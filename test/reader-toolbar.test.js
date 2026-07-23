@@ -83,3 +83,25 @@ test('does not add the action to non-PDF readers', () => {
 
     assert.deepEqual(appended, []);
 });
+
+test('uses Zotero plugin cleanup instead of the broken 9.0 listener unregister API', () => {
+    let unregisterCalls = 0;
+    const zotero = {
+        version: '9.0.6',
+        Reader: {
+            registerEventListener() {},
+            unregisterEventListener() {
+                unregisterCalls++;
+            },
+        },
+    };
+
+    const dispose = registerReaderToolbar({
+        zotero,
+        pluginID: 'mktero@example.com',
+        onOpen: async () => {},
+    });
+    dispose();
+
+    assert.equal(unregisterCalls, 0);
+});

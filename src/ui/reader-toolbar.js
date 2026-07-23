@@ -20,7 +20,17 @@ export function registerReaderToolbar({ zotero, pluginID, onOpen, onError = defa
     };
 
     zotero.Reader.registerEventListener('renderToolbar', handler, pluginID);
-    return () => zotero.Reader.unregisterEventListener?.('renderToolbar', handler);
+    return () => {
+        // Zotero removes listeners registered with pluginID during plugin shutdown.
+        // Zotero 9.0's public unregister method incorrectly keeps only the target
+        // listener, so calling it can remove listeners belonging to other plugins.
+        if (isZotero90(zotero.version)) return;
+        zotero.Reader.unregisterEventListener?.('renderToolbar', handler);
+    };
+}
+
+function isZotero90(version) {
+    return /^9\.0(?:[.-]|$)/.test(String(version || ''));
 }
 
 function defaultErrorHandler(error) {
