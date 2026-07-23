@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title>Mktero</title>
+    <link rel="stylesheet" href="markdown.css" />
+    <script src="markdown-window.js" defer="defer"></script>
+</head>
+<body>
+    <header class="app-header">
+        <div class="title-area">
+            <h1 id="mktero-title">Mktero</h1>
+            <span id="mktero-status">Converting PDF…</span>
+        </div>
+        <div class="actions">
+            <div class="mode-switch" role="group" aria-label="View mode">
+                <button id="mktero-show-preview" class="active" type="button">Preview</button>
+                <button id="mktero-show-source" type="button">Markdown</button>
+            </div>
+            <button id="mktero-copy" type="button">Copy Markdown</button>
+        </div>
+    </header>
+    <progress id="mktero-progress" max="100" value="0"></progress>
+    <div id="mktero-warning" class="message warning" hidden="hidden"></div>
+    <div id="mktero-error" class="message error" hidden="hidden"></div>
+    <main>
+        <article id="mktero-preview" class="markdown-body"></article>
+        <pre id="mktero-source" class="markdown-source" hidden="hidden"></pre>
+    </main>
+</body>
+</html>

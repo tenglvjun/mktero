@@ -1,0 +1,15 @@
+{
+  "name": "mktero",
+  "version": "0.1.0",
+  "description": "Display opened Zotero PDFs as Markdown",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build.mjs",
+    "check": "node --check scripts/build.mjs && node --check src/bootstrap.js && node --check src/markdown/structured-renderer.js && node --check src/markdown/markdown-html.js && node --check src/core/markdown-document-service.js && node --check src/extractors/zotero-extractor.js && node --check src/ui/reader-toolbar.js && node --check src/ui/markdown-window-presenter.js && node --check src/ui/markdown-window.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
