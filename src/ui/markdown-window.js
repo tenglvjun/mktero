@@ -3,7 +3,7 @@ import { renderMarkdownHTML } from '../markdown/markdown-html.js';
 let model;
 
 window.addEventListener('DOMContentLoaded', () => {
-    model = window.arguments?.[0] || {
+    model = getEmbeddedModel() || {
         title: 'Mktero',
         status: 'error',
         error: 'The Markdown document was not provided.',
@@ -12,7 +12,16 @@ window.addEventListener('DOMContentLoaded', () => {
     render();
 });
 
-window.addEventListener('mktero:model-update', render);
+window.addEventListener('mktero:model-update', () => {
+    model = getEmbeddedModel() || model;
+    render();
+});
+
+function getEmbeddedModel() {
+    return window.mkteroModel
+        || window.frameElement?.mkteroModel
+        || window.arguments?.[0];
+}
 
 function bindActions() {
     document.getElementById('mktero-show-preview').addEventListener('click', () => setMode('preview'));

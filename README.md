@@ -32,7 +32,7 @@ Alternatively, open **Tools → Add-ons**, choose **Install Add-on From File…*
 - Structured extraction with progress when SDT is available
 - Plain-text fallback for runtimes without SDT, including Zotero 9.0.6
 - Headings, paragraphs, lists, tables, blockquotes, math, notes and page markers
-- Rendered preview, Markdown source, and copy action
+- Zotero Tab with rendered preview, Markdown source, and copy action
 - Escaped PDF content and restricted link schemes
 
 Scanned PDFs without a text layer currently require a separate OCR implementation. Figures are represented by their extracted labels or captions rather than exported image files.

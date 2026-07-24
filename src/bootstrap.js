@@ -1,6 +1,6 @@
 import { createMarkdownDocumentService } from './core/markdown-document-service.js';
 import { registerReaderToolbar } from './ui/reader-toolbar.js';
-import { MarkdownWindowPresenter } from './ui/markdown-window-presenter.js';
+import { MarkdownTabPresenter } from './ui/markdown-tab-presenter.js';
 
 const runtime = {
     id: null,
@@ -13,13 +13,16 @@ globalThis.install = async function install() {};
 
 globalThis.startup = async function startup({ id, rootURI }) {
     runtime.id = id;
-    await Zotero.uiReadyPromise;
-
-    runtime.service = createMarkdownDocumentService({ zotero: Zotero });
-    runtime.presenter = new MarkdownWindowPresenter({
+    runtime.presenter = new MarkdownTabPresenter({
         zotero: Zotero,
         rootURI,
     });
+    const presenter = runtime.presenter;
+    await Zotero.uiReadyPromise;
+    if (runtime.presenter !== presenter) return;
+
+    runtime.service = createMarkdownDocumentService({ zotero: Zotero });
+    presenter.ensureSessionStateFilter();
     runtime.disposeToolbar = registerReaderToolbar({
         zotero: Zotero,
         pluginID: id,
@@ -32,7 +35,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
 
 globalThis.shutdown = function shutdown() {
     runtime.disposeToolbar?.();
-    runtime.presenter?.closeAll();
+    runtime.presenter?.dispose();
     runtime.disposeToolbar = null;
     runtime.presenter = null;
     runtime.service = null;
