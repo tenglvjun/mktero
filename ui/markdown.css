@@ -122,6 +122,47 @@ main {
 
 .markdown-body p { margin: 1em 0; }
 
+.markdown-body a { color: var(--accent); }
+
+.markdown-body img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 20px auto;
+}
+
+.markdown-body pre {
+    overflow-x: auto;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.markdown-body :not(pre) > code {
+    padding: 2px 4px;
+    border-radius: 4px;
+    background: var(--surface);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.88em;
+}
+
+.markdown-body hr {
+    margin: 32px 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+}
+
+.missing-image {
+    display: block;
+    margin: 20px 0;
+    padding: 12px;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    font: 13px ui-sans-serif, system-ui, sans-serif;
+}
+
 .markdown-body blockquote {
     margin-inline: 0;
     padding-inline-start: 18px;

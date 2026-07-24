@@ -1,8 +1,8 @@
 # Mktero
 
-Mktero is a Zotero 7/8/9 plugin that adds an **MD** button to PDF reader toolbars. It converts the opened PDF to Markdown and displays a safe rendered preview plus the Markdown source.
+Mktero is a Zotero 7/8/9 plugin that adds an **MD** button to PDF reader toolbars. It sends the opened PDF to MinerU, then displays the resulting Markdown in a Zotero tab with a safe rendered preview and source view.
 
-Mktero prefers Structured Document Text (SDT) when the Zotero runtime provides it and otherwise falls back to Zotero's plain PDF full-text extractor. Zotero 9.0.6 is covered by the fallback path.
+Configure a MinerU API Token under **Settings → Mktero** before converting a PDF. The token is stored as a standard, unencrypted preference in the local Zotero profile. Clicking **MD** uploads the current PDF to MinerU for processing.
 
 ## Development
 
@@ -29,10 +29,11 @@ Alternatively, open **Tools → Add-ons**, choose **Install Add-on From File…*
 ## Current scope
 
 - PDF reader toolbar entry
-- Structured extraction with progress when SDT is available
-- Plain-text fallback for runtimes without SDT, including Zotero 9.0.6
-- Headings, paragraphs, lists, tables, blockquotes, math, notes and page markers
+- MinerU VLM parsing with OCR, formula, and table recognition
+- Local PDF upload through MinerU pre-signed URLs
+- Parsing progress reported in the Markdown tab
 - Zotero Tab with rendered preview, Markdown source, and copy action
 - Escaped PDF content and restricted link schemes
+- Local figure previews extracted from the MinerU result archive
 
-Scanned PDFs without a text layer currently require a separate OCR implementation. Figures are represented by their extracted labels or captions rather than exported image files.
+The MinerU precision API currently limits each file to 200 MB and 200 pages. Mktero reads `full.md` and supported raster images from the MinerU result archive. Images are displayed for the current Tab but are not imported as Zotero attachments.

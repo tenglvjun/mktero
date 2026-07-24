@@ -40,6 +40,9 @@ await Promise.all([
     copyText('manifest.json', 'manifest.json'),
     copyText('ui/markdown.xhtml', 'ui/markdown.xhtml'),
     copyText('ui/markdown.css', 'ui/markdown.css'),
+    copyText('ui/preferences.xhtml', 'ui/preferences.xhtml'),
+    copyText('ui/preferences.css', 'ui/preferences.css'),
+    copyText('prefs.js', 'prefs.js'),
 ]);
 
 await execFileAsync('zip', ['-qr', xpiPath, '.'], { cwd: packageRoot });

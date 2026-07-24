@@ -10,7 +10,7 @@ export class MarkdownTabPresenter {
         this.ensureSessionStateFilter();
     }
 
-    open(itemID) {
+    open(itemID, { onClose } = {}) {
         this.ensureSessionStateFilter();
         const owner = this.zotero.getMainWindow?.();
         const tabs = owner?.Zotero_Tabs;
@@ -20,6 +20,7 @@ export class MarkdownTabPresenter {
 
         const existing = this.presentations.get(itemID);
         if (existing) {
+            if (onClose) existing.onClose = onClose;
             tabs.select(existing.tabID);
             return { ...existing, created: false };
         }
@@ -54,11 +55,17 @@ export class MarkdownTabPresenter {
                 if (this.presentations.get(itemID)?.tabID === tabID) {
                     this.presentations.delete(itemID);
                 }
+                try {
+                    presentation?.onClose?.();
+                }
+                catch (error) {
+                    this.zotero.logError?.(error);
+                }
             },
         });
         container.appendChild(browser);
 
-        presentation = { tabs, tabID, browser, model, closed: false };
+        presentation = { tabs, tabID, browser, model, closed: false, onClose };
         this.presentations.set(itemID, presentation);
         return { ...presentation, created: true };
     }
@@ -138,6 +145,8 @@ function createInitialModel(itemID) {
         status: 'loading',
         progress: 0,
         markdown: '',
+        assets: [],
+        assetBasePath: '',
         sourceKind: null,
         warnings: [],
         error: '',

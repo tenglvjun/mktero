@@ -1,0 +1,15 @@
+#mktero-token-field {
+    display: grid;
+    gap: 8px;
+    max-width: 640px;
+}
+
+#mktero-token-field label {
+    font-weight: 600;
+}
+
+#mktero-mineru-api-key {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 32px;
+}

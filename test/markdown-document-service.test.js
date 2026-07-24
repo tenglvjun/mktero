@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMarkdownDocumentService } from '../src/core/markdown-document-service.js';
+import {
+    createMarkdownDocumentService,
+    MarkdownDocumentService,
+} from '../src/core/markdown-document-service.js';
 
 function createPdfItem(overrides = {}) {
     return {
@@ -113,4 +116,59 @@ test('rejects an empty structured document as non-extractable', async () => {
         () => service.convert(42),
         /no extractable text/i
     );
+});
+
+test('passes through Markdown produced by MinerU', async () => {
+    const service = new MarkdownDocumentService({
+        extractor: {
+            extract: async () => ({
+                kind: 'markdown',
+                title: 'MinerU Paper',
+                markdown: '# Already Markdown\n\n| A | B |',
+                extractedPages: 2,
+                totalPages: 2,
+                warnings: [],
+            }),
+        },
+    });
+
+    const result = await service.convert(42);
+
+    assert.equal(result.markdown, '# Already Markdown\n\n| A | B |');
+    assert.equal(result.sourceKind, 'markdown');
+});
+
+test('allows a fresh conversion while an aborted conversion is settling', async () => {
+    let calls = 0;
+    const service = new MarkdownDocumentService({
+        extractor: {
+            extract: async (_itemID, { signal }) => {
+                calls++;
+                if (calls === 1) {
+                    return new Promise((_, reject) => {
+                        signal.addEventListener('abort', () => reject(signal.reason), {
+                            once: true,
+                        });
+                    });
+                }
+                return {
+                    kind: 'markdown',
+                    title: 'Fresh conversion',
+                    markdown: '# Fresh conversion',
+                    extractedPages: 1,
+                    totalPages: 1,
+                    warnings: [],
+                };
+            },
+        },
+    });
+    const firstController = new AbortController();
+    const first = service.convert(42, { signal: firstController.signal });
+    firstController.abort();
+
+    const second = service.convert(42, { signal: new AbortController().signal });
+
+    await assert.rejects(first, error => error.name === 'AbortError');
+    assert.equal((await second).markdown, '# Fresh conversion');
+    assert.equal(calls, 2);
 });

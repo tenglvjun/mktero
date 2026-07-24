@@ -1,6 +1,8 @@
 import { renderMarkdownHTML } from '../markdown/markdown-html.js';
 
 let model;
+let renderedAssets;
+let assetURLs = new Map();
 
 window.addEventListener('DOMContentLoaded', () => {
     model = getEmbeddedModel() || {
@@ -16,6 +18,8 @@ window.addEventListener('mktero:model-update', () => {
     model = getEmbeddedModel() || model;
     render();
 });
+
+window.addEventListener('unload', revokeAssetURLs);
 
 function getEmbeddedModel() {
     return window.mkteroModel
@@ -49,20 +53,77 @@ function render() {
     warning.textContent = model.warnings?.join(' ') || '';
 
     if (model.status === 'loading') {
+        revokeAssetURLs();
         status.textContent = `Converting PDF… ${model.progress || 0}%`;
         preview.replaceChildren();
         source.textContent = '';
     }
     else if (model.status === 'ready') {
-        status.textContent = model.sourceKind === 'structured'
-            ? 'Structured Markdown'
-            : 'Plain-text Markdown';
-        preview.innerHTML = renderMarkdownHTML(model.markdown || '');
+        syncAssetURLs();
+        status.textContent = sourceLabel(model.sourceKind);
+        preview.innerHTML = renderMarkdownHTML(model.markdown || '', {
+            resolveImageURL,
+        });
         source.textContent = model.markdown || '';
     }
     else {
         status.textContent = 'Conversion failed';
     }
+}
+
+function syncAssetURLs() {
+    if (renderedAssets === model.assets) return;
+    revokeAssetURLs();
+    renderedAssets = model.assets;
+    for (const asset of model.assets || []) {
+        if (!asset?.path || !asset?.mimeType || !asset?.data) continue;
+        const path = normalizeZipPath(asset.path);
+        const url = URL.createObjectURL(new Blob([asset.data], { type: asset.mimeType }));
+        assetURLs.set(path, url);
+    }
+}
+
+function revokeAssetURLs() {
+    for (const url of assetURLs.values()) URL.revokeObjectURL(url);
+    assetURLs = new Map();
+    renderedAssets = undefined;
+}
+
+function resolveImageURL(source) {
+    const path = String(source || '').split(/[?#]/, 1)[0];
+    if (!path || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('/')) return null;
+    let decodedPath;
+    try {
+        decodedPath = decodeURIComponent(path);
+    }
+    catch {
+        return null;
+    }
+    return assetURLs.get(resolveZipPath(model.assetBasePath || '', decodedPath)) || null;
+}
+
+function resolveZipPath(basePath, relativePath) {
+    const segments = `${basePath}/${relativePath}`.split('/');
+    const resolved = [];
+    for (const segment of segments) {
+        if (!segment || segment === '.') continue;
+        if (segment === '..') {
+            resolved.pop();
+            continue;
+        }
+        resolved.push(segment);
+    }
+    return resolved.join('/');
+}
+
+function normalizeZipPath(path) {
+    return resolveZipPath('', String(path).replace(/\\/g, '/'));
+}
+
+function sourceLabel(sourceKind) {
+    if (sourceKind === 'markdown') return 'MinerU Markdown';
+    if (sourceKind === 'structured') return 'Structured Markdown';
+    return 'Plain-text Markdown';
 }
 
 function setMode(mode) {

@@ -22,14 +22,13 @@ test('renders the Markdown subset used by the PDF converter', () => {
         '$$',
     ].join('\n');
 
-    assert.equal(renderMarkdownHTML(markdown), [
-        '<span class="page-marker" data-page="2">Page 2</span>',
-        '<h1>Intro</h1>',
-        '<p>A <strong>bold</strong> and <em>useful</em> paragraph.</p>',
-        '<ul><li>First</li><li>Second</li></ul>',
-        '<table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>x</td><td>1</td></tr></tbody></table>',
-        '<div class="math"><code>x^2 + y^2 = z^2</code></div>',
-    ].join('\n'));
+    const html = renderMarkdownHTML(markdown);
+    assert.match(html, /<span class="page-marker" data-page="2">Page 2<\/span>/);
+    assert.match(html, /<h1>Intro<\/h1>/);
+    assert.match(html, /<p>A <strong>bold<\/strong> and <em>useful<\/em> paragraph\.<\/p>/);
+    assert.match(html, /<ul>[\s\S]*<li>First<\/li>[\s\S]*<li>Second<\/li>[\s\S]*<\/ul>/);
+    assert.match(html, /<table>[\s\S]*<th>Name<\/th>[\s\S]*<td>1<\/td>[\s\S]*<\/table>/);
+    assert.match(html, /<div class="math"><code>x\^2 \+ y\^2 = z\^2<\/code><\/div>/);
 });
 
 test('escapes raw HTML and refuses unsafe links', () => {
@@ -50,20 +49,50 @@ test('escapes raw HTML and refuses unsafe links', () => {
 test('preserves escaped Markdown punctuation as literal text', () => {
     assert.equal(
         renderMarkdownHTML('\\# literal \\* text'),
-        '<p># literal * text</p>'
+        '<p># literal * text</p>\n'
     );
 });
 
 test('renders code blocks whose content contains a shorter fence', () => {
     assert.equal(
         renderMarkdownHTML('````\nbefore\n```\nafter\n````'),
-        '<pre><code>before\n```\nafter</code></pre>'
+        '<pre><code>before\n```\nafter\n</code></pre>\n'
     );
 });
 
 test('preserves query parameters in safe links', () => {
     assert.equal(
         renderMarkdownHTML('[search](https://example.com/?a=1&b=2)'),
-        '<p><a href="https://example.com/?a=1&amp;b=2" rel="noreferrer">search</a></p>'
+        '<p><a href="https://example.com/?a=1&amp;b=2" rel="noreferrer">search</a></p>\n'
     );
+});
+
+test('renders language fences and resolved MinerU images', () => {
+    const html = renderMarkdownHTML([
+        '```js',
+        'const answer = 42;',
+        '```',
+        '',
+        '![Figure 1](images/figure.png)',
+    ].join('\n'), {
+        resolveImageURL: path => path === 'images/figure.png'
+            ? 'blob:mktero-figure'
+            : null,
+    });
+
+    assert.match(html, /<code class="language-js">const answer = 42;/);
+    assert.match(html, /<img src="blob:mktero-figure" alt="Figure 1">/);
+});
+
+test('does not load unresolved or external Markdown images', () => {
+    const html = renderMarkdownHTML('![Remote](https://example.com/tracker.png)');
+
+    assert.equal(html.includes('<img'), false);
+    assert.match(html, /class="missing-image">Remote<\/span>/);
+});
+
+test('keeps the safe inline tags emitted by Zotero structured extraction', () => {
+    const html = renderMarkdownHTML('H<sub>2</sub>O<br>next');
+
+    assert.equal(html, '<p>H<sub>2</sub>O<br>next</p>\n');
 });

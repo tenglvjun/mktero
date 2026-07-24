@@ -14,26 +14,34 @@ export class MarkdownDocumentService {
     }
 
     async convert(itemID, options = {}) {
-        if (this.inFlight.has(itemID)) {
-            return this.inFlight.get(itemID);
+        const existing = this.inFlight.get(itemID);
+        if (existing && !existing.signal?.aborted) {
+            return existing.promise;
         }
 
-        const conversion = this.#convert(itemID, options)
-            .finally(() => this.inFlight.delete(itemID));
-        this.inFlight.set(itemID, conversion);
-        return conversion;
+        const entry = { signal: options.signal, promise: null };
+        entry.promise = this.#convert(itemID, options)
+            .finally(() => {
+                if (this.inFlight.get(itemID) === entry) {
+                    this.inFlight.delete(itemID);
+                }
+            });
+        this.inFlight.set(itemID, entry);
+        return entry.promise;
     }
 
     async #convert(itemID, options) {
         const extracted = await this.extractor.extract(itemID, options);
-        const markdown = extracted.kind === 'structured'
-            ? renderStructuredDocument(extracted.document)
-            : renderPlainText(extracted.text);
+        const markdown = extracted.kind === 'markdown'
+            ? extracted.markdown
+            : extracted.kind === 'structured'
+                ? renderStructuredDocument(extracted.document)
+                : renderPlainText(extracted.text);
         if (!markdown.trim()) {
             throw new Error('The PDF contains no extractable text; OCR may be required');
         }
 
-        return {
+        const result = {
             itemID,
             title: extracted.title,
             markdown,
@@ -42,6 +50,11 @@ export class MarkdownDocumentService {
             totalPages: extracted.totalPages,
             warnings: extracted.warnings,
         };
+        if (extracted.assets?.length) {
+            result.assets = extracted.assets;
+            result.assetBasePath = extracted.assetBasePath || '';
+        }
+        return result;
     }
 }
 

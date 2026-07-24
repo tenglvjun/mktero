@@ -1,0 +1,21 @@
+<vbox id="mktero-preferences-pane"
+      class="main-section"
+      xmlns:html="http://www.w3.org/1999/xhtml">
+    <groupbox aria-labelledby="mktero-mineru-title">
+        <label><html:h2 id="mktero-mineru-title">MinerU API</html:h2></label>
+
+        <html:div id="mktero-token-field">
+            <html:label for="mktero-mineru-api-key">API Token</html:label>
+            <html:input id="mktero-mineru-api-key"
+                        type="password"
+                        preference="extensions.mktero.mineruApiKey"
+                        autocomplete="off"
+                        spellcheck="false" />
+        </html:div>
+
+        <description>
+            <label is="zotero-text-link"
+                   href="https://mineru.net/apiManage/token">Manage MinerU API Tokens</label>
+        </description>
+    </groupbox>
+</vbox>

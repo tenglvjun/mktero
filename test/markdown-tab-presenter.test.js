@@ -182,11 +182,14 @@ test('delivers the latest model after the Markdown browser finishes loading', ()
 
 test('ignores conversion updates after the Markdown tab is closed', () => {
     const mainWindow = createMainWindow();
+    let closeCalls = 0;
     const presenter = new MarkdownTabPresenter({
         zotero: { getMainWindow: () => mainWindow },
         rootURI: 'resource://mktero/',
     });
-    const presentation = presenter.open(42);
+    const presentation = presenter.open(42, {
+        onClose: () => closeCalls++,
+    });
 
     mainWindow.added[0].options.onClose();
     presenter.update(presentation, {
@@ -199,4 +202,5 @@ test('ignores conversion updates after the Markdown tab is closed', () => {
     assert.equal(presentation.model.markdown, '');
     assert.deepEqual(mainWindow.renamed, []);
     assert.deepEqual(presentation.browser.events, []);
+    assert.equal(closeCalls, 1);
 });
