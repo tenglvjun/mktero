@@ -2,6 +2,7 @@ import { createLoadingPresentation } from './markdown-loading-state.js';
 
 const TAB_TYPE = 'mktero';
 const LOAD_TIMEOUT_MS = 5000;
+const MARKDOWN_PAGE_ID = 'mktero-markdown-page';
 
 export class MarkdownTabPresenter {
     constructor({ zotero, rootURI, services = getRuntimeServices() }) {
@@ -60,28 +61,31 @@ export class MarkdownTabPresenter {
         stack.appendChild(browser);
         stack.appendChild(nativeLoading);
 
+        let presentation;
         let browserLoaded = false;
-        browser.addEventListener?.('load', () => {
-            const currentURI = browser.currentURI?.spec
-                || browser.contentDocument?.documentURI
-                || '';
-            if (currentURI && currentURI !== browserURI) return;
-            browserLoaded = true;
-            nativeLoading.hidden = true;
+        const cleanupBrowserLoad = () => {
+            owner.removeEventListener?.('DOMContentLoaded', handleBrowserDOMContentLoaded);
             if (presentation && presentation.loadTimeoutID !== null) {
                 owner.clearTimeout?.(presentation.loadTimeoutID);
                 presentation.loadTimeoutID = null;
             }
+        };
+        const handleBrowserDOMContentLoaded = event => {
+            if (!browser.contentWindow
+                || browser.contentWindow.document !== event.target) return;
+            if (event.target.documentElement?.id !== MARKDOWN_PAGE_ID) return;
+            browserLoaded = true;
+            cleanupBrowserLoad();
+            nativeLoading.hidden = true;
             this.debug(
                 `Markdown view loaded for item ${itemID} (${describeURIScheme(browserURI)})`
             );
             const contentWindow = browser.contentWindow;
-            if (!contentWindow) return;
             contentWindow.mkteroModel = model;
             contentWindow.dispatchEvent(new contentWindow.CustomEvent('mktero:model-update'));
-        });
+        };
+        owner.addEventListener?.('DOMContentLoaded', handleBrowserDOMContentLoaded);
 
-        let presentation;
         const { id: tabID, container } = tabs.add({
             type: TAB_TYPE,
             title: model.title,
@@ -93,10 +97,7 @@ export class MarkdownTabPresenter {
             preventJumpback: true,
             onClose: () => {
                 if (presentation) presentation.closed = true;
-                if (presentation && presentation.loadTimeoutID !== null) {
-                    owner.clearTimeout?.(presentation.loadTimeoutID);
-                    presentation.loadTimeoutID = null;
-                }
+                cleanupBrowserLoad();
                 if (this.presentations.get(itemID)?.tabID === tabID) {
                     this.presentations.delete(itemID);
                 }
@@ -133,11 +134,10 @@ export class MarkdownTabPresenter {
             `Opening Markdown view for item ${itemID} `
             + `(${describeURIScheme(browserURI)}, remote=false)`
         );
-        this.loadBrowser(browser, browserURI);
         if (owner.setTimeout) {
             presentation.loadTimeoutID = owner.setTimeout(() => {
-                if (browserLoaded || presentation.closed) return;
                 presentation.loadTimeoutID = null;
+                if (browserLoaded || presentation.closed) return;
                 const currentURI = browser.currentURI?.spec || 'unavailable';
                 nativeLoadingHint.setAttribute(
                     'value',
@@ -149,6 +149,7 @@ export class MarkdownTabPresenter {
                 ));
             }, LOAD_TIMEOUT_MS);
         }
+        this.loadBrowser(browser, browserURI);
 
         return { ...presentation, created: true };
     }

@@ -2,17 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MarkdownTabPresenter } from '../src/ui/markdown-tab-presenter.js';
 
-function createMainWindow() {
+function createMainWindow({ synchronousBrowserLoad = false } = {}) {
     const added = [];
     const selected = [];
     const renamed = [];
     const closed = [];
+    const windowListeners = new Map();
+    const activeTimeouts = new Map();
     let nextID = 1;
+    let nextTimeoutID = 1;
 
     const document = {
         createXULElement(tagName) {
             const events = [];
             const listeners = new Map();
+            const contentDocument = {
+                documentURI: 'about:blank',
+                documentElement: { id: '' },
+            };
             return {
                 tagName,
                 attributes: {},
@@ -24,8 +31,10 @@ function createMainWindow() {
                 srcSetAfterAppend: false,
                 loadedURI: null,
                 loadOptions: null,
+                contentDocument,
                 contentWindow: {
                     loaded: false,
+                    document: contentDocument,
                     CustomEvent: class CustomEvent {
                         constructor(type) {
                             this.type = type;
@@ -56,10 +65,16 @@ function createMainWindow() {
                     if (!uri?.spec) throw new TypeError('loadURI requires an nsIURI-like object');
                     this.loadedURI = uri;
                     this.loadOptions = options;
+                    if (synchronousBrowserLoad) this.load();
                 },
                 load() {
                     this.contentWindow.loaded = true;
-                    listeners.get('load')?.();
+                    this.contentDocument.documentURI = this.loadedURI?.spec
+                        || this.attributes.src;
+                    this.contentDocument.documentElement.id = 'mktero-markdown-page';
+                    for (const listener of windowListeners.get('DOMContentLoaded') || []) {
+                        listener({ target: this.contentDocument });
+                    }
                 },
             };
         },
@@ -102,7 +117,39 @@ function createMainWindow() {
         },
     };
 
-    return { document, Zotero_Tabs, added, selected, renamed, closed };
+    return {
+        document,
+        Zotero_Tabs,
+        added,
+        selected,
+        renamed,
+        closed,
+        addEventListener(type, listener) {
+            const listeners = windowListeners.get(type) || [];
+            listeners.push(listener);
+            windowListeners.set(type, listeners);
+        },
+        removeEventListener(type, listener) {
+            const listeners = windowListeners.get(type) || [];
+            windowListeners.set(type, listeners.filter(value => value !== listener));
+        },
+        dispatchDOMContentLoaded(target) {
+            for (const listener of windowListeners.get('DOMContentLoaded') || []) {
+                listener({ target });
+            }
+        },
+        setTimeout(listener) {
+            const id = nextTimeoutID++;
+            activeTimeouts.set(id, listener);
+            return id;
+        },
+        clearTimeout(id) {
+            activeTimeouts.delete(id);
+        },
+        activeTimeoutCount() {
+            return activeTimeouts.size;
+        },
+    };
 }
 
 test('opens Markdown in a Zotero tab and reuses it for the same PDF', () => {
@@ -168,8 +215,34 @@ test('shows native conversion progress until the Markdown browser loads', () => 
         'PDF uploaded. MinerU is parsing the document…'
     );
 
+    mainWindow.dispatchDOMContentLoaded(presentation.browser.contentDocument);
+    assert.equal(presentation.nativeLoading.hidden, false);
+
+    mainWindow.dispatchDOMContentLoaded({ unrelated: true });
+    assert.equal(presentation.nativeLoading.hidden, false);
+
     presentation.browser.load();
     assert.equal(presentation.nativeLoading.hidden, true);
+    assert.equal(mainWindow.activeTimeoutCount(), 0);
+});
+
+test('does not leave a watchdog after the Markdown document loads synchronously', () => {
+    const mainWindow = createMainWindow({ synchronousBrowserLoad: true });
+    const systemPrincipal = {};
+    const presenter = new MarkdownTabPresenter({
+        zotero: { getMainWindow: () => mainWindow },
+        rootURI: 'jar:file:///profile/extensions/mktero.xpi!/',
+        services: {
+            io: { newURI: spec => ({ spec }) },
+            scriptSecurityManager: { getSystemPrincipal: () => systemPrincipal },
+        },
+    });
+
+    const presentation = presenter.open(42);
+
+    assert.equal(presentation.nativeLoading.hidden, true);
+    assert.equal(presentation.loadTimeoutID, null);
+    assert.equal(mainWindow.activeTimeoutCount(), 0);
 });
 
 test('exposes and refreshes the reparse action on the tab model', async () => {

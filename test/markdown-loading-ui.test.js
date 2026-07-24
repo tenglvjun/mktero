@@ -10,6 +10,7 @@ test('ships an accessible, visible loading UI for MinerU conversion', async () =
     ]);
 
     assert.match(pane, /id="mktero-loading"[^>]+role="status"/);
+    assert.match(pane, /id="mktero-markdown-page"/);
     assert.match(pane, /id="mktero-loading-progress"/);
     assert.match(pane, /id="mktero-loading-progress-label">0%/);
     assert.match(styles, /@keyframes mktero-spin/);
