@@ -1,9 +1,13 @@
+import { createLoadingPresentation } from './markdown-loading-state.js';
+
 const TAB_TYPE = 'mktero';
+const LOAD_TIMEOUT_MS = 5000;
 
 export class MarkdownTabPresenter {
-    constructor({ zotero, rootURI }) {
+    constructor({ zotero, rootURI, services = getRuntimeServices() }) {
         this.zotero = zotero;
         this.rootURI = rootURI;
+        this.services = services;
         this.presentations = new Map();
         this.sessionStatePatch = null;
         this.removeStaleSessionTabs();
@@ -28,18 +32,54 @@ export class MarkdownTabPresenter {
 
         const model = createInitialModel(itemID, onReparse);
         const browser = owner.document.createXULElement('browser');
+        const stack = owner.document.createXULElement('stack');
+        const nativeLoading = owner.document.createXULElement('vbox');
+        const nativeLoadingTitle = owner.document.createXULElement('label');
+        const nativeLoadingLabel = owner.document.createXULElement('label');
+        const nativeLoadingProgress = owner.document.createXULElement('progressmeter');
+        const nativeLoadingHint = owner.document.createXULElement('label');
         const browserURI = `${this.rootURI}ui/markdown.xhtml`;
+        stack.setAttribute('flex', '1');
+        stack.style.width = '100%';
+        stack.style.height = '100%';
         browser.setAttribute('type', 'content');
         browser.setAttribute('flex', '1');
+        browser.setAttribute('remote', 'false');
+        browser.setAttribute('maychangeremoteness', 'true');
         browser.style.width = '100%';
         browser.style.height = '100%';
         browser.mkteroModel = model;
+
+        configureNativeLoading({
+            nativeLoading,
+            nativeLoadingTitle,
+            nativeLoadingLabel,
+            nativeLoadingProgress,
+            nativeLoadingHint,
+        });
+        stack.appendChild(browser);
+        stack.appendChild(nativeLoading);
+
+        let browserLoaded = false;
         browser.addEventListener?.('load', () => {
+            const currentURI = browser.currentURI?.spec
+                || browser.contentDocument?.documentURI
+                || '';
+            if (currentURI && currentURI !== browserURI) return;
+            browserLoaded = true;
+            nativeLoading.hidden = true;
+            if (presentation && presentation.loadTimeoutID !== null) {
+                owner.clearTimeout?.(presentation.loadTimeoutID);
+                presentation.loadTimeoutID = null;
+            }
+            this.debug(
+                `Markdown view loaded for item ${itemID} (${describeURIScheme(browserURI)})`
+            );
             const contentWindow = browser.contentWindow;
             if (!contentWindow) return;
             contentWindow.mkteroModel = model;
             contentWindow.dispatchEvent(new contentWindow.CustomEvent('mktero:model-update'));
-        }, { once: true });
+        });
 
         let presentation;
         const { id: tabID, container } = tabs.add({
@@ -53,6 +93,10 @@ export class MarkdownTabPresenter {
             preventJumpback: true,
             onClose: () => {
                 if (presentation) presentation.closed = true;
+                if (presentation && presentation.loadTimeoutID !== null) {
+                    owner.clearTimeout?.(presentation.loadTimeoutID);
+                    presentation.loadTimeoutID = null;
+                }
                 if (this.presentations.get(itemID)?.tabID === tabID) {
                     this.presentations.delete(itemID);
                 }
@@ -64,11 +108,48 @@ export class MarkdownTabPresenter {
                 }
             },
         });
-        container.appendChild(browser);
-        browser.setAttribute('src', browserURI);
+        container.appendChild(stack);
 
-        presentation = { tabs, tabID, browser, model, closed: false, onClose };
+        presentation = {
+            tabs,
+            tabID,
+            stack,
+            browser,
+            browserURI,
+            model,
+            nativeLoading,
+            nativeLoadingTitle,
+            nativeLoadingLabel,
+            nativeLoadingProgress,
+            nativeLoadingHint,
+            closed: false,
+            onClose,
+            loadTimeoutID: null,
+        };
+        syncNativeLoading(presentation);
         this.presentations.set(itemID, presentation);
+
+        this.debug(
+            `Opening Markdown view for item ${itemID} `
+            + `(${describeURIScheme(browserURI)}, remote=false)`
+        );
+        this.loadBrowser(browser, browserURI);
+        if (owner.setTimeout) {
+            presentation.loadTimeoutID = owner.setTimeout(() => {
+                if (browserLoaded || presentation.closed) return;
+                presentation.loadTimeoutID = null;
+                const currentURI = browser.currentURI?.spec || 'unavailable';
+                nativeLoadingHint.setAttribute(
+                    'value',
+                    'The Markdown view is still loading. Conversion status will continue here.'
+                );
+                this.zotero.logError?.(new Error(
+                    `Mktero: Markdown view did not load for item ${itemID} within `
+                    + `${LOAD_TIMEOUT_MS}ms (current URI: ${describeURIScheme(currentURI)})`
+                ));
+            }, LOAD_TIMEOUT_MS);
+        }
+
         return { ...presentation, created: true };
     }
 
@@ -80,6 +161,7 @@ export class MarkdownTabPresenter {
         if (typeof changes.title === 'string' && changes.title) {
             current.tabs.rename?.(current.tabID, changes.title);
         }
+        syncNativeLoading(current);
 
         const contentWindow = current.browser.contentWindow;
         if (contentWindow?.dispatchEvent && contentWindow.CustomEvent) {
@@ -125,6 +207,25 @@ export class MarkdownTabPresenter {
         this.sessionStatePatch = null;
     }
 
+    loadBrowser(browser, browserURI) {
+        const uri = this.services?.io?.newURI?.(browserURI);
+        const principal = this.services?.scriptSecurityManager?.getSystemPrincipal?.();
+        if (uri && principal && typeof browser.loadURI === 'function') {
+            try {
+                browser.loadURI(uri, { triggeringPrincipal: principal });
+                return;
+            }
+            catch (error) {
+                this.zotero.logError?.(error);
+            }
+        }
+        browser.setAttribute('src', browserURI);
+    }
+
+    debug(message) {
+        this.zotero.debug?.(`Mktero: ${message}`);
+    }
+
     removeStaleSessionTabs() {
         const windows = this.zotero.Session?.state?.windows;
         if (!Array.isArray(windows)) return;
@@ -134,6 +235,90 @@ export class MarkdownTabPresenter {
             windowState.tabs = windowState.tabs.filter(tab => !isMkteroSessionTab(tab));
         }
     }
+}
+
+function configureNativeLoading({
+    nativeLoading,
+    nativeLoadingTitle,
+    nativeLoadingLabel,
+    nativeLoadingProgress,
+    nativeLoadingHint,
+}) {
+    nativeLoading.hidden = false;
+    nativeLoading.setAttribute('flex', '1');
+    nativeLoading.setAttribute('align', 'center');
+    nativeLoading.setAttribute('pack', 'center');
+    nativeLoading.style.width = '100%';
+    nativeLoading.style.height = '100%';
+    nativeLoading.style.backgroundColor = 'Canvas';
+    nativeLoading.style.color = 'CanvasText';
+    nativeLoading.style.zIndex = '1';
+
+    nativeLoadingTitle.setAttribute('value', 'Mktero');
+    nativeLoadingTitle.style.fontSize = '18px';
+    nativeLoadingTitle.style.fontWeight = '600';
+    nativeLoadingTitle.style.marginBottom = '10px';
+    nativeLoadingLabel.style.fontSize = '14px';
+    nativeLoadingProgress.setAttribute('mode', 'undetermined');
+    nativeLoadingProgress.style.width = '320px';
+    nativeLoadingProgress.style.maxWidth = '70%';
+    nativeLoadingProgress.style.marginTop = '16px';
+    nativeLoadingHint.setAttribute(
+        'value',
+        'This may take a few minutes. You can keep this tab open.'
+    );
+    nativeLoadingHint.style.marginTop = '12px';
+    nativeLoadingHint.style.opacity = '0.7';
+
+    nativeLoading.appendChild(nativeLoadingTitle);
+    nativeLoading.appendChild(nativeLoadingLabel);
+    nativeLoading.appendChild(nativeLoadingProgress);
+    nativeLoading.appendChild(nativeLoadingHint);
+}
+
+function syncNativeLoading(presentation) {
+    if (presentation.nativeLoading.hidden) return;
+    const model = presentation.model;
+    if (model.status === 'loading') {
+        const loading = createLoadingPresentation(model);
+        presentation.nativeLoadingProgress.hidden = false;
+        presentation.nativeLoadingLabel.setAttribute(
+            'value',
+            loading.detail.replace(/\.$/, '…')
+        );
+        if (loading.progress > 0) {
+            presentation.nativeLoadingProgress.setAttribute('mode', 'normal');
+            presentation.nativeLoadingProgress.setAttribute('value', loading.progress);
+        }
+        else {
+            presentation.nativeLoadingProgress.setAttribute('mode', 'undetermined');
+        }
+        return;
+    }
+    if (model.status === 'ready') {
+        presentation.nativeLoadingLabel.setAttribute(
+            'value',
+            model.cacheHit
+                ? 'Cached Markdown is ready. Loading the view…'
+                : 'Conversion complete. Loading the Markdown view…'
+        );
+        presentation.nativeLoadingProgress.setAttribute('mode', 'normal');
+        presentation.nativeLoadingProgress.setAttribute('value', 100);
+        return;
+    }
+    presentation.nativeLoadingLabel.setAttribute(
+        'value',
+        `Conversion failed: ${model.error || 'Unknown error'}`
+    );
+    presentation.nativeLoadingProgress.hidden = true;
+}
+
+function describeURIScheme(uri) {
+    return String(uri).match(/^([a-z][a-z0-9+.-]*):/i)?.[1] || 'unknown';
+}
+
+function getRuntimeServices() {
+    return typeof Services === 'undefined' ? null : Services;
 }
 
 function isMkteroSessionTab(tab) {

@@ -16,11 +16,14 @@ function createMainWindow() {
             return {
                 tagName,
                 attributes: {},
+                children: [],
                 style: {},
                 events,
                 listeners,
                 attached: false,
                 srcSetAfterAppend: false,
+                loadedURI: null,
+                loadOptions: null,
                 contentWindow: {
                     loaded: false,
                     CustomEvent: class CustomEvent {
@@ -41,11 +44,18 @@ function createMainWindow() {
                 addEventListener(type, listener) {
                     listeners.set(type, listener);
                 },
+                appendChild(child) {
+                    child.attached = true;
+                    this.children.push(child);
+                },
                 fixupAndLoadURIString() {
                     throw new Error('NS_ERROR_FAILURE [nsIWebNavigation.fixupAndLoadURIString]');
                 },
-                loadURI() {
-                    throw new Error('Dynamic browser navigation must use the src attribute');
+                loadURI(uri, options) {
+                    if (!this.attached) throw new Error('The browser must be attached before loading');
+                    if (!uri?.spec) throw new TypeError('loadURI requires an nsIURI-like object');
+                    this.loadedURI = uri;
+                    this.loadOptions = options;
                 },
                 load() {
                     this.contentWindow.loaded = true;
@@ -97,9 +107,18 @@ function createMainWindow() {
 
 test('opens Markdown in a Zotero tab and reuses it for the same PDF', () => {
     const mainWindow = createMainWindow();
+    const systemPrincipal = { kind: 'system-principal' };
     const presenter = new MarkdownTabPresenter({
         zotero: { getMainWindow: () => mainWindow },
-        rootURI: 'resource://mktero/',
+        rootURI: 'jar:file:///profile/extensions/mktero.xpi!/',
+        services: {
+            io: {
+                newURI: spec => ({ spec }),
+            },
+            scriptSecurityManager: {
+                getSystemPrincipal: () => systemPrincipal,
+            },
+        },
     });
 
     const first = presenter.open(42);
@@ -111,14 +130,46 @@ test('opens Markdown in a Zotero tab and reuses it for the same PDF', () => {
     assert.equal(mainWindow.added[0].options.type, 'mktero');
     assert.equal(mainWindow.added[0].options.title, 'Converting PDF…');
     assert.equal(mainWindow.added[0].options.data.mkteroItemID, 42);
-    assert.equal(mainWindow.added[0].children[0].tagName, 'browser');
+    assert.equal(first.browser.attributes.remote, 'false');
     assert.equal(
-        mainWindow.added[0].children[0].attributes.src,
-        'resource://mktero/ui/markdown.xhtml'
+        first.browser.loadedURI.spec,
+        'jar:file:///profile/extensions/mktero.xpi!/ui/markdown.xhtml'
     );
-    assert.equal(mainWindow.added[0].children[0].srcSetAfterAppend, true);
+    assert.equal(first.browser.loadOptions.triggeringPrincipal, systemPrincipal);
     assert.deepEqual(mainWindow.selected, [first.tabID]);
     assert.deepEqual(mainWindow.Zotero_Tabs.getState().map(tab => tab.type), ['library', 'other']);
+});
+
+test('shows native conversion progress until the Markdown browser loads', () => {
+    const mainWindow = createMainWindow();
+    const presenter = new MarkdownTabPresenter({
+        zotero: { getMainWindow: () => mainWindow },
+        rootURI: 'resource://mktero/',
+    });
+
+    const presentation = presenter.open(42);
+
+    assert.equal(presentation.nativeLoading.hidden, false);
+    assert.equal(
+        presentation.nativeLoadingLabel.attributes.value,
+        'Preparing the PDF for MinerU…'
+    );
+
+    presenter.update(presentation, { status: 'loading', progress: 5 });
+    assert.equal(
+        presentation.nativeLoadingLabel.attributes.value,
+        'Uploading the PDF to MinerU…'
+    );
+    assert.equal(presentation.nativeLoadingProgress.attributes.value, '5');
+
+    presenter.update(presentation, { status: 'loading', progress: 10 });
+    assert.equal(
+        presentation.nativeLoadingLabel.attributes.value,
+        'PDF uploaded. MinerU is parsing the document…'
+    );
+
+    presentation.browser.load();
+    assert.equal(presentation.nativeLoading.hidden, true);
 });
 
 test('exposes and refreshes the reparse action on the tab model', async () => {

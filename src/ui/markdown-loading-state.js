@@ -29,7 +29,7 @@ function progressDetail(progress) {
         return 'Uploading the PDF to MinerU.';
     }
     if (progress < CONVERSION_PROGRESS.DOWNLOADING) {
-        return 'MinerU is parsing the document.';
+        return 'PDF uploaded. MinerU is parsing the document.';
     }
     return 'Downloading and preparing the Markdown result.';
 }

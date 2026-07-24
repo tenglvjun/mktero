@@ -12,6 +12,7 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
         shutdown: globalThis.shutdown,
     };
     const alerts = [];
+    const debugLogs = [];
     let toolbarHandler;
     let openedPreferences = null;
     const mainWindow = createMainWindow(NativeAbortController, alerts);
@@ -53,7 +54,9 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
             },
         },
         getMainWindow: () => mainWindow,
-        debug() {},
+        debug(message) {
+            debugLogs.push(message);
+        },
         logError() {},
     };
     globalThis.IOUtils = {
@@ -95,6 +98,8 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
 
     assert.deepEqual(alerts, []);
     assert.equal(openedPreferences, 'mktero-preferences');
+    assert.ok(debugLogs.some(message => message.includes('conversion started for item 42')));
+    assert.ok(debugLogs.some(message => message.includes('conversion failed for item 42')));
 });
 
 function createMainWindow(AbortController, alerts) {
@@ -123,9 +128,13 @@ function createMainWindow(AbortController, alerts) {
         document: {
             createXULElement() {
                 return {
+                    children: [],
                     style: {},
                     setAttribute() {},
                     addEventListener() {},
+                    appendChild(child) {
+                        this.children.push(child);
+                    },
                     contentWindow: null,
                 };
             },

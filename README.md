@@ -28,6 +28,16 @@ To load source builds during development, create an extension proxy file named `
 
 Alternatively, open **Tools → Add-ons**, choose **Install Add-on From File…**, and select the generated XPI.
 
+## Troubleshooting conversion
+
+Open **Help → Debug Output Logging**, enable logging, trigger the **MD** action, and then choose **View Output**. Filter for `Mktero:`. The conversion log distinguishes these cases without recording the API Token, upload URL, or PDF content:
+
+- `requesting a MinerU upload URL`: Mktero is creating the MinerU task.
+- `uploading PDF to MinerU`: the PDF upload has started.
+- `PDF upload completed; MinerU is parsing`: MinerU received the PDF successfully.
+- `completed from local cache; MinerU upload skipped`: no API request was needed.
+- `completed through MinerU API`: the result came back from MinerU.
+
 ## Current scope
 
 - PDF reader toolbar entry

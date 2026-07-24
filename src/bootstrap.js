@@ -9,7 +9,10 @@ import {
     createZoteroMarkdownCache,
 } from './cache/markdown-cache.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
-import { normalizeConversionProgress } from './core/conversion-progress.js';
+import {
+    CONVERSION_PROGRESS,
+    normalizeConversionProgress,
+} from './core/conversion-progress.js';
 import {
     MinerUConfigurationError,
     MinerUDocumentExtractor,
@@ -123,22 +126,41 @@ async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
     abortConversion(itemID);
     const controller = createZoteroAbortController();
     runtime.controllers.set(itemID, controller);
+    Zotero.debug(
+        `Mktero: conversion started for item ${itemID} `
+        + `(force refresh: ${forceRefresh})`
+    );
     runtime.presenter.update(
         presentation,
         createConversionLoadingChanges(previousResult)
     );
 
+    let lastLoggedProgress = null;
     try {
         const result = await runtime.service.convert(itemID, {
             signal: controller.signal,
             forceRefresh,
             onProgress(progress) {
+                const normalizedProgress = normalizeConversionProgress(progress);
+                if (normalizedProgress !== lastLoggedProgress) {
+                    lastLoggedProgress = normalizedProgress;
+                    Zotero.debug(
+                        `Mktero: item ${itemID}: `
+                        + `${conversionProgressLog(normalizedProgress)} `
+                        + `(${normalizedProgress}%)`
+                    );
+                }
                 runtime.presenter?.update(presentation, {
                     status: 'loading',
-                    progress: normalizeConversionProgress(progress),
+                    progress: normalizedProgress,
                 });
             },
         });
+        Zotero.debug(
+            result.cacheHit
+                ? `Mktero: item ${itemID}: completed from local cache; MinerU upload skipped`
+                : `Mktero: item ${itemID}: completed through MinerU API`
+        );
         runtime.presenter?.update(
             presentation,
             createConversionReadyChanges(result)
@@ -146,6 +168,9 @@ async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
     }
     catch (error) {
         if (controller.signal.aborted) return;
+        Zotero.debug(
+            `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
+        );
         Zotero.logError(error);
         if (error instanceof MinerUConfigurationError
             || error?.code === 'MINERU_API_KEY_INVALID') {
@@ -161,6 +186,25 @@ async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
             runtime.controllers.delete(itemID);
         }
     }
+}
+
+function conversionProgressLog(progress) {
+    if (progress >= CONVERSION_PROGRESS.COMPLETE) {
+        return 'conversion result available';
+    }
+    if (progress >= CONVERSION_PROGRESS.DOWNLOADING) {
+        return 'MinerU parsing finished; downloading the result';
+    }
+    if (progress >= CONVERSION_PROGRESS.PARSING) {
+        return 'PDF upload completed; MinerU is parsing';
+    }
+    if (progress >= CONVERSION_PROGRESS.UPLOADING) {
+        return 'uploading PDF to MinerU';
+    }
+    if (progress >= CONVERSION_PROGRESS.PREPARING) {
+        return 'requesting a MinerU upload URL';
+    }
+    return 'preparing the local PDF';
 }
 
 function abortConversion(itemID) {

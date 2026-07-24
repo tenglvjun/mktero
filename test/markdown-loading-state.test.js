@@ -23,7 +23,7 @@ test('describes the visible MinerU loading stages', () => {
     );
     assert.equal(
         createLoadingPresentation({ status: 'loading', progress: 42 }).detail,
-        'MinerU is parsing the document.'
+        'PDF uploaded. MinerU is parsing the document.'
     );
     assert.equal(
         createLoadingPresentation({ status: 'loading', progress: 97 }).detail,
@@ -42,7 +42,7 @@ test('uses a compact loading presentation while reparsing existing Markdown', ()
         progress: 24,
         progressLabel: '24%',
         title: 'Reparsing PDF…',
-        detail: 'MinerU is parsing the document.',
+        detail: 'PDF uploaded. MinerU is parsing the document.',
         hint: 'The current Markdown remains available until the new result is ready.',
     });
 });
