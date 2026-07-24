@@ -50,6 +50,9 @@ export class MarkdownDocumentService {
             totalPages: extracted.totalPages,
             warnings: extracted.warnings,
         };
+        if ('cacheHit' in extracted) {
+            result.cacheHit = Boolean(extracted.cacheHit);
+        }
         if (extracted.assets?.length) {
             result.assets = extracted.assets;
             result.assetBasePath = extracted.assetBasePath || '';

@@ -346,3 +346,29 @@ test('rejects a result archive larger than the configured limit', async () => {
         error => error.code === 'MINERU_ARCHIVE_TOO_LARGE'
     );
 });
+
+test('uses an injected AbortController when the calling sandbox has none', async t => {
+    const NativeAbortController = globalThis.AbortController;
+    delete globalThis.AbortController;
+    t.after(() => { globalThis.AbortController = NativeAbortController; });
+    let controllerCalls = 0;
+    const client = new MinerUClient({
+        fetch: async () => jsonResponse({ code: 'A0202', msg: 'Token error' }, 401),
+        createAbortController: () => {
+            controllerCalls++;
+            return new NativeAbortController();
+        },
+        extractMarkdownFromZip: () => '',
+    });
+
+    await assert.rejects(
+        () => client.parse({
+            apiKey: 'bad-token',
+            fileName: 'paper.pdf',
+            fileData: new Uint8Array([1]),
+            dataID: 'zotero-42',
+        }),
+        /API Token is invalid/
+    );
+    assert.equal(controllerCalls, 1);
+});

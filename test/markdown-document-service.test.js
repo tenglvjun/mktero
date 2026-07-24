@@ -128,6 +128,7 @@ test('passes through Markdown produced by MinerU', async () => {
                 extractedPages: 2,
                 totalPages: 2,
                 warnings: [],
+                cacheHit: true,
             }),
         },
     });
@@ -136,6 +137,7 @@ test('passes through Markdown produced by MinerU', async () => {
 
     assert.equal(result.markdown, '# Already Markdown\n\n| A | B |');
     assert.equal(result.sourceKind, 'markdown');
+    assert.equal(result.cacheHit, true);
 });
 
 test('allows a fresh conversion while an aborted conversion is settling', async () => {

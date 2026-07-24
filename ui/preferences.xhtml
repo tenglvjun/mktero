@@ -1,5 +1,6 @@
 <vbox id="mktero-preferences-pane"
       class="main-section"
+      onload="MkteroPreferences.init(event)"
       xmlns:html="http://www.w3.org/1999/xhtml">
     <groupbox aria-labelledby="mktero-mineru-title">
         <label><html:h2 id="mktero-mineru-title">MinerU API</html:h2></label>
@@ -16,6 +17,27 @@
         <description>
             <label is="zotero-text-link"
                    href="https://mineru.net/apiManage/token">Manage MinerU API Tokens</label>
+        </description>
+    </groupbox>
+
+    <groupbox id="mktero-cache-section" aria-labelledby="mktero-cache-title">
+        <label><html:h2 id="mktero-cache-title">Local Markdown cache</html:h2></label>
+
+        <html:label id="mktero-cache-toggle" for="mktero-cache-enabled">
+            <html:input id="mktero-cache-enabled"
+                        type="checkbox"
+                        preference="extensions.mktero.cacheEnabled" />
+            Reuse successful MinerU results for unchanged PDFs
+        </html:label>
+
+        <html:div id="mktero-cache-actions">
+            <html:span id="mktero-cache-status">Calculating cache size...</html:span>
+            <html:button id="mktero-clear-cache" type="button">Clear cache</html:button>
+        </html:div>
+
+        <description>
+            Cached Markdown and figures are stored unencrypted in this Zotero profile and
+            are not synced.
         </description>
     </groupbox>
 </vbox>

@@ -4,6 +4,8 @@ Mktero is a Zotero 7/8/9 plugin that adds an **MD** button to PDF reader toolbar
 
 Configure a MinerU API Token under **Settings → Mktero** before converting a PDF. The token is stored as a standard, unencrypted preference in the local Zotero profile. Clicking **MD** uploads the current PDF to MinerU for processing.
 
+Successful MinerU results are cached locally by PDF content and parser profile. Opening an unchanged PDF again reuses its Markdown and figures without requiring a Token or another upload. Use **Reparse** in the Markdown tab to bypass the cached result, or disable and clear the cache under **Settings → Mktero**. Cache files are stored unencrypted in the current Zotero profile and are not synced.
+
 ## Development
 
 Requirements:
@@ -35,5 +37,6 @@ Alternatively, open **Tools → Add-ons**, choose **Install Add-on From File…*
 - Zotero Tab with rendered preview, Markdown source, and copy action
 - Escaped PDF content and restricted link schemes
 - Local figure previews extracted from the MinerU result archive
+- Local content-addressed cache with automatic expiry and manual clearing
 
 The MinerU precision API currently limits each file to 200 MB and 200 pages. Mktero reads `full.md` and supported raster images from the MinerU result archive. Images are displayed for the current Tab but are not imported as Zotero attachments.

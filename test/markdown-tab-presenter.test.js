@@ -19,6 +19,7 @@ function createMainWindow() {
                 style: {},
                 events,
                 listeners,
+                fixedURI: null,
                 contentWindow: {
                     loaded: false,
                     CustomEvent: class CustomEvent {
@@ -35,6 +36,9 @@ function createMainWindow() {
                 },
                 addEventListener(type, listener) {
                     listeners.set(type, listener);
+                },
+                fixupAndLoadURIString(uri) {
+                    this.fixedURI = uri;
                 },
                 load() {
                     this.contentWindow.loaded = true;
@@ -97,14 +101,40 @@ test('opens Markdown in a Zotero tab and reuses it for the same PDF', () => {
     assert.equal(second.created, false);
     assert.equal(mainWindow.added.length, 1);
     assert.equal(mainWindow.added[0].options.type, 'mktero');
+    assert.equal(mainWindow.added[0].options.title, 'Converting PDF…');
     assert.equal(mainWindow.added[0].options.data.mkteroItemID, 42);
     assert.equal(mainWindow.added[0].children[0].tagName, 'browser');
     assert.equal(
         mainWindow.added[0].children[0].attributes.src,
         'resource://mktero/ui/markdown.xhtml'
     );
+    assert.equal(
+        mainWindow.added[0].children[0].fixedURI,
+        'resource://mktero/ui/markdown.xhtml'
+    );
     assert.deepEqual(mainWindow.selected, [first.tabID]);
     assert.deepEqual(mainWindow.Zotero_Tabs.getState().map(tab => tab.type), ['library', 'other']);
+});
+
+test('exposes and refreshes the reparse action on the tab model', async () => {
+    const mainWindow = createMainWindow();
+    const calls = [];
+    const presenter = new MarkdownTabPresenter({
+        zotero: { getMainWindow: () => mainWindow },
+        rootURI: 'resource://mktero/',
+    });
+    const first = presenter.open(42, {
+        onReparse: () => calls.push('first'),
+    });
+    const second = presenter.open(42, {
+        onReparse: () => calls.push('second'),
+    });
+
+    await second.model.onReparse();
+
+    assert.equal(first.model, second.model);
+    assert.deepEqual(calls, ['second']);
+    assert.equal(second.model.cacheHit, false);
 });
 
 test('removes stale Mktero tabs before Zotero restores the previous session', () => {

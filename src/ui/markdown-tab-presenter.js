@@ -10,7 +10,7 @@ export class MarkdownTabPresenter {
         this.ensureSessionStateFilter();
     }
 
-    open(itemID, { onClose } = {}) {
+    open(itemID, { onClose, onReparse } = {}) {
         this.ensureSessionStateFilter();
         const owner = this.zotero.getMainWindow?.();
         const tabs = owner?.Zotero_Tabs;
@@ -21,15 +21,17 @@ export class MarkdownTabPresenter {
         const existing = this.presentations.get(itemID);
         if (existing) {
             if (onClose) existing.onClose = onClose;
+            if (onReparse) existing.model.onReparse = onReparse;
             tabs.select(existing.tabID);
             return { ...existing, created: false };
         }
 
-        const model = createInitialModel(itemID);
+        const model = createInitialModel(itemID, onReparse);
         const browser = owner.document.createXULElement('browser');
+        const browserURI = `${this.rootURI}ui/markdown.xhtml`;
         browser.setAttribute('type', 'content');
         browser.setAttribute('flex', '1');
-        browser.setAttribute('src', `${this.rootURI}ui/markdown.xhtml`);
+        browser.setAttribute('src', browserURI);
         browser.style.width = '100%';
         browser.style.height = '100%';
         browser.mkteroModel = model;
@@ -43,7 +45,7 @@ export class MarkdownTabPresenter {
         let presentation;
         const { id: tabID, container } = tabs.add({
             type: TAB_TYPE,
-            title: 'Markdown',
+            title: model.title,
             data: {
                 mkteroItemID: itemID,
                 icon: 'attachment-pdf',
@@ -64,6 +66,12 @@ export class MarkdownTabPresenter {
             },
         });
         container.appendChild(browser);
+        if (typeof browser.fixupAndLoadURIString === 'function') {
+            browser.fixupAndLoadURIString(browserURI);
+        }
+        else {
+            browser.loadURI?.(browserURI);
+        }
 
         presentation = { tabs, tabID, browser, model, closed: false, onClose };
         this.presentations.set(itemID, presentation);
@@ -138,7 +146,7 @@ function isMkteroSessionTab(tab) {
     return tab?.type === TAB_TYPE && tab.data?.mkteroItemID !== undefined;
 }
 
-function createInitialModel(itemID) {
+function createInitialModel(itemID, onReparse) {
     return {
         itemID,
         title: 'Converting PDF…',
@@ -148,7 +156,10 @@ function createInitialModel(itemID) {
         assets: [],
         assetBasePath: '',
         sourceKind: null,
+        cacheHit: false,
+        preserveContent: false,
         warnings: [],
         error: '',
+        onReparse,
     };
 }

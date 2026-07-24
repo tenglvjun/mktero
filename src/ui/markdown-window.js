@@ -31,6 +31,7 @@ function bindActions() {
     document.getElementById('mktero-show-preview').addEventListener('click', () => setMode('preview'));
     document.getElementById('mktero-show-source').addEventListener('click', () => setMode('source'));
     document.getElementById('mktero-copy').addEventListener('click', copyMarkdown);
+    document.getElementById('mktero-reparse').addEventListener('click', reparse);
 }
 
 function render() {
@@ -44,6 +45,7 @@ function render() {
     const warning = document.getElementById('mktero-warning');
     const preview = document.getElementById('mktero-preview');
     const source = document.getElementById('mktero-source');
+    const reparseButton = document.getElementById('mktero-reparse');
 
     progress.hidden = model.status !== 'loading';
     progress.value = model.progress || 0;
@@ -51,16 +53,20 @@ function render() {
     error.textContent = model.error || '';
     warning.hidden = !model.warnings?.length;
     warning.textContent = model.warnings?.join(' ') || '';
+    reparseButton.disabled = model.status === 'loading' || typeof model.onReparse !== 'function';
 
     if (model.status === 'loading') {
-        revokeAssetURLs();
-        status.textContent = `Converting PDF… ${model.progress || 0}%`;
-        preview.replaceChildren();
-        source.textContent = '';
+        const action = model.preserveContent ? 'Reparsing PDF' : 'Converting PDF';
+        status.textContent = `${action}… ${model.progress || 0}%`;
+        if (!model.preserveContent) {
+            revokeAssetURLs();
+            preview.replaceChildren();
+            source.textContent = '';
+        }
     }
     else if (model.status === 'ready') {
         syncAssetURLs();
-        status.textContent = sourceLabel(model.sourceKind);
+        status.textContent = sourceLabel(model.sourceKind, model.cacheHit);
         preview.innerHTML = renderMarkdownHTML(model.markdown || '', {
             resolveImageURL,
         });
@@ -120,10 +126,23 @@ function normalizeZipPath(path) {
     return resolveZipPath('', String(path).replace(/\\/g, '/'));
 }
 
-function sourceLabel(sourceKind) {
+function sourceLabel(sourceKind, cacheHit) {
+    if (sourceKind === 'markdown' && cacheHit) return 'Cached MinerU Markdown';
     if (sourceKind === 'markdown') return 'MinerU Markdown';
     if (sourceKind === 'structured') return 'Structured Markdown';
     return 'Plain-text Markdown';
+}
+
+async function reparse() {
+    const button = document.getElementById('mktero-reparse');
+    if (typeof model.onReparse !== 'function') return;
+    button.disabled = true;
+    try {
+        await model.onReparse();
+    }
+    finally {
+        button.disabled = model.status === 'loading';
+    }
 }
 
 function setMode(mode) {

@@ -34,6 +34,15 @@ await Promise.all([
         target: ['firefox115'],
         legalComments: 'none',
     }),
+    build({
+        entryPoints: [path.join(projectRoot, 'src/ui/preferences.js')],
+        outfile: path.join(packageRoot, 'ui/preferences.js'),
+        bundle: true,
+        format: 'iife',
+        platform: 'browser',
+        target: ['firefox115'],
+        legalComments: 'none',
+    }),
 ]);
 
 await Promise.all([

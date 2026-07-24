@@ -1,21 +1,34 @@
 import {
+    getMinerUCacheEnabled,
     getMinerUApiKey,
     openMinerUPreferences,
     registerMinerUPreferencesPane,
 } from './config/mineru-preferences.js';
+import {
+    createMinerUCacheKey,
+    createZoteroMarkdownCache,
+} from './cache/markdown-cache.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import {
     MinerUConfigurationError,
     MinerUDocumentExtractor,
 } from './extractors/mineru-extractor.js';
 import { MinerUClient } from './mineru/mineru-client.js';
+import { createRuntimeAbortController } from './platform/abort-controller.js';
 import { registerReaderToolbar } from './ui/reader-toolbar.js';
 import { MarkdownTabPresenter } from './ui/markdown-tab-presenter.js';
+import {
+    createConversionFailureChanges,
+    createConversionLoadingChanges,
+    createConversionReadyChanges,
+    snapshotReadyResult,
+} from './ui/markdown-tab-state.js';
 
 const runtime = {
     id: null,
     service: null,
     presenter: null,
+    cache: null,
     preferencePaneID: null,
     disposeToolbar: null,
     controllers: new Map(),
@@ -33,14 +46,26 @@ globalThis.startup = async function startup({ id, rootURI }) {
     await Zotero.uiReadyPromise;
     if (runtime.presenter !== presenter) return;
 
+    const cache = createZoteroMarkdownCache({
+        zotero: Zotero,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+    });
+    runtime.cache = cache;
     runtime.service = new MarkdownDocumentService({
         extractor: new MinerUDocumentExtractor({
             zotero: Zotero,
-            client: new MinerUClient(),
+            client: new MinerUClient({
+                createAbortController: createZoteroAbortController,
+            }),
             getApiKey: () => getMinerUApiKey(Zotero),
             readFile: path => IOUtils.read(path),
+            cache,
+            createCacheKey: fileData => createMinerUCacheKey(fileData),
+            isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         }),
     });
+    cache.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
     const preferencePaneID = await registerMinerUPreferencesPane({
         zotero: Zotero,
@@ -72,6 +97,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeToolbar = null;
     runtime.presenter = null;
     runtime.service = null;
+    runtime.cache = null;
     runtime.preferencePaneID = null;
     runtime.id = null;
 };
@@ -80,29 +106,31 @@ globalThis.uninstall = async function uninstall() {};
 globalThis.onMainWindowLoad = function onMainWindowLoad() {};
 globalThis.onMainWindowUnload = function onMainWindowUnload() {};
 
-async function openReaderAsMarkdown(reader) {
+async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
     const itemID = reader.itemID;
     const presentation = runtime.presenter.open(itemID, {
         onClose: () => abortConversion(itemID),
+        onReparse: () => openReaderAsMarkdown(reader, { forceRefresh: true }),
     });
-    if (!presentation.created && presentation.model.status !== 'error') return;
+    if (!presentation.created
+        && presentation.model.status !== 'error'
+        && !forceRefresh) return;
 
+    const previousResult = forceRefresh
+        ? snapshotReadyResult(presentation.model)
+        : null;
     abortConversion(itemID);
-    const controller = new AbortController();
+    const controller = createZoteroAbortController();
     runtime.controllers.set(itemID, controller);
-    runtime.presenter.update(presentation, {
-        status: 'loading',
-        progress: 0,
-        markdown: '',
-        assets: [],
-        assetBasePath: '',
-        warnings: [],
-        error: '',
-    });
+    runtime.presenter.update(
+        presentation,
+        createConversionLoadingChanges(previousResult)
+    );
 
     try {
         const result = await runtime.service.convert(itemID, {
             signal: controller.signal,
+            forceRefresh,
             onProgress(progress) {
                 runtime.presenter?.update(presentation, {
                     status: 'loading',
@@ -110,11 +138,10 @@ async function openReaderAsMarkdown(reader) {
                 });
             },
         });
-        runtime.presenter?.update(presentation, {
-            ...result,
-            status: 'ready',
-            progress: 100,
-        });
+        runtime.presenter?.update(
+            presentation,
+            createConversionReadyChanges(result)
+        );
     }
     catch (error) {
         if (controller.signal.aborted) return;
@@ -123,10 +150,10 @@ async function openReaderAsMarkdown(reader) {
             || error?.code === 'MINERU_API_KEY_INVALID') {
             openMinerUPreferences(Zotero);
         }
-        runtime.presenter?.update(presentation, {
-            status: 'error',
-            error: userFacingError(error),
-        });
+        runtime.presenter?.update(
+            presentation,
+            createConversionFailureChanges(userFacingError(error), previousResult)
+        );
     }
     finally {
         if (runtime.controllers.get(itemID) === controller) {
@@ -153,6 +180,14 @@ function handleToolbarError(error) {
     Zotero.logError(error);
     const owner = Zotero.getMainWindow?.();
     owner?.alert?.(`Mktero: ${userFacingError(error)}`);
+}
+
+function createZoteroAbortController() {
+    return createRuntimeAbortController({
+        globalObject: globalThis,
+        zotero: Zotero,
+        services: typeof Services === 'undefined' ? null : Services,
+    });
 }
 
 function normalizeProgress(progress) {

@@ -83,6 +83,16 @@ button.active {
     color: var(--accent);
 }
 
+button:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+button:disabled:hover {
+    border-color: var(--border);
+    color: inherit;
+}
+
 progress {
     display: block;
     width: 100%;

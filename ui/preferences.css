@@ -13,3 +13,26 @@
     width: 100%;
     min-height: 32px;
 }
+
+#mktero-cache-section {
+    margin-top: 18px;
+}
+
+#mktero-cache-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#mktero-cache-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    max-width: 640px;
+    margin-top: 12px;
+}
+
+#mktero-cache-status {
+    color: var(--fill-secondary, currentColor);
+}

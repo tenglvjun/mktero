@@ -1,5 +1,7 @@
 import { concatenateUint8Arrays, toUint8Array } from './binary.js';
+import { MINERU_BATCH_OPTIONS, MINERU_FILE_OPTIONS } from './parser-profile.js';
 import { extractMinerUResultFromZip } from './zip-markdown.js';
+import { createRuntimeAbortController } from '../platform/abort-controller.js';
 
 const DEFAULT_API_BASE = 'https://mineru.net/api/v4';
 const DEFAULT_POLL_INTERVAL_MS = 3000;
@@ -25,8 +27,12 @@ export class MinerUClient {
         maxRetryAttempts = DEFAULT_MAX_RETRY_ATTEMPTS,
         retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
         maxArchiveBytes = DEFAULT_MAX_ARCHIVE_BYTES,
+        createAbortController = createRuntimeAbortController,
     } = {}) {
         if (!fetch) throw new TypeError('A fetch implementation is required');
+        if (typeof createAbortController !== 'function') {
+            throw new TypeError('An AbortController factory is required');
+        }
         this.fetch = fetch;
         this.sleep = sleep;
         this.extractResultFromZip = extractResult;
@@ -39,6 +45,7 @@ export class MinerUClient {
         this.maxRetryAttempts = maxRetryAttempts;
         this.retryBaseDelayMs = retryBaseDelayMs;
         this.maxArchiveBytes = maxArchiveBytes;
+        this.createAbortController = createAbortController;
     }
 
     async parse({
@@ -62,11 +69,9 @@ export class MinerUClient {
                 files: [{
                     name: fileName,
                     data_id: dataID,
-                    is_ocr: true,
+                    ...MINERU_FILE_OPTIONS,
                 }],
-                model_version: 'vlm',
-                enable_formula: true,
-                enable_table: true,
+                ...MINERU_BATCH_OPTIONS,
             }),
             signal,
         });
@@ -217,7 +222,7 @@ export class MinerUClient {
 
     async #runRequest({ signal, timeoutMs, label, operation }) {
         throwIfAborted(signal);
-        const controller = new AbortController();
+        const controller = this.createAbortController();
         let timedOut = false;
         const relayAbort = () => controller.abort(signal?.reason);
         signal?.addEventListener('abort', relayAbort, { once: true });
