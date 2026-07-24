@@ -2,6 +2,7 @@ import { concatenateUint8Arrays, toUint8Array } from './binary.js';
 import { MINERU_BATCH_OPTIONS, MINERU_FILE_OPTIONS } from './parser-profile.js';
 import { extractMinerUResultFromZip } from './zip-markdown.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
+import { CONVERSION_PROGRESS } from '../core/conversion-progress.js';
 
 const DEFAULT_API_BASE = 'https://mineru.net/api/v4';
 const DEFAULT_POLL_INTERVAL_MS = 3000;
@@ -61,7 +62,7 @@ export class MinerUClient {
         if (!fileName) throw new Error('A PDF file name is required');
         throwIfAborted(signal);
 
-        onProgress(2);
+        onProgress(CONVERSION_PROGRESS.PREPARING);
         const batch = await this.#requestJSON(`${this.apiBase}/file-urls/batch`, {
             method: 'POST',
             headers: authorizedJSONHeaders(token),
@@ -81,7 +82,7 @@ export class MinerUClient {
             throw new Error('MinerU did not return a file upload URL');
         }
 
-        onProgress(5);
+        onProgress(CONVERSION_PROGRESS.UPLOADING);
         const uploadResponse = await this.#runRequest({
             signal,
             timeoutMs: this.uploadTimeoutMs,
@@ -95,7 +96,7 @@ export class MinerUClient {
         if (!uploadResponse?.ok) {
             throw httpError('MinerU file upload failed', uploadResponse);
         }
-        onProgress(10);
+        onProgress(CONVERSION_PROGRESS.PARSING);
 
         const completed = await this.#poll({
             token,
@@ -105,7 +106,7 @@ export class MinerUClient {
             onProgress,
             signal,
         });
-        onProgress(95);
+        onProgress(CONVERSION_PROGRESS.DOWNLOADING);
 
         const archive = await this.#withRetry(
             () => this.#downloadArchive(completed.full_zip_url, signal),
@@ -118,7 +119,7 @@ export class MinerUClient {
         }
 
         throwIfAborted(signal);
-        onProgress(100);
+        onProgress(CONVERSION_PROGRESS.COMPLETE);
         const totalPages = completed.extract_progress?.total_pages ?? null;
         return {
             markdown,
@@ -159,7 +160,7 @@ export class MinerUClient {
                 onProgress(progressFromPages(result.extract_progress));
             }
             else {
-                onProgress(12);
+                onProgress(CONVERSION_PROGRESS.QUEUED);
             }
 
             if (attempt < this.maxPollAttempts - 1) {
@@ -295,8 +296,17 @@ function findResult(results, dataID, fileName) {
 function progressFromPages(progress) {
     const extracted = Number(progress?.extracted_pages);
     const total = Number(progress?.total_pages);
-    if (!Number.isFinite(extracted) || !Number.isFinite(total) || total <= 0) return 20;
-    return Math.min(90, Math.max(15, Math.round(15 + (75 * extracted / total))));
+    if (!Number.isFinite(extracted) || !Number.isFinite(total) || total <= 0) {
+        return CONVERSION_PROGRESS.PARSING_FALLBACK;
+    }
+    const range = CONVERSION_PROGRESS.PARSING_MAX - CONVERSION_PROGRESS.PARSING_MIN;
+    const value = Math.round(
+        CONVERSION_PROGRESS.PARSING_MIN + (range * extracted / total)
+    );
+    return Math.min(
+        CONVERSION_PROGRESS.PARSING_MAX,
+        Math.max(CONVERSION_PROGRESS.PARSING_MIN, value)
+    );
 }
 
 function apiError(code, message) {

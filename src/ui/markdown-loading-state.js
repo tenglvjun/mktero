@@ -1,7 +1,12 @@
+import {
+    CONVERSION_PROGRESS,
+    normalizeConversionProgress,
+} from '../core/conversion-progress.js';
+
 export function createLoadingPresentation(model = {}) {
     if (model.status !== 'loading') return { visible: false };
 
-    const progress = normalizeProgress(model.progress);
+    const progress = normalizeConversionProgress(model.progress);
     const preserveContent = Boolean(model.preserveContent);
     return {
         visible: true,
@@ -16,15 +21,15 @@ export function createLoadingPresentation(model = {}) {
     };
 }
 
-function normalizeProgress(progress) {
-    const value = Number(progress);
-    if (!Number.isFinite(value)) return 0;
-    return Math.min(100, Math.max(0, Math.round(value)));
-}
-
 function progressDetail(progress) {
-    if (progress < 5) return 'Preparing the PDF for MinerU.';
-    if (progress < 10) return 'Uploading the PDF to MinerU.';
-    if (progress < 95) return 'MinerU is parsing the document.';
+    if (progress < CONVERSION_PROGRESS.UPLOADING) {
+        return 'Preparing the PDF for MinerU.';
+    }
+    if (progress < CONVERSION_PROGRESS.PARSING) {
+        return 'Uploading the PDF to MinerU.';
+    }
+    if (progress < CONVERSION_PROGRESS.DOWNLOADING) {
+        return 'MinerU is parsing the document.';
+    }
     return 'Downloading and preparing the Markdown result.';
 }

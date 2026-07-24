@@ -9,6 +9,7 @@ import {
     createZoteroMarkdownCache,
 } from './cache/markdown-cache.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
+import { normalizeConversionProgress } from './core/conversion-progress.js';
 import {
     MinerUConfigurationError,
     MinerUDocumentExtractor,
@@ -134,7 +135,7 @@ async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
             onProgress(progress) {
                 runtime.presenter?.update(presentation, {
                     status: 'loading',
-                    progress: normalizeProgress(progress),
+                    progress: normalizeConversionProgress(progress),
                 });
             },
         });
@@ -188,12 +189,6 @@ function createZoteroAbortController() {
         zotero: Zotero,
         services: typeof Services === 'undefined' ? null : Services,
     });
-}
-
-function normalizeProgress(progress) {
-    const value = Number(progress);
-    if (!Number.isFinite(value)) return 0;
-    return Math.min(100, Math.max(0, Math.round(value)));
 }
 
 function userFacingError(error) {
