@@ -15,18 +15,32 @@
         </div>
         <div class="actions">
             <div class="mode-switch" role="group" aria-label="View mode">
-                <button id="mktero-show-preview" class="active" type="button">Preview</button>
-                <button id="mktero-show-source" type="button">Markdown</button>
+                <button id="mktero-show-preview" class="active" type="button" disabled="disabled">Preview</button>
+                <button id="mktero-show-source" type="button" disabled="disabled">Markdown</button>
             </div>
-            <button id="mktero-reparse" type="button">Reparse</button>
-            <button id="mktero-copy" type="button">Copy Markdown</button>
+            <button id="mktero-reparse" type="button" disabled="disabled">Reparse</button>
+            <button id="mktero-copy" type="button" disabled="disabled">Copy Markdown</button>
         </div>
     </header>
     <progress id="mktero-progress" max="100" value="0"></progress>
     <div id="mktero-warning" class="message warning" hidden="hidden"></div>
     <div id="mktero-error" class="message error" hidden="hidden"></div>
-    <main>
-        <article id="mktero-preview" class="markdown-body"></article>
+    <main id="mktero-content" aria-busy="true">
+        <section id="mktero-loading" class="loading-state" role="status" aria-live="polite" aria-atomic="true">
+            <div class="loading-spinner" aria-hidden="true"></div>
+            <div class="loading-content">
+                <span class="loading-eyebrow">MinerU conversion</span>
+                <h2 id="mktero-loading-title">Converting PDF…</h2>
+                <p id="mktero-loading-detail">Preparing the PDF for MinerU.</p>
+                <div class="loading-progress-heading">
+                    <span>Progress</span>
+                    <strong id="mktero-loading-progress-label">0%</strong>
+                </div>
+                <progress id="mktero-loading-progress" max="100" value="0"></progress>
+                <p id="mktero-loading-hint" class="loading-hint">This can take a few minutes. Keep this tab open while MinerU finishes.</p>
+            </div>
+        </section>
+        <article id="mktero-preview" class="markdown-body" hidden="hidden"></article>
         <pre id="mktero-source" class="markdown-source" hidden="hidden"></pre>
     </main>
 </body>

@@ -1,4 +1,5 @@
 import { renderMarkdownHTML } from '../markdown/markdown-html.js';
+import { createLoadingPresentation } from './markdown-loading-state.js';
 
 let model;
 let renderedAssets;
@@ -43,22 +44,42 @@ function render() {
     const progress = document.getElementById('mktero-progress');
     const error = document.getElementById('mktero-error');
     const warning = document.getElementById('mktero-warning');
+    const content = document.getElementById('mktero-content');
+    const loading = document.getElementById('mktero-loading');
+    const loadingProgress = document.getElementById('mktero-loading-progress');
     const preview = document.getElementById('mktero-preview');
     const source = document.getElementById('mktero-source');
+    const previewButton = document.getElementById('mktero-show-preview');
+    const sourceButton = document.getElementById('mktero-show-source');
     const reparseButton = document.getElementById('mktero-reparse');
+    const copyButton = document.getElementById('mktero-copy');
+    const loadingView = createLoadingPresentation(model);
+    const showContent = model.status === 'ready' || loadingView.preserveContent;
 
-    progress.hidden = model.status !== 'loading';
-    progress.value = model.progress || 0;
+    progress.hidden = !loadingView.visible;
+    progress.value = loadingView.progress || 0;
+    loading.hidden = !loadingView.visible;
+    loading.classList.toggle('loading-state--inline', loadingView.preserveContent);
+    content.setAttribute('aria-busy', String(loadingView.visible));
     error.hidden = model.status !== 'error';
     error.textContent = model.error || '';
     warning.hidden = !model.warnings?.length;
     warning.textContent = model.warnings?.join(' ') || '';
-    reparseButton.disabled = model.status === 'loading' || typeof model.onReparse !== 'function';
+    previewButton.disabled = !showContent;
+    sourceButton.disabled = !showContent;
+    copyButton.disabled = !showContent;
+    reparseButton.disabled = loadingView.visible || typeof model.onReparse !== 'function';
+    syncContentVisibility(showContent);
 
-    if (model.status === 'loading') {
-        const action = model.preserveContent ? 'Reparsing PDF' : 'Converting PDF';
-        status.textContent = `${action}… ${model.progress || 0}%`;
-        if (!model.preserveContent) {
+    if (loadingView.visible) {
+        status.textContent = `${loadingView.title} ${loadingView.progressLabel}`;
+        document.getElementById('mktero-loading-title').textContent = loadingView.title;
+        document.getElementById('mktero-loading-detail').textContent = loadingView.detail;
+        document.getElementById('mktero-loading-progress-label').textContent
+            = loadingView.progressLabel;
+        document.getElementById('mktero-loading-hint').textContent = loadingView.hint;
+        loadingProgress.value = loadingView.progress;
+        if (!loadingView.preserveContent) {
             revokeAssetURLs();
             preview.replaceChildren();
             source.textContent = '';
@@ -75,6 +96,13 @@ function render() {
     else {
         status.textContent = 'Conversion failed';
     }
+}
+
+function syncContentVisibility(visible) {
+    const previewMode = document.getElementById('mktero-show-preview')
+        .classList.contains('active');
+    document.getElementById('mktero-preview').hidden = !visible || !previewMode;
+    document.getElementById('mktero-source').hidden = !visible || previewMode;
 }
 
 function syncAssetURLs() {

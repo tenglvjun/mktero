@@ -26,6 +26,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 body {
     margin: 0;
     min-height: 100vh;
@@ -93,7 +95,7 @@ button:disabled:hover {
     color: inherit;
 }
 
-progress {
+#mktero-progress {
     display: block;
     width: 100%;
     height: 3px;
@@ -115,6 +117,94 @@ main {
     max-width: 900px;
     margin: 0 auto;
     padding: 32px 28px 64px;
+}
+
+.loading-state {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 20px;
+    max-width: 640px;
+    margin: clamp(48px, 11vh, 108px) auto 0;
+    padding: 26px 28px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: 0 12px 36px rgb(0 0 0 / 10%);
+}
+
+.loading-state.loading-state--inline {
+    max-width: none;
+    margin: 0 0 28px;
+    padding: 16px 18px;
+    border-radius: 10px;
+    box-shadow: none;
+}
+
+.loading-spinner {
+    width: 38px;
+    height: 38px;
+    margin-top: 3px;
+    border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: mktero-spin 0.85s linear infinite;
+}
+
+.loading-state--inline .loading-spinner {
+    width: 28px;
+    height: 28px;
+}
+
+.loading-content { min-width: 0; }
+
+.loading-eyebrow {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.loading-content h2 {
+    margin: 4px 0 6px;
+    font-size: 19px;
+}
+
+.loading-content p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.loading-progress-heading {
+    display: flex;
+    justify-content: space-between;
+    margin: 18px 0 7px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.loading-progress-heading strong {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+#mktero-loading-progress {
+    display: block;
+    width: 100%;
+    height: 8px;
+    border: 0;
+    accent-color: var(--accent);
+}
+
+.loading-content .loading-hint {
+    margin-top: 12px;
+    font-size: 12px;
+}
+
+@keyframes mktero-spin {
+    to { transform: rotate(360deg); }
 }
 
 .markdown-body {
@@ -225,4 +315,9 @@ main {
 @media (max-width: 720px) {
     .app-header { align-items: flex-start; flex-direction: column; }
     main { padding: 24px 18px 48px; }
+    .loading-state { margin-top: 32px; padding: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .loading-spinner { animation-duration: 2s; }
 }
