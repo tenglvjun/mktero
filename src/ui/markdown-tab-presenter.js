@@ -31,7 +31,6 @@ export class MarkdownTabPresenter {
         const browserURI = `${this.rootURI}ui/markdown.xhtml`;
         browser.setAttribute('type', 'content');
         browser.setAttribute('flex', '1');
-        browser.setAttribute('src', browserURI);
         browser.style.width = '100%';
         browser.style.height = '100%';
         browser.mkteroModel = model;
@@ -66,12 +65,7 @@ export class MarkdownTabPresenter {
             },
         });
         container.appendChild(browser);
-        if (typeof browser.fixupAndLoadURIString === 'function') {
-            browser.fixupAndLoadURIString(browserURI);
-        }
-        else {
-            browser.loadURI?.(browserURI);
-        }
+        browser.setAttribute('src', browserURI);
 
         presentation = { tabs, tabID, browser, model, closed: false, onClose };
         this.presentations.set(itemID, presentation);

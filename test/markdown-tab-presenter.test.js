@@ -19,7 +19,8 @@ function createMainWindow() {
                 style: {},
                 events,
                 listeners,
-                fixedURI: null,
+                attached: false,
+                srcSetAfterAppend: false,
                 contentWindow: {
                     loaded: false,
                     CustomEvent: class CustomEvent {
@@ -33,12 +34,18 @@ function createMainWindow() {
                 },
                 setAttribute(name, value) {
                     this.attributes[name] = String(value);
+                    if (name === 'src' && this.attached) {
+                        this.srcSetAfterAppend = true;
+                    }
                 },
                 addEventListener(type, listener) {
                     listeners.set(type, listener);
                 },
-                fixupAndLoadURIString(uri) {
-                    this.fixedURI = uri;
+                fixupAndLoadURIString() {
+                    throw new Error('NS_ERROR_FAILURE [nsIWebNavigation.fixupAndLoadURIString]');
+                },
+                loadURI() {
+                    throw new Error('Dynamic browser navigation must use the src attribute');
                 },
                 load() {
                     this.contentWindow.loaded = true;
@@ -56,6 +63,7 @@ function createMainWindow() {
                 children,
                 container: {
                     appendChild(child) {
+                        child.attached = true;
                         children.push(child);
                     },
                 },
@@ -108,10 +116,7 @@ test('opens Markdown in a Zotero tab and reuses it for the same PDF', () => {
         mainWindow.added[0].children[0].attributes.src,
         'resource://mktero/ui/markdown.xhtml'
     );
-    assert.equal(
-        mainWindow.added[0].children[0].fixedURI,
-        'resource://mktero/ui/markdown.xhtml'
-    );
+    assert.equal(mainWindow.added[0].children[0].srcSetAfterAppend, true);
     assert.deepEqual(mainWindow.selected, [first.tabID]);
     assert.deepEqual(mainWindow.Zotero_Tabs.getState().map(tab => tab.type), ['library', 'other']);
 });
