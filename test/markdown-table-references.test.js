@@ -43,6 +43,128 @@ test('maps a prose table reference to its uniquely captioned table', () => {
     }]);
 });
 
+test('maps a MinerU split table heading and description to its HTML table', () => {
+    const markdown = [
+        'The criteria are described in Table 2.',
+        '',
+        '## Table 2',
+        '',
+        'PICO criteria for inclusion and exclusion in systematic review.',
+        '',
+        '<table><tr><td>Parameters</td><td>Inclusion Criteria</td>',
+        '<td>Exclusion Criteria</td></tr></table>',
+    ].join('\n');
+
+    const result = analyzeMarkdownTableReferences(markdown);
+
+    assert.deepEqual(result.targets.map(target => ({
+        id: target.id,
+        label: target.label,
+        caption: target.caption,
+        kind: target.table.kind,
+    })), [{
+        id: 'table:2',
+        label: 'Table 2',
+        caption: 'Table 2 PICO criteria for inclusion and exclusion in systematic review.',
+        kind: 'html',
+    }]);
+    assert.deepEqual(result.references.map(reference => ({
+        text: markdown.slice(reference.from, reference.to),
+        targetId: reference.targetId,
+    })), [{
+        text: 'Table 2',
+        targetId: 'table:2',
+    }]);
+});
+
+test('maps a split plain-text Roman table label to its HTML table', () => {
+    const markdown = [
+        'The downstream tasks are summarized in Table I.',
+        '',
+        'TABLE I  ',
+        'OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.',
+        '',
+        '<table><tr><td>BCI Tasks</td><td>Datasets</td></tr></table>',
+    ].join('\n');
+
+    const result = analyzeMarkdownTableReferences(markdown);
+
+    assert.deepEqual(result.targets.map(target => ({
+        id: target.id,
+        label: target.label,
+        caption: target.caption,
+        kind: target.table.kind,
+    })), [{
+        id: 'table:i',
+        label: 'TABLE I',
+        caption: 'TABLE I OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.',
+        kind: 'html',
+    }]);
+    assert.deepEqual(result.references.map(reference => ({
+        text: markdown.slice(reference.from, reference.to),
+        targetId: reference.targetId,
+    })), [{
+        text: 'Table I',
+        targetId: 'table:i',
+    }]);
+});
+
+test('does not attach a split table heading across an intervening paragraph', () => {
+    const markdown = [
+        'See Table 2.',
+        '',
+        '## Table 2',
+        '',
+        'PICO criteria for the review.',
+        '',
+        'This separate paragraph discusses the selection process.',
+        '',
+        '<table><tr><td>Parameters</td></tr></table>',
+    ].join('\n');
+
+    const result = analyzeMarkdownTableReferences(markdown);
+
+    assert.deepEqual(result.targets, []);
+    assert.deepEqual(result.references, []);
+});
+
+test('does not attach a split plain-text table label across extra prose', () => {
+    const markdown = [
+        'See Table I.',
+        '',
+        'TABLE I',
+        '',
+        'Overview of downstream tasks.',
+        '',
+        'This separate paragraph discusses the datasets.',
+        '',
+        '<table><tr><td>Task</td></tr></table>',
+    ].join('\n');
+
+    const result = analyzeMarkdownTableReferences(markdown);
+
+    assert.deepEqual(result.targets, []);
+    assert.deepEqual(result.references, []);
+});
+
+test('ignores a split plain-text table label inside fenced code', () => {
+    const markdown = [
+        'See Table I.',
+        '',
+        '```text',
+        'TABLE I',
+        'Overview of downstream tasks.',
+        '```',
+        '',
+        '<table><tr><td>Task</td></tr></table>',
+    ].join('\n');
+
+    const result = analyzeMarkdownTableReferences(markdown);
+
+    assert.deepEqual(result.targets, []);
+    assert.deepEqual(result.references, []);
+});
+
 test('ignores table references inside code and existing links', () => {
     const markdown = [
         '# Results',

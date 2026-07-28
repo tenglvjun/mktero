@@ -2,6 +2,8 @@ import { parseGFMTableRow } from './markdown-tables.js';
 
 const ACADEMIC_FIGURE_CAPTION_PATTERN = /^((?:(?:algorithm|chart|fig\.?|figure|scheme|table)[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?)[.:]|fig\.[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?)))[ \t]+(\S[\s\S]*)$/iu;
 const ACADEMIC_TABLE_CAPTION_PATTERN = /^(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]+(\S[\s\S]*)$/iu;
+const ACADEMIC_TABLE_HEADING_PATTERN = /^ {0,3}#{1,6}[ \t]+(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?(?:[ \t]+#+)?[ \t]*$/iu;
+const ACADEMIC_TABLE_PLAIN_HEADING_PATTERN = /^ {0,3}(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]*$/iu;
 const EMPTY_IMAGE_LINE_PATTERN = /^( {0,3})!\[[ \t]*\](\([^\r\n]+\))[ \t]*(?:\r?\n)?$/;
 const MARKDOWN_IMAGE_LINE_PATTERN = /^ {0,3}!\[[^\]\r\n]*\]\([^\r\n]+\)[ \t]*(?:\r?\n)?$/;
 const CAPTIONED_IMAGE_LINE_PATTERN = /^ {0,3}!\[((?:\\.|[^\]\\])*)\]\([^\r\n]+\)[ \t]*(?:\r?\n)?$/;
@@ -189,10 +191,35 @@ export function findAcademicTableGroups(markdown) {
 
     for (let index = 0; index < lines.length; index++) {
         if (blockedLines.has(index)) continue;
-        const caption = parseAcademicTableCaption(lines[index].text);
-        if (!caption) continue;
-
-        const tableIndex = nearbyLineIndex(lines, index + 1);
+        let caption = parseAcademicTableCaption(lines[index].text);
+        let tableIndex = nearbyLineIndex(lines, index + 1);
+        if (!caption) {
+            const heading = parseAcademicTableHeading(lines[index].text);
+            if (!heading) continue;
+            const tableAfterHeading = academicTableAt(
+                lines,
+                tableIndex,
+                blockedLines
+            );
+            if (tableAfterHeading) {
+                caption = createSplitTableCaption(heading, '');
+            }
+            else {
+                const descriptionIndex = tableIndex;
+                if (descriptionIndex >= lines.length
+                    || blockedLines.has(descriptionIndex)
+                    || !lines[descriptionIndex].text.trim()
+                    || parseAcademicTableCaption(lines[descriptionIndex].text)) {
+                    continue;
+                }
+                tableIndex = nearbyLineIndex(lines, descriptionIndex + 1);
+                if (!academicTableAt(lines, tableIndex, blockedLines)) continue;
+                caption = createSplitTableCaption(
+                    heading,
+                    lines[descriptionIndex].text.trim()
+                );
+            }
+        }
         const table = academicTableAt(lines, tableIndex, blockedLines);
         if (!table) continue;
         groups.push({
@@ -205,6 +232,24 @@ export function findAcademicTableGroups(markdown) {
     }
 
     return groups;
+}
+
+function parseAcademicTableHeading(value) {
+    const source = String(value || '');
+    const match = ACADEMIC_TABLE_HEADING_PATTERN.exec(source)
+        || ACADEMIC_TABLE_PLAIN_HEADING_PATTERN.exec(source);
+    if (!match) return null;
+    return {
+        label: match[1] + (match[2] || ''),
+    };
+}
+
+function createSplitTableCaption(heading, description) {
+    return {
+        text: [heading.label, description].filter(Boolean).join(' '),
+        label: heading.label,
+        description,
+    };
 }
 
 function academicTableAt(lines, index, blockedLines) {

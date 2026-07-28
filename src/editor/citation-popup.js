@@ -56,10 +56,12 @@ function createCitationItem(document, target, close, onActivate) {
         close();
         onActivate?.(target);
     });
-    if (Number.isInteger(target.number)) {
+    const marker = target.label
+        ?? (Number.isInteger(target.number) ? String(target.number) : '');
+    if (marker) {
         const number = document.createElement('span');
         number.className = 'mktero-citation-popup-number';
-        number.textContent = `[${target.number}]`;
+        number.textContent = `[${marker}]`;
         item.appendChild(number);
     }
     const text = document.createElement('span');

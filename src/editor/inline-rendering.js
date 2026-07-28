@@ -1,6 +1,7 @@
 import { syntaxTree } from '@codemirror/language';
 import { Prec, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { findMinerUAlgorithmGroups } from '../markdown/markdown-algorithms.js';
 import {
     findDisplayMathMatches,
     findInlineMathMatches,
@@ -369,9 +370,17 @@ function buildDecorations(state, context) {
         analyzedTableReferences.targets.map(target => [target.from, target])
     );
     referenceAnalysis(state, context.figureReferences);
+    const algorithmGroups = findMinerUAlgorithmGroups(state.doc.toString());
     const figureGroups = findAcademicFigureGroups(state.doc.toString());
     const tableGroups = findAcademicTableGroups(state.doc.toString());
-    const renderedGroups = [...figureGroups, ...tableGroups];
+    const renderedGroups = [
+        ...algorithmGroups,
+        ...figureGroups,
+        ...tableGroups,
+    ];
+    for (const group of algorithmGroups) {
+        decorations.push(renderedRange(group, state, 'algorithm', context));
+    }
     for (const group of figureGroups) {
         decorations.push(renderedRange(group, state, 'image', context));
     }
@@ -634,7 +643,7 @@ function citationLabel(targets, kind, translate) {
     if (kind === 'affiliation') {
         if (targets.length === 1) {
             return translate('citation.viewAffiliationOne', {
-                number: targets[0].number,
+                number: targets[0].label ?? targets[0].number,
             });
         }
         return translate('citation.viewAffiliationMany', {
@@ -803,7 +812,8 @@ function decorateSyntaxNode(node, state, decorations, context) {
 
     if (node.name === 'Link') {
         const source = state.sliceDoc(node.from, node.to);
-        if (!isBracketedNumericCitation(source)) {
+        if (!isBracketedNumericCitation(source)
+            && findLinkURL(state, node.from + 1)) {
             decorateLink(node, state, decorations);
         }
         return;

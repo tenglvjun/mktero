@@ -68,9 +68,9 @@ function analyzeFrontMatter(markdown, bodyEnd) {
         };
     }
 
-    const byNumber = new Map(
+    const byMarker = new Map(
         definition.affiliations.map(affiliation => [
-            affiliation.number,
+            affiliationMarkerKey(affiliation.label),
             affiliation,
         ])
     );
@@ -82,7 +82,7 @@ function analyzeFrontMatter(markdown, bodyEnd) {
     ).flatMap(marker => numericCitationsInText(
         marker.value,
         marker.from,
-        byNumber,
+        byMarker,
         marker.markup,
         'affiliation'
     ));
@@ -145,7 +145,7 @@ function parseAffiliations(markdown, frontMatterEnd) {
             markdown,
             paragraph.from,
             paragraph.to
-        ).filter(marker => /^\s*\d+\s*$/.test(marker.value));
+        ).filter(marker => affiliationMarkerKey(marker.value) !== null);
         if (!markers.length) {
             if (foundDefinition) break;
             continue;
@@ -172,9 +172,12 @@ function parseAffiliations(markdown, frontMatterEnd) {
             const to = trimRangeEnd(markdown, contentFrom, rawTo);
             const text = plainReferenceText(markdown.slice(contentFrom, to));
             if (!text || !/\p{L}/u.test(text)) continue;
-            const number = Number(marker.value.trim());
+            const label = marker.value.trim();
+            const markerKey = affiliationMarkerKey(label);
+            const number = Number.isInteger(markerKey) ? markerKey : null;
             paragraphAffiliations.push({
-                id: `affiliation:${number}`,
+                id: `affiliation:${markerKey}`,
+                label,
                 number,
                 text,
                 from: contentFrom,
@@ -205,6 +208,13 @@ function parseAffiliations(markdown, frontMatterEnd) {
     };
 }
 
+function affiliationMarkerKey(value) {
+    const marker = String(value).trim();
+    if (/^\d+$/.test(marker)) return Number(marker);
+    if (/^\p{L}$/u.test(marker)) return marker.toLocaleLowerCase('en-US');
+    return null;
+}
+
 function findReferenceSection(markdown) {
     const headingPattern = new RegExp(REFERENCE_HEADING_PATTERN);
     const match = [...markdown.matchAll(headingPattern)].at(-1);
@@ -223,7 +233,14 @@ function findReferenceSection(markdown) {
             break;
         }
     }
-    return { from, to };
+    const explicitSection = { from, to };
+    const inferredSection = inferNumberedReferenceSection(markdown);
+    if (inferredSection
+        && inferredSection.from >= explicitSection.to
+        && !parseReferences(markdown, explicitSection).length) {
+        return inferredSection;
+    }
+    return explicitSection;
 }
 
 function inferNumberedReferenceSection(markdown) {
@@ -408,9 +425,6 @@ function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
     if (hasBracketCitationStyle(bracketCitationContainers)) {
         return squareBracketCitations;
     }
-    if (hasParentheticalCitationStyle(parentheticalCitationContainers)) {
-        return [...squareBracketCitations, ...parentheticalCitations];
-    }
 
     const superscriptCitations = [];
     let superscriptCitationContainers = 0;
@@ -423,6 +437,10 @@ function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
         );
         superscriptCitations.push(...matched);
         if (matched.length) superscriptCitationContainers++;
+    }
+    if (hasParentheticalCitationStyle(parentheticalCitationContainers)
+        && parentheticalCitationContainers >= superscriptCitationContainers) {
+        return [...squareBracketCitations, ...parentheticalCitations];
     }
     if (hasSuperscriptCitationStyle(superscriptCitationContainers)) {
         return [...squareBracketCitations, ...superscriptCitations];
@@ -601,7 +619,7 @@ function numericCitationsInContainer(match, offset, byNumber) {
 function numericCitationsInText(
     value,
     valueFrom,
-    byNumber,
+    targetsByMarker,
     superscriptMarkup = null,
     kind = 'reference'
 ) {
@@ -624,7 +642,7 @@ function numericCitationsInText(
             if (last < first || last - first > 100) continue;
             const matched = [];
             for (let number = first; number <= last; number++) {
-                const reference = byNumber.get(number);
+                const reference = targetsByMarker.get(number);
                 if (reference) matched.push(reference);
             }
             if (matched.length) {
@@ -638,7 +656,12 @@ function numericCitationsInText(
             }
             continue;
         }
-        const reference = byNumber.get(Number(label));
+        const marker = kind === 'affiliation'
+            ? affiliationMarkerKey(label)
+            : Number(label);
+        const reference = marker === null
+            ? null
+            : targetsByMarker.get(marker);
         if (reference) {
             citations.push(createCitation(
                 from,

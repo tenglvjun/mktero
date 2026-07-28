@@ -90,6 +90,7 @@ test('keeps inline math inside the prose line box', () => {
         '.markdown-editor-host > .cm-editor .cm-mktero-math-display'
     );
     assert.doesNotMatch(displayMath, /line-height/);
+    assert.doesNotMatch(displayMath, /background\s*:/);
 });
 
 test('styles academic figure captions as distinct labels', () => {
@@ -130,6 +131,13 @@ test('styles academic table captions above tables without a background', () => {
     );
     assert.match(label, /color:\s*var\(--text\)/);
     assert.match(label, /font-weight:\s*650/);
+});
+
+test('preserves line breaks inside rendered MinerU algorithms', () => {
+    const algorithm = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-algorithm .mktero-algorithm'
+    );
+    assert.match(algorithm, /white-space:\s*pre-wrap/);
 });
 
 test('separates panels inside a shared academic figure', () => {

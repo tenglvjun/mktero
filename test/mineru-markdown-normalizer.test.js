@@ -91,6 +91,26 @@ test('joins a MinerU paragraph split in the middle of a sentence', () => {
     );
 });
 
+test('joins a citation year split from its preceding author name', () => {
+    const markdown = 'Dental anxiety can stem from previous negative experiences '
+        + '(Oosterink et al., 2008; van Houtem et al.,\n\n'
+        + '2017; van Houtem et al., 2015). Its extreme form is dental phobia.';
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown),
+        'Dental anxiety can stem from previous negative experiences '
+            + '(Oosterink et al., 2008; van Houtem et al., 2017; '
+            + 'van Houtem et al., 2015). Its extreme form is dental phobia.'
+    );
+});
+
+test('keeps an unrelated year-led paragraph separate after a comma', () => {
+    const markdown = 'The historical discussion mentions several authors,\n\n'
+        + '2017 was examined separately in the chronological overview.';
+
+    assert.equal(normalizeMinerUMarkdown(markdown), markdown);
+});
+
 test('joins a MinerU paragraph split after a semicolon', () => {
     const markdown = 'Concretely, a real loop system assembles five reusable pieces and '
         + 'an external memory. $^{8}$ Scheduled automations discover and triage the work '

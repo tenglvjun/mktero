@@ -936,6 +936,10 @@ main {
     border-top: 1px solid var(--border);
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-algorithm .mktero-algorithm {
+    white-space: pre-wrap;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-table,
 .markdown-editor-host > .cm-editor .cm-mktero-html-table {
     width: 100%;
@@ -1019,7 +1023,6 @@ main {
     margin: 20px 0;
     padding: 14px;
     border-radius: 6px;
-    background: var(--surface);
     text-align: center;
     cursor: text;
 }

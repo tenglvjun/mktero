@@ -1,6 +1,10 @@
 import { Marked } from 'marked';
 import katex from 'katex';
 import {
+    findMinerUAlgorithmGroups,
+    stripMinerUAlgorithmWrappers,
+} from './markdown-algorithms.js';
+import {
     findAcademicFigureGroups,
     findAcademicTableGroups,
     parseAcademicFigureCaption,
@@ -52,13 +56,29 @@ export function renderMarkdownHTML(markdown, { resolveImageURL = () => null } = 
             createAcademicTableExtension(),
         ],
     });
+    const algorithmHTML = renderStandaloneMinerUAlgorithm(markdown, parser);
+    if (algorithmHTML) return algorithmHTML;
     const figureGroupHTML = renderStandaloneAcademicFigureGroup(
         markdown,
         parser,
-        resolveImageURL
+        resolveImageURL,
+        mathBudget
     );
     if (figureGroupHTML) return figureGroupHTML;
-    return renderParsedMarkdown(markdown, parser);
+    return renderParsedMarkdown(stripMinerUAlgorithmWrappers(markdown), parser);
+}
+
+function renderStandaloneMinerUAlgorithm(markdown, parser) {
+    const groups = findMinerUAlgorithmGroups(markdown);
+    if (groups.length !== 1) return null;
+    const group = groups[0];
+    if (markdown.slice(0, group.from).trim()
+        || markdown.slice(group.to).trim()) {
+        return null;
+    }
+    return '<section class="mktero-algorithm">'
+        + renderParsedMarkdown(group.content, parser)
+        + '</section>\n';
 }
 
 function renderParsedMarkdown(markdown, parser) {
@@ -100,7 +120,7 @@ function createSafeRenderer(resolveImageURL, mathBudget) {
             if (!caption) return `<p>${content}</p>\n`;
             return '<figure class="mktero-figure">'
                 + content
-                + renderFigureCaption(caption)
+                + renderFigureCaption(caption, mathBudget, image.tokens)
                 + '</figure>\n';
         },
 
@@ -110,7 +130,12 @@ function createSafeRenderer(resolveImageURL, mathBudget) {
     };
 }
 
-function renderStandaloneAcademicFigureGroup(markdown, parser, resolveImageURL) {
+function renderStandaloneAcademicFigureGroup(
+    markdown,
+    parser,
+    resolveImageURL,
+    mathBudget
+) {
     const groups = findAcademicFigureGroups(markdown);
     if (groups.length !== 1) return null;
     const group = groups[0];
@@ -130,7 +155,7 @@ function renderStandaloneAcademicFigureGroup(markdown, parser, resolveImageURL) 
 
     return '<figure class="mktero-figure mktero-figure-group">'
         + images.map(image => renderImageToken(image, resolveImageURL)).join('')
-        + renderFigureCaption(group.caption)
+        + renderFigureCaption(group.caption, mathBudget)
         + '</figure>\n';
 }
 
@@ -146,11 +171,69 @@ function renderImageToken({ href, title, text, tokens }, resolveImageURL) {
     return `<img src="${escapeAttribute(resolved)}" alt="${escapeAttribute(alt)}"${titleAttribute}>`;
 }
 
-function renderFigureCaption(caption) {
+function renderFigureCaption(caption, mathBudget, tokens = null) {
     return '<figcaption>'
         + `<span class="mktero-figure-label">${escapeHTML(caption.label)}</span>`
-        + ` ${escapeHTML(caption.description)}`
+        + ` ${renderFigureCaptionDescription(caption, mathBudget, tokens)}`
         + '</figcaption>';
+}
+
+function renderFigureCaptionDescription(caption, mathBudget, tokens) {
+    if (!tokens) {
+        return renderCaptionMathSource(caption.description, mathBudget);
+    }
+    const segments = inlineTokenTextSegments(tokens);
+    const text = segments.map(segment => segment.text).join('');
+    const captionFrom = text.indexOf(caption.text);
+    if (captionFrom < 0) return escapeHTML(caption.description);
+    const descriptionFrom = captionFrom
+        + caption.text.length
+        - caption.description.length;
+    return renderCaptionTokenSegments(
+        segments,
+        descriptionFrom,
+        descriptionFrom + caption.description.length,
+        mathBudget
+    );
+}
+
+function renderCaptionTokenSegments(segments, from, to, mathBudget) {
+    let offset = 0;
+    let html = '';
+    for (const segment of segments) {
+        const segmentFrom = offset;
+        const segmentTo = segmentFrom + segment.text.length;
+        offset = segmentTo;
+        if (segmentTo <= from || segmentFrom >= to) continue;
+        const text = segment.text.slice(
+            Math.max(0, from - segmentFrom),
+            Math.min(segment.text.length, to - segmentFrom)
+        );
+        html += segment.math
+            ? renderCaptionMath(text, mathBudget)
+            : escapeHTML(text);
+    }
+    return html;
+}
+
+function renderCaptionMathSource(source, mathBudget) {
+    const matches = findInlineMathMatches(source);
+    let html = '';
+    let offset = 0;
+    for (const match of matches) {
+        html += escapeHTML(source.slice(offset, match.start));
+        html += renderCaptionMath(match.text, mathBudget);
+        offset = match.end;
+    }
+    return html + escapeHTML(source.slice(offset));
+}
+
+function renderCaptionMath(source, mathBudget) {
+    return `<span class="math-inline">${renderMathML(
+        source,
+        false,
+        mathBudget
+    )}</span>`;
 }
 
 function renderTableCaption(caption) {
@@ -176,17 +259,21 @@ function createAcademicTableExtension() {
 function groupAcademicTableTokens(tokens) {
     const grouped = [];
     for (let index = 0; index < tokens.length; index++) {
-        const captionToken = tokens[index];
-        if (captionToken.type !== 'paragraph') {
-            grouped.push(captionToken);
+        const firstToken = tokens[index];
+        if (!['heading', 'paragraph'].includes(firstToken.type)) {
+            grouped.push(firstToken);
             continue;
         }
 
         let tableIndex = index + 1;
         while (tokens[tableIndex]?.type === 'space') tableIndex++;
+        if (tokens[tableIndex]?.type === 'paragraph') {
+            tableIndex++;
+            while (tokens[tableIndex]?.type === 'space') tableIndex++;
+        }
         const tableToken = tokens[tableIndex];
         if (!['html', 'table'].includes(tableToken?.type)) {
-            grouped.push(captionToken);
+            grouped.push(firstToken);
             continue;
         }
 
@@ -203,7 +290,7 @@ function groupAcademicTableTokens(tokens) {
             || !kindMatches
             || source.slice(0, group.from).trim()
             || source.slice(group.to).trim()) {
-            grouped.push(captionToken);
+            grouped.push(firstToken);
             continue;
         }
 
@@ -686,12 +773,29 @@ function createInlineMathMatch(source, openerIndex, closerIndex, opener, closer,
 }
 
 function inlineTokensToText(tokens) {
-    return tokens.map(token => {
-        if (token.type === 'mkteroMathInline') return token.text || '';
-        if (Array.isArray(token.tokens)) return inlineTokensToText(token.tokens);
-        if (token.type === 'br') return '\n';
-        return token.text || '';
-    }).join('');
+    return inlineTokenTextSegments(tokens)
+        .map(segment => segment.text)
+        .join('');
+}
+
+function inlineTokenTextSegments(tokens) {
+    return tokens.flatMap(token => {
+        if (token.type === 'mkteroMathInline') {
+            return [{
+                text: unescapeImageMathSource(token.text || ''),
+                math: true,
+            }];
+        }
+        if (Array.isArray(token.tokens)) {
+            return inlineTokenTextSegments(token.tokens);
+        }
+        const text = token.type === 'br' ? '\n' : token.text || '';
+        return text ? [{ text, math: false }] : [];
+    });
+}
+
+function unescapeImageMathSource(source) {
+    return String(source).replace(/\\\\/g, '\\');
 }
 
 function isSingleDollarAt(source, index) {

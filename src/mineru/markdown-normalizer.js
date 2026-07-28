@@ -13,6 +13,7 @@ const LOAD_REACTIONS_START_PATTERN = /^load[ \t]+reactions\b/iu;
 const MARKDOWN_IMAGE_LINE_PATTERN = /^!\[[^\]\n]*\]\(.+\)[ \t]*$/;
 const PROSE_CONTINUATION_END_PATTERN = /[\p{L}\p{N}]$/u;
 const SEMICOLON_SERIES_CONTINUATION_PATTERN = /^[^.!?]*;/;
+const CITATION_YEAR_CONTINUATION_PATTERN = /^(?:18|19|20)\d{2}[a-z]?[ \t]*[,;，；)]/i;
 const OCR_BULLET_ITEM_PATTERN = /^[ \t]*(?:\\-|•)[ \t]+\S[^\r\n]*[ \t]*$/u;
 const OCR_BULLET_PREFIX_PATTERN = /^([ \t]*)(?:\\-|•)(?=[ \t]+)/u;
 const MIN_PRECEDING_WORDS = 6;
@@ -100,16 +101,30 @@ function isBrokenProseBoundary(previousBlock, separator, nextBlock) {
     }
     const continuesLoadReaction = LOAD_REACTION_MODIFIERS_END_PATTERN.test(previous)
         && LOAD_REACTIONS_START_PATTERN.test(next);
+    const continuesCitationYear = previous.endsWith(',')
+        && hasUnclosedParenthetical(previous)
+        && CITATION_YEAR_CONTINUATION_PATTERN.test(next);
     const continuesProse = PROSE_CONTINUATION_END_PATTERN.test(previous)
         || continuesLoadReaction
+        || continuesCitationYear
         || (previous.endsWith(';')
             && SEMICOLON_SERIES_CONTINUATION_PATTERN.test(next));
-    if (!/^\p{Ll}/u.test(next) || !continuesProse) {
+    if ((!/^\p{Ll}/u.test(next) && !continuesCitationYear)
+        || !continuesProse) {
         return false;
     }
 
     const words = previous.match(/\p{L}[\p{L}\p{N}'’-]*/gu) || [];
     return words.length >= MIN_PRECEDING_WORDS;
+}
+
+function hasUnclosedParenthetical(value) {
+    let depth = 0;
+    for (const character of value) {
+        if (character === '(' || character === '（') depth++;
+        if ((character === ')' || character === '）') && depth > 0) depth--;
+    }
+    return depth > 0;
 }
 
 function isMarkdownBlock(block) {

@@ -305,6 +305,54 @@ test('escapes raw HTML and refuses unsafe links', () => {
     assert.equal(html.includes('href="https://example.com"'), true);
 });
 
+test('renders a paired MinerU algorithm wrapper without visible HTML tags', () => {
+    const html = renderMarkdownHTML([
+        '<div class="mineru-algorithm" style="white-space: pre-wrap; font-family:monospace;">',
+        'Algorithm 1: Continual learning',
+        '',
+        'Input: task $T_{i}$',
+        '',
+        'Training Stage:',
+        '    Optimize $C_{i}$;',
+        '</div>',
+    ].join('\n'));
+
+    assert.match(html, /^<section class="mktero-algorithm">/);
+    assert.match(html, /Algorithm 1: Continual learning/);
+    assert.match(html, /class="math-inline"/);
+    assert.match(html, /<msub>/);
+    assert.doesNotMatch(html, /&lt;\/?div|<div/i);
+});
+
+test('keeps unmatched and unrelated div tags inert and visible', () => {
+    const unmatched = renderMarkdownHTML('Result\n\n</div>');
+    const unrelated = renderMarkdownHTML([
+        '<div class="other">',
+        'Unsafe wrapper',
+        '</div>',
+    ].join('\n'));
+
+    assert.match(unmatched, /&lt;\/div&gt;/);
+    assert.match(unrelated, /&lt;div class=&quot;other&quot;&gt;/);
+    assert.match(unrelated, /&lt;\/div&gt;/);
+    assert.doesNotMatch(unrelated, /<div class="other">/);
+});
+
+test('does not trust HTML nested inside a MinerU algorithm wrapper', () => {
+    const html = renderMarkdownHTML([
+        '<div class="mineru-algorithm" onclick="alert(1)">',
+        '<script>alert(2)</script>',
+        '',
+        'Safe algorithm text.',
+        '</div>',
+    ].join('\n'));
+
+    assert.match(html, /^<section class="mktero-algorithm">/);
+    assert.match(html, /Safe algorithm text/);
+    assert.doesNotMatch(html, /onclick|<script/i);
+    assert.match(html, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
+});
+
 test('preserves escaped Markdown punctuation as literal text', () => {
     assert.equal(
         renderMarkdownHTML('\\# literal \\* text'),
@@ -392,6 +440,41 @@ test('renders a standalone academic image description as a visible figure captio
             + '</figcaption>'
             + '</figure>\n'
     );
+});
+
+test('renders inline LaTeX in an academic image caption', () => {
+    const html = renderMarkdownHTML(
+        '![Fig. 2. Progress from $M_{0}$ to '
+            + '$M_{1},\\\\ldots,M_{N}$.](images/figure.png)',
+        { resolveImageURL: () => 'blob:mktero-figure' }
+    );
+
+    assert.equal((html.match(/class="math-inline"/g) || []).length, 2);
+    assert.match(
+        html,
+        /<figcaption><span class="mktero-figure-label">Fig\. 2\.<\/span>/
+    );
+    assert.match(html, /<msub><mi>M<\/mi><mn>0<\/mn><\/msub>/);
+    assert.match(
+        html,
+        /application\/x-tex">M_\{1\},\\ldots,M_\{N\}<\/annotation>/
+    );
+    assert.match(
+        html,
+        /alt="Fig\. 2\. Progress from M_\{0\} to M_\{1\},\\ldots,M_\{N\}\."/
+    );
+});
+
+test('keeps unsafe LaTeX and HTML inert in an academic image caption', () => {
+    const html = renderMarkdownHTML(
+        '![Fig. 2. Unsafe $\\\\def\\\\x{1}$ '
+            + '<script>alert(1)</script>.](images/figure.png)',
+        { resolveImageURL: () => 'blob:mktero-figure' }
+    );
+
+    assert.match(html, /<code class="math-fallback">\\def\\x\{1\}<\/code>/);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.doesNotMatch(html, /<script>/);
 });
 
 test('renders consecutive image panels with one shared academic caption', () => {
@@ -496,6 +579,95 @@ test('renders a MinerU table caption as the native table caption', () => {
             + ' Means &amp; standard deviations of desired emotions'
             + '</caption><tr><td>Measure</td><td>m</td><td>SD</td></tr></table>'
     );
+});
+
+test('renders a MinerU split table heading and description as one captioned table', () => {
+    const html = renderMarkdownHTML([
+        '## Table 2',
+        '',
+        'PICO criteria for inclusion and exclusion in systematic review.',
+        '',
+        '<table><tr><td>Parameters</td><td>Inclusion Criteria</td></tr></table>',
+    ].join('\n'));
+
+    assert.equal(
+        html,
+        '<table><caption>'
+            + '<span class="mktero-table-label">Table 2</span>'
+            + ' PICO criteria for inclusion and exclusion in systematic review.'
+            + '</caption><tr><td>Parameters</td>'
+            + '<td>Inclusion Criteria</td></tr></table>'
+    );
+});
+
+test('renders a split plain-text Roman table label as one captioned table', () => {
+    const html = renderMarkdownHTML([
+        'TABLE I  ',
+        'OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.',
+        '',
+        '<table><tr><td>BCI Tasks</td><td>Datasets</td></tr></table>',
+    ].join('\n'));
+
+    assert.equal(
+        html,
+        '<table><caption>'
+            + '<span class="mktero-table-label">TABLE I</span>'
+            + ' OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.'
+            + '</caption><tr><td>BCI Tasks</td>'
+            + '<td>Datasets</td></tr></table>'
+    );
+});
+
+test('renders a blank-line-separated plain-text table label and description as one caption', () => {
+    const html = renderMarkdownHTML([
+        'TABLE V',
+        '',
+        'COMPARISON OF DIFFERENT ADAPTATION PARADIGMS.',
+        '',
+        '<table><tr><td>Paradigm</td><td>Performance</td></tr></table>',
+    ].join('\n'));
+
+    assert.equal(
+        html,
+        '<table><caption>'
+            + '<span class="mktero-table-label">TABLE V</span>'
+            + ' COMPARISON OF DIFFERENT ADAPTATION PARADIGMS.'
+            + '</caption><tr><td>Paradigm</td>'
+            + '<td>Performance</td></tr></table>'
+    );
+});
+
+test('does not group a blank-line-separated table label across extra prose', () => {
+    const html = renderMarkdownHTML([
+        'TABLE V',
+        '',
+        'Comparison of adaptation paradigms.',
+        '',
+        'This separate paragraph explains the evaluation.',
+        '',
+        '<table><tr><td>Paradigm</td></tr></table>',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /<caption>/);
+    assert.match(html, /^<p>TABLE V<\/p>/);
+    assert.match(html, /<p>This separate paragraph explains the evaluation\.<\/p>/);
+});
+
+test('escapes markup in a MinerU split table description', () => {
+    const html = renderMarkdownHTML([
+        '## Table 2',
+        '',
+        'Results <img src=x onerror="alert(1)">',
+        '',
+        '<table><tr><td>Safe</td></tr></table>',
+    ].join('\n'));
+
+    assert.match(
+        html,
+        /<caption><span class="mktero-table-label">Table 2<\/span> Results &lt;img/
+    );
+    assert.doesNotMatch(html, /<caption>[\s\S]*<img/i);
+    assert.doesNotMatch(html, /onerror="alert\(1\)"/);
 });
 
 test('renders academic table captions throughout a Markdown document', () => {

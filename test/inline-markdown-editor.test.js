@@ -442,6 +442,134 @@ test('renders a MinerU HTML table and its preceding caption as one table', () =>
     dom.window.close();
 });
 
+test('recognizes a referenced MinerU table with a split heading and description', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        'The inclusion criteria are described in Table 2.',
+        '',
+        '## Table 2',
+        '',
+        'PICO criteria for inclusion and exclusion in systematic review.',
+        '',
+        '<table><tr><td>Parameters</td><td>Inclusion Criteria</td>',
+        '<td>Exclusion Criteria</td></tr></table>',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const reference = document.querySelector('.cm-mktero-table-reference');
+    const table = document.querySelector('.cm-mktero-html-table table');
+
+    assert.equal(reference?.textContent, 'Table 2');
+    assert.equal(
+        table?.querySelector('caption')?.textContent,
+        'Table 2 PICO criteria for inclusion and exclusion in systematic review.'
+    );
+    assert.deepEqual(
+        [...table.querySelectorAll('td')].map(cell => cell.textContent),
+        ['Parameters', 'Inclusion Criteria', 'Exclusion Criteria']
+    );
+
+    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.equal(
+        document.querySelector('.mktero-table-preview-caption')?.textContent,
+        'Table 2 PICO criteria for inclusion and exclusion in systematic review.'
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('recognizes a referenced MinerU table with a plain-text Roman label', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        'The downstream tasks are summarized in Table I.',
+        '',
+        'TABLE I  ',
+        'OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.',
+        '',
+        '<table><tr><td>BCI Tasks</td><td>Datasets</td></tr></table>',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const reference = document.querySelector('.cm-mktero-table-reference');
+    const table = document.querySelector('.cm-mktero-html-table table');
+
+    assert.equal(reference?.textContent, 'Table I');
+    assert.equal(
+        table?.querySelector('caption')?.textContent,
+        'TABLE I OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.'
+    );
+    assert.equal(
+        table?.querySelector('.mktero-table-label')?.textContent,
+        'TABLE I'
+    );
+    assert.deepEqual(
+        [...table.querySelectorAll('td')].map(cell => cell.textContent),
+        ['BCI Tasks', 'Datasets']
+    );
+
+    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.equal(
+        document.querySelector('.mktero-table-preview-caption')?.textContent,
+        'TABLE I OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.'
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders a blank-line-separated table label with caption typography', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        'TABLE V',
+        '',
+        'COMPARISON OF DIFFERENT ADAPTATION PARADIGMS.',
+        '',
+        '<table><tr><td>Paradigm</td><td>Performance</td></tr></table>',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const tableBlock = document.querySelector('.cm-mktero-html-block');
+    const caption = tableBlock?.querySelector('caption');
+
+    assert.equal(
+        caption?.textContent,
+        'TABLE V COMPARISON OF DIFFERENT ADAPTATION PARADIGMS.'
+    );
+    assert.equal(tableBlock?.querySelector('p'), null);
+    assert.equal(
+        caption?.matches(
+            '.cm-mktero-html-block table caption'
+        ),
+        true
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('previews a uniquely captioned table from its prose reference', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -649,6 +777,42 @@ test('previews and highlights a referenced raw HTML table', () => {
     dom.window.close();
 });
 
+test('hides paired MinerU algorithm wrapper tags while preserving its content', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '<div class="mineru-algorithm" style="white-space: pre-wrap; font-family:monospace;">',
+        'Algorithm 1: Continual learning',
+        '',
+        'Input: task $T_{i}$',
+        '',
+        'Training Stage:',
+        '    Optimize $C_{i}$;',
+        '</div>',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const algorithm = document.querySelector(
+        '.cm-mktero-algorithm .mktero-algorithm'
+    );
+
+    assert.match(algorithm?.textContent || '', /Algorithm 1: Continual learning/);
+    assert.match(algorithm?.textContent || '', /Optimize/);
+    assert.equal(algorithm?.querySelectorAll('.math-inline').length, 2);
+    assert.doesNotMatch(
+        document.querySelector('.cm-content')?.textContent || '',
+        /<\/?div/
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('renders quotes, lists, read-only tasks, and dividers', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -793,6 +957,31 @@ test('opens all reference, autolink, and bare URL Markdown links', () => {
     dom.window.close();
 });
 
+test('keeps statistical confidence intervals as plain text instead of links', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '95%CI[-0.56,-0.05] and [source](https://example.com).';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+
+    assert.deepEqual(
+        [...document.querySelectorAll('.cm-mktero-link')]
+            .map(link => link.textContent),
+        ['source']
+    );
+    assert.match(
+        document.querySelector('.cm-content').textContent,
+        /\[-0\.56,-0\.05\]/
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('shows resolved reference text when a rendered citation is hovered', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -915,6 +1104,65 @@ test('renders dollar-wrapped numeric citations emitted by the PDF converter', ()
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /Timo Schick et al\. Toolformer\. 2023\./
     );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders citations recovered after a misplaced references heading', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Paper',
+        '',
+        '## I. INTRODUCTION',
+        '',
+        'Prior work $[1]$ and related systems $[2–3]$.',
+        '',
+        '## REFERENCES',
+        '',
+        'modulation continues here from the discussion paragraph.',
+        '',
+        '## B. Limitations',
+        '',
+        'Limitations text.',
+        '',
+        '## VII. CONCLUSION',
+        '',
+        'Conclusion text.',
+        '',
+        '[1] Alpha A. First paper. 2024.',
+        '',
+        '[2] Beta B. Second paper. 2024.',
+        '',
+        '[3] Gamma G. Third paper. 2025.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+
+    const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+    assert.deepEqual(
+        citations.map(citation => citation.textContent),
+        ['1', '2–3']
+    );
+    assert.equal(document.querySelector('.cm-mktero-math'), null);
+    assert.match(
+        document.querySelector('.cm-content')?.textContent || '',
+        /Prior work \[1\] and related systems \[2–3\]\./
+    );
+
+    citations[1].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.equal(
+        document.querySelectorAll('.mktero-citation-popup-item').length,
+        2
+    );
+    assert.equal(editor.getMarkdown(), markdown);
 
     editor.destroy();
     dom.window.close();
@@ -1060,6 +1308,50 @@ test('keeps LaTeX superscript citations interactive instead of rendering math', 
         3
     );
     assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders dominant superscript citations beside parenthetical sample sizes', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Paper',
+        '',
+        '## Introduction',
+        '',
+        'Imaging supports diagnosis $^{1-2}$ and monitoring $^{3-4}$.',
+        'Anxiety outcomes were also reported $^{5-6}$.',
+        'Fentanyl dose was CG (29) versus EG (18).',
+        '',
+        '## References',
+        '',
+        '1. First reference.',
+        '2. Second reference.',
+        '3. Third reference.',
+        '4. Fourth reference.',
+        '5. Fifth reference.',
+        '6. Sixth reference.',
+        '18. Eighteenth reference.',
+        '29. Twenty-ninth reference.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+
+    assert.deepEqual(
+        citations.map(citation => citation.textContent),
+        ['1-2', '3-4', '5-6']
+    );
+    assert.ok(citations.every(citation => (
+        citation.classList.contains('cm-mktero-citation-superscript')
+    )));
+    assert.equal(document.querySelector('.cm-mktero-math'), null);
 
     editor.destroy();
     dom.window.close();
@@ -1225,6 +1517,55 @@ test('links an author affiliation before a corresponding-author symbol', () => {
         /College of Health Solutions, Arizona State University, USA/
     );
     assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders alphabetic author affiliations as interactive superscripts', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Paper',
+        '',
+        'Serge Steenen $^{a,b,*}$; Fabiënne Linke $^{b}$',
+        '',
+        '$^{a}$ Department of Surgery',
+        '',
+        '$^{b}$ Department of Public Health',
+        '',
+        '## Abstract',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const authorLine = [...document.querySelectorAll('.cm-line')]
+        .find(line => line.textContent.includes('Serge Steenen'));
+    const citations = [
+        ...authorLine.querySelectorAll('.cm-mktero-citation'),
+    ];
+
+    assert.deepEqual(
+        citations.map(citation => citation.textContent),
+        ['a', 'b', 'b']
+    );
+    assert.match(authorLine.textContent, /a,b,\*/);
+    assert.deepEqual(
+        [...document.querySelectorAll('.cm-mktero-affiliation-marker')]
+            .map(marker => marker.textContent),
+        ['a', 'b']
+    );
+    assert.equal(document.querySelector('.cm-mktero-math'), null);
+
+    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    const popup = document.querySelector('.mktero-citation-popup');
+    assert.equal(citations[0].getAttribute('aria-label'), 'View author affiliation a');
+    assert.match(popup?.textContent || '', /\[a\]Department of Surgery/);
 
     editor.destroy();
     dom.window.close();
@@ -1503,6 +1844,36 @@ test('renders an academic image description as a selectable read-only caption', 
     assert.equal(
         document.querySelector('.cm-mktero-image figcaption').textContent,
         captionText
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders EvoBrain model notation inside its figure caption', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '![Fig. 2. The backbone is progressively adapted from '
+        + '$M_{0}$ to $M_{1},\\\\ldots,M_{N}$.](images/evobrain.jpg)';
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => 'blob:mktero-evobrain',
+    });
+    const figure = document.querySelector('.cm-mktero-image .mktero-figure');
+    const caption = figure?.querySelector('figcaption');
+
+    assert.equal(caption?.querySelectorAll('.math-inline').length, 2);
+    assert.equal(caption?.querySelectorAll('msub').length, 3);
+    assert.match(caption?.innerHTML || '', /<mo>…<\/mo>/);
+    assert.equal(
+        figure?.querySelector('img')?.getAttribute('alt'),
+        'Fig. 2. The backbone is progressively adapted from '
+            + 'M_{0} to M_{1},\\ldots,M_{N}.'
     );
     assert.equal(editor.getMarkdown(), markdown);
 

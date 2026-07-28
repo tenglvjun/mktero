@@ -297,6 +297,43 @@ test('prefers parenthetical references over superscript footnotes', () => {
     );
 });
 
+test('prefers dominant superscript citations over incidental parenthetical values', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        '## Introduction',
+        '',
+        'Imaging supports diagnosis $^{1-2}$ and monitoring $^{3-4}$.',
+        'Anxiety outcomes were also reported $^{5-6}$.',
+        'Fentanyl dose was CG (29) versus EG (18).',
+        '',
+        '## References',
+        '',
+        '1. First reference.',
+        '2. Second reference.',
+        '3. Third reference.',
+        '4. Fourth reference.',
+        '5. Fifth reference.',
+        '6. Sixth reference.',
+        '18. Eighteenth reference.',
+        '29. Twenty-ninth reference.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            superscript: Boolean(citation.superscriptMarkup),
+        })),
+        [
+            { label: '1-2', superscript: true },
+            { label: '3-4', superscript: true },
+            { label: '5-6', superscript: true },
+        ]
+    );
+});
+
 test('does not treat numeric ranges as citations in superscript-style papers', () => {
     const markdown = [
         '# Paper',
@@ -455,6 +492,78 @@ test('maps author superscripts to affiliations without stealing body references'
             { label: '1', kind: 'reference', targetIds: ['number:1'] },
         ]
     );
+});
+
+test('maps alphabetic author superscripts to affiliations and ignores symbols', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Serge Steenen $^{a,b,*}$; Fabiënne Linke $^{b}$',
+        '',
+        '$^{a}$ Department of Surgery',
+        '',
+        '$^{b}$ Department of Public Health',
+        '',
+        '## Abstract',
+        '',
+        'Body text.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => ({
+            id: affiliation.id,
+            label: affiliation.label,
+            number: affiliation.number,
+            text: affiliation.text,
+        })),
+        [
+            {
+                id: 'affiliation:a',
+                label: 'a',
+                number: null,
+                text: 'Department of Surgery',
+            },
+            {
+                id: 'affiliation:b',
+                label: 'b',
+                number: null,
+                text: 'Department of Public Health',
+            },
+        ]
+    );
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: 'a', kind: 'affiliation', targetIds: ['affiliation:a'] },
+            { label: 'b', kind: 'affiliation', targetIds: ['affiliation:b'] },
+            { label: 'b', kind: 'affiliation', targetIds: ['affiliation:b'] },
+        ]
+    );
+});
+
+test('does not treat superscript words as alphabetic affiliations', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Result $^{note}$',
+        '',
+        '$^{note}$ Untrusted definition text',
+        '',
+        '## Abstract',
+        '',
+        'Body text.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(result.affiliations, []);
+    assert.deepEqual(result.citations, []);
 });
 
 test('does not treat unmatched front-matter superscripts as references', () => {
@@ -836,6 +945,125 @@ test('infers cited trailing bracketed references without a heading', () => {
         [1, 2, 3]
     );
     assert.deepEqual(result.citations[0].referenceIds, ['number:1']);
+});
+
+test('falls back to cited trailing references after a misplaced heading', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        '## I. INTRODUCTION',
+        '',
+        'Prior work $[1]$ and related systems $[2–3]$.',
+        '',
+        '## REFERENCES',
+        '',
+        'modulation continues here from the preceding discussion paragraph.',
+        '',
+        '## B. Limitations',
+        '',
+        'Limitations text.',
+        '',
+        '## VII. CONCLUSION',
+        '',
+        'Conclusion text.',
+        '',
+        '[1] Alpha A. First paper. 2024.',
+        '',
+        '[2] Beta B. Second paper. 2024.',
+        '',
+        '[3] Gamma G. Third paper. 2025.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.references.map(reference => reference.number),
+        [1, 2, 3]
+    );
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            referenceIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', referenceIds: ['number:1'] },
+            {
+                label: '2–3',
+                referenceIds: ['number:2', 'number:3'],
+            },
+        ]
+    );
+});
+
+test('keeps a valid explicit reference section over a trailing checklist', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        '## Introduction',
+        '',
+        'Smith (2024) reports the result; appendix marker [1] is procedural.',
+        '',
+        '## References',
+        '',
+        'Smith, A. (2024). The actual cited paper.',
+        '',
+        '## Appendix',
+        '',
+        '[1] Export the data.',
+        '',
+        '[2] Review the chart.',
+        '',
+        '[3] Share the report.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.references.map(reference => reference.text),
+        ['Smith, A. (2024). The actual cited paper.']
+    );
+    assert.deepEqual(
+        result.citations.map(citation => markdown.slice(citation.from, citation.to)),
+        ['Smith (2024)']
+    );
+});
+
+test('strips unsafe HTML from trailing references after a misplaced heading', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        '## Introduction',
+        '',
+        'Prior work $[1]$ supports the result.',
+        '',
+        '## References',
+        '',
+        'discussion text misplaced below the heading.',
+        '',
+        '## Conclusion',
+        '',
+        'Conclusion text.',
+        '',
+        '[1] <img src=x onerror="alert(1)"> Alpha A. First paper. 2024.',
+        '',
+        '[2] <script>alert(2)</script> Beta B. Second paper. 2024.',
+        '',
+        '[3] Gamma G. Third paper. 2025.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.equal(result.references.length, 3);
+    assert.deepEqual(
+        result.references.slice(0, 2).map(reference => reference.text),
+        [
+            'Alpha A. First paper. 2024.',
+            'alert(2) Beta B. Second paper. 2024.',
+        ]
+    );
+    assert.ok(result.references.every(reference => !/[<>]|onerror/i.test(
+        reference.text
+    )));
 });
 
 test('does not infer an uncited trailing bracketed checklist as references', () => {
