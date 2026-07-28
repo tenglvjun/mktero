@@ -184,11 +184,14 @@ test('styles citation popups and temporary reference highlights', () => {
     assert.match(popup, /position:\s*fixed/);
     assert.match(popup, /max-width:\s*min\(460px, calc\(100vw - 24px\)\)/);
     assert.match(popup, /z-index:\s*900/);
-    assert.match(popup, /--citation-popup-surface:\s*#fff/);
-    assert.match(popup, /--citation-popup-text:\s*#24292f/);
-    assert.match(popup, /--citation-popup-border:\s*#d8dee4/);
-    assert.match(popup, /--citation-popup-hover:\s*#f3f6fb/);
-    assert.match(popup, /--citation-popup-accent:\s*#2f6feb/);
+    assert.match(popup, /--citation-popup-surface:\s*var\(--surface\)/);
+    assert.match(popup, /--citation-popup-text:\s*var\(--text\)/);
+    assert.match(popup, /--citation-popup-border:\s*var\(--border\)/);
+    assert.match(
+        popup,
+        /--citation-popup-hover:\s*color-mix\(\s*in srgb,\s*var\(--accent\) 12%,\s*var\(--surface\)\s*\)/
+    );
+    assert.match(popup, /--citation-popup-accent:\s*var\(--accent\)/);
     assert.match(popup, /background:\s*var\(--citation-popup-surface\)/);
 
     const popupItem = ruleBody('.mktero-citation-popup-item');
@@ -248,6 +251,17 @@ test('styles table references, previews, and target highlights', () => {
     assert.match(popupShell, /max-width:\s*calc\(100vw - 48px\)/);
     assert.match(popupShell, /box-sizing:\s*border-box/);
     assert.match(popupShell, /z-index:\s*900/);
+    assert.match(
+        popupShell,
+        /--reference-preview-surface:\s*var\(--surface\)/
+    );
+    assert.match(popupShell, /--reference-preview-text:\s*var\(--text\)/);
+    assert.match(popupShell, /--reference-preview-muted:\s*var\(--muted\)/);
+    assert.match(popupShell, /--reference-preview-border:\s*var\(--border\)/);
+    assert.match(
+        popupShell,
+        /--reference-preview-header:\s*color-mix\(\s*in srgb,\s*var\(--surface\) 82%,\s*var\(--background\)\s*\)/
+    );
 
     const popup = ruleBody('.mktero-table-preview-popup');
     assert.match(popup, /width:\s*min\(700px, calc\(100vw - 48px\)\)/);

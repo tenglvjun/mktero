@@ -546,11 +546,15 @@ main {
 }
 
 .mktero-citation-popup {
-    --citation-popup-surface: #fff;
-    --citation-popup-text: #24292f;
-    --citation-popup-border: #d8dee4;
-    --citation-popup-hover: #f3f6fb;
-    --citation-popup-accent: #2f6feb;
+    --citation-popup-surface: var(--surface);
+    --citation-popup-text: var(--text);
+    --citation-popup-border: var(--border);
+    --citation-popup-hover: color-mix(
+        in srgb,
+        var(--accent) 12%,
+        var(--surface)
+    );
+    --citation-popup-accent: var(--accent);
     position: fixed;
     z-index: 900;
     width: max-content;
@@ -659,11 +663,15 @@ main {
 
 .mktero-table-preview-popup,
 .mktero-figure-preview-popup {
-    --reference-preview-surface: #fff;
-    --reference-preview-text: #24292f;
-    --reference-preview-muted: #57606a;
-    --reference-preview-border: #d8dee4;
-    --reference-preview-header: #f6f8fa;
+    --reference-preview-surface: var(--surface);
+    --reference-preview-text: var(--text);
+    --reference-preview-muted: var(--muted);
+    --reference-preview-border: var(--border);
+    --reference-preview-header: color-mix(
+        in srgb,
+        var(--surface) 82%,
+        var(--background)
+    );
     position: fixed;
     z-index: 900;
     box-sizing: border-box;
