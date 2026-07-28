@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "description": "Display opened Zotero PDFs as Markdown",
   "author": "Tony",
+  "icons": {
+    "48": "ui/icons/markdown.svg",
+    "96": "ui/icons/markdown.svg"
+  },
   "applications": {
     "zotero": {
       "id": "mktero@tenglvjun.github.io",
