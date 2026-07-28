@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 
-test('uses the Zotero window AbortController when the plugin sandbox has none', async t => {
+test('uses the Zotero window AbortController when the plugin sandbox has none', {
+    timeout: 5_000,
+}, async t => {
     const NativeAbortController = globalThis.AbortController;
     const previousGlobals = {
         Zotero: globalThis.Zotero,
@@ -17,7 +19,10 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
     const alerts = [];
     const debugLogs = [];
     let toolbarHandler;
-    let openedPreferences = null;
+    let resolveOpenedPreferences;
+    const openedPreferences = new Promise(resolve => {
+        resolveOpenedPreferences = resolve;
+    });
     const mainWindow = createMainWindow(NativeAbortController, alerts);
     globalThis.Zotero = {
         version: '9.0.6',
@@ -47,7 +52,7 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
         Utilities: {
             Internal: {
                 openPreferences(id) {
-                    openedPreferences = id;
+                    resolveOpenedPreferences(id);
                 },
             },
         },
@@ -100,12 +105,9 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
     });
 
     appended[0].click();
-    for (let index = 0; index < 100 && !openedPreferences; index++) {
-        await new Promise(resolve => setImmediate(resolve));
-    }
 
     assert.deepEqual(alerts, []);
-    assert.equal(openedPreferences, 'mktero-preferences');
+    assert.equal(await openedPreferences, 'mktero-preferences');
     assert.ok(debugLogs.some(message => message.includes('conversion started for item 42')));
     assert.ok(debugLogs.some(message => message.includes('conversion failed for item 42')));
 });
