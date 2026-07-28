@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('ships language, MinerU token, cache preferences, and Markdown UI assets', async () => {
+test('ships MinerU token, cache preferences, and localized Markdown UI assets', async () => {
     const [
         prefs,
         pane,
@@ -23,12 +23,9 @@ test('ships language, MinerU token, cache preferences, and Markdown UI assets', 
 
     assert.match(prefs, /pref\("extensions\.mktero\.mineruApiKey", ""\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.cacheEnabled", true\)/);
-    assert.match(prefs, /pref\("extensions\.mktero\.language", "system"\)/);
-    assert.match(pane, /id="mktero-language"/);
-    assert.match(pane, /preference="extensions\.mktero\.language"/);
-    assert.match(pane, /value="system"/);
-    assert.match(pane, /value="en-US"/);
-    assert.match(pane, /value="zh-CN"/);
+    assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
+    assert.doesNotMatch(pane, /id="mktero-language"/);
+    assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
     assert.match(pane, /preference="extensions\.mktero\.mineruApiKey"/);
     assert.match(pane, /preference="extensions\.mktero\.cacheEnabled"/);
     assert.match(pane, /id="mktero-clear-cache"/);
@@ -37,7 +34,9 @@ test('ships language, MinerU token, cache preferences, and Markdown UI assets', 
     const visiblePreferenceText = pane.replace(/<[^>]+>/g, ' ');
     assert.doesNotMatch(visiblePreferenceText, /mineru/i);
     assert.match(script, /createZoteroMarkdownCache/);
+    assert.doesNotMatch(script, /setMkteroLanguagePreference/);
     assert.match(bootstrap, /new MinerUClient/);
+    assert.doesNotMatch(bootstrap, /observeMkteroLanguagePreference/);
     assert.match(markdownView, /createInlineMarkdownEditor/);
     assert.doesNotMatch(markdownView, /'mktero-show-source'/);
     assert.doesNotMatch(markdownView, /'mktero-reparse'/);
@@ -73,8 +72,8 @@ test('presents every preference group as one cohesive settings card', async () =
         readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
     ]);
 
-    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
-    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 2);
+    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 2);
     assert.match(
         pane,
         /id="mktero-mineru-api-key"[\s\S]*aria-describedby="mktero-token-help mktero-token-storage-note"/

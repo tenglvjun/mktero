@@ -1,9 +1,7 @@
 import {
-    getMkteroLanguagePreference,
     getMinerUCacheEnabled,
     getMinerUApiKey,
     getZoteroLocale,
-    observeMkteroLanguagePreference,
     openMinerUPreferences,
     registerMinerUPreferencesPane,
 } from './config/mineru-preferences.js';
@@ -48,7 +46,6 @@ const runtime = {
     rootURI: null,
     preferencePaneID: null,
     localization: null,
-    disposeLanguageObserver: null,
     disposeToolbar: null,
     contextMenus: new Map(),
     controllers: new Map(),
@@ -60,7 +57,6 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.id = id;
     runtime.rootURI = rootURI;
     const localization = createLocalization({
-        preference: getMkteroLanguagePreference(Zotero),
         zoteroLocale: getZoteroLocale(
             Zotero,
             typeof Services === 'undefined' ? null : Services
@@ -108,10 +104,6 @@ globalThis.startup = async function startup({ id, rootURI }) {
         return;
     }
     runtime.preferencePaneID = preferencePaneID;
-    runtime.disposeLanguageObserver = observeMkteroLanguagePreference(
-        Zotero,
-        refreshRuntimeLanguage
-    );
     registerReaderToolbarAction();
     registerMainWindowContextMenu(Zotero.getMainWindow?.());
 
@@ -120,7 +112,6 @@ globalThis.startup = async function startup({ id, rootURI }) {
 
 globalThis.shutdown = function shutdown() {
     abortAllConversions();
-    runtime.disposeLanguageObserver?.();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();
     runtime.presenter?.dispose();
@@ -128,7 +119,6 @@ globalThis.shutdown = function shutdown() {
         Zotero.PreferencePanes.unregister?.(runtime.preferencePaneID);
     }
     runtime.disposeToolbar = null;
-    runtime.disposeLanguageObserver = null;
     runtime.presenter = null;
     runtime.service = null;
     runtime.cache = null;
@@ -314,22 +304,6 @@ function registerReaderToolbarAction() {
         onError: handleOpenError,
         translate: runtimeTranslate,
     });
-}
-
-function refreshRuntimeLanguage() {
-    if (!runtime.localization) return;
-    runtime.localization.setPreference(getMkteroLanguagePreference(Zotero));
-    runtime.presenter?.relocalize();
-
-    if (runtime.disposeToolbar) {
-        runtime.disposeToolbar();
-        runtime.disposeToolbar = null;
-        registerReaderToolbarAction();
-    }
-
-    const windows = [...runtime.contextMenus.keys()];
-    disposeAllContextMenus();
-    for (const window of windows) registerMainWindowContextMenu(window);
 }
 
 function runtimeTranslate(key, variables) {

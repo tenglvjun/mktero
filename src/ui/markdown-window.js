@@ -57,7 +57,6 @@ class MarkdownTabView {
         this.outlineVisible = true;
         this.outlineWidth = DEFAULT_OUTLINE_WIDTH;
         this.outlineResize = null;
-        this.renderedLanguage = localization.language;
 
         this.host = this.createElement('div', {
             class: 'mktero-tab-host',
@@ -96,7 +95,7 @@ class MarkdownTabView {
     render(model = this.model) {
         this.model = model;
         const elements = this.elements;
-        const languageChanged = this.syncLocalization();
+        this.syncLocalization();
         const loadingView = createLoadingPresentation(model, this.t);
         const showContent = model.status === 'ready' || loadingView.preserveContent;
 
@@ -133,7 +132,7 @@ class MarkdownTabView {
             const assetsChanged = this.syncAssetURLs();
             this.editor.setMarkdown(markdown);
             this.syncOutline(markdown);
-            if (assetsChanged || languageChanged) this.editor.refreshRendering();
+            if (assetsChanged) this.editor.refreshRendering();
             return;
         }
 
@@ -394,8 +393,6 @@ class MarkdownTabView {
     }
 
     syncLocalization() {
-        const languageChanged = this.renderedLanguage !== this.localization.language;
-        this.renderedLanguage = this.localization.language;
         this.host.setAttribute('aria-label', this.t('viewer.label'));
         this.elements.progressHeadingLabel.textContent = this.t('loading.progress');
         this.elements.editorSection.setAttribute(
@@ -407,7 +404,6 @@ class MarkdownTabView {
         this.elements.outlineList.querySelector('.markdown-outline-empty')
             ?.replaceChildren(this.t('viewer.outlineEmpty'));
         this.syncOutlineControlLabels();
-        return languageChanged;
     }
 
     syncOutlineControlLabels() {

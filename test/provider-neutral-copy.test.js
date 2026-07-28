@@ -19,7 +19,7 @@ test('removes provider branding from errors shown to users', () => {
 });
 
 test('localizes known conversion errors and hides unknown internal messages', () => {
-    const localization = createLocalization({ preference: 'zh-CN' });
+    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
     const translate = localization.t.bind(localization);
 
     assert.equal(
@@ -43,7 +43,7 @@ test('localizes known conversion errors and hides unknown internal messages', ()
 });
 
 test('localizes fallback titles and conversion warnings', () => {
-    const localization = createLocalization({ preference: 'zh-CN' });
+    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
     const result = localizeConversionResult({
         title: 'Untitled PDF',
         warnings: [

@@ -1,12 +1,7 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
-import {
-    getMkteroLanguagePreference,
-    getZoteroLocale,
-    setMkteroLanguagePreference,
-} from '../config/mineru-preferences.js';
+import { getZoteroLocale } from '../config/mineru-preferences.js';
 import {
     createLocalization,
-    LANGUAGE_FOLLOW_ZOTERO,
     translateEnglish,
 } from '../i18n/localization.js';
 
@@ -57,15 +52,11 @@ export function createPreferencesController({
     cache,
     services = typeof Services === 'undefined' ? null : Services,
     localization = createLocalization({
-        preference: zotero.Prefs?.get
-            ? getMkteroLanguagePreference(zotero)
-            : LANGUAGE_FOLLOW_ZOTERO,
         zoteroLocale: getZoteroLocale(zotero, services),
     }),
 }) {
     const status = document.getElementById('mktero-cache-status');
     const clearButton = document.getElementById('mktero-clear-cache');
-    const languageSelect = document.getElementById('mktero-language');
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
 
@@ -105,25 +96,11 @@ export function createPreferencesController({
         }
     }
 
-    async function changeLanguage() {
-        const preference = zotero.Prefs?.set
-            ? setMkteroLanguagePreference(zotero, languageSelect.value)
-            : languageSelect.value;
-        localization.setPreference(preference);
-        languageSelect.value = localization.preference;
-        localize();
-        await refresh();
-    }
-
     return {
         async init() {
             if (initialized) return;
             initialized = true;
             clearButton.addEventListener('click', clear);
-            if (languageSelect) {
-                languageSelect.value = localization.preference;
-                languageSelect.addEventListener('change', changeLanguage);
-            }
             localize();
             await refresh();
         },
@@ -131,7 +108,6 @@ export function createPreferencesController({
             if (!initialized) return;
             initialized = false;
             clearButton.removeEventListener('click', clear);
-            languageSelect?.removeEventListener('change', changeLanguage);
         },
     };
 }

@@ -360,8 +360,8 @@ test('updates conversion progress directly in the inline view', () => {
     assert.equal(shadow.querySelector('#mktero-loading-progress-label').textContent, '10%');
 });
 
-test('localizes and refreshes the Markdown viewer chrome', () => {
-    const localization = createLocalization({ preference: 'zh-CN' });
+test('localizes the Markdown viewer chrome from the Zotero locale', () => {
+    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
     const model = createModel({
         status: 'ready',
         progress: 100,
@@ -377,16 +377,6 @@ test('localizes and refreshes the Markdown viewer chrome', () => {
     assert.equal(shadow.querySelector('.markdown-outline-title').textContent, '目录');
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
 
-    localization.setPreference('en-US');
-    view.render(model);
-
-    assert.equal(view.root.getAttribute('aria-label'), 'Mktero Markdown viewer');
-    assert.equal(
-        shadow.querySelector('.markdown-editor').getAttribute('aria-label'),
-        'Read-only Markdown view'
-    );
-    assert.equal(shadow.querySelector('.markdown-outline-title').textContent, 'Outline');
-    assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, 'No headings');
     view.destroy();
 });
 

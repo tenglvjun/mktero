@@ -58,7 +58,7 @@ test('localizes figure reference controls', () => {
             '![Figure 1. 流程图](images/flow.png)',
         ].join('\n'),
         resolveImageURL: path => `blob:mktero-${path}`,
-        localization: createLocalization({ preference: 'zh-CN' }),
+        localization: createLocalization({ zoteroLocale: 'zh-CN' }),
     });
     const reference = document.querySelector('.cm-mktero-figure-reference');
 

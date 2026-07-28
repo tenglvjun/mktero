@@ -291,10 +291,10 @@ test('ignores conversion updates after the Markdown tab is closed', () => {
     assert.equal(presentation.view.renderCalls.length, 1);
 });
 
-test('localizes new and existing loading tabs', () => {
+test('localizes new loading tabs from the Zotero locale', () => {
     const mainWindow = createMainWindow();
     const harness = createViewHarness();
-    const localization = createLocalization({ preference: 'zh-CN' });
+    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
     const presenter = new MarkdownTabPresenter({
         zotero: { getMainWindow: () => mainWindow },
         rootURI: 'resource://mktero/',
@@ -306,13 +306,5 @@ test('localizes new and existing loading tabs', () => {
     assert.equal(mainWindow.added[0].options.title, '正在转换 PDF…');
     assert.equal(harness.calls[0].localization, localization);
 
-    localization.setPreference('en-US');
-    presenter.relocalize();
-
-    assert.equal(presentation.model.title, 'Converting PDF…');
-    assert.deepEqual(mainWindow.renamed, [{
-        tabID: presentation.tabID,
-        title: 'Converting PDF…',
-    }]);
-    assert.equal(presentation.view.renderCalls.length, 2);
+    assert.equal(presentation.view.renderCalls.length, 1);
 });

@@ -115,24 +115,6 @@ export class MarkdownTabPresenter {
         current.view.render(current.model);
     }
 
-    relocalize() {
-        for (const presentation of this.presentations.values()) {
-            if (presentation.closed) continue;
-            if (presentation.model.status !== 'ready') {
-                presentation.model.title = this.localization.t(
-                    presentation.model.preserveContent
-                        ? 'loading.reparsingTitle'
-                        : 'loading.convertingTitle'
-                );
-                presentation.tabs.rename?.(
-                    presentation.tabID,
-                    presentation.model.title
-                );
-            }
-            presentation.view.render(presentation.model);
-        }
-    }
-
     closeAll() {
         for (const presentation of [...this.presentations.values()]) {
             if (!presentation.closed) presentation.tabs.close?.(presentation.tabID);
