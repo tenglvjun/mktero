@@ -1,4 +1,7 @@
-import { normalizeLanguagePreference } from '../i18n/localization.js';
+import {
+    normalizeLanguagePreference,
+    translateEnglish,
+} from '../i18n/localization.js';
 
 export const MKTERO_LANGUAGE_PREF = 'extensions.mktero.language';
 export const MINERU_API_KEY_PREF = 'extensions.mktero.mineruApiKey';
@@ -17,9 +20,10 @@ export function setMkteroLanguagePreference(zotero, value) {
     return preference;
 }
 
-export function getZoteroLocale(zotero, services) {
+export function getSystemLocale(zotero, services) {
     return String(
-        zotero?.locale
+        services?.locale?.systemLocaleAsBCP47
+        || zotero?.locale
         || services?.locale?.appLocaleAsBCP47
         || ''
     );
@@ -54,11 +58,10 @@ export function registerMinerUPreferencesPane({
     zotero,
     pluginID,
     rootURI,
-    translate,
+    translate = translateEnglish,
 }) {
     if (!zotero.PreferencePanes?.register) {
-        throw new Error(translate?.('error.preferencesUnavailable')
-            || 'Zotero preference panes are unavailable');
+        throw new Error(translate('error.preferencesUnavailable'));
     }
     return zotero.PreferencePanes.register({
         pluginID,

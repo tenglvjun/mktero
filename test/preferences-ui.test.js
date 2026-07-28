@@ -155,6 +155,14 @@ test('follows the system language until the user persists a selection', async ()
         document.getElementById('mktero-cache-status').textContent,
         '2 个缓存文档，1.5 KB'
     );
+
+    controller.destroy();
+    select.value = 'en-US';
+    select.dispatchEvent(new dom.window.Event('change'));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(persisted.length, 1);
+    assert.equal(document.querySelector('h2').textContent, '语言');
 });
 
 test('initializes an imported preferences fragment from Zotero capture-phase load', async () => {
@@ -162,9 +170,13 @@ test('initializes an imported preferences fragment from Zotero capture-phase loa
     const dom = new JSDOM('<!doctype html><div id="mktero-preferences-pane"></div>');
     const pane = dom.window.document.getElementById('mktero-preferences-pane');
     let initializeCalls = 0;
+    let cleanupCalls = 0;
     const dispose = preferencesUI.registerPreferencesPaneLoader({
         document: dom.window.document,
-        initialize: async () => { initializeCalls++; },
+        initialize: async () => {
+            initializeCalls++;
+            return () => { cleanupCalls++; };
+        },
     });
 
     let initialization;
@@ -175,13 +187,24 @@ test('initializes an imported preferences fragment from Zotero capture-phase loa
 
     pane.dispatchEvent(new dom.window.Event('load'));
     assert.equal(initializeCalls, 1);
+    pane.dispatchEvent(new dom.window.Event('unload'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cleanupCalls, 1);
+
+    const reload = new dom.window.Event('load');
+    reload.waitUntil = promise => { initialization = promise; };
+    pane.dispatchEvent(reload);
+    await initialization;
+    assert.equal(initializeCalls, 2);
     dispose();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cleanupCalls, 2);
 
     const replacementPane = dom.window.document.createElement('div');
     replacementPane.id = 'mktero-preferences-pane';
     dom.window.document.body.append(replacementPane);
     replacementPane.dispatchEvent(new dom.window.Event('load'));
-    assert.equal(initializeCalls, 1);
+    assert.equal(initializeCalls, 2);
 });
 
 function createControl(properties = {}) {
@@ -191,6 +214,9 @@ function createControl(properties = {}) {
         ...properties,
         addEventListener(type, listener) {
             listeners.set(type, listener);
+        },
+        removeEventListener(type, listener) {
+            if (listeners.get(type) === listener) listeners.delete(type);
         },
         attributes: {},
         setAttribute(name, value) {

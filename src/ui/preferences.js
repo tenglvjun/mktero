@@ -1,7 +1,7 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
 import {
     getMkteroLanguagePreference,
-    getZoteroLocale,
+    getSystemLocale,
     setMkteroLanguagePreference,
 } from '../config/mineru-preferences.js';
 import {
@@ -11,19 +11,44 @@ import {
 } from '../i18n/localization.js';
 
 export function registerPreferencesPaneLoader({ document, initialize }) {
-    const initializations = new WeakMap();
+    const initializations = new Map();
+    const disposePane = pane => {
+        const record = initializations.get(pane);
+        if (!record) return;
+        initializations.delete(pane);
+        record.disposed = true;
+        record.initialization.then(cleanup => cleanup?.(), () => {});
+    };
     const handleLoad = event => {
         const pane = event.target;
         if (pane?.id !== 'mktero-preferences-pane') return;
-        let initialization = initializations.get(pane);
-        if (!initialization) {
-            initialization = Promise.resolve().then(() => initialize(event));
-            initializations.set(pane, initialization);
+        let record = initializations.get(pane);
+        if (!record) {
+            record = { disposed: false, initialization: null };
+            record.initialization = Promise.resolve()
+                .then(() => initialize(event))
+                .then(cleanup => {
+                    if (record.disposed) cleanup?.();
+                    return record.disposed ? null : cleanup;
+                });
+            initializations.set(pane, record);
         }
-        event.waitUntil?.(initialization);
+        event.waitUntil?.(record.initialization);
+    };
+    const handleUnload = event => {
+        const pane = event.target;
+        if (pane?.id === 'mktero-preferences-pane') disposePane(pane);
+    };
+    const dispose = () => {
+        document.removeEventListener('load', handleLoad, true);
+        document.removeEventListener('unload', handleUnload, true);
+        document.defaultView?.removeEventListener('unload', dispose);
+        for (const pane of initializations.keys()) disposePane(pane);
     };
     document.addEventListener('load', handleLoad, true);
-    return () => document.removeEventListener('load', handleLoad, true);
+    document.addEventListener('unload', handleUnload, true);
+    document.defaultView?.addEventListener('unload', dispose);
+    return dispose;
 }
 
 export function createPreferencesController({
@@ -35,13 +60,14 @@ export function createPreferencesController({
         preference: zotero.Prefs?.get
             ? getMkteroLanguagePreference(zotero)
             : LANGUAGE_SYSTEM,
-        systemLocale: getZoteroLocale(zotero, services),
+        systemLocale: getSystemLocale(zotero, services),
     }),
 }) {
     const status = document.getElementById('mktero-cache-status');
     const clearButton = document.getElementById('mktero-clear-cache');
     const languageSelect = document.getElementById('mktero-language');
     const t = (key, variables) => localization.t(key, variables);
+    let initialized = false;
 
     function localize() {
         localizePreferencesDocument(document, localization);
@@ -91,6 +117,8 @@ export function createPreferencesController({
 
     return {
         async init() {
+            if (initialized) return;
+            initialized = true;
             clearButton.addEventListener('click', clear);
             if (languageSelect) {
                 languageSelect.value = localization.preference;
@@ -98,6 +126,12 @@ export function createPreferencesController({
             }
             localize();
             await refresh();
+        },
+        destroy() {
+            if (!initialized) return;
+            initialized = false;
+            clearButton.removeEventListener('click', clear);
+            languageSelect?.removeEventListener('change', changeLanguage);
         },
     };
 }
@@ -138,7 +172,7 @@ function trimDecimal(value) {
 }
 
 globalThis.MkteroPreferences = {
-    init(event) {
+    async init(event) {
         const document = event.target?.ownerDocument
             || event.currentTarget?.ownerDocument
             || globalThis.document;
@@ -148,7 +182,8 @@ globalThis.MkteroPreferences = {
             pathUtils: PathUtils,
         });
         const controller = createPreferencesController({ document, zotero: Zotero, cache });
-        return controller.init();
+        await controller.init();
+        return () => controller.destroy();
     },
 };
 

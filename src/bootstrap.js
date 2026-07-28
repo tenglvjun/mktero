@@ -2,7 +2,7 @@ import {
     getMkteroLanguagePreference,
     getMinerUCacheEnabled,
     getMinerUApiKey,
-    getZoteroLocale,
+    getSystemLocale,
     observeMkteroLanguagePreference,
     openMinerUPreferences,
     registerMinerUPreferencesPane,
@@ -26,7 +26,10 @@ import {
     createLocalization,
     translateEnglish,
 } from './i18n/localization.js';
-import { removeProviderBranding } from './ui/provider-neutral-copy.js';
+import {
+    localizeConversionError,
+    localizeConversionResult,
+} from './ui/provider-neutral-copy.js';
 import { registerItemContextMenu } from './ui/item-context-menu.js';
 import { registerReaderToolbar } from './ui/reader-toolbar.js';
 import { MarkdownTabPresenter } from './ui/markdown-tab-presenter.js';
@@ -58,7 +61,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.rootURI = rootURI;
     const localization = createLocalization({
         preference: getMkteroLanguagePreference(Zotero),
-        systemLocale: getZoteroLocale(
+        systemLocale: getSystemLocale(
             Zotero,
             typeof Services === 'undefined' ? null : Services
         ),
@@ -199,7 +202,9 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         );
         runtime.presenter?.update(
             presentation,
-            createConversionReadyChanges(result)
+            createConversionReadyChanges(
+                localizeConversionResult(result, runtimeTranslate)
+            )
         );
     }
     catch (error) {
@@ -336,14 +341,5 @@ function userFacingError(error) {
     if (error instanceof MinerUConfigurationError) {
         return runtimeTranslate('error.apiTokenMissing');
     }
-    if (error?.code === 'MINERU_API_KEY_INVALID') {
-        return runtimeTranslate('error.apiTokenInvalid');
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    if (/no extractable text/i.test(message)) {
-        return runtimeTranslate('error.noExtractableText');
-    }
-    return message
-        ? removeProviderBranding(message)
-        : runtimeTranslate('error.conversionFailed');
+    return localizeConversionError(error, runtimeTranslate);
 }
