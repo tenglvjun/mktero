@@ -5,8 +5,8 @@
   "description": "Display opened Zotero PDFs as Markdown",
   "author": "Tony",
   "icons": {
-    "48": "ui/icons/markdown.svg",
-    "96": "ui/icons/markdown.svg"
+    "48": "ui/icons/mktero.svg",
+    "96": "ui/icons/mktero.svg"
   },
   "applications": {
     "zotero": {

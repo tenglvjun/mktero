@@ -30,8 +30,8 @@ test('provides the update URL required by Zotero 9', () => {
 
 test('declares the scalable Mktero logo for extension surfaces', () => {
     assert.deepEqual(manifest.icons, {
-        48: 'ui/icons/markdown.svg',
-        96: 'ui/icons/markdown.svg',
+        48: 'ui/icons/mktero.svg',
+        96: 'ui/icons/mktero.svg',
     });
 });
 

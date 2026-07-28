@@ -68,7 +68,7 @@ test('adds a Markdown action for a parent item and opens its PDF attachment', as
     assert.equal(menuItem.getAttribute('class'), 'menuitem-iconic');
     assert.equal(
         menuItem.getAttribute('image'),
-        'resource://mktero/ui/icons/markdown.svg'
+        'resource://mktero/ui/icons/mktero.svg'
     );
 
     menuItem.dispatchEvent(new harness.document.defaultView.Event('command'));

@@ -102,7 +102,7 @@ test('registers and opens the Mktero preference pane', async () => {
         pluginID: 'mktero@example.com',
         id: MINERU_PREFERENCE_PANE_ID,
         label: 'Mktero',
-        image: 'resource://mktero/ui/icons/markdown.svg',
+        image: 'resource://mktero/ui/icons/mktero.svg',
         src: 'resource://mktero/ui/preferences.xhtml',
         scripts: ['resource://mktero/ui/preferences.js'],
         stylesheets: ['resource://mktero/ui/preferences.css'],

@@ -138,7 +138,7 @@ test('installs the custom Markdown tab icon stylesheet in the Zotero window', ()
     assert.match(style.textContent, /data-item-type="markdown"/);
     assert.match(
         style.textContent,
-        /jar:file:\/\/\/profile\/extensions\/mktero\.xpi!\/ui\/icons\/markdown\.svg/
+        /jar:file:\/\/\/profile\/extensions\/mktero\.xpi!\/ui\/icons\/mktero\.svg/
     );
 
     presenter.dispose();

@@ -141,7 +141,7 @@ export class MarkdownTabPresenter {
         style.setAttribute('id', TAB_ICON_STYLE_ID);
         style.textContent = `
 .icon-item-type[data-item-type="${TAB_ICON}"] {
-    background-image: url("${this.rootURI}ui/icons/markdown.svg") !important;
+    background-image: url("${this.rootURI}ui/icons/mktero.svg") !important;
     background-position: center !important;
     background-repeat: no-repeat !important;
     background-size: contain !important;

@@ -19,7 +19,7 @@ const packageFiles = [
     'bootstrap.js',
     'manifest.json',
     'prefs.js',
-    'ui/icons/markdown.svg',
+    'ui/icons/mktero.svg',
     'ui/preferences.css',
     'ui/preferences.js',
     'ui/preferences.xhtml',
@@ -57,7 +57,7 @@ await Promise.all([
     copyText('manifest.json', 'manifest.json'),
     copyText('ui/preferences.xhtml', 'ui/preferences.xhtml'),
     copyText('ui/preferences.css', 'ui/preferences.css'),
-    copyText('ui/icons/markdown.svg', 'ui/icons/markdown.svg'),
+    copyText('ui/icons/mktero.svg', 'ui/icons/mktero.svg'),
     copyText('prefs.js', 'prefs.js'),
 ]);
 

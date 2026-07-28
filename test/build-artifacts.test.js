@@ -41,7 +41,7 @@ test('builds reproducible release assets and Zotero update metadata', async () =
         'bootstrap.js',
         'manifest.json',
         'prefs.js',
-        'ui/icons/markdown.svg',
+        'ui/icons/mktero.svg',
         'ui/preferences.css',
         'ui/preferences.js',
         'ui/preferences.xhtml',

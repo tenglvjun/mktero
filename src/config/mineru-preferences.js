@@ -33,7 +33,7 @@ export function registerMinerUPreferencesPane({
         pluginID,
         id: MINERU_PREFERENCE_PANE_ID,
         label: 'Mktero',
-        image: `${rootURI}ui/icons/markdown.svg`,
+        image: `${rootURI}ui/icons/mktero.svg`,
         src: `${rootURI}ui/preferences.xhtml`,
         scripts: [`${rootURI}ui/preferences.js`],
         stylesheets: [`${rootURI}ui/preferences.css`],
