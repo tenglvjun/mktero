@@ -47,7 +47,7 @@ documentation-only. Report any command that could not be run.
 - `prefs.js`: defaults for every Zotero preference.
 - `src/bootstrap.js`: extension lifecycle and dependency composition. It owns
   startup/shutdown, conversion cancellation, tabs, toolbar actions, context
-  menus, preferences, cache, and proxy transport.
+  menus, preferences, and cache.
 - `src/config/`: preference keys and preference-pane registration.
 - `src/core/`: provider-independent conversion orchestration and progress.
 - `src/extractors/`: adapters from Zotero items or MinerU results to the core
@@ -56,8 +56,7 @@ documentation-only. Report any command that could not be run.
   helpers, and Markdown normalization.
 - `src/cache/`: content-addressed Markdown and image cache under the active
   Zotero profile.
-- `src/platform/`: Zotero/runtime adapters for aborting requests and applying
-  proxy settings.
+- `src/platform/`: Zotero/runtime adapters for aborting requests.
 - `src/markdown/`: pure Markdown parsing, analysis, normalization, rendering,
   and safety logic.
 - `src/editor/`: CodeMirror 6 read-only presentation, image previews, and
@@ -78,7 +77,7 @@ documentation-only. Report any command that could not be run.
   into files bundled for Zotero.
 - Preserve all bootstrap lifecycle globals: `install`, `startup`, `shutdown`,
   `uninstall`, `onMainWindowLoad`, and `onMainWindowUnload`.
-- Every registration, listener, object URL, proxy context, tab, and in-flight
+- Every registration, listener, object URL, tab, and in-flight
   conversion needs a matching cleanup path. Closing a tab or shutting down the
   extension must abort its active conversion.
 - Mktero tabs are session-only and there is at most one live tab per PDF item.
@@ -107,10 +106,10 @@ preference values as untrusted input.
   must continue to reject oversized data before unnecessary inflation.
 - Normalize archive paths and never allow an extracted path to escape its
   logical result root.
-- Never log or expose API tokens, proxy credentials, pre-signed upload URLs,
+- Never log or expose API tokens, pre-signed upload URLs,
   PDF bytes/content, or raw authenticated responses. Existing progress logs
   deliberately contain only item IDs and conversion stages.
-- API tokens, proxy credentials, cached Markdown, and cached figures are stored
+- API tokens, cached Markdown, and cached figures are stored
   unencrypted in the local Zotero profile. User-facing documentation and UI
   must continue to state that accurately.
 - Cache keys include the PDF content hash and MinerU parser profile. When parser

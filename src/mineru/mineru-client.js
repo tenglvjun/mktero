@@ -179,7 +179,6 @@ export class MinerUClient {
             operation: async requestSignal => {
                 const response = await this.fetch(url, {
                     signal: requestSignal,
-                    maxResponseBytes: this.maxArchiveBytes,
                 });
                 if (!response?.ok) {
                     throw httpError('MinerU result download failed', response);
@@ -347,7 +346,7 @@ function parseRetryAfter(value) {
 
 function isKnownRequestError(error) {
     return typeof error?.code === 'string'
-        && (error.code.startsWith('MINERU_') || error.code.startsWith('MKTERO_'));
+        && error.code.startsWith('MINERU_');
 }
 
 function isRetryable(error) {

@@ -26,8 +26,6 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
 - 识别正文中的表格与图片引用；悬停时显示预览，点击后跳转并临时高亮对应图表。
 - 点击文档图片可打开全屏预览，支持 25% 至 400% 缩放和拖动查看。
 - 按 PDF 内容与解析配置缓存 Markdown 和图片；未变化的 PDF 可直接从本地缓存打开。
-- 支持 Zotero 已解析的系统代理，也支持带认证信息的手动 HTTP、HTTPS、SOCKS5 和
-  SOCKS5H 代理及主机绕过列表。
 
 ## 使用要求
 
@@ -62,13 +60,8 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
 | --- | --- | --- |
 | API Token | 空 | 缓存未命中时必填，用于调用 MinerU API |
 | Reuse conversion results | 开启 | 复用相同 PDF 内容和解析配置对应的本地结果 |
-| Enable proxy | 关闭 | 仅为 Mktero 的转换请求启用代理 |
-| Use system proxy | 开启 | 启用代理后使用 Zotero 已解析的系统代理 |
-| Manual proxy address | 空 | 关闭系统代理后填写 `http`、`https`、`socks5` 或 `socks5h` URL |
-| Bypass proxy for | `localhost, 127.0.0.1` | 逗号分隔的主机、主机端口或 `*.local` 一类域名规则 |
 
-API Token 和手动代理 URL 中的认证信息会作为普通首选项保存在当前 Zotero 配置文件中，
-不会加密。
+API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不会加密。
 
 ## 使用方法
 
@@ -182,8 +175,8 @@ SHA-256 校验文件和 Zotero 更新清单。标签与 `manifest.json` 版本�
 - `completed from local cache; MinerU upload skipped`：已命中本地缓存，没有发起上传。
 - `completed through MinerU API`：已通过 MinerU API 完成转换。
 
-日志不会记录 API Token、代理凭据、预签名上传地址或 PDF 内容。若仍然失败，请优先检查
-本地附件是否可用、Token 是否有效，以及代理设置能否访问 MinerU。
+日志不会记录 API Token、预签名上传地址或 PDF 内容。若仍然失败，请优先检查
+本地附件是否可用、Token 是否有效，以及当前网络能否访问 MinerU。
 
 ## License
 

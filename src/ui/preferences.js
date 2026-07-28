@@ -1,5 +1,4 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
-import { parseProxyURL } from '../platform/proxy-transport.js';
 
 export function registerPreferencesPaneLoader({ document, initialize }) {
     const initializations = new WeakMap();
@@ -20,13 +19,6 @@ export function registerPreferencesPaneLoader({ document, initialize }) {
 export function createPreferencesController({ document, zotero, cache }) {
     const status = document.getElementById('mktero-cache-status');
     const clearButton = document.getElementById('mktero-clear-cache');
-    const proxyEnabled = document.getElementById('mktero-proxy-enabled');
-    const systemProxyRow = document.getElementById('mktero-system-proxy-row');
-    const proxyUseSystem = document.getElementById('mktero-proxy-use-system');
-    const manualProxyFields = document.getElementById('mktero-manual-proxy-fields');
-    const proxyURL = document.getElementById('mktero-proxy-url');
-    const proxyBypass = document.getElementById('mktero-proxy-bypass');
-    const proxyStatus = document.getElementById('mktero-proxy-status');
 
     async function refresh() {
         status.setAttribute('aria-busy', 'true');
@@ -60,48 +52,9 @@ export function createPreferencesController({ document, zotero, cache }) {
         }
     }
 
-    function syncProxyFields() {
-        const enabled = proxyEnabled.checked;
-        const manual = enabled && !proxyUseSystem.checked;
-        proxyUseSystem.disabled = !enabled;
-        systemProxyRow.dataset.disabled = String(!enabled);
-        systemProxyRow.setAttribute('aria-disabled', String(!enabled));
-        proxyUseSystem.setAttribute('aria-expanded', String(manual));
-        manualProxyFields.hidden = !manual;
-        manualProxyFields.setAttribute('aria-hidden', String(!manual));
-        proxyURL.disabled = !manual;
-        proxyBypass.disabled = !manual;
-        proxyURL.setAttribute('aria-invalid', 'false');
-        proxyStatus.dataset.error = 'false';
-        proxyStatus.textContent = '';
-        proxyStatus.hidden = true;
-        if (!manual) return;
-        try {
-            parseProxyURL(proxyURL.value);
-        }
-        catch (error) {
-            proxyURL.setAttribute('aria-invalid', 'true');
-            proxyStatus.dataset.error = 'true';
-            proxyStatus.textContent = error.message;
-            proxyStatus.hidden = false;
-        }
-    }
-
     return {
         async init() {
             clearButton.addEventListener('click', clear);
-            proxyEnabled.addEventListener('change', syncProxyFields);
-            proxyUseSystem.addEventListener('change', syncProxyFields);
-            proxyURL.addEventListener('input', syncProxyFields);
-            for (const field of [
-                proxyEnabled,
-                proxyUseSystem,
-                proxyURL,
-                proxyBypass,
-            ]) {
-                field.addEventListener('syncfrompreference', syncProxyFields);
-            }
-            syncProxyFields();
             await refresh();
         },
     };

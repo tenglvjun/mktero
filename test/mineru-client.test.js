@@ -110,7 +110,6 @@ test('uploads a local PDF and returns MinerU Markdown', async () => {
     assert.equal(requests[2].options.headers.Authorization, 'Bearer secret-token');
     assert.equal(requests[4].url, 'https://download.example/result.zip');
     assert.equal(requests[4].options.headers, undefined);
-    assert.equal(requests[4].options.maxResponseBytes, DEFAULT_MAX_ARCHIVE_BYTES);
     assert.equal(progress.at(-1), 100);
     assert.ok(progress.some(value => value > 50 && value < 100));
 });
@@ -165,26 +164,6 @@ test('rejects an invalid MinerU API token with an actionable error', async () =>
             dataID: 'zotero-42',
         }),
         /API Token is invalid/
-    );
-});
-
-test('preserves an actionable proxy configuration error from the transport', async () => {
-    const configurationError = new Error('Invalid manual proxy address');
-    configurationError.code = 'MKTERO_PROXY_CONFIG_INVALID';
-    const client = new MinerUClient({
-        fetch: async () => { throw configurationError; },
-        sleep: async () => {},
-        extractMarkdownFromZip: () => '',
-    });
-
-    await assert.rejects(
-        () => client.parse({
-            apiKey: 'secret-token',
-            fileName: 'paper.pdf',
-            fileData: new Uint8Array([1]),
-            dataID: 'zotero-42',
-        }),
-        error => error === configurationError
     );
 });
 

@@ -58,21 +58,12 @@
 }
 
 .mktero-settings-card > .mktero-setting-row + .mktero-setting-row,
-#mktero-manual-proxy-fields > .mktero-setting-row,
 .mktero-card-note {
     border-top: 1px solid var(--material-border, rgba(127, 127, 127, 0.22));
 }
 
 .mktero-switch-row {
     cursor: pointer;
-}
-
-.mktero-switch-row[data-disabled="true"] {
-    cursor: default;
-}
-
-.mktero-switch-row[data-disabled="true"] .mktero-setting-copy {
-    opacity: 0.55;
 }
 
 .mktero-setting-copy {
@@ -195,27 +186,6 @@
     outline-offset: 2px;
 }
 
-.mktero-switch-input:disabled {
-    cursor: default;
-}
-
-.mktero-switch-input:disabled + .mktero-switch {
-    opacity: 0.45;
-}
-
-#mktero-manual-proxy-fields[hidden],
-#mktero-proxy-status[hidden] {
-    display: none !important;
-}
-
-#mktero-proxy-status {
-    display: block;
-}
-
-#mktero-proxy-status[data-error="true"] {
-    color: var(--color-red-70, #c62828);
-}
-
 #mktero-clear-cache {
     flex: 0 0 auto;
     min-height: 30px;
@@ -235,8 +205,7 @@
 }
 
 @media (max-width: 720px) {
-    .mktero-field-row,
-    .mktero-proxy-field {
+    .mktero-field-row {
         align-items: stretch;
         flex-direction: column;
         gap: 12px;
