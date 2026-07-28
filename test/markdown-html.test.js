@@ -468,13 +468,13 @@ test('renders inline LaTeX in an academic image caption', () => {
 test('keeps unsafe LaTeX and HTML inert in an academic image caption', () => {
     const html = renderMarkdownHTML(
         '![Fig. 2. Unsafe $\\\\def\\\\x{1}$ '
-            + '<script>alert(1)</script>.](images/figure.png)',
+            + '<SCRIPT>alert(1)</SCRIPT>.](images/figure.png)',
         { resolveImageURL: () => 'blob:mktero-figure' }
     );
 
     assert.match(html, /<code class="math-fallback">\\def\\x\{1\}<\/code>/);
-    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-    assert.doesNotMatch(html, /<script>/);
+    assert.match(html, /&lt;SCRIPT&gt;alert\(1\)&lt;\/SCRIPT&gt;/);
+    assert.doesNotMatch(html, /<script>/i);
 });
 
 test('renders consecutive image panels with one shared academic caption', () => {
