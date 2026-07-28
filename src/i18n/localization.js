@@ -1,9 +1,9 @@
-export const LANGUAGE_SYSTEM = 'system';
+export const LANGUAGE_FOLLOW_ZOTERO = 'system';
 export const LANGUAGE_ENGLISH = 'en-US';
 export const LANGUAGE_SIMPLIFIED_CHINESE = 'zh-CN';
 
 export const LANGUAGE_OPTIONS = Object.freeze([
-    LANGUAGE_SYSTEM,
+    LANGUAGE_FOLLOW_ZOTERO,
     LANGUAGE_ENGLISH,
     LANGUAGE_SIMPLIFIED_CHINESE,
 ]);
@@ -13,8 +13,8 @@ const MESSAGES = Object.freeze({
         'preferences.language.title': 'Language',
         'preferences.language.description': 'Choose the language used by Mktero.',
         'preferences.language.label': 'Display language',
-        'preferences.language.help': 'Follow the operating system language or use a language only for Mktero',
-        'preferences.language.system': 'Follow system',
+        'preferences.language.help': 'Follow Zotero\'s display language or use a language only for Mktero',
+        'preferences.language.system': 'Follow Zotero',
         'preferences.language.english': 'English',
         'preferences.language.chinese': 'Simplified Chinese',
         'preferences.conversion.title': 'PDF conversion',
@@ -111,8 +111,8 @@ const MESSAGES = Object.freeze({
         'preferences.language.title': '语言',
         'preferences.language.description': '选择 Mktero 使用的界面语言。',
         'preferences.language.label': '显示语言',
-        'preferences.language.help': '跟随操作系统语言，或仅为 Mktero 指定语言',
-        'preferences.language.system': '跟随系统',
+        'preferences.language.help': '跟随 Zotero 的显示语言，或仅为 Mktero 指定语言',
+        'preferences.language.system': '跟随 Zotero',
         'preferences.language.english': '英语',
         'preferences.language.chinese': '简体中文',
         'preferences.conversion.title': 'PDF 转换',
@@ -209,13 +209,13 @@ const MESSAGES = Object.freeze({
 
 export function normalizeLanguagePreference(value) {
     const language = String(value || '').trim();
-    return LANGUAGE_OPTIONS.includes(language) ? language : LANGUAGE_SYSTEM;
+    return LANGUAGE_OPTIONS.includes(language) ? language : LANGUAGE_FOLLOW_ZOTERO;
 }
 
-export function resolveLanguage(preference, systemLocale) {
+export function resolveLanguage(preference, zoteroLocale) {
     const normalizedPreference = normalizeLanguagePreference(preference);
-    if (normalizedPreference !== LANGUAGE_SYSTEM) return normalizedPreference;
-    const locale = String(systemLocale || '').trim().replaceAll('_', '-').toLowerCase();
+    if (normalizedPreference !== LANGUAGE_FOLLOW_ZOTERO) return normalizedPreference;
+    const locale = String(zoteroLocale || '').trim().replaceAll('_', '-').toLowerCase();
     if (locale === 'zh' || locale.startsWith('zh-')) {
         return LANGUAGE_SIMPLIFIED_CHINESE;
     }
@@ -223,11 +223,11 @@ export function resolveLanguage(preference, systemLocale) {
 }
 
 export function createLocalization({
-    preference = LANGUAGE_SYSTEM,
-    systemLocale = LANGUAGE_ENGLISH,
+    preference = LANGUAGE_FOLLOW_ZOTERO,
+    zoteroLocale = LANGUAGE_ENGLISH,
 } = {}) {
     let normalizedPreference = normalizeLanguagePreference(preference);
-    let language = resolveLanguage(normalizedPreference, systemLocale);
+    let language = resolveLanguage(normalizedPreference, zoteroLocale);
     return {
         get preference() {
             return normalizedPreference;
@@ -240,7 +240,7 @@ export function createLocalization({
         },
         setPreference(value) {
             normalizedPreference = normalizeLanguagePreference(value);
-            language = resolveLanguage(normalizedPreference, systemLocale);
+            language = resolveLanguage(normalizedPreference, zoteroLocale);
             return language;
         },
     };

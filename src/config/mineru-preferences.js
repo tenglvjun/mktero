@@ -20,10 +20,9 @@ export function setMkteroLanguagePreference(zotero, value) {
     return preference;
 }
 
-export function getSystemLocale(zotero, services) {
+export function getZoteroLocale(zotero, services) {
     return String(
-        services?.locale?.systemLocaleAsBCP47
-        || zotero?.locale
+        zotero?.locale
         || services?.locale?.appLocaleAsBCP47
         || ''
     );

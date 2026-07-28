@@ -1,12 +1,12 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
 import {
     getMkteroLanguagePreference,
-    getSystemLocale,
+    getZoteroLocale,
     setMkteroLanguagePreference,
 } from '../config/mineru-preferences.js';
 import {
     createLocalization,
-    LANGUAGE_SYSTEM,
+    LANGUAGE_FOLLOW_ZOTERO,
     translateEnglish,
 } from '../i18n/localization.js';
 
@@ -59,8 +59,8 @@ export function createPreferencesController({
     localization = createLocalization({
         preference: zotero.Prefs?.get
             ? getMkteroLanguagePreference(zotero)
-            : LANGUAGE_SYSTEM,
-        systemLocale: getSystemLocale(zotero, services),
+            : LANGUAGE_FOLLOW_ZOTERO,
+        zoteroLocale: getZoteroLocale(zotero, services),
     }),
 }) {
     const status = document.getElementById('mktero-cache-status');

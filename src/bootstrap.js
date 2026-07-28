@@ -2,7 +2,7 @@ import {
     getMkteroLanguagePreference,
     getMinerUCacheEnabled,
     getMinerUApiKey,
-    getSystemLocale,
+    getZoteroLocale,
     observeMkteroLanguagePreference,
     openMinerUPreferences,
     registerMinerUPreferencesPane,
@@ -61,7 +61,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.rootURI = rootURI;
     const localization = createLocalization({
         preference: getMkteroLanguagePreference(Zotero),
-        systemLocale: getSystemLocale(
+        zoteroLocale: getZoteroLocale(
             Zotero,
             typeof Services === 'undefined' ? null : Services
         ),

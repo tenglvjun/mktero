@@ -4,7 +4,7 @@ import {
     getMkteroLanguagePreference,
     getMinerUCacheEnabled,
     getMinerUApiKey,
-    getSystemLocale,
+    getZoteroLocale,
     MKTERO_LANGUAGE_PREF,
     MINERU_API_KEY_PREF,
     MINERU_CACHE_ENABLED_PREF,
@@ -72,7 +72,7 @@ test('reads and persists the Mktero language preference', () => {
     ]);
 });
 
-test('uses system mode for invalid language preferences', () => {
+test('uses follow-Zotero mode for invalid language preferences', () => {
     const values = [];
     const zotero = {
         Prefs: {
@@ -88,9 +88,9 @@ test('uses system mode for invalid language preferences', () => {
     assert.deepEqual(values, ['system']);
 });
 
-test('prefers the system locale and falls back to the Zotero locale', () => {
+test('uses the Zotero locale and ignores the operating system locale', () => {
     assert.equal(
-        getSystemLocale(
+        getZoteroLocale(
             { locale: 'zh-CN' },
             {
                 locale: {
@@ -99,20 +99,23 @@ test('prefers the system locale and falls back to the Zotero locale', () => {
                 },
             }
         ),
-        'en-GB'
-    );
-    assert.equal(
-        getSystemLocale(
-            { locale: 'zh-CN' },
-            { locale: { appLocaleAsBCP47: 'fr-FR' } }
-        ),
         'zh-CN'
     );
     assert.equal(
-        getSystemLocale({}, { locale: { appLocaleAsBCP47: 'fr-FR' } }),
+        getZoteroLocale(
+            {},
+            { locale: { appLocaleAsBCP47: 'fr-FR' } }
+        ),
         'fr-FR'
     );
-    assert.equal(getSystemLocale({}, null), '');
+    assert.equal(
+        getZoteroLocale(
+            {},
+            { locale: { systemLocaleAsBCP47: 'zh-CN' } }
+        ),
+        ''
+    );
+    assert.equal(getZoteroLocale({}, null), '');
 });
 
 test('observes language changes and unregisters during shutdown', () => {

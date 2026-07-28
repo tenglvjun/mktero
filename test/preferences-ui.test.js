@@ -92,7 +92,7 @@ test('restores cache controls when clearing the cache fails', async () => {
     assert.equal(status.attributes['aria-busy'], 'false');
 });
 
-test('follows the system language until the user persists a selection', async () => {
+test('follows the Zotero language until the user persists a selection', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
             <h2 data-i18n="preferences.language.title">Language</h2>
@@ -109,7 +109,7 @@ test('follows the system language until the user persists a selection', async ()
     const { document } = dom.window;
     const persisted = [];
     const zotero = {
-        locale: 'fr-FR',
+        locale: 'zh-CN',
         Prefs: {
             get: () => 'system',
             set(key, value, global) {
@@ -128,41 +128,41 @@ test('follows the system language until the user persists a selection', async ()
     });
 
     await controller.init();
-    assert.equal(document.querySelector('h2').textContent, 'Language');
-    assert.equal(document.getElementById('mktero-language').value, 'system');
-    assert.equal(
-        document.getElementById('mktero-cache-status').textContent,
-        '2 cached documents, 1.5 KB'
-    );
-
-    const select = document.getElementById('mktero-language');
-    select.value = 'zh-CN';
-    select.dispatchEvent(new dom.window.Event('change'));
-    await new Promise(resolve => setImmediate(resolve));
-
-    assert.deepEqual(persisted, [{
-        key: 'extensions.mktero.language',
-        value: 'zh-CN',
-        global: true,
-    }]);
     assert.equal(document.querySelector('h2').textContent, '语言');
-    assert.equal(
-        document.querySelector('[data-i18n="preferences.cache.usageLabel"]')
-            .textContent,
-        '缓存用量'
-    );
+    assert.equal(document.getElementById('mktero-language').value, 'system');
     assert.equal(
         document.getElementById('mktero-cache-status').textContent,
         '2 个缓存文档，1.5 KB'
     );
 
-    controller.destroy();
+    const select = document.getElementById('mktero-language');
     select.value = 'en-US';
     select.dispatchEvent(new dom.window.Event('change'));
     await new Promise(resolve => setImmediate(resolve));
 
+    assert.deepEqual(persisted, [{
+        key: 'extensions.mktero.language',
+        value: 'en-US',
+        global: true,
+    }]);
+    assert.equal(document.querySelector('h2').textContent, 'Language');
+    assert.equal(
+        document.querySelector('[data-i18n="preferences.cache.usageLabel"]')
+            .textContent,
+        'Cache usage'
+    );
+    assert.equal(
+        document.getElementById('mktero-cache-status').textContent,
+        '2 cached documents, 1.5 KB'
+    );
+
+    controller.destroy();
+    select.value = 'zh-CN';
+    select.dispatchEvent(new dom.window.Event('change'));
+    await new Promise(resolve => setImmediate(resolve));
+
     assert.equal(persisted.length, 1);
-    assert.equal(document.querySelector('h2').textContent, '语言');
+    assert.equal(document.querySelector('h2').textContent, 'Language');
 });
 
 test('initializes an imported preferences fragment from Zotero capture-phase load', async () => {
