@@ -4,6 +4,9 @@
   "description": "Display opened Zotero PDFs as Markdown",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^24.15.0 || >=26.0.0"
+  },
   "scripts": {
     "test": "node --test",
     "build": "node scripts/build.mjs",

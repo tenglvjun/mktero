@@ -16,7 +16,9 @@ extension, including `Zotero`, `IOUtils`, `PathUtils`, `Components`,
 
 ## Commands
 
-Use Node.js 20 or newer.
+Use the Node.js version in `.node-version` (currently 24.15.0); it is the
+shared local and CI version source. Do not use Node.js 25, which is outside the
+supported dependency engine range.
 
 ```bash
 npm ci
