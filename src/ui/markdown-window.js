@@ -1,4 +1,5 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
+import { createLocalization } from '../i18n/localization.js';
 import { extractMarkdownOutline } from '../markdown/markdown-outline.js';
 import { createLoadingPresentation } from './markdown-loading-state.js';
 
@@ -16,6 +17,7 @@ export function createMarkdownTabView({
     zotero,
     stylesheetText = BUNDLED_MARKDOWN_STYLES,
     editorFactory = createInlineMarkdownEditor,
+    localization = createLocalization(),
 }) {
     return new MarkdownTabView({
         document,
@@ -23,16 +25,26 @@ export function createMarkdownTabView({
         zotero,
         stylesheetText,
         editorFactory,
+        localization,
     });
 }
 
 class MarkdownTabView {
-    constructor({ document, model, zotero, stylesheetText, editorFactory }) {
+    constructor({
+        document,
+        model,
+        zotero,
+        stylesheetText,
+        editorFactory,
+        localization,
+    }) {
+        this.localization = localization;
+        this.t = localization.t.bind(localization);
         if (!document?.createElementNS) {
-            throw new Error('The Zotero window cannot create the Markdown view');
+            throw new Error(this.t('error.markdownViewUnavailable'));
         }
         if (!stylesheetText) {
-            throw new Error('The bundled Markdown styles are unavailable');
+            throw new Error(this.t('error.markdownStylesUnavailable'));
         }
 
         this.document = document;
@@ -45,11 +57,12 @@ class MarkdownTabView {
         this.outlineVisible = true;
         this.outlineWidth = DEFAULT_OUTLINE_WIDTH;
         this.outlineResize = null;
+        this.renderedLanguage = localization.language;
 
         this.host = this.createElement('div', {
             class: 'mktero-tab-host',
             role: 'region',
-            'aria-label': 'Mktero Markdown viewer',
+            'aria-label': this.t('viewer.label'),
         });
         Object.assign(this.host.style, {
             display: 'block',
@@ -60,7 +73,7 @@ class MarkdownTabView {
             overflow: 'hidden',
         });
         if (!this.host.attachShadow) {
-            throw new Error('The Zotero window does not support an isolated Markdown view');
+            throw new Error(this.t('error.shadowRootUnavailable'));
         }
 
         this.root = this.createLayoutRoot();
@@ -74,6 +87,7 @@ class MarkdownTabView {
             initialMarkdown: '',
             resolveImageURL: source => this.resolveImageURL(source),
             openLink: href => this.openLink(href),
+            localization: this.localization,
         });
         this.syncOutline('');
         this.bindActions();
@@ -82,7 +96,8 @@ class MarkdownTabView {
     render(model = this.model) {
         this.model = model;
         const elements = this.elements;
-        const loadingView = createLoadingPresentation(model);
+        const languageChanged = this.syncLocalization();
+        const loadingView = createLoadingPresentation(model, this.t);
         const showContent = model.status === 'ready' || loadingView.preserveContent;
 
         elements.progress.hidden = !loadingView.visible;
@@ -118,7 +133,7 @@ class MarkdownTabView {
             const assetsChanged = this.syncAssetURLs();
             this.editor.setMarkdown(markdown);
             this.syncOutline(markdown);
-            if (assetsChanged) this.editor.refreshRendering();
+            if (assetsChanged || languageChanged) this.editor.refreshRendering();
             return;
         }
 
@@ -162,7 +177,7 @@ class MarkdownTabView {
             status: 'loading',
             progress: 0,
             preserveContent: false,
-        });
+        }, this.t);
         const progress = this.createElement('progress', {
             id: 'mktero-progress',
             max: '100',
@@ -193,7 +208,11 @@ class MarkdownTabView {
             { id: 'mktero-loading-detail' },
             initialLoading.detail
         );
-        const progressHeadingLabel = this.createElement('span', {}, 'Progress');
+        const progressHeadingLabel = this.createElement(
+            'span',
+            {},
+            this.t('loading.progress')
+        );
         const loadingProgressLabel = this.createElement(
             'strong',
             { id: 'mktero-loading-progress-label' },
@@ -242,13 +261,13 @@ class MarkdownTabView {
         });
         const editorSection = this.createElement('section', {
             class: 'markdown-editor',
-            'aria-label': 'Markdown 只读视图',
+            'aria-label': this.t('viewer.readOnly'),
         });
         editorSection.appendChild(editorHost);
         const outlineTitle = this.createElement(
             'h2',
             { class: 'markdown-outline-title' },
-            '目录'
+            this.t('viewer.outlineTitle')
         );
         const outlineList = this.createElement('ol', {
             class: 'markdown-outline-list',
@@ -256,7 +275,7 @@ class MarkdownTabView {
         const outline = this.createElement('aside', {
             id: 'mktero-outline',
             class: 'markdown-outline',
-            'aria-label': 'Markdown 目录',
+            'aria-label': this.t('viewer.outline'),
         });
         appendChildren(outline, outlineTitle, outlineList);
         outline.style.setProperty(
@@ -273,8 +292,8 @@ class MarkdownTabView {
             'aria-valuemin': String(MIN_OUTLINE_WIDTH),
             'aria-valuemax': String(MAX_OUTLINE_WIDTH),
             'aria-valuenow': String(this.outlineWidth),
-            'aria-label': '调整目录宽度，双击收起',
-            title: '调整目录宽度，双击收起',
+            'aria-label': this.t('viewer.outlineResize'),
+            title: this.t('viewer.outlineResize'),
         });
         const outlineToggle = this.createElement(
             'button',
@@ -284,8 +303,8 @@ class MarkdownTabView {
                 type: 'button',
                 'aria-controls': 'mktero-outline',
                 'aria-expanded': 'true',
-                'aria-label': '收起目录',
-                title: '收起目录',
+                'aria-label': this.t('viewer.outlineCollapse'),
+                title: this.t('viewer.outlineCollapse'),
             },
             '‹'
         );
@@ -313,11 +332,13 @@ class MarkdownTabView {
             loading,
             loadingTitle,
             loadingDetail,
+            progressHeadingLabel,
             loadingProgress,
             loadingProgressLabel,
             loadingHint,
             workspace,
             outline,
+            outlineTitle,
             outlineList,
             outlineResizer,
             outlineToggle,
@@ -370,6 +391,36 @@ class MarkdownTabView {
 
     syncContentVisibility(visible) {
         this.elements.workspace.hidden = !visible;
+    }
+
+    syncLocalization() {
+        const languageChanged = this.renderedLanguage !== this.localization.language;
+        this.renderedLanguage = this.localization.language;
+        this.host.setAttribute('aria-label', this.t('viewer.label'));
+        this.elements.progressHeadingLabel.textContent = this.t('loading.progress');
+        this.elements.editorSection.setAttribute(
+            'aria-label',
+            this.t('viewer.readOnly')
+        );
+        this.elements.outline.setAttribute('aria-label', this.t('viewer.outline'));
+        this.elements.outlineTitle.textContent = this.t('viewer.outlineTitle');
+        this.elements.outlineList.querySelector('.markdown-outline-empty')
+            ?.replaceChildren(this.t('viewer.outlineEmpty'));
+        this.syncOutlineControlLabels();
+        return languageChanged;
+    }
+
+    syncOutlineControlLabels() {
+        const resizeLabel = this.outlineVisible
+            ? this.t('viewer.outlineResize')
+            : this.t('viewer.outlineExpand');
+        this.elements.outlineResizer.setAttribute('aria-label', resizeLabel);
+        this.elements.outlineResizer.setAttribute('title', resizeLabel);
+        const toggleLabel = this.t(this.outlineVisible
+            ? 'viewer.outlineCollapse'
+            : 'viewer.outlineExpand');
+        this.elements.outlineToggle.setAttribute('aria-label', toggleLabel);
+        this.elements.outlineToggle.setAttribute('title', toggleLabel);
     }
 
     startOutlineResize(event) {
@@ -425,19 +476,12 @@ class MarkdownTabView {
             'is-outline-collapsed',
             !visible
         );
-        const label = visible
-            ? '调整目录宽度，双击收起'
-            : '展开目录';
-        this.elements.outlineResizer.setAttribute('aria-label', label);
-        this.elements.outlineResizer.setAttribute('title', label);
-        const toggleLabel = visible ? '收起目录' : '展开目录';
         this.elements.outlineToggle.textContent = visible ? '‹' : '›';
         this.elements.outlineToggle.setAttribute(
             'aria-expanded',
             String(visible)
         );
-        this.elements.outlineToggle.setAttribute('aria-label', toggleLabel);
-        this.elements.outlineToggle.setAttribute('title', toggleLabel);
+        this.syncOutlineControlLabels();
     }
 
     handleOutlineResizeKey(event) {
@@ -466,7 +510,7 @@ class MarkdownTabView {
             list.appendChild(this.createElement(
                 'li',
                 { class: 'markdown-outline-empty' },
-                '暂无目录'
+                this.t('viewer.outlineEmpty')
             ));
             return;
         }

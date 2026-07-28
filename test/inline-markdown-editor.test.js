@@ -474,7 +474,7 @@ test('previews a uniquely captioned table from its prose reference', () => {
     }));
 
     const popup = document.querySelector('.mktero-table-preview-popup');
-    assert.equal(popup?.getAttribute('aria-label'), '表格预览');
+    assert.equal(popup?.getAttribute('aria-label'), 'Table preview');
     assert.equal(
         popup?.querySelector('.mktero-table-preview-caption')?.textContent,
         'Table 5. Open-source model performance'
@@ -827,7 +827,7 @@ test('shows resolved reference text when a rendered citation is hovered', () => 
 
     const popup = document.querySelector('.mktero-citation-popup');
     assert.equal(popup?.getAttribute('role'), 'dialog');
-    assert.equal(popup?.getAttribute('aria-label'), '引用详情');
+    assert.equal(popup?.getAttribute('aria-label'), 'Citation details');
     assert.match(popup?.textContent || '', /Alpha A\. Numeric evidence\. Journal\. 2024\./);
     assert.equal(
         citations[0].getAttribute('aria-describedby'),
@@ -1135,7 +1135,7 @@ test('shows author affiliations instead of references for front-matter superscri
 
     assert.deepEqual(affiliations.map(marker => marker.textContent), ['1', '2']);
     assert.deepEqual(citations.map(citation => citation.textContent), ['1', '2', '1']);
-    assert.equal(citations[0].getAttribute('aria-label'), '查看作者单位 1');
+    assert.equal(citations[0].getAttribute('aria-label'), 'View author affiliation 1');
     assert.doesNotMatch(
         document.querySelector('.cm-content')?.textContent || '',
         /<\/?sup>/
@@ -1145,7 +1145,7 @@ test('shows author affiliations instead of references for front-matter superscri
         bubbles: true,
     }));
     let popup = document.querySelector('.mktero-citation-popup');
-    assert.equal(popup?.getAttribute('aria-label'), '作者单位');
+    assert.equal(popup?.getAttribute('aria-label'), 'Author affiliations');
     assert.match(
         popup?.textContent || '',
         /Department of Psychology, Stanford University\./
@@ -1176,7 +1176,7 @@ test('shows author affiliations instead of references for front-matter superscri
         bubbles: true,
     }));
     popup = document.querySelector('.mktero-citation-popup');
-    assert.equal(popup?.getAttribute('aria-label'), '引用详情');
+    assert.equal(popup?.getAttribute('aria-label'), 'Citation details');
     assert.match(popup?.textContent || '', /Actual cited paper/);
     assert.equal(editor.getMarkdown(), markdown);
 
@@ -1492,7 +1492,7 @@ test('renders an academic image description as a selectable read-only caption', 
         document.querySelector('.mktero-image-preview-image')?.getAttribute('alt'),
         captionText
     );
-    document.querySelector('[aria-label="关闭图片预览"]').click();
+    document.querySelector('[aria-label="Close image preview"]').click();
 
     caption.dispatchEvent(new dom.window.MouseEvent('dblclick', {
         bubbles: true,
@@ -1620,8 +1620,8 @@ test('previews a rendered image with zoom and drag controls', () => {
     assert.equal(document.querySelector('.cm-editor').hasAttribute('inert'), true);
     assert.equal(document.querySelector('.cm-editor').getAttribute('aria-hidden'), 'true');
 
-    const closeButton = dialog.querySelector('[aria-label="关闭图片预览"]');
-    const zoomOutButton = dialog.querySelector('[aria-label="缩小图片"]');
+    const closeButton = dialog.querySelector('[aria-label="Close image preview"]');
+    const zoomOutButton = dialog.querySelector('[aria-label="Zoom out"]');
     assert.equal(document.activeElement, closeButton);
     dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
         key: 'Tab',
@@ -1635,11 +1635,11 @@ test('previews a rendered image with zoom and drag controls', () => {
     }));
     assert.equal(document.activeElement, closeButton);
 
-    dialog.querySelector('[aria-label="放大图片"]').click();
+    dialog.querySelector('[aria-label="Zoom in"]').click();
     assert.equal(scale.textContent, '125%');
     assert.match(previewImage.style.transform, /scale\(1\.25\)/);
 
-    dialog.querySelector('[aria-label="缩小图片"]').click();
+    dialog.querySelector('[aria-label="Zoom out"]').click();
     assert.equal(scale.textContent, '100%');
     previewImage.dispatchEvent(new dom.window.MouseEvent('mousedown', {
         bubbles: true,

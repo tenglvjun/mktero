@@ -1,6 +1,9 @@
 import {
+    getMkteroLanguagePreference,
     getMinerUCacheEnabled,
     getMinerUApiKey,
+    getZoteroLocale,
+    observeMkteroLanguagePreference,
     openMinerUPreferences,
     registerMinerUPreferencesPane,
 } from './config/mineru-preferences.js';
@@ -19,6 +22,10 @@ import {
 } from './extractors/mineru-extractor.js';
 import { MinerUClient } from './mineru/mineru-client.js';
 import { createRuntimeAbortController } from './platform/abort-controller.js';
+import {
+    createLocalization,
+    translateEnglish,
+} from './i18n/localization.js';
 import { removeProviderBranding } from './ui/provider-neutral-copy.js';
 import { registerItemContextMenu } from './ui/item-context-menu.js';
 import { registerReaderToolbar } from './ui/reader-toolbar.js';
@@ -37,6 +44,8 @@ const runtime = {
     cache: null,
     rootURI: null,
     preferencePaneID: null,
+    localization: null,
+    disposeLanguageObserver: null,
     disposeToolbar: null,
     contextMenus: new Map(),
     controllers: new Map(),
@@ -47,9 +56,18 @@ globalThis.install = async function install() {};
 globalThis.startup = async function startup({ id, rootURI }) {
     runtime.id = id;
     runtime.rootURI = rootURI;
+    const localization = createLocalization({
+        preference: getMkteroLanguagePreference(Zotero),
+        systemLocale: getZoteroLocale(
+            Zotero,
+            typeof Services === 'undefined' ? null : Services
+        ),
+    });
+    runtime.localization = localization;
     runtime.presenter = new MarkdownTabPresenter({
         zotero: Zotero,
         rootURI,
+        localization,
     });
     const presenter = runtime.presenter;
     await Zotero.uiReadyPromise;
@@ -80,18 +98,18 @@ globalThis.startup = async function startup({ id, rootURI }) {
         zotero: Zotero,
         pluginID: id,
         rootURI,
+        translate: runtimeTranslate,
     });
     if (runtime.presenter !== presenter) {
         Zotero.PreferencePanes.unregister?.(preferencePaneID);
         return;
     }
     runtime.preferencePaneID = preferencePaneID;
-    runtime.disposeToolbar = registerReaderToolbar({
-        zotero: Zotero,
-        pluginID: id,
-        onOpen: openReaderAsMarkdown,
-        onError: handleOpenError,
-    });
+    runtime.disposeLanguageObserver = observeMkteroLanguagePreference(
+        Zotero,
+        refreshRuntimeLanguage
+    );
+    registerReaderToolbarAction();
     registerMainWindowContextMenu(Zotero.getMainWindow?.());
 
     Zotero.debug('Mktero: started');
@@ -99,6 +117,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
 
 globalThis.shutdown = function shutdown() {
     abortAllConversions();
+    runtime.disposeLanguageObserver?.();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();
     runtime.presenter?.dispose();
@@ -106,10 +125,12 @@ globalThis.shutdown = function shutdown() {
         Zotero.PreferencePanes.unregister?.(runtime.preferencePaneID);
     }
     runtime.disposeToolbar = null;
+    runtime.disposeLanguageObserver = null;
     runtime.presenter = null;
     runtime.service = null;
     runtime.cache = null;
     runtime.rootURI = null;
+    runtime.localization = null;
     runtime.preferencePaneID = null;
     runtime.id = null;
 };
@@ -147,7 +168,7 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
     );
     runtime.presenter.update(
         presentation,
-        createConversionLoadingChanges(previousResult)
+        createConversionLoadingChanges(previousResult, runtimeTranslate)
     );
 
     let lastLoggedProgress = null;
@@ -193,7 +214,11 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         }
         runtime.presenter?.update(
             presentation,
-            createConversionFailureChanges(userFacingError(error), previousResult)
+            createConversionFailureChanges(
+                userFacingError(error),
+                previousResult,
+                runtimeTranslate
+            )
         );
     }
     finally {
@@ -244,6 +269,7 @@ function registerMainWindowContextMenu(window) {
         rootURI: runtime.rootURI,
         onOpen: openItemAsMarkdown,
         onError: handleOpenError,
+        translate: runtimeTranslate,
     });
     if (dispose) runtime.contextMenus.set(window, dispose);
 }
@@ -274,18 +300,50 @@ function createZoteroAbortController() {
     });
 }
 
+function registerReaderToolbarAction() {
+    if (!runtime.id) return;
+    runtime.disposeToolbar = registerReaderToolbar({
+        zotero: Zotero,
+        pluginID: runtime.id,
+        onOpen: openReaderAsMarkdown,
+        onError: handleOpenError,
+        translate: runtimeTranslate,
+    });
+}
+
+function refreshRuntimeLanguage() {
+    if (!runtime.localization) return;
+    runtime.localization.setPreference(getMkteroLanguagePreference(Zotero));
+    runtime.presenter?.relocalize();
+
+    if (runtime.disposeToolbar) {
+        runtime.disposeToolbar();
+        runtime.disposeToolbar = null;
+        registerReaderToolbarAction();
+    }
+
+    const windows = [...runtime.contextMenus.keys()];
+    disposeAllContextMenus();
+    for (const window of windows) registerMainWindowContextMenu(window);
+}
+
+function runtimeTranslate(key, variables) {
+    return runtime.localization?.t(key, variables)
+        ?? translateEnglish(key, variables);
+}
+
 function userFacingError(error) {
     if (error instanceof MinerUConfigurationError) {
-        return 'Configure an API Token in Settings → Mktero, then try again.';
+        return runtimeTranslate('error.apiTokenMissing');
     }
     if (error?.code === 'MINERU_API_KEY_INVALID') {
-        return 'The API Token is invalid or expired. Update it in Settings → Mktero.';
+        return runtimeTranslate('error.apiTokenInvalid');
     }
     const message = error instanceof Error ? error.message : String(error);
     if (/no extractable text/i.test(message)) {
-        return 'This PDF has no extractable text. A scanned PDF may require OCR.';
+        return runtimeTranslate('error.noExtractableText');
     }
     return message
         ? removeProviderBranding(message)
-        : 'PDF conversion failed.';
+        : runtimeTranslate('error.conversionFailed');
 }

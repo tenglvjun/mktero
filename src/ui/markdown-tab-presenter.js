@@ -1,3 +1,4 @@
+import { createLocalization } from '../i18n/localization.js';
 import { createMarkdownTabView } from './markdown-window.js';
 
 const TAB_TYPE = 'mktero';
@@ -6,10 +7,16 @@ const TAB_ICON_STYLE_ID = 'mktero-markdown-tab-icon-style';
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
 export class MarkdownTabPresenter {
-    constructor({ zotero, rootURI, createView = createMarkdownTabView }) {
+    constructor({
+        zotero,
+        rootURI,
+        createView = createMarkdownTabView,
+        localization = createLocalization(),
+    }) {
         this.zotero = zotero;
         this.rootURI = rootURI;
         this.createView = createView;
+        this.localization = localization;
         this.presentations = new Map();
         this.sessionStatePatch = null;
         this.tabIconStyle = null;
@@ -22,7 +29,7 @@ export class MarkdownTabPresenter {
         const owner = this.zotero.getMainWindow?.();
         const tabs = owner?.Zotero_Tabs;
         if (!owner?.document || !tabs?.add || !tabs?.select) {
-            throw new Error('The Zotero tab manager is not available');
+            throw new Error(this.localization.t('error.tabManagerUnavailable'));
         }
         this.ensureTabIconStyle(owner.document);
 
@@ -34,12 +41,17 @@ export class MarkdownTabPresenter {
             return { ...existing, created: false };
         }
 
-        const model = createInitialModel(itemID, onReparse);
+        const model = createInitialModel(
+            itemID,
+            onReparse,
+            this.localization.t.bind(this.localization)
+        );
         const view = this.createView({
             document: owner.document,
             rootURI: this.rootURI,
             model,
             zotero: this.zotero,
+            localization: this.localization,
         });
         view.render(model);
         let presentation;
@@ -101,6 +113,24 @@ export class MarkdownTabPresenter {
             current.tabs.rename?.(current.tabID, changes.title);
         }
         current.view.render(current.model);
+    }
+
+    relocalize() {
+        for (const presentation of this.presentations.values()) {
+            if (presentation.closed) continue;
+            if (presentation.model.status !== 'ready') {
+                presentation.model.title = this.localization.t(
+                    presentation.model.preserveContent
+                        ? 'loading.reparsingTitle'
+                        : 'loading.convertingTitle'
+                );
+                presentation.tabs.rename?.(
+                    presentation.tabID,
+                    presentation.model.title
+                );
+            }
+            presentation.view.render(presentation.model);
+        }
     }
 
     closeAll() {
@@ -184,10 +214,10 @@ function isMkteroSessionTab(tab) {
     return tab?.type === TAB_TYPE && tab.data?.mkteroItemID !== undefined;
 }
 
-function createInitialModel(itemID, onReparse) {
+function createInitialModel(itemID, onReparse, translate) {
     return {
         itemID,
-        title: 'Converting PDF…',
+        title: translate('loading.convertingTitle'),
         status: 'loading',
         progress: 0,
         markdown: '',

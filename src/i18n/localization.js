@@ -1,0 +1,221 @@
+export const LANGUAGE_SYSTEM = 'system';
+export const LANGUAGE_ENGLISH = 'en-US';
+export const LANGUAGE_SIMPLIFIED_CHINESE = 'zh-CN';
+
+export const LANGUAGE_OPTIONS = Object.freeze([
+    LANGUAGE_SYSTEM,
+    LANGUAGE_ENGLISH,
+    LANGUAGE_SIMPLIFIED_CHINESE,
+]);
+
+const MESSAGES = Object.freeze({
+    [LANGUAGE_ENGLISH]: Object.freeze({
+        'preferences.language.title': 'Language',
+        'preferences.language.description': 'Choose the language used by Mktero.',
+        'preferences.language.label': 'Display language',
+        'preferences.language.help': 'Follow Zotero\'s language or use a language only for Mktero',
+        'preferences.language.system': 'Follow system',
+        'preferences.language.english': 'English',
+        'preferences.language.chinese': 'Simplified Chinese',
+        'preferences.conversion.title': 'PDF conversion',
+        'preferences.conversion.description': 'Connect the service Mktero uses to turn PDFs into readable Markdown.',
+        'preferences.apiToken.label': 'API Token',
+        'preferences.apiToken.help': 'Required when converting a PDF that is not already cached',
+        'preferences.apiToken.storage': 'Stored locally in this Zotero profile',
+        'preferences.apiToken.manage': 'Manage API Tokens',
+        'preferences.cache.title': 'Local Markdown cache',
+        'preferences.cache.description': 'Control how converted documents and figures are stored on this device.',
+        'preferences.cache.reuseLabel': 'Reuse conversion results',
+        'preferences.cache.reuseHelp': 'Open unchanged PDFs without converting and downloading them again',
+        'preferences.cache.usageLabel': 'Cache usage',
+        'preferences.cache.calculating': 'Calculating cache size...',
+        'preferences.cache.clear': 'Clear cache',
+        'preferences.cache.note': 'Cached Markdown and figures are stored unencrypted in this Zotero profile and are not synced.',
+        'preferences.cache.stats.none': 'No cached documents',
+        'preferences.cache.stats.one': '1 cached document, {size}',
+        'preferences.cache.stats.many': '{count} cached documents, {size}',
+        'preferences.cache.unavailable': 'Cache information unavailable',
+        'preferences.cache.clearing': 'Clearing cache...',
+        'preferences.cache.clearFailed': 'Cache could not be cleared',
+        'menu.readAsMarkdown': 'Read as Markdown with Mktero',
+        'toolbar.openMarkdown': 'Open as Markdown',
+        'toolbar.openMarkdownAria': 'Open PDF as Markdown',
+        'loading.progress': 'Progress',
+        'loading.convertingTitle': 'Converting PDF…',
+        'loading.reparsingTitle': 'Reparsing PDF…',
+        'loading.preparing': 'Preparing the PDF.',
+        'loading.uploading': 'Uploading the PDF for conversion.',
+        'loading.converting': 'The PDF is being converted to Markdown.',
+        'loading.downloading': 'Downloading and preparing the Markdown result.',
+        'loading.defaultHint': 'This can take a few minutes. Keep this tab open until conversion finishes.',
+        'loading.reparseHint': 'The current Markdown remains available until the new result is ready.',
+        'tab.reparseFailed': 'Reparse failed: {message}',
+        'viewer.label': 'Mktero Markdown viewer',
+        'viewer.readOnly': 'Read-only Markdown view',
+        'viewer.outline': 'Markdown outline',
+        'viewer.outlineTitle': 'Outline',
+        'viewer.outlineResize': 'Resize the outline; double-click to collapse',
+        'viewer.outlineCollapse': 'Collapse outline',
+        'viewer.outlineExpand': 'Expand outline',
+        'viewer.outlineEmpty': 'No headings',
+        'editor.taskItem': 'Markdown task item',
+        'image.preview': 'Image preview',
+        'image.fallbackAlt': 'Image',
+        'image.previewNamed': 'Preview image: {alt}',
+        'image.zoomOut': 'Zoom out',
+        'image.zoomIn': 'Zoom in',
+        'image.closePreview': 'Close image preview',
+        'table.preview': 'Table preview',
+        'figure.preview': 'Figure preview',
+        'citation.details': 'Citation details',
+        'citation.affiliations': 'Author affiliations',
+        'reference.previewAndJump': 'Preview and jump to {label}',
+        'citation.viewAffiliationOne': 'View author affiliation {number}',
+        'citation.viewAffiliationMany': 'View {count} author affiliations',
+        'citation.viewReferenceNumber': 'View citation {number}',
+        'citation.viewReferenceText': 'View citation: {text}',
+        'citation.viewReferenceMany': 'View {count} citations',
+        'error.apiTokenMissing': 'Configure an API Token in Settings -> Mktero, then try again.',
+        'error.apiTokenInvalid': 'The API Token is invalid or expired. Update it in Settings -> Mktero.',
+        'error.noExtractableText': 'This PDF has no extractable text. A scanned PDF may require OCR.',
+        'error.conversionFailed': 'PDF conversion failed.',
+        'error.preferencesUnavailable': 'Zotero preference panes are unavailable',
+        'error.readerHandlersUnavailable': 'Zotero Reader event handlers are unavailable',
+        'error.tabManagerUnavailable': 'The Zotero tab manager is not available',
+        'error.markdownViewUnavailable': 'The Zotero window cannot create the Markdown view',
+        'error.markdownStylesUnavailable': 'The bundled Markdown styles are unavailable',
+        'error.shadowRootUnavailable': 'The Zotero window does not support an isolated Markdown view',
+        'error.editorParentRequired': 'An editor parent element is required',
+        'error.editorWindowRequired': 'The editor requires a browser window',
+    }),
+    [LANGUAGE_SIMPLIFIED_CHINESE]: Object.freeze({
+        'preferences.language.title': '语言',
+        'preferences.language.description': '选择 Mktero 使用的界面语言。',
+        'preferences.language.label': '显示语言',
+        'preferences.language.help': '跟随 Zotero 的语言，或仅为 Mktero 指定语言',
+        'preferences.language.system': '跟随系统',
+        'preferences.language.english': '英语',
+        'preferences.language.chinese': '简体中文',
+        'preferences.conversion.title': 'PDF 转换',
+        'preferences.conversion.description': '连接 Mktero 用来将 PDF 转换为易读 Markdown 的服务。',
+        'preferences.apiToken.label': 'API Token',
+        'preferences.apiToken.help': '转换尚未缓存的 PDF 时需要此 Token',
+        'preferences.apiToken.storage': '保存在当前 Zotero 配置文件中',
+        'preferences.apiToken.manage': '管理 API Token',
+        'preferences.cache.title': '本地 Markdown 缓存',
+        'preferences.cache.description': '管理转换后的文档和图片在此设备上的存储方式。',
+        'preferences.cache.reuseLabel': '复用转换结果',
+        'preferences.cache.reuseHelp': '直接打开未发生变化的 PDF，无需重新转换和下载',
+        'preferences.cache.usageLabel': '缓存用量',
+        'preferences.cache.calculating': '正在计算缓存大小...',
+        'preferences.cache.clear': '清空缓存',
+        'preferences.cache.note': '缓存的 Markdown 和图片未加密，仅保存在当前 Zotero 配置文件中且不会同步。',
+        'preferences.cache.stats.none': '没有缓存文档',
+        'preferences.cache.stats.one': '1 个缓存文档，{size}',
+        'preferences.cache.stats.many': '{count} 个缓存文档，{size}',
+        'preferences.cache.unavailable': '无法获取缓存信息',
+        'preferences.cache.clearing': '正在清空缓存...',
+        'preferences.cache.clearFailed': '无法清空缓存',
+        'menu.readAsMarkdown': '使用 Mktero 阅读 Markdown',
+        'toolbar.openMarkdown': '以 Markdown 打开',
+        'toolbar.openMarkdownAria': '以 Markdown 打开 PDF',
+        'loading.progress': '进度',
+        'loading.convertingTitle': '正在转换 PDF…',
+        'loading.reparsingTitle': '正在重新解析 PDF…',
+        'loading.preparing': '正在准备 PDF。',
+        'loading.uploading': '正在上传 PDF 以进行转换。',
+        'loading.converting': '正在将 PDF 转换为 Markdown。',
+        'loading.downloading': '正在下载并准备 Markdown 结果。',
+        'loading.defaultHint': '这可能需要几分钟。转换完成前请保持此标签页打开。',
+        'loading.reparseHint': '新结果准备完成前，当前 Markdown 仍可继续阅读。',
+        'tab.reparseFailed': '重新解析失败：{message}',
+        'viewer.label': 'Mktero Markdown 阅读器',
+        'viewer.readOnly': 'Markdown 只读视图',
+        'viewer.outline': 'Markdown 目录',
+        'viewer.outlineTitle': '目录',
+        'viewer.outlineResize': '调整目录宽度，双击收起',
+        'viewer.outlineCollapse': '收起目录',
+        'viewer.outlineExpand': '展开目录',
+        'viewer.outlineEmpty': '暂无目录',
+        'editor.taskItem': 'Markdown 任务项',
+        'image.preview': '图片预览',
+        'image.fallbackAlt': '图片',
+        'image.previewNamed': '预览图片：{alt}',
+        'image.zoomOut': '缩小图片',
+        'image.zoomIn': '放大图片',
+        'image.closePreview': '关闭图片预览',
+        'table.preview': '表格预览',
+        'figure.preview': '图片预览',
+        'citation.details': '引用详情',
+        'citation.affiliations': '作者单位',
+        'reference.previewAndJump': '预览并跳转到 {label}',
+        'citation.viewAffiliationOne': '查看作者单位 {number}',
+        'citation.viewAffiliationMany': '查看 {count} 个作者单位',
+        'citation.viewReferenceNumber': '查看引用 {number}',
+        'citation.viewReferenceText': '查看引用：{text}',
+        'citation.viewReferenceMany': '查看 {count} 条引用',
+        'error.apiTokenMissing': '请先在“设置 -> Mktero”中配置 API Token，然后重试。',
+        'error.apiTokenInvalid': 'API Token 无效或已过期，请在“设置 -> Mktero”中更新。',
+        'error.noExtractableText': '此 PDF 没有可提取的文本。扫描版 PDF 可能需要 OCR。',
+        'error.conversionFailed': 'PDF 转换失败。',
+        'error.preferencesUnavailable': 'Zotero 设置页面不可用',
+        'error.readerHandlersUnavailable': 'Zotero 阅读器事件处理不可用',
+        'error.tabManagerUnavailable': 'Zotero 标签页管理器不可用',
+        'error.markdownViewUnavailable': 'Zotero 窗口无法创建 Markdown 视图',
+        'error.markdownStylesUnavailable': '内置 Markdown 样式不可用',
+        'error.shadowRootUnavailable': 'Zotero 窗口不支持隔离的 Markdown 视图',
+        'error.editorParentRequired': '缺少编辑器容器元素',
+        'error.editorWindowRequired': '编辑器需要浏览器窗口',
+    }),
+});
+
+export function normalizeLanguagePreference(value) {
+    const language = String(value || '').trim();
+    return LANGUAGE_OPTIONS.includes(language) ? language : LANGUAGE_SYSTEM;
+}
+
+export function resolveLanguage(preference, systemLocale) {
+    const normalizedPreference = normalizeLanguagePreference(preference);
+    if (normalizedPreference !== LANGUAGE_SYSTEM) return normalizedPreference;
+    const locale = String(systemLocale || '').trim().replaceAll('_', '-').toLowerCase();
+    if (locale === 'zh' || locale.startsWith('zh-')) {
+        return LANGUAGE_SIMPLIFIED_CHINESE;
+    }
+    return LANGUAGE_ENGLISH;
+}
+
+export function createLocalization({
+    preference = LANGUAGE_SYSTEM,
+    systemLocale = LANGUAGE_ENGLISH,
+} = {}) {
+    let normalizedPreference = normalizeLanguagePreference(preference);
+    let language = resolveLanguage(normalizedPreference, systemLocale);
+    return {
+        get preference() {
+            return normalizedPreference;
+        },
+        get language() {
+            return language;
+        },
+        t(key, variables) {
+            return translateMessage(language, key, variables);
+        },
+        setPreference(value) {
+            normalizedPreference = normalizeLanguagePreference(value);
+            language = resolveLanguage(normalizedPreference, systemLocale);
+            return language;
+        },
+    };
+}
+
+export function translateMessage(language, key, variables = {}) {
+    const messages = MESSAGES[language] || MESSAGES[LANGUAGE_ENGLISH];
+    const template = messages[key] ?? MESSAGES[LANGUAGE_ENGLISH][key] ?? key;
+    return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (match, name) => (
+        Object.hasOwn(variables, name) ? String(variables[name]) : match
+    ));
+}
+
+export function translateEnglish(key, variables) {
+    return translateMessage(LANGUAGE_ENGLISH, key, variables);
+}

@@ -6,6 +6,7 @@ import {
     findInlineMathMatches,
     safeMarkdownLinkURL,
 } from '../markdown/markdown-html.js';
+import { translateEnglish } from '../i18n/localization.js';
 import {
     findAcademicFigureGroups,
     findAcademicTableGroups,
@@ -38,6 +39,7 @@ class RenderedMarkdownWidget extends WidgetType {
         renderVersion,
         citations = [],
         extraClassName = '',
+        translate = translateEnglish,
     }) {
         super();
         this.source = source;
@@ -50,6 +52,7 @@ class RenderedMarkdownWidget extends WidgetType {
         this.citations = citations;
         this.citationKey = citations.map(citation => citation.key).join('|');
         this.extraClassName = extraClassName;
+        this.translate = translate;
     }
 
     eq(other) {
@@ -82,7 +85,11 @@ class RenderedMarkdownWidget extends WidgetType {
             if (event.target?.closest?.('img')) return;
             openRenderedLink(event, this.openLink);
         });
-        installRenderedImagePreview(container, this.openImagePreview);
+        installRenderedImagePreview(
+            container,
+            this.openImagePreview,
+            this.translate
+        );
         return container;
     }
 
@@ -111,13 +118,14 @@ class TextMarkerWidget extends WidgetType {
 }
 
 class TaskCheckboxWidget extends WidgetType {
-    constructor(checked) {
+    constructor(checked, label) {
         super();
         this.checked = checked;
+        this.label = label;
     }
 
     eq(other) {
-        return this.checked === other.checked;
+        return this.checked === other.checked && this.label === other.label;
     }
 
     toDOM(view) {
@@ -128,7 +136,7 @@ class TaskCheckboxWidget extends WidgetType {
         checkbox.type = 'checkbox';
         checkbox.checked = this.checked;
         checkbox.disabled = true;
-        checkbox.setAttribute('aria-label', 'Markdown task item');
+        checkbox.setAttribute('aria-label', this.label);
         wrapper.appendChild(checkbox);
         return wrapper;
     }
@@ -148,6 +156,7 @@ export function createInlineRenderingExtension({
     activateCitation,
     activateTableReference,
     activateFigureReference,
+    translate = translateEnglish,
 }) {
     const context = {
         resolveImageURL,
@@ -159,6 +168,7 @@ export function createInlineRenderingExtension({
         activateCitation,
         activateTableReference,
         activateFigureReference,
+        translate,
         renderVersion: 0,
         highlightedReferenceID: null,
         highlightedTableID: null,
@@ -446,7 +456,7 @@ function decorateCitations(state, decorations, context) {
         }
         decorations.push(Decoration.mark({
             class: citationClassName(citation),
-            attributes: citationAttributes(citation),
+            attributes: citationAttributes(citation, context.translate),
         }).range(citation.from, citation.to));
     }
     decorateSuperscriptResidue(decorations, superscriptContent);
@@ -595,7 +605,9 @@ function decoratePreviewReferences(
             attributes: {
                 role: 'link',
                 tabindex: '0',
-                'aria-label': `预览并跳转到 ${target.label}`,
+                'aria-label': context.translate('reference.previewAndJump', {
+                    label: target.label,
+                }),
                 [targetAttribute]: target.id,
             },
         }).range(reference.from, reference.to));
@@ -618,20 +630,24 @@ function citationRangeIsExcluded(state, position) {
     return false;
 }
 
-function citationLabel(targets, kind) {
+function citationLabel(targets, kind, translate) {
     if (kind === 'affiliation') {
         if (targets.length === 1) {
-            return `查看作者单位 ${targets[0].number}`;
+            return translate('citation.viewAffiliationOne', {
+                number: targets[0].number,
+            });
         }
-        return `查看 ${targets.length} 个作者单位`;
+        return translate('citation.viewAffiliationMany', {
+            count: targets.length,
+        });
     }
     if (targets.length === 1) {
         const target = targets[0];
         return Number.isInteger(target.number)
-            ? `查看引用 ${target.number}`
-            : `查看引用：${target.text}`;
+            ? translate('citation.viewReferenceNumber', { number: target.number })
+            : translate('citation.viewReferenceText', { text: target.text });
     }
-    return `查看 ${targets.length} 条引用`;
+    return translate('citation.viewReferenceMany', { count: targets.length });
 }
 
 function citationElement(event, view) {
@@ -729,7 +745,9 @@ function openCitationPopup(citation, view, context, focusFirst = false) {
     context.citationPopup?.open({
         anchor: citation,
         targets: targetsForCitation(citation, context),
-        label: kind === 'affiliation' ? '作者单位' : '引用详情',
+        label: context.translate(kind === 'affiliation'
+            ? 'citation.affiliations'
+            : 'citation.details'),
         focusFirst,
         onActivate(target) {
             context.activateCitation?.(view, target);
@@ -856,7 +874,8 @@ function decorateSyntaxNode(node, state, decorations, context) {
         if (task) {
             decorations.push(Decoration.replace({
                 widget: new TaskCheckboxWidget(
-                    /x/i.test(state.sliceDoc(node.from, node.to))
+                    /x/i.test(state.sliceDoc(node.from, node.to)),
+                    context.translate('editor.taskItem')
                 ),
             }).range(node.from, node.to));
         }
@@ -1076,11 +1095,18 @@ function renderedCitationDescriptors(state, context, from, to) {
             state,
             citation,
             from,
-            to
+            to,
+            context.translate
         ));
 }
 
-function renderedCitationDescriptor(state, citation, rangeFrom, rangeTo) {
+function renderedCitationDescriptor(
+    state,
+    citation,
+    rangeFrom,
+    rangeTo,
+    translate
+) {
     const markerRange = visibleCitationMarkerRange(
         state,
         citation,
@@ -1099,7 +1125,7 @@ function renderedCitationDescriptor(state, citation, rangeFrom, rangeTo) {
         targetOffset: visibleMarkdownText(targetPrefix).length,
         targetLength: target.length,
         className: citationClassName(citation),
-        attributes: citationAttributes(citation),
+        attributes: citationAttributes(citation, translate),
     };
 }
 
@@ -1145,11 +1171,11 @@ function citationClassName(citation) {
     ].filter(Boolean).join(' ');
 }
 
-function citationAttributes(citation) {
+function citationAttributes(citation, translate) {
     return {
         role: 'link',
         tabindex: '0',
-        'aria-label': citationLabel(citation.references, citation.kind),
+        'aria-label': citationLabel(citation.references, citation.kind, translate),
         'data-citation-ids': citation.referenceIds.join(' '),
         'data-citation-kind': citation.kind,
     };

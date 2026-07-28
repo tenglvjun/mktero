@@ -1,4 +1,5 @@
 import { renderMarkdownHTML } from '../markdown/markdown-html.js';
+import { translateEnglish } from '../i18n/localization.js';
 
 export function appendRenderedMarkdown(
     container,
@@ -35,13 +36,17 @@ export function openRenderedLink(event, openLink) {
     return true;
 }
 
-export function installRenderedImagePreview(container, openImagePreview) {
+export function installRenderedImagePreview(
+    container,
+    openImagePreview,
+    translate = translateEnglish
+) {
     for (const image of container.querySelectorAll('img')) {
-        const alt = image.getAttribute('alt') || '图片';
+        const alt = image.getAttribute('alt') || translate('image.fallbackAlt');
         image.setAttribute('role', 'button');
         image.setAttribute('tabindex', '0');
         image.setAttribute('aria-haspopup', 'dialog');
-        image.setAttribute('aria-label', `预览图片：${alt}`);
+        image.setAttribute('aria-label', translate('image.previewNamed', { alt }));
     }
     container.addEventListener('mousedown', event => {
         if (!event.target?.closest?.('img')) return;

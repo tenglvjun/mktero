@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('ships MinerU token, cache preferences, and Markdown UI assets', async () => {
+test('ships language, MinerU token, cache preferences, and Markdown UI assets', async () => {
     const [
         prefs,
         pane,
@@ -23,6 +23,12 @@ test('ships MinerU token, cache preferences, and Markdown UI assets', async () =
 
     assert.match(prefs, /pref\("extensions\.mktero\.mineruApiKey", ""\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.cacheEnabled", true\)/);
+    assert.match(prefs, /pref\("extensions\.mktero\.language", "system"\)/);
+    assert.match(pane, /id="mktero-language"/);
+    assert.match(pane, /preference="extensions\.mktero\.language"/);
+    assert.match(pane, /value="system"/);
+    assert.match(pane, /value="en-US"/);
+    assert.match(pane, /value="zh-CN"/);
     assert.match(pane, /preference="extensions\.mktero\.mineruApiKey"/);
     assert.match(pane, /preference="extensions\.mktero\.cacheEnabled"/);
     assert.match(pane, /id="mktero-clear-cache"/);
@@ -37,7 +43,7 @@ test('ships MinerU token, cache preferences, and Markdown UI assets', async () =
     assert.doesNotMatch(markdownView, /'mktero-reparse'/);
     assert.match(markdownView, /__MKTERO_MARKDOWN_STYLES__/);
     assert.doesNotMatch(markdownView, /STYLESHEET_CACHE_KEY/);
-    assert.match(markdownView, /bundled Markdown styles are unavailable/);
+    assert.match(markdownView, /error\.markdownStylesUnavailable/);
     assert.match(tabPresenter, /TAB_ICON = 'markdown'/);
     assert.match(buildScript, /ui\/preferences\.js/);
     assert.match(buildScript, /ui\/icons\/markdown\.svg/);
@@ -67,8 +73,8 @@ test('presents every preference group as one cohesive settings card', async () =
         readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
     ]);
 
-    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 2);
-    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 2);
+    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 3);
     assert.match(
         pane,
         /id="mktero-mineru-api-key"[\s\S]*aria-describedby="mktero-token-help mktero-token-storage-note"/

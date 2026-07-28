@@ -95,7 +95,8 @@
     width: min(48%, 460px);
 }
 
-.mktero-field-control input {
+.mktero-field-control input,
+.mktero-field-control select {
     box-sizing: border-box;
     width: 100%;
     min-height: 34px;
@@ -107,11 +108,13 @@
     font: inherit;
 }
 
-.mktero-field-control input:hover {
+.mktero-field-control input:hover,
+.mktero-field-control select:hover {
     border-color: rgba(90, 90, 90, 0.55);
 }
 
-.mktero-field-control input:focus {
+.mktero-field-control input:focus,
+.mktero-field-control select:focus {
     border-color: AccentColor;
     outline: 2px solid color-mix(in srgb, AccentColor 28%, transparent);
     outline-offset: 0;

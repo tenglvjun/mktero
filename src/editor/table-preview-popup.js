@@ -1,7 +1,12 @@
 import { createAnchoredPopup } from './anchored-popup.js';
+import { createLocalization } from '../i18n/localization.js';
 import { appendRenderedMarkdown } from './rendered-markdown-dom.js';
 
-export function createTablePreviewPopup(parent, { resolveImageURL } = {}) {
+export function createTablePreviewPopup(parent, {
+    resolveImageURL,
+    localization = createLocalization(),
+} = {}) {
+    const t = localization.t.bind(localization);
     const anchoredPopup = createAnchoredPopup(parent, {
         className: 'mktero-table-preview-popup',
         idPrefix: 'mktero-table-preview-popup',
@@ -13,7 +18,7 @@ export function createTablePreviewPopup(parent, { resolveImageURL } = {}) {
             if (!target?.table?.source) return;
             anchoredPopup.open({
                 anchor,
-                label: '表格预览',
+                label: t('table.preview'),
                 renderContent({ document }) {
                     return createPreviewContent(
                         document,

@@ -1,4 +1,14 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
+import {
+    getMkteroLanguagePreference,
+    getZoteroLocale,
+    setMkteroLanguagePreference,
+} from '../config/mineru-preferences.js';
+import {
+    createLocalization,
+    LANGUAGE_SYSTEM,
+    translateEnglish,
+} from '../i18n/localization.js';
 
 export function registerPreferencesPaneLoader({ document, initialize }) {
     const initializations = new WeakMap();
@@ -16,18 +26,35 @@ export function registerPreferencesPaneLoader({ document, initialize }) {
     return () => document.removeEventListener('load', handleLoad, true);
 }
 
-export function createPreferencesController({ document, zotero, cache }) {
+export function createPreferencesController({
+    document,
+    zotero,
+    cache,
+    services = typeof Services === 'undefined' ? null : Services,
+    localization = createLocalization({
+        preference: zotero.Prefs?.get
+            ? getMkteroLanguagePreference(zotero)
+            : LANGUAGE_SYSTEM,
+        systemLocale: getZoteroLocale(zotero, services),
+    }),
+}) {
     const status = document.getElementById('mktero-cache-status');
     const clearButton = document.getElementById('mktero-clear-cache');
+    const languageSelect = document.getElementById('mktero-language');
+    const t = (key, variables) => localization.t(key, variables);
+
+    function localize() {
+        localizePreferencesDocument(document, localization);
+    }
 
     async function refresh() {
         status.setAttribute('aria-busy', 'true');
         try {
-            status.textContent = formatCacheStats(await cache.getStats());
+            status.textContent = formatCacheStats(await cache.getStats(), t);
         }
         catch (error) {
             zotero.logError?.(error);
-            status.textContent = 'Cache information unavailable';
+            status.textContent = t('preferences.cache.unavailable');
         }
         finally {
             status.setAttribute('aria-busy', 'false');
@@ -37,14 +64,14 @@ export function createPreferencesController({ document, zotero, cache }) {
     async function clear() {
         clearButton.disabled = true;
         status.setAttribute('aria-busy', 'true');
-        status.textContent = 'Clearing cache...';
+        status.textContent = t('preferences.cache.clearing');
         try {
             await cache.clear();
             await refresh();
         }
         catch (error) {
             zotero.logError?.(error);
-            status.textContent = 'Cache could not be cleared';
+            status.textContent = t('preferences.cache.clearFailed');
         }
         finally {
             clearButton.disabled = false;
@@ -52,18 +79,48 @@ export function createPreferencesController({ document, zotero, cache }) {
         }
     }
 
+    async function changeLanguage() {
+        const preference = zotero.Prefs?.set
+            ? setMkteroLanguagePreference(zotero, languageSelect.value)
+            : languageSelect.value;
+        localization.setPreference(preference);
+        languageSelect.value = localization.preference;
+        localize();
+        await refresh();
+    }
+
     return {
         async init() {
             clearButton.addEventListener('click', clear);
+            if (languageSelect) {
+                languageSelect.value = localization.preference;
+                languageSelect.addEventListener('change', changeLanguage);
+            }
+            localize();
             await refresh();
         },
     };
 }
 
-export function formatCacheStats({ entries, sizeBytes }) {
-    if (!entries) return 'No cached documents';
-    const documentLabel = entries === 1 ? 'document' : 'documents';
-    return `${entries} cached ${documentLabel}, ${formatBytes(sizeBytes)}`;
+export function localizePreferencesDocument(document, localization) {
+    for (const element of document.querySelectorAll?.('[data-i18n]') || []) {
+        element.textContent = localization.t(element.getAttribute('data-i18n'));
+    }
+    document.getElementById('mktero-preferences-pane')
+        ?.setAttribute('lang', localization.language);
+}
+
+export function formatCacheStats({ entries, sizeBytes }, translate = translateEnglish) {
+    if (!entries) return translate('preferences.cache.stats.none');
+    return translate(
+        entries === 1
+            ? 'preferences.cache.stats.one'
+            : 'preferences.cache.stats.many',
+        {
+            count: entries,
+            size: formatBytes(sizeBytes),
+        }
+    );
 }
 
 function formatBytes(value) {

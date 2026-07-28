@@ -1,6 +1,10 @@
 import { createAnchoredPopup } from './anchored-popup.js';
+import { createLocalization } from '../i18n/localization.js';
 
-export function createCitationPopup(parent) {
+export function createCitationPopup(parent, {
+    localization = createLocalization(),
+} = {}) {
+    const t = localization.t.bind(localization);
     const anchoredPopup = createAnchoredPopup(parent, {
         className: 'mktero-citation-popup',
         idPrefix: 'mktero-citation-popup',
@@ -9,7 +13,7 @@ export function createCitationPopup(parent) {
     const open = ({
         anchor,
         targets,
-        label = '引用详情',
+        label = t('citation.details'),
         onActivate,
         focusFirst = false,
     }) => {

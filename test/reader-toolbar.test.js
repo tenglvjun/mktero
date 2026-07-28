@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
+import { translateMessage } from '../src/i18n/localization.js';
 import { registerReaderToolbar } from '../src/ui/reader-toolbar.js';
 
 function createDocument() {
@@ -14,6 +15,10 @@ function createDocument() {
                 title: '',
                 type: '',
                 dataset: {},
+                attributes: {},
+                setAttribute(name, value) {
+                    this.attributes[name] = String(value);
+                },
                 addEventListener(type, handler) {
                     listeners.set(type, handler);
                 },
@@ -57,6 +62,34 @@ test('adds an action to PDF reader toolbars and opens that reader item', async (
     assert.equal(appended.length, 1);
     assert.equal(appended[0].textContent, 'MD');
     assert.deepEqual(opened, [42]);
+});
+
+test('localizes the reader toolbar action', () => {
+    let handler;
+    const zotero = {
+        Reader: {
+            registerEventListener(_type, value) {
+                handler = value;
+            },
+            unregisterEventListener() {},
+        },
+    };
+    registerReaderToolbar({
+        zotero,
+        pluginID: 'mktero@example.com',
+        onOpen: () => {},
+        translate: (key, variables) => translateMessage('zh-CN', key, variables),
+    });
+    const appended = [];
+
+    handler({
+        reader: { type: 'pdf', itemID: 42 },
+        doc: createDocument(),
+        append: element => appended.push(element),
+    });
+
+    assert.equal(appended[0].title, '以 Markdown 打开');
+    assert.equal(appended[0].attributes['aria-label'], '以 Markdown 打开 PDF');
 });
 
 test('does not add the action to non-PDF readers', () => {

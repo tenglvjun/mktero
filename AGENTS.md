@@ -126,9 +126,9 @@ preference values as untrusted input.
   Prefer injected platform functions in code that needs network, time, files,
   timers, or Zotero APIs.
 - Add comments only for constraints or non-obvious Zotero/browser behavior.
-- Follow the language of the surrounding UI surface. Preferences and Zotero
-  menu copy are currently English; Markdown reader controls are currently
-  Chinese.
+- Put user-visible Mktero copy in `src/i18n/localization.js` and keep the
+  English and Simplified Chinese message sets in sync. Do not hardcode a UI
+  language in preferences, Zotero menus, or Markdown reader controls.
 - Use `node:test` and `node:assert/strict`. Test names should describe observable
   behavior, and tests must not call the real MinerU service.
 - Pair renderer/parser changes with normal, boundary, and malicious-input

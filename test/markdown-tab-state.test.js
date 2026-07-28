@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { translateMessage } from '../src/i18n/localization.js';
 import {
     createConversionFailureChanges,
     createConversionLoadingChanges,
@@ -98,4 +99,23 @@ test('clears figures when a successful reparse has no assets', () => {
         progress: 100,
         preserveContent: false,
     });
+});
+
+test('localizes reparse loading and failure states', () => {
+    const translate = (key, variables) => translateMessage('zh-CN', key, variables);
+    const snapshot = snapshotReadyResult({
+        title: '论文',
+        status: 'ready',
+        markdown: '# 论文',
+        warnings: [],
+    });
+
+    assert.equal(
+        createConversionLoadingChanges(snapshot, translate).title,
+        '正在重新解析 PDF…'
+    );
+    assert.deepEqual(
+        createConversionFailureChanges('服务不可用', snapshot, translate).warnings,
+        ['重新解析失败：服务不可用']
+    );
 });

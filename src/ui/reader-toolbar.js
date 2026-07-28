@@ -1,9 +1,17 @@
+import { translateEnglish } from '../i18n/localization.js';
+
 const BUTTON_SELECTOR = '.mktero-markdown-button';
 const CUSTOM_SECTIONS_SELECTOR = '.toolbar .end .custom-sections';
 
-export function registerReaderToolbar({ zotero, pluginID, onOpen, onError = defaultErrorHandler }) {
+export function registerReaderToolbar({
+    zotero,
+    pluginID,
+    onOpen,
+    onError = defaultErrorHandler,
+    translate = translateEnglish,
+}) {
     if (!zotero?.Reader?.registerEventListener) {
-        throw new Error('Zotero Reader event handlers are unavailable');
+        throw new Error(translate('error.readerHandlersUnavailable'));
     }
 
     let active = true;
@@ -15,9 +23,9 @@ export function registerReaderToolbar({ zotero, pluginID, onOpen, onError = defa
         button.type = 'button';
         button.className = 'toolbar-button mktero-markdown-button';
         button.textContent = 'MD';
-        button.title = 'Open as Markdown';
+        button.title = translate('toolbar.openMarkdown');
         button.dataset.mkteroItemID = String(reader.itemID);
-        button.setAttribute?.('aria-label', 'Open PDF as Markdown');
+        button.setAttribute?.('aria-label', translate('toolbar.openMarkdownAria'));
         button.addEventListener('click', () => {
             Promise.resolve(onOpen(reader)).catch(error => onError(error, reader));
         });

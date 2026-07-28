@@ -1,3 +1,5 @@
+import { translateEnglish } from '../i18n/localization.js';
+
 const READY_RESULT_FIELDS = [
     'title',
     'markdown',
@@ -19,11 +21,14 @@ export function snapshotReadyResult(model) {
     return snapshot;
 }
 
-export function createConversionLoadingChanges(previousResult) {
+export function createConversionLoadingChanges(
+    previousResult,
+    translate = translateEnglish
+) {
     if (previousResult) {
         return {
             ...previousResult,
-            title: 'Reparsing PDF…',
+            title: translate('loading.reparsingTitle'),
             status: 'loading',
             progress: 0,
             error: '',
@@ -56,7 +61,11 @@ export function createConversionReadyChanges(result) {
     };
 }
 
-export function createConversionFailureChanges(message, previousResult) {
+export function createConversionFailureChanges(
+    message,
+    previousResult,
+    translate = translateEnglish
+) {
     if (previousResult) {
         return {
             ...previousResult,
@@ -64,7 +73,7 @@ export function createConversionFailureChanges(message, previousResult) {
             progress: 100,
             warnings: [
                 ...(previousResult.warnings || []),
-                `Reparse failed: ${message}`,
+                translate('tab.reparseFailed', { message }),
             ],
             error: '',
             preserveContent: false,

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EditorView } from '@codemirror/view';
 import { JSDOM } from 'jsdom';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
+import { createLocalization } from '../src/i18n/localization.js';
 
 test('previews a captioned image from its prose figure reference', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
@@ -29,7 +30,7 @@ test('previews a captioned image from its prose figure reference', () => {
     }));
 
     const popup = document.querySelector('.mktero-figure-preview-popup');
-    assert.equal(popup?.getAttribute('aria-label'), '图片预览');
+    assert.equal(popup?.getAttribute('aria-label'), 'Figure preview');
     assert.equal(
         popup?.querySelector('img')?.getAttribute('src'),
         'blob:mktero-images/flow.png'
@@ -39,6 +40,40 @@ test('previews a captioned image from its prose figure reference', () => {
         'Figure 1. PRISMA flowchart'
     );
     assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('localizes figure reference controls', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: [
+            '结果见 Figure 1。',
+            '',
+            '![Figure 1. 流程图](images/flow.png)',
+        ].join('\n'),
+        resolveImageURL: path => `blob:mktero-${path}`,
+        localization: createLocalization({ preference: 'zh-CN' }),
+    });
+    const reference = document.querySelector('.cm-mktero-figure-reference');
+
+    assert.equal(
+        reference.getAttribute('aria-label'),
+        '预览并跳转到 Figure 1.'
+    );
+    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.equal(
+        document.querySelector('.mktero-figure-preview-popup')
+            ?.getAttribute('aria-label'),
+        '图片预览'
+    );
 
     editor.destroy();
     dom.window.close();

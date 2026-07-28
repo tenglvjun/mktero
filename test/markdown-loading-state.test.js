@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { translateMessage } from '../src/i18n/localization.js';
 import { createLoadingPresentation } from '../src/ui/markdown-loading-state.js';
 
 test('describes provider-neutral loading stages', () => {
@@ -60,5 +61,20 @@ test('hides the loading presentation outside conversion and clamps invalid progr
     assert.equal(
         createLoadingPresentation({ status: 'loading', progress: Number.NaN }).progress,
         0
+    );
+});
+
+test('localizes conversion progress', () => {
+    const presentation = createLoadingPresentation({
+        status: 'loading',
+        progress: 42,
+        preserveContent: false,
+    }, (key, variables) => translateMessage('zh-CN', key, variables));
+
+    assert.equal(presentation.title, '正在转换 PDF…');
+    assert.equal(presentation.detail, '正在将 PDF 转换为 Markdown。');
+    assert.equal(
+        presentation.hint,
+        '这可能需要几分钟。转换完成前请保持此标签页打开。'
     );
 });

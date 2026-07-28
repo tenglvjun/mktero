@@ -2,8 +2,9 @@ import {
     CONVERSION_PROGRESS,
     normalizeConversionProgress,
 } from '../core/conversion-progress.js';
+import { translateEnglish } from '../i18n/localization.js';
 
-export function createLoadingPresentation(model = {}) {
+export function createLoadingPresentation(model = {}, translate = translateEnglish) {
     if (model.status !== 'loading') return { visible: false };
 
     const progress = normalizeConversionProgress(model.progress);
@@ -13,23 +14,25 @@ export function createLoadingPresentation(model = {}) {
         preserveContent,
         progress,
         progressLabel: `${progress}%`,
-        title: preserveContent ? 'Reparsing PDF…' : 'Converting PDF…',
-        detail: progressDetail(progress),
+        title: translate(preserveContent
+            ? 'loading.reparsingTitle'
+            : 'loading.convertingTitle'),
+        detail: progressDetail(progress, translate),
         hint: preserveContent
-            ? 'The current Markdown remains available until the new result is ready.'
-            : 'This can take a few minutes. Keep this tab open until conversion finishes.',
+            ? translate('loading.reparseHint')
+            : translate('loading.defaultHint'),
     };
 }
 
-function progressDetail(progress) {
+function progressDetail(progress, translate) {
     if (progress < CONVERSION_PROGRESS.UPLOADING) {
-        return 'Preparing the PDF.';
+        return translate('loading.preparing');
     }
     if (progress < CONVERSION_PROGRESS.PARSING) {
-        return 'Uploading the PDF for conversion.';
+        return translate('loading.uploading');
     }
     if (progress < CONVERSION_PROGRESS.DOWNLOADING) {
-        return 'The PDF is being converted to Markdown.';
+        return translate('loading.converting');
     }
-    return 'Downloading and preparing the Markdown result.';
+    return translate('loading.downloading');
 }

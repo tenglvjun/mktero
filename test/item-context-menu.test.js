@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
+import { translateMessage } from '../src/i18n/localization.js';
 import { registerItemContextMenu } from '../src/ui/item-context-menu.js';
 
 function createMenuHarness(selectedItems = []) {
@@ -142,4 +143,22 @@ test('reports failures from the shared Markdown opening flow', async () => {
     await new Promise(resolve => setImmediate(resolve));
 
     assert.deepEqual(reported, [failure]);
+});
+
+test('localizes the item menu action', () => {
+    const harness = createMenuHarness([pdfItem(42)]);
+    registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: () => {},
+        onError: assert.fail,
+        translate: (key, variables) => translateMessage('zh-CN', key, variables),
+    });
+
+    assert.equal(
+        harness.document.querySelector('#mktero-read-as-markdown')
+            .getAttribute('label'),
+        '使用 Mktero 阅读 Markdown'
+    );
 });

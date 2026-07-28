@@ -26,6 +26,7 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
 - 识别正文中的表格与图片引用；悬停时显示预览，点击后跳转并临时高亮对应图表。
 - 点击文档图片可打开全屏预览，支持 25% 至 400% 缩放和拖动查看。
 - 按 PDF 内容与解析配置缓存 Markdown 和图片；未变化的 PDF 可直接从本地缓存打开。
+- 支持英文和简体中文界面；默认跟随 Zotero/系统语言，也可在设置中单独指定。
 
 ## 使用要求
 
@@ -58,10 +59,12 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
 
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |
+| Display language | 跟随系统 | 支持英文和简体中文；不支持的系统语言回退为英文 |
 | API Token | 空 | 缓存未命中时必填，用于调用 MinerU API |
 | Reuse conversion results | 开启 | 复用相同 PDF 内容和解析配置对应的本地结果 |
 
 API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不会加密。
+手动选择的界面语言会保存在当前 Zotero 配置文件中，并在下次启动时继续使用。
 
 ## 使用方法
 
@@ -133,6 +136,7 @@ XPI 中的文件顺序和时间戳固定；相同源码与依赖连续构建会�
 src/bootstrap.js   Zotero 生命周期与依赖装配
 src/mineru/        MinerU API、解析配置和结果解包
 src/cache/         Markdown 与图片缓存
+src/i18n/          英文、简体中文消息与语言选择逻辑
 src/markdown/      Markdown 规范化、分析和安全渲染
 src/editor/        CodeMirror 只读视图与引用/图片交互
 src/ui/            Zotero 工具栏、菜单、标签页和设置页

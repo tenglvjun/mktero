@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
+import { createLocalization } from '../src/i18n/localization.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
 
 const MARKDOWN_STYLES = readFileSync(
@@ -47,6 +48,7 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         zotero,
         stylesheetText: options.stylesheetText ?? MARKDOWN_STYLES,
         editorFactory: options.editorFactory ?? createTestInlineEditor,
+        localization: options.localization,
     });
     view.render(model);
     return { document, view, shadow: view.host.shadowRoot };
@@ -146,7 +148,7 @@ test('resizes and toggles the Markdown outline from its edge', () => {
         assert.equal(toggle.textContent, '‹');
         assert.equal(toggle.getAttribute('aria-controls'), 'mktero-outline');
         assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-        assert.equal(toggle.getAttribute('aria-label'), '收起目录');
+        assert.equal(toggle.getAttribute('aria-label'), 'Collapse outline');
         assert.equal(outline.hidden, false);
 
         dispatchMouseEvent(resizer, 'mousedown', 256);
@@ -173,8 +175,8 @@ test('resizes and toggles the Markdown outline from its edge', () => {
         assert.equal(outline.hidden, true);
         assert.equal(toggle.textContent, '›');
         assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-        assert.equal(toggle.getAttribute('aria-label'), '展开目录');
-        assert.equal(resizer.getAttribute('aria-label'), '展开目录');
+        assert.equal(toggle.getAttribute('aria-label'), 'Expand outline');
+        assert.equal(resizer.getAttribute('aria-label'), 'Expand outline');
 
         toggle.click();
         assert.equal(outline.hidden, false);
@@ -215,8 +217,8 @@ test('shows a live Markdown outline and scrolls to the selected heading', () => 
     const outline = shadow.querySelector('#mktero-outline');
     const buttons = [...outline.querySelectorAll('.markdown-outline-link')];
 
-    assert.equal(outline.getAttribute('aria-label'), 'Markdown 目录');
-    assert.equal(shadow.querySelector('.markdown-outline-title').textContent, '目录');
+    assert.equal(outline.getAttribute('aria-label'), 'Markdown outline');
+    assert.equal(shadow.querySelector('.markdown-outline-title').textContent, 'Outline');
     assert.deepEqual(buttons.map(button => button.textContent), [
         'Overview',
         'Methods',
@@ -259,7 +261,7 @@ test('shows an empty outline state when Markdown has no headings', () => {
     }));
 
     assert.equal(shadow.querySelectorAll('.markdown-outline-link').length, 0);
-    assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
+    assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, 'No headings');
     view.destroy();
 });
 
@@ -356,6 +358,36 @@ test('updates conversion progress directly in the inline view', () => {
     );
     assert.equal(shadow.querySelector('#mktero-loading-progress').value, 10);
     assert.equal(shadow.querySelector('#mktero-loading-progress-label').textContent, '10%');
+});
+
+test('localizes and refreshes the Markdown viewer chrome', () => {
+    const localization = createLocalization({ preference: 'zh-CN' });
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '正文',
+    });
+    const { view, shadow } = createView(model, {}, { localization });
+
+    assert.equal(view.root.getAttribute('aria-label'), 'Mktero Markdown 阅读器');
+    assert.equal(
+        shadow.querySelector('.markdown-editor').getAttribute('aria-label'),
+        'Markdown 只读视图'
+    );
+    assert.equal(shadow.querySelector('.markdown-outline-title').textContent, '目录');
+    assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
+
+    localization.setPreference('en-US');
+    view.render(model);
+
+    assert.equal(view.root.getAttribute('aria-label'), 'Mktero Markdown viewer');
+    assert.equal(
+        shadow.querySelector('.markdown-editor').getAttribute('aria-label'),
+        'Read-only Markdown view'
+    );
+    assert.equal(shadow.querySelector('.markdown-outline-title').textContent, 'Outline');
+    assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, 'No headings');
+    view.destroy();
 });
 
 test('routes rendered Markdown links through Zotero instead of navigating the main window', () => {

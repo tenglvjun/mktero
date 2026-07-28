@@ -3,6 +3,7 @@ import { searchKeymap } from '@codemirror/search';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import { createLocalization } from '../i18n/localization.js';
 import {
     createInlineRenderingExtension,
     refreshInlineRendering,
@@ -75,18 +76,22 @@ export function createInlineMarkdownEditor({
     initialMarkdown,
     resolveImageURL,
     openLink,
+    localization = createLocalization(),
 }) {
-    if (!parent) throw new Error('An editor parent element is required');
+    const t = localization.t.bind(localization);
+    if (!parent) throw new Error(t('error.editorParentRequired'));
     const ownerWindow = parent.ownerDocument?.defaultView;
-    if (!ownerWindow) throw new Error('The editor requires a browser window');
+    if (!ownerWindow) throw new Error(t('error.editorWindowRequired'));
     acquireDOMGlobals(ownerWindow);
-    const imagePreview = createImagePreview(parent);
-    const citationPopup = createCitationPopup(parent);
+    const imagePreview = createImagePreview(parent, { localization });
+    const citationPopup = createCitationPopup(parent, { localization });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
         resolveImageURL,
+        localization,
     });
     const figurePreviewPopup = createFigurePreviewPopup(parent, {
         resolveImageURL,
+        localization,
     });
     let destroyed = false;
     const citationHighlight = createTimedTargetHighlight({
@@ -164,6 +169,7 @@ export function createInlineMarkdownEditor({
                         referenceFeatures.table.highlight.activate,
                     activateFigureReference:
                         referenceFeatures.figure.highlight.activate,
+                    translate: t,
                 }),
                 EditorView.editable.of(false),
                 EditorState.readOnly.of(true),

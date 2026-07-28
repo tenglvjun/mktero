@@ -14,6 +14,7 @@ export class RenderedTableWidget extends WidgetType {
         openImagePreview,
         renderVersion,
         highlighted = false,
+        translate,
     }) {
         super();
         this.source = source;
@@ -23,6 +24,7 @@ export class RenderedTableWidget extends WidgetType {
         this.openImagePreview = openImagePreview;
         this.renderVersion = renderVersion;
         this.highlighted = highlighted;
+        this.translate = translate;
     }
 
     eq(other) {
@@ -53,7 +55,11 @@ export class RenderedTableWidget extends WidgetType {
             if (event.target?.closest?.('img')) return;
             openRenderedLink(event, this.openLink);
         });
-        installRenderedImagePreview(container, this.openImagePreview);
+        installRenderedImagePreview(
+            container,
+            this.openImagePreview,
+            this.translate
+        );
         return container;
     }
 

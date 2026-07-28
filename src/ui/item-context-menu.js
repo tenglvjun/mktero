@@ -1,3 +1,5 @@
+import { translateEnglish } from '../i18n/localization.js';
+
 const ITEM_MENU_ID = 'zotero-itemmenu';
 const MENU_ITEM_ID = 'mktero-read-as-markdown';
 
@@ -7,6 +9,7 @@ export function registerItemContextMenu({
     rootURI,
     onOpen,
     onError,
+    translate = translateEnglish,
 }) {
     const document = window?.document;
     const menu = document?.getElementById?.(ITEM_MENU_ID);
@@ -18,7 +21,7 @@ export function registerItemContextMenu({
         || document.createElement('menuitem');
     menuItem.id = MENU_ITEM_ID;
     menuItem.hidden = true;
-    menuItem.setAttribute('label', 'Read as Markdown with Mktero');
+    menuItem.setAttribute('label', translate('menu.readAsMarkdown'));
     menuItem.setAttribute('class', 'menuitem-iconic');
     menuItem.setAttribute('image', `${rootURI}ui/icons/markdown.svg`);
 

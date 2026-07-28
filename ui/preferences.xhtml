@@ -1,17 +1,49 @@
 <vbox id="mktero-preferences-pane"
       class="main-section"
       xmlns:html="http://www.w3.org/1999/xhtml">
-    <groupbox class="mktero-preferences-section" aria-labelledby="mktero-mineru-title">
+    <groupbox class="mktero-preferences-section" aria-labelledby="mktero-language-title">
         <html:div class="mktero-section-heading">
-            <html:h2 id="mktero-mineru-title">PDF conversion</html:h2>
-            <html:p>Connect the service Mktero uses to turn PDFs into readable Markdown.</html:p>
+            <html:h2 id="mktero-language-title"
+                     data-i18n="preferences.language.title">Language</html:h2>
+            <html:p data-i18n="preferences.language.description">Choose the language used by Mktero.</html:p>
         </html:div>
 
         <html:div class="mktero-settings-card">
             <html:div class="mktero-setting-row mktero-field-row">
                 <html:span class="mktero-setting-copy">
-                    <html:label for="mktero-mineru-api-key"><html:strong>API Token</html:strong></html:label>
-                    <html:small id="mktero-token-help">Required when converting a PDF that is not already cached</html:small>
+                    <html:label for="mktero-language"><html:strong data-i18n="preferences.language.label">Display language</html:strong></html:label>
+                    <html:small id="mktero-language-help"
+                                data-i18n="preferences.language.help">Follow Zotero's language or use a language only for Mktero</html:small>
+                </html:span>
+                <html:span class="mktero-field-control mktero-language-control">
+                    <html:select id="mktero-language"
+                                 preference="extensions.mktero.language"
+                                 aria-describedby="mktero-language-help">
+                        <html:option value="system"
+                                     data-i18n="preferences.language.system">Follow system</html:option>
+                        <html:option value="en-US"
+                                     data-i18n="preferences.language.english">English</html:option>
+                        <html:option value="zh-CN"
+                                     data-i18n="preferences.language.chinese">Simplified Chinese</html:option>
+                    </html:select>
+                </html:span>
+            </html:div>
+        </html:div>
+    </groupbox>
+
+    <groupbox class="mktero-preferences-section" aria-labelledby="mktero-mineru-title">
+        <html:div class="mktero-section-heading">
+            <html:h2 id="mktero-mineru-title"
+                     data-i18n="preferences.conversion.title">PDF conversion</html:h2>
+            <html:p data-i18n="preferences.conversion.description">Connect the service Mktero uses to turn PDFs into readable Markdown.</html:p>
+        </html:div>
+
+        <html:div class="mktero-settings-card">
+            <html:div class="mktero-setting-row mktero-field-row">
+                <html:span class="mktero-setting-copy">
+                    <html:label for="mktero-mineru-api-key"><html:strong data-i18n="preferences.apiToken.label">API Token</html:strong></html:label>
+                    <html:small id="mktero-token-help"
+                                data-i18n="preferences.apiToken.help">Required when converting a PDF that is not already cached</html:small>
                 </html:span>
                 <html:span class="mktero-field-control mktero-token-control">
                     <html:input id="mktero-mineru-api-key"
@@ -21,9 +53,11 @@
                                 autocomplete="off"
                                 spellcheck="false" />
                     <html:span class="mktero-field-meta">
-                        <html:small id="mktero-token-storage-note">Stored locally in this Zotero profile</html:small>
+                        <html:small id="mktero-token-storage-note"
+                                    data-i18n="preferences.apiToken.storage">Stored locally in this Zotero profile</html:small>
                         <label is="zotero-text-link"
-                               href="https://mineru.net/apiManage/token">Manage API Tokens</label>
+                               href="https://mineru.net/apiManage/token"
+                               data-i18n="preferences.apiToken.manage">Manage API Tokens</label>
                     </html:span>
                 </html:span>
             </html:div>
@@ -34,16 +68,17 @@
               class="mktero-preferences-section"
               aria-labelledby="mktero-cache-title">
         <html:div class="mktero-section-heading">
-            <html:h2 id="mktero-cache-title">Local Markdown cache</html:h2>
-            <html:p>Control how converted documents and figures are stored on this device.</html:p>
+            <html:h2 id="mktero-cache-title"
+                     data-i18n="preferences.cache.title">Local Markdown cache</html:h2>
+            <html:p data-i18n="preferences.cache.description">Control how converted documents and figures are stored on this device.</html:p>
         </html:div>
 
         <html:div class="mktero-settings-card">
             <html:label class="mktero-setting-row mktero-switch-row"
                         for="mktero-cache-enabled">
                 <html:span class="mktero-setting-copy">
-                    <html:strong>Reuse conversion results</html:strong>
-                    <html:small>Open unchanged PDFs without converting and downloading them again</html:small>
+                    <html:strong data-i18n="preferences.cache.reuseLabel">Reuse conversion results</html:strong>
+                    <html:small data-i18n="preferences.cache.reuseHelp">Open unchanged PDFs without converting and downloading them again</html:small>
                 </html:span>
                 <html:span class="mktero-switch-control">
                     <html:input id="mktero-cache-enabled"
@@ -57,16 +92,20 @@
 
             <html:div class="mktero-setting-row mktero-cache-usage-row">
                 <html:span class="mktero-setting-copy">
-                    <html:strong>Cache usage</html:strong>
+                    <html:strong data-i18n="preferences.cache.usageLabel">Cache usage</html:strong>
                     <html:small id="mktero-cache-status"
                                 role="status"
                                 aria-live="polite"
-                                aria-busy="true">Calculating cache size...</html:small>
+                                aria-busy="true"
+                                data-i18n="preferences.cache.calculating">Calculating cache size...</html:small>
                 </html:span>
-                <html:button id="mktero-clear-cache" type="button">Clear cache</html:button>
+                <html:button id="mktero-clear-cache"
+                             type="button"
+                             data-i18n="preferences.cache.clear">Clear cache</html:button>
             </html:div>
 
-            <html:small class="mktero-card-note">
+            <html:small class="mktero-card-note"
+                        data-i18n="preferences.cache.note">
                 Cached Markdown and figures are stored unencrypted in this Zotero profile and are not synced.
             </html:small>
         </html:div>

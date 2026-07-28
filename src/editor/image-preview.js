@@ -1,10 +1,15 @@
+import { createLocalization } from '../i18n/localization.js';
+
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
 const SCALE_STEP = 0.25;
 
-export function createImagePreview(parent) {
+export function createImagePreview(parent, {
+    localization = createLocalization(),
+} = {}) {
     const document = parent.ownerDocument;
     const ownerWindow = document.defaultView;
+    const t = localization.t.bind(localization);
     let dialog = null;
     let image = null;
     let scaleOutput = null;
@@ -140,7 +145,7 @@ export function createImagePreview(parent) {
         dialog.className = 'mktero-image-preview';
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
-        dialog.setAttribute('aria-label', '图片预览');
+        dialog.setAttribute('aria-label', t('image.preview'));
 
         const stage = document.createElement('div');
         stage.className = 'mktero-image-preview-stage';
@@ -165,12 +170,20 @@ export function createImagePreview(parent) {
 
         const controls = document.createElement('div');
         controls.className = 'mktero-image-preview-controls';
-        zoomOutButton = createButton('缩小图片', '−', () => changeScale(-SCALE_STEP));
+        zoomOutButton = createButton(
+            t('image.zoomOut'),
+            '−',
+            () => changeScale(-SCALE_STEP)
+        );
         scaleOutput = document.createElement('output');
         scaleOutput.className = 'mktero-image-preview-scale';
         scaleOutput.setAttribute('aria-live', 'polite');
-        zoomInButton = createButton('放大图片', '+', () => changeScale(SCALE_STEP));
-        const closeButton = createButton('关闭图片预览', '×', close);
+        zoomInButton = createButton(
+            t('image.zoomIn'),
+            '+',
+            () => changeScale(SCALE_STEP)
+        );
+        const closeButton = createButton(t('image.closePreview'), '×', close);
         controls.append(zoomOutButton, scaleOutput, zoomInButton, closeButton);
 
         dialog.append(stage, controls);
