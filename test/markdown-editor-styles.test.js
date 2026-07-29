@@ -301,13 +301,25 @@ test('styles Zotero-colored PDF annotations and their note popup', () => {
     const noteMarker = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note'
     );
-    assert.match(noteMarker, /display:\s*inline-block/);
-    assert.match(noteMarker, /width:\s*12px/);
-    assert.match(noteMarker, /height:\s*12px/);
-    assert.match(
-        noteMarker,
-        /background:\s*var\(--mktero-annotation-color\)/
+    assert.match(noteMarker, /position:\s*relative/);
+    assert.match(noteMarker, /display:\s*inline/);
+    assert.match(noteMarker, /width:\s*0/);
+    assert.match(noteMarker, /height:\s*0/);
+
+    const noteIcon = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-icon'
     );
+    assert.match(noteIcon, /position:\s*absolute/);
+    assert.match(noteIcon, /top:\s*-1\.05em/);
+    assert.match(noteIcon, /left:\s*-6px/);
+    assert.match(noteIcon, /width:\s*15px/);
+    assert.match(noteIcon, /height:\s*15px/);
+
+    const noteBubble = ruleBody([
+        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-bubble,',
+        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-line',
+    ].join('\n'));
+    assert.match(noteBubble, /stroke:\s*currentColor/);
 
     const popup = ruleBody('.mktero-annotation-popup');
     assert.match(popup, /position:\s*fixed/);

@@ -8,6 +8,7 @@ import {
 } from '../src/editor/pdf-annotations.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const translate = (key, variables = {}) => {
     if (key === 'annotation.page') return `Page ${variables.page}`;
     if (key === 'annotation.view') return `View ${variables.text}`;
@@ -50,6 +51,13 @@ test('creates rendered annotations in the XHTML namespace', () => {
     assert.equal(noteMarker?.namespaceURI, XHTML_NAMESPACE);
     assert.equal(noteMarker?.getAttribute('aria-hidden'), 'true');
     assert.equal(noteMarker?.textContent, '');
+    assert.equal(annotation.firstElementChild, noteMarker);
+    const icon = noteMarker.querySelector(
+        '.cm-mktero-pdf-annotation-note-icon'
+    );
+    assert.equal(icon?.namespaceURI, SVG_NAMESPACE);
+    assert.equal(icon?.getAttribute('viewBox'), '0 0 16 16');
+    assert.equal(icon?.querySelectorAll('path').length, 2);
     assert.equal(annotation.textContent, 'Visible');
 
     document.createElement = createElement;

@@ -703,37 +703,62 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note {
     position: relative;
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    box-sizing: border-box;
-    margin-inline: 3px 1px;
-    border: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
-    border-radius: 2px;
-    background: var(--mktero-annotation-color);
-    box-shadow: 0 1px 1px rgb(31 35 40 / 16%);
-    vertical-align: 0.08em;
+    z-index: 2;
+    display: inline;
+    width: 0;
+    height: 0;
+    color: color-mix(
+        in srgb,
+        var(--mktero-annotation-color) 58%,
+        var(--text)
+    );
+    line-height: 0;
     cursor: pointer;
 }
 
-.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note::after {
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-icon {
     position: absolute;
-    top: -1px;
-    right: -1px;
-    width: 4px;
-    height: 4px;
-    border-bottom: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
-    border-left: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
-    background: var(--surface);
-    content: "";
+    top: -1.05em;
+    left: -6px;
+    width: 15px;
+    height: 15px;
+    overflow: visible;
+    filter: drop-shadow(0 1px 1px rgb(31 35 40 / 18%));
+    transform-origin: center;
+    transition: transform 120ms ease, filter 120ms ease;
 }
 
-.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note:hover {
-    box-shadow: 0 0 0 2px color-mix(
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-bubble,
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-line {
+    stroke: currentColor;
+    vector-effect: non-scaling-stroke;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-bubble {
+    fill: color-mix(
         in srgb,
-        var(--mktero-annotation-color) 35%,
-        transparent
+        var(--surface) 88%,
+        var(--mktero-annotation-color)
     );
+    stroke-width: 1.35;
+    stroke-linejoin: round;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-line {
+    fill: none;
+    stroke-width: 1.25;
+    stroke-linecap: round;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note:hover
+    .cm-mktero-pdf-annotation-note-icon {
+    filter: drop-shadow(0 2px 2px rgb(31 35 40 / 24%));
+    transform: scale(1.08);
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note:active
+    .cm-mktero-pdf-annotation-note-icon {
+    transform: scale(0.96);
 }
 
 .mktero-annotation-popup {

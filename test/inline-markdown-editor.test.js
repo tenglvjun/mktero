@@ -132,6 +132,9 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
         markers[0].namespaceURI,
         'http://www.w3.org/1999/xhtml'
     );
+    assert.ok(markers[0].querySelector(
+        '.cm-mktero-pdf-annotation-note-icon'
+    ));
     assert.match(
         markers[0].getAttribute('style') || '',
         /--mktero-annotation-color:\s*#ffd400/
@@ -141,6 +144,11 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
             ?.getAttribute('aria-label') || '',
         /with note/
     );
+    const firstHighlight = document.querySelector(
+        '.cm-mktero-pdf-annotation'
+    );
+    assert.ok(markers[0].compareDocumentPosition(firstHighlight)
+        & dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
 
     markers[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
         bubbles: true,
@@ -308,6 +316,7 @@ test('shows one note marker when an annotation covers formula content', () => {
     );
     assert.equal(noteMarkers.length, 1);
     assert.ok(rendered.contains(noteMarkers[0]));
+    assert.equal(rendered.firstElementChild, noteMarkers[0]);
 
     noteMarkers[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
         bubbles: true,
@@ -411,6 +420,7 @@ test('renders PDF annotations inside a rendered Markdown table', () => {
         '.cm-mktero-pdf-annotation-note'
     );
     assert.ok(noteMarker);
+    assert.equal(annotation.firstElementChild, noteMarker);
     noteMarker.dispatchEvent(new dom.window.MouseEvent('mouseover', {
         bubbles: true,
     }));

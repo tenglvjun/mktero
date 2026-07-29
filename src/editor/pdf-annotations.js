@@ -11,6 +11,7 @@ import {
 import { accessibleAnnotationText } from '../core/pdf-annotation.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const MAX_RENDERED_MATCH_CANDIDATES = 10_000;
 
 export function annotationClassName(annotation) {
@@ -52,6 +53,21 @@ export function createAnnotationNoteMarker(document, annotation) {
         `--mktero-annotation-color: ${safeAnnotationColor(annotation.color)}`
     );
     marker.setAttribute('aria-hidden', 'true');
+    const icon = document.createElementNS(SVG_NAMESPACE, 'svg');
+    icon.setAttribute('class', 'cm-mktero-pdf-annotation-note-icon');
+    icon.setAttribute('viewBox', '0 0 16 16');
+    icon.setAttribute('focusable', 'false');
+    const bubble = document.createElementNS(SVG_NAMESPACE, 'path');
+    bubble.setAttribute('class', 'cm-mktero-pdf-annotation-note-bubble');
+    bubble.setAttribute(
+        'd',
+        'M4 2.25h8A1.75 1.75 0 0 1 13.75 4v5A1.75 1.75 0 0 1 12 10.75H7.1L4 13.5v-2.75A1.75 1.75 0 0 1 2.25 9V4A1.75 1.75 0 0 1 4 2.25Z'
+    );
+    const lines = document.createElementNS(SVG_NAMESPACE, 'path');
+    lines.setAttribute('class', 'cm-mktero-pdf-annotation-note-line');
+    lines.setAttribute('d', 'M5 5.25h6M5 7.75h4.5');
+    icon.append(bubble, lines);
+    marker.append(icon);
     return marker;
 }
 
@@ -223,11 +239,11 @@ function wrapTextRange(container, from, to, annotation, translate) {
     )) {
         element.setAttribute(name, value);
     }
-    element.append(range.extractContents());
     const noteMarker = annotation.showNoteMarker === false
         ? null
         : createAnnotationNoteMarker(document, annotation);
     if (noteMarker) element.append(noteMarker);
+    element.append(range.extractContents());
     range.insertNode(element);
 }
 

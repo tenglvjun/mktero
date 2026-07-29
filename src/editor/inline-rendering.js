@@ -519,7 +519,7 @@ function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
         const validRanges = (annotation.ranges || []).filter(range => (
             validAnnotationRange(range, state.doc.length)
         ));
-        const noteOffset = annotationTerminalOffset(validRanges);
+        const noteOffset = annotationStartOffset(validRanges);
         for (const range of annotation.ranges || []) {
             if (!validAnnotationRange(range, state.doc.length)) continue;
             if (renderedRanges.some(rendered => rangeContains(rendered, range))) {
@@ -531,14 +531,14 @@ function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
             }).range(range.from, range.to));
         }
         const noteRendered = renderedRanges.some(range => (
-            rangeContainsOffset(range, noteOffset)
+            rangeContainsStartOffset(range, noteOffset)
         ));
         if (noteOffset !== null
             && !noteRendered
             && annotationHasComment(annotation)) {
             decorations.push(Decoration.widget({
                 widget: new AnnotationNoteWidget(annotation),
-                side: 1,
+                side: -1,
             }).range(noteOffset));
         }
     }
@@ -556,23 +556,23 @@ function rangeContains(outer, inner) {
     return inner.from >= outer.from && inner.to <= outer.to;
 }
 
-function rangeContainsOffset(range, offset) {
+function rangeContainsStartOffset(range, offset) {
     return Number.isInteger(offset)
-        && offset > range.from
-        && offset <= range.to;
+        && offset >= range.from
+        && offset < range.to;
 }
 
-function annotationTerminalOffset(ranges) {
-    let terminalOffset = null;
+function annotationStartOffset(ranges) {
+    let startOffset = null;
     for (const range of ranges || []) {
         if (!Number.isInteger(range?.from)
             || !Number.isInteger(range?.to)
             || range.to <= range.from) {
             continue;
         }
-        terminalOffset = Math.max(terminalOffset ?? range.to, range.to);
+        startOffset = Math.min(startOffset ?? range.from, range.from);
     }
-    return terminalOffset;
+    return startOffset;
 }
 
 function decorateCitations(state, decorations, context) {
@@ -1300,9 +1300,9 @@ function annotationsForRange(overlay, from, to) {
         if (!contained) return [];
         return [{
             ...annotation,
-            showNoteMarker: rangeContainsOffset(
+            showNoteMarker: rangeContainsStartOffset(
                 { from, to },
-                annotationTerminalOffset(annotation.ranges)
+                annotationStartOffset(annotation.ranges)
             ),
         }];
     });
@@ -1438,9 +1438,9 @@ function annotationsOverlappingRange(overlay, from, to) {
         return overlaps ? [{
             ...annotation,
             ranges: [{ from, to }],
-            showNoteMarker: rangeContainsOffset(
+            showNoteMarker: rangeContainsStartOffset(
                 { from, to },
-                annotationTerminalOffset(annotation.ranges)
+                annotationStartOffset(annotation.ranges)
             ),
         }] : [];
     });
@@ -1458,7 +1458,6 @@ function wrapRenderedMathAnnotations(container, annotations, translate) {
         )) {
             wrapper.setAttribute(name, value);
         }
-        wrapper.append(...container.childNodes);
         if (annotation.showNoteMarker) {
             const noteMarker = createAnnotationNoteMarker(
                 container.ownerDocument,
@@ -1466,6 +1465,7 @@ function wrapRenderedMathAnnotations(container, annotations, translate) {
             );
             if (noteMarker) wrapper.append(noteMarker);
         }
+        wrapper.append(...container.childNodes);
         container.append(wrapper);
     }
 }
