@@ -6,6 +6,10 @@ import {
 import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
+import {
+    accessibleAnnotationText,
+    comparePdfAnnotations,
+} from '../core/pdf-annotation.js';
 import { createLocalization } from '../i18n/localization.js';
 import { extractMarkdownOutline } from '../markdown/markdown-outline.js';
 import { createLoadingPresentation } from './markdown-loading-state.js';
@@ -686,78 +690,91 @@ class MarkdownTabView {
         }
 
         for (const { annotation, matched } of entries) {
-            const offset = matched
-                ? firstAnnotationOffset(annotation, markdownLength)
-                : null;
-            const canJump = offset !== null;
-            const attributes = {
-                class: [
-                    'markdown-note-link',
-                    canJump ? '' : 'is-note-unavailable',
-                ].filter(Boolean).join(' '),
-                type: 'button',
-                'data-annotation-id': String(annotation.id || ''),
-            };
-            if (canJump) {
-                attributes['data-offset'] = String(offset);
-                attributes['aria-label'] = this.t('viewer.noteJump', {
-                    text: accessibleNoteText(
-                        annotation.comment || annotation.text
-                    ),
-                });
-            }
-            else {
-                attributes.disabled = 'disabled';
-            }
-            const button = this.createElement('button', attributes);
-            const metadata = this.createElement('span', {
-                class: 'markdown-note-metadata',
-            });
-            const color = this.createElement('span', {
-                class: 'markdown-note-color',
-                style: `--mktero-annotation-color: ${safeAnnotationColor(
-                    annotation.color
-                )};`,
-                'aria-hidden': 'true',
-            });
-            metadata.appendChild(color);
-            const pageLabel = annotationPageLabel(annotation);
-            if (pageLabel) {
-                metadata.appendChild(this.createElement(
-                    'span',
-                    { class: 'markdown-note-page' },
-                    this.t('annotation.page', { page: pageLabel })
-                ));
-            }
-            if (!canJump) {
-                metadata.appendChild(this.createElement(
-                    'span',
-                    { class: 'markdown-note-unavailable' },
-                    this.t('viewer.noteUnavailable')
-                ));
-            }
-            button.appendChild(metadata);
-
-            const quote = this.createElement(
-                'span',
-                { class: 'markdown-note-quote' },
-                String(annotation.text || '')
-            );
-            button.appendChild(quote);
-            if (annotation.comment) {
-                button.appendChild(this.createElement(
-                    'span',
-                    { class: 'markdown-note-comment' },
-                    String(annotation.comment)
-                ));
-            }
-
-            const item = this.createElement('li', {
-                class: 'markdown-note-item',
-            });
-            item.appendChild(button);
-            list.appendChild(item);
+            list.appendChild(this.createNoteItem(
+                annotation,
+                matched,
+                markdownLength
+            ));
         }
+    }
+
+    createNoteItem(annotation, matched, markdownLength) {
+        const offset = matched
+            ? firstAnnotationOffset(annotation, markdownLength)
+            : null;
+        const button = this.createElement(
+            'button',
+            this.noteButtonAttributes(annotation, offset)
+        );
+        button.appendChild(this.createNoteMetadata(annotation, offset !== null));
+        button.appendChild(this.createElement(
+            'span',
+            { class: 'markdown-note-quote' },
+            String(annotation.text || '')
+        ));
+        if (annotation.comment) {
+            button.appendChild(this.createElement(
+                'span',
+                { class: 'markdown-note-comment' },
+                String(annotation.comment)
+            ));
+        }
+        const item = this.createElement('li', {
+            class: 'markdown-note-item',
+        });
+        item.appendChild(button);
+        return item;
+    }
+
+    noteButtonAttributes(annotation, offset) {
+        const canJump = offset !== null;
+        const attributes = {
+            class: canJump
+                ? 'markdown-note-link'
+                : 'markdown-note-link is-note-unavailable',
+            type: 'button',
+            'data-annotation-id': String(annotation.id || ''),
+        };
+        if (!canJump) {
+            attributes.disabled = 'disabled';
+            return attributes;
+        }
+        attributes['data-offset'] = String(offset);
+        attributes['aria-label'] = this.t('viewer.noteJump', {
+            text: accessibleAnnotationText(
+                annotation.comment || annotation.text
+            ),
+        });
+        return attributes;
+    }
+
+    createNoteMetadata(annotation, canJump) {
+        const metadata = this.createElement('span', {
+            class: 'markdown-note-metadata',
+        });
+        metadata.appendChild(this.createElement('span', {
+            class: 'markdown-note-color',
+            style: `--mktero-annotation-color: ${safeAnnotationColor(
+                annotation.color
+            )};`,
+            'aria-hidden': 'true',
+        }));
+        const pageLabel = annotationPageLabel(annotation);
+        if (pageLabel) {
+            metadata.appendChild(this.createElement(
+                'span',
+                { class: 'markdown-note-page' },
+                this.t('annotation.page', { page: pageLabel })
+            ));
+        }
+        if (!canJump) {
+            metadata.appendChild(this.createElement(
+                'span',
+                { class: 'markdown-note-unavailable' },
+                this.t('viewer.noteUnavailable')
+            ));
+        }
+        return metadata;
     }
 
     openLink(href) {
@@ -837,15 +854,7 @@ function orderedAnnotationEntries(annotationOverlay) {
             .map(annotation => ({ annotation, matched: false }))
         : [];
     return [...matched, ...unmatched].sort((left, right) => (
-        compareStrings(
-            String(left.annotation?.sortIndex || ''),
-            String(right.annotation?.sortIndex || '')
-        )
-        || (safePageIndex(left.annotation) - safePageIndex(right.annotation))
-        || compareStrings(
-            String(left.annotation?.id || ''),
-            String(right.annotation?.id || '')
-        )
+        comparePdfAnnotations(left.annotation, right.annotation)
     ));
 }
 
@@ -865,22 +874,6 @@ function firstAnnotationOffset(annotation, markdownLength) {
 
 function isAnnotationEntry(annotation) {
     return Boolean(annotation && typeof annotation === 'object');
-}
-
-function safePageIndex(annotation) {
-    return Number.isInteger(annotation?.pageIndex) && annotation.pageIndex >= 0
-        ? annotation.pageIndex
-        : Number.MAX_SAFE_INTEGER;
-}
-
-function compareStrings(left, right) {
-    if (left === right) return 0;
-    return left < right ? -1 : 1;
-}
-
-function accessibleNoteText(value) {
-    const text = String(value || '').replace(/\s+/gu, ' ').trim();
-    return text.length <= 200 ? text : `${text.slice(0, 199)}…`;
 }
 
 function appendChildren(parent, ...children) {

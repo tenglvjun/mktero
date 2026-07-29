@@ -6,6 +6,7 @@ import {
 import {
     createVisibleMarkdownTextIndex,
 } from '../markdown/markdown-visible-text.js';
+import { accessibleAnnotationText } from '../core/pdf-annotation.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const MAX_RENDERED_MATCH_CANDIDATES = 10_000;
@@ -214,9 +215,4 @@ export function annotationPageLabel(annotation) {
     return Number.isInteger(annotation.pageIndex) && annotation.pageIndex >= 0
         ? String(annotation.pageIndex + 1)
         : '';
-}
-
-function accessibleAnnotationText(text) {
-    const value = String(text || '').replace(/\s+/gu, ' ').trim();
-    return value.length <= 200 ? value : `${value.slice(0, 199)}…`;
 }

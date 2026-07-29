@@ -1,3 +1,5 @@
+import { comparePdfAnnotations } from '../core/pdf-annotation.js';
+
 const SUPPORTED_ANNOTATION_TYPES = new Set(['highlight', 'underline']);
 const DEFAULT_ANNOTATION_COLOR = '#ffd400';
 const SAFE_COLOR = /^#[0-9a-f]{6}$/i;
@@ -55,7 +57,7 @@ export class ZoteroAnnotationExtractor {
                 return normalized;
             })
             .filter(annotation => annotation.text)
-            .sort(compareAnnotations);
+            .sort(comparePdfAnnotations);
     }
 }
 
@@ -87,16 +89,4 @@ function annotationPageIndex(position) {
     catch {
         return null;
     }
-}
-
-function compareAnnotations(left, right) {
-    return compareStrings(left.sortIndex, right.sortIndex)
-        || (left.pageIndex ?? Number.MAX_SAFE_INTEGER)
-            - (right.pageIndex ?? Number.MAX_SAFE_INTEGER)
-        || compareStrings(left.id, right.id);
-}
-
-function compareStrings(left, right) {
-    if (left === right) return 0;
-    return left < right ? -1 : 1;
 }
