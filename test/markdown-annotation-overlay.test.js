@@ -126,6 +126,105 @@ test('matches PDF citations against MinerU dollar-wrapped citations', async () =
     assert.deepEqual(result.unmatched, []);
 });
 
+test('matches PDF footnote digits against MinerU sentence superscripts', async () => {
+    const annotation = {
+        id: 'FOOT0001',
+        type: 'highlight',
+        text: 'named skills is a system that composes.11',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '12',
+        pageIndex: 11,
+        sortIndex: '00012',
+    };
+    const markdown = 'named skills is a system that composes. $^{11}$';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'normalized',
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
+test('does not flatten ordinary numeric superscript math into PDF text', async () => {
+    const annotation = {
+        id: 'MATH0002',
+        type: 'highlight',
+        text: 'x2',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '12',
+        pageIndex: 11,
+        sortIndex: '00013',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, 'The value is x $^{2}$.');
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'not-found',
+    }]);
+});
+
+test('does not treat a new paragraph numeric superscript as a footnote', async () => {
+    const annotation = {
+        id: 'MATH0003',
+        type: 'highlight',
+        text: 'finished.2',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '12',
+        pageIndex: 11,
+        sortIndex: '00014',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, 'The sentence finished.\n\n$^{2}$');
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'not-found',
+    }]);
+});
+
+test('rejects oversized malformed sentence superscript markup', async () => {
+    const annotation = {
+        id: 'LIMIT003',
+        type: 'highlight',
+        text: 'finished.1111',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '12',
+        pageIndex: 11,
+        sortIndex: '00015',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+    const markdown = 'The sentence finished. $^{' + '1'.repeat(100_000);
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'not-found',
+    }]);
+});
+
 test('keeps plain numeric citation brackets visible to PDF annotations', async () => {
     const annotation = {
         id: 'CITE0003',

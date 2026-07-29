@@ -8,6 +8,8 @@ const DOUBLE_QUOTES = new Set(['“', '”', '„', '‟']);
 const HYPHENS = new Set(['‐', '‑', '‒', '–', '—', '−']);
 const CITATION_WRAPPER = /\$\[([0-9,，;；\s–—-]{1,512})\]\$/gu;
 const TRADEMARK_SUPERSCRIPT = /\$\^\{([®©™])\}\$/gu;
+const SENTENCE_FOOTNOTE_SUPERSCRIPT = /\$\^\{([0-9]{1,4})\}\$/gu;
+const SENTENCE_END = /[.!?。！？]/u;
 
 export function normalizePdfAnnotationText(text) {
     return createPdfAnnotationTextIndex(String(text)).text.trim();
@@ -20,6 +22,12 @@ export function expandPdfAnnotationSourceRange(source, range) {
     if (wrapperFrom >= 0
         && /^[®©™]$/u.test(symbol)
         && source.slice(wrapperFrom, wrapperTo) === `$^{${symbol}}$`) {
+        return { from: wrapperFrom, to: wrapperTo };
+    }
+    if (wrapperFrom >= 0
+        && /^[0-9]{1,4}$/u.test(symbol)
+        && source.slice(wrapperFrom, wrapperTo) === `$^{${symbol}}$`
+        && sentenceFootnoteWhitespaceFrom(source, wrapperFrom) !== null) {
         return { from: wrapperFrom, to: wrapperTo };
     }
     return range;
@@ -98,5 +106,42 @@ function collectNormalizationMarkup(text) {
             ignoredOffsets.add(offset);
         }
     }
+    for (const match of text.matchAll(SENTENCE_FOOTNOTE_SUPERSCRIPT)) {
+        const whitespaceFrom = sentenceFootnoteWhitespaceFrom(
+            text,
+            match.index
+        );
+        if (whitespaceFrom === null) continue;
+        const contentFrom = match.index + match[0].indexOf(match[1]);
+        const contentTo = contentFrom + match[1].length;
+        for (
+            let offset = match.index;
+            offset < match.index + match[0].length;
+            offset++
+        ) {
+            if (offset < contentFrom || offset >= contentTo) {
+                ignoredOffsets.add(offset);
+            }
+        }
+        for (let offset = contentFrom; offset < contentTo; offset++) {
+            replacements.set(offset, {
+                from: match.index,
+                to: match.index + match[0].length,
+            });
+        }
+        for (let offset = whitespaceFrom; offset < match.index; offset++) {
+            ignoredOffsets.add(offset);
+        }
+    }
     return { ignoredOffsets, replacements };
+}
+
+function sentenceFootnoteWhitespaceFrom(text, wrapperFrom) {
+    let whitespaceFrom = wrapperFrom;
+    while (whitespaceFrom > 0 && /[ \t]/u.test(text[whitespaceFrom - 1])) {
+        whitespaceFrom--;
+    }
+    return whitespaceFrom > 0 && SENTENCE_END.test(text[whitespaceFrom - 1])
+        ? whitespaceFrom
+        : null;
 }
