@@ -209,6 +209,13 @@ export function safeAnnotationColor(color) {
     return /^#[0-9a-f]{6}$/.test(value) ? value : '#ffd400';
 }
 
+export function annotationPageLabel(annotation) {
+    if (annotation.pageLabel) return String(annotation.pageLabel);
+    return Number.isInteger(annotation.pageIndex) && annotation.pageIndex >= 0
+        ? String(annotation.pageIndex + 1)
+        : '';
+}
+
 function accessibleAnnotationText(text) {
     const value = String(text || '').replace(/\s+/gu, ' ').trim();
     return value.length <= 200 ? value : `${value.slice(0, 199)}…`;

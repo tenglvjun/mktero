@@ -1,6 +1,9 @@
 import { createAnchoredPopup } from './anchored-popup.js';
 import { createLocalization } from '../i18n/localization.js';
-import { safeAnnotationColor } from './pdf-annotations.js';
+import {
+    annotationPageLabel,
+    safeAnnotationColor,
+} from './pdf-annotations.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
@@ -62,11 +65,4 @@ function createAnnotationContent(document, annotation, translate) {
     text.textContent = annotation.comment || annotation.text;
     content.appendChild(text);
     return content;
-}
-
-function annotationPageLabel(annotation) {
-    if (annotation.pageLabel) return String(annotation.pageLabel);
-    return Number.isInteger(annotation.pageIndex) && annotation.pageIndex >= 0
-        ? String(annotation.pageIndex + 1)
-        : '';
 }

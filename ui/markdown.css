@@ -92,7 +92,7 @@ main {
     font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
-.markdown-outline-edge {
+.markdown-side-panel-edge {
     position: relative;
     z-index: 2;
     width: 7px;
@@ -100,35 +100,36 @@ main {
     flex: 0 0 7px;
 }
 
-.markdown-outline-resizer {
+.markdown-side-panel-resizer {
     position: absolute;
     inset: 0;
     cursor: col-resize;
     touch-action: none;
 }
 
-.markdown-outline-resizer::before {
+.markdown-side-panel-resizer::before {
     position: absolute;
     inset: 0 3px;
     background: var(--border);
     content: "";
 }
 
-.markdown-outline-resizer:hover::before,
-.markdown-outline-resizer:focus-visible::before,
-.is-resizing-outline .markdown-outline-resizer::before {
+.markdown-side-panel-resizer:hover::before,
+.markdown-side-panel-resizer:focus-visible::before,
+.is-resizing-outline .markdown-outline-resizer::before,
+.is-resizing-notes .markdown-notes-resizer::before {
     inset-inline: 2px;
     background: var(--accent);
 }
 
-.markdown-outline-resizer:focus-visible {
+.markdown-side-panel-resizer:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
     outline-offset: -2px;
 }
 
 .markdown-outline-resizer.is-outline-collapsed { cursor: e-resize; }
 
-.markdown-outline-toggle {
+.markdown-side-panel-toggle {
     position: absolute;
     z-index: 1;
     top: 50%;
@@ -149,18 +150,18 @@ main {
     transform: translate(-50%, -50%);
 }
 
-.markdown-outline-toggle:hover {
+.markdown-side-panel-toggle:hover {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
     background: color-mix(in srgb, var(--accent) 8%, var(--surface));
     color: var(--accent);
 }
 
-.markdown-outline-toggle:focus-visible {
+.markdown-side-panel-toggle:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
     outline-offset: 1px;
 }
 
-.markdown-outline-resizer.is-outline-collapsed + .markdown-outline-toggle {
+.markdown-outline-resizer.is-outline-collapsed + .markdown-side-panel-toggle {
     left: 0;
     transform: translate(0, -50%);
 }
@@ -218,6 +219,130 @@ main {
 }
 
 .markdown-outline-empty {
+    padding: 6px 8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.markdown-notes {
+    display: flex;
+    min-width: 0;
+    flex: 0 0 var(--notes-width, 300px);
+    flex-direction: column;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--surface) 68%, var(--background));
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.markdown-notes-resizer.is-notes-collapsed { cursor: w-resize; }
+
+.markdown-notes-resizer.is-notes-collapsed + .markdown-side-panel-toggle {
+    right: 0;
+    left: auto;
+    transform: translate(0, -50%);
+}
+
+.markdown-workspace.is-resizing-notes {
+    cursor: col-resize;
+    user-select: none;
+}
+
+.markdown-notes-title {
+    margin: 0;
+    padding: 18px 16px 10px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.markdown-notes-list {
+    margin: 0;
+    padding: 2px 8px 24px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    list-style: none;
+    scrollbar-width: thin;
+}
+
+.markdown-note-item { margin: 4px 0; }
+
+.markdown-note-link {
+    display: block;
+    width: 100%;
+    padding: 9px 10px;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: var(--text);
+    background: transparent;
+    font: inherit;
+    line-height: 1.4;
+    text-align: left;
+    cursor: pointer;
+}
+
+.markdown-note-link:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.markdown-note-link:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.markdown-note-link:disabled {
+    color: var(--muted);
+    cursor: default;
+    opacity: 0.72;
+}
+
+.markdown-note-metadata {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.markdown-note-color {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 10px;
+    border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+    border-radius: 50%;
+    background: var(--mktero-annotation-color);
+}
+
+.markdown-note-unavailable {
+    margin-left: auto;
+    color: var(--warning);
+}
+
+.markdown-note-quote {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    color: var(--muted);
+    font-size: 12px;
+    -webkit-line-clamp: 3;
+}
+
+.markdown-note-comment {
+    display: -webkit-box;
+    margin-top: 6px;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    color: var(--text);
+    font-size: 12.5px;
+    font-weight: 550;
+    white-space: pre-wrap;
+    -webkit-line-clamp: 4;
+}
+
+.markdown-notes-empty {
     padding: 6px 8px;
     color: var(--muted);
     font-size: 12px;
@@ -1200,6 +1325,10 @@ main {
 @media (max-width: 760px) {
     .markdown-outline {
         flex-basis: min(var(--outline-width, 256px), 42vw);
+    }
+
+    .markdown-notes {
+        flex-basis: min(var(--notes-width, 300px), 32vw);
     }
 }
 

@@ -1,5 +1,9 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
 import {
+    annotationPageLabel,
+    safeAnnotationColor,
+} from '../editor/pdf-annotations.js';
+import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
 import { createLocalization } from '../i18n/localization.js';
@@ -10,10 +14,43 @@ const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
     ? __MKTERO_MARKDOWN_STYLES__
     : null;
-const DEFAULT_OUTLINE_WIDTH = 256;
-const MIN_OUTLINE_WIDTH = 180;
-const MAX_OUTLINE_WIDTH = 480;
-const OUTLINE_KEYBOARD_STEP = 16;
+const SIDE_PANEL_KEYBOARD_STEP = 16;
+const SIDE_PANEL_CONFIG = Object.freeze({
+    outline: Object.freeze({
+        elementKey: 'outline',
+        resizerKey: 'outlineResizer',
+        toggleKey: 'outlineToggle',
+        widthProperty: '--outline-width',
+        defaultWidth: 256,
+        minWidth: 180,
+        maxWidth: 480,
+        resizeDirection: 1,
+        resizeClass: 'is-resizing-outline',
+        collapsedClass: 'is-outline-collapsed',
+        resizeLabelKey: 'viewer.outlineResize',
+        collapseLabelKey: 'viewer.outlineCollapse',
+        expandLabelKey: 'viewer.outlineExpand',
+        collapseGlyph: '‹',
+        expandGlyph: '›',
+    }),
+    notes: Object.freeze({
+        elementKey: 'notes',
+        resizerKey: 'notesResizer',
+        toggleKey: 'notesToggle',
+        widthProperty: '--notes-width',
+        defaultWidth: 300,
+        minWidth: 220,
+        maxWidth: 480,
+        resizeDirection: -1,
+        resizeClass: 'is-resizing-notes',
+        collapsedClass: 'is-notes-collapsed',
+        resizeLabelKey: 'viewer.notesResize',
+        collapseLabelKey: 'viewer.notesCollapse',
+        expandLabelKey: 'viewer.notesExpand',
+        collapseGlyph: '›',
+        expandGlyph: '‹',
+    }),
+});
 export function createMarkdownTabView({
     document,
     model,
@@ -57,9 +94,17 @@ class MarkdownTabView {
         this.renderedAssets = undefined;
         this.assetURLs = new Map();
         this.listeners = [];
-        this.outlineVisible = true;
-        this.outlineWidth = DEFAULT_OUTLINE_WIDTH;
-        this.outlineResize = null;
+        this.sidePanels = Object.fromEntries(
+            Object.entries(SIDE_PANEL_CONFIG).map(([name, config]) => [
+                name,
+                {
+                    ...config,
+                    visible: true,
+                    width: config.defaultWidth,
+                    resize: null,
+                },
+            ])
+        );
 
         this.host = this.createElement('div', {
             class: 'mktero-tab-host',
@@ -92,6 +137,7 @@ class MarkdownTabView {
             localization: this.localization,
         });
         this.syncOutline('');
+        this.syncNotes(createEmptyAnnotationOverlay(), 0);
         this.bindActions();
     }
 
@@ -129,19 +175,22 @@ class MarkdownTabView {
                     annotationOverlay: createEmptyAnnotationOverlay(),
                 });
                 this.syncOutline('');
+                this.syncNotes(createEmptyAnnotationOverlay(), 0);
             }
             return;
         }
 
         if (model.status === 'ready') {
             const markdown = model.markdown || '';
+            const annotationOverlay = model.annotationOverlay
+                || createEmptyAnnotationOverlay();
             const assetsChanged = this.syncAssetURLs();
             this.editor.setDocument({
                 markdown,
-                annotationOverlay: model.annotationOverlay
-                    || createEmptyAnnotationOverlay(),
+                annotationOverlay,
             });
             this.syncOutline(markdown);
+            this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
             return;
         }
@@ -289,41 +338,40 @@ class MarkdownTabView {
         appendChildren(outline, outlineTitle, outlineList);
         outline.style.setProperty(
             '--outline-width',
-            `${this.outlineWidth}px`
+            `${this.sidePanels.outline.width}px`
         );
-        const outlineResizer = this.createElement('div', {
-            id: 'mktero-outline-resizer',
-            class: 'markdown-outline-resizer',
-            role: 'separator',
-            tabindex: '0',
-            'aria-controls': 'mktero-outline',
-            'aria-orientation': 'vertical',
-            'aria-valuemin': String(MIN_OUTLINE_WIDTH),
-            'aria-valuemax': String(MAX_OUTLINE_WIDTH),
-            'aria-valuenow': String(this.outlineWidth),
-            'aria-label': this.t('viewer.outlineResize'),
-            title: this.t('viewer.outlineResize'),
-        });
-        const outlineToggle = this.createElement(
-            'button',
-            {
-                id: 'mktero-outline-toggle',
-                class: 'markdown-outline-toggle',
-                type: 'button',
-                'aria-controls': 'mktero-outline',
-                'aria-expanded': 'true',
-                'aria-label': this.t('viewer.outlineCollapse'),
-                title: this.t('viewer.outlineCollapse'),
-            },
-            '‹'
+        const outlineControls = this.createSidePanelEdge('outline');
+
+        const notesTitle = this.createElement(
+            'h2',
+            { class: 'markdown-notes-title' },
+            this.t('viewer.notesTitle')
         );
-        const outlineEdge = this.createElement('div', {
-            class: 'markdown-outline-edge',
+        const notesList = this.createElement('ol', {
+            class: 'markdown-notes-list',
         });
-        appendChildren(outlineEdge, outlineResizer, outlineToggle);
+        const notes = this.createElement('aside', {
+            id: 'mktero-notes',
+            class: 'markdown-notes',
+            'aria-label': this.t('viewer.notes'),
+        });
+        appendChildren(notes, notesTitle, notesList);
+        notes.style.setProperty(
+            '--notes-width',
+            `${this.sidePanels.notes.width}px`
+        );
+        const notesControls = this.createSidePanelEdge('notes');
+
         const workspace = this.createElement('div', { class: 'markdown-workspace' });
         workspace.hidden = true;
-        appendChildren(workspace, outline, outlineEdge, editorSection);
+        appendChildren(
+            workspace,
+            outline,
+            outlineControls.edge,
+            editorSection,
+            notesControls.edge,
+            notes
+        );
         const content = this.createElement('main', {
             id: 'mktero-content',
             'aria-busy': 'true',
@@ -349,11 +397,52 @@ class MarkdownTabView {
             outline,
             outlineTitle,
             outlineList,
-            outlineResizer,
-            outlineToggle,
+            outlineResizer: outlineControls.resizer,
+            outlineToggle: outlineControls.toggle,
+            notes,
+            notesTitle,
+            notesList,
+            notesResizer: notesControls.resizer,
+            notesToggle: notesControls.toggle,
             editorHost,
             editorSection,
         };
+    }
+
+    createSidePanelEdge(name) {
+        const panel = this.sidePanels[name];
+        const id = `mktero-${name}`;
+        const resizer = this.createElement('div', {
+            id: `${id}-resizer`,
+            class: `markdown-side-panel-resizer markdown-${name}-resizer`,
+            role: 'separator',
+            tabindex: '0',
+            'aria-controls': id,
+            'aria-orientation': 'vertical',
+            'aria-valuemin': String(panel.minWidth),
+            'aria-valuemax': String(panel.maxWidth),
+            'aria-valuenow': String(panel.width),
+            'aria-label': this.t(panel.resizeLabelKey),
+            title: this.t(panel.resizeLabelKey),
+        });
+        const toggle = this.createElement(
+            'button',
+            {
+                id: `${id}-toggle`,
+                class: `markdown-side-panel-toggle markdown-${name}-toggle`,
+                type: 'button',
+                'aria-controls': id,
+                'aria-expanded': 'true',
+                'aria-label': this.t(panel.collapseLabelKey),
+                title: this.t(panel.collapseLabelKey),
+            },
+            panel.collapseGlyph
+        );
+        const edge = this.createElement('div', {
+            class: `markdown-side-panel-edge markdown-${name}-edge`,
+        });
+        appendChildren(edge, resizer, toggle);
+        return { edge, resizer, toggle };
     }
 
     createElement(tagName, attributes = {}, text = '') {
@@ -372,24 +461,43 @@ class MarkdownTabView {
             const offset = Number(button.getAttribute('data-offset'));
             if (Number.isFinite(offset)) this.editor.scrollToOffset?.(offset);
         });
-        this.listen(this.elements.outlineToggle, 'click', () => {
-            this.setOutlineVisibility(!this.outlineVisible);
+        this.listen(this.elements.notesList, 'click', event => {
+            const button = event.target?.closest?.('.markdown-note-link');
+            if (!button
+                || button.hasAttribute('disabled')
+                || !this.elements.notesList.contains(button)) {
+                return;
+            }
+            const offset = Number(button.getAttribute('data-offset'));
+            if (Number.isFinite(offset)) this.editor.scrollToOffset?.(offset);
         });
-        this.listen(this.elements.outlineResizer, 'dblclick', event => {
-            event.preventDefault();
-            this.setOutlineVisibility(!this.outlineVisible);
-        });
-        this.listen(this.elements.outlineResizer, 'mousedown', event => {
-            this.startOutlineResize(event);
-        });
+        this.bindSidePanelActions('outline');
+        this.bindSidePanelActions('notes');
         this.listen(this.ownerWindow, 'mousemove', event => {
-            this.resizeOutline(event);
+            this.resizeSidePanel('outline', event);
+            this.resizeSidePanel('notes', event);
         });
         this.listen(this.ownerWindow, 'mouseup', () => {
-            this.finishOutlineResize();
+            this.finishSidePanelResize('outline');
+            this.finishSidePanelResize('notes');
         });
-        this.listen(this.elements.outlineResizer, 'keydown', event => {
-            this.handleOutlineResizeKey(event);
+    }
+
+    bindSidePanelActions(name) {
+        const panel = this.sidePanels[name];
+        const { resizer, toggle } = this.sidePanelElements(name);
+        this.listen(toggle, 'click', () => {
+            this.setSidePanelVisibility(name, !panel.visible);
+        });
+        this.listen(resizer, 'dblclick', event => {
+            event.preventDefault();
+            this.setSidePanelVisibility(name, !panel.visible);
+        });
+        this.listen(resizer, 'mousedown', event => {
+            this.startSidePanelResize(name, event);
+        });
+        this.listen(resizer, 'keydown', event => {
+            this.handleSidePanelResizeKey(name, event);
         });
     }
 
@@ -413,99 +521,122 @@ class MarkdownTabView {
         this.elements.outlineTitle.textContent = this.t('viewer.outlineTitle');
         this.elements.outlineList.querySelector('.markdown-outline-empty')
             ?.replaceChildren(this.t('viewer.outlineEmpty'));
-        this.syncOutlineControlLabels();
+        this.elements.notes.setAttribute('aria-label', this.t('viewer.notes'));
+        this.elements.notesTitle.textContent = this.t('viewer.notesTitle');
+        this.elements.notesList.querySelector('.markdown-notes-empty')
+            ?.replaceChildren(this.t('viewer.notesEmpty'));
+        this.syncSidePanelControlLabels('outline');
+        this.syncSidePanelControlLabels('notes');
     }
 
-    syncOutlineControlLabels() {
-        const resizeLabel = this.outlineVisible
-            ? this.t('viewer.outlineResize')
-            : this.t('viewer.outlineExpand');
-        this.elements.outlineResizer.setAttribute('aria-label', resizeLabel);
-        this.elements.outlineResizer.setAttribute('title', resizeLabel);
-        const toggleLabel = this.t(this.outlineVisible
-            ? 'viewer.outlineCollapse'
-            : 'viewer.outlineExpand');
-        this.elements.outlineToggle.setAttribute('aria-label', toggleLabel);
-        this.elements.outlineToggle.setAttribute('title', toggleLabel);
+    syncSidePanelControlLabels(name) {
+        const panel = this.sidePanels[name];
+        const { resizer, toggle } = this.sidePanelElements(name);
+        const resizeLabel = this.t(panel.visible
+            ? panel.resizeLabelKey
+            : panel.expandLabelKey);
+        resizer.setAttribute('aria-label', resizeLabel);
+        resizer.setAttribute('title', resizeLabel);
+        const toggleLabel = this.t(panel.visible
+            ? panel.collapseLabelKey
+            : panel.expandLabelKey);
+        toggle.setAttribute('aria-label', toggleLabel);
+        toggle.setAttribute('title', toggleLabel);
     }
 
-    startOutlineResize(event) {
+    startSidePanelResize(name, event) {
+        const panel = this.sidePanels[name];
         if (event.button !== 0
-            || !this.outlineVisible
+            || !panel.visible
             || this.elements.workspace.hidden) {
             return;
         }
         event.preventDefault();
-        this.outlineResize = {
+        panel.resize = {
             pointerStartX: event.clientX,
-            widthAtStart: this.outlineWidth,
+            widthAtStart: panel.width,
         };
-        this.elements.workspace.classList.add('is-resizing-outline');
+        this.elements.workspace.classList.add(panel.resizeClass);
     }
 
-    resizeOutline(event) {
-        if (!this.outlineResize || !Number.isFinite(event.clientX)) return;
-        this.setOutlineWidth(
-            this.outlineResize.widthAtStart
-                + event.clientX
-                - this.outlineResize.pointerStartX
+    resizeSidePanel(name, event) {
+        const panel = this.sidePanels[name];
+        if (!panel.resize || !Number.isFinite(event.clientX)) return;
+        this.setSidePanelWidth(
+            name,
+            panel.resize.widthAtStart
+                + panel.resizeDirection
+                * (event.clientX - panel.resize.pointerStartX)
         );
     }
 
-    finishOutlineResize() {
-        if (!this.outlineResize) return;
-        this.outlineResize = null;
-        this.elements.workspace.classList.remove('is-resizing-outline');
+    finishSidePanelResize(name) {
+        const panel = this.sidePanels[name];
+        if (!panel.resize) return;
+        panel.resize = null;
+        this.elements.workspace.classList.remove(panel.resizeClass);
     }
 
-    setOutlineWidth(width) {
+    setSidePanelWidth(name, width) {
+        const panel = this.sidePanels[name];
+        const { element, resizer } = this.sidePanelElements(name);
         const nextWidth = Math.min(
-            MAX_OUTLINE_WIDTH,
-            Math.max(MIN_OUTLINE_WIDTH, Math.round(width))
+            panel.maxWidth,
+            Math.max(panel.minWidth, Math.round(width))
         );
-        this.outlineWidth = nextWidth;
-        this.elements.outline.style.setProperty(
-            '--outline-width',
+        panel.width = nextWidth;
+        element.style.setProperty(
+            panel.widthProperty,
             `${nextWidth}px`
         );
-        this.elements.outlineResizer.setAttribute(
-            'aria-valuenow',
-            String(nextWidth)
-        );
+        resizer.setAttribute('aria-valuenow', String(nextWidth));
     }
 
-    setOutlineVisibility(visible) {
-        this.finishOutlineResize();
-        this.outlineVisible = visible;
-        this.elements.outline.hidden = !visible;
-        this.elements.outlineResizer.classList.toggle(
-            'is-outline-collapsed',
+    setSidePanelVisibility(name, visible) {
+        const panel = this.sidePanels[name];
+        const { element, resizer, toggle } = this.sidePanelElements(name);
+        this.finishSidePanelResize(name);
+        panel.visible = visible;
+        element.hidden = !visible;
+        resizer.classList.toggle(
+            panel.collapsedClass,
             !visible
         );
-        this.elements.outlineToggle.textContent = visible ? '‹' : '›';
-        this.elements.outlineToggle.setAttribute(
-            'aria-expanded',
-            String(visible)
-        );
-        this.syncOutlineControlLabels();
+        toggle.textContent = visible
+            ? panel.collapseGlyph
+            : panel.expandGlyph;
+        toggle.setAttribute('aria-expanded', String(visible));
+        this.syncSidePanelControlLabels(name);
     }
 
-    handleOutlineResizeKey(event) {
+    handleSidePanelResizeKey(name, event) {
+        const panel = this.sidePanels[name];
         if (['Enter', ' '].includes(event.key)) {
             event.preventDefault();
-            this.setOutlineVisibility(!this.outlineVisible);
+            this.setSidePanelVisibility(name, !panel.visible);
             return;
         }
-        if (!this.outlineVisible) return;
+        if (!panel.visible) return;
         const widths = {
-            ArrowLeft: this.outlineWidth - OUTLINE_KEYBOARD_STEP,
-            ArrowRight: this.outlineWidth + OUTLINE_KEYBOARD_STEP,
-            Home: MIN_OUTLINE_WIDTH,
-            End: MAX_OUTLINE_WIDTH,
+            ArrowLeft: panel.width
+                - panel.resizeDirection * SIDE_PANEL_KEYBOARD_STEP,
+            ArrowRight: panel.width
+                + panel.resizeDirection * SIDE_PANEL_KEYBOARD_STEP,
+            Home: panel.minWidth,
+            End: panel.maxWidth,
         };
         if (!(event.key in widths)) return;
         event.preventDefault();
-        this.setOutlineWidth(widths[event.key]);
+        this.setSidePanelWidth(name, widths[event.key]);
+    }
+
+    sidePanelElements(name) {
+        const panel = this.sidePanels[name];
+        return {
+            element: this.elements[panel.elementKey],
+            resizer: this.elements[panel.resizerKey],
+            toggle: this.elements[panel.toggleKey],
+        };
     }
 
     syncOutline(markdown) {
@@ -535,6 +666,94 @@ class MarkdownTabView {
             );
             const item = this.createElement('li', {
                 class: 'markdown-outline-item',
+            });
+            item.appendChild(button);
+            list.appendChild(item);
+        }
+    }
+
+    syncNotes(annotationOverlay, markdownLength) {
+        const list = this.elements.notesList;
+        list.replaceChildren();
+        const entries = orderedAnnotationEntries(annotationOverlay);
+        if (!entries.length) {
+            list.appendChild(this.createElement(
+                'li',
+                { class: 'markdown-notes-empty' },
+                this.t('viewer.notesEmpty')
+            ));
+            return;
+        }
+
+        for (const { annotation, matched } of entries) {
+            const offset = matched
+                ? firstAnnotationOffset(annotation, markdownLength)
+                : null;
+            const canJump = offset !== null;
+            const attributes = {
+                class: [
+                    'markdown-note-link',
+                    canJump ? '' : 'is-note-unavailable',
+                ].filter(Boolean).join(' '),
+                type: 'button',
+                'data-annotation-id': String(annotation.id || ''),
+            };
+            if (canJump) {
+                attributes['data-offset'] = String(offset);
+                attributes['aria-label'] = this.t('viewer.noteJump', {
+                    text: accessibleNoteText(
+                        annotation.comment || annotation.text
+                    ),
+                });
+            }
+            else {
+                attributes.disabled = 'disabled';
+            }
+            const button = this.createElement('button', attributes);
+            const metadata = this.createElement('span', {
+                class: 'markdown-note-metadata',
+            });
+            const color = this.createElement('span', {
+                class: 'markdown-note-color',
+                style: `--mktero-annotation-color: ${safeAnnotationColor(
+                    annotation.color
+                )};`,
+                'aria-hidden': 'true',
+            });
+            metadata.appendChild(color);
+            const pageLabel = annotationPageLabel(annotation);
+            if (pageLabel) {
+                metadata.appendChild(this.createElement(
+                    'span',
+                    { class: 'markdown-note-page' },
+                    this.t('annotation.page', { page: pageLabel })
+                ));
+            }
+            if (!canJump) {
+                metadata.appendChild(this.createElement(
+                    'span',
+                    { class: 'markdown-note-unavailable' },
+                    this.t('viewer.noteUnavailable')
+                ));
+            }
+            button.appendChild(metadata);
+
+            const quote = this.createElement(
+                'span',
+                { class: 'markdown-note-quote' },
+                String(annotation.text || '')
+            );
+            button.appendChild(quote);
+            if (annotation.comment) {
+                button.appendChild(this.createElement(
+                    'span',
+                    { class: 'markdown-note-comment' },
+                    String(annotation.comment)
+                ));
+            }
+
+            const item = this.createElement('li', {
+                class: 'markdown-note-item',
             });
             item.appendChild(button);
             list.appendChild(item);
@@ -604,6 +823,64 @@ class MarkdownTabView {
             resolveZipPath(this.model.assetBasePath || '', decodedPath)
         ) || null;
     }
+}
+
+function orderedAnnotationEntries(annotationOverlay) {
+    const matched = Array.isArray(annotationOverlay?.matched)
+        ? annotationOverlay.matched
+            .filter(isAnnotationEntry)
+            .map(annotation => ({ annotation, matched: true }))
+        : [];
+    const unmatched = Array.isArray(annotationOverlay?.unmatched)
+        ? annotationOverlay.unmatched
+            .filter(isAnnotationEntry)
+            .map(annotation => ({ annotation, matched: false }))
+        : [];
+    return [...matched, ...unmatched].sort((left, right) => (
+        compareStrings(
+            String(left.annotation?.sortIndex || ''),
+            String(right.annotation?.sortIndex || '')
+        )
+        || (safePageIndex(left.annotation) - safePageIndex(right.annotation))
+        || compareStrings(
+            String(left.annotation?.id || ''),
+            String(right.annotation?.id || '')
+        )
+    ));
+}
+
+function firstAnnotationOffset(annotation, markdownLength) {
+    if (!Number.isInteger(markdownLength) || markdownLength < 0) return null;
+    for (const range of annotation?.ranges || []) {
+        if (Number.isInteger(range?.from)
+            && Number.isInteger(range?.to)
+            && range.from >= 0
+            && range.to > range.from
+            && range.to <= markdownLength) {
+            return range.from;
+        }
+    }
+    return null;
+}
+
+function isAnnotationEntry(annotation) {
+    return Boolean(annotation && typeof annotation === 'object');
+}
+
+function safePageIndex(annotation) {
+    return Number.isInteger(annotation?.pageIndex) && annotation.pageIndex >= 0
+        ? annotation.pageIndex
+        : Number.MAX_SAFE_INTEGER;
+}
+
+function compareStrings(left, right) {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+}
+
+function accessibleNoteText(value) {
+    const text = String(value || '').replace(/\s+/gu, ' ').trim();
+    return text.length <= 200 ? text : `${text.slice(0, 199)}…`;
 }
 
 function appendChildren(parent, ...children) {

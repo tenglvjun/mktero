@@ -242,6 +242,180 @@ test('resizes and toggles the Markdown outline from its edge', () => {
     }
 });
 
+test('resizes and toggles PDF notes from the right edge', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Annotated text',
+        sourceKind: 'markdown',
+    }));
+    const notes = shadow.querySelector('#mktero-notes');
+    const resizer = shadow.querySelector('#mktero-notes-resizer');
+    const toggle = shadow.querySelector('#mktero-notes-toggle');
+
+    try {
+        assert.ok(notes);
+        assert.ok(resizer);
+        assert.ok(toggle);
+        assert.equal(resizer.parentElement, toggle.parentElement);
+        assert.equal(resizer.getAttribute('role'), 'separator');
+        assert.equal(resizer.getAttribute('aria-controls'), 'mktero-notes');
+        assert.equal(resizer.getAttribute('aria-orientation'), 'vertical');
+        assert.equal(resizer.getAttribute('aria-valuemin'), '220');
+        assert.equal(resizer.getAttribute('aria-valuemax'), '480');
+        assert.equal(resizer.getAttribute('aria-valuenow'), '300');
+        assert.equal(toggle.textContent, '›');
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+        assert.equal(toggle.getAttribute('aria-label'), 'Collapse PDF notes');
+        assert.equal(notes.hidden, false);
+
+        dispatchMouseEvent(resizer, 'mousedown', 1000);
+        dispatchMouseEvent(document.defaultView, 'mousemove', 900);
+        dispatchMouseEvent(document.defaultView, 'mouseup', 900);
+
+        assert.equal(resizer.getAttribute('aria-valuenow'), '400');
+        assert.equal(
+            notes.style.getPropertyValue('--notes-width'),
+            '400px'
+        );
+
+        dispatchKeyboardEvent(resizer, 'ArrowRight');
+        assert.equal(resizer.getAttribute('aria-valuenow'), '384');
+        dispatchKeyboardEvent(resizer, 'ArrowLeft');
+        assert.equal(resizer.getAttribute('aria-valuenow'), '400');
+        dispatchKeyboardEvent(resizer, 'Home');
+        assert.equal(resizer.getAttribute('aria-valuenow'), '220');
+        dispatchKeyboardEvent(resizer, 'End');
+        assert.equal(resizer.getAttribute('aria-valuenow'), '480');
+
+        toggle.click();
+        assert.equal(notes.hidden, true);
+        assert.equal(toggle.textContent, '‹');
+        assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+        assert.equal(toggle.getAttribute('aria-label'), 'Expand PDF notes');
+        assert.equal(resizer.getAttribute('aria-label'), 'Expand PDF notes');
+
+        toggle.click();
+        assert.equal(notes.hidden, false);
+        assert.equal(toggle.textContent, '›');
+        assert.equal(resizer.getAttribute('aria-valuenow'), '480');
+
+        resizer.dispatchEvent(new document.defaultView.Event('dblclick', {
+            bubbles: true,
+            cancelable: true,
+        }));
+        assert.equal(notes.hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('shows PDF notes safely and jumps matched notes to Markdown', () => {
+    const scrolledOffsets = [];
+    const annotationOverlay = {
+        matched: [{
+            id: 'HIGH0001',
+            type: 'highlight',
+            text: 'Important result',
+            comment: '<img src=x onerror=alert(1)> Review this',
+            color: '#ffd400',
+            pageLabel: '4',
+            pageIndex: 3,
+            sortIndex: '00002',
+            ranges: [{ from: 12, to: 28 }],
+        }],
+        unmatched: [{
+            id: 'UNDER001',
+            type: 'underline',
+            text: 'Missing result',
+            comment: 'Needs follow-up',
+            color: '#2ea8e5',
+            pageLabel: '',
+            pageIndex: 1,
+            sortIndex: '00001',
+            reason: 'not-found',
+        }],
+    };
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Before text Important result after text.',
+        annotationOverlay,
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => scrolledOffsets.push(offset);
+            return editor;
+        },
+    });
+    const notes = shadow.querySelector('#mktero-notes');
+    const buttons = [...notes.querySelectorAll('.markdown-note-link')];
+
+    try {
+        assert.equal(notes.getAttribute('aria-label'), 'PDF notes');
+        assert.equal(
+            notes.querySelector('.markdown-notes-title').textContent,
+            'PDF Notes'
+        );
+        assert.equal(buttons.length, 2);
+        assert.equal(buttons[0].hasAttribute('disabled'), true);
+        assert.match(buttons[0].textContent, /Page 2/);
+        assert.match(buttons[0].textContent, /Missing result/);
+        assert.match(buttons[0].textContent, /Not found in Markdown/);
+        assert.equal(buttons[1].hasAttribute('disabled'), false);
+        assert.match(buttons[1].textContent, /Page 4/);
+        assert.match(buttons[1].textContent, /Important result/);
+        assert.match(
+            buttons[1].textContent,
+            /<img src=x onerror=alert\(1\)> Review this/
+        );
+        assert.equal(buttons[1].querySelector('img'), null);
+        assert.match(
+            buttons[1].querySelector('.markdown-note-color')
+                .getAttribute('style'),
+            /--mktero-annotation-color:\s*#ffd400/
+        );
+
+        buttons[1].dispatchEvent(new document.defaultView.Event('click', {
+            bubbles: true,
+        }));
+        assert.deepEqual(scrolledOffsets, [12]);
+
+        view.render(createModel({
+            status: 'ready',
+            progress: 100,
+            markdown: 'Updated note',
+            annotationOverlay: {
+                matched: [{
+                    id: 'HIGH0002',
+                    type: 'highlight',
+                    text: 'Updated',
+                    comment: '',
+                    color: '#a28ae5',
+                    pageLabel: '5',
+                    pageIndex: 4,
+                    sortIndex: '00001',
+                    ranges: [{ from: 0, to: 7 }],
+                }],
+                unmatched: [],
+            },
+            sourceKind: 'markdown',
+        }));
+        const updated = notes.querySelectorAll('.markdown-note-link');
+        assert.equal(updated.length, 1);
+        assert.match(updated[0].textContent, /Updated/);
+        updated[0].dispatchEvent(new document.defaultView.Event('click', {
+            bubbles: true,
+        }));
+        assert.deepEqual(scrolledOffsets, [12, 0]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('shows a live Markdown outline and scrolls to the selected heading', () => {
     const markdown = '# Overview\n\n## Methods\n\n### Results';
     const scrolledOffsets = [];
@@ -305,6 +479,8 @@ test('shows an empty outline state when Markdown has no headings', () => {
 
     assert.equal(shadow.querySelectorAll('.markdown-outline-link').length, 0);
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, 'No headings');
+    assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 0);
+    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, 'No PDF notes');
     view.destroy();
 });
 
@@ -332,6 +508,7 @@ test('mounts the Markdown UI in an isolated inline shadow root', () => {
     assert.ok(shadow.querySelector('#mktero-editor .cm-content'));
     assert.equal(shadow.querySelector('.markdown-workspace').hidden, true);
     assert.ok(shadow.querySelector('#mktero-outline-resizer'));
+    assert.ok(shadow.querySelector('#mktero-notes-resizer'));
     assert.ok(!shadow.querySelector('#mktero-toggle-outline'));
     assert.ok(!shadow.querySelector('#mktero-save'));
     view.destroy();
@@ -419,6 +596,8 @@ test('localizes the Markdown viewer chrome from the Zotero locale', () => {
     );
     assert.equal(shadow.querySelector('.markdown-outline-title').textContent, '目录');
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
+    assert.equal(shadow.querySelector('.markdown-notes-title').textContent, 'PDF 笔记');
+    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, '暂无 PDF 笔记');
 
     view.destroy();
 });

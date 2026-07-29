@@ -28,8 +28,8 @@ test('styles a read-only Markdown workspace without editing controls', async () 
     assert.doesNotMatch(styles, /\.app-header\s*\{/);
     assert.doesNotMatch(styles, /\.editor-toolbar\s*\{/);
     assert.doesNotMatch(styles, /\.save-button\s*\{/);
-    assert.match(styles, /\.markdown-outline-edge\s*\{[^}]*width: 7px;/s);
-    assert.match(styles, /\.markdown-outline-resizer\s*\{[^}]*inset: 0;/s);
+    assert.match(styles, /\.markdown-side-panel-edge\s*\{[^}]*width: 7px;/s);
+    assert.match(styles, /\.markdown-side-panel-resizer\s*\{[^}]*inset: 0;/s);
     assert.match(styles, /\.markdown-editor-host\s*\{[^}]*min-height: 0;/s);
     assert.doesNotMatch(styles, /\.mode-switch/);
 });
