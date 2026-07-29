@@ -35,7 +35,9 @@ function normalizePdfAnnotationCharacter(
 ) {
     if (citationDollars.has(offset)) return '';
     if (/^\s$/u.test(character)
-        && /^[,.;:!?，。；：！？]/u.test(source.slice(offset + character.length))) {
+        && /^\s*[,.;:!?，。；：！？]/u.test(
+            source.slice(offset + character.length)
+        )) {
         return '';
     }
     if (SINGLE_QUOTES.has(character)) return "'";

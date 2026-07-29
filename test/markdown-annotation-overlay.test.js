@@ -126,6 +126,32 @@ test('matches PDF citations against MinerU dollar-wrapped citations', async () =
     assert.deepEqual(result.unmatched, []);
 });
 
+test('ignores repeated MinerU whitespace before citation punctuation', async () => {
+    const annotation = {
+        id: 'CITE0002',
+        type: 'highlight',
+        text: 'lowering cortisol [26, 27], significantly.',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '2',
+        pageIndex: 1,
+        sortIndex: '00005',
+    };
+    const markdown = 'lowering cortisol $[26, 27]$   , significantly.';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'normalized',
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
 test('does not guess when PDF quote normalization leaves repeated matches', async () => {
     const annotation = {
         id: 'QUOTE002',
