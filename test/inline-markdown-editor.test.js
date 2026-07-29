@@ -269,6 +269,59 @@ test('renders a PDF trademark annotation over MinerU superscript markup', async 
     dom.window.close();
 });
 
+test('shows one note marker when an annotation covers formula content', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Result $x+y$ observed.';
+    const from = markdown.indexOf('x+y');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'MATH0001',
+                type: 'highlight',
+                text: 'x+y',
+                comment: 'Formula note',
+                color: '#ff6666',
+                pageLabel: '7',
+                ranges: [{ from, to: from + 3 }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const rendered = document.querySelector(
+        '.cm-mktero-math .cm-mktero-pdf-annotation'
+    );
+    assert.ok(rendered);
+    assert.match(rendered.textContent, /x\s*\+\s*y/);
+    const noteMarkers = document.querySelectorAll(
+        '.cm-mktero-pdf-annotation-note'
+    );
+    assert.equal(noteMarkers.length, 1);
+    assert.ok(rendered.contains(noteMarkers[0]));
+
+    noteMarkers[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.match(
+        document.querySelector('.mktero-annotation-popup')?.textContent || '',
+        /Formula note/
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('shows PDF annotation notes safely on hover', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

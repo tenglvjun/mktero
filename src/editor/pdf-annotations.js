@@ -224,7 +224,9 @@ function wrapTextRange(container, from, to, annotation, translate) {
         element.setAttribute(name, value);
     }
     element.append(range.extractContents());
-    const noteMarker = createAnnotationNoteMarker(document, annotation);
+    const noteMarker = annotation.showNoteMarker === false
+        ? null
+        : createAnnotationNoteMarker(document, annotation);
     if (noteMarker) element.append(noteMarker);
     range.insertNode(element);
 }

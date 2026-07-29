@@ -445,6 +445,7 @@ function normalizeLinkLabel(label) {
 function buildDecorations(state, context) {
     const decorations = [];
     const excludedMathRanges = collectExcludedMathRanges(state);
+    const renderedMathRanges = [];
     const analyzedTableReferences = referenceAnalysis(
         state,
         context.tableReferences
@@ -494,7 +495,8 @@ function buildDecorations(state, context) {
                     decorations,
                     excludedMathRanges,
                     context,
-                    paragraph
+                    paragraph,
+                    renderedMathRanges
                 );
             }
             return undefined;
@@ -507,24 +509,33 @@ function buildDecorations(state, context) {
         state,
         decorations,
         context,
-        renderedGroups
+        [...renderedGroups, ...renderedMathRanges]
     );
     return Decoration.set(decorations, true);
 }
 
-function decoratePDFAnnotations(state, decorations, context, renderedGroups) {
+function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
     for (const annotation of context.annotationOverlay?.matched || []) {
-        let noteOffset = null;
+        const validRanges = (annotation.ranges || []).filter(range => (
+            validAnnotationRange(range, state.doc.length)
+        ));
+        const noteOffset = annotationTerminalOffset(validRanges);
         for (const range of annotation.ranges || []) {
             if (!validAnnotationRange(range, state.doc.length)) continue;
-            if (renderedGroups.some(group => rangeContains(group, range))) continue;
+            if (renderedRanges.some(rendered => rangeContains(rendered, range))) {
+                continue;
+            }
             decorations.push(Decoration.mark({
                 class: annotationClassName(annotation),
                 attributes: annotationAttributes(annotation, context.translate),
             }).range(range.from, range.to));
-            noteOffset = Math.max(noteOffset ?? range.to, range.to);
         }
-        if (noteOffset !== null && annotationHasComment(annotation)) {
+        const noteRendered = renderedRanges.some(range => (
+            rangeContainsOffset(range, noteOffset)
+        ));
+        if (noteOffset !== null
+            && !noteRendered
+            && annotationHasComment(annotation)) {
             decorations.push(Decoration.widget({
                 widget: new AnnotationNoteWidget(annotation),
                 side: 1,
@@ -543,6 +554,25 @@ function validAnnotationRange(range, documentLength) {
 
 function rangeContains(outer, inner) {
     return inner.from >= outer.from && inner.to <= outer.to;
+}
+
+function rangeContainsOffset(range, offset) {
+    return Number.isInteger(offset)
+        && offset > range.from
+        && offset <= range.to;
+}
+
+function annotationTerminalOffset(ranges) {
+    let terminalOffset = null;
+    for (const range of ranges || []) {
+        if (!Number.isInteger(range?.from)
+            || !Number.isInteger(range?.to)
+            || range.to <= range.from) {
+            continue;
+        }
+        terminalOffset = Math.max(terminalOffset ?? range.to, range.to);
+    }
+    return terminalOffset;
 }
 
 function decorateCitations(state, decorations, context) {
@@ -1112,7 +1142,8 @@ function decorateMath(
     decorations,
     excludedRanges,
     context,
-    renderDisplayMath
+    renderDisplayMath,
+    renderedMathRanges
 ) {
     const source = state.sliceDoc(node.from, node.to);
     const displayMatches = findDisplayMathMatches(source);
@@ -1131,6 +1162,7 @@ function decorateMath(
                 'math-display',
                 context
             ));
+            renderedMathRanges.push({ from: matchFrom, to: matchTo });
         }
     }
 
@@ -1168,6 +1200,7 @@ function decorateMath(
             true,
             findAncestorAt(state, matchFrom, 'Link') ? 'cm-mktero-link' : ''
         ));
+        renderedMathRanges.push({ from: matchFrom, to: matchTo });
     }
 }
 
@@ -1256,15 +1289,23 @@ function renderedRange(node, state, display, context) {
 }
 
 function annotationsForRange(overlay, from, to) {
-    return (overlay?.matched || []).filter(annotation => (
-        (annotation.ranges || []).some(range => (
+    return (overlay?.matched || []).flatMap(annotation => {
+        const contained = (annotation.ranges || []).some(range => (
             Number.isInteger(range?.from)
             && Number.isInteger(range?.to)
             && range.from >= from
             && range.to > range.from
             && range.to <= to
-        ))
-    ));
+        ));
+        if (!contained) return [];
+        return [{
+            ...annotation,
+            showNoteMarker: rangeContainsOffset(
+                { from, to },
+                annotationTerminalOffset(annotation.ranges)
+            ),
+        }];
+    });
 }
 
 function renderedCitationDescriptors(state, context, from, to) {
@@ -1374,7 +1415,7 @@ function renderedMathRange(
             source,
             display,
             from,
-            annotations: annotationsCoveringRange(
+            annotations: annotationsOverlappingRange(
                 context.annotationOverlay,
                 from,
                 to
@@ -1386,15 +1427,22 @@ function renderedMathRange(
     }).range(from, to);
 }
 
-function annotationsCoveringRange(overlay, from, to) {
+function annotationsOverlappingRange(overlay, from, to) {
     return (overlay?.matched || []).flatMap(annotation => {
-        const covers = (annotation.ranges || []).some(range => (
+        const overlaps = (annotation.ranges || []).some(range => (
             Number.isInteger(range?.from)
             && Number.isInteger(range?.to)
-            && range.from <= from
-            && range.to >= to
+            && range.from < to
+            && range.to > from
         ));
-        return covers ? [{ ...annotation, ranges: [{ from, to }] }] : [];
+        return overlaps ? [{
+            ...annotation,
+            ranges: [{ from, to }],
+            showNoteMarker: rangeContainsOffset(
+                { from, to },
+                annotationTerminalOffset(annotation.ranges)
+            ),
+        }] : [];
     });
 }
 
@@ -1411,6 +1459,13 @@ function wrapRenderedMathAnnotations(container, annotations, translate) {
             wrapper.setAttribute(name, value);
         }
         wrapper.append(...container.childNodes);
+        if (annotation.showNoteMarker) {
+            const noteMarker = createAnnotationNoteMarker(
+                container.ownerDocument,
+                annotation
+            );
+            if (noteMarker) wrapper.append(noteMarker);
+        }
         container.append(wrapper);
     }
 }
