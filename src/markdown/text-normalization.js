@@ -1,3 +1,9 @@
+const NUMERIC_CITATION_CONTENT = /^\d+(?:\s*[-–—]\s*\d+)?(?:\s*[,，;；]\s*\d+(?:\s*[-–—]\s*\d+)?)*$/u;
+
+export function isNumericCitationContent(text) {
+    return NUMERIC_CITATION_CONTENT.test(text);
+}
+
 export function normalizeText(text) {
     return String(text)
         .normalize('NFKC')

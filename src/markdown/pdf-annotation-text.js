@@ -1,9 +1,11 @@
-import { createNormalizedTextIndex } from './text-normalization.js';
+import {
+    createNormalizedTextIndex,
+    isNumericCitationContent,
+} from './text-normalization.js';
 
 const SINGLE_QUOTES = new Set(['‘', '’', '‛']);
 const DOUBLE_QUOTES = new Set(['“', '”', '„', '‟']);
 const HYPHENS = new Set(['‐', '‑', '‒', '–', '—', '−']);
-const CITATION_CONTENT = /^\d+(?:\s*[-–—]\s*\d+)?(?:\s*[,，;；]\s*\d+(?:\s*[-–—]\s*\d+)?)*$/u;
 const CITATION_WRAPPER = /\$\[([0-9,，;；\s–—-]{1,512})\]\$/gu;
 const TRADEMARK_SUPERSCRIPT = /\$\^\{([®©™])\}\$/gu;
 
@@ -50,7 +52,7 @@ function normalizePdfAnnotationCharacter(
 function collectIgnoredMarkupOffsets(text) {
     const offsets = new Set();
     for (const match of text.matchAll(CITATION_WRAPPER)) {
-        if (!CITATION_CONTENT.test(match[1])) continue;
+        if (!isNumericCitationContent(match[1])) continue;
         offsets.add(match.index);
         offsets.add(match.index + match[0].length - 1);
     }

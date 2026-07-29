@@ -1,4 +1,5 @@
 import { GFM, parser } from '@lezer/markdown';
+import { isNumericCitationContent } from './text-normalization.js';
 
 const MARKDOWN_PARSER = parser.configure(GFM);
 const HIDDEN_NODE_NAMES = new Set([
@@ -20,7 +21,6 @@ const HIDDEN_URL_PARENT_NAMES = new Set([
     'Link',
     'LinkReference',
 ]);
-const NUMERIC_CITATION_CONTENT = /^\d+(?:\s*[-–—]\s*\d+)?(?:\s*[,，;；]\s*\d+(?:\s*[-–—]\s*\d+)?)*$/u;
 
 export function createVisibleMarkdownTextIndex(markdown) {
     const hiddenRanges = collectHiddenRanges(markdown);
@@ -105,7 +105,7 @@ function isVisibleNumericCitationMark(node, markdown) {
     return source.length <= 514
         && source[0] === '['
         && source.at(-1) === ']'
-        && NUMERIC_CITATION_CONTENT.test(source.slice(1, -1));
+        && isNumericCitationContent(source.slice(1, -1));
 }
 
 function hiddenURL(node) {
