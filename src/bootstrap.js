@@ -10,6 +10,7 @@ import {
     createZoteroMarkdownCache,
 } from './cache/markdown-cache.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
+import { MarkdownAnnotationOverlay } from './core/markdown-annotation-overlay.js';
 import {
     CONVERSION_PROGRESS,
     normalizeConversionProgress,
@@ -18,6 +19,7 @@ import {
     MinerUConfigurationError,
     MinerUDocumentExtractor,
 } from './extractors/mineru-extractor.js';
+import { ZoteroAnnotationExtractor } from './extractors/zotero-annotation-extractor.js';
 import { MinerUClient } from './mineru/mineru-client.js';
 import { createRuntimeAbortController } from './platform/abort-controller.js';
 import {
@@ -78,6 +80,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.cache = cache;
+    const annotationOverlay = new MarkdownAnnotationOverlay({
+        extractor: new ZoteroAnnotationExtractor(Zotero),
+        onError: error => Zotero.logError?.(error),
+    });
     runtime.service = new MarkdownDocumentService({
         extractor: new MinerUDocumentExtractor({
             zotero: Zotero,
@@ -90,6 +96,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             createCacheKey: fileData => createMinerUCacheKey(fileData),
             isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         }),
+        annotationOverlay,
     });
     cache.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();

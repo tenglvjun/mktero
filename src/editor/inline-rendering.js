@@ -24,10 +24,16 @@ import {
     installRenderedImagePreview,
     openRenderedLink,
 } from './rendered-markdown-dom.js';
+import {
+    annotationAttributes,
+    annotationClassName,
+    installRenderedAnnotations,
+} from './pdf-annotations.js';
 
 export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
+export const setAnnotationOverlay = StateEffect.define();
 
 class RenderedMarkdownWidget extends WidgetType {
     constructor({
@@ -39,6 +45,7 @@ class RenderedMarkdownWidget extends WidgetType {
         openImagePreview,
         renderVersion,
         citations = [],
+        annotations = [],
         extraClassName = '',
         translate = translateEnglish,
     }) {
@@ -52,6 +59,8 @@ class RenderedMarkdownWidget extends WidgetType {
         this.renderVersion = renderVersion;
         this.citations = citations;
         this.citationKey = citations.map(citation => citation.key).join('|');
+        this.annotations = annotations;
+        this.annotationKey = JSON.stringify(annotations);
         this.extraClassName = extraClassName;
         this.translate = translate;
     }
@@ -62,6 +71,7 @@ class RenderedMarkdownWidget extends WidgetType {
             && this.from === other.from
             && this.renderVersion === other.renderVersion
             && this.citationKey === other.citationKey
+            && this.annotationKey === other.annotationKey
             && this.extraClassName === other.extraClassName;
     }
 
@@ -81,6 +91,11 @@ class RenderedMarkdownWidget extends WidgetType {
             inline
         );
         installRenderedCitations(container, this.citations);
+        installRenderedAnnotations(
+            container,
+            this.annotations,
+            this.translate
+        );
 
         container.addEventListener('mousedown', event => {
             if (event.target?.closest?.('img')) return;
@@ -95,7 +110,9 @@ class RenderedMarkdownWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
-        return !event.target?.closest?.('.cm-mktero-citation');
+        return !event.target?.closest?.(
+            '.cm-mktero-citation, .cm-mktero-pdf-annotation'
+        );
     }
 }
 
@@ -154,6 +171,7 @@ export function createInlineRenderingExtension({
     citationPopup,
     tablePreviewPopup,
     figurePreviewPopup,
+    annotationPopup,
     activateCitation,
     activateTableReference,
     activateFigureReference,
@@ -166,6 +184,7 @@ export function createInlineRenderingExtension({
         citationPopup,
         tablePreviewPopup,
         figurePreviewPopup,
+        annotationPopup,
         activateCitation,
         activateTableReference,
         activateFigureReference,
@@ -174,6 +193,8 @@ export function createInlineRenderingExtension({
         highlightedReferenceID: null,
         highlightedTableID: null,
         highlightedFigureID: null,
+        annotationOverlay: { matched: [], unmatched: [] },
+        annotationTargets: new Map(),
         citationAnalysisDocument: null,
         citationAnalysis: null,
         citationTargets: new Map(),
@@ -196,6 +217,7 @@ export function createInlineRenderingExtension({
             let referenceHighlightChanged = false;
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
+            let annotationOverlayChanged = false;
             if (shouldRefresh) context.renderVersion++;
             for (const effect of transaction.effects) {
                 if (effect.is(setReferenceHighlight)) {
@@ -210,11 +232,22 @@ export function createInlineRenderingExtension({
                     context.highlightedFigureID = effect.value;
                     figureHighlightChanged = true;
                 }
+                else if (effect.is(setAnnotationOverlay)) {
+                    context.annotationOverlay = effect.value
+                        || { matched: [], unmatched: [] };
+                    context.annotationTargets = new Map(
+                        (context.annotationOverlay.matched || []).map(
+                            annotation => [String(annotation.id || ''), annotation]
+                        )
+                    );
+                    annotationOverlayChanged = true;
+                }
             }
             if (transaction.docChanged
                 || referenceHighlightChanged
                 || tableHighlightChanged
                 || figureHighlightChanged
+                || annotationOverlayChanged
                 || shouldRefresh) {
                 return buildDecorations(transaction.state, context);
             }
@@ -420,7 +453,34 @@ function buildDecorations(state, context) {
     decorateCitations(state, decorations, context);
     decorateTableReferences(state, decorations, context);
     decorateFigureReferences(state, decorations, context);
+    decoratePDFAnnotations(
+        state,
+        decorations,
+        context,
+        renderedGroups
+    );
     return Decoration.set(decorations, true);
+}
+
+function decoratePDFAnnotations(state, decorations, context, renderedGroups) {
+    for (const annotation of context.annotationOverlay?.matched || []) {
+        for (const range of annotation.ranges || []) {
+            if (!validAnnotationRange(range, state.doc.length)) continue;
+            if (renderedGroups.some(group => rangeContains(group, range))) continue;
+            decorations.push(Decoration.mark({
+                class: annotationClassName(annotation),
+                attributes: annotationAttributes(annotation, context.translate),
+            }).range(range.from, range.to));
+        }
+    }
+}
+
+function validAnnotationRange(range, documentLength) {
+    return Number.isInteger(range?.from)
+        && Number.isInteger(range?.to)
+        && range.from >= 0
+        && range.to > range.from
+        && range.to <= documentLength;
 }
 
 function rangeContains(outer, inner) {
@@ -665,6 +725,26 @@ function citationElement(event, view) {
 }
 
 function referenceInteraction(event, view, context) {
+    const annotation = annotationElement(event, view);
+    if (annotation) {
+        const target = context.annotationTargets.get(
+            annotation.getAttribute('data-annotation-id') || ''
+        );
+        if (!target) return null;
+        const open = () => {
+            closeReferencePopupsExcept(context, context.annotationPopup);
+            context.annotationPopup?.open({
+                anchor: annotation,
+                annotation: target,
+            });
+        };
+        return {
+            element: annotation,
+            popup: context.annotationPopup,
+            open,
+            activate: open,
+        };
+    }
     const citation = citationElement(event, view);
     if (citation) {
         return {
@@ -688,9 +768,15 @@ function referenceInteraction(event, view, context) {
 
 function referencePopups(context) {
     return [
+        context.annotationPopup,
         context.citationPopup,
         ...previewReferenceTypes(context).map(type => type.popup),
     ];
+}
+
+function annotationElement(event, view) {
+    const annotation = event.target?.closest?.('.cm-mktero-pdf-annotation');
+    return annotation && view.dom.contains(annotation) ? annotation : null;
 }
 
 function closeReferencePopupsExcept(context, retainedPopup) {
@@ -1055,12 +1141,18 @@ function renderedRange(node, state, display, context) {
         && node.tableTarget.id === context.highlightedTableID;
     const figureIsHighlighted = context.figureReferences.targetsByFrom
         ?.get(node.from)?.id === context.highlightedFigureID;
+    const annotations = annotationsForRange(
+        context.annotationOverlay,
+        node.from,
+        node.to
+    );
     if (display === 'table') {
         return Decoration.replace({
             widget: new RenderedTableWidget({
                 source,
                 caption: node.caption,
                 highlighted: tableIsHighlighted,
+                annotations,
                 ...context,
             }),
             block: true,
@@ -1079,6 +1171,7 @@ function renderedRange(node, state, display, context) {
                     node.to
                 )
                 : [],
+            annotations,
             extraClassName: [
                 display === 'html-block'
                     && (node.table?.kind === 'html'
@@ -1096,6 +1189,14 @@ function renderedRange(node, state, display, context) {
         }),
         block: true,
     }).range(node.from, node.to);
+}
+
+function annotationsForRange(overlay, from, to) {
+    return (overlay?.matched || []).filter(annotation => (
+        (annotation.ranges || []).some(range => (
+            range.from >= from && range.to <= to
+        ))
+    ));
 }
 
 function renderedCitationDescriptors(state, context, from, to) {

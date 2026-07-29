@@ -10,6 +10,7 @@ const READY_RESULT_FIELDS = [
     'cacheKey',
     'extractedPages',
     'totalPages',
+    'annotationOverlay',
     'warnings',
 ];
 
@@ -43,6 +44,7 @@ export function createConversionLoadingChanges(
         assetBasePath: '',
         cacheHit: false,
         cacheKey: null,
+        annotationOverlay: emptyAnnotationOverlay(),
         warnings: [],
         error: '',
         preserveContent: false,
@@ -54,6 +56,7 @@ export function createConversionReadyChanges(result) {
         assets: [],
         assetBasePath: '',
         cacheKey: null,
+        annotationOverlay: emptyAnnotationOverlay(),
         ...result,
         status: 'ready',
         progress: 100,
@@ -84,4 +87,8 @@ export function createConversionFailureChanges(
         error: message,
         preserveContent: false,
     };
+}
+
+function emptyAnnotationOverlay() {
+    return { matched: [], unmatched: [] };
 }

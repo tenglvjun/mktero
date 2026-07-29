@@ -121,7 +121,10 @@ class MarkdownTabView {
             elements.loadingProgress.value = loadingView.progress;
             if (!loadingView.preserveContent) {
                 this.revokeAssetURLs();
-                this.editor.setMarkdown('');
+                this.editor.setDocument({
+                    markdown: '',
+                    annotationOverlay: { matched: [], unmatched: [] },
+                });
                 this.syncOutline('');
             }
             return;
@@ -130,7 +133,11 @@ class MarkdownTabView {
         if (model.status === 'ready') {
             const markdown = model.markdown || '';
             const assetsChanged = this.syncAssetURLs();
-            this.editor.setMarkdown(markdown);
+            this.editor.setDocument({
+                markdown,
+                annotationOverlay: model.annotationOverlay
+                    || { matched: [], unmatched: [] },
+            });
             this.syncOutline(markdown);
             if (assetsChanged) this.editor.refreshRendering();
             return;

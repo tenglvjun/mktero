@@ -208,6 +208,7 @@ function createInitialModel(itemID, onReparse, translate) {
         sourceKind: null,
         cacheHit: false,
         cacheKey: null,
+        annotationOverlay: { matched: [], unmatched: [] },
         preserveContent: false,
         warnings: [],
         error: '',

@@ -545,6 +545,99 @@ main {
     animation: mktero-reference-highlight 3s ease-out;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation {
+    border-radius: 3px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    cursor: pointer;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation--highlight {
+    background: color-mix(
+        in srgb,
+        var(--mktero-annotation-color) 32%,
+        transparent
+    );
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation--underline {
+    text-decoration-line: underline;
+    text-decoration-color: var(--mktero-annotation-color);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation:focus-visible {
+    outline: 2px solid color-mix(
+        in srgb,
+        var(--mktero-annotation-color) 65%,
+        transparent
+    );
+    outline-offset: 2px;
+}
+
+.mktero-annotation-popup {
+    position: fixed;
+    z-index: 900;
+    width: min(420px, calc(100vw - 24px));
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow:
+        0 16px 40px rgb(31 35 40 / 16%),
+        0 3px 10px rgb(31 35 40 / 8%);
+    font: 13px/1.55 ui-sans-serif, system-ui, sans-serif;
+}
+
+.mktero-annotation-popup::after {
+    position: absolute;
+    left: var(--anchored-popup-arrow-left, 50%);
+    width: 10px;
+    height: 10px;
+    background: var(--surface);
+    border: solid var(--border);
+    border-width: 0 1px 1px 0;
+    content: "";
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.mktero-annotation-popup[data-placement="top"]::after {
+    bottom: -6px;
+}
+
+.mktero-annotation-popup[data-placement="bottom"]::after {
+    top: -6px;
+    transform: translateX(-50%) rotate(225deg);
+}
+
+.mktero-annotation-popup-content {
+    padding: 12px;
+}
+
+.mktero-annotation-popup-metadata {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.mktero-annotation-popup-swatch {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
+    background: var(--mktero-annotation-color);
+    border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+    border-radius: 50%;
+}
+
+.mktero-annotation-popup-text {
+    margin-top: 8px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
 .mktero-citation-popup {
     --citation-popup-surface: var(--surface);
     --citation-popup-text: var(--text);

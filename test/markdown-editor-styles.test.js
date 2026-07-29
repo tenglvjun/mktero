@@ -251,6 +251,40 @@ test('styles citation popups and temporary reference highlights', () => {
     assert.match(highlight, /animation:\s*mktero-reference-highlight 3s ease-out/);
 });
 
+test('styles Zotero-colored PDF annotations and their note popup', () => {
+    const annotation = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation'
+    );
+    assert.match(annotation, /border-radius:\s*3px/);
+    assert.match(annotation, /box-decoration-break:\s*clone/);
+    assert.match(annotation, /cursor:\s*pointer/);
+
+    const highlight = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation--highlight'
+    );
+    assert.match(
+        highlight,
+        /background:\s*color-mix\([\s\S]*?var\(--mktero-annotation-color\) 32%[\s\S]*?transparent/
+    );
+
+    const underline = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation--underline'
+    );
+    assert.match(underline, /text-decoration-line:\s*underline/);
+    assert.match(
+        underline,
+        /text-decoration-color:\s*var\(--mktero-annotation-color\)/
+    );
+
+    const popup = ruleBody('.mktero-annotation-popup');
+    assert.match(popup, /position:\s*fixed/);
+    assert.match(popup, /z-index:\s*900/);
+    assert.match(popup, /background:\s*var\(--surface\)/);
+
+    const swatch = ruleBody('.mktero-annotation-popup-swatch');
+    assert.match(swatch, /background:\s*var\(--mktero-annotation-color\)/);
+});
+
 test('styles table references, previews, and target highlights', () => {
     const reference = ruleBody(
         [

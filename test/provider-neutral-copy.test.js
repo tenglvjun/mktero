@@ -48,6 +48,7 @@ test('localizes fallback titles and conversion warnings', () => {
         title: 'Untitled PDF',
         warnings: [
             'The local Markdown cache is unavailable.',
+            'Zotero PDF annotations could not be loaded.',
             'Unknown non-fatal warning.',
         ],
     }, localization.t.bind(localization));
@@ -55,6 +56,7 @@ test('localizes fallback titles and conversion warnings', () => {
     assert.equal(result.title, '未命名 PDF');
     assert.deepEqual(result.warnings, [
         '本地 Markdown 缓存不可用。',
+        '无法读取 Zotero PDF 标注。',
         '转换过程中发生了一个不影响阅读的问题。',
     ]);
 });

@@ -22,6 +22,7 @@ function createModel(changes = {}) {
         sourceKind: null,
         cacheHit: false,
         cacheKey: null,
+        annotationOverlay: { matched: [], unmatched: [] },
         preserveContent: false,
         warnings: [],
         error: '',
@@ -66,6 +67,9 @@ function createTestInlineEditor({ document, parent, initialMarkdown }) {
     return {
         getMarkdown: () => content.textContent,
         setMarkdown(markdown) {
+            content.textContent = markdown;
+        },
+        setDocument({ markdown }) {
             content.textContent = markdown;
         },
         focus: () => content.focus(),
@@ -121,6 +125,45 @@ test('shows Markdown without editing controls', () => {
     finally {
         view.destroy();
     }
+});
+
+test('updates Markdown and PDF annotations as one editor document', () => {
+    const updates = [];
+    const annotationOverlay = {
+        matched: [{
+            id: 'HIGH0001',
+            type: 'highlight',
+            text: 'Important',
+            comment: 'Review this',
+            color: '#ffd400',
+            pageLabel: '4',
+            ranges: [{ from: 0, to: 9 }],
+        }],
+        unmatched: [],
+    };
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Important result.',
+        annotationOverlay,
+    }), {}, {
+        editorFactory() {
+            return {
+                setMarkdown() {},
+                setDocument(document) {
+                    updates.push(document);
+                },
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    assert.deepEqual(updates, [{
+        markdown: 'Important result.',
+        annotationOverlay,
+    }]);
+    view.destroy();
 });
 
 test('resizes and toggles the Markdown outline from its edge', () => {

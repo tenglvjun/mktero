@@ -7,12 +7,14 @@ import { createLocalization } from '../i18n/localization.js';
 import {
     createInlineRenderingExtension,
     refreshInlineRendering,
+    setAnnotationOverlay,
     setFigureHighlight,
     setReferenceHighlight,
     setTableHighlight,
 } from './inline-rendering.js';
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
+import { createAnnotationPopup } from './annotation-popup.js';
 import { createFigurePreviewPopup } from './figure-preview-popup.js';
 import { createTablePreviewPopup } from './table-preview-popup.js';
 
@@ -85,6 +87,7 @@ export function createInlineMarkdownEditor({
     acquireDOMGlobals(ownerWindow);
     const imagePreview = createImagePreview(parent, { localization });
     const citationPopup = createCitationPopup(parent, { localization });
+    const annotationPopup = createAnnotationPopup(parent, { localization });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
         resolveImageURL,
         localization,
@@ -127,21 +130,21 @@ export function createInlineMarkdownEditor({
         },
     };
     const referenceFeatureList = Object.values(referenceFeatures);
+    const interactionPopups = [
+        annotationPopup,
+        ...referenceFeatureList.map(feature => feature.popup),
+    ];
     let view;
     const removeDOMActivation = installDOMActivation(
         parent,
         ownerWindow,
         event => {
             if (!view) return;
-            if (referenceFeatureList.some(feature => (
-                feature.popup.contains(event.target)
-            ))) {
+            if (interactionPopups.some(popup => popup.contains(event.target))) {
                 return;
             }
             if (event.type === 'scroll' || event.type === 'wheel') {
-                for (const feature of referenceFeatureList) {
-                    feature.popup.close();
-                }
+                for (const popup of interactionPopups) popup.close();
             }
             view.requestMeasure();
             if (event.type === 'scroll'
@@ -163,6 +166,7 @@ export function createInlineMarkdownEditor({
                     citationPopup,
                     tablePreviewPopup,
                     figurePreviewPopup,
+                    annotationPopup,
                     activateCitation:
                         referenceFeatures.citation.highlight.activate,
                     activateTableReference:
@@ -186,35 +190,44 @@ export function createInlineMarkdownEditor({
     }
     catch (error) {
         for (const feature of referenceFeatureList) feature.popup.destroy();
+        annotationPopup.destroy();
         imagePreview.destroy();
         removeDOMActivation();
         releaseDOMGlobals(ownerWindow);
         throw error;
     }
+    const setDocument = ({ markdown, annotationOverlay }) => {
+        activateDOMGlobals(ownerWindow);
+        for (const feature of referenceFeatureList) {
+            feature.popup.close();
+            feature.highlight.cancel();
+        }
+        annotationPopup.close();
+        const value = String(markdown || '');
+        const effects = [
+            ...referenceFeatureList.map(feature => feature.effect.of(null)),
+            setAnnotationOverlay.of(
+                annotationOverlay || { matched: [], unmatched: [] }
+            ),
+        ];
+        if (value === view.state.doc.toString()) {
+            view.dispatch({ effects });
+            return;
+        }
+        view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: value },
+            effects,
+        });
+    };
     return {
         getMarkdown() {
             return view.state.doc.toString();
         },
+        setDocument,
         setMarkdown(markdown) {
-            activateDOMGlobals(ownerWindow);
-            for (const feature of referenceFeatureList) {
-                feature.popup.close();
-                feature.highlight.cancel();
-            }
-            const value = String(markdown || '');
-            if (value === view.state.doc.toString()) {
-                view.dispatch({
-                    effects: referenceFeatureList.map(feature => (
-                        feature.effect.of(null)
-                    )),
-                });
-                return;
-            }
-            view.dispatch({
-                changes: { from: 0, to: view.state.doc.length, insert: value },
-                effects: [
-                    ...referenceFeatureList.map(feature => feature.effect.of(null)),
-                ],
+            setDocument({
+                markdown,
+                annotationOverlay: { matched: [], unmatched: [] },
             });
         },
         focus() {
@@ -243,6 +256,7 @@ export function createInlineMarkdownEditor({
                     feature.highlight.cancel();
                     feature.popup.destroy();
                 }
+                annotationPopup.destroy();
                 imagePreview.destroy();
                 view.destroy();
             }

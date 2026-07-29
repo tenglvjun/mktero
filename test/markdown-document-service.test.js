@@ -4,6 +4,7 @@ import {
     createMarkdownDocumentService,
     MarkdownDocumentService,
 } from '../src/core/markdown-document-service.js';
+import { MarkdownAnnotationOverlay } from '../src/core/markdown-annotation-overlay.js';
 
 function createPdfItem(overrides = {}) {
     return {
@@ -140,6 +141,82 @@ test('passes through Markdown produced by MinerU', async () => {
     assert.equal(result.sourceKind, 'markdown');
     assert.equal(result.cacheHit, true);
     assert.equal(result.cacheKey, 'a'.repeat(64));
+});
+
+test('adds current Zotero PDF annotations without changing Markdown', async () => {
+    const annotationOverlay = new MarkdownAnnotationOverlay({
+        extractor: {
+            extract: async () => [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'important result',
+                comment: 'Review this',
+                color: '#ffd400',
+                pageLabel: '4',
+                pageIndex: 3,
+                sortIndex: '00001',
+            }],
+        },
+    });
+    const service = new MarkdownDocumentService({
+        extractor: {
+            extract: async () => ({
+                kind: 'markdown',
+                title: 'Annotated paper',
+                markdown: 'An **important** result.',
+                warnings: [],
+            }),
+        },
+        annotationOverlay,
+    });
+
+    const result = await service.convert(42);
+
+    assert.equal(result.markdown, 'An **important** result.');
+    assert.deepEqual(result.annotationOverlay, {
+        matched: [{
+            id: 'HIGH0001',
+            type: 'highlight',
+            text: 'important result',
+            comment: 'Review this',
+            color: '#ffd400',
+            pageLabel: '4',
+            pageIndex: 3,
+            sortIndex: '00001',
+            matchKind: 'exact',
+            ranges: [{ from: 5, to: 23 }],
+        }],
+        unmatched: [],
+    });
+});
+
+test('keeps a successful conversion when Zotero annotations cannot be read', async () => {
+    const annotationOverlay = new MarkdownAnnotationOverlay({
+        extractor: {
+            extract: async () => {
+                throw new Error('annotation database unavailable');
+            },
+        },
+    });
+    const service = new MarkdownDocumentService({
+        extractor: {
+            extract: async () => ({
+                kind: 'markdown',
+                title: 'Readable paper',
+                markdown: 'Readable body',
+                warnings: [],
+            }),
+        },
+        annotationOverlay,
+    });
+
+    const result = await service.convert(42);
+
+    assert.equal(result.markdown, 'Readable body');
+    assert.deepEqual(result.annotationOverlay, { matched: [], unmatched: [] });
+    assert.deepEqual(result.warnings, [
+        'Zotero PDF annotations could not be loaded.',
+    ]);
 });
 
 test('reopens an intentionally empty user-edited Markdown document', async () => {

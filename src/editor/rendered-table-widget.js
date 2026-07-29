@@ -4,6 +4,7 @@ import {
     installRenderedImagePreview,
     openRenderedLink,
 } from './rendered-markdown-dom.js';
+import { installRenderedAnnotations } from './pdf-annotations.js';
 
 export class RenderedTableWidget extends WidgetType {
     constructor({
@@ -14,6 +15,7 @@ export class RenderedTableWidget extends WidgetType {
         openImagePreview,
         renderVersion,
         highlighted = false,
+        annotations = [],
         translate,
     }) {
         super();
@@ -24,6 +26,8 @@ export class RenderedTableWidget extends WidgetType {
         this.openImagePreview = openImagePreview;
         this.renderVersion = renderVersion;
         this.highlighted = highlighted;
+        this.annotations = annotations;
+        this.annotationKey = JSON.stringify(annotations);
         this.translate = translate;
     }
 
@@ -31,7 +35,8 @@ export class RenderedTableWidget extends WidgetType {
         return this.source === other.source
             && this.caption?.text === other.caption?.text
             && this.renderVersion === other.renderVersion
-            && this.highlighted === other.highlighted;
+            && this.highlighted === other.highlighted
+            && this.annotationKey === other.annotationKey;
     }
 
     toDOM(view) {
@@ -51,6 +56,11 @@ export class RenderedTableWidget extends WidgetType {
             cell.setAttribute('contenteditable', 'false');
             cell.setAttribute('aria-readonly', 'true');
         }
+        installRenderedAnnotations(
+            container,
+            this.annotations,
+            this.translate
+        );
         container.addEventListener('mousedown', event => {
             if (event.target?.closest?.('img')) return;
             openRenderedLink(event, this.openLink);
@@ -63,8 +73,8 @@ export class RenderedTableWidget extends WidgetType {
         return container;
     }
 
-    ignoreEvent() {
-        return true;
+    ignoreEvent(event) {
+        return !event.target?.closest?.('.cm-mktero-pdf-annotation');
     }
 }
 

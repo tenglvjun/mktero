@@ -38,6 +38,10 @@ const WARNING_MESSAGE_KEYS = new Map([
         'The Markdown result could not be saved to the local cache.',
         'warning.cacheSaveFailed',
     ],
+    [
+        'Zotero PDF annotations could not be loaded.',
+        'warning.annotationsUnavailable',
+    ],
 ]);
 
 export function removeProviderBranding(message) {

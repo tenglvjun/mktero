@@ -5,11 +5,12 @@ import {
 } from '../markdown/structured-renderer.js';
 
 export class MarkdownDocumentService {
-    constructor({ extractor }) {
+    constructor({ extractor, annotationOverlay = null }) {
         if (!extractor) {
             throw new TypeError('A document extractor is required');
         }
         this.extractor = extractor;
+        this.annotationOverlay = annotationOverlay;
         this.inFlight = new Map();
     }
 
@@ -59,6 +60,15 @@ export class MarkdownDocumentService {
         if (extracted.assets?.length) {
             result.assets = extracted.assets;
             result.assetBasePath = extracted.assetBasePath || '';
+        }
+        if (this.annotationOverlay) {
+            const annotationResult = await this.annotationOverlay.resolve(
+                itemID,
+                markdown
+            );
+            const { warning, ...annotationOverlay } = annotationResult;
+            result.annotationOverlay = annotationOverlay;
+            if (warning) result.warnings = [...result.warnings, warning];
         }
         return result;
     }

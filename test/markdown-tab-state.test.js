@@ -22,6 +22,10 @@ test('keeps the current Markdown visible while a forced reparse is running', () 
         cacheKey: 'a'.repeat(64),
         extractedPages: 2,
         totalPages: 2,
+        annotationOverlay: {
+            matched: [{ id: 'HIGH0001', ranges: [{ from: 0, to: 6 }] }],
+            unmatched: [],
+        },
         warnings: [],
         error: '',
         onReparse: () => {},
@@ -35,6 +39,7 @@ test('keeps the current Markdown visible while a forced reparse is running', () 
     assert.equal(loading.markdown, '# Cached paper');
     assert.equal(loading.cacheHit, true);
     assert.equal(loading.cacheKey, 'a'.repeat(64));
+    assert.deepEqual(loading.annotationOverlay, current.annotationOverlay);
 });
 
 test('restores the previous result with a warning when reparse fails', () => {
@@ -72,6 +77,7 @@ test('uses the normal empty and error states without a previous result', () => {
         assetBasePath: '',
         cacheHit: false,
         cacheKey: null,
+        annotationOverlay: { matched: [], unmatched: [] },
         warnings: [],
         error: '',
         preserveContent: false,
@@ -92,6 +98,7 @@ test('clears figures when a successful reparse has no assets', () => {
         assets: [],
         assetBasePath: '',
         cacheKey: null,
+        annotationOverlay: { matched: [], unmatched: [] },
         title: 'Reparsed paper',
         markdown: '# Reparsed',
         sourceKind: 'markdown',
