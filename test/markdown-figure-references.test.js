@@ -33,6 +33,56 @@ test('maps a prose figure reference to a uniquely captioned image', () => {
     }]);
 });
 
+test('maps a subfigure reference to its uniquely captioned parent figure', () => {
+    const markdown = [
+        'The first layer appears in (Fig. 1a).',
+        '',
+        '![Fig. 1. Pipeline architecture](images/pipeline.png)',
+    ].join('\n');
+
+    const result = analyzeMarkdownFigureReferences(markdown);
+
+    assert.deepEqual(result.references.map(reference => ({
+        text: markdown.slice(reference.from, reference.to),
+        targetId: reference.targetId,
+    })), [{
+        text: 'Fig. 1a',
+        targetId: 'figure:1',
+    }]);
+});
+
+test('prefers an exact subfigure target over its parent figure', () => {
+    const markdown = [
+        'Compare Fig. 1a with the complete figure.',
+        '',
+        '![Fig. 1. Complete result](images/complete.png)',
+        '',
+        '![Fig. 1a. Detailed result](images/detail.png)',
+    ].join('\n');
+
+    const result = analyzeMarkdownFigureReferences(markdown);
+
+    assert.deepEqual(result.references.map(reference => reference.targetId), [
+        'figure:1a',
+    ]);
+});
+
+test('does not fall back when an exact subfigure target is ambiguous', () => {
+    const markdown = [
+        'Compare Fig. 1a with the complete figure.',
+        '',
+        '![Fig. 1. Complete result](images/complete.png)',
+        '',
+        '![Fig. 1a. First detail](images/detail-first.png)',
+        '',
+        '![Fig. 1a. Second detail](images/detail-second.png)',
+    ].join('\n');
+
+    const result = analyzeMarkdownFigureReferences(markdown);
+
+    assert.deepEqual(result.references, []);
+});
+
 test('maps Fig. references to every panel in a shared-caption figure', () => {
     const markdown = [
         'The ablation is shown in Fig. S2.',

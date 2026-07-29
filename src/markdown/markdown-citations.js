@@ -12,6 +12,7 @@ const WRAPPED_SUPERSCRIPT_PATTERNS = [
     /\$(?:\{\})?\^\{\s*([^{}\r\n]{1,80}?)\s*\}\$/g,
     /\\\((?:\{\})?\^\{\s*([^{}\r\n]{1,80}?)\s*\}\\\)/g,
 ];
+const AUTHOR_NOTE_DECORATED_AFFILIATION_PATTERN = /^([*†‡§¶#+‖]*)(\d+|\p{L})([*†‡§¶#+‖]*)$/u;
 const UNICODE_SUPERSCRIPT_CHARACTERS = {
     '⁰': '0',
     '¹': '1',
@@ -140,14 +141,31 @@ function parseAffiliations(markdown, frontMatterEnd) {
         from: 0,
         to: frontMatterEnd,
     });
-    for (const paragraph of paragraphs) {
+    for (const [paragraphIndex, paragraph] of paragraphs.entries()) {
         const markers = findSuperscriptMarkers(
             markdown,
             paragraph.from,
             paragraph.to
         ).filter(marker => affiliationMarkerKey(marker.value) !== null);
         if (!markers.length) {
-            if (foundDefinition) break;
+            if (!foundDefinition) continue;
+            const authorMarkerKeys = findAuthorAffiliationMarkerKeys(
+                markdown,
+                definitionRanges[0].from
+            );
+            const plainAffiliations = parsePlainAffiliationParagraph(
+                markdown,
+                paragraph,
+                authorMarkerKeys,
+                affiliationMarkerKey(affiliations.at(-1)?.label || ''),
+                leadingAffiliationMarkerKey(
+                    markdown,
+                    paragraphs[paragraphIndex + 1]
+                )
+            );
+            if (!plainAffiliations.length) break;
+            affiliations.push(...plainAffiliations);
+            definitionRanges.push(paragraph);
             continue;
         }
         const leading = markdown.slice(
@@ -206,6 +224,109 @@ function parseAffiliations(markdown, frontMatterEnd) {
             ? Math.max(...definitionRanges.map(range => range.to))
             : frontMatterEnd,
     };
+}
+
+function findAuthorAffiliationMarkerKeys(markdown, authorAreaEnd) {
+    const keys = new Set();
+    const markers = findSuperscriptMarkers(
+        markdown,
+        findAuthorAreaStart(markdown, authorAreaEnd),
+        authorAreaEnd,
+        { includeLikelyExponents: true }
+    );
+    for (const marker of markers) {
+        for (const segment of marker.value.split(/[,;，；]/)) {
+            const parsed = affiliationCitationMarker(segment.trim());
+            if (parsed !== null) keys.add(parsed.key);
+        }
+    }
+    return keys;
+}
+
+function leadingAffiliationMarkerKey(markdown, paragraph) {
+    if (!paragraph) return null;
+    const marker = findSuperscriptMarkers(
+        markdown,
+        paragraph.from,
+        paragraph.to
+    ).find(candidate => affiliationMarkerKey(candidate.value) !== null);
+    if (!marker) return null;
+    const leading = markdown.slice(paragraph.from, marker.markup.wrapperFrom);
+    return leading.trim() ? null : affiliationMarkerKey(marker.value);
+}
+
+function parsePlainAffiliationParagraph(
+    markdown,
+    paragraph,
+    expectedKeys,
+    previousKey,
+    nextKey
+) {
+    const source = markdown.slice(paragraph.from, paragraph.to);
+    const linePattern = /^[ \t]*([A-Za-z])[ \t]+([^\r\n]*\p{L}[^\r\n]*)$/gmu;
+    const lines = [...source.matchAll(linePattern)];
+    if (lines.length < 2) return [];
+    let coveredTo = 0;
+    for (const line of lines) {
+        if (line.index !== coveredTo) return [];
+        coveredTo = line.index + line[0].length;
+        const newline = /^\r?\n/.exec(source.slice(coveredTo))?.[0] || '';
+        coveredTo += newline.length;
+    }
+    if (coveredTo !== source.length) return [];
+    if (typeof previousKey !== 'string' || !/^[a-z]$/.test(previousKey)) {
+        return [];
+    }
+
+    const affiliations = [];
+    const usedKeys = new Set();
+    let expectedCodePoint = previousKey.codePointAt(0) + 1;
+    for (const line of lines) {
+        const label = line[1];
+        const markerKey = affiliationMarkerKey(label);
+        if (!expectedKeys.has(markerKey)
+            || usedKeys.has(markerKey)
+            || markerKey.codePointAt(0) !== expectedCodePoint) {
+            return [];
+        }
+        usedKeys.add(markerKey);
+        expectedCodePoint++;
+
+        const markerOffset = line[0].indexOf(label);
+        const markerFrom = paragraph.from + line.index + markerOffset;
+        const contentOffset = line[0].indexOf(
+            line[2],
+            markerOffset + label.length
+        );
+        const contentFrom = paragraph.from + line.index + contentOffset;
+        const to = trimRangeEnd(
+            markdown,
+            contentFrom,
+            paragraph.from + line.index + line[0].length
+        );
+        const text = plainReferenceText(markdown.slice(contentFrom, to));
+        if (!text) return [];
+        affiliations.push({
+            id: `affiliation:${markerKey}`,
+            label,
+            number: null,
+            text,
+            from: contentFrom,
+            to,
+            markerMarkup: {
+                wrapperFrom: markerFrom,
+                contentFrom: markerFrom,
+                contentTo: markerFrom + label.length,
+                wrapperTo: markerFrom + label.length,
+                raiseContent: true,
+            },
+        });
+    }
+    if (typeof nextKey !== 'string'
+        || nextKey.codePointAt(0) !== expectedCodePoint) {
+        return [];
+    }
+    return affiliations;
 }
 
 function affiliationMarkerKey(value) {
@@ -490,27 +611,53 @@ function findNumericEnumerationStarts(body) {
             const between = previous
                 ? paragraph.slice(previous.index + previous[0].length, marker.index)
                 : '';
-            if ((!previous && number === 1)
-                || (previous
-                    && number === Number(previous[1]) + 1
-                    && !/[.!?。！？]/u.test(between))) {
+            if (!previous || (number === Number(previous[1]) + 1
+                && !/[.!?。！？]/u.test(between))) {
                 sequence.push(marker);
                 continue;
             }
-            if (sequence.length >= 2) {
-                for (const item of sequence) {
-                    starts.add(paragraphFrom + item.index);
-                }
-            }
-            sequence = number === 1 ? [marker] : [];
+            recordNumericEnumerationStarts(
+                starts,
+                sequence,
+                paragraph,
+                paragraphFrom
+            );
+            sequence = [marker];
         }
-        if (sequence.length >= 2) {
-            for (const item of sequence) {
-                starts.add(paragraphFrom + item.index);
-            }
-        }
+        recordNumericEnumerationStarts(
+            starts,
+            sequence,
+            paragraph,
+            paragraphFrom
+        );
     }
     return starts;
+}
+
+function recordNumericEnumerationStarts(
+    starts,
+    sequence,
+    paragraph,
+    paragraphFrom
+) {
+    if (sequence.length < 2) return;
+    const first = sequence[0];
+    const startsAtOne = Number(first[1]) === 1;
+    const continuesNumberedItems = sequence.length >= 3
+        && sequence.slice(0, -1).every((item, index) => {
+            const next = sequence[index + 1];
+            const itemText = paragraph.slice(
+                item.index + item[0].length,
+                next.index
+            );
+            return /\p{L}/u.test(itemText)
+                && /[,;:，；：]\s*(?:(?:and|or)|(?:以及|和|及))?\s*$/iu
+                    .test(itemText);
+        });
+    if (!startsAtOne && !continuesNumberedItems) return;
+    for (const item of sequence) {
+        starts.add(paragraphFrom + item.index);
+    }
 }
 
 function parentheticalRangeLooksStatistical(body, match) {
@@ -657,15 +804,15 @@ function numericCitationsInText(
             continue;
         }
         const marker = kind === 'affiliation'
-            ? affiliationMarkerKey(label)
-            : Number(label);
+            ? affiliationCitationMarker(label)
+            : { key: Number(label), from: 0, to: label.length };
         const reference = marker === null
             ? null
-            : targetsByMarker.get(marker);
+            : targetsByMarker.get(marker.key);
         if (reference) {
             citations.push(createCitation(
-                from,
-                to,
+                from + marker.from,
+                from + marker.to,
                 [reference],
                 superscriptMarkup,
                 kind
@@ -673,6 +820,22 @@ function numericCitationsInText(
         }
     }
     return citations;
+}
+
+function affiliationCitationMarker(label) {
+    const direct = affiliationMarkerKey(label);
+    if (direct !== null) {
+        return { key: direct, from: 0, to: label.length };
+    }
+
+    const decorated = AUTHOR_NOTE_DECORATED_AFFILIATION_PATTERN.exec(label);
+    if (!decorated || (!decorated[1] && !decorated[3])) return null;
+    const key = affiliationMarkerKey(decorated[2]);
+    return key === null ? null : {
+        key,
+        from: decorated[1].length,
+        to: decorated[1].length + decorated[2].length,
+    };
 }
 
 function findAuthorYearCitations(markdown, bodyFrom, bodyEnd, references) {

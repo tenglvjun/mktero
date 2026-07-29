@@ -144,19 +144,38 @@ function renderStandaloneAcademicFigureGroup(
         return null;
     }
 
-    const images = group.images.map(image => {
+    const panels = group.images.map(image => {
         const tokens = parser.lexer(image.source);
         const paragraph = tokens.find(token => token.type !== 'space');
-        return paragraph?.type === 'paragraph'
+        const imageToken = paragraph?.type === 'paragraph'
             ? standaloneImageToken(paragraph.tokens)
             : null;
+        return imageToken ? {
+            imageToken,
+            panelLabel: image.panelLabel || '',
+        } : null;
     });
-    if (images.some(image => !image)) return null;
+    if (panels.some(panel => !panel)) return null;
 
     return '<figure class="mktero-figure mktero-figure-group">'
-        + images.map(image => renderImageToken(image, resolveImageURL)).join('')
+        + panels.map(panel => renderFigurePanel(
+            panel,
+            resolveImageURL,
+            mathBudget
+        )).join('')
         + renderFigureCaption(group.caption, mathBudget)
         + '</figure>\n';
+}
+
+function renderFigurePanel(panel, resolveImageURL, mathBudget) {
+    const image = renderImageToken(panel.imageToken, resolveImageURL);
+    if (!panel.panelLabel) return image;
+    return '<div class="mktero-figure-panel">'
+        + image
+        + '<div class="mktero-figure-panel-label">'
+        + renderCaptionMathSource(panel.panelLabel, mathBudget)
+        + '</div>'
+        + '</div>';
 }
 
 function renderImageToken({ href, title, text, tokens }, resolveImageURL) {

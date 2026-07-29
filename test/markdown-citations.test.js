@@ -224,6 +224,91 @@ test('does not treat numbered list markers as citations in bracket-style papers'
     );
 });
 
+test('does not treat a continued numbered sequence as parenthetical citations', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Earlier caption content ended with items (1) and (2).',
+        '',
+        '(3) validate input, (4) repair errors, and (5) generate output.',
+        '',
+        '## References',
+        '',
+        '[3] Alpha A. Validation paper. 2020.',
+        '[4] Beta B. Repair paper. 2021.',
+        '[5] Gamma G. Output paper. 2022.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(result.citations, []);
+});
+
+test('keeps comma-separated consecutive parenthetical citations', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Prior studies, (3), (4), and (5), support the result.',
+        '',
+        '## References',
+        '',
+        '[3] Alpha A. Validation paper. 2020.',
+        '[4] Beta B. Repair paper. 2021.',
+        '[5] Gamma G. Output paper. 2022.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => markdown.slice(citation.from, citation.to)),
+        ['3', '4', '5']
+    );
+});
+
+test('keeps consecutive parenthetical citations in narrative prose', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Study A supports this (3) and Study B extends it (4) '
+            + 'while Study C confirms it (5).',
+        '',
+        '## References',
+        '',
+        '[3] Alpha A. Validation paper. 2020.',
+        '[4] Beta B. Repair paper. 2021.',
+        '[5] Gamma G. Output paper. 2022.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => markdown.slice(citation.from, citation.to)),
+        ['3', '4', '5']
+    );
+});
+
+test('keeps sentence-separated parenthetical citations that are consecutive', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Validation was established previously (3). Repair was extended later (4). '
+            + 'Output generation was then confirmed (5).',
+        '',
+        '## References',
+        '',
+        '[3] Alpha A. Validation paper. 2020.',
+        '[4] Beta B. Repair paper. 2021.',
+        '[5] Gamma G. Output paper. 2022.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => markdown.slice(citation.from, citation.to)),
+        ['3', '4', '5']
+    );
+});
+
 test('does not treat ANOVA degrees of freedom as bracket citations', () => {
     const markdown = [
         '# Paper',
@@ -545,6 +630,222 @@ test('maps alphabetic author superscripts to affiliations and ignores symbols', 
             { label: 'b', kind: 'affiliation', targetIds: ['affiliation:b'] },
         ]
     );
+});
+
+test('recovers plain affiliation markers emitted between superscript definitions', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'J. Reis ${}^{d}$, A.F. Pires ${}^{e}$, '
+            + 'E. Pereira ${}^{e,f}$, M. Almeida-Silva ${}^{g}$',
+        '',
+        '$^{d}$ Instituto de Etnomusicologia, Lisboa, Portugal',
+        '',
+        'e Escola Superior de Tecnologia da Saúde, Lisboa, Portugal',
+        'f Nucleararmed - Instituto de Medicina Nuclear, Almada, Portugal',
+        '',
+        '$^{g}$ OSEAN Sustainable Ecosystem, Funchal, Portugal',
+        '',
+        '## Abstract',
+        '',
+        'Body text.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => affiliation.label),
+        ['d', 'e', 'f', 'g']
+    );
+    assert.deepEqual(
+        result.affiliations.slice(1, 3).map(affiliation => ({
+            marker: markdown.slice(
+                affiliation.markerMarkup.contentFrom,
+                affiliation.markerMarkup.contentTo
+            ),
+            raised: affiliation.markerMarkup.raiseContent,
+        })),
+        [
+            { marker: 'e', raised: true },
+            { marker: 'f', raised: true },
+        ]
+    );
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: 'd', kind: 'affiliation', targetIds: ['affiliation:d'] },
+            { label: 'e', kind: 'affiliation', targetIds: ['affiliation:e'] },
+            { label: 'e', kind: 'affiliation', targetIds: ['affiliation:e'] },
+            { label: 'f', kind: 'affiliation', targetIds: ['affiliation:f'] },
+            { label: 'g', kind: 'affiliation', targetIds: ['affiliation:g'] },
+        ]
+    );
+});
+
+test('recovers plain affiliation markers with CRLF line endings', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Author D ${}^{d}$, Author E ${}^{e}$, '
+            + 'Author F ${}^{f}$, Author G ${}^{g}$',
+        '',
+        '$^{d}$ Department D',
+        '',
+        'e Department E',
+        'f Department F',
+        '',
+        '$^{g}$ Department G',
+        '',
+        '## Abstract',
+    ].join('\r\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => affiliation.label),
+        ['d', 'e', 'f', 'g']
+    );
+});
+
+test('does not recover trailing plain affiliation-like lines', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Author D ${}^{d}$, Author E ${}^{e}$, Author F ${}^{f}$',
+        '',
+        '$^{d}$ Department D',
+        '',
+        'e Ordinary front matter',
+        'f More ordinary front matter',
+        '',
+        '## Abstract',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => affiliation.label),
+        ['d']
+    );
+});
+
+test('does not recover out-of-order plain letters as affiliations', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Author D ${}^{d}$, Author E ${}^{e}$, '
+            + 'Author F ${}^{f}$, Author G ${}^{g}$',
+        '',
+        '$^{d}$ Department D',
+        '',
+        'f Ordinary front matter',
+        'e More ordinary front matter',
+        '',
+        '$^{g}$ Department G',
+        '',
+        '## Abstract',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => affiliation.label),
+        ['d']
+    );
+    assert.deepEqual(
+        result.citations.map(citation => markdown.slice(citation.from, citation.to)),
+        ['d']
+    );
+});
+
+test('sanitizes recovered plain affiliation text', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Author D ${}^{d}$, Author E ${}^{e}$, '
+            + 'Author F ${}^{f}$, Author G ${}^{g}$',
+        '',
+        '$^{d}$ Department D',
+        '',
+        'e <img src=x onerror=alert(1)> Research Lab',
+        'f <script>alert(2)</script> Medical Institute',
+        '',
+        '$^{g}$ Department G',
+        '',
+        '## Abstract',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => affiliation.text),
+        [
+            'Department D',
+            'Research Lab',
+            'alert(2) Medical Institute',
+            'Department G',
+        ]
+    );
+    assert.ok(result.affiliations.every(affiliation => (
+        !/[<>]|onerror/i.test(affiliation.text)
+    )));
+});
+
+test('maps affiliation numbers that immediately follow author-note symbols', () => {
+    const markdown = [
+        '# Towards autonomous biology',
+        '',
+        'Renjian Song $^{*1}$, Yaokai Fu $^{*1}$, Ziyan Zhao $^{1}$, '
+            + 'Jigang Yu $^{1}$, Qing Yuan $^{1}$, Chang-Ting Chen $^{**2}$',
+        '',
+        '\\*These authors contributed equally to this manuscript',
+        '',
+        '\\*\\*Corresponding author. Email: charlie.chen@bota.bio',
+        '',
+        '$^{1}$ Bota Biosciences, Hangzhou, China',
+        '',
+        '$^{2}$ Bota Biosciences, Lafayette, CA, USA',
+        '',
+        '## Abstract',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '2', kind: 'affiliation', targetIds: ['affiliation:2'] },
+        ]
+    );
+});
+
+test('does not extract symbol-prefixed affiliations from words or markup', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Alice $^{*note1}$; Bob $^{*1<img>}$',
+        '',
+        '$^{1}$ Research Lab',
+        '',
+        '## Abstract',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(result.citations, []);
 });
 
 test('does not treat superscript words as alphabetic affiliations', () => {

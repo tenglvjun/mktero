@@ -145,6 +145,16 @@ test('separates panels inside a shared academic figure', () => {
         '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-group img + img'
     );
     assert.match(panels, /margin-top:\s*12px/);
+
+    const labeledPanels = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel + .mktero-figure-panel'
+    );
+    assert.match(labeledPanels, /margin-top:\s*12px/);
+
+    const panelLabel = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel-label'
+    );
+    assert.match(panelLabel, /text-align:\s*center/);
 });
 
 test('lays out a responsive scrollable outline beside the editor', () => {
@@ -310,6 +320,11 @@ test('styles figure references, previews, and target highlights', () => {
     const image = ruleBody('.mktero-figure-preview-viewport img');
     assert.match(image, /max-width:\s*100%/);
     assert.match(image, /object-fit:\s*contain/);
+
+    const panelLabel = ruleBody(
+        '.mktero-figure-preview-viewport .mktero-figure-panel-label'
+    );
+    assert.match(panelLabel, /text-align:\s*center/);
 
     const highlight = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-figure-target-highlight'

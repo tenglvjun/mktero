@@ -783,6 +783,27 @@ main {
     margin-top: 10px;
 }
 
+.mktero-figure-preview-viewport .mktero-figure-panel {
+    display: flex;
+    max-width: 100%;
+    margin: 0 auto;
+    flex-direction: column;
+    align-items: center;
+}
+
+.mktero-figure-preview-viewport .mktero-figure-panel + .mktero-figure-panel {
+    margin-top: 10px;
+}
+
+.mktero-figure-preview-viewport .mktero-figure-panel-label {
+    max-width: 100%;
+    margin: 5px auto 0;
+    color: var(--reference-preview-text);
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: center;
+}
+
 .mktero-figure-preview-viewport figcaption {
     margin: 9px 2px 0;
     color: var(--reference-preview-muted);
@@ -885,6 +906,27 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-group img + img {
     margin-top: 12px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel {
+    display: flex;
+    max-width: 100%;
+    margin: 0 auto;
+    flex-direction: column;
+    align-items: center;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel + .mktero-figure-panel {
+    margin-top: 12px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel-label {
+    max-width: 100%;
+    margin: 6px auto 0;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.4;
+    text-align: center;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure figcaption {

@@ -501,6 +501,71 @@ test('renders consecutive image panels with one shared academic caption', () => 
     );
 });
 
+test('keeps repeated extracted axis labels with their shared-caption panels', () => {
+    const html = renderMarkdownHTML([
+        '![](images/ppg.jpg)  ',
+        'Time (s)',
+        '',
+        '![](images/abp.jpg)  ',
+        'Time (s)  ',
+        'Fig. 1. SBP and DBP estimation from PPG (left) and ABP (right) signals.',
+    ].join('\n'), {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+
+    assert.equal(
+        html,
+        '<figure class="mktero-figure mktero-figure-group">'
+            + '<div class="mktero-figure-panel">'
+            + '<img src="blob:mktero-images/ppg.jpg" alt="">'
+            + '<div class="mktero-figure-panel-label">Time (s)</div>'
+            + '</div>'
+            + '<div class="mktero-figure-panel">'
+            + '<img src="blob:mktero-images/abp.jpg" alt="">'
+            + '<div class="mktero-figure-panel-label">Time (s)</div>'
+            + '</div>'
+            + '<figcaption>'
+            + '<span class="mktero-figure-label">Fig. 1.</span>'
+            + ' SBP and DBP estimation from PPG (left) and ABP (right) signals.'
+            + '</figcaption>'
+            + '</figure>\n'
+    );
+});
+
+test('does not treat different prose lines between images as panel labels', () => {
+    const html = renderMarkdownHTML([
+        '![](images/first.jpg)  ',
+        'First result needs discussion.',
+        '',
+        '![](images/second.jpg)  ',
+        'Second result needs separate discussion.  ',
+        'Fig. 3. Comparison of both results.',
+    ].join('\n'), {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+
+    assert.doesNotMatch(html, /mktero-figure-group/);
+    assert.match(html, /First result needs discussion\./);
+    assert.match(html, /Second result needs separate discussion\./);
+});
+
+test('keeps extracted panel labels inert when grouping figures', () => {
+    const html = renderMarkdownHTML([
+        '![](images/first.jpg)  ',
+        'Time <script>alert(1)</script> (s)',
+        '',
+        '![](images/second.jpg)  ',
+        'Time <script>alert(1)</script> (s)  ',
+        'Fig. 4. Unsafe extracted axis labels.',
+    ].join('\n'), {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+
+    assert.match(html, /mktero-figure-group/);
+    assert.match(html, /Time &lt;script&gt;alert\(1\)&lt;\/script&gt; \(s\)/);
+    assert.doesNotMatch(html, /<script>/i);
+});
+
 test('keeps academic-looking descriptions on inline images inline', () => {
     const html = renderMarkdownHTML(
         'See ![Figure 1. Participant flow.](images/figure.png) for details.',

@@ -22,7 +22,13 @@ export function analyzeMarkdownFigureReferences(markdown) {
         keyForObject: figure => figureKey(figure.caption.label),
         createTarget: figureTarget,
         referencePattern: FIGURE_REFERENCE_PATTERN,
+        referenceKeys: figureReferenceKeys,
     });
+}
+
+function figureReferenceKeys(key) {
+    const subfigure = /^(s?\d{1,4})[a-z]$/u.exec(key);
+    return subfigure ? [key, subfigure[1]] : [key];
 }
 
 function figureTarget(key, figure) {

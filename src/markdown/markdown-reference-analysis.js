@@ -19,6 +19,7 @@ export function analyzeMarkdownLabeledReferences(markdown, {
     keyForObject,
     createTarget,
     referencePattern,
+    referenceKeys = key => [key],
 }) {
     const source = String(markdown || '');
     const candidates = objects.flatMap(object => {
@@ -44,8 +45,11 @@ export function analyzeMarkdownLabeledReferences(markdown, {
     const references = [];
 
     for (const match of source.matchAll(new RegExp(referencePattern))) {
-        const target = targetsByKey.get(
-            normalizeReferenceIdentifier(match[1])
+        const key = normalizeReferenceIdentifier(match[1]);
+        const target = resolveReferenceTarget(
+            referenceKeys(key),
+            candidatesByKey,
+            targetsByKey
         );
         if (!target
             || ignoredRanges.some(range => rangeContains(range, match.index))) {
@@ -59,6 +63,14 @@ export function analyzeMarkdownLabeledReferences(markdown, {
     }
 
     return { targets, references };
+}
+
+function resolveReferenceTarget(keys, candidatesByKey, targetsByKey) {
+    for (const key of keys) {
+        if (!candidatesByKey.has(key)) continue;
+        return targetsByKey.get(key) || null;
+    }
+    return null;
 }
 
 export function normalizeReferenceIdentifier(identifier) {

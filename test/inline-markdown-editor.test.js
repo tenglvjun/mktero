@@ -1357,6 +1357,48 @@ test('renders dominant superscript citations beside parenthetical sample sizes',
     dom.window.close();
 });
 
+test('distinguishes continued figure steps from a subfigure reference', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Paper',
+        '',
+        'Pipeline continued, (3) validate input, (4) repair errors, '
+            + 'and (5) generate output.',
+        '',
+        'The first layer is shown in (Fig. 1a).',
+        '',
+        '![Fig. 1. Pipeline architecture](images/pipeline.png)',
+        '',
+        '## References',
+        '',
+        '[3] Alpha A. Validation paper. 2020.',
+        '[4] Beta B. Repair paper. 2021.',
+        '[5] Gamma G. Output paper. 2022.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+    const continuationLine = [...document.querySelectorAll('.cm-line')]
+        .find(line => line.textContent.includes('Pipeline continued'));
+    const referenceLine = [...document.querySelectorAll('.cm-line')]
+        .find(line => line.textContent.includes('first layer'));
+
+    assert.equal(continuationLine.querySelector('.cm-mktero-citation'), null);
+    assert.equal(
+        referenceLine.querySelector('.cm-mktero-figure-reference')?.textContent,
+        'Fig. 1a'
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('keeps Unicode superscript citation glyphs at their native position', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -1516,6 +1558,55 @@ test('links an author affiliation before a corresponding-author symbol', () => {
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /College of Health Solutions, Arizona State University, USA/
     );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('links affiliations after leading equal-contribution and corresponding-author symbols', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Towards autonomous biology',
+        '',
+        'Renjian Song $^{*1}$, Yaokai Fu $^{*1}$, Ziyan Zhao $^{1}$, '
+            + 'Jigang Yu $^{1}$, Qing Yuan $^{1}$, Chang-Ting Chen $^{**2}$',
+        '',
+        '\\*These authors contributed equally to this manuscript',
+        '',
+        '\\*\\*Corresponding author. Email: charlie.chen@bota.bio',
+        '',
+        '$^{1}$ Bota Biosciences, Hangzhou, China',
+        '',
+        '$^{2}$ Bota Biosciences, Lafayette, CA, USA',
+        '',
+        '## Abstract',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const authorLine = [...document.querySelectorAll('.cm-line')]
+        .find(line => line.textContent.includes('Renjian Song'));
+    const citations = [
+        ...authorLine.querySelectorAll('.cm-mktero-citation'),
+    ];
+
+    assert.deepEqual(
+        citations.map(citation => citation.textContent),
+        ['1', '1', '1', '1', '1', '2']
+    );
+    assert.deepEqual(
+        [...authorLine.querySelectorAll('.cm-mktero-citation-superscript')]
+            .map(element => element.textContent)
+            .filter(text => /\*/.test(text)),
+        ['*', '*', '**']
+    );
+    assert.equal(citations[0].getAttribute('aria-label'), 'View author affiliation 1');
+    assert.equal(citations.at(-1).getAttribute('aria-label'), 'View author affiliation 2');
     assert.equal(editor.getMarkdown(), markdown);
 
     editor.destroy();

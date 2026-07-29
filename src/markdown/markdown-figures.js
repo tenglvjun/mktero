@@ -10,6 +10,8 @@ const CAPTIONED_IMAGE_LINE_PATTERN = /^ {0,3}!\[((?:\\.|[^\]\\])*)\]\([^\r\n]+\)
 const RAW_HTML_TABLE_START_PATTERN = /^ {0,3}<table(?:\s|>)/i;
 const RAW_HTML_TABLE_END_PATTERN = /<\/table>[ \t]*$/i;
 const BLANK_LINE_PATTERN = /^[ \t]*(?:\r?\n)?$/;
+const MARKDOWN_HARD_BREAK_PATTERN = /[ \t]{2,}(?:\r?\n)?$/;
+const MAX_PANEL_LABEL_LENGTH = 80;
 
 export function parseAcademicFigureCaption(value) {
     const text = String(value || '').trim();
@@ -114,6 +116,18 @@ export function findAcademicFigureGroups(markdown) {
 
     for (let index = 0; index < lines.length; index++) {
         if (blockedLines.has(index)) continue;
+
+        const labeledGroup = trailingSharedPanelLabelGroup(
+            lines,
+            index,
+            blockedLines
+        );
+        if (labeledGroup) {
+            const { captionIndex, ...group } = labeledGroup;
+            groups.push(group);
+            index = captionIndex;
+            continue;
+        }
 
         const caption = parseCaptionLine(lines[index].raw);
         if (caption) {
@@ -371,6 +385,67 @@ function collectNearbyImages(lines, startIndex, blockedLines) {
         index = nextIndex;
     }
     return images;
+}
+
+function trailingSharedPanelLabelGroup(lines, startIndex, blockedLines) {
+    const images = [];
+    let index = startIndex;
+    let caption = null;
+    let captionIndex = -1;
+
+    while (index < lines.length
+        && !blockedLines.has(index)
+        && isMarkdownImageLine(lines[index].raw)
+        && MARKDOWN_HARD_BREAK_PATTERN.test(lines[index].raw)) {
+        const labelIndex = index + 1;
+        if (labelIndex >= lines.length || blockedLines.has(labelIndex)) {
+            return null;
+        }
+        const panelLabel = extractedPanelLabel(lines[labelIndex]);
+        if (!panelLabel) return null;
+
+        images.push({
+            index,
+            source: lines[index].text.trim(),
+            panelLabel,
+        });
+
+        index = nearbyLineIndex(lines, labelIndex + 1);
+        if (index < lines.length
+            && !blockedLines.has(index)
+            && isMarkdownImageLine(lines[index].raw)) {
+            continue;
+        }
+
+        if (index < lines.length && !blockedLines.has(index)) {
+            caption = parseCaptionLine(lines[index].raw);
+            captionIndex = index;
+        }
+        break;
+    }
+
+    if (images.length < 2 || !caption) return null;
+    const sharedLabel = images[0].panelLabel;
+    if (images.some(image => image.panelLabel !== sharedLabel)) return null;
+
+    return {
+        from: lines[startIndex].from,
+        to: lines[captionIndex].to,
+        caption,
+        captionIndex,
+        images,
+    };
+}
+
+function extractedPanelLabel(line) {
+    const text = line?.text?.trim() || '';
+    if (!text
+        || text.length > MAX_PANEL_LABEL_LENGTH
+        || isMarkdownImageLine(line.raw)
+        || parseAcademicFigureCaption(text)) {
+        return null;
+    }
+    return text;
 }
 
 function nearbyLineIndex(lines, index) {
