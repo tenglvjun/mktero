@@ -1,8 +1,10 @@
 import {
-    createNormalizedTextIndex,
     findTextOccurrences,
-    normalizeText,
 } from '../markdown/text-normalization.js';
+import {
+    createPdfAnnotationTextIndex,
+    normalizePdfAnnotationText,
+} from '../markdown/pdf-annotation-text.js';
 import {
     createVisibleMarkdownTextIndex,
 } from '../markdown/markdown-visible-text.js';
@@ -91,9 +93,9 @@ function renderedTextRange(
     }
     if (exact.offsets.length) return null;
 
-    const normalizedTarget = normalizeText(annotationText);
+    const normalizedTarget = normalizePdfAnnotationText(annotationText);
     if (!normalizedTarget) return null;
-    const index = createNormalizedTextIndex(content);
+    const index = createPdfAnnotationTextIndex(content);
     const normalized = findTextOccurrences(
         index.text,
         normalizedTarget,
@@ -137,7 +139,7 @@ function sourceOccurrenceOrdinal(
 
     const visibleIndex = createVisibleMarkdownTextIndex(source);
     const index = normalized
-        ? createNormalizedTextIndex(
+        ? createPdfAnnotationTextIndex(
             visibleIndex.text,
             offset => visibleIndex.sourceOffsetAt(offset)
         )

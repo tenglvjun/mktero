@@ -1,8 +1,8 @@
+import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
-    createNormalizedTextIndex,
-    findTextOccurrences,
-    normalizeText,
-} from '../markdown/text-normalization.js';
+    createPdfAnnotationTextIndex,
+    normalizePdfAnnotationText,
+} from '../markdown/pdf-annotation-text.js';
 import {
     createVisibleMarkdownTextIndex,
 } from '../markdown/markdown-visible-text.js';
@@ -75,9 +75,9 @@ export class MarkdownAnnotationOverlay {
                 previousSourceTo = Math.max(previousSourceTo, exactRange.to);
                 continue;
             }
-            const normalizedText = normalizeText(annotation.text);
+            const normalizedText = normalizePdfAnnotationText(annotation.text);
             if (!normalizedIndex && !candidates.length) {
-                normalizedIndex = createNormalizedTextIndex(
+                normalizedIndex = createPdfAnnotationTextIndex(
                     index.text,
                     offset => index.sourceOffsetAt(offset)
                 );

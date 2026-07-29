@@ -62,6 +62,146 @@ test('matches PDF text after Unicode and whitespace normalization', async () => 
     assert.deepEqual(result.unmatched, []);
 });
 
+test('matches PDF smart quotes against Markdown ASCII quotes', async () => {
+    const annotation = {
+        id: 'QUOTE001',
+        type: 'highlight',
+        text: [
+            'No audio features were significantly associated with',
+            'participants’ desired recovery emotions.',
+        ].join(' '),
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '1',
+        pageIndex: 0,
+        sortIndex: '00003',
+    };
+    const markdown = [
+        'No audio features were significantly associated with',
+        "participants' desired recovery emotions.",
+    ].join(' ');
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'normalized',
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
+test('matches PDF citations against MinerU dollar-wrapped citations', async () => {
+    const annotation = {
+        id: 'CITE0001',
+        type: 'highlight',
+        text: [
+            'positive emotions interact with our stress systems,',
+            'lowering cortisol [26, 27], significantly.',
+        ].join(' '),
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '2',
+        pageIndex: 1,
+        sortIndex: '00004',
+    };
+    const markdown = [
+        'positive emotions interact with our stress systems,',
+        'lowering cortisol $[26, 27]$ , significantly.',
+    ].join(' ');
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'normalized',
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
+test('does not guess when PDF quote normalization leaves repeated matches', async () => {
+    const annotation = {
+        id: 'QUOTE002',
+        type: 'highlight',
+        text: 'participant’s response',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '2',
+        pageIndex: 1,
+        sortIndex: '00005',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(
+        42,
+        "participant's response and participant's response"
+    );
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'ambiguous',
+    }]);
+});
+
+test('does not treat ordinary numeric math as a PDF citation', async () => {
+    const annotation = {
+        id: 'MATH0001',
+        type: 'highlight',
+        text: '[20]',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '2',
+        pageIndex: 1,
+        sortIndex: '00006',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, 'The measured value was $20$.');
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'not-found',
+    }]);
+});
+
+test('handles oversized malformed citation markup without guessing', async () => {
+    const annotation = {
+        id: 'LIMIT002',
+        type: 'highlight',
+        text: '[20]',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '2',
+        pageIndex: 1,
+        sortIndex: '00007',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+    const markdown = '$[' + '20,'.repeat(100_000);
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'not-found',
+    }]);
+});
+
 test('uses preceding annotation order to disambiguate repeated text', async () => {
     const annotations = [
         {

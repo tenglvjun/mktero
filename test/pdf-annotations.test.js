@@ -75,6 +75,46 @@ test('rejects empty and out-of-bounds rendered annotation ranges', () => {
     dom.window.close();
 });
 
+test('renders annotations across PDF quote and MinerU citation differences', () => {
+    const rendered = [
+        "brain's 'pleasure and reward center,' lowers",
+        'cortisol [26, 27], significantly.',
+    ].join(' ');
+    const source = [
+        "brain's 'pleasure and reward center,' lowers",
+        'cortisol $[26, 27]$ , significantly.',
+    ].join(' ');
+    const annotation = {
+        id: 'NORMAL01',
+        type: 'highlight',
+        text: [
+            'brain’s ‘pleasure and reward center,’ lowers',
+            'cortisol [26, 27], significantly.',
+        ].join(' '),
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: source.length }],
+    };
+    const dom = new JSDOM(
+        '<!doctype html><div id="content"></div>'
+    );
+    const container = dom.window.document.querySelector('#content');
+    container.textContent = rendered;
+
+    installRenderedAnnotations(
+        container,
+        [annotation],
+        translate,
+        { source, sourceFrom: 0 }
+    );
+
+    assert.equal(
+        container.querySelector('.cm-mktero-pdf-annotation')?.textContent,
+        rendered
+    );
+    dom.window.close();
+});
+
 test('creates annotation popups in XHTML and falls back to the page index', () => {
     const dom = new JSDOM(
         '<!doctype html><div id="parent"><button id="anchor">Open</button></div>'

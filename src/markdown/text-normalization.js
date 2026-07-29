@@ -7,7 +7,8 @@ export function normalizeText(text) {
 
 export function createNormalizedTextIndex(
     text,
-    sourceOffsetAt = offset => offset
+    sourceOffsetAt = offset => offset,
+    normalizeCharacter = character => character.normalize('NFKC')
 ) {
     const output = [];
     const sourceStarts = [];
@@ -15,7 +16,7 @@ export function createNormalizedTextIndex(
     for (let offset = 0; offset < text.length;) {
         const character = String.fromCodePoint(text.codePointAt(offset));
         const nextOffset = offset + character.length;
-        const normalized = character.normalize('NFKC');
+        const normalized = normalizeCharacter(character, offset, text);
         const sourceFrom = sourceOffsetAt(offset);
         const sourceTo = sourceOffsetAt(nextOffset - 1) + 1;
         if (/^\s+$/u.test(normalized)) {

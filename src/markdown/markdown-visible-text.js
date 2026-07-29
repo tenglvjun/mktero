@@ -74,7 +74,9 @@ function collectHiddenRanges(markdown) {
                 ranges.push({ from: node.from, to: node.to });
                 return false;
             }
-            if (HIDDEN_NODE_NAMES.has(node.name) || hiddenURL(node)) {
+            if ((HIDDEN_NODE_NAMES.has(node.name)
+                && !isDollarWrappedCitationMark(node, markdown))
+                || hiddenURL(node)) {
                 ranges.push({ from: node.from, to: node.to });
             }
             return undefined;
@@ -92,6 +94,14 @@ function collectHiddenRanges(markdown) {
         }
     }
     return merged;
+}
+
+function isDollarWrappedCitationMark(node, markdown) {
+    if (node.name !== 'LinkMark') return false;
+    const parent = node.node.parent;
+    return parent?.name === 'Link'
+        && markdown[parent.from - 1] === '$'
+        && markdown[parent.to] === '$';
 }
 
 function hiddenURL(node) {
