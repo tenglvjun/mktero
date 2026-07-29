@@ -192,6 +192,58 @@ test('matches PDF trademark symbols against MinerU superscript markup', async ()
     assert.deepEqual(result.unmatched, []);
 });
 
+test('maps a PDF trademark symbol to its complete MinerU source markup', async () => {
+    const annotation = {
+        id: 'MARK0004',
+        type: 'highlight',
+        text: '®',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '4',
+        pageIndex: 3,
+        sortIndex: '00010',
+    };
+    const markdown = 'BOSE $^{®}$ headphones';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'exact',
+        ranges: [{ from: 5, to: 11 }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
+test('maps PDF text ending in a trademark to complete MinerU markup', async () => {
+    const annotation = {
+        id: 'MARK0006',
+        type: 'highlight',
+        text: 'BOSE®',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '4',
+        pageIndex: 3,
+        sortIndex: '00011',
+    };
+    const markdown = 'BOSE $^{®}$ headphones';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'normalized',
+        ranges: [{ from: 0, to: 11 }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
 test('does not treat ordinary superscript math as a trademark symbol', async () => {
     const annotation = {
         id: 'MARK0002',

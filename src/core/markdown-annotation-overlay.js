@@ -1,6 +1,7 @@
 import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
     createPdfAnnotationTextIndex,
+    expandPdfAnnotationSourceRange,
     normalizePdfAnnotationText,
 } from '../markdown/pdf-annotation-text.js';
 import {
@@ -63,7 +64,10 @@ export class MarkdownAnnotationOverlay {
             const candidates = candidateResult.offsets;
             const exactRange = selectCandidateRange(
                 candidateResult.truncated ? [] : candidates,
-                candidate => index.sourceRange(candidate, annotation.text.length),
+                candidate => expandPdfAnnotationSourceRange(
+                    markdown,
+                    index.sourceRange(candidate, annotation.text.length)
+                ),
                 previousSourceTo
             );
             if (exactRange) {

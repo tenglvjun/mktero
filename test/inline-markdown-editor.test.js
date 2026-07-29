@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorView } from '@codemirror/view';
 import { JSDOM } from 'jsdom';
+import {
+    MarkdownAnnotationOverlay,
+} from '../src/core/markdown-annotation-overlay.js';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 
 function enterTableCellEditing(cell, ownerWindow) {
@@ -85,6 +88,46 @@ test('renders matched PDF annotations with their Zotero colors', () => {
         /--mktero-annotation-color:\s*#ffd400/
     );
     assert.equal(editor.getMarkdown(), 'Important result.');
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders a PDF trademark annotation over MinerU superscript markup', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'BOSE $^{®}$ headphones';
+    const annotation = {
+        id: 'MARK0005',
+        type: 'highlight',
+        text: '®',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '4',
+        pageIndex: 3,
+        sortIndex: '00010',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+    const annotationOverlay = await overlay.resolve(42, markdown);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({ markdown, annotationOverlay });
+
+    const rendered = document.querySelector('.cm-mktero-pdf-annotation');
+    assert.ok(rendered);
+    assert.match(rendered.textContent, /®/);
+    assert.match(
+        rendered.getAttribute('style'),
+        /--mktero-annotation-color:\s*#ffd400/
+    );
 
     editor.destroy();
     dom.window.close();

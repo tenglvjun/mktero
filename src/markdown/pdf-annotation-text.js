@@ -13,11 +13,23 @@ export function normalizePdfAnnotationText(text) {
     return createPdfAnnotationTextIndex(String(text)).text.trim();
 }
 
+export function expandPdfAnnotationSourceRange(source, range) {
+    const symbol = source.slice(range.from, range.to);
+    const wrapperFrom = range.from - 3;
+    const wrapperTo = range.to + 2;
+    if (wrapperFrom >= 0
+        && /^[®©™]$/u.test(symbol)
+        && source.slice(wrapperFrom, wrapperTo) === `$^{${symbol}}$`) {
+        return { from: wrapperFrom, to: wrapperTo };
+    }
+    return range;
+}
+
 export function createPdfAnnotationTextIndex(
     text,
     sourceOffsetAt = offset => offset
 ) {
-    const ignoredMarkup = collectIgnoredMarkupOffsets(text);
+    const markup = collectNormalizationMarkup(text);
     return createNormalizedTextIndex(
         text,
         sourceOffsetAt,
@@ -25,7 +37,7 @@ export function createPdfAnnotationTextIndex(
             character,
             offset,
             source,
-            ignoredMarkup
+            markup
         )
     );
 }
@@ -34,9 +46,17 @@ function normalizePdfAnnotationCharacter(
     character,
     offset,
     source,
-    ignoredMarkup
+    markup
 ) {
-    if (ignoredMarkup.has(offset)) return '';
+    const replacement = markup.replacements.get(offset);
+    if (replacement) {
+        return {
+            text: character,
+            sourceFrom: replacement.from,
+            sourceTo: replacement.to,
+        };
+    }
+    if (markup.ignoredOffsets.has(offset)) return '';
     if (/^\s$/u.test(character)
         && /^\s*[,.;:!?，。；：！？®©™]/u.test(
             source.slice(offset + character.length)
@@ -49,29 +69,34 @@ function normalizePdfAnnotationCharacter(
     return character.normalize('NFKC');
 }
 
-function collectIgnoredMarkupOffsets(text) {
-    const offsets = new Set();
+function collectNormalizationMarkup(text) {
+    const ignoredOffsets = new Set();
+    const replacements = new Map();
     for (const match of text.matchAll(CITATION_WRAPPER)) {
         if (!isNumericCitationContent(match[1])) continue;
-        offsets.add(match.index);
-        offsets.add(match.index + match[0].length - 1);
+        ignoredOffsets.add(match.index);
+        ignoredOffsets.add(match.index + match[0].length - 1);
     }
     for (const match of text.matchAll(TRADEMARK_SUPERSCRIPT)) {
         const symbolOffset = match.index + match[0].indexOf(match[1]);
+        replacements.set(symbolOffset, {
+            from: match.index,
+            to: match.index + match[0].length,
+        });
         for (
             let offset = match.index;
             offset < match.index + match[0].length;
             offset++
         ) {
-            if (offset !== symbolOffset) offsets.add(offset);
+            if (offset !== symbolOffset) ignoredOffsets.add(offset);
         }
         for (
             let offset = match.index - 1;
             offset >= 0 && /\s/u.test(text[offset]);
             offset--
         ) {
-            offsets.add(offset);
+            ignoredOffsets.add(offset);
         }
     }
-    return offsets;
+    return { ignoredOffsets, replacements };
 }

@@ -22,9 +22,16 @@ export function createNormalizedTextIndex(
     for (let offset = 0; offset < text.length;) {
         const character = String.fromCodePoint(text.codePointAt(offset));
         const nextOffset = offset + character.length;
-        const normalized = normalizeCharacter(character, offset, text);
-        const sourceFrom = sourceOffsetAt(offset);
-        const sourceTo = sourceOffsetAt(nextOffset - 1) + 1;
+        const result = normalizeCharacter(character, offset, text);
+        const normalized = typeof result === 'string' ? result : result.text;
+        const normalizedSourceFrom = typeof result === 'string'
+            ? offset
+            : result.sourceFrom;
+        const normalizedSourceTo = typeof result === 'string'
+            ? nextOffset
+            : result.sourceTo;
+        const sourceFrom = sourceOffsetAt(normalizedSourceFrom);
+        const sourceTo = sourceOffsetAt(normalizedSourceTo - 1) + 1;
         if (/^\s+$/u.test(normalized)) {
             if (output.at(-1) === ' ') {
                 sourceEnds[sourceEnds.length - 1] = sourceTo;

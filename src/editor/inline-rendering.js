@@ -33,6 +33,8 @@ import {
     installRenderedAnnotations,
 } from './pdf-annotations.js';
 
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+
 export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
@@ -94,12 +96,21 @@ class RenderedMarkdownWidget extends WidgetType {
             inline
         );
         installRenderedCitations(container, this.citations);
-        installRenderedAnnotations(
-            container,
-            this.annotations,
-            this.translate,
-            { source: this.source, sourceFrom: this.from }
-        );
+        if (['math', 'math-display'].includes(this.display)) {
+            wrapRenderedMathAnnotations(
+                container,
+                this.annotations,
+                this.translate
+            );
+        }
+        else {
+            installRenderedAnnotations(
+                container,
+                this.annotations,
+                this.translate,
+                { source: this.source, sourceFrom: this.from }
+            );
+        }
 
         container.addEventListener('mousedown', event => {
             if (event.target?.closest?.('img')) return;
@@ -1324,11 +1335,45 @@ function renderedMathRange(
             source,
             display,
             from,
+            annotations: annotationsCoveringRange(
+                context.annotationOverlay,
+                from,
+                to
+            ),
             extraClassName,
             ...context,
         }),
         block: !inline,
     }).range(from, to);
+}
+
+function annotationsCoveringRange(overlay, from, to) {
+    return (overlay?.matched || []).flatMap(annotation => {
+        const covers = (annotation.ranges || []).some(range => (
+            Number.isInteger(range?.from)
+            && Number.isInteger(range?.to)
+            && range.from <= from
+            && range.to >= to
+        ));
+        return covers ? [{ ...annotation, ranges: [{ from, to }] }] : [];
+    });
+}
+
+function wrapRenderedMathAnnotations(container, annotations, translate) {
+    for (const annotation of annotations) {
+        const wrapper = container.ownerDocument.createElementNS(
+            XHTML_NAMESPACE,
+            'span'
+        );
+        wrapper.className = annotationClassName(annotation);
+        for (const [name, value] of Object.entries(
+            annotationAttributes(annotation, translate)
+        )) {
+            wrapper.setAttribute(name, value);
+        }
+        wrapper.append(...container.childNodes);
+        container.append(wrapper);
+    }
 }
 
 function collectExcludedMathRanges(state) {
