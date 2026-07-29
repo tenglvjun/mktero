@@ -1,7 +1,14 @@
 import {
     createNormalizedTextIndex,
+    findTextOccurrences,
     normalizeText,
 } from '../markdown/text-normalization.js';
+import {
+    createVisibleMarkdownTextIndex,
+} from '../markdown/markdown-visible-text.js';
+
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const MAX_RENDERED_MATCH_CANDIDATES = 10_000;
 
 export function annotationClassName(annotation) {
     const type = annotation.type === 'underline' ? 'underline' : 'highlight';
@@ -28,38 +35,133 @@ export function annotationAttributes(annotation, translate) {
 export function installRenderedAnnotations(
     container,
     annotations,
-    translate
+    translate,
+    { source = '', sourceFrom = 0 } = {}
 ) {
     for (const annotation of annotations || []) {
         const text = String(annotation.text || '');
         if (!text) continue;
         const content = container.textContent || '';
-        const range = uniqueTextRange(content, text);
+        const range = renderedTextRange(
+            content,
+            text,
+            annotation,
+            source,
+            sourceFrom
+        );
         if (!range) continue;
         wrapTextRange(container, range.from, range.to, annotation, translate);
     }
 }
 
-function uniqueTextRange(content, annotationText) {
-    const exactFrom = content.indexOf(annotationText);
-    if (exactFrom >= 0
-        && content.indexOf(annotationText, exactFrom + annotationText.length) < 0) {
-        return { from: exactFrom, to: exactFrom + annotationText.length };
+function renderedTextRange(
+    content,
+    annotationText,
+    annotation,
+    source,
+    sourceFrom
+) {
+    if (source && !annotationSourceRange(annotation, source, sourceFrom)) {
+        return null;
     }
-    if (exactFrom >= 0) return null;
+    const exact = findTextOccurrences(
+        content,
+        annotationText,
+        MAX_RENDERED_MATCH_CANDIDATES
+    );
+    if (!exact.truncated) {
+        const ordinal = sourceOccurrenceOrdinal(
+            source,
+            sourceFrom,
+            annotation,
+            annotationText,
+            false
+        );
+        const exactFrom = exact.offsets[ordinal ?? -1];
+        if (exactFrom !== undefined) {
+            return { from: exactFrom, to: exactFrom + annotationText.length };
+        }
+        if (exact.offsets.length === 1) {
+            return {
+                from: exact.offsets[0],
+                to: exact.offsets[0] + annotationText.length,
+            };
+        }
+    }
+    if (exact.offsets.length) return null;
 
     const normalizedTarget = normalizeText(annotationText);
     if (!normalizedTarget) return null;
     const index = createNormalizedTextIndex(content);
-    const normalizedFrom = index.text.indexOf(normalizedTarget);
-    if (normalizedFrom < 0
-        || index.text.indexOf(
-            normalizedTarget,
-            normalizedFrom + normalizedTarget.length
-        ) >= 0) {
-        return null;
+    const normalized = findTextOccurrences(
+        index.text,
+        normalizedTarget,
+        MAX_RENDERED_MATCH_CANDIDATES
+    );
+    if (normalized.truncated) return null;
+    const ordinal = sourceOccurrenceOrdinal(
+        source,
+        sourceFrom,
+        annotation,
+        normalizedTarget,
+        true
+    );
+    const normalizedFrom = normalized.offsets[ordinal ?? -1];
+    if (normalizedFrom !== undefined) {
+        return index.sourceRange(normalizedFrom, normalizedTarget.length);
     }
-    return index.sourceRange(normalizedFrom, normalizedTarget.length);
+    if (normalized.offsets.length === 1) {
+        return index.sourceRange(
+            normalized.offsets[0],
+            normalizedTarget.length
+        );
+    }
+    return null;
+}
+
+function sourceOccurrenceOrdinal(
+    source,
+    sourceFrom,
+    annotation,
+    target,
+    normalized
+) {
+    if (!source || !Number.isInteger(sourceFrom)) return null;
+    const annotationRange = annotationSourceRange(
+        annotation,
+        source,
+        sourceFrom
+    );
+    if (!annotationRange) return null;
+
+    const visibleIndex = createVisibleMarkdownTextIndex(source);
+    const index = normalized
+        ? createNormalizedTextIndex(
+            visibleIndex.text,
+            offset => visibleIndex.sourceOffsetAt(offset)
+        )
+        : visibleIndex;
+    const candidates = findTextOccurrences(
+        index.text,
+        target,
+        MAX_RENDERED_MATCH_CANDIDATES
+    );
+    if (candidates.truncated) return null;
+    return candidates.offsets.findIndex(offset => {
+        const range = index.sourceRange(offset, target.length);
+        return range.from + sourceFrom === annotationRange.from
+            && range.to + sourceFrom === annotationRange.to;
+    });
+}
+
+function annotationSourceRange(annotation, source, sourceFrom) {
+    return (annotation.ranges || []).find(range => (
+        Number.isInteger(range?.from)
+        && Number.isInteger(range?.to)
+        && range.from >= sourceFrom
+        && range.to > range.from
+        && range.to <= sourceFrom + source.length
+    ));
 }
 
 function wrapTextRange(container, from, to, annotation, translate) {
@@ -91,7 +193,7 @@ function wrapTextRange(container, from, to, annotation, translate) {
     const range = document.createRange();
     range.setStart(startNode, startOffset);
     range.setEnd(endNode, endOffset);
-    const element = document.createElement('span');
+    const element = document.createElementNS(XHTML_NAMESPACE, 'span');
     element.className = annotationClassName(annotation);
     for (const [name, value] of Object.entries(
         annotationAttributes(annotation, translate)

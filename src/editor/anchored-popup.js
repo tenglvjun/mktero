@@ -1,4 +1,5 @@
 let nextPopupID = 1;
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
 export function createAnchoredPopup(parent, {
     className,
@@ -57,7 +58,7 @@ export function createAnchoredPopup(parent, {
         }
         close();
         anchor = nextAnchor;
-        popup = document.createElement('div');
+        popup = document.createElementNS(XHTML_NAMESPACE, 'div');
         popup.id = `${idPrefix}-${nextPopupID++}`;
         popup.className = className;
         popup.setAttribute('role', 'dialog');

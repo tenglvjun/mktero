@@ -1,26 +1,14 @@
-import { GFM, parser } from '@lezer/markdown';
 import {
     createNormalizedTextIndex,
+    findTextOccurrences,
     normalizeText,
 } from '../markdown/text-normalization.js';
+import {
+    createVisibleMarkdownTextIndex,
+} from '../markdown/markdown-visible-text.js';
 
-const MARKDOWN_PARSER = parser.configure(GFM);
 const MAX_MATCHABLE_MARKDOWN_LENGTH = 8 * 1024 * 1024;
 const MAX_MATCH_CANDIDATES = 10_000;
-const HIDDEN_NODE_NAMES = new Set([
-    'CodeMark',
-    'EmphasisMark',
-    'HeaderMark',
-    'LinkMark',
-    'ListMark',
-    'QuoteMark',
-    'StrikethroughMark',
-    'URL',
-]);
-const HIDDEN_SUBTREE_NAMES = new Set([
-    'CommentBlock',
-    'LinkReferenceDefinition',
-]);
 
 export class MarkdownAnnotationOverlay {
     constructor({ extractor, onError = () => {} }) {
@@ -46,8 +34,7 @@ export class MarkdownAnnotationOverlay {
                 // Annotation diagnostics must not make PDF conversion fail.
             }
             return {
-                matched: [],
-                unmatched: [],
+                ...createEmptyAnnotationOverlay(),
                 warning: 'Zotero PDF annotations could not be loaded.',
             };
         }
@@ -55,22 +42,27 @@ export class MarkdownAnnotationOverlay {
 
     async #resolve(itemID, markdown) {
         const annotations = await this.extractor.extract(itemID);
-        if (!annotations.length) return { matched: [], unmatched: [] };
+        if (!annotations.length) return createEmptyAnnotationOverlay();
         if (markdown.length > MAX_MATCHABLE_MARKDOWN_LENGTH) {
             throw new Error(
                 'Markdown exceeds the PDF annotation matching safety limit'
             );
         }
-        const index = createVisibleTextIndex(markdown);
+        const index = createVisibleMarkdownTextIndex(markdown);
         let normalizedIndex = null;
         const matched = [];
         const unmatched = [];
         let previousSourceTo = 0;
 
         for (const annotation of annotations) {
-            const candidates = findOccurrences(index.text, annotation.text);
+            const candidateResult = findTextOccurrences(
+                index.text,
+                annotation.text,
+                MAX_MATCH_CANDIDATES
+            );
+            const candidates = candidateResult.offsets;
             const exactRange = selectCandidateRange(
-                candidates,
+                candidateResult.truncated ? [] : candidates,
                 candidate => index.sourceRange(candidate, annotation.text.length),
                 previousSourceTo
             );
@@ -90,11 +82,18 @@ export class MarkdownAnnotationOverlay {
                     offset => index.sourceOffsetAt(offset)
                 );
             }
-            const normalizedCandidates = candidates.length
-                ? []
-                : findOccurrences(normalizedIndex.text, normalizedText);
+            const normalizedCandidateResult = candidates.length
+                ? { offsets: [], truncated: false }
+                : findTextOccurrences(
+                    normalizedIndex.text,
+                    normalizedText,
+                    MAX_MATCH_CANDIDATES
+                );
+            const normalizedCandidates = normalizedCandidateResult.offsets;
             const normalizedRange = selectCandidateRange(
-                normalizedCandidates,
+                normalizedCandidateResult.truncated
+                    ? []
+                    : normalizedCandidates,
                 candidate => normalizedIndex.sourceRange(
                     candidate,
                     normalizedText.length
@@ -110,7 +109,10 @@ export class MarkdownAnnotationOverlay {
                 previousSourceTo = Math.max(previousSourceTo, normalizedRange.to);
                 continue;
             }
-            const ambiguous = candidates.length || normalizedCandidates.length;
+            const ambiguous = candidateResult.truncated
+                || candidates.length
+                || normalizedCandidateResult.truncated
+                || normalizedCandidates.length;
             unmatched.push({
                 ...annotation,
                 reason: ambiguous ? 'ambiguous' : 'not-found',
@@ -136,108 +138,6 @@ function selectCandidateRange(candidates, toRange, previousSourceTo) {
     return following.length === 1 ? following[0] : null;
 }
 
-function createVisibleTextIndex(markdown) {
-    const hiddenRanges = collectHiddenRanges(markdown);
-    const segments = [];
-    const chunks = [];
-    let sourceFrom = 0;
-    let visibleFrom = 0;
-    for (const hidden of hiddenRanges) {
-        if (sourceFrom < hidden.from) {
-            const chunk = markdown.slice(sourceFrom, hidden.from);
-            chunks.push(chunk);
-            segments.push({
-                visibleFrom,
-                visibleTo: visibleFrom + chunk.length,
-                sourceFrom,
-            });
-            visibleFrom += chunk.length;
-        }
-        sourceFrom = Math.max(sourceFrom, hidden.to);
-    }
-    if (sourceFrom < markdown.length) {
-        const chunk = markdown.slice(sourceFrom);
-        chunks.push(chunk);
-        segments.push({
-            visibleFrom,
-            visibleTo: visibleFrom + chunk.length,
-            sourceFrom,
-        });
-    }
-    return {
-        text: chunks.join(''),
-        sourceOffsetAt(offset) {
-            const segment = findSegment(segments, offset);
-            return segment
-                ? segment.sourceFrom + offset - segment.visibleFrom
-                : markdown.length;
-        },
-        sourceRange(from, length) {
-            return {
-                from: this.sourceOffsetAt(from),
-                to: this.sourceOffsetAt(from + length - 1) + 1,
-            };
-        },
-    };
-}
-
-function collectHiddenRanges(markdown) {
-    const ranges = [];
-    MARKDOWN_PARSER.parse(markdown).iterate({
-        enter(node) {
-            if (HIDDEN_SUBTREE_NAMES.has(node.name)) {
-                ranges.push({ from: node.from, to: node.to });
-                return false;
-            }
-            if (HIDDEN_NODE_NAMES.has(node.name)) {
-                ranges.push({ from: node.from, to: node.to });
-            }
-            return undefined;
-        },
-    });
-    ranges.sort((left, right) => left.from - right.from || left.to - right.to);
-    const merged = [];
-    for (const range of ranges) {
-        const previous = merged.at(-1);
-        if (!previous || range.from > previous.to) {
-            merged.push({ ...range });
-        }
-        else {
-            previous.to = Math.max(previous.to, range.to);
-        }
-    }
-    return merged;
-}
-
-function findOccurrences(source, target) {
-    if (!target) return [];
-    const result = [];
-    let from = 0;
-    while (from <= source.length - target.length) {
-        const index = source.indexOf(target, from);
-        if (index < 0) break;
-        result.push(index);
-        if (result.length >= MAX_MATCH_CANDIDATES) break;
-        from = index + Math.max(1, target.length);
-    }
-    return result;
-}
-
-function findSegment(segments, offset) {
-    let low = 0;
-    let high = segments.length - 1;
-    while (low <= high) {
-        const middle = (low + high) >> 1;
-        const segment = segments[middle];
-        if (offset < segment.visibleFrom) {
-            high = middle - 1;
-        }
-        else if (offset >= segment.visibleTo) {
-            low = middle + 1;
-        }
-        else {
-            return segment;
-        }
-    }
-    return null;
+export function createEmptyAnnotationOverlay() {
+    return { matched: [], unmatched: [] };
 }

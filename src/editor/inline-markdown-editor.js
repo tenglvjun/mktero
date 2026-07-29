@@ -3,6 +3,9 @@ import { searchKeymap } from '@codemirror/search';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import {
+    createEmptyAnnotationOverlay,
+} from '../core/markdown-annotation-overlay.js';
 import { createLocalization } from '../i18n/localization.js';
 import {
     createInlineRenderingExtension,
@@ -207,7 +210,7 @@ export function createInlineMarkdownEditor({
         const effects = [
             ...referenceFeatureList.map(feature => feature.effect.of(null)),
             setAnnotationOverlay.of(
-                annotationOverlay || { matched: [], unmatched: [] }
+                annotationOverlay || createEmptyAnnotationOverlay()
             ),
         ];
         if (value === view.state.doc.toString()) {
@@ -227,7 +230,7 @@ export function createInlineMarkdownEditor({
         setMarkdown(markdown) {
             setDocument({
                 markdown,
-                annotationOverlay: { matched: [], unmatched: [] },
+                annotationOverlay: createEmptyAnnotationOverlay(),
             });
         },
         focus() {

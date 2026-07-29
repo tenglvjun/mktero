@@ -161,3 +161,136 @@ test('matches visible academic figure caption text inside image markup', async (
     }]);
     assert.deepEqual(result.unmatched, []);
 });
+
+test('matches visible bare and autolink URLs but hides link destinations', async () => {
+    const annotations = [
+        {
+            id: 'BARE0001',
+            type: 'highlight',
+            text: 'https://visible.example',
+            comment: '',
+            color: '#ffd400',
+            pageLabel: '1',
+            pageIndex: 0,
+            sortIndex: '00001',
+        },
+        {
+            id: 'AUTO0001',
+            type: 'underline',
+            text: 'https://auto.example',
+            comment: '',
+            color: '#2ea8e5',
+            pageLabel: '1',
+            pageIndex: 0,
+            sortIndex: '00002',
+        },
+        {
+            id: 'HIDDEN01',
+            type: 'highlight',
+            text: 'https://hidden.example',
+            comment: '',
+            color: '#ff6666',
+            pageLabel: '1',
+            pageIndex: 0,
+            sortIndex: '00003',
+        },
+    ];
+    const markdown = [
+        'Bare https://visible.example',
+        '',
+        'Auto <https://auto.example>',
+        '',
+        'Inline [label](https://hidden.example)',
+        '',
+        '[label][ref]',
+        '',
+        '[ref]: https://hidden.example',
+    ].join('\n');
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => annotations },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(
+        result.matched.map(annotation => ({
+            id: annotation.id,
+            text: markdown.slice(
+                annotation.ranges[0].from,
+                annotation.ranges[0].to
+            ),
+        })),
+        [
+            { id: 'BARE0001', text: 'https://visible.example' },
+            { id: 'AUTO0001', text: 'https://auto.example' },
+        ]
+    );
+    assert.deepEqual(result.unmatched, [{
+        ...annotations[2],
+        reason: 'not-found',
+    }]);
+});
+
+test('does not guess after the occurrence candidate budget is exhausted', async () => {
+    const before = 'x '.repeat(9_999);
+    const markdown = `${before}anchor x x`;
+    const annotations = [
+        {
+            id: 'ANCHOR02',
+            type: 'highlight',
+            text: 'anchor',
+            comment: '',
+            color: '#ffd400',
+            pageLabel: '1',
+            pageIndex: 0,
+            sortIndex: '00001',
+        },
+        {
+            id: 'REPEAT03',
+            type: 'highlight',
+            text: 'x',
+            comment: '',
+            color: '#ffd400',
+            pageLabel: '1',
+            pageIndex: 0,
+            sortIndex: '00002',
+        },
+    ];
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => annotations },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched.map(annotation => annotation.id), [
+        'ANCHOR02',
+    ]);
+    assert.equal(result.unmatched[0].id, 'REPEAT03');
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+});
+
+test('fails annotation matching softly above the Markdown size budget', async () => {
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: {
+            extract: async () => [{
+                id: 'LIMIT001',
+                type: 'highlight',
+                text: 'result',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '1',
+                pageIndex: 0,
+                sortIndex: '00001',
+            }],
+        },
+    });
+
+    const result = await overlay.resolve(42, 'x'.repeat(8 * 1024 * 1024 + 1));
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, []);
+    assert.equal(
+        result.warning,
+        'Zotero PDF annotations could not be loaded.'
+    );
+});

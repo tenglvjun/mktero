@@ -1,3 +1,6 @@
+import {
+    createEmptyAnnotationOverlay,
+} from '../core/markdown-annotation-overlay.js';
 import { createLocalization } from '../i18n/localization.js';
 import { createMarkdownTabView } from './markdown-window.js';
 
@@ -208,7 +211,7 @@ function createInitialModel(itemID, onReparse, translate) {
         sourceKind: null,
         cacheHit: false,
         cacheKey: null,
-        annotationOverlay: { matched: [], unmatched: [] },
+        annotationOverlay: createEmptyAnnotationOverlay(),
         preserveContent: false,
         warnings: [],
         error: '',

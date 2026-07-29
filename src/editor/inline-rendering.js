@@ -1,6 +1,9 @@
 import { syntaxTree } from '@codemirror/language';
 import { Prec, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import {
+    createEmptyAnnotationOverlay,
+} from '../core/markdown-annotation-overlay.js';
 import { findMinerUAlgorithmGroups } from '../markdown/markdown-algorithms.js';
 import {
     findDisplayMathMatches,
@@ -94,7 +97,8 @@ class RenderedMarkdownWidget extends WidgetType {
         installRenderedAnnotations(
             container,
             this.annotations,
-            this.translate
+            this.translate,
+            { source: this.source, sourceFrom: this.from }
         );
 
         container.addEventListener('mousedown', event => {
@@ -110,6 +114,10 @@ class RenderedMarkdownWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
+        if (event.type === 'mousedown'
+            && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
+            return true;
+        }
         return !event.target?.closest?.(
             '.cm-mktero-citation, .cm-mktero-pdf-annotation'
         );
@@ -193,7 +201,7 @@ export function createInlineRenderingExtension({
         highlightedReferenceID: null,
         highlightedTableID: null,
         highlightedFigureID: null,
-        annotationOverlay: { matched: [], unmatched: [] },
+        annotationOverlay: createEmptyAnnotationOverlay(),
         annotationTargets: new Map(),
         citationAnalysisDocument: null,
         citationAnalysis: null,
@@ -234,7 +242,7 @@ export function createInlineRenderingExtension({
                 }
                 else if (effect.is(setAnnotationOverlay)) {
                     context.annotationOverlay = effect.value
-                        || { matched: [], unmatched: [] };
+                        || createEmptyAnnotationOverlay();
                     context.annotationTargets = new Map(
                         (context.annotationOverlay.matched || []).map(
                             annotation => [String(annotation.id || ''), annotation]
@@ -282,8 +290,10 @@ export function createInlineRenderingExtension({
                 return false;
             },
             mousedown(event, view) {
+                const interaction = referenceInteraction(event, view, context);
                 if (event.button === 0
-                    && referenceInteraction(event, view, context)) {
+                    && interaction
+                    && !interaction.allowTextSelection) {
                     event.preventDefault();
                     return true;
                 }
@@ -310,7 +320,8 @@ export function createInlineRenderingExtension({
                 return false;
             },
             dblclick(event, view) {
-                if (referenceInteraction(event, view, context)) {
+                const interaction = referenceInteraction(event, view, context);
+                if (interaction && !interaction.allowTextSelection) {
                     event.preventDefault();
                     return true;
                 }
@@ -743,6 +754,7 @@ function referenceInteraction(event, view, context) {
             popup: context.annotationPopup,
             open,
             activate: open,
+            allowTextSelection: true,
         };
     }
     const citation = citationElement(event, view);
@@ -1150,6 +1162,8 @@ function renderedRange(node, state, display, context) {
         return Decoration.replace({
             widget: new RenderedTableWidget({
                 source,
+                annotationSource: state.sliceDoc(node.from, node.to),
+                annotationSourceFrom: node.from,
                 caption: node.caption,
                 highlighted: tableIsHighlighted,
                 annotations,
@@ -1194,7 +1208,11 @@ function renderedRange(node, state, display, context) {
 function annotationsForRange(overlay, from, to) {
     return (overlay?.matched || []).filter(annotation => (
         (annotation.ranges || []).some(range => (
-            range.from >= from && range.to <= to
+            Number.isInteger(range?.from)
+            && Number.isInteger(range?.to)
+            && range.from >= from
+            && range.to > range.from
+            && range.to <= to
         ))
     ));
 }

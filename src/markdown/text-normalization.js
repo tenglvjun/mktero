@@ -47,3 +47,25 @@ export function createNormalizedTextIndex(
         },
     };
 }
+
+export function findTextOccurrences(source, target, limit = 10_000) {
+    if (!target || !Number.isInteger(limit) || limit <= 0) {
+        return { offsets: [], truncated: false };
+    }
+    const offsets = [];
+    let from = 0;
+    const step = Math.max(1, target.length);
+    while (from <= source.length - target.length) {
+        const index = source.indexOf(target, from);
+        if (index < 0) break;
+        offsets.push(index);
+        from = index + step;
+        if (offsets.length === limit) {
+            return {
+                offsets,
+                truncated: source.indexOf(target, from) >= 0,
+            };
+        }
+    }
+    return { offsets, truncated: false };
+}

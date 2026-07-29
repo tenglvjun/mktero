@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ZoteroAnnotationExtractor } from '../src/extractors/zotero-annotation-extractor.js';
 
+function extractorForAnnotations(annotations) {
+    const attachment = {
+        isPDFAttachment: () => true,
+        getAnnotations: () => annotations,
+    };
+    return new ZoteroAnnotationExtractor({
+        Items: {
+            getAsync: async () => attachment,
+            loadDataTypes: async () => {},
+        },
+    });
+}
+
 test('reads supported PDF text annotations in document order', async () => {
     let childItemsLoaded = false;
     let annotationDataLoaded = false;
@@ -113,4 +126,50 @@ test('rejects annotation text that exceeds the local safety budget', async () =>
         () => new ZoteroAnnotationExtractor(zotero).extract(42),
         /annotation text exceeds the local safety limit/i
     );
+});
+
+test('rejects a PDF whose text annotation count exceeds the safety budget', async () => {
+    const annotations = Array.from({ length: 5_001 }, (_, index) => ({
+        id: index + 1,
+        annotationType: 'highlight',
+    }));
+
+    await assert.rejects(
+        () => extractorForAnnotations(annotations).extract(42),
+        /annotation count exceeds the local safety limit/i
+    );
+});
+
+test('rejects aggregate annotation text above the safety budget', async () => {
+    const annotations = Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        annotationType: 'highlight',
+        annotationText: 'x'.repeat(100_000),
+        annotationComment: '',
+        annotationColor: '#ffd400',
+        annotationPageLabel: '1',
+        annotationSortIndex: String(index).padStart(5, '0'),
+        annotationPosition: JSON.stringify({ pageIndex: 0 }),
+    }));
+
+    await assert.rejects(
+        () => extractorForAnnotations(annotations).extract(42),
+        /annotation text exceeds the local safety limit/i
+    );
+});
+
+test('replaces an untrusted Zotero annotation color with the safe default', async () => {
+    const result = await extractorForAnnotations([{
+        id: 101,
+        key: 'HIGH0003',
+        annotationType: 'highlight',
+        annotationText: 'Visible',
+        annotationComment: '',
+        annotationColor: '#fff; background: red',
+        annotationPageLabel: '1',
+        annotationSortIndex: '00001',
+        annotationPosition: JSON.stringify({ pageIndex: 0 }),
+    }]).extract(42);
+
+    assert.equal(result[0].color, '#ffd400');
 });

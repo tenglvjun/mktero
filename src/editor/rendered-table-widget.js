@@ -9,6 +9,8 @@ import { installRenderedAnnotations } from './pdf-annotations.js';
 export class RenderedTableWidget extends WidgetType {
     constructor({
         source,
+        annotationSource,
+        annotationSourceFrom,
         caption,
         resolveImageURL,
         openLink,
@@ -20,6 +22,8 @@ export class RenderedTableWidget extends WidgetType {
     }) {
         super();
         this.source = source;
+        this.annotationSource = annotationSource;
+        this.annotationSourceFrom = annotationSourceFrom;
         this.caption = caption;
         this.resolveImageURL = resolveImageURL;
         this.openLink = openLink;
@@ -33,6 +37,8 @@ export class RenderedTableWidget extends WidgetType {
 
     eq(other) {
         return this.source === other.source
+            && this.annotationSource === other.annotationSource
+            && this.annotationSourceFrom === other.annotationSourceFrom
             && this.caption?.text === other.caption?.text
             && this.renderVersion === other.renderVersion
             && this.highlighted === other.highlighted
@@ -59,7 +65,11 @@ export class RenderedTableWidget extends WidgetType {
         installRenderedAnnotations(
             container,
             this.annotations,
-            this.translate
+            this.translate,
+            {
+                source: this.annotationSource,
+                sourceFrom: this.annotationSourceFrom,
+            }
         );
         container.addEventListener('mousedown', event => {
             if (event.target?.closest?.('img')) return;
@@ -74,6 +84,10 @@ export class RenderedTableWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
+        if (event.type === 'mousedown'
+            && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
+            return true;
+        }
         return !event.target?.closest?.('.cm-mktero-pdf-annotation');
     }
 }

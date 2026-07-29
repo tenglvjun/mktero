@@ -187,6 +187,64 @@ test('renders PDF annotations inside a rendered Markdown table', () => {
     dom.window.close();
 });
 
+test('uses the resolved source range for repeated text in rendered widgets', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '| Claim | Claim |',
+        '| --- | --- |',
+        '| repeated | repeated |',
+    ].join('\n');
+    const from = markdown.lastIndexOf('repeated');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'TABLE003',
+                type: 'highlight',
+                text: 'repeated',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '5',
+                ranges: [{ from, to: from + 'repeated'.length }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const cells = [...document.querySelectorAll('.cm-mktero-table td')];
+    assert.equal(cells[0].querySelector('.cm-mktero-pdf-annotation'), null);
+    const annotation = cells[1].querySelector(
+        '.cm-mktero-pdf-annotation'
+    );
+    assert.equal(annotation?.textContent, 'repeated');
+
+    const range = document.createRange();
+    range.selectNodeContents(annotation);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+    const mouseDown = new dom.window.MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+    });
+    annotation.dispatchEvent(mouseDown);
+
+    assert.equal(mouseDown.defaultPrevented, false);
+    assert.equal(document.getSelection().toString(), 'repeated');
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('renders PDF annotations inside an academic figure caption', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

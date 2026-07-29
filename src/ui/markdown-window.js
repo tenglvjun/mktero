@@ -1,4 +1,7 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
+import {
+    createEmptyAnnotationOverlay,
+} from '../core/markdown-annotation-overlay.js';
 import { createLocalization } from '../i18n/localization.js';
 import { extractMarkdownOutline } from '../markdown/markdown-outline.js';
 import { createLoadingPresentation } from './markdown-loading-state.js';
@@ -123,7 +126,7 @@ class MarkdownTabView {
                 this.revokeAssetURLs();
                 this.editor.setDocument({
                     markdown: '',
-                    annotationOverlay: { matched: [], unmatched: [] },
+                    annotationOverlay: createEmptyAnnotationOverlay(),
                 });
                 this.syncOutline('');
             }
@@ -136,7 +139,7 @@ class MarkdownTabView {
             this.editor.setDocument({
                 markdown,
                 annotationOverlay: model.annotationOverlay
-                    || { matched: [], unmatched: [] },
+                    || createEmptyAnnotationOverlay(),
             });
             this.syncOutline(markdown);
             if (assetsChanged) this.editor.refreshRendering();

@@ -1,3 +1,6 @@
+import {
+    createEmptyAnnotationOverlay,
+} from '../core/markdown-annotation-overlay.js';
 import { translateEnglish } from '../i18n/localization.js';
 
 const READY_RESULT_FIELDS = [
@@ -44,7 +47,7 @@ export function createConversionLoadingChanges(
         assetBasePath: '',
         cacheHit: false,
         cacheKey: null,
-        annotationOverlay: emptyAnnotationOverlay(),
+        annotationOverlay: createEmptyAnnotationOverlay(),
         warnings: [],
         error: '',
         preserveContent: false,
@@ -56,7 +59,7 @@ export function createConversionReadyChanges(result) {
         assets: [],
         assetBasePath: '',
         cacheKey: null,
-        annotationOverlay: emptyAnnotationOverlay(),
+        annotationOverlay: createEmptyAnnotationOverlay(),
         ...result,
         status: 'ready',
         progress: 100,
@@ -87,8 +90,4 @@ export function createConversionFailureChanges(
         error: message,
         preserveContent: false,
     };
-}
-
-function emptyAnnotationOverlay() {
-    return { matched: [], unmatched: [] };
 }
