@@ -93,6 +93,131 @@ test('renders matched PDF annotations with their Zotero colors', () => {
     dom.window.close();
 });
 
+test('shows one note marker for a commented multiline PDF annotation', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'First line\nsecond line';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'NOTE0001',
+                type: 'highlight',
+                text: markdown,
+                comment: 'Remember this finding',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: markdown.length }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const markers = document.querySelectorAll(
+        '.cm-mktero-pdf-annotation-note'
+    );
+    assert.equal(markers.length, 1);
+    assert.equal(markers[0].getAttribute('data-annotation-id'), 'NOTE0001');
+    assert.equal(markers[0].getAttribute('aria-hidden'), 'true');
+    assert.equal(markers[0].textContent, '');
+    assert.equal(
+        markers[0].namespaceURI,
+        'http://www.w3.org/1999/xhtml'
+    );
+    assert.match(
+        markers[0].getAttribute('style') || '',
+        /--mktero-annotation-color:\s*#ffd400/
+    );
+    assert.match(
+        document.querySelector('.cm-mktero-pdf-annotation')
+            ?.getAttribute('aria-label') || '',
+        /with note/
+    );
+
+    markers[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.match(
+        document.querySelector('.mktero-annotation-popup')?.textContent || '',
+        /Remember this finding/
+    );
+    const click = new dom.window.MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+    });
+    markers[0].dispatchEvent(click);
+    assert.equal(click.defaultPrevented, true);
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'NOTE0001',
+                type: 'highlight',
+                text: markdown,
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: markdown.length }],
+            }],
+            unmatched: [],
+        },
+    });
+    assert.equal(
+        document.querySelector('.cm-mktero-pdf-annotation-note'),
+        null
+    );
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not show a note marker for a whitespace-only comment', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: {
+            matched: [{
+                id: 'NOTE0002',
+                type: 'highlight',
+                text: 'Important',
+                comment: ' \n\t ',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: 9 }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    assert.equal(
+        document.querySelector('.cm-mktero-pdf-annotation-note'),
+        null
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('renders a PDF trademark annotation over MinerU superscript markup', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -103,7 +228,7 @@ test('renders a PDF trademark annotation over MinerU superscript markup', async 
         id: 'MARK0005',
         type: 'highlight',
         text: '®',
-        comment: '',
+        comment: 'Trademark note',
         color: '#ffd400',
         pageLabel: '4',
         pageIndex: 3,
@@ -127,6 +252,17 @@ test('renders a PDF trademark annotation over MinerU superscript markup', async 
     assert.match(
         rendered.getAttribute('style'),
         /--mktero-annotation-color:\s*#ffd400/
+    );
+    const noteMarker = document.querySelectorAll(
+        '.cm-mktero-pdf-annotation-note'
+    );
+    assert.equal(noteMarker.length, 1);
+    noteMarker[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.match(
+        document.querySelector('.mktero-annotation-popup')?.textContent || '',
+        /Trademark note/
     );
 
     editor.destroy();
@@ -218,7 +354,11 @@ test('renders PDF annotations inside a rendered Markdown table', () => {
         'cm-mktero-pdf-annotation--underline'
     ));
     assert.equal(annotation.getAttribute('data-annotation-id'), 'TABLE001');
-    annotation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+    const noteMarker = annotation.querySelector(
+        '.cm-mktero-pdf-annotation-note'
+    );
+    assert.ok(noteMarker);
+    noteMarker.dispatchEvent(new dom.window.MouseEvent('mouseover', {
         bubbles: true,
     }));
     assert.match(

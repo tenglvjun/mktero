@@ -21,6 +21,10 @@ export function annotationClassName(annotation) {
     ].join(' ');
 }
 
+export function annotationHasComment(annotation) {
+    return Boolean(String(annotation?.comment || '').trim());
+}
+
 export function annotationAttributes(annotation, translate) {
     return {
         'data-annotation-id': String(annotation.id || ''),
@@ -29,10 +33,26 @@ export function annotationAttributes(annotation, translate) {
         )}`,
         role: 'button',
         tabindex: '0',
-        'aria-label': translate('annotation.view', {
-            text: accessibleAnnotationText(annotation.text),
-        }),
+        'aria-label': translate(
+            annotationHasComment(annotation)
+                ? 'annotation.viewWithNote'
+                : 'annotation.view',
+            { text: accessibleAnnotationText(annotation.text) }
+        ),
     };
+}
+
+export function createAnnotationNoteMarker(document, annotation) {
+    if (!annotationHasComment(annotation)) return null;
+    const marker = document.createElementNS(XHTML_NAMESPACE, 'span');
+    marker.className = 'cm-mktero-pdf-annotation-note';
+    marker.setAttribute('data-annotation-id', String(annotation.id || ''));
+    marker.setAttribute(
+        'style',
+        `--mktero-annotation-color: ${safeAnnotationColor(annotation.color)}`
+    );
+    marker.setAttribute('aria-hidden', 'true');
+    return marker;
 }
 
 export function installRenderedAnnotations(
@@ -204,6 +224,8 @@ function wrapTextRange(container, from, to, annotation, translate) {
         element.setAttribute(name, value);
     }
     element.append(range.extractContents());
+    const noteMarker = createAnnotationNoteMarker(document, annotation);
+    if (noteMarker) element.append(noteMarker);
     range.insertNode(element);
 }
 

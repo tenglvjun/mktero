@@ -701,6 +701,41 @@ main {
     outline-offset: 2px;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note {
+    position: relative;
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    box-sizing: border-box;
+    margin-inline: 3px 1px;
+    border: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+    border-radius: 2px;
+    background: var(--mktero-annotation-color);
+    box-shadow: 0 1px 1px rgb(31 35 40 / 16%);
+    vertical-align: 0.08em;
+    cursor: pointer;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note::after {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 4px;
+    height: 4px;
+    border-bottom: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
+    border-left: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
+    background: var(--surface);
+    content: "";
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note:hover {
+    box-shadow: 0 0 0 2px color-mix(
+        in srgb,
+        var(--mktero-annotation-color) 35%,
+        transparent
+    );
+}
+
 .mktero-annotation-popup {
     position: fixed;
     z-index: 900;

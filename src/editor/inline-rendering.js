@@ -28,8 +28,10 @@ import {
     openRenderedLink,
 } from './rendered-markdown-dom.js';
 import {
+    annotationHasComment,
     annotationAttributes,
     annotationClassName,
+    createAnnotationNoteMarker,
     installRenderedAnnotations,
 } from './pdf-annotations.js';
 
@@ -180,6 +182,32 @@ class TaskCheckboxWidget extends WidgetType {
 
     ignoreEvent() {
         return true;
+    }
+}
+
+class AnnotationNoteWidget extends WidgetType {
+    constructor(annotation) {
+        super();
+        this.annotation = annotation;
+        this.key = JSON.stringify([
+            String(annotation.id || ''),
+            String(annotation.color || ''),
+        ]);
+    }
+
+    eq(other) {
+        return this.key === other.key;
+    }
+
+    toDOM(view) {
+        return createAnnotationNoteMarker(
+            view.dom.ownerDocument,
+            this.annotation
+        );
+    }
+
+    ignoreEvent() {
+        return false;
     }
 }
 
@@ -486,6 +514,7 @@ function buildDecorations(state, context) {
 
 function decoratePDFAnnotations(state, decorations, context, renderedGroups) {
     for (const annotation of context.annotationOverlay?.matched || []) {
+        let noteOffset = null;
         for (const range of annotation.ranges || []) {
             if (!validAnnotationRange(range, state.doc.length)) continue;
             if (renderedGroups.some(group => rangeContains(group, range))) continue;
@@ -493,6 +522,13 @@ function decoratePDFAnnotations(state, decorations, context, renderedGroups) {
                 class: annotationClassName(annotation),
                 attributes: annotationAttributes(annotation, context.translate),
             }).range(range.from, range.to));
+            noteOffset = Math.max(noteOffset ?? range.to, range.to);
+        }
+        if (noteOffset !== null && annotationHasComment(annotation)) {
+            decorations.push(Decoration.widget({
+                widget: new AnnotationNoteWidget(annotation),
+                side: 1,
+            }).range(noteOffset));
         }
     }
 }
@@ -798,7 +834,10 @@ function referencePopups(context) {
 }
 
 function annotationElement(event, view) {
-    const annotation = event.target?.closest?.('.cm-mktero-pdf-annotation');
+    const annotation = event.target?.closest?.([
+        '.cm-mktero-pdf-annotation',
+        '.cm-mktero-pdf-annotation-note',
+    ].join(', '));
     return annotation && view.dom.contains(annotation) ? annotation : null;
 }
 

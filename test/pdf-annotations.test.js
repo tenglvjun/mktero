@@ -37,13 +37,20 @@ test('creates rendered annotations in the XHTML namespace', () => {
         id: 'HIGH0001',
         type: 'highlight',
         text: 'Visible',
-        comment: '',
+        comment: 'Review this',
         color: '#ffd400',
         ranges: [{ from: 0, to: 7 }],
     }], translate, { source: 'Visible', sourceFrom: 0 });
 
     const annotation = container.querySelector('.cm-mktero-pdf-annotation');
     assert.equal(annotation?.namespaceURI, XHTML_NAMESPACE);
+    const noteMarker = annotation.querySelector(
+        '.cm-mktero-pdf-annotation-note'
+    );
+    assert.equal(noteMarker?.namespaceURI, XHTML_NAMESPACE);
+    assert.equal(noteMarker?.getAttribute('aria-hidden'), 'true');
+    assert.equal(noteMarker?.textContent, '');
+    assert.equal(annotation.textContent, 'Visible');
 
     document.createElement = createElement;
     dom.window.close();

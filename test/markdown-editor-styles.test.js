@@ -298,6 +298,17 @@ test('styles Zotero-colored PDF annotations and their note popup', () => {
         /text-decoration-color:\s*var\(--mktero-annotation-color\)/
     );
 
+    const noteMarker = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note'
+    );
+    assert.match(noteMarker, /display:\s*inline-block/);
+    assert.match(noteMarker, /width:\s*12px/);
+    assert.match(noteMarker, /height:\s*12px/);
+    assert.match(
+        noteMarker,
+        /background:\s*var\(--mktero-annotation-color\)/
+    );
+
     const popup = ruleBody('.mktero-annotation-popup');
     assert.match(popup, /position:\s*fixed/);
     assert.match(popup, /z-index:\s*900/);
