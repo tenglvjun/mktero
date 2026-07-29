@@ -126,6 +126,123 @@ test('matches PDF citations against MinerU dollar-wrapped citations', async () =
     assert.deepEqual(result.unmatched, []);
 });
 
+test('keeps plain numeric citation brackets visible to PDF annotations', async () => {
+    const annotation = {
+        id: 'CITE0003',
+        type: 'highlight',
+        text: [
+            'breathing was gradually slowed to encourage deeper breathing)',
+            '[30], and patients were invited to focus.',
+        ].join(' '),
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '4',
+        pageIndex: 3,
+        sortIndex: '00008',
+    };
+    const markdown = [
+        'breathing was gradually slowed to encourage deeper breathing)',
+        '[30], and patients were invited to focus.',
+    ].join(' ');
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'exact',
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
+test('matches PDF trademark symbols against MinerU superscript markup', async () => {
+    const annotation = {
+        id: 'MARK0001',
+        type: 'highlight',
+        text: [
+            'Participants listened via headphones',
+            '(BOSE® quiet comfort 35 II) from an iPod®,',
+            'and the volume was controlled.',
+        ].join(' '),
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '4',
+        pageIndex: 3,
+        sortIndex: '00009',
+    };
+    const markdown = [
+        'Participants listened via headphones',
+        '(BOSE $^{®}$ quiet comfort 35 II) from an iPod $^{®}$ ,',
+        'and the volume was controlled.',
+    ].join(' ');
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, [{
+        ...annotation,
+        matchKind: 'normalized',
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+    assert.deepEqual(result.unmatched, []);
+});
+
+test('does not treat ordinary superscript math as a trademark symbol', async () => {
+    const annotation = {
+        id: 'MARK0002',
+        type: 'highlight',
+        text: 'BOSE®',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '4',
+        pageIndex: 3,
+        sortIndex: '00010',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, 'BOSE $^{R}$');
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'not-found',
+    }]);
+});
+
+test('still hides actual numeric Markdown link destinations', async () => {
+    const annotation = {
+        id: 'LINK0001',
+        type: 'highlight',
+        text: 'https://hidden.example',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '4',
+        pageIndex: 3,
+        sortIndex: '00011',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(
+        42,
+        '[30](https://hidden.example)'
+    );
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{
+        ...annotation,
+        reason: 'not-found',
+    }]);
+});
+
 test('ignores repeated MinerU whitespace before citation punctuation', async () => {
     const annotation = {
         id: 'CITE0002',

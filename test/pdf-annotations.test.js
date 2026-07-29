@@ -115,6 +115,37 @@ test('renders annotations across PDF quote and MinerU citation differences', () 
     dom.window.close();
 });
 
+test('renders annotations across MinerU trademark superscript markup', () => {
+    const rendered = 'Headphones (BOSE ®) from an iPod ®.';
+    const source = 'Headphones (BOSE $^{®}$) from an iPod $^{®}$.';
+    const annotation = {
+        id: 'MARK0003',
+        type: 'highlight',
+        text: 'Headphones (BOSE®) from an iPod®.',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: source.length }],
+    };
+    const dom = new JSDOM(
+        '<!doctype html><div id="content"></div>'
+    );
+    const container = dom.window.document.querySelector('#content');
+    container.textContent = rendered;
+
+    installRenderedAnnotations(
+        container,
+        [annotation],
+        translate,
+        { source, sourceFrom: 0 }
+    );
+
+    assert.equal(
+        container.querySelector('.cm-mktero-pdf-annotation')?.textContent,
+        rendered
+    );
+    dom.window.close();
+});
+
 test('creates annotation popups in XHTML and falls back to the page index', () => {
     const dom = new JSDOM(
         '<!doctype html><div id="parent"><button id="anchor">Open</button></div>'
