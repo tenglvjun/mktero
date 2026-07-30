@@ -143,7 +143,7 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
     assert.match(
         document.querySelector('.cm-mktero-pdf-annotation')
             ?.getAttribute('aria-label') || '',
-        /Edit PDF annotation/
+        /Add or edit PDF note/
     );
     const firstHighlight = document.querySelector(
         '.cm-mktero-pdf-annotation'
@@ -340,15 +340,19 @@ test('shows one note marker when an annotation covers formula content', () => {
     dom.window.close();
 });
 
-test('shows PDF annotation notes safely only after clicking the note marker', () => {
+test('edits PDF annotation notes safely after clicking the note marker', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
     const { document } = dom.window;
+    let updatedNote;
     const editor = createInlineMarkdownEditor({
         parent: document.querySelector('#editor'),
         initialMarkdown: '',
         resolveImageURL: () => null,
+        updateAnnotationComment(annotationID, comment) {
+            updatedNote = { annotationID, comment };
+        },
     });
     editor.setDocument({
         markdown: 'Important result.',
@@ -387,7 +391,7 @@ test('shows PDF annotation notes safely only after clicking the note marker', ()
     );
     assert.equal(noteMarker.getAttribute('role'), 'button');
     assert.equal(noteMarker.getAttribute('tabindex'), '0');
-    assert.equal(noteMarker.getAttribute('aria-label'), 'Open PDF note');
+    assert.equal(noteMarker.getAttribute('aria-label'), 'Edit PDF note');
 
     noteMarker.dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
@@ -402,9 +406,83 @@ test('shows PDF annotation notes safely only after clicking the note marker', ()
     assert.match(popup.textContent, /Page 4/);
     assert.match(popup.textContent, /<img src=x onerror=alert\(1\)> Review this/);
     assert.equal(popup.querySelector('img'), null);
+    const input = popup.querySelector('.mktero-annotation-note-input');
+    assert.equal(
+        input.value,
+        '<img src=x onerror=alert(1)> Review this'
+    );
+    input.value = 'Revised safely';
+    popup.querySelector('.mktero-annotation-note-save').click();
+    await Promise.resolve();
+    assert.deepEqual(updatedNote, {
+        annotationID: 'HIGH0001',
+        comment: 'Revised safely',
+    });
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
 
     editor.destroy();
     assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+    dom.window.close();
+});
+
+test('adds a note after clicking a PDF annotation without a comment', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let updatedNote;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        updateAnnotationComment(annotationID, comment) {
+            updatedNote = { annotationID, comment };
+        },
+    });
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: 9 }],
+            }],
+            unmatched: [],
+        },
+    });
+    const annotation = document.querySelector('.cm-mktero-pdf-annotation');
+
+    annotation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.ok(document.querySelector('.mktero-annotation-actions'));
+
+    annotation.dispatchEvent(new dom.window.MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+    }));
+    const popup = document.querySelector('.mktero-annotation-popup');
+    assert.equal(popup.querySelector('.mktero-annotation-actions'), null);
+    const input = popup.querySelector('.mktero-annotation-note-input');
+    assert.equal(input.value, '');
+    assert.equal(document.activeElement, input);
+
+    input.value = 'New note';
+    popup.querySelector('.mktero-annotation-note-save').click();
+    await Promise.resolve();
+
+    assert.deepEqual(updatedNote, {
+        annotationID: 'HIGH0001',
+        comment: 'New note',
+    });
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
     dom.window.close();
 });
 
@@ -595,8 +673,17 @@ test('uses the resolved source range for repeated text in rendered widgets', () 
     });
     annotation.dispatchEvent(mouseDown);
 
+    const click = new dom.window.MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+    });
+    annotation.dispatchEvent(click);
+
     assert.equal(mouseDown.defaultPrevented, false);
+    assert.equal(click.defaultPrevented, false);
     assert.equal(document.getSelection().toString(), 'repeated');
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
 
     editor.destroy();
     dom.window.close();

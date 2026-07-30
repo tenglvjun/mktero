@@ -145,6 +145,9 @@ class MarkdownTabView {
             changeAnnotationColor: (annotationID, color) => (
                 this.changeAnnotationColor(annotationID, color)
             ),
+            updateAnnotationComment: (annotationID, comment) => (
+                this.updateAnnotationComment(annotationID, comment)
+            ),
             deleteAnnotation: annotationID => (
                 this.deleteAnnotation(annotationID)
             ),
@@ -242,6 +245,19 @@ class MarkdownTabView {
         this.model.annotationOverlay = filterAnnotationOverlay(
             this.model.annotationOverlay,
             annotationID
+        );
+        this.render(this.model);
+    }
+
+    async updateAnnotationComment(annotationID, comment) {
+        if (typeof this.model.onUpdateAnnotationComment !== 'function') {
+            throw new Error('PDF annotation comment changes are unavailable');
+        }
+        await this.model.onUpdateAnnotationComment(annotationID, comment);
+        this.model.annotationOverlay = mapAnnotationOverlay(
+            this.model.annotationOverlay,
+            annotationID,
+            annotation => ({ ...annotation, comment })
         );
         this.render(this.model);
     }

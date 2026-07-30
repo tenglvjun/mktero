@@ -59,7 +59,7 @@ export function createAnnotationNoteMarker(
     );
     marker.setAttribute('role', 'button');
     marker.setAttribute('tabindex', '0');
-    marker.setAttribute('aria-label', translate('annotation.openNote'));
+    marker.setAttribute('aria-label', translate('annotation.editNote'));
     const icon = createLucideIcon(document, LUCIDE_ICONS.messageSquareText, {
         className: 'cm-mktero-pdf-annotation-note-icon',
     });

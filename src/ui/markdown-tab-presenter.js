@@ -31,6 +31,7 @@ export class MarkdownTabPresenter {
         onClose,
         onReparse,
         onChangeAnnotationColor,
+        onUpdateAnnotationComment,
         onDeleteAnnotation,
     } = {}) {
         this.ensureSessionStateFilter();
@@ -48,6 +49,10 @@ export class MarkdownTabPresenter {
             if (onChangeAnnotationColor) {
                 existing.model.onChangeAnnotationColor = onChangeAnnotationColor;
             }
+            if (onUpdateAnnotationComment) {
+                existing.model.onUpdateAnnotationComment
+                    = onUpdateAnnotationComment;
+            }
             if (onDeleteAnnotation) {
                 existing.model.onDeleteAnnotation = onDeleteAnnotation;
             }
@@ -60,6 +65,7 @@ export class MarkdownTabPresenter {
             {
                 onReparse,
                 onChangeAnnotationColor,
+                onUpdateAnnotationComment,
                 onDeleteAnnotation,
             },
             this.localization.t.bind(this.localization)

@@ -354,6 +354,13 @@ export function createInlineRenderingExtension({
             click(event, view) {
                 const interaction = referenceInteraction(event, view, context);
                 if (interaction && event.button === 0) {
+                    if (interaction.allowTextSelection
+                        && hasSelectedInteractionText(
+                            view,
+                            interaction.element
+                        )) {
+                        return false;
+                    }
                     event.preventDefault();
                     interaction.activate();
                     return true;
@@ -849,12 +856,19 @@ function referenceInteraction(event, view, context) {
                 focus,
             });
         };
+        const openNote = () => {
+            closeReferencePopupsExcept(context, context.annotationPopup);
+            context.annotationPopup?.openNote({
+                anchor: annotation,
+                annotation: target,
+            });
+        };
         return {
             element: annotation,
             popup: context.annotationPopup,
             open: () => openActions(false),
             focusPopup: () => openActions(true),
-            activate: () => openActions(false),
+            activate: openNote,
             allowTextSelection: true,
         };
     }
@@ -877,6 +891,13 @@ function referenceInteraction(event, view, context) {
         };
     }
     return previewReferenceInteraction(event, view, context);
+}
+
+function hasSelectedInteractionText(view, element) {
+    const selection = view.dom.ownerDocument.getSelection?.();
+    if (!selection || selection.isCollapsed) return false;
+    return element.contains(selection.anchorNode)
+        || element.contains(selection.focusNode);
 }
 
 function referencePopups(context) {

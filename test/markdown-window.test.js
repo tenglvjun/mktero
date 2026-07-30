@@ -217,6 +217,80 @@ test('updates the visible annotation after Zotero saves a new color', async () =
     view.destroy();
 });
 
+test('updates the visible note after Zotero saves an annotation comment', async () => {
+    const updates = [];
+    const saved = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Important result.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: 9 }],
+            }],
+            unmatched: [],
+        },
+        async onUpdateAnnotationComment(annotationID, comment) {
+            saved.push({ annotationID, comment });
+        },
+    });
+    const { view, shadow } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument(document) {
+                    updates.push(document);
+                },
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    await editorOptions.updateAnnotationComment(
+        'HIGH0001',
+        'Review this argument'
+    );
+
+    assert.deepEqual(saved, [{
+        annotationID: 'HIGH0001',
+        comment: 'Review this argument',
+    }]);
+    assert.equal(
+        model.annotationOverlay.matched[0].comment,
+        'Review this argument'
+    );
+    assert.equal(
+        updates.at(-1).annotationOverlay.matched[0].comment,
+        'Review this argument'
+    );
+    assert.match(
+        shadow.querySelector('.markdown-notes-list').textContent,
+        /Review this argument/
+    );
+
+    await editorOptions.updateAnnotationComment('HIGH0001', '');
+
+    assert.deepEqual(saved.at(-1), {
+        annotationID: 'HIGH0001',
+        comment: '',
+    });
+    assert.equal(model.annotationOverlay.matched.length, 1);
+    assert.equal(model.annotationOverlay.matched[0].comment, '');
+    assert.doesNotMatch(
+        shadow.querySelector('.markdown-notes-list').textContent,
+        /Review this argument/
+    );
+    view.destroy();
+});
+
 test('removes the visible annotation after Zotero deletes it', async () => {
     const deleted = [];
     let editorOptions;

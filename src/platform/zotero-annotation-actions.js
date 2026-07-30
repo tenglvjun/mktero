@@ -1,4 +1,7 @@
-import { isZoteroAnnotationColor } from '../core/pdf-annotation.js';
+import {
+    isZoteroAnnotationColor,
+    MAX_PDF_ANNOTATION_TEXT_LENGTH,
+} from '../core/pdf-annotation.js';
 
 export function createZoteroAnnotationActions(zotero) {
     return {
@@ -12,20 +15,12 @@ export function createZoteroAnnotationActions(zotero) {
                 itemID,
                 annotationID
             );
-            const previousColor = annotation.annotationColor;
-            try {
-                await withNotifierQueue(zotero, async notifierQueue => {
-                    annotation.annotationColor = normalizedColor;
-                    await annotation.saveTx({
-                        skipDateModifiedUpdate: true,
-                        notifierQueue,
-                    });
-                });
-            }
-            catch (error) {
-                annotation.annotationColor = previousColor;
-                throw error;
-            }
+            await saveAnnotationField(
+                zotero,
+                annotation,
+                'annotationColor',
+                normalizedColor
+            );
         },
         async deleteAnnotation(itemID, annotationID) {
             const annotation = editableAnnotation(
@@ -37,7 +32,43 @@ export function createZoteroAnnotationActions(zotero) {
                 await annotation.eraseTx({ notifierQueue });
             });
         },
+        async updateComment(itemID, annotationID, comment) {
+            const normalizedComment = String(comment ?? '');
+            if (normalizedComment.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) {
+                throw new Error(
+                    'PDF annotation comment exceeds the safety limit'
+                );
+            }
+            const annotation = editableAnnotation(
+                zotero,
+                itemID,
+                annotationID
+            );
+            await saveAnnotationField(
+                zotero,
+                annotation,
+                'annotationComment',
+                normalizedComment
+            );
+        },
     };
+}
+
+async function saveAnnotationField(zotero, annotation, field, value) {
+    const previousValue = annotation[field];
+    try {
+        await withNotifierQueue(zotero, async notifierQueue => {
+            annotation[field] = value;
+            await annotation.saveTx({
+                skipDateModifiedUpdate: true,
+                notifierQueue,
+            });
+        });
+    }
+    catch (error) {
+        annotation[field] = previousValue;
+        throw error;
+    }
 }
 
 function editableAnnotation(zotero, itemID, annotationID) {

@@ -1,3 +1,5 @@
+export const MAX_PDF_ANNOTATION_TEXT_LENGTH = 100_000;
+
 export const ZOTERO_ANNOTATION_COLORS = Object.freeze([
     Object.freeze({ name: 'yellow', value: '#ffd400' }),
     Object.freeze({ name: 'red', value: '#ff6666' }),

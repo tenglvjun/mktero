@@ -326,6 +326,30 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
     assert.match(actionsPopup, /max-width:\s*calc\(100vw - 24px\)/);
     assert.match(actionsPopup, /box-sizing:\s*border-box/);
 
+    const notePopup = ruleBody('.mktero-annotation-popup--note-editor');
+    assert.match(
+        notePopup,
+        /width:\s*min\(360px, calc\(100vw - 24px\)\)/
+    );
+
+    const noteInput = ruleBody('.mktero-annotation-note-input');
+    assert.match(noteInput, /width:\s*100%/);
+    assert.match(noteInput, /min-height:\s*82px/);
+    assert.match(noteInput, /resize:\s*vertical/);
+    assert.match(noteInput, /border-radius:\s*6px/);
+
+    const noteFooter = ruleBody('.mktero-annotation-note-footer');
+    assert.match(noteFooter, /display:\s*flex/);
+    assert.match(noteFooter, /justify-content:\s*flex-end/);
+    assert.match(noteFooter, /gap:\s*6px/);
+
+    const noteButtons = ruleBody([
+        '.mktero-annotation-note-cancel,',
+        '.mktero-annotation-note-save',
+    ].join('\n'));
+    assert.match(noteButtons, /height:\s*28px/);
+    assert.match(noteButtons, /border-radius:\s*6px/);
+
     const swatch = ruleBody('.mktero-annotation-popup-swatch');
     assert.match(swatch, /background:\s*var\(--mktero-annotation-color\)/);
 

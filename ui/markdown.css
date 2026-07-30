@@ -765,6 +765,11 @@ main {
     box-sizing: border-box;
 }
 
+.mktero-annotation-popup--note-editor {
+    width: min(360px, calc(100vw - 24px));
+    box-sizing: border-box;
+}
+
 .mktero-annotation-popup::after {
     position: absolute;
     left: var(--anchored-popup-arrow-left, 50%);
@@ -786,10 +791,6 @@ main {
     transform: translateX(-50%) rotate(225deg);
 }
 
-.mktero-annotation-popup-content {
-    padding: 12px;
-}
-
 .mktero-annotation-popup-metadata {
     display: flex;
     align-items: center;
@@ -807,10 +808,101 @@ main {
     border-radius: 50%;
 }
 
-.mktero-annotation-popup-text {
-    margin-top: 8px;
+.mktero-annotation-note-editor {
+    padding: 10px;
+}
+
+.mktero-annotation-note-quote {
+    display: -webkit-box;
+    margin-top: 7px;
+    overflow: hidden;
     overflow-wrap: anywhere;
-    white-space: pre-wrap;
+    -webkit-box-orient: vertical;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+    -webkit-line-clamp: 2;
+}
+
+.mktero-annotation-note-input {
+    display: block;
+    width: 100%;
+    min-height: 82px;
+    max-height: min(240px, calc(100vh - 180px));
+    margin-top: 8px;
+    padding: 7px 8px;
+    resize: vertical;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    background: var(--background);
+    font: inherit;
+    line-height: 1.45;
+}
+
+.mktero-annotation-note-input:focus-visible {
+    border-color: var(--accent);
+    outline: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
+    outline-offset: 0;
+}
+
+.mktero-annotation-note-input:read-only {
+    color: var(--muted);
+    background: var(--surface);
+}
+
+.mktero-annotation-note-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.mktero-annotation-note-cancel,
+.mktero-annotation-note-save {
+    min-width: 52px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.mktero-annotation-note-cancel:hover {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.mktero-annotation-note-save {
+    border-color: var(--accent);
+    color: #ffffff;
+    background: var(--accent);
+}
+
+.mktero-annotation-note-save:hover {
+    background: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+.mktero-annotation-note-cancel:focus-visible,
+.mktero-annotation-note-save:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 2px;
+}
+
+.mktero-annotation-note-input:disabled,
+.mktero-annotation-note-cancel:disabled,
+.mktero-annotation-note-save:disabled {
+    cursor: progress;
+    opacity: 0.55;
+}
+
+.mktero-annotation-note-error {
+    margin-top: 7px;
+    color: var(--error, #c62828);
+    font-size: 12px;
 }
 
 .mktero-annotation-actions {

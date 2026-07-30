@@ -82,6 +82,7 @@ export function createInlineMarkdownEditor({
     resolveImageURL,
     openLink,
     changeAnnotationColor,
+    updateAnnotationComment,
     deleteAnnotation,
     localization = createLocalization(),
 }) {
@@ -95,6 +96,7 @@ export function createInlineMarkdownEditor({
     const annotationPopup = createAnnotationPopup(parent, {
         localization,
         changeAnnotationColor,
+        updateAnnotationComment,
         deleteAnnotation,
     });
     const tablePreviewPopup = createTablePreviewPopup(parent, {

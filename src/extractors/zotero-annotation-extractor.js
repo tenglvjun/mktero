@@ -1,10 +1,12 @@
-import { comparePdfAnnotations } from '../core/pdf-annotation.js';
+import {
+    comparePdfAnnotations,
+    MAX_PDF_ANNOTATION_TEXT_LENGTH,
+} from '../core/pdf-annotation.js';
 
 const SUPPORTED_ANNOTATION_TYPES = new Set(['highlight', 'underline']);
 const DEFAULT_ANNOTATION_COLOR = '#ffd400';
 const SAFE_COLOR = /^#[0-9a-f]{6}$/i;
 const MAX_TEXT_ANNOTATIONS = 5_000;
-const MAX_ANNOTATION_TEXT_LENGTH = 100_000;
 const MAX_TOTAL_ANNOTATION_TEXT_LENGTH = 2_000_000;
 
 export class ZoteroAnnotationExtractor {
@@ -41,8 +43,11 @@ export class ZoteroAnnotationExtractor {
         return supported
             .map(annotation => {
                 const normalized = normalizeAnnotation(annotation);
-                if (normalized.text.length > MAX_ANNOTATION_TEXT_LENGTH
-                    || normalized.comment.length > MAX_ANNOTATION_TEXT_LENGTH) {
+                const textTooLong = normalized.text.length
+                    > MAX_PDF_ANNOTATION_TEXT_LENGTH;
+                const commentTooLong = normalized.comment.length
+                    > MAX_PDF_ANNOTATION_TEXT_LENGTH;
+                if (textTooLong || commentTooLong) {
                     throw new Error(
                         'PDF annotation text exceeds the local safety limit'
                     );

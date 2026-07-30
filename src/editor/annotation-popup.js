@@ -1,5 +1,8 @@
 import { createAnchoredPopup } from './anchored-popup.js';
-import { ZOTERO_ANNOTATION_COLORS } from '../core/pdf-annotation.js';
+import {
+    MAX_PDF_ANNOTATION_TEXT_LENGTH,
+    ZOTERO_ANNOTATION_COLORS,
+} from '../core/pdf-annotation.js';
 import {
     createLucideIcon,
     LUCIDE_ICONS,
@@ -15,6 +18,7 @@ const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 export function createAnnotationPopup(parent, {
     localization = createLocalization(),
     changeAnnotationColor,
+    updateAnnotationComment,
     deleteAnnotation,
 } = {}) {
     const t = localization.t.bind(localization);
@@ -25,12 +29,19 @@ export function createAnnotationPopup(parent, {
 
     const openNote = ({ anchor, annotation }) => {
         if (!annotation) return;
+        anchoredPopup.close();
         anchoredPopup.open({
             anchor,
-            label: t('annotation.details'),
-            renderContent({ document }) {
-                return createAnnotationNoteContent(document, annotation, t);
+            label: t('annotation.noteEditor'),
+            popupClassName: 'mktero-annotation-popup--note-editor',
+            renderContent({ document, close, reposition }) {
+                return createAnnotationNoteEditor(document, annotation, t, {
+                    updateAnnotationComment,
+                    close,
+                    reposition,
+                });
             },
+            focusContent: focusNoteInput,
         });
     };
     const openActions = ({ anchor, annotation, focus = false }) => {
@@ -65,10 +76,7 @@ export function createAnnotationPopup(parent, {
     };
 }
 
-function createAnnotationNoteContent(document, annotation, translate) {
-    const content = document.createElementNS(XHTML_NAMESPACE, 'div');
-    content.className = 'mktero-annotation-popup-content';
-
+function createAnnotationMetadata(document, annotation, translate) {
     const metadata = document.createElementNS(XHTML_NAMESPACE, 'div');
     metadata.className = 'mktero-annotation-popup-metadata';
     const swatch = document.createElementNS(XHTML_NAMESPACE, 'span');
@@ -88,13 +96,87 @@ function createAnnotationNoteContent(document, annotation, translate) {
         });
         metadata.appendChild(page);
     }
-    content.appendChild(metadata);
+    return metadata;
+}
 
-    const text = document.createElementNS(XHTML_NAMESPACE, 'div');
-    text.className = 'mktero-annotation-popup-text';
-    text.textContent = annotation.comment || annotation.text;
-    content.appendChild(text);
-    return content;
+function createAnnotationNoteEditor(
+    document,
+    annotation,
+    translate,
+    { updateAnnotationComment, close, reposition }
+) {
+    const form = document.createElementNS(XHTML_NAMESPACE, 'form');
+    form.className = 'mktero-annotation-note-editor';
+    form.appendChild(createAnnotationMetadata(document, annotation, translate));
+
+    const quote = document.createElementNS(XHTML_NAMESPACE, 'div');
+    quote.className = 'mktero-annotation-note-quote';
+    quote.textContent = String(annotation.text || '');
+    form.appendChild(quote);
+
+    const input = document.createElementNS(XHTML_NAMESPACE, 'textarea');
+    input.className = 'mktero-annotation-note-input';
+    input.maxLength = MAX_PDF_ANNOTATION_TEXT_LENGTH;
+    input.setAttribute('aria-label', translate('annotation.noteInput'));
+    input.setAttribute('placeholder', translate('annotation.notePlaceholder'));
+    input.textContent = String(annotation.comment || '');
+    const canUpdate = typeof updateAnnotationComment === 'function';
+    input.readOnly = !canUpdate;
+    form.appendChild(input);
+
+    const error = document.createElementNS(XHTML_NAMESPACE, 'div');
+    error.className = 'mktero-annotation-note-error';
+    error.setAttribute('role', 'status');
+    error.setAttribute('aria-live', 'polite');
+    error.hidden = true;
+
+    const footer = document.createElementNS(XHTML_NAMESPACE, 'div');
+    footer.className = 'mktero-annotation-note-footer';
+    const cancelButton = document.createElementNS(XHTML_NAMESPACE, 'button');
+    cancelButton.className = 'mktero-annotation-note-cancel';
+    cancelButton.type = 'button';
+    cancelButton.textContent = translate('annotation.cancelNote');
+    cancelButton.addEventListener('click', close);
+    const saveButton = document.createElementNS(XHTML_NAMESPACE, 'button');
+    saveButton.className = 'mktero-annotation-note-save';
+    saveButton.type = 'submit';
+    saveButton.textContent = translate('annotation.saveNote');
+    saveButton.disabled = !canUpdate;
+    footer.append(cancelButton, saveButton);
+    form.append(error, footer);
+
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canUpdate) return;
+        input.focus();
+        input.readOnly = true;
+        cancelButton.disabled = true;
+        saveButton.disabled = true;
+        error.hidden = true;
+        try {
+            await updateAnnotationComment(annotation.id, input.value);
+            close?.();
+        }
+        catch {
+            error.textContent = translate('annotation.noteSaveFailed');
+            error.hidden = false;
+            reposition?.();
+        }
+        finally {
+            input.readOnly = false;
+            cancelButton.disabled = false;
+            saveButton.disabled = false;
+            if (form.isConnected) input.focus();
+        }
+    });
+    return form;
+}
+
+function focusNoteInput(popup) {
+    const input = popup.querySelector('.mktero-annotation-note-input');
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange?.(input.value.length, input.value.length);
 }
 
 function createAnnotationActions(

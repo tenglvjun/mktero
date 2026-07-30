@@ -32,6 +32,9 @@ export function createAnchoredPopup(parent, {
 
     const scheduleClose = () => {
         cancelClose();
+        const root = parent.getRootNode?.();
+        const activeElement = root?.activeElement || document.activeElement;
+        if (popup?.contains(activeElement)) return;
         closeTimer = ownerWindow.setTimeout(close, 120);
     };
 

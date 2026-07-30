@@ -160,6 +160,9 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         onChangeAnnotationColor: (annotationID, color) => (
             runAnnotationAction('changeColor', itemID, annotationID, color)
         ),
+        onUpdateAnnotationComment: (annotationID, comment) => (
+            runAnnotationAction('updateComment', itemID, annotationID, comment)
+        ),
         onDeleteAnnotation: annotationID => (
             runAnnotationAction('deleteAnnotation', itemID, annotationID)
         ),
