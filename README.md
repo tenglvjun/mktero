@@ -134,7 +134,8 @@ Mktero Markdown 缓存。每次转换或从缓存打开文档时都会重新读�
   表格等渲染边界的选区不会显示操作条，以免保存无法完整显示的高亮。
 - 从 Markdown 新建标注时会先立即保存本地高亮，再在后台同步 Zotero PDF 标注。短文本
   需要等待 PDF 全文完成唯一定位；较长段落在单一结果稳定后即可同步。PDF 文本层在换行
-  处保留的断词连字符会自动兼容；找不到文字或存在多个候选时保留本地高亮，不会猜测位置。
+  处保留的断词连字符会在相关页面文本可用后自动兼容，无需等待剩余页面提取完成；找不到
+  文字或存在多个候选时保留本地高亮，不会猜测位置。
   必要时会在后台加载对应 PDF 阅读器以获取页码和高亮矩形；读取器初始化或文本搜索超时
   不会阻塞 Markdown 划词交互。
 - 仅支持具有本地文件的 Zotero PDF 附件；缺失或尚未下载的附件无法转换。
@@ -163,8 +164,8 @@ npm run build
 构建结果位于：
 
 - `build/package/`：未压缩插件目录
-- `build/mktero-0.2.1.xpi`：可安装插件包
-- `build/mktero-0.2.1.xpi.sha256`：只引用 XPI 文件名的 SHA-256 校验文件
+- `build/mktero-0.2.2.xpi`：可安装插件包
+- `build/mktero-0.2.2.xpi.sha256`：只引用 XPI 文件名的 SHA-256 校验文件
 - `build/updates.json`：与当前版本、下载地址和 XPI 哈希一致的 Zotero 更新清单
 
 XPI 中的文件顺序和时间戳固定；相同源码与依赖连续构建会得到相同的 XPI 哈希。
@@ -197,8 +198,8 @@ scripts/build.mjs  esbuild 与 XPI 打包脚本
 随后创建带 `v` 前缀、与清单版本完全一致的标签：
 
 ```bash
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
 标签推送后，[Release 工作流](./.github/workflows/release.yml)会自动执行语法检查、完整测试

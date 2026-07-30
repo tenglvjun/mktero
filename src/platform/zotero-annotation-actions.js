@@ -408,43 +408,99 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
     }
 }
 
-function findNormalizedPDFSearchQuery(view, text) {
+function findNormalizedPDFSearchQuery(view, text, tracker = null) {
     const pages = view?._findController?._pageContents;
-    if (!Array.isArray(pages) || pages.length > MAX_PDF_FALLBACK_PAGES) {
-        return { query: null, ambiguous: false };
+    if (tracker?.status === 'ambiguous') {
+        return { query: null, ambiguous: true, unavailable: false };
     }
-    const target = normalizePdfAnnotationText(text);
-    if (!target) return { query: null, ambiguous: false };
-    let totalTextLength = 0;
-    let query = null;
-    let matchCount = 0;
-    for (const page of pages) {
-        if (page == null) continue;
+    if (tracker?.status === 'unavailable') {
+        return { query: null, ambiguous: false, unavailable: true };
+    }
+    if (!Array.isArray(pages)) {
+        return { query: null, ambiguous: false, unavailable: false };
+    }
+    if (pages.length > MAX_PDF_FALLBACK_PAGES) {
+        if (tracker) tracker.status = 'unavailable';
+        return { query: null, ambiguous: false, unavailable: true };
+    }
+    const target = tracker?.target ?? normalizePdfAnnotationText(text);
+    if (!target) {
+        return { query: null, ambiguous: false, unavailable: false };
+    }
+    let totalTextLength = tracker?.totalTextLength || 0;
+    let query = tracker?.query || null;
+    let matchCount = tracker?.matchCount || 0;
+    const firstPageIndex = tracker?.nextPageIndex || 0;
+    for (let pageIndex = firstPageIndex;
+        pageIndex < pages.length;
+        pageIndex++) {
+        const page = pages[pageIndex];
+        if (page == null) {
+            if (tracker) break;
+            continue;
+        }
         if (typeof page !== 'string'
             || page.length > MAX_PDF_FALLBACK_PAGE_TEXT_LENGTH) {
-            return { query: null, ambiguous: false };
+            if (tracker) tracker.status = 'unavailable';
+            return { query: null, ambiguous: false, unavailable: true };
         }
         totalTextLength += page.length;
         if (totalTextLength > MAX_PDF_FALLBACK_TOTAL_TEXT_LENGTH) {
-            return { query: null, ambiguous: false };
+            if (tracker) tracker.status = 'unavailable';
+            return { query: null, ambiguous: false, unavailable: true };
         }
-        const index = createDehyphenatedPdfAnnotationTextIndex(page);
-        const occurrences = findTextOccurrences(index.text, target, 2);
-        if (occurrences.truncated || occurrences.offsets.length > 1) {
-            return { query: null, ambiguous: true };
+        const pageMatch = findNormalizedTextOnPDFPage(page, text, target);
+        if (pageMatch.ambiguous) {
+            if (tracker) tracker.status = 'ambiguous';
+            return { query: null, ambiguous: true, unavailable: false };
         }
-        if (!occurrences.offsets.length) continue;
-        matchCount++;
-        if (matchCount > 1) return { query: null, ambiguous: true };
-        const range = index.sourceRange(
-            occurrences.offsets[0],
-            target.length
-        );
-        const candidate = page.slice(range.from, range.to);
-        if (!candidate || candidate === text) continue;
-        query = candidate;
+        if (pageMatch.matched) {
+            matchCount++;
+            if (matchCount > 1) {
+                if (tracker) tracker.status = 'ambiguous';
+                return { query: null, ambiguous: true, unavailable: false };
+            }
+            query = pageMatch.query || query;
+        }
+        if (tracker) {
+            tracker.nextPageIndex = pageIndex + 1;
+            tracker.totalTextLength = totalTextLength;
+            tracker.query = query;
+            tracker.matchCount = matchCount;
+        }
     }
-    return { query, ambiguous: false };
+    return { query, ambiguous: false, unavailable: false };
+}
+
+function findNormalizedTextOnPDFPage(page, text, target) {
+    const index = createDehyphenatedPdfAnnotationTextIndex(page);
+    const occurrences = findTextOccurrences(index.text, target, 2);
+    if (occurrences.truncated || occurrences.offsets.length > 1) {
+        return { matched: false, query: null, ambiguous: true };
+    }
+    if (!occurrences.offsets.length) {
+        return { matched: false, query: null, ambiguous: false };
+    }
+    const range = index.sourceRange(occurrences.offsets[0], target.length);
+    const candidate = page.slice(range.from, range.to);
+    return {
+        matched: true,
+        query: candidate && candidate !== text ? candidate : null,
+        ambiguous: false,
+    };
+}
+
+function createNormalizedPDFSearchTracker(text) {
+    // Zotero fills _pageContents sequentially. Preserve progress so polling a
+    // slow or oversized document does not normalize earlier pages repeatedly.
+    return {
+        target: normalizePdfAnnotationText(text),
+        nextPageIndex: 0,
+        totalTextLength: 0,
+        query: null,
+        matchCount: 0,
+        status: 'active',
+    };
 }
 
 async function readerForItem(zotero, itemID, waitOptions) {
@@ -496,22 +552,45 @@ async function waitForPDFTextResult(view, text, {
     const startedAt = now();
     let stableMatch = null;
     let stableSince = null;
-    let attemptedNormalizedFallback = false;
+    let stableNormalizedQuery = null;
+    let stableNormalizedSince = null;
+    const normalizedFallbackTracker = allowNormalizedFallback
+        ? createNormalizedPDFSearchTracker(text)
+        : null;
     while (now() - startedAt <= timeout) {
         const result = currentFindResult(view, text);
         if (result?.total > 1) return result;
         if (result && pdfSearchCompleted(view, text)) return result;
-        if (allowNormalizedFallback
-            && !attemptedNormalizedFallback
-            && result?.total === 0
-            && pdfPageTextExtractionCompleted(view)) {
-            attemptedNormalizedFallback = true;
+        if (normalizedFallbackTracker) {
             const normalizedFallback = findNormalizedPDFSearchQuery(
                 view,
-                text
+                text,
+                normalizedFallbackTracker
             );
-            if (normalizedFallback.query || normalizedFallback.ambiguous) {
-                return { ...result, normalizedFallback };
+            if (normalizedFallback.ambiguous) {
+                return {
+                    ...(result || { total: 0 }),
+                    normalizedFallback,
+                };
+            }
+            if (normalizedFallback.unavailable) {
+                stableNormalizedQuery = null;
+                stableNormalizedSince = null;
+            }
+            else if (normalizedFallback.query) {
+                if (normalizedFallback.query !== stableNormalizedQuery) {
+                    stableNormalizedQuery = normalizedFallback.query;
+                    stableNormalizedSince = now();
+                }
+                if (pdfPageTextExtractionCompleted(view)
+                    || (isStrongUniqueMatch(text)
+                        && now() - stableNormalizedSince
+                            >= FAST_UNIQUE_SETTLE_TIME)) {
+                    return {
+                        ...(result || { total: 0 }),
+                        normalizedFallback,
+                    };
+                }
             }
         }
         if (result?.total === 1

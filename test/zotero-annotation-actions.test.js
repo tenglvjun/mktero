@@ -11,8 +11,8 @@ const LONG_STRESS_RECOVERY_PASSAGE = 'Previous research support for the notion '
     + 'that music listening is beneficial for stress recovery is inconclusive, '
     + 'given the methodological diversity with which the effects of music on '
     + 'stress recovery have been investigated.';
-const HYPHENATED_MARKDOWN_PASSAGE = 'Empirical support for the notion that '
-    + 'music listening is beneficial for stress recovery is inconclusive, '
+const HYPHENATED_MARKDOWN_PASSAGE = 'Background Empirical support for the notion '
+    + 'that music listening is beneficial for stress recovery is inconclusive, '
     + 'potentially due to the methodological diversity with which the effects '
     + 'of music on stress recovery have been investigated.';
 const HYPHENATED_PDF_PASSAGE = HYPHENATED_MARKDOWN_PASSAGE.replace(
@@ -465,6 +465,130 @@ test('recovers a line-end hyphen when extracted pages remain pending', async () 
         HYPHENATED_MARKDOWN_PASSAGE,
         HYPHENATED_PDF_PASSAGE,
     ]);
+});
+
+test('recovers a line-end hyphen before every PDF page is extracted', async () => {
+    const queries = [];
+    let savedJSON;
+    let pendingAnnotation = null;
+    const view = {
+        _findState: { active: false, query: '', result: null },
+        initializedPromise: Promise.resolve(),
+        setFindState(state) {
+            if (!state.active) {
+                this._findState = state;
+                return;
+            }
+            queries.push(state.query);
+            markSearchComplete(this, state.query);
+            this._findController._extractTextPromises = Array.from(
+                { length: 16 },
+                () => new Promise(() => {})
+            );
+            this._findController._pageContents = [HYPHENATED_PDF_PASSAGE];
+            this._findController._pendingFindMatches = new Set(
+                Array.from({ length: 15 }, (_, index) => index + 1)
+            );
+            if (state.query === HYPHENATED_PDF_PASSAGE) {
+                pendingAnnotation = {
+                    total: 1,
+                    index: 0,
+                };
+                this._findState = { ...state, result: pendingAnnotation };
+            }
+            else {
+                this._findState = { ...state, result: null };
+            }
+        },
+    };
+    let clock = 0;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            savedJSON = json;
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        delay: async () => {
+            clock += 250;
+            if (pendingAnnotation && !pendingAnnotation.annotation) {
+                pendingAnnotation.annotation = locatedAnnotation(
+                    HYPHENATED_PDF_PASSAGE
+                );
+            }
+        },
+        searchTimeout: 1_000,
+    });
+
+    const created = await actions.createFromText(42, {
+        text: HYPHENATED_MARKDOWN_PASSAGE,
+        comment: '',
+        color: '#ff6666',
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+    assert.equal(savedJSON.text, HYPHENATED_MARKDOWN_PASSAGE);
+    assert.deepEqual(queries, [
+        HYPHENATED_MARKDOWN_PASSAGE,
+        HYPHENATED_PDF_PASSAGE,
+    ]);
+});
+
+test('rejects a delayed normalized duplicate with different line wrapping', async () => {
+    const queries = [];
+    const pages = [HYPHENATED_PDF_PASSAGE];
+    const view = {
+        _findState: { active: false, query: '', result: null },
+        initializedPromise: Promise.resolve(),
+        setFindState(state) {
+            if (!state.active) {
+                this._findState = state;
+                return;
+            }
+            queries.push(state.query);
+            markSearchComplete(this, state.query);
+            this._findController._pageContents = pages;
+            this._findController._pendingFindMatches = new Set([1]);
+            this._findState = {
+                ...state,
+                result: state.query === HYPHENATED_PDF_PASSAGE
+                    ? {
+                        total: 1,
+                        annotation: locatedAnnotation(
+                            HYPHENATED_PDF_PASSAGE
+                        ),
+                    }
+                    : null,
+            };
+        },
+    };
+    let clock = 0;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON() {
+            assert.fail('An ambiguous annotation must not be saved');
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        delay: async () => {
+            clock += 250;
+            pages[1] = HYPHENATED_MARKDOWN_PASSAGE;
+        },
+        searchTimeout: 1_000,
+    });
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text: HYPHENATED_MARKDOWN_PASSAGE,
+            comment: '',
+            color: '#ff6666',
+        }),
+        error => error.code === 'MKTERO_PDF_TEXT_AMBIGUOUS'
+    );
+    assert.deepEqual(queries, [HYPHENATED_MARKDOWN_PASSAGE]);
 });
 
 test('does not wait forever for PDF reader initialization', async () => {
