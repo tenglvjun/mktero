@@ -7,6 +7,11 @@ import {
     MAX_PDF_ANNOTATION_TEXT_LENGTH,
 } from '../src/core/pdf-annotation.js';
 
+const LONG_STRESS_RECOVERY_PASSAGE = 'Previous research support for the notion '
+    + 'that music listening is beneficial for stress recovery is inconclusive, '
+    + 'given the methodological diversity with which the effects of music on '
+    + 'stress recovery have been investigated.';
+
 test('creates a Zotero PDF highlight from located Markdown text', async () => {
     const selectedText = 'The sound of stress recovery: an exploratory study '
         + 'of self-selected music listening after stress';
@@ -264,6 +269,79 @@ test('waits for every PDF page before accepting a unique text match', async () =
         error => error.code === 'MKTERO_PDF_TEXT_AMBIGUOUS'
     );
     assert.equal(delayCalls, 1);
+});
+
+test('creates a highlight for a long match without waiting for every PDF page', async () => {
+    const text = LONG_STRESS_RECOVERY_PASSAGE;
+    const view = createSearchView({
+        total: 1,
+        annotation: locatedAnnotation(text),
+    });
+    const originalSetFindState = view.setFindState;
+    view.setFindState = function setFindState(state) {
+        originalSetFindState.call(this, state);
+        if (state.active) {
+            this._findController._pendingFindMatches.add(1);
+        }
+    };
+    let clock = 0;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        delay: async () => {
+            clock += 250;
+        },
+        searchTimeout: 1_000,
+    });
+
+    const created = await actions.createFromText(42, {
+        text,
+        comment: '',
+        color: '#ff6666',
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+});
+
+test('rejects a later-page duplicate during the long-match settle window', async () => {
+    const text = LONG_STRESS_RECOVERY_PASSAGE;
+    const view = createSearchView({
+        total: 1,
+        annotation: locatedAnnotation(text),
+    });
+    const originalSetFindState = view.setFindState;
+    view.setFindState = function setFindState(state) {
+        originalSetFindState.call(this, state);
+        if (state.active) {
+            this._findController._pendingFindMatches.add(1);
+        }
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON() {
+            assert.fail('The annotation must not be saved');
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero, {
+        async delay() {
+            view._findState.result = { total: 2 };
+            view._findController._pendingFindMatches.clear();
+        },
+    });
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text,
+            comment: '',
+            color: '#ff6666',
+        }),
+        error => error.code === 'MKTERO_PDF_TEXT_AMBIGUOUS'
+    );
 });
 
 test('times out when Zotero does not finish locating the PDF text', async () => {

@@ -3,6 +3,11 @@ import {
     MAX_PDF_ANNOTATION_TEXT_LENGTH,
 } from '../core/pdf-annotation.js';
 
+// Long passages can be accepted after a stable single match without making
+// the user wait for every remaining PDF page to finish text extraction.
+const FAST_UNIQUE_MATCH_LENGTH = 160;
+const FAST_UNIQUE_SETTLE_TIME = 500;
+
 export function createZoteroAnnotationActions(zotero, {
     locateText = null,
     delay = defaultDelay,
@@ -287,8 +292,9 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
             index: null,
             result: null,
         });
-        const result = await waitForValue(
-            () => completedFindResult(view, text),
+        const result = await waitForPDFTextResult(
+            view,
+            text,
             { delay, now, timeout }
         );
         if (!result) {
@@ -358,14 +364,56 @@ async function readerForItem(zotero, itemID, waitOptions) {
     };
 }
 
-function completedFindResult(view, text) {
+async function waitForPDFTextResult(view, text, { delay, now, timeout }) {
+    const startedAt = now();
+    let stableMatch = null;
+    let stableSince = null;
+    while (now() - startedAt <= timeout) {
+        const result = currentFindResult(view, text);
+        if (result?.total > 1) return result;
+        if (result && pdfSearchCompleted(view, text)) return result;
+        if (result?.total === 1
+            && result.annotation
+            && isStrongUniqueMatch(text)) {
+            const match = annotationMatchKey(result.annotation);
+            if (match !== stableMatch) {
+                stableMatch = match;
+                stableSince = now();
+            }
+            if (now() - stableSince >= FAST_UNIQUE_SETTLE_TIME) {
+                return result;
+            }
+        }
+        else {
+            stableMatch = null;
+            stableSince = null;
+        }
+        await delay(25);
+    }
+    return null;
+}
+
+function currentFindResult(view, text) {
     const state = view?._findState;
     if (!state?.active || state.query !== text || !state.result) return null;
-    if (!pdfSearchCompleted(view, text)) return null;
     const result = state.result;
     if (!Number.isInteger(result.total) || result.total < 0) return null;
     if (result.total === 1 && !result.annotation) return null;
     return result;
+}
+
+function isStrongUniqueMatch(text) {
+    return String(text || '').replace(/\s+/gu, ' ').trim().length
+        >= FAST_UNIQUE_MATCH_LENGTH;
+}
+
+function annotationMatchKey(annotation) {
+    return JSON.stringify({
+        text: annotation?.text,
+        pageLabel: annotation?.pageLabel,
+        sortIndex: annotation?.sortIndex,
+        position: annotation?.position,
+    });
 }
 
 function pdfSearchCompleted(view, text) {
