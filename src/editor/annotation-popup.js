@@ -38,6 +38,7 @@ export function createAnnotationPopup(parent, {
         anchoredPopup.open({
             anchor,
             label: t('annotation.actions'),
+            popupClassName: 'mktero-annotation-popup--actions',
             renderContent({ document, close, reposition }) {
                 return createAnnotationActions(document, annotation, t, {
                     changeAnnotationColor,

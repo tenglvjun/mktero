@@ -759,6 +759,12 @@ main {
     font: 13px/1.55 ui-sans-serif, system-ui, sans-serif;
 }
 
+.mktero-annotation-popup--actions {
+    width: max-content;
+    max-width: calc(100vw - 24px);
+    box-sizing: border-box;
+}
+
 .mktero-annotation-popup::after {
     position: absolute;
     left: var(--anchored-popup-arrow-left, 50%);
@@ -810,25 +816,26 @@ main {
 .mktero-annotation-actions {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 9px;
+    gap: 6px;
+    padding: 8px 9px;
     flex-wrap: wrap;
 }
 
 .mktero-annotation-color-palette {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
 }
 
 .mktero-annotation-color-button,
 .mktero-annotation-delete-button {
     display: inline-flex;
-    width: 27px;
-    height: 27px;
+    width: 25px;
+    height: 25px;
     padding: 0;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
     border: 1px solid transparent;
     border-radius: 50%;
     color: var(--muted);
@@ -837,8 +844,8 @@ main {
 }
 
 .mktero-annotation-color-button::before {
-    width: 17px;
-    height: 17px;
+    width: 15px;
+    height: 15px;
     border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
     border-radius: 50%;
     background: var(--mktero-annotation-color);
@@ -870,8 +877,9 @@ main {
 }
 
 .mktero-annotation-delete-button {
-    border-left-color: color-mix(in srgb, var(--text) 12%, transparent);
-    border-radius: 7px;
+    margin-left: 2px;
+    border-left-color: color-mix(in srgb, var(--text) 16%, transparent);
+    border-radius: 6px;
 }
 
 .mktero-annotation-delete-button:hover {

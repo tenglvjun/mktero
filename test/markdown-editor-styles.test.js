@@ -321,18 +321,27 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
     assert.match(popup, /z-index:\s*900/);
     assert.match(popup, /background:\s*var\(--surface\)/);
 
+    const actionsPopup = ruleBody('.mktero-annotation-popup--actions');
+    assert.match(actionsPopup, /width:\s*max-content/);
+    assert.match(actionsPopup, /max-width:\s*calc\(100vw - 24px\)/);
+    assert.match(actionsPopup, /box-sizing:\s*border-box/);
+
     const swatch = ruleBody('.mktero-annotation-popup-swatch');
     assert.match(swatch, /background:\s*var\(--mktero-annotation-color\)/);
 
     const actions = ruleBody('.mktero-annotation-actions');
     assert.match(actions, /display:\s*flex/);
     assert.match(actions, /flex-wrap:\s*wrap/);
+    assert.match(actions, /gap:\s*6px/);
+    assert.match(actions, /padding:\s*8px 9px/);
 
     const colorButton = ruleBody([
         '.mktero-annotation-color-button,',
         '.mktero-annotation-delete-button',
     ].join('\n'));
-    assert.match(colorButton, /width:\s*27px/);
+    assert.match(colorButton, /width:\s*25px/);
+    assert.match(colorButton, /height:\s*25px/);
+    assert.match(colorButton, /box-sizing:\s*border-box/);
     assert.match(colorButton, /cursor:\s*pointer/);
 
     const colorSwatch = ruleBody(
@@ -342,6 +351,8 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
         colorSwatch,
         /background:\s*var\(--mktero-annotation-color\)/
     );
+    assert.match(colorSwatch, /width:\s*15px/);
+    assert.match(colorSwatch, /height:\s*15px/);
 });
 
 test('styles table references, previews, and target highlights', () => {

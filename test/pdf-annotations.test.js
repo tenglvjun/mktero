@@ -225,6 +225,9 @@ test('shows a safe localized error when an annotation action fails', async () =>
             color: '#ffd400',
         },
     });
+    assert.ok(parent.querySelector(
+        '.mktero-annotation-popup.mktero-annotation-popup--actions'
+    ));
     const error = parent.querySelector('.mktero-annotation-action-error');
     const errorShown = new Promise(resolve => {
         const observer = new dom.window.MutationObserver(() => {

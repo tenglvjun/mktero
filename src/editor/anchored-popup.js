@@ -45,6 +45,7 @@ export function createAnchoredPopup(parent, {
         label,
         renderContent,
         focusContent,
+        popupClassName,
     }) => {
         if (!nextAnchor || typeof renderContent !== 'function') return;
         if (ignoredOpenAnchor === nextAnchor) {
@@ -60,7 +61,9 @@ export function createAnchoredPopup(parent, {
         anchor = nextAnchor;
         popup = document.createElementNS(XHTML_NAMESPACE, 'div');
         popup.id = `${idPrefix}-${nextPopupID++}`;
-        popup.className = className;
+        popup.className = [className, popupClassName]
+            .filter(Boolean)
+            .join(' ');
         popup.setAttribute('role', 'dialog');
         popup.setAttribute('aria-label', label);
         const content = renderContent({ document, close, reposition });
