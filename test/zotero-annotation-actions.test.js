@@ -406,6 +406,141 @@ test('locates Markdown text split by a PDF line-end hyphen', async () => {
     });
 });
 
+test('recovers a line-end hyphen when extracted pages remain pending', async () => {
+    const queries = [];
+    let savedJSON;
+    const view = {
+        _findState: { active: false, query: '', result: null },
+        initializedPromise: Promise.resolve(),
+        setFindState(state) {
+            if (!state.active) {
+                this._findState = state;
+                return;
+            }
+            queries.push(state.query);
+            markSearchComplete(this, state.query);
+            this._findController._extractTextPromises = [Promise.resolve()];
+            this._findController._pageContents = [HYPHENATED_PDF_PASSAGE];
+            if (state.query === HYPHENATED_MARKDOWN_PASSAGE) {
+                this._findController._pendingFindMatches.add(0);
+            }
+            this._findState = {
+                ...state,
+                result: state.query === HYPHENATED_PDF_PASSAGE
+                    ? {
+                        total: 1,
+                        annotation: locatedAnnotation(
+                            HYPHENATED_PDF_PASSAGE
+                        ),
+                    }
+                    : { total: 0 },
+            };
+        },
+    };
+    let clock = 0;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            savedJSON = json;
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        delay: async () => {
+            clock += 250;
+        },
+        searchTimeout: 1_000,
+    });
+
+    const created = await actions.createFromText(42, {
+        text: HYPHENATED_MARKDOWN_PASSAGE,
+        comment: '',
+        color: '#a28ae5',
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+    assert.equal(savedJSON.text, HYPHENATED_MARKDOWN_PASSAGE);
+    assert.deepEqual(queries, [
+        HYPHENATED_MARKDOWN_PASSAGE,
+        HYPHENATED_PDF_PASSAGE,
+    ]);
+});
+
+test('does not wait forever for PDF reader initialization', async () => {
+    let clock = 0;
+    const view = createSearchView({ total: 0 });
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON() {
+            assert.fail('The annotation must not be saved');
+        },
+    });
+    zotero.Reader._readers[0]._initPromise = new Promise(() => {});
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        delay: async () => {
+            clock += 250;
+        },
+        searchTimeout: 1_000,
+    });
+
+    const outcome = await Promise.race([
+        actions.createFromText(42, {
+            text: 'Selected paper title',
+            comment: '',
+            color: '#ffd400',
+        }).then(
+            () => 'created',
+            error => error.code
+        ),
+        new Promise(resolve => setImmediate(() => resolve('stalled'))),
+    ]);
+
+    assert.equal(outcome, 'MKTERO_PDF_READER_UNAVAILABLE');
+});
+
+test('closes a background PDF reader that opens after its timeout', async () => {
+    let clock = 0;
+    let resolveOpening;
+    const opening = new Promise(resolve => {
+        resolveOpening = resolve;
+    });
+    const view = createSearchView({ total: 0 });
+    const lateReader = createReader(view);
+    let closeCalls = 0;
+    lateReader.close = () => closeCalls++;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON() {
+            assert.fail('The annotation must not be saved');
+        },
+    });
+    zotero.Reader._readers = [];
+    zotero.Reader.open = () => opening;
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        delay: async () => {
+            clock += 250;
+        },
+        searchTimeout: 1_000,
+    });
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text: 'Selected paper title',
+            comment: '',
+            color: '#ffd400',
+        }),
+        error => error.code === 'MKTERO_PDF_READER_UNAVAILABLE'
+    );
+    resolveOpening(lateReader);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(closeCalls, 1);
+});
+
 test('prefers an exact PDF text match over line-end hyphen recovery', async () => {
     const queries = [];
     const view = createSearchView({

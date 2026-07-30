@@ -271,11 +271,15 @@ function createZoteroPDFTextLocator(zotero, {
 }
 
 async function locateTextInReader(reader, text, { delay, now, timeout }) {
-    await reader._initPromise;
+    const waitOptions = { delay, now, timeout };
+    await waitForReaderPromise(reader._initPromise, waitOptions);
     const internalReader = reader._internalReader;
-    await internalReader?.initializedPromise;
+    await waitForReaderPromise(
+        internalReader?.initializedPromise,
+        waitOptions
+    );
     const view = internalReader?._primaryView;
-    await view?.initializedPromise;
+    await waitForReaderPromise(view?.initializedPromise, waitOptions);
     if (!view || typeof view.setFindState !== 'function') {
         throw annotationSyncError(
             'MKTERO_PDF_READER_UNAVAILABLE',
@@ -303,7 +307,7 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
         let result = await waitForPDFTextResult(
             view,
             text,
-            { delay, now, timeout }
+            { delay, now, timeout, allowNormalizedFallback: true }
         );
         let usedNormalizedQuery = false;
         if (!result) {
@@ -313,7 +317,8 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
             );
         }
         if (!result.total) {
-            const fallback = findNormalizedPDFSearchQuery(view, text);
+            const fallback = result.normalizedFallback
+                || findNormalizedPDFSearchQuery(view, text);
             if (fallback.ambiguous) {
                 throw annotationSyncError(
                     'MKTERO_PDF_TEXT_AMBIGUOUS',
@@ -425,9 +430,21 @@ async function readerForItem(zotero, itemID, waitOptions) {
     let reader = findReader();
     let temporaryReader = null;
     if (!reader && typeof zotero.Reader?.open === 'function') {
-        temporaryReader = await zotero.Reader.open(itemID, null, {
+        const opening = zotero.Reader.open(itemID, null, {
             openInBackground: true,
         });
+        try {
+            temporaryReader = await waitForReaderPromise(
+                opening,
+                waitOptions
+            );
+        }
+        catch (error) {
+            Promise.resolve(opening)
+                .then(lateReader => lateReader?.close?.())
+                .catch(lateError => zotero.logError?.(lateError));
+            throw error;
+        }
         reader = temporaryReader;
     }
     reader ||= await waitForValue(findReader, waitOptions);
@@ -446,14 +463,33 @@ async function readerForItem(zotero, itemID, waitOptions) {
     };
 }
 
-async function waitForPDFTextResult(view, text, { delay, now, timeout }) {
+async function waitForPDFTextResult(view, text, {
+    delay,
+    now,
+    timeout,
+    allowNormalizedFallback = false,
+}) {
     const startedAt = now();
     let stableMatch = null;
     let stableSince = null;
+    let attemptedNormalizedFallback = false;
     while (now() - startedAt <= timeout) {
         const result = currentFindResult(view, text);
         if (result?.total > 1) return result;
         if (result && pdfSearchCompleted(view, text)) return result;
+        if (allowNormalizedFallback
+            && !attemptedNormalizedFallback
+            && result?.total === 0
+            && pdfPageTextExtractionCompleted(view)) {
+            attemptedNormalizedFallback = true;
+            const normalizedFallback = findNormalizedPDFSearchQuery(
+                view,
+                text
+            );
+            if (normalizedFallback.query || normalizedFallback.ambiguous) {
+                return { ...result, normalizedFallback };
+            }
+        }
         if (result?.total === 1
             && result.annotation
             && isStrongUniqueMatch(text)) {
@@ -473,6 +509,21 @@ async function waitForPDFTextResult(view, text, { delay, now, timeout }) {
         await delay(25);
     }
     return null;
+}
+
+function pdfPageTextExtractionCompleted(view) {
+    const controller = view?._findController;
+    const extraction = controller?._extractTextPromises;
+    const pages = controller?._pageContents;
+    if (!Array.isArray(extraction)
+        || !extraction.length
+        || !Array.isArray(pages)) {
+        return false;
+    }
+    for (let index = 0; index < extraction.length; index++) {
+        if (typeof pages[index] !== 'string') return false;
+    }
+    return true;
 }
 
 function currentFindResult(view, text) {
@@ -516,6 +567,35 @@ async function waitForValue(read, { delay, now, timeout }) {
         await delay(25);
     }
     return null;
+}
+
+async function waitForReaderPromise(promise, { delay, now, timeout }) {
+    let state = 'pending';
+    let value;
+    let failure;
+    Promise.resolve(promise).then(
+        result => {
+            state = 'fulfilled';
+            value = result;
+        },
+        error => {
+            state = 'rejected';
+            failure = error;
+        }
+    );
+    await Promise.resolve();
+    const startedAt = now();
+    while (state === 'pending' && now() - startedAt <= timeout) {
+        await delay(25);
+    }
+    if (state === 'pending') {
+        throw annotationSyncError(
+            'MKTERO_PDF_READER_UNAVAILABLE',
+            'Zotero PDF reader initialization timed out'
+        );
+    }
+    if (state === 'rejected') throw failure;
+    return value;
 }
 
 function inactiveFindState() {
