@@ -186,9 +186,10 @@ class TaskCheckboxWidget extends WidgetType {
 }
 
 class AnnotationNoteWidget extends WidgetType {
-    constructor(annotation) {
+    constructor(annotation, translate) {
         super();
         this.annotation = annotation;
+        this.translate = translate;
         this.key = JSON.stringify([
             String(annotation.id || ''),
             String(annotation.color || ''),
@@ -202,7 +203,8 @@ class AnnotationNoteWidget extends WidgetType {
     toDOM(view) {
         return createAnnotationNoteMarker(
             view.dom.ownerDocument,
-            this.annotation
+            this.annotation,
+            this.translate
         );
     }
 
@@ -537,7 +539,7 @@ function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
             && !noteRendered
             && annotationHasComment(annotation)) {
             decorations.push(Decoration.widget({
-                widget: new AnnotationNoteWidget(annotation),
+                widget: new AnnotationNoteWidget(annotation, context.translate),
                 side: -1,
             }).range(noteOffset));
         }
@@ -813,24 +815,46 @@ function citationElement(event, view) {
 }
 
 function referenceInteraction(event, view, context) {
+    const noteMarker = annotationNoteElement(event, view);
+    if (noteMarker) {
+        const target = context.annotationTargets.get(
+            noteMarker.getAttribute('data-annotation-id') || ''
+        );
+        if (!target) return null;
+        const openNote = () => {
+            closeReferencePopupsExcept(context, context.annotationPopup);
+            context.annotationPopup?.openNote({
+                anchor: noteMarker,
+                annotation: target,
+            });
+        };
+        return {
+            element: noteMarker,
+            popup: context.annotationPopup,
+            open() {},
+            activate: openNote,
+        };
+    }
     const annotation = annotationElement(event, view);
     if (annotation) {
         const target = context.annotationTargets.get(
             annotation.getAttribute('data-annotation-id') || ''
         );
         if (!target) return null;
-        const open = () => {
+        const openActions = focus => {
             closeReferencePopupsExcept(context, context.annotationPopup);
-            context.annotationPopup?.open({
+            context.annotationPopup?.openActions({
                 anchor: annotation,
                 annotation: target,
+                focus,
             });
         };
         return {
             element: annotation,
             popup: context.annotationPopup,
-            open,
-            activate: open,
+            open: () => openActions(false),
+            focusPopup: () => openActions(true),
+            activate: () => openActions(false),
             allowTextSelection: true,
         };
     }
@@ -864,11 +888,13 @@ function referencePopups(context) {
 }
 
 function annotationElement(event, view) {
-    const annotation = event.target?.closest?.([
-        '.cm-mktero-pdf-annotation',
-        '.cm-mktero-pdf-annotation-note',
-    ].join(', '));
+    const annotation = event.target?.closest?.('.cm-mktero-pdf-annotation');
     return annotation && view.dom.contains(annotation) ? annotation : null;
+}
+
+function annotationNoteElement(event, view) {
+    const marker = event.target?.closest?.('.cm-mktero-pdf-annotation-note');
+    return marker && view.dom.contains(marker) ? marker : null;
 }
 
 function closeReferencePopupsExcept(context, retainedPopup) {
@@ -1461,7 +1487,8 @@ function wrapRenderedMathAnnotations(container, annotations, translate) {
         if (annotation.showNoteMarker) {
             const noteMarker = createAnnotationNoteMarker(
                 container.ownerDocument,
-                annotation
+                annotation,
+                translate
             );
             if (noteMarker) wrapper.append(noteMarker);
         }

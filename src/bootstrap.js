@@ -23,6 +23,9 @@ import { ZoteroAnnotationExtractor } from './extractors/zotero-annotation-extrac
 import { MinerUClient } from './mineru/mineru-client.js';
 import { createRuntimeAbortController } from './platform/abort-controller.js';
 import {
+    createZoteroAnnotationActions,
+} from './platform/zotero-annotation-actions.js';
+import {
     createLocalization,
     translateEnglish,
 } from './i18n/localization.js';
@@ -48,6 +51,7 @@ const runtime = {
     rootURI: null,
     preferencePaneID: null,
     localization: null,
+    annotationActions: null,
     disposeToolbar: null,
     contextMenus: new Map(),
     controllers: new Map(),
@@ -65,6 +69,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ),
     });
     runtime.localization = localization;
+    runtime.annotationActions = createZoteroAnnotationActions(Zotero);
     runtime.presenter = new MarkdownTabPresenter({
         zotero: Zotero,
         rootURI,
@@ -131,6 +136,7 @@ globalThis.shutdown = function shutdown() {
     runtime.cache = null;
     runtime.rootURI = null;
     runtime.localization = null;
+    runtime.annotationActions = null;
     runtime.preferencePaneID = null;
     runtime.id = null;
 };
@@ -151,6 +157,12 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
     const presentation = runtime.presenter.open(itemID, {
         onClose: () => abortConversion(itemID),
         onReparse: () => openItemAsMarkdown(itemID, { forceRefresh: true }),
+        onChangeAnnotationColor: (annotationID, color) => (
+            runAnnotationAction('changeColor', itemID, annotationID, color)
+        ),
+        onDeleteAnnotation: annotationID => (
+            runAnnotationAction('deleteAnnotation', itemID, annotationID)
+        ),
     });
     if (!presentation.created
         && presentation.model.status !== 'error'
@@ -227,6 +239,20 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         if (runtime.controllers.get(itemID) === controller) {
             runtime.controllers.delete(itemID);
         }
+    }
+}
+
+async function runAnnotationAction(action, ...args) {
+    try {
+        const handler = runtime.annotationActions?.[action];
+        if (typeof handler !== 'function') {
+            throw new Error('PDF annotation actions are unavailable');
+        }
+        await handler(...args);
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        throw error;
     }
 }
 

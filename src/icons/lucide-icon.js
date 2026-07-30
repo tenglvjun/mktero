@@ -4,6 +4,7 @@ import {
     FileText,
     LoaderCircle,
     MessageSquareText,
+    Trash2,
     X,
     ZoomIn,
     ZoomOut,
@@ -42,6 +43,10 @@ export const LUCIDE_ICONS = Object.freeze({
     messageSquareText: Object.freeze({
         name: 'message-square-text',
         nodes: MessageSquareText,
+    }),
+    trash2: Object.freeze({
+        name: 'trash-2',
+        nodes: Trash2,
     }),
     x: Object.freeze({
         name: 'x',

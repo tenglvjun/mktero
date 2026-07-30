@@ -142,6 +142,12 @@ class MarkdownTabView {
             initialMarkdown: '',
             resolveImageURL: source => this.resolveImageURL(source),
             openLink: href => this.openLink(href),
+            changeAnnotationColor: (annotationID, color) => (
+                this.changeAnnotationColor(annotationID, color)
+            ),
+            deleteAnnotation: annotationID => (
+                this.deleteAnnotation(annotationID)
+            ),
             localization: this.localization,
         });
         this.syncOutline('');
@@ -213,6 +219,31 @@ class MarkdownTabView {
         this.editor?.destroy();
         this.revokeAssetURLs();
         this.root.remove?.();
+    }
+
+    async changeAnnotationColor(annotationID, color) {
+        if (typeof this.model.onChangeAnnotationColor !== 'function') {
+            throw new Error('PDF annotation color changes are unavailable');
+        }
+        await this.model.onChangeAnnotationColor(annotationID, color);
+        this.model.annotationOverlay = mapAnnotationOverlay(
+            this.model.annotationOverlay,
+            annotationID,
+            annotation => ({ ...annotation, color })
+        );
+        this.render(this.model);
+    }
+
+    async deleteAnnotation(annotationID) {
+        if (typeof this.model.onDeleteAnnotation !== 'function') {
+            throw new Error('PDF annotation deletion is unavailable');
+        }
+        await this.model.onDeleteAnnotation(annotationID);
+        this.model.annotationOverlay = filterAnnotationOverlay(
+            this.model.annotationOverlay,
+            annotationID
+        );
+        this.render(this.model);
     }
 
     createStylesheet(stylesheetText) {
@@ -886,6 +917,35 @@ function firstAnnotationOffset(annotation, markdownLength) {
 
 function isAnnotationEntry(annotation) {
     return Boolean(annotation && typeof annotation === 'object');
+}
+
+function mapAnnotationOverlay(annotationOverlay, annotationID, transform) {
+    const targetID = String(annotationID || '');
+    return transformAnnotationOverlay(annotationOverlay, annotations => (
+        annotations.map(annotation => (
+            String(annotation?.id || '') === targetID
+                ? transform(annotation)
+                : annotation
+        ))
+    ));
+}
+
+function filterAnnotationOverlay(annotationOverlay, annotationID) {
+    const targetID = String(annotationID || '');
+    const keep = annotation => String(annotation?.id || '') !== targetID;
+    return transformAnnotationOverlay(
+        annotationOverlay,
+        annotations => annotations.filter(keep)
+    );
+}
+
+function transformAnnotationOverlay(annotationOverlay, transform) {
+    const overlay = annotationOverlay || createEmptyAnnotationOverlay();
+    return {
+        ...overlay,
+        matched: transform(overlay.matched || []),
+        unmatched: transform(overlay.unmatched || []),
+    };
 }
 
 function appendChildren(parent, ...children) {

@@ -166,6 +166,102 @@ test('updates Markdown and PDF annotations as one editor document', () => {
     view.destroy();
 });
 
+test('updates the visible annotation after Zotero saves a new color', async () => {
+    const updates = [];
+    const saved = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Important result.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important',
+                comment: 'Review this',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: 9 }],
+            }],
+            unmatched: [],
+        },
+        async onChangeAnnotationColor(annotationID, color) {
+            saved.push({ annotationID, color });
+        },
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument(document) {
+                    updates.push(document);
+                },
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    await editorOptions.changeAnnotationColor('HIGH0001', '#ff6666');
+
+    assert.deepEqual(saved, [{
+        annotationID: 'HIGH0001',
+        color: '#ff6666',
+    }]);
+    assert.equal(model.annotationOverlay.matched[0].color, '#ff6666');
+    assert.equal(
+        updates.at(-1).annotationOverlay.matched[0].color,
+        '#ff6666'
+    );
+    view.destroy();
+});
+
+test('removes the visible annotation after Zotero deletes it', async () => {
+    const deleted = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Important result.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important',
+                comment: 'Review this',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: 9 }],
+            }],
+            unmatched: [],
+        },
+        async onDeleteAnnotation(annotationID) {
+            deleted.push(annotationID);
+        },
+    });
+    const { view, shadow } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    await editorOptions.deleteAnnotation('HIGH0001');
+
+    assert.deepEqual(deleted, ['HIGH0001']);
+    assert.deepEqual(model.annotationOverlay, { matched: [], unmatched: [] });
+    assert.match(
+        shadow.querySelector('.markdown-notes-list').textContent,
+        /No PDF notes/
+    );
+    view.destroy();
+});
+
 test('resizes and toggles the Markdown outline from its edge', () => {
     const { document, view, shadow } = createView(createModel({
         status: 'ready',

@@ -11,7 +11,8 @@ const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const translate = (key, variables = {}) => {
     if (key === 'annotation.page') return `Page ${variables.page}`;
-    if (key === 'annotation.view') return `View ${variables.text}`;
+    if (key === 'annotation.edit') return `Edit ${variables.text}`;
+    if (key === 'annotation.actionFailed') return 'Update failed';
     return key;
 };
 
@@ -49,7 +50,8 @@ test('creates rendered annotations in the XHTML namespace', () => {
         '.cm-mktero-pdf-annotation-note'
     );
     assert.equal(noteMarker?.namespaceURI, XHTML_NAMESPACE);
-    assert.equal(noteMarker?.getAttribute('aria-hidden'), 'true');
+    assert.equal(noteMarker?.getAttribute('role'), 'button');
+    assert.equal(noteMarker?.getAttribute('tabindex'), '0');
     assert.equal(noteMarker?.textContent, '');
     assert.equal(annotation.firstElementChild, noteMarker);
     const icon = noteMarker.querySelector(
@@ -198,5 +200,52 @@ test('creates annotation popups in XHTML and falls back to the page index', () =
 
     popup.destroy();
     document.createElement = createElement;
+    dom.window.close();
+});
+
+test('shows a safe localized error when an annotation action fails', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>'
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        async changeAnnotationColor() {
+            throw new Error('private database details');
+        },
+    });
+    popup.openActions({
+        anchor: document.querySelector('#anchor'),
+        annotation: {
+            id: 'HIGH0002',
+            type: 'highlight',
+            text: 'Visible',
+            comment: 'Review this',
+            color: '#ffd400',
+        },
+    });
+    const error = parent.querySelector('.mktero-annotation-action-error');
+    const errorShown = new Promise(resolve => {
+        const observer = new dom.window.MutationObserver(() => {
+            if (error.hidden || !error.textContent) return;
+            observer.disconnect();
+            resolve();
+        });
+        observer.observe(error, {
+            attributes: true,
+            childList: true,
+            subtree: true,
+        });
+    });
+
+    parent.querySelector('[data-color="#ff6666"]').click();
+    await errorShown;
+
+    assert.equal(error.hidden, false);
+    assert.equal(error.textContent, 'Update failed');
+    assert.doesNotMatch(parent.textContent, /private database details/);
+
+    popup.destroy();
     dom.window.close();
 });

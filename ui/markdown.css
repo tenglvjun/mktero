@@ -734,6 +734,17 @@ main {
     transform: scale(0.96);
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note:focus-visible
+    .cm-mktero-pdf-annotation-note-icon {
+    filter: drop-shadow(0 0 2px var(--mktero-annotation-color));
+    outline: 2px solid color-mix(
+        in srgb,
+        var(--mktero-annotation-color) 70%,
+        transparent
+    );
+    outline-offset: 2px;
+}
+
 .mktero-annotation-popup {
     position: fixed;
     z-index: 900;
@@ -794,6 +805,88 @@ main {
     margin-top: 8px;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+
+.mktero-annotation-actions {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px;
+    flex-wrap: wrap;
+}
+
+.mktero-annotation-color-palette {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.mktero-annotation-color-button,
+.mktero-annotation-delete-button {
+    display: inline-flex;
+    width: 27px;
+    height: 27px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 50%;
+    color: var(--muted);
+    background: transparent;
+    cursor: pointer;
+}
+
+.mktero-annotation-color-button::before {
+    width: 17px;
+    height: 17px;
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    border-radius: 50%;
+    background: var(--mktero-annotation-color);
+    box-shadow: 0 1px 2px rgb(31 35 40 / 15%);
+    content: "";
+}
+
+.mktero-annotation-color-button:hover,
+.mktero-annotation-delete-button:hover {
+    border-color: color-mix(in srgb, var(--text) 18%, transparent);
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.mktero-annotation-color-button[aria-pressed="true"] {
+    border-color: var(--text);
+    box-shadow: 0 0 0 1px var(--surface) inset;
+}
+
+.mktero-annotation-color-button:focus-visible,
+.mktero-annotation-delete-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.mktero-annotation-color-button:disabled,
+.mktero-annotation-delete-button:disabled {
+    cursor: progress;
+    opacity: 0.5;
+}
+
+.mktero-annotation-delete-button {
+    border-left-color: color-mix(in srgb, var(--text) 12%, transparent);
+    border-radius: 7px;
+}
+
+.mktero-annotation-delete-button:hover {
+    color: var(--error, #c62828);
+}
+
+.mktero-annotation-delete-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.mktero-annotation-action-error {
+    width: 100%;
+    color: var(--error, #c62828);
+    font-size: 12px;
 }
 
 .mktero-citation-popup {

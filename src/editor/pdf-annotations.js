@@ -9,6 +9,7 @@ import {
     createVisibleMarkdownTextIndex,
 } from '../markdown/markdown-visible-text.js';
 import { accessibleAnnotationText } from '../core/pdf-annotation.js';
+import { translateEnglish } from '../i18n/localization.js';
 import {
     createLucideIcon,
     LUCIDE_ICONS,
@@ -37,16 +38,17 @@ export function annotationAttributes(annotation, translate) {
         )}`,
         role: 'button',
         tabindex: '0',
-        'aria-label': translate(
-            annotationHasComment(annotation)
-                ? 'annotation.viewWithNote'
-                : 'annotation.view',
-            { text: accessibleAnnotationText(annotation.text) }
-        ),
+        'aria-label': translate('annotation.edit', {
+            text: accessibleAnnotationText(annotation.text),
+        }),
     };
 }
 
-export function createAnnotationNoteMarker(document, annotation) {
+export function createAnnotationNoteMarker(
+    document,
+    annotation,
+    translate = translateEnglish
+) {
     if (!annotationHasComment(annotation)) return null;
     const marker = document.createElementNS(XHTML_NAMESPACE, 'span');
     marker.className = 'cm-mktero-pdf-annotation-note';
@@ -55,7 +57,9 @@ export function createAnnotationNoteMarker(document, annotation) {
         'style',
         `--mktero-annotation-color: ${safeAnnotationColor(annotation.color)}`
     );
-    marker.setAttribute('aria-hidden', 'true');
+    marker.setAttribute('role', 'button');
+    marker.setAttribute('tabindex', '0');
+    marker.setAttribute('aria-label', translate('annotation.openNote'));
     const icon = createLucideIcon(document, LUCIDE_ICONS.messageSquareText, {
         className: 'cm-mktero-pdf-annotation-note-icon',
     });
@@ -233,7 +237,7 @@ function wrapTextRange(container, from, to, annotation, translate) {
     }
     const noteMarker = annotation.showNoteMarker === false
         ? null
-        : createAnnotationNoteMarker(document, annotation);
+        : createAnnotationNoteMarker(document, annotation, translate);
     if (noteMarker) element.append(noteMarker);
     element.append(range.extractContents());
     range.insertNode(element);

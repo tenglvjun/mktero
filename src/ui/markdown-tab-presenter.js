@@ -27,7 +27,12 @@ export class MarkdownTabPresenter {
         this.ensureSessionStateFilter();
     }
 
-    open(itemID, { onClose, onReparse } = {}) {
+    open(itemID, {
+        onClose,
+        onReparse,
+        onChangeAnnotationColor,
+        onDeleteAnnotation,
+    } = {}) {
         this.ensureSessionStateFilter();
         const owner = this.zotero.getMainWindow?.();
         const tabs = owner?.Zotero_Tabs;
@@ -40,13 +45,23 @@ export class MarkdownTabPresenter {
         if (existing) {
             if (onClose) existing.onClose = onClose;
             if (onReparse) existing.model.onReparse = onReparse;
+            if (onChangeAnnotationColor) {
+                existing.model.onChangeAnnotationColor = onChangeAnnotationColor;
+            }
+            if (onDeleteAnnotation) {
+                existing.model.onDeleteAnnotation = onDeleteAnnotation;
+            }
             tabs.select(existing.tabID);
             return { ...existing, created: false };
         }
 
         const model = createInitialModel(
             itemID,
-            onReparse,
+            {
+                onReparse,
+                onChangeAnnotationColor,
+                onDeleteAnnotation,
+            },
             this.localization.t.bind(this.localization)
         );
         const view = this.createView({
@@ -199,7 +214,7 @@ function isMkteroSessionTab(tab) {
     return tab?.type === TAB_TYPE && tab.data?.mkteroItemID !== undefined;
 }
 
-function createInitialModel(itemID, onReparse, translate) {
+function createInitialModel(itemID, actions, translate) {
     return {
         itemID,
         title: translate('loading.convertingTitle'),
@@ -215,6 +230,6 @@ function createInitialModel(itemID, onReparse, translate) {
         preserveContent: false,
         warnings: [],
         error: '',
-        onReparse,
+        ...actions,
     };
 }

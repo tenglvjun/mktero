@@ -226,6 +226,30 @@ test('exposes and refreshes the reparse action on the tab model', async () => {
     assert.equal(second.model.cacheKey, null);
 });
 
+test('exposes and refreshes PDF annotation actions on the tab model', async () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const calls = [];
+    const presenter = createPresenter(mainWindow, harness);
+    const first = presenter.open(42, {
+        onChangeAnnotationColor: () => calls.push('stale-color'),
+        onDeleteAnnotation: () => calls.push('stale-delete'),
+    });
+    const second = presenter.open(42, {
+        onChangeAnnotationColor: (id, color) => calls.push({ id, color }),
+        onDeleteAnnotation: id => calls.push({ deleted: id }),
+    });
+
+    await second.model.onChangeAnnotationColor('ANN00001', '#ff6666');
+    await second.model.onDeleteAnnotation('ANN00001');
+
+    assert.equal(first.model, second.model);
+    assert.deepEqual(calls, [
+        { id: 'ANN00001', color: '#ff6666' },
+        { deleted: 'ANN00001' },
+    ]);
+});
+
 test('removes stale Mktero tabs before Zotero restores the previous session', () => {
     const mainWindow = createMainWindow();
     const harness = createViewHarness();

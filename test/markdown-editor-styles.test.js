@@ -273,7 +273,7 @@ test('styles citation popups and temporary reference highlights', () => {
     assert.match(highlight, /animation:\s*mktero-reference-highlight 3s ease-out/);
 });
 
-test('styles Zotero-colored PDF annotations and their note popup', () => {
+test('styles Zotero-colored PDF annotations and their action popup', () => {
     const annotation = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation'
     );
@@ -323,6 +323,25 @@ test('styles Zotero-colored PDF annotations and their note popup', () => {
 
     const swatch = ruleBody('.mktero-annotation-popup-swatch');
     assert.match(swatch, /background:\s*var\(--mktero-annotation-color\)/);
+
+    const actions = ruleBody('.mktero-annotation-actions');
+    assert.match(actions, /display:\s*flex/);
+    assert.match(actions, /flex-wrap:\s*wrap/);
+
+    const colorButton = ruleBody([
+        '.mktero-annotation-color-button,',
+        '.mktero-annotation-delete-button',
+    ].join('\n'));
+    assert.match(colorButton, /width:\s*27px/);
+    assert.match(colorButton, /cursor:\s*pointer/);
+
+    const colorSwatch = ruleBody(
+        '.mktero-annotation-color-button::before'
+    );
+    assert.match(
+        colorSwatch,
+        /background:\s*var\(--mktero-annotation-color\)/
+    );
 });
 
 test('styles table references, previews, and target highlights', () => {

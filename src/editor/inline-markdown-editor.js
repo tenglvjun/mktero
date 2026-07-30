@@ -81,6 +81,8 @@ export function createInlineMarkdownEditor({
     initialMarkdown,
     resolveImageURL,
     openLink,
+    changeAnnotationColor,
+    deleteAnnotation,
     localization = createLocalization(),
 }) {
     const t = localization.t.bind(localization);
@@ -90,7 +92,11 @@ export function createInlineMarkdownEditor({
     acquireDOMGlobals(ownerWindow);
     const imagePreview = createImagePreview(parent, { localization });
     const citationPopup = createCitationPopup(parent, { localization });
-    const annotationPopup = createAnnotationPopup(parent, { localization });
+    const annotationPopup = createAnnotationPopup(parent, {
+        localization,
+        changeAnnotationColor,
+        deleteAnnotation,
+    });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
         resolveImageURL,
         localization,

@@ -126,7 +126,8 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
     );
     assert.equal(markers.length, 1);
     assert.equal(markers[0].getAttribute('data-annotation-id'), 'NOTE0001');
-    assert.equal(markers[0].getAttribute('aria-hidden'), 'true');
+    assert.equal(markers[0].getAttribute('role'), 'button');
+    assert.equal(markers[0].getAttribute('tabindex'), '0');
     assert.equal(markers[0].textContent, '');
     assert.equal(
         markers[0].namespaceURI,
@@ -142,7 +143,7 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
     assert.match(
         document.querySelector('.cm-mktero-pdf-annotation')
             ?.getAttribute('aria-label') || '',
-        /with note/
+        /Edit PDF annotation/
     );
     const firstHighlight = document.querySelector(
         '.cm-mktero-pdf-annotation'
@@ -153,7 +154,7 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
     markers[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
         bubbles: true,
     }));
-    assert.match(
+    assert.doesNotMatch(
         document.querySelector('.mktero-annotation-popup')?.textContent || '',
         /Remember this finding/
     );
@@ -164,6 +165,10 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
     });
     markers[0].dispatchEvent(click);
     assert.equal(click.defaultPrevented, true);
+    assert.match(
+        document.querySelector('.mktero-annotation-popup')?.textContent || '',
+        /Remember this finding/
+    );
 
     editor.setDocument({
         markdown,
@@ -265,8 +270,10 @@ test('renders a PDF trademark annotation over MinerU superscript markup', async 
         '.cm-mktero-pdf-annotation-note'
     );
     assert.equal(noteMarker.length, 1);
-    noteMarker[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+    noteMarker[0].dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
+        cancelable: true,
+        button: 0,
     }));
     assert.match(
         document.querySelector('.mktero-annotation-popup')?.textContent || '',
@@ -318,8 +325,10 @@ test('shows one note marker when an annotation covers formula content', () => {
     assert.ok(rendered.contains(noteMarkers[0]));
     assert.equal(rendered.firstElementChild, noteMarkers[0]);
 
-    noteMarkers[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+    noteMarkers[0].dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
+        cancelable: true,
+        button: 0,
     }));
     assert.match(
         document.querySelector('.mktero-annotation-popup')?.textContent || '',
@@ -331,7 +340,7 @@ test('shows one note marker when an annotation covers formula content', () => {
     dom.window.close();
 });
 
-test('shows PDF annotation notes safely on hover', () => {
+test('shows PDF annotation notes safely only after clicking the note marker', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
@@ -357,9 +366,33 @@ test('shows PDF annotation notes safely on hover', () => {
         },
     });
     const annotation = document.querySelector('.cm-mktero-pdf-annotation');
+    const noteMarker = document.querySelector(
+        '.cm-mktero-pdf-annotation-note'
+    );
 
     annotation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
         bubbles: true,
+    }));
+    assert.doesNotMatch(
+        document.querySelector('.mktero-annotation-popup')?.textContent || '',
+        /Review this/
+    );
+
+    noteMarker.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.doesNotMatch(
+        document.querySelector('.mktero-annotation-popup')?.textContent || '',
+        /Review this/
+    );
+    assert.equal(noteMarker.getAttribute('role'), 'button');
+    assert.equal(noteMarker.getAttribute('tabindex'), '0');
+    assert.equal(noteMarker.getAttribute('aria-label'), 'Open PDF note');
+
+    noteMarker.dispatchEvent(new dom.window.MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
     }));
 
     const popup = document.querySelector('.mktero-annotation-popup');
@@ -372,6 +405,82 @@ test('shows PDF annotation notes safely on hover', () => {
 
     editor.destroy();
     assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+    dom.window.close();
+});
+
+test('shows color and delete actions when hovering a PDF annotation', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let resolveColorChange;
+    let resolveDelete;
+    const colorChanged = new Promise(resolve => {
+        resolveColorChange = resolve;
+    });
+    const deleted = new Promise(resolve => {
+        resolveDelete = resolve;
+    });
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        changeAnnotationColor(annotationID, color) {
+            resolveColorChange({ annotationID, color });
+        },
+        deleteAnnotation(annotationID) {
+            resolveDelete(annotationID);
+        },
+    });
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important',
+                comment: 'Private note',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: 9 }],
+            }],
+            unmatched: [],
+        },
+    });
+    const annotation = document.querySelector('.cm-mktero-pdf-annotation');
+
+    annotation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+
+    const popup = document.querySelector('.mktero-annotation-popup');
+    const colorButtons = popup.querySelectorAll(
+        '.mktero-annotation-color-button'
+    );
+    assert.equal(colorButtons.length, 8);
+    assert.equal(
+        popup.querySelector('[data-color="#ffd400"]')
+            ?.getAttribute('aria-pressed'),
+        'true'
+    );
+    assert.doesNotMatch(popup.textContent, /Private note/);
+
+    popup.querySelector('[data-color="#ff6666"]').click();
+    assert.deepEqual(await colorChanged, {
+        annotationID: 'HIGH0001',
+        color: '#ff6666',
+    });
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    annotation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    const reopenedPopup = document.querySelector('.mktero-annotation-popup');
+    reopenedPopup.querySelector('.mktero-annotation-delete-button').click();
+    assert.equal(await deleted, 'HIGH0001');
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
     dom.window.close();
 });
 
@@ -421,8 +530,10 @@ test('renders PDF annotations inside a rendered Markdown table', () => {
     );
     assert.ok(noteMarker);
     assert.equal(annotation.firstElementChild, noteMarker);
-    noteMarker.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+    noteMarker.dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
+        cancelable: true,
+        button: 0,
     }));
     assert.match(
         document.querySelector('.mktero-annotation-popup').textContent,
