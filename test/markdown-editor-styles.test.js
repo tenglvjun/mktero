@@ -353,6 +353,18 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
     );
     assert.match(colorSwatch, /width:\s*15px/);
     assert.match(colorSwatch, /height:\s*15px/);
+
+    const deleteButton = ruleBody('\n\n.mktero-annotation-delete-button');
+    assert.match(deleteButton, /position:\s*relative/);
+    assert.doesNotMatch(deleteButton, /border-left-color/);
+
+    const deleteSeparator = ruleBody(
+        '.mktero-annotation-delete-button::before'
+    );
+    assert.match(deleteSeparator, /width:\s*1px/);
+    assert.match(deleteSeparator, /top:\s*3px/);
+    assert.match(deleteSeparator, /bottom:\s*3px/);
+    assert.match(deleteSeparator, /background:\s*color-mix/);
 });
 
 test('styles table references, previews, and target highlights', () => {

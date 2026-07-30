@@ -877,9 +877,20 @@ main {
 }
 
 .mktero-annotation-delete-button {
+    position: relative;
     margin-left: 2px;
-    border-left-color: color-mix(in srgb, var(--text) 16%, transparent);
     border-radius: 6px;
+}
+
+.mktero-annotation-delete-button::before {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: -5px;
+    width: 1px;
+    background: color-mix(in srgb, var(--text) 16%, transparent);
+    content: "";
+    pointer-events: none;
 }
 
 .mktero-annotation-delete-button:hover {
