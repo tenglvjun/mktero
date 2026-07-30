@@ -17,6 +17,7 @@ const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
 export function createAnnotationPopup(parent, {
     localization = createLocalization(),
+    createMarkdownAnnotation,
     changeAnnotationColor,
     updateAnnotationComment,
     deleteAnnotation,
@@ -36,12 +37,62 @@ export function createAnnotationPopup(parent, {
             popupClassName: 'mktero-annotation-popup--note-editor',
             renderContent({ document, close, reposition }) {
                 return createAnnotationNoteEditor(document, annotation, t, {
-                    updateAnnotationComment,
+                    saveComment: typeof updateAnnotationComment === 'function'
+                        ? comment => updateAnnotationComment(
+                            annotation.id,
+                            comment
+                        )
+                        : undefined,
                     close,
                     reposition,
                 });
             },
             focusContent: focusNoteInput,
+        });
+    };
+    const openDraftNote = ({ anchor, annotation }) => {
+        if (!annotation) return;
+        anchoredPopup.close();
+        anchoredPopup.open({
+            anchor,
+            label: t('annotation.noteEditor'),
+            popupClassName: 'mktero-annotation-popup--note-editor',
+            renderContent({ document, close, reposition }) {
+                return createAnnotationNoteEditor(document, annotation, t, {
+                    saveComment: typeof createMarkdownAnnotation === 'function'
+                        ? comment => createMarkdownAnnotation({
+                            ...annotation,
+                            comment,
+                        })
+                        : undefined,
+                    close,
+                    reposition,
+                });
+            },
+            focusContent: focusNoteInput,
+        });
+    };
+    const openSelection = ({ anchor, selection }) => {
+        if (!selection) return;
+        const annotation = {
+            ...selection,
+            source: 'markdown',
+            type: 'highlight',
+            comment: '',
+            color: '#ffd400',
+        };
+        anchoredPopup.open({
+            anchor,
+            label: t('annotation.selectionActions'),
+            popupClassName: 'mktero-annotation-popup--actions',
+            renderContent({ document, close, reposition }) {
+                return createMarkdownSelectionActions(document, annotation, t, {
+                    createMarkdownAnnotation,
+                    openNote: () => openDraftNote({ anchor, annotation }),
+                    close,
+                    reposition,
+                });
+            },
         });
     };
     const openActions = ({ anchor, annotation, focus = false }) => {
@@ -67,6 +118,7 @@ export function createAnnotationPopup(parent, {
     return {
         open: openNote,
         openNote,
+        openSelection,
         openActions,
         close: anchoredPopup.close,
         scheduleClose: anchoredPopup.scheduleClose,
@@ -103,7 +155,7 @@ function createAnnotationNoteEditor(
     document,
     annotation,
     translate,
-    { updateAnnotationComment, close, reposition }
+    { saveComment, close, reposition }
 ) {
     const form = document.createElementNS(XHTML_NAMESPACE, 'form');
     form.className = 'mktero-annotation-note-editor';
@@ -120,7 +172,7 @@ function createAnnotationNoteEditor(
     input.setAttribute('aria-label', translate('annotation.noteInput'));
     input.setAttribute('placeholder', translate('annotation.notePlaceholder'));
     input.textContent = String(annotation.comment || '');
-    const canUpdate = typeof updateAnnotationComment === 'function';
+    const canUpdate = typeof saveComment === 'function';
     input.readOnly = !canUpdate;
     form.appendChild(input);
 
@@ -154,7 +206,7 @@ function createAnnotationNoteEditor(
         saveButton.disabled = true;
         error.hidden = true;
         try {
-            await updateAnnotationComment(annotation.id, input.value);
+            await saveComment(input.value);
             close?.();
         }
         catch {
@@ -170,6 +222,85 @@ function createAnnotationNoteEditor(
         }
     });
     return form;
+}
+
+function createMarkdownSelectionActions(
+    document,
+    annotation,
+    translate,
+    { createMarkdownAnnotation, openNote, close, reposition }
+) {
+    const content = document.createElementNS(XHTML_NAMESPACE, 'div');
+    content.className = [
+        'mktero-annotation-actions',
+        'mktero-markdown-selection-actions',
+    ].join(' ');
+    const palette = document.createElementNS(XHTML_NAMESPACE, 'div');
+    palette.className = 'mktero-annotation-color-palette';
+    palette.setAttribute('role', 'group');
+    palette.setAttribute('aria-label', translate('annotation.addHighlight'));
+    const controls = [];
+    const error = document.createElementNS(XHTML_NAMESPACE, 'div');
+    error.className = 'mktero-annotation-action-error';
+    error.setAttribute('role', 'status');
+    error.setAttribute('aria-live', 'polite');
+    error.hidden = true;
+    const canCreate = typeof createMarkdownAnnotation === 'function';
+
+    const run = async action => {
+        for (const control of controls) control.disabled = true;
+        error.hidden = true;
+        try {
+            await action();
+            close?.();
+        }
+        catch {
+            error.textContent = translate('annotation.actionFailed');
+            error.hidden = false;
+            reposition?.();
+        }
+        finally {
+            for (const control of controls) control.disabled = !canCreate;
+        }
+    };
+
+    for (const option of ZOTERO_ANNOTATION_COLORS) {
+        const button = document.createElementNS(XHTML_NAMESPACE, 'button');
+        button.className = 'mktero-annotation-color-button';
+        button.type = 'button';
+        button.dataset.color = option.value;
+        button.style.setProperty('--mktero-annotation-color', option.value);
+        button.setAttribute('aria-label', translate('annotation.highlightColor', {
+            color: translate(`annotation.color.${option.name}`),
+        }));
+        button.setAttribute('title', translate('annotation.highlightColor', {
+            color: translate(`annotation.color.${option.name}`),
+        }));
+        button.disabled = !canCreate;
+        button.addEventListener('click', () => run(() => (
+            createMarkdownAnnotation({ ...annotation, color: option.value })
+        )));
+        controls.push(button);
+        palette.appendChild(button);
+    }
+    content.appendChild(palette);
+
+    const noteButton = document.createElementNS(XHTML_NAMESPACE, 'button');
+    noteButton.className = 'mktero-annotation-note-button';
+    noteButton.type = 'button';
+    noteButton.dataset.action = 'add-note';
+    noteButton.setAttribute('aria-label', translate('annotation.addNote'));
+    noteButton.setAttribute('title', translate('annotation.addNote'));
+    noteButton.disabled = !canCreate;
+    noteButton.appendChild(createLucideIcon(
+        document,
+        LUCIDE_ICONS.messageSquarePlus,
+        { className: 'mktero-annotation-note-action-icon', size: 16 }
+    ));
+    noteButton.addEventListener('click', openNote);
+    controls.push(noteButton);
+    content.append(noteButton, error);
+    return content;
 }
 
 function focusNoteInput(popup) {

@@ -9,8 +9,12 @@ import {
     createMinerUCacheKey,
     createZoteroMarkdownCache,
 } from './cache/markdown-cache.js';
+import {
+    createZoteroMarkdownAnnotationStore,
+} from './cache/markdown-annotation-store.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import { MarkdownAnnotationOverlay } from './core/markdown-annotation-overlay.js';
+import { MarkdownLocalAnnotations } from './core/markdown-local-annotations.js';
 import {
     CONVERSION_PROGRESS,
     normalizeConversionProgress,
@@ -52,6 +56,7 @@ const runtime = {
     preferencePaneID: null,
     localization: null,
     annotationActions: null,
+    localAnnotations: null,
     disposeToolbar: null,
     contextMenus: new Map(),
     controllers: new Map(),
@@ -89,6 +94,15 @@ globalThis.startup = async function startup({ id, rootURI }) {
         extractor: new ZoteroAnnotationExtractor(Zotero),
         onError: error => Zotero.logError?.(error),
     });
+    const localAnnotations = new MarkdownLocalAnnotations({
+        store: createZoteroMarkdownAnnotationStore({
+            zotero: Zotero,
+            ioUtils: IOUtils,
+            pathUtils: PathUtils,
+        }),
+        onError: error => Zotero.logError?.(error),
+    });
+    runtime.localAnnotations = localAnnotations;
     runtime.service = new MarkdownDocumentService({
         extractor: new MinerUDocumentExtractor({
             zotero: Zotero,
@@ -102,6 +116,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         }),
         annotationOverlay,
+        localAnnotations,
     });
     cache.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
@@ -137,6 +152,7 @@ globalThis.shutdown = function shutdown() {
     runtime.rootURI = null;
     runtime.localization = null;
     runtime.annotationActions = null;
+    runtime.localAnnotations = null;
     runtime.preferencePaneID = null;
     runtime.id = null;
 };
@@ -165,6 +181,20 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         ),
         onDeleteAnnotation: annotationID => (
             runAnnotationAction('deleteAnnotation', itemID, annotationID)
+        ),
+        onCreateMarkdownAnnotation: draft => (
+            runMarkdownAnnotationAction('create', itemID, draft)
+        ),
+        onUpdateMarkdownAnnotation: (annotationID, changes) => (
+            runMarkdownAnnotationAction(
+                'update',
+                itemID,
+                annotationID,
+                changes
+            )
+        ),
+        onDeleteMarkdownAnnotation: annotationID => (
+            runMarkdownAnnotationAction('delete', itemID, annotationID)
         ),
     });
     if (!presentation.created
@@ -252,6 +282,20 @@ async function runAnnotationAction(action, ...args) {
             throw new Error('PDF annotation actions are unavailable');
         }
         await handler(...args);
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        throw error;
+    }
+}
+
+async function runMarkdownAnnotationAction(action, ...args) {
+    try {
+        const handler = runtime.localAnnotations?.[action];
+        if (typeof handler !== 'function') {
+            throw new Error('Markdown annotation actions are unavailable');
+        }
+        return await handler.call(runtime.localAnnotations, ...args);
     }
     catch (error) {
         Zotero.logError?.(error);

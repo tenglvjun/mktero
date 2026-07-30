@@ -15,6 +15,17 @@ function enterTableCellEditing(cell, ownerWindow) {
     }));
 }
 
+function textNodeContaining(element, text) {
+    const walker = element.ownerDocument.createTreeWalker(
+        element,
+        element.ownerDocument.defaultView.NodeFilter.SHOW_TEXT
+    );
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent.includes(text)) return node;
+    }
+    return null;
+}
+
 test('keeps Markdown as the source of truth in a read-only surface', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -143,7 +154,7 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
     assert.match(
         document.querySelector('.cm-mktero-pdf-annotation')
             ?.getAttribute('aria-label') || '',
-        /Add or edit PDF note/
+        /Add or edit note/
     );
     const firstHighlight = document.querySelector(
         '.cm-mktero-pdf-annotation'
@@ -391,7 +402,7 @@ test('edits PDF annotation notes safely after clicking the note marker', async (
     );
     assert.equal(noteMarker.getAttribute('role'), 'button');
     assert.equal(noteMarker.getAttribute('tabindex'), '0');
-    assert.equal(noteMarker.getAttribute('aria-label'), 'Edit PDF note');
+    assert.equal(noteMarker.getAttribute('aria-label'), 'Edit note');
 
     noteMarker.dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
@@ -2956,6 +2967,294 @@ test('allows rendered block text to be selected without revealing its source', (
     assert.match(document.getSelection().toString(), /select this text/);
     assert.ok(document.querySelector('.cm-mktero-code-block'));
     assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('shows Markdown annotation actions after selecting ordinary text', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Select this Markdown text.',
+    });
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const actions = document.querySelector(
+        '.mktero-markdown-selection-actions'
+    );
+    assert.ok(actions);
+    assert.ok(actions.querySelector('[data-action="add-note"]'));
+    assert.match(document.getSelection().toString(), /Select this Markdown text/);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('creates a local highlight from uniquely located rendered block text', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '```text\nselect this text\n```',
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const code = document.querySelector('.cm-mktero-code-block pre');
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    document.getSelection().addRange(range);
+
+    code.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    document.querySelector('[data-color="#ffd400"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.text, 'select this text');
+    assert.deepEqual(created.ranges, [{ from: 8, to: 24 }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('creates a local highlight from the selected repeated rendered text', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '```text\nrepeat repeat\n```',
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const code = document.querySelector('.cm-mktero-code-block pre');
+    const textNode = textNodeContaining(code, 'repeat repeat');
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 'repeat'.length);
+    document.getSelection().addRange(range);
+
+    code.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    const colorButton = document.querySelector('[data-color="#ffd400"]');
+    assert.ok(colorButton);
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.text, 'repeat');
+    assert.deepEqual(created.ranges, [{ from: 8, to: 14 }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('maps repeated rendered table text from its selected cell', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '| Claim | Claim |',
+        '| --- | --- |',
+        '| repeat | repeat |',
+    ].join('\n');
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const cells = document.querySelectorAll('.cm-mktero-table td');
+    const textNode = textNodeContaining(cells[1], 'repeat');
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    document.getSelection().addRange(range);
+
+    cells[1].dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    const colorButton = document.querySelector('[data-color="#ffd400"]');
+    assert.ok(colorButton);
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const from = markdown.lastIndexOf('repeat');
+    assert.equal(created.text, 'repeat');
+    assert.deepEqual(created.ranges, [{ from, to: from + 6 }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not offer a partial annotation across rendered boundaries', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '```text\nfirst\n```\n\nsecond',
+        async createMarkdownAnnotation() {
+            assert.fail('A cross-boundary annotation must not be created');
+        },
+    });
+    const code = document.querySelector('.cm-mktero-code-block pre');
+    const secondLine = [...document.querySelectorAll('.cm-line')].find(
+        line => line.textContent.includes('second')
+    );
+    const firstText = textNodeContaining(code, 'first');
+    const secondText = textNodeContaining(secondLine, 'second');
+    const range = document.createRange();
+    range.setStart(firstText, 0);
+    range.setEnd(secondText, secondText.textContent.length);
+    document.getSelection().addRange(range);
+
+    secondLine.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    assert.equal(
+        document.querySelector('.mktero-markdown-selection-actions'),
+        null
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('creates a local highlight from the selected Markdown text', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Select this Markdown text.',
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return {
+                ...annotation,
+                id: 'mktero-local-1',
+                matchKind: 'local',
+            };
+        },
+    });
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const colorButton = document.querySelector(
+        '.mktero-markdown-selection-actions [data-color="#ff6666"]'
+    );
+    colorButton.dispatchEvent(new dom.window.MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+    }));
+    colorButton.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.text, 'Select this Markdown text.');
+    assert.equal(created.color, '#ff6666');
+    assert.deepEqual(created.ranges, [{ from: 0, to: 26 }]);
+    assert.equal(created.source, 'markdown');
+    assert.equal(document.getSelection().rangeCount, 0);
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('creates a local highlight and note from the selection note action', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Select this Markdown text.',
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const noteAction = document.querySelector('[data-action="add-note"]');
+    assert.equal(
+        noteAction.querySelector('svg')?.getAttribute('data-lucide'),
+        'message-square-plus'
+    );
+    noteAction.click();
+    const input = document.querySelector('.mktero-annotation-note-input');
+    input.value = 'My Markdown note';
+    document.querySelector('.mktero-annotation-note-save').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.text, 'Select this Markdown text.');
+    assert.equal(created.comment, 'My Markdown note');
+    assert.equal(created.color, '#ffd400');
+    assert.deepEqual(created.ranges, [{ from: 0, to: 26 }]);
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
 
     editor.destroy();
     dom.window.close();

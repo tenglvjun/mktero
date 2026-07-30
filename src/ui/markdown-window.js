@@ -142,6 +142,9 @@ class MarkdownTabView {
             initialMarkdown: '',
             resolveImageURL: source => this.resolveImageURL(source),
             openLink: href => this.openLink(href),
+            createMarkdownAnnotation: annotation => (
+                this.createMarkdownAnnotation(annotation)
+            ),
             changeAnnotationColor: (annotationID, color) => (
                 this.changeAnnotationColor(annotationID, color)
             ),
@@ -225,6 +228,24 @@ class MarkdownTabView {
     }
 
     async changeAnnotationColor(annotationID, color) {
+        const annotation = findOverlayAnnotation(
+            this.model.annotationOverlay,
+            annotationID
+        );
+        if (isMarkdownAnnotation(annotation)) {
+            if (typeof this.model.onUpdateMarkdownAnnotation !== 'function') {
+                throw new Error('Markdown annotation changes are unavailable');
+            }
+            const saved = await this.model.onUpdateMarkdownAnnotation(
+                annotationID,
+                annotationUpdate(annotation, { color })
+            );
+            this.replaceVisibleAnnotation(annotationID, saved || {
+                ...annotation,
+                color,
+            });
+            return;
+        }
         if (typeof this.model.onChangeAnnotationColor !== 'function') {
             throw new Error('PDF annotation color changes are unavailable');
         }
@@ -238,10 +259,39 @@ class MarkdownTabView {
     }
 
     async deleteAnnotation(annotationID) {
+        const annotation = findOverlayAnnotation(
+            this.model.annotationOverlay,
+            annotationID
+        );
+        if (isMarkdownAnnotation(annotation)) {
+            if (typeof this.model.onDeleteMarkdownAnnotation !== 'function') {
+                throw new Error('Markdown annotation deletion is unavailable');
+            }
+            await this.model.onDeleteMarkdownAnnotation(annotationID);
+            this.removeVisibleAnnotation(annotationID);
+            return;
+        }
         if (typeof this.model.onDeleteAnnotation !== 'function') {
             throw new Error('PDF annotation deletion is unavailable');
         }
         await this.model.onDeleteAnnotation(annotationID);
+        this.removeVisibleAnnotation(annotationID);
+    }
+
+    async createMarkdownAnnotation(annotation) {
+        if (typeof this.model.onCreateMarkdownAnnotation !== 'function') {
+            throw new Error('Markdown annotation creation is unavailable');
+        }
+        const saved = await this.model.onCreateMarkdownAnnotation(annotation);
+        this.model.annotationOverlay = appendMatchedAnnotation(
+            this.model.annotationOverlay,
+            saved
+        );
+        this.render(this.model);
+        return saved;
+    }
+
+    removeVisibleAnnotation(annotationID) {
         this.model.annotationOverlay = filterAnnotationOverlay(
             this.model.annotationOverlay,
             annotationID
@@ -250,6 +300,24 @@ class MarkdownTabView {
     }
 
     async updateAnnotationComment(annotationID, comment) {
+        const annotation = findOverlayAnnotation(
+            this.model.annotationOverlay,
+            annotationID
+        );
+        if (isMarkdownAnnotation(annotation)) {
+            if (typeof this.model.onUpdateMarkdownAnnotation !== 'function') {
+                throw new Error('Markdown annotation changes are unavailable');
+            }
+            const saved = await this.model.onUpdateMarkdownAnnotation(
+                annotationID,
+                annotationUpdate(annotation, { comment })
+            );
+            this.replaceVisibleAnnotation(annotationID, saved || {
+                ...annotation,
+                comment,
+            });
+            return;
+        }
         if (typeof this.model.onUpdateAnnotationComment !== 'function') {
             throw new Error('PDF annotation comment changes are unavailable');
         }
@@ -258,6 +326,15 @@ class MarkdownTabView {
             this.model.annotationOverlay,
             annotationID,
             annotation => ({ ...annotation, comment })
+        );
+        this.render(this.model);
+    }
+
+    replaceVisibleAnnotation(annotationID, annotation) {
+        this.model.annotationOverlay = mapAnnotationOverlay(
+            this.model.annotationOverlay,
+            annotationID,
+            () => annotation
         );
         this.render(this.model);
     }
@@ -944,6 +1021,35 @@ function mapAnnotationOverlay(annotationOverlay, annotationID, transform) {
                 : annotation
         ))
     ));
+}
+
+function appendMatchedAnnotation(annotationOverlay, annotation) {
+    const overlay = annotationOverlay || createEmptyAnnotationOverlay();
+    return {
+        ...overlay,
+        matched: [...(overlay.matched || []), annotation],
+        unmatched: [...(overlay.unmatched || [])],
+    };
+}
+
+function findOverlayAnnotation(annotationOverlay, annotationID) {
+    const targetID = String(annotationID || '');
+    return [
+        ...(annotationOverlay?.matched || []),
+        ...(annotationOverlay?.unmatched || []),
+    ].find(annotation => String(annotation?.id || '') === targetID) || null;
+}
+
+function isMarkdownAnnotation(annotation) {
+    return annotation?.source === 'markdown';
+}
+
+function annotationUpdate(annotation, changes) {
+    return {
+        ...changes,
+        text: annotation.text,
+        ranges: annotation.ranges,
+    };
 }
 
 function filterAnnotationOverlay(annotationOverlay, annotationID) {

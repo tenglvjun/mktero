@@ -53,6 +53,10 @@ export class RenderedTableWidget extends WidgetType {
             'cm-mktero-table',
             this.highlighted ? 'cm-mktero-table-target-highlight' : '',
         ].filter(Boolean).join(' ');
+        container.dataset.markdownFrom = String(this.annotationSourceFrom);
+        container.dataset.markdownTo = String(
+            this.annotationSourceFrom + this.annotationSource.length
+        );
         appendRenderedMarkdown(container, this.source, this.resolveImageURL);
         const table = container.querySelector('table');
         if (table && this.caption) {

@@ -291,6 +291,85 @@ test('updates the visible note after Zotero saves an annotation comment', async 
     view.destroy();
 });
 
+test('creates and edits persistent local Markdown annotations', async () => {
+    const updates = [];
+    const actions = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Important result.',
+        annotationOverlay: { matched: [], unmatched: [] },
+        async onCreateMarkdownAnnotation(annotation) {
+            actions.push({ action: 'create', annotation });
+            return {
+                ...annotation,
+                id: 'mktero-local-1',
+                source: 'markdown',
+                type: 'highlight',
+                matchKind: 'local',
+                sortIndex: '000000000000',
+            };
+        },
+        async onUpdateMarkdownAnnotation(annotationID, changes) {
+            actions.push({ action: 'update', annotationID, changes });
+            const current = model.annotationOverlay.matched.find(annotation => (
+                annotation.id === annotationID
+            ));
+            return { ...current, ...changes };
+        },
+        async onDeleteMarkdownAnnotation(annotationID) {
+            actions.push({ action: 'delete', annotationID });
+        },
+    });
+    const { view, shadow } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument(document) {
+                    updates.push(document);
+                },
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    await editorOptions.createMarkdownAnnotation({
+        text: 'Important',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 9 }],
+    });
+    await editorOptions.updateAnnotationComment(
+        'mktero-local-1',
+        'Local note'
+    );
+    await editorOptions.changeAnnotationColor(
+        'mktero-local-1',
+        '#ff6666'
+    );
+
+    assert.equal(model.annotationOverlay.matched[0].comment, 'Local note');
+    assert.equal(model.annotationOverlay.matched[0].color, '#ff6666');
+    assert.match(shadow.querySelector('.markdown-notes-list').textContent, /Local note/);
+    assert.deepEqual(actions.map(({ action }) => action), [
+        'create',
+        'update',
+        'update',
+    ]);
+    assert.equal(updates.at(-1).annotationOverlay.matched[0].source, 'markdown');
+
+    await editorOptions.deleteAnnotation('mktero-local-1');
+
+    assert.deepEqual(actions.at(-1), {
+        action: 'delete',
+        annotationID: 'mktero-local-1',
+    });
+    assert.deepEqual(model.annotationOverlay.matched, []);
+    view.destroy();
+});
+
 test('removes the visible annotation after Zotero deletes it', async () => {
     const deleted = [];
     let editorOptions;
@@ -331,7 +410,7 @@ test('removes the visible annotation after Zotero deletes it', async () => {
     assert.deepEqual(model.annotationOverlay, { matched: [], unmatched: [] });
     assert.match(
         shadow.querySelector('.markdown-notes-list').textContent,
-        /No PDF notes/
+        /No notes/
     );
     view.destroy();
 });
@@ -452,7 +531,7 @@ test('resizes and toggles PDF notes from the right edge', () => {
             'chevron-right'
         );
         assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-        assert.equal(toggle.getAttribute('aria-label'), 'Collapse PDF notes');
+        assert.equal(toggle.getAttribute('aria-label'), 'Collapse notes');
         assert.equal(notes.hidden, false);
 
         dispatchMouseEvent(resizer, 'mousedown', 1000);
@@ -482,8 +561,8 @@ test('resizes and toggles PDF notes from the right edge', () => {
             'chevron-left'
         );
         assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-        assert.equal(toggle.getAttribute('aria-label'), 'Expand PDF notes');
-        assert.equal(resizer.getAttribute('aria-label'), 'Expand PDF notes');
+        assert.equal(toggle.getAttribute('aria-label'), 'Expand notes');
+        assert.equal(resizer.getAttribute('aria-label'), 'Expand notes');
 
         toggle.click();
         assert.equal(notes.hidden, false);
@@ -548,10 +627,10 @@ test('shows PDF notes safely and jumps matched notes to Markdown', () => {
     const buttons = [...notes.querySelectorAll('.markdown-note-link')];
 
     try {
-        assert.equal(notes.getAttribute('aria-label'), 'PDF notes');
+        assert.equal(notes.getAttribute('aria-label'), 'Notes');
         assert.equal(
             notes.querySelector('.markdown-notes-title').textContent,
-            'PDF Notes'
+            'Notes'
         );
         assert.equal(buttons.length, 2);
         assert.equal(buttons[0].hasAttribute('disabled'), true);
@@ -674,7 +753,7 @@ test('shows an empty outline state when Markdown has no headings', () => {
     assert.equal(shadow.querySelectorAll('.markdown-outline-link').length, 0);
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, 'No headings');
     assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 0);
-    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, 'No PDF notes');
+    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, 'No notes');
     view.destroy();
 });
 
@@ -793,8 +872,8 @@ test('localizes the Markdown viewer chrome from the Zotero locale', () => {
     );
     assert.equal(shadow.querySelector('.markdown-outline-title').textContent, '目录');
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
-    assert.equal(shadow.querySelector('.markdown-notes-title').textContent, 'PDF 笔记');
-    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, '暂无 PDF 笔记');
+    assert.equal(shadow.querySelector('.markdown-notes-title').textContent, '笔记');
+    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, '暂无笔记');
 
     view.destroy();
 });

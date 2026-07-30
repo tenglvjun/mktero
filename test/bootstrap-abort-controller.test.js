@@ -70,6 +70,7 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
     globalThis.IOUtils = {
         exists: async () => false,
         read: async () => new Uint8Array([1]),
+        stat: async () => ({ size: 0 }),
     };
     globalThis.PathUtils = {
         join: path.join,

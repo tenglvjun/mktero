@@ -42,6 +42,10 @@ const WARNING_MESSAGE_KEYS = new Map([
         'Zotero PDF annotations could not be loaded.',
         'warning.annotationsUnavailable',
     ],
+    [
+        'Local Markdown annotations could not be loaded.',
+        'warning.localAnnotationsUnavailable',
+    ],
 ]);
 
 export function removeProviderBranding(message) {

@@ -3,6 +3,7 @@ import {
     ChevronRight,
     FileText,
     LoaderCircle,
+    MessageSquarePlus,
     MessageSquareText,
     Trash2,
     X,
@@ -43,6 +44,10 @@ export const LUCIDE_ICONS = Object.freeze({
     messageSquareText: Object.freeze({
         name: 'message-square-text',
         nodes: MessageSquareText,
+    }),
+    messageSquarePlus: Object.freeze({
+        name: 'message-square-plus',
+        nodes: MessageSquarePlus,
     }),
     trash2: Object.freeze({
         name: 'trash-2',

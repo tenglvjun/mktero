@@ -34,8 +34,12 @@ import {
     createAnnotationNoteMarker,
     installRenderedAnnotations,
 } from './pdf-annotations.js';
+import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
+import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
+import { findTextOccurrences } from '../markdown/text-normalization.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const MAX_MATCH_CANDIDATES = 10_000;
 
 export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
@@ -91,6 +95,8 @@ class RenderedMarkdownWidget extends WidgetType {
             `cm-mktero-${this.display}`,
             this.extraClassName,
         ].filter(Boolean).join(' ');
+        container.dataset.markdownFrom = String(this.from);
+        container.dataset.markdownTo = String(this.from + this.source.length);
         appendRenderedMarkdown(
             container,
             this.source,
@@ -332,6 +338,9 @@ export function createInlineRenderingExtension({
             },
             mousedown(event, view) {
                 const interaction = referenceInteraction(event, view, context);
+                if (!interaction && event.button === 0) {
+                    context.annotationPopup?.close();
+                }
                 if (event.button === 0
                     && interaction
                     && !interaction.allowTextSelection) {
@@ -898,6 +907,165 @@ function hasSelectedInteractionText(view, element) {
     if (!selection || selection.isCollapsed) return false;
     return element.contains(selection.anchorNode)
         || element.contains(selection.focusNode);
+}
+
+export function selectedMarkdownAnnotation(view) {
+    const selection = view.dom.ownerDocument.getSelection?.();
+    if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
+        return null;
+    }
+    const range = selection.getRangeAt(0);
+    if (!selectionNodeInEditor(view, range.startContainer)
+        || !selectionNodeInEditor(view, range.endContainer)) {
+        return null;
+    }
+    const text = selection.toString();
+    if (!text.trim() || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) {
+        return null;
+    }
+    const renderedStart = renderedSelectionContainer(
+        range.startContainer,
+        view
+    );
+    const renderedEnd = renderedSelectionContainer(range.endContainer, view);
+    if (renderedStart || renderedEnd) {
+        return renderedStart && renderedStart === renderedEnd
+            ? selectedRenderedMarkdownAnnotation(view, range, text)
+            : null;
+    }
+    if (selectionIntersectsRenderedContent(view, range)) return null;
+    try {
+        const first = view.posAtDOM(range.startContainer, range.startOffset);
+        const second = view.posAtDOM(range.endContainer, range.endOffset);
+        const from = Math.min(first, second);
+        const to = Math.max(first, second);
+        if (to <= from) return null;
+        return { text, ranges: [{ from, to }] };
+    }
+    catch {
+        return null;
+    }
+}
+
+function selectedRenderedMarkdownAnnotation(view, range, selectedText) {
+    const start = renderedSelectionContainer(range.startContainer, view);
+    const end = renderedSelectionContainer(range.endContainer, view);
+    if (!start || start !== end) return null;
+    const sourceFrom = Number(start.dataset.markdownFrom);
+    const sourceTo = Number(start.dataset.markdownTo);
+    if (!Number.isInteger(sourceFrom)
+        || !Number.isInteger(sourceTo)
+        || sourceFrom < 0
+        || sourceTo <= sourceFrom
+        || sourceTo > view.state.doc.length) {
+        return null;
+    }
+    const text = selectedText.trim();
+    if (!text) return null;
+    const source = view.state.sliceDoc(sourceFrom, sourceTo);
+    const renderedOffset = renderedSelectionTextOffset(
+        start,
+        range,
+        selectedText
+    );
+    if (renderedOffset === null) return null;
+    const renderedCandidates = findTextOccurrences(
+        start.textContent || '',
+        text,
+        MAX_MATCH_CANDIDATES
+    );
+    if (renderedCandidates.truncated) return null;
+    const ordinal = renderedCandidates.offsets.indexOf(renderedOffset);
+    if (ordinal < 0) return null;
+    const visible = createVisibleMarkdownTextIndex(source);
+    const candidates = findTextOccurrences(
+        visible.text,
+        text,
+        MAX_MATCH_CANDIDATES
+    );
+    if (candidates.truncated || ordinal >= candidates.offsets.length) {
+        return null;
+    }
+    const selectedRange = visible.sourceRange(
+        candidates.offsets[ordinal],
+        text.length
+    );
+    return {
+        text,
+        ranges: [{
+            from: sourceFrom + selectedRange.from,
+            to: sourceFrom + selectedRange.to,
+        }],
+    };
+}
+
+function renderedSelectionTextOffset(container, range, selectedText) {
+    const document = container.ownerDocument;
+    const prefix = document.createRange();
+    try {
+        prefix.selectNodeContents(container);
+        prefix.setEnd(range.startContainer, range.startOffset);
+    }
+    catch {
+        return null;
+    }
+    const leadingWhitespace = selectedText.length
+        - selectedText.trimStart().length;
+    return prefix.toString().length + leadingWhitespace;
+}
+
+function selectionIntersectsRenderedContent(view, range) {
+    if (typeof range.intersectsNode !== 'function') return true;
+    for (const container of view.dom.querySelectorAll(
+        '.cm-mktero-rendered[data-markdown-from][data-markdown-to]'
+    )) {
+        try {
+            if (range.intersectsNode(container)) return true;
+        }
+        catch {
+            return true;
+        }
+    }
+    return false;
+}
+
+function renderedSelectionContainer(node, view) {
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    const container = element?.closest?.(
+        '.cm-mktero-rendered[data-markdown-from][data-markdown-to]'
+    );
+    return container && view.dom.contains(container) ? container : null;
+}
+
+function selectionNodeInEditor(view, node) {
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    return Boolean(element && view.dom.contains(element));
+}
+
+export function selectionAnchor(selection, fallback) {
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const rect = lastSelectionRect(range)
+        || fallback?.getBoundingClientRect?.()
+        || emptyRect();
+    const snapshot = {
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+    };
+    return { getBoundingClientRect: () => snapshot };
+}
+
+function lastSelectionRect(range) {
+    const rectangles = range?.getClientRects?.();
+    if (rectangles?.length) return rectangles[rectangles.length - 1];
+    return range?.getBoundingClientRect?.() || null;
+}
+
+function emptyRect() {
+    return { top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0 };
 }
 
 function referencePopups(context) {

@@ -920,7 +920,8 @@ main {
 }
 
 .mktero-annotation-color-button,
-.mktero-annotation-delete-button {
+.mktero-annotation-delete-button,
+.mktero-annotation-note-button {
     display: inline-flex;
     width: 25px;
     height: 25px;
@@ -946,7 +947,8 @@ main {
 }
 
 .mktero-annotation-color-button:hover,
-.mktero-annotation-delete-button:hover {
+.mktero-annotation-delete-button:hover,
+.mktero-annotation-note-button:hover {
     border-color: color-mix(in srgb, var(--text) 18%, transparent);
     background: color-mix(in srgb, var(--text) 7%, transparent);
 }
@@ -957,13 +959,15 @@ main {
 }
 
 .mktero-annotation-color-button:focus-visible,
-.mktero-annotation-delete-button:focus-visible {
+.mktero-annotation-delete-button:focus-visible,
+.mktero-annotation-note-button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
 
 .mktero-annotation-color-button:disabled,
-.mktero-annotation-delete-button:disabled {
+.mktero-annotation-delete-button:disabled,
+.mktero-annotation-note-button:disabled {
     cursor: progress;
     opacity: 0.5;
 }
@@ -990,6 +994,32 @@ main {
 }
 
 .mktero-annotation-delete-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.mktero-annotation-note-button {
+    position: relative;
+    margin-left: 2px;
+    border-radius: 6px;
+}
+
+.mktero-annotation-note-button::before {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: -5px;
+    width: 1px;
+    background: color-mix(in srgb, var(--text) 16%, transparent);
+    content: "";
+    pointer-events: none;
+}
+
+.mktero-annotation-note-button:hover {
+    color: var(--accent);
+}
+
+.mktero-annotation-note-action-icon {
     width: 16px;
     height: 16px;
 }

@@ -22,8 +22,8 @@ export function createAnchoredPopup(parent, {
     const close = () => {
         cancelClose();
         if (anchor && popup
-            && anchor.getAttribute('aria-describedby') === popup.id) {
-            anchor.removeAttribute('aria-describedby');
+            && anchor.getAttribute?.('aria-describedby') === popup.id) {
+            anchor.removeAttribute?.('aria-describedby');
         }
         popup?.remove();
         popup = null;
@@ -88,7 +88,7 @@ export function createAnchoredPopup(parent, {
             event.stopPropagation();
             close();
             ignoredOpenAnchor = returnFocus;
-            returnFocus?.focus();
+            returnFocus?.focus?.();
             ownerWindow.setTimeout(() => {
                 if (ignoredOpenAnchor === returnFocus) {
                     ignoredOpenAnchor = null;
@@ -96,7 +96,7 @@ export function createAnchoredPopup(parent, {
             }, 0);
         });
         parent.appendChild(popup);
-        anchor.setAttribute('aria-describedby', popup.id);
+        anchor.setAttribute?.('aria-describedby', popup.id);
         reposition();
         focusContent?.(popup);
     };

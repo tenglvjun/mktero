@@ -361,7 +361,8 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
 
     const colorButton = ruleBody([
         '.mktero-annotation-color-button,',
-        '.mktero-annotation-delete-button',
+        '.mktero-annotation-delete-button,',
+        '.mktero-annotation-note-button',
     ].join('\n'));
     assert.match(colorButton, /width:\s*25px/);
     assert.match(colorButton, /height:\s*25px/);
@@ -389,6 +390,16 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
     assert.match(deleteSeparator, /top:\s*3px/);
     assert.match(deleteSeparator, /bottom:\s*3px/);
     assert.match(deleteSeparator, /background:\s*color-mix/);
+
+    const noteAction = ruleBody('\n\n.mktero-annotation-note-button');
+    assert.match(noteAction, /position:\s*relative/);
+    assert.match(noteAction, /border-radius:\s*6px/);
+    const noteSeparator = ruleBody(
+        '.mktero-annotation-note-button::before'
+    );
+    assert.match(noteSeparator, /width:\s*1px/);
+    assert.match(noteSeparator, /top:\s*3px/);
+    assert.match(noteSeparator, /bottom:\s*3px/);
 });
 
 test('styles table references, previews, and target highlights', () => {
