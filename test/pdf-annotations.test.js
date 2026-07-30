@@ -17,6 +17,7 @@ const translate = (key, variables = {}) => {
     if (key === 'annotation.edit') return `Edit ${variables.text}`;
     if (key === 'annotation.actionFailed') return 'Update failed';
     if (key === 'annotation.noteSaveFailed') return 'Note save failed';
+    if (key === 'annotation.pdfTextAmbiguous') return 'PDF text is ambiguous';
     return key;
 };
 
@@ -371,6 +372,51 @@ test('shows a safe localized error when an annotation action fails', async () =>
     assert.equal(error.hidden, false);
     assert.equal(error.textContent, 'Update failed');
     assert.doesNotMatch(parent.textContent, /private database details/);
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('explains when selected Markdown text is ambiguous in the PDF', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>'
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        async createMarkdownAnnotation() {
+            const error = new Error('private PDF details');
+            error.code = 'MKTERO_PDF_TEXT_AMBIGUOUS';
+            throw error;
+        },
+    });
+    popup.openSelection({
+        anchor: document.querySelector('#anchor'),
+        selection: {
+            text: 'repeated text',
+            ranges: [{ from: 0, to: 13 }],
+        },
+    });
+    const error = parent.querySelector('.mktero-annotation-action-error');
+    const errorShown = new Promise(resolve => {
+        const observer = new dom.window.MutationObserver(() => {
+            if (error.hidden || !error.textContent) return;
+            observer.disconnect();
+            resolve();
+        });
+        observer.observe(error, {
+            attributes: true,
+            childList: true,
+            subtree: true,
+        });
+    });
+
+    parent.querySelector('[data-color="#ffd400"]').click();
+    await errorShown;
+
+    assert.equal(error.textContent, 'PDF text is ambiguous');
+    assert.doesNotMatch(parent.textContent, /private PDF details/);
 
     popup.destroy();
     dom.window.close();

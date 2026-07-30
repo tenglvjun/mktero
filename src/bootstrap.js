@@ -30,6 +30,9 @@ import {
     createZoteroAnnotationActions,
 } from './platform/zotero-annotation-actions.js';
 import {
+    registerZoteroAnnotationObserver,
+} from './platform/zotero-annotation-observer.js';
+import {
     createLocalization,
     translateEnglish,
 } from './i18n/localization.js';
@@ -40,6 +43,9 @@ import {
 import { registerItemContextMenu } from './ui/item-context-menu.js';
 import { registerReaderToolbar } from './ui/reader-toolbar.js';
 import { MarkdownTabPresenter } from './ui/markdown-tab-presenter.js';
+import {
+    createAnnotationOverlayRefresher,
+} from './ui/annotation-overlay-refresher.js';
 import {
     createConversionFailureChanges,
     createConversionLoadingChanges,
@@ -56,6 +62,8 @@ const runtime = {
     preferencePaneID: null,
     localization: null,
     annotationActions: null,
+    disposeAnnotationObserver: null,
+    annotationOverlayRefresher: null,
     localAnnotations: null,
     disposeToolbar: null,
     contextMenus: new Map(),
@@ -100,6 +108,9 @@ globalThis.startup = async function startup({ id, rootURI }) {
             ioUtils: IOUtils,
             pathUtils: PathUtils,
         }),
+        createPDFAnnotation: (itemID, draft) => (
+            runtime.annotationActions.createFromText(itemID, draft)
+        ),
         onError: error => Zotero.logError?.(error),
     });
     runtime.localAnnotations = localAnnotations;
@@ -118,6 +129,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
         annotationOverlay,
         localAnnotations,
     });
+    runtime.annotationOverlayRefresher = createAnnotationOverlayRefresher({
+        presenter,
+        service: runtime.service,
+    });
+    runtime.disposeAnnotationObserver = registerZoteroAnnotationObserver(
+        Zotero,
+        {
+            onChange: itemIDs => (
+                runtime.annotationOverlayRefresher?.refresh(itemIDs)
+            ),
+            onError: error => Zotero.logError?.(error),
+        }
+    );
     cache.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
     const preferencePaneID = await registerMinerUPreferencesPane({
@@ -139,6 +163,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
 
 globalThis.shutdown = function shutdown() {
     abortAllConversions();
+    runtime.disposeAnnotationObserver?.();
+    runtime.annotationOverlayRefresher?.dispose();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();
     runtime.presenter?.dispose();
@@ -152,6 +178,8 @@ globalThis.shutdown = function shutdown() {
     runtime.rootURI = null;
     runtime.localization = null;
     runtime.annotationActions = null;
+    runtime.disposeAnnotationObserver = null;
+    runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
     runtime.preferencePaneID = null;
     runtime.id = null;

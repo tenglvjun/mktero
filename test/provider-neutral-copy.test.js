@@ -50,6 +50,7 @@ test('localizes fallback titles and conversion warnings', () => {
             'The local Markdown cache is unavailable.',
             'Zotero PDF annotations could not be loaded.',
             'Local Markdown annotations could not be loaded.',
+            'Some local Markdown annotations could not be synchronized to the PDF.',
             'Unknown non-fatal warning.',
         ],
     }, localization.t.bind(localization));
@@ -59,6 +60,7 @@ test('localizes fallback titles and conversion warnings', () => {
         '本地 Markdown 缓存不可用。',
         '无法读取 Zotero PDF 标注。',
         '无法读取本地 Markdown 标注。',
+        '部分本地 Markdown 标注无法同步到 PDF。',
         '转换过程中发生了一个不影响阅读的问题。',
     ]);
 });

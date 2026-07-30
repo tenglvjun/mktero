@@ -46,6 +46,10 @@ const WARNING_MESSAGE_KEYS = new Map([
         'Local Markdown annotations could not be loaded.',
         'warning.localAnnotationsUnavailable',
     ],
+    [
+        'Some local Markdown annotations could not be synchronized to the PDF.',
+        'warning.localAnnotationsSyncFailed',
+    ],
 ]);
 
 export function removeProviderBranding(message) {

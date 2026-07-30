@@ -14,6 +14,12 @@ import {
 } from './pdf-annotations.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const ANNOTATION_ERROR_KEYS = new Map([
+    ['MKTERO_PDF_TEXT_NOT_FOUND', 'annotation.pdfTextNotFound'],
+    ['MKTERO_PDF_TEXT_AMBIGUOUS', 'annotation.pdfTextAmbiguous'],
+    ['MKTERO_PDF_READER_UNAVAILABLE', 'annotation.pdfReaderUnavailable'],
+    ['MKTERO_PDF_TEXT_SEARCH_TIMEOUT', 'annotation.pdfTextSearchTimeout'],
+]);
 
 export function createAnnotationPopup(parent, {
     localization = createLocalization(),
@@ -209,8 +215,12 @@ function createAnnotationNoteEditor(
             await saveComment(input.value);
             close?.();
         }
-        catch {
-            error.textContent = translate('annotation.noteSaveFailed');
+        catch (cause) {
+            error.textContent = annotationErrorMessage(
+                cause,
+                translate,
+                'annotation.noteSaveFailed'
+            );
             error.hidden = false;
             reposition?.();
         }
@@ -254,8 +264,12 @@ function createMarkdownSelectionActions(
             await action();
             close?.();
         }
-        catch {
-            error.textContent = translate('annotation.actionFailed');
+        catch (cause) {
+            error.textContent = annotationErrorMessage(
+                cause,
+                translate,
+                'annotation.actionFailed'
+            );
             error.hidden = false;
             reposition?.();
         }
@@ -337,8 +351,12 @@ function createAnnotationActions(
             await action();
             close?.();
         }
-        catch {
-            error.textContent = translate('annotation.actionFailed');
+        catch (cause) {
+            error.textContent = annotationErrorMessage(
+                cause,
+                translate,
+                'annotation.actionFailed'
+            );
             error.hidden = false;
             reposition?.();
         }
@@ -386,4 +404,8 @@ function createAnnotationActions(
     content.appendChild(deleteButton);
     content.appendChild(error);
     return content;
+}
+
+function annotationErrorMessage(error, translate, fallbackKey) {
+    return translate(ANNOTATION_ERROR_KEYS.get(error?.code) || fallbackKey);
 }

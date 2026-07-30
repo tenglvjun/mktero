@@ -67,7 +67,20 @@ export class MarkdownDocumentService {
             result.assets = extracted.assets;
             result.assetBasePath = extracted.assetBasePath || '';
         }
+        const annotationResult = await this.resolveAnnotations(itemID, markdown);
+        result.warnings = [
+            ...result.warnings,
+            ...annotationResult.warnings,
+        ];
+        if (annotationResult.annotationOverlay) {
+            result.annotationOverlay = annotationResult.annotationOverlay;
+        }
+        return result;
+    }
+
+    async resolveAnnotations(itemID, markdown) {
         const overlays = [];
+        const warnings = [];
         if (this.annotationOverlay) {
             const annotationResult = await this.annotationOverlay.resolve(
                 itemID,
@@ -75,7 +88,7 @@ export class MarkdownDocumentService {
             );
             const { warning, ...annotationOverlay } = annotationResult;
             overlays.push(annotationOverlay);
-            if (warning) result.warnings = [...result.warnings, warning];
+            if (warning) warnings.push(warning);
         }
         if (this.localAnnotations) {
             const localResult = await this.localAnnotations.resolve(
@@ -84,12 +97,14 @@ export class MarkdownDocumentService {
             );
             const { warning, ...localOverlay } = localResult;
             overlays.push(localOverlay);
-            if (warning) result.warnings = [...result.warnings, warning];
+            if (warning) warnings.push(warning);
         }
-        if (overlays.length) {
-            result.annotationOverlay = mergeAnnotationOverlays(...overlays);
-        }
-        return result;
+        return {
+            annotationOverlay: overlays.length
+                ? mergeAnnotationOverlays(...overlays)
+                : null,
+            warnings,
+        };
     }
 }
 

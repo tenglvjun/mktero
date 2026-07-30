@@ -157,6 +157,14 @@ export class MarkdownTabPresenter {
         current.view.render(current.model);
     }
 
+    get(itemID) {
+        return this.presentations.get(itemID) || null;
+    }
+
+    list() {
+        return [...this.presentations.values()];
+    }
+
     closeAll() {
         for (const presentation of [...this.presentations.values()]) {
             if (!presentation.closed) presentation.tabs.close?.(presentation.tabID);

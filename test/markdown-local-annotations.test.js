@@ -43,6 +43,166 @@ test('creates, updates, and deletes a persistent Markdown annotation', async () 
     assert.deepEqual(await store.get(42), []);
 });
 
+test('creates a Zotero PDF annotation for a Markdown highlight', async () => {
+    const createdPDFAnnotations = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store: createMemoryStore(),
+        createPDFAnnotation: async (itemID, annotation) => {
+            createdPDFAnnotations.push({ itemID, annotation });
+            return {
+                ...annotation,
+                id: 'ZOTERO001',
+                source: 'zotero',
+                pageLabel: '1',
+            };
+        },
+    });
+    const draft = {
+        text: 'The sound of stress recovery',
+        comment: 'Paper title',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 28 }],
+    };
+
+    const created = await annotations.create(42, draft);
+
+    assert.equal(created.id, 'ZOTERO001');
+    assert.equal(created.source, 'zotero');
+    assert.deepEqual(createdPDFAnnotations, [{
+        itemID: 42,
+        annotation: draft,
+    }]);
+});
+
+test('migrates an existing local Markdown highlight into Zotero PDF', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'The sound of stress recovery',
+        comment: 'Paper title',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 32 }],
+    };
+    const store = createMemoryStore([local]);
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation(itemID, draft) {
+            synchronized.push({ itemID, draft });
+            return {
+                id: 'ZOTERO001',
+                source: 'zotero',
+                type: 'highlight',
+                text: draft.text,
+                comment: draft.comment,
+                color: draft.color,
+                pageLabel: '1',
+                pageIndex: 0,
+                sortIndex: '00000|000001|00000',
+            };
+        },
+    });
+
+    const result = await annotations.resolve(
+        42,
+        'The The sound of stress recovery continues.'
+    );
+
+    assert.deepEqual(await store.get(42), []);
+    assert.equal(result.matched[0].id, 'ZOTERO001');
+    assert.equal(result.matched[0].source, 'zotero');
+    assert.deepEqual(result.matched[0].ranges, [{ from: 4, to: 32 }]);
+    assert.deepEqual(synchronized, [{
+        itemID: 42,
+        draft: {
+            text: local.text,
+            comment: local.comment,
+            color: local.color,
+            ranges: local.ranges,
+        },
+    }]);
+});
+
+test('keeps a local highlight when PDF synchronization fails', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'The sound of stress recovery',
+        comment: 'Paper title',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 32 }],
+    };
+    const store = createMemoryStore([local]);
+    const errors = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            throw new Error('PDF text not found');
+        },
+        onError: error => errors.push(error.message),
+    });
+
+    const result = await annotations.resolve(
+        42,
+        'The The sound of stress recovery continues.'
+    );
+
+    assert.deepEqual(await store.get(42), [local]);
+    assert.equal(result.matched[0].id, local.id);
+    assert.equal(
+        result.warning,
+        'Some local Markdown annotations could not be synchronized to the PDF.'
+    );
+    assert.deepEqual(errors, ['PDF text not found']);
+});
+
+test('serializes concurrent migration of the same local highlight', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'The sound of stress recovery',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 32 }],
+    };
+    const store = createMemoryStore([local]);
+    let createCalls = 0;
+    let releaseCreation;
+    const creationAllowed = new Promise(resolve => {
+        releaseCreation = resolve;
+    });
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            createCalls++;
+            await creationAllowed;
+            return {
+                ...local,
+                id: 'ZOTERO001',
+                source: 'zotero',
+            };
+        },
+    });
+    const markdown = 'The The sound of stress recovery continues.';
+
+    const first = annotations.resolve(42, markdown);
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = annotations.resolve(42, markdown);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(createCalls, 1);
+    releaseCreation();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    assert.equal(firstResult.matched[0].id, 'ZOTERO001');
+    assert.deepEqual(secondResult.matched, []);
+    assert.deepEqual(await store.get(42), []);
+});
+
 test('restores saved ranges and relocates a uniquely moved Markdown quote', async () => {
     const store = createMemoryStore([{
         id: 'mktero-local-1',
