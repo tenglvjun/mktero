@@ -11,6 +11,14 @@ const LONG_STRESS_RECOVERY_PASSAGE = 'Previous research support for the notion '
     + 'that music listening is beneficial for stress recovery is inconclusive, '
     + 'given the methodological diversity with which the effects of music on '
     + 'stress recovery have been investigated.';
+const HYPHENATED_MARKDOWN_PASSAGE = 'Empirical support for the notion that '
+    + 'music listening is beneficial for stress recovery is inconclusive, '
+    + 'potentially due to the methodological diversity with which the effects '
+    + 'of music on stress recovery have been investigated.';
+const HYPHENATED_PDF_PASSAGE = HYPHENATED_MARKDOWN_PASSAGE.replace(
+    'investigated',
+    'inves- tigated'
+);
 
 test('creates a Zotero PDF highlight from located Markdown text', async () => {
     const selectedText = 'The sound of stress recovery: an exploratory study '
@@ -342,6 +350,153 @@ test('rejects a later-page duplicate during the long-match settle window', async
         }),
         error => error.code === 'MKTERO_PDF_TEXT_AMBIGUOUS'
     );
+});
+
+test('locates Markdown text split by a PDF line-end hyphen', async () => {
+    const queries = [];
+    let savedJSON;
+    const view = {
+        _findState: { active: false, query: '', result: null },
+        initializedPromise: Promise.resolve(),
+        setFindState(state) {
+            if (!state.active) {
+                this._findState = state;
+                return;
+            }
+            queries.push(state.query);
+            markSearchComplete(this, state.query);
+            this._findController._pageContents = [HYPHENATED_PDF_PASSAGE];
+            this._findState = {
+                ...state,
+                result: state.query === HYPHENATED_PDF_PASSAGE
+                    ? {
+                        total: 1,
+                        annotation: locatedAnnotation(
+                            HYPHENATED_PDF_PASSAGE
+                        ),
+                    }
+                    : { total: 0 },
+            };
+        },
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            savedJSON = json;
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero);
+
+    const created = await actions.createFromText(42, {
+        text: HYPHENATED_MARKDOWN_PASSAGE,
+        comment: '',
+        color: '#a28ae5',
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+    assert.deepEqual(queries, [
+        HYPHENATED_MARKDOWN_PASSAGE,
+        HYPHENATED_PDF_PASSAGE,
+    ]);
+    assert.equal(savedJSON.text, HYPHENATED_MARKDOWN_PASSAGE);
+    assert.deepEqual(savedJSON.position, {
+        pageIndex: 0,
+        rects: [[72, 700, 280, 720]],
+    });
+});
+
+test('prefers an exact PDF text match over line-end hyphen recovery', async () => {
+    const queries = [];
+    const view = createSearchView({
+        total: 1,
+        annotation: locatedAnnotation(HYPHENATED_MARKDOWN_PASSAGE),
+    });
+    const originalSetFindState = view.setFindState;
+    view.setFindState = function setFindState(state) {
+        if (state.active) queries.push(state.query);
+        originalSetFindState.call(this, state);
+        this._findController._pageContents = [HYPHENATED_PDF_PASSAGE];
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await actions.createFromText(42, {
+        text: HYPHENATED_MARKDOWN_PASSAGE,
+        comment: '',
+        color: '#a28ae5',
+    });
+
+    assert.deepEqual(queries, [HYPHENATED_MARKDOWN_PASSAGE]);
+});
+
+test('rejects ambiguous line-end hyphen matches across PDF pages', async () => {
+    const queries = [];
+    const view = createSearchView({ total: 0 });
+    const originalSetFindState = view.setFindState;
+    view.setFindState = function setFindState(state) {
+        if (state.active) queries.push(state.query);
+        originalSetFindState.call(this, state);
+        this._findController._pageContents = [
+            HYPHENATED_PDF_PASSAGE,
+            HYPHENATED_PDF_PASSAGE,
+        ];
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON() {
+            assert.fail('The annotation must not be saved');
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text: HYPHENATED_MARKDOWN_PASSAGE,
+            comment: '',
+            color: '#a28ae5',
+        }),
+        error => error.code === 'MKTERO_PDF_TEXT_AMBIGUOUS'
+    );
+    assert.deepEqual(queries, [HYPHENATED_MARKDOWN_PASSAGE]);
+});
+
+test('fails safely for malformed or oversized PDF page text', async () => {
+    for (const pageContents of [
+        [42],
+        ['x'.repeat(1_000_001)],
+    ]) {
+        const queries = [];
+        const view = createSearchView({ total: 0 });
+        const originalSetFindState = view.setFindState;
+        view.setFindState = function setFindState(state) {
+            if (state.active) queries.push(state.query);
+            originalSetFindState.call(this, state);
+            this._findController._pageContents = pageContents;
+        };
+        const zotero = createZoteroForAnnotationCreation({
+            view,
+            async saveFromJSON() {
+                assert.fail('The annotation must not be saved');
+            },
+        });
+        const actions = createZoteroAnnotationActions(zotero);
+
+        await assert.rejects(
+            actions.createFromText(42, {
+                text: HYPHENATED_MARKDOWN_PASSAGE,
+                comment: '',
+                color: '#a28ae5',
+            }),
+            error => error.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+        );
+        assert.deepEqual(queries, [HYPHENATED_MARKDOWN_PASSAGE]);
+    }
 });
 
 test('times out when Zotero does not finish locating the PDF text', async () => {

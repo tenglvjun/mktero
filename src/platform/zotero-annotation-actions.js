@@ -2,11 +2,19 @@ import {
     isZoteroAnnotationColor,
     MAX_PDF_ANNOTATION_TEXT_LENGTH,
 } from '../core/pdf-annotation.js';
+import {
+    createDehyphenatedPdfAnnotationTextIndex,
+    normalizePdfAnnotationText,
+} from '../markdown/pdf-annotation-text.js';
+import { findTextOccurrences } from '../markdown/text-normalization.js';
 
 // Long passages can be accepted after a stable single match without making
 // the user wait for every remaining PDF page to finish text extraction.
 const FAST_UNIQUE_MATCH_LENGTH = 160;
 const FAST_UNIQUE_SETTLE_TIME = 500;
+const MAX_PDF_FALLBACK_PAGES = 10_000;
+const MAX_PDF_FALLBACK_PAGE_TEXT_LENGTH = 1_000_000;
+const MAX_PDF_FALLBACK_TOTAL_TEXT_LENGTH = 10_000_000;
 
 export function createZoteroAnnotationActions(zotero, {
     locateText = null,
@@ -292,16 +300,49 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
             index: null,
             result: null,
         });
-        const result = await waitForPDFTextResult(
+        let result = await waitForPDFTextResult(
             view,
             text,
             { delay, now, timeout }
         );
+        let usedNormalizedQuery = false;
         if (!result) {
             throw annotationSyncError(
                 'MKTERO_PDF_TEXT_SEARCH_TIMEOUT',
                 'Timed out while locating text in the PDF'
             );
+        }
+        if (!result.total) {
+            const fallback = findNormalizedPDFSearchQuery(view, text);
+            if (fallback.ambiguous) {
+                throw annotationSyncError(
+                    'MKTERO_PDF_TEXT_AMBIGUOUS',
+                    'Selected Markdown text occurs more than once in the PDF'
+                );
+            }
+            if (fallback.query) {
+                usedNormalizedQuery = true;
+                await view.setFindState({
+                    active: true,
+                    query: fallback.query,
+                    highlightAll: false,
+                    caseSensitive: false,
+                    entireWord: false,
+                    index: null,
+                    result: null,
+                });
+                result = await waitForPDFTextResult(
+                    view,
+                    fallback.query,
+                    { delay, now, timeout }
+                );
+                if (!result) {
+                    throw annotationSyncError(
+                        'MKTERO_PDF_TEXT_SEARCH_TIMEOUT',
+                        'Timed out while locating text in the PDF'
+                    );
+                }
+            }
         }
         if (!result.total) {
             throw annotationSyncError(
@@ -315,7 +356,9 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
                 'Selected Markdown text occurs more than once in the PDF'
             );
         }
-        return result.annotation;
+        return usedNormalizedQuery
+            ? { ...result.annotation, text }
+            : result.annotation;
     }
     catch (error) {
         searchError = error;
@@ -334,6 +377,45 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
             }
         }
     }
+}
+
+function findNormalizedPDFSearchQuery(view, text) {
+    const pages = view?._findController?._pageContents;
+    if (!Array.isArray(pages) || pages.length > MAX_PDF_FALLBACK_PAGES) {
+        return { query: null, ambiguous: false };
+    }
+    const target = normalizePdfAnnotationText(text);
+    if (!target) return { query: null, ambiguous: false };
+    let totalTextLength = 0;
+    let query = null;
+    let matchCount = 0;
+    for (const page of pages) {
+        if (page == null) continue;
+        if (typeof page !== 'string'
+            || page.length > MAX_PDF_FALLBACK_PAGE_TEXT_LENGTH) {
+            return { query: null, ambiguous: false };
+        }
+        totalTextLength += page.length;
+        if (totalTextLength > MAX_PDF_FALLBACK_TOTAL_TEXT_LENGTH) {
+            return { query: null, ambiguous: false };
+        }
+        const index = createDehyphenatedPdfAnnotationTextIndex(page);
+        const occurrences = findTextOccurrences(index.text, target, 2);
+        if (occurrences.truncated || occurrences.offsets.length > 1) {
+            return { query: null, ambiguous: true };
+        }
+        if (!occurrences.offsets.length) continue;
+        matchCount++;
+        if (matchCount > 1) return { query: null, ambiguous: true };
+        const range = index.sourceRange(
+            occurrences.offsets[0],
+            target.length
+        );
+        const candidate = page.slice(range.from, range.to);
+        if (!candidate || candidate === text) continue;
+        query = candidate;
+    }
+    return { query, ambiguous: false };
 }
 
 async function readerForItem(zotero, itemID, waitOptions) {

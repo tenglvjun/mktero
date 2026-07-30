@@ -50,6 +50,72 @@ export function createPdfAnnotationTextIndex(
     );
 }
 
+export function createDehyphenatedPdfAnnotationTextIndex(text) {
+    const normalized = createPdfAnnotationTextIndex(String(text));
+    const output = [];
+    const sourceStarts = [];
+    const sourceEnds = [];
+    for (let offset = 0; offset < normalized.text.length;) {
+        const character = String.fromCodePoint(
+            normalized.text.codePointAt(offset)
+        );
+        const nextOffset = offset + character.length;
+        const hasWhitespace = character === '-'
+            && normalized.text[nextOffset] === ' ';
+        const afterWhitespace = nextOffset + (hasWhitespace ? 1 : 0);
+        if (character === '-'
+            && isLetterBefore(normalized.text, offset)
+            && isLetterAt(normalized.text, afterWhitespace)
+            && hasWhitespace) {
+            offset = afterWhitespace;
+            continue;
+        }
+        for (let unit = 0; unit < character.length; unit++) {
+            output.push(character[unit]);
+            sourceStarts.push(offset);
+            sourceEnds.push(nextOffset);
+        }
+        offset = nextOffset;
+    }
+    return {
+        text: output.join(''),
+        sourceRange(from, length) {
+            const normalizedFrom = sourceStarts[from];
+            const normalizedTo = sourceEnds[from + length - 1];
+            return normalized.sourceRange(
+                normalizedFrom,
+                normalizedTo - normalizedFrom
+            );
+        },
+    };
+}
+
+function isLetterBefore(text, offset) {
+    if (offset <= 0) return false;
+    let previousOffset = offset - 1;
+    if (previousOffset > 0
+        && isLowSurrogate(text.charCodeAt(previousOffset))
+        && isHighSurrogate(text.charCodeAt(previousOffset - 1))) {
+        previousOffset--;
+    }
+    const character = String.fromCodePoint(text.codePointAt(previousOffset));
+    return /^\p{L}$/u.test(character);
+}
+
+function isLetterAt(text, offset) {
+    if (offset >= text.length) return false;
+    const character = String.fromCodePoint(text.codePointAt(offset));
+    return /^\p{L}$/u.test(character);
+}
+
+function isHighSurrogate(value) {
+    return value >= 0xD800 && value <= 0xDBFF;
+}
+
+function isLowSurrogate(value) {
+    return value >= 0xDC00 && value <= 0xDFFF;
+}
+
 function normalizePdfAnnotationCharacter(
     character,
     offset,

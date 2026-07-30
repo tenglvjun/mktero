@@ -43,8 +43,8 @@ export function createNormalizedTextIndex(
             }
         }
         else {
-            for (const unit of normalized) {
-                output.push(unit);
+            for (let unit = 0; unit < normalized.length; unit++) {
+                output.push(normalized[unit]);
                 sourceStarts.push(sourceFrom);
                 sourceEnds.push(sourceTo);
             }
