@@ -1,4 +1,8 @@
 import { translateEnglish } from '../i18n/localization.js';
+import {
+    createLucideIcon,
+    LUCIDE_ICONS,
+} from '../icons/lucide-icon.js';
 
 const BUTTON_SELECTOR = '.mktero-markdown-button';
 const CUSTOM_SECTIONS_SELECTOR = '.toolbar .end .custom-sections';
@@ -22,7 +26,10 @@ export function registerReaderToolbar({
         const button = doc.createElement('button');
         button.type = 'button';
         button.className = 'toolbar-button mktero-markdown-button';
-        button.textContent = 'MD';
+        button.appendChild(createLucideIcon(doc, LUCIDE_ICONS.fileText, {
+            className: 'mktero-reader-toolbar-icon',
+            size: 16,
+        }));
         button.title = translate('toolbar.openMarkdown');
         button.dataset.mkteroItemID = String(reader.itemID);
         button.setAttribute?.('aria-label', translate('toolbar.openMarkdownAria'));

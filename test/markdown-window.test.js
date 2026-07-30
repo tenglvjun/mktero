@@ -188,7 +188,11 @@ test('resizes and toggles the Markdown outline from its edge', () => {
         assert.equal(resizer.getAttribute('aria-valuemin'), '180');
         assert.equal(resizer.getAttribute('aria-valuemax'), '480');
         assert.equal(resizer.getAttribute('aria-valuenow'), '256');
-        assert.equal(toggle.textContent, '‹');
+        assert.equal(toggle.textContent, '');
+        assert.equal(
+            toggle.querySelector('svg')?.getAttribute('data-lucide'),
+            'chevron-left'
+        );
         assert.equal(toggle.getAttribute('aria-controls'), 'mktero-outline');
         assert.equal(toggle.getAttribute('aria-expanded'), 'true');
         assert.equal(toggle.getAttribute('aria-label'), 'Collapse outline');
@@ -216,14 +220,22 @@ test('resizes and toggles the Markdown outline from its edge', () => {
 
         toggle.click();
         assert.equal(outline.hidden, true);
-        assert.equal(toggle.textContent, '›');
+        assert.equal(toggle.textContent, '');
+        assert.equal(
+            toggle.querySelector('svg')?.getAttribute('data-lucide'),
+            'chevron-right'
+        );
         assert.equal(toggle.getAttribute('aria-expanded'), 'false');
         assert.equal(toggle.getAttribute('aria-label'), 'Expand outline');
         assert.equal(resizer.getAttribute('aria-label'), 'Expand outline');
 
         toggle.click();
         assert.equal(outline.hidden, false);
-        assert.equal(toggle.textContent, '‹');
+        assert.equal(toggle.textContent, '');
+        assert.equal(
+            toggle.querySelector('svg')?.getAttribute('data-lucide'),
+            'chevron-left'
+        );
         assert.equal(toggle.getAttribute('aria-expanded'), 'true');
         assert.equal(resizer.getAttribute('aria-valuenow'), '376');
         assert.equal(
@@ -264,7 +276,11 @@ test('resizes and toggles PDF notes from the right edge', () => {
         assert.equal(resizer.getAttribute('aria-valuemin'), '220');
         assert.equal(resizer.getAttribute('aria-valuemax'), '480');
         assert.equal(resizer.getAttribute('aria-valuenow'), '300');
-        assert.equal(toggle.textContent, '›');
+        assert.equal(toggle.textContent, '');
+        assert.equal(
+            toggle.querySelector('svg')?.getAttribute('data-lucide'),
+            'chevron-right'
+        );
         assert.equal(toggle.getAttribute('aria-expanded'), 'true');
         assert.equal(toggle.getAttribute('aria-label'), 'Collapse PDF notes');
         assert.equal(notes.hidden, false);
@@ -290,14 +306,22 @@ test('resizes and toggles PDF notes from the right edge', () => {
 
         toggle.click();
         assert.equal(notes.hidden, true);
-        assert.equal(toggle.textContent, '‹');
+        assert.equal(toggle.textContent, '');
+        assert.equal(
+            toggle.querySelector('svg')?.getAttribute('data-lucide'),
+            'chevron-left'
+        );
         assert.equal(toggle.getAttribute('aria-expanded'), 'false');
         assert.equal(toggle.getAttribute('aria-label'), 'Expand PDF notes');
         assert.equal(resizer.getAttribute('aria-label'), 'Expand PDF notes');
 
         toggle.click();
         assert.equal(notes.hidden, false);
-        assert.equal(toggle.textContent, '›');
+        assert.equal(toggle.textContent, '');
+        assert.equal(
+            toggle.querySelector('svg')?.getAttribute('data-lucide'),
+            'chevron-right'
+        );
         assert.equal(resizer.getAttribute('aria-valuenow'), '480');
 
         resizer.dispatchEvent(new document.defaultView.Event('dblclick', {
@@ -572,6 +596,9 @@ test('updates conversion progress directly in the inline view', () => {
 
     view.render(createModel({ progress: 10 }));
 
+    const spinner = shadow.querySelector('.loading-spinner');
+    assert.equal(spinner?.localName, 'svg');
+    assert.equal(spinner?.getAttribute('data-lucide'), 'loader-circle');
     assert.equal(
         shadow.querySelector('#mktero-loading-detail').textContent,
         'The PDF is being converted to Markdown.'

@@ -17,6 +17,7 @@ const xpiName = `mktero-${manifest.version}.xpi`;
 const xpiPath = path.join(buildRoot, xpiName);
 const packageFiles = [
     'bootstrap.js',
+    'licenses/lucide.txt',
     'manifest.json',
     'prefs.js',
     'ui/icons/mktero.svg',
@@ -28,6 +29,7 @@ const packageFiles = [
 await rm(buildRoot, { recursive: true, force: true });
 await mkdir(path.join(packageRoot, 'ui'), { recursive: true });
 await mkdir(path.join(packageRoot, 'ui/icons'), { recursive: true });
+await mkdir(path.join(packageRoot, 'licenses'), { recursive: true });
 
 await Promise.all([
     build({
@@ -58,6 +60,7 @@ await Promise.all([
     copyText('ui/preferences.xhtml', 'ui/preferences.xhtml'),
     copyText('ui/preferences.css', 'ui/preferences.css'),
     copyText('ui/icons/mktero.svg', 'ui/icons/mktero.svg'),
+    copyText('node_modules/lucide/LICENSE', 'licenses/lucide.txt'),
     copyText('prefs.js', 'prefs.js'),
 ]);
 

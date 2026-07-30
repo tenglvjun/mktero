@@ -16,8 +16,13 @@ function createDocument() {
                 type: '',
                 dataset: {},
                 attributes: {},
+                children: [],
                 setAttribute(name, value) {
                     this.attributes[name] = String(value);
+                },
+                appendChild(child) {
+                    this.children.push(child);
+                    return child;
                 },
                 addEventListener(type, handler) {
                     listeners.set(type, handler);
@@ -26,6 +31,9 @@ function createDocument() {
                     listeners.get('click')?.();
                 },
             };
+        },
+        createElementNS(_namespace, tagName) {
+            return this.createElement(tagName);
         },
     };
 }
@@ -60,7 +68,12 @@ test('adds an action to PDF reader toolbars and opens that reader item', async (
     assert.equal(registered.type, 'renderToolbar');
     assert.equal(registered.pluginID, 'mktero@example.com');
     assert.equal(appended.length, 1);
-    assert.equal(appended[0].textContent, 'MD');
+    assert.equal(appended[0].textContent, '');
+    assert.equal(appended[0].children[0].tagName, 'svg');
+    assert.equal(
+        appended[0].children[0].attributes['data-lucide'],
+        'file-text'
+    );
     assert.deepEqual(opened, [42]);
 });
 

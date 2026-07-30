@@ -14,7 +14,7 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
 
 ## 主要功能
 
-- 从 PDF 阅读器工具栏的 `MD` 按钮打开当前附件。
+- 从 PDF 阅读器工具栏的文件图标按钮打开当前附件。
 - 在文库中右键单个 PDF 或带有 PDF 附件的条目，通过
   `Read as Markdown with Mktero` 打开；普通条目会使用找到的第一个 PDF 附件。
 - 使用 MinerU VLM 模型执行 OCR，并启用公式和表格识别。
@@ -42,6 +42,7 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
   或双击分隔线展开和收起。
 - 按 PDF 内容与解析配置缓存 Markdown 和图片；未变化的 PDF 可直接从本地缓存打开。
 - 支持英文和简体中文界面；自动跟随 Zotero 的显示语言，其他语言回退为英文。
+- 阅读器操作、侧栏、图片预览、加载状态和 PDF 笔记标记统一使用 Lucide SVG 图标。
 - 在扩展、设置、右键菜单和 Markdown 标签页中统一使用 Mktero SVG Logo。
 
 ## 使用要求
@@ -83,7 +84,7 @@ API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不�
 ## 使用方法
 
 1. 在 `设置 -> Mktero` 中配置 API Token。
-2. 打开 PDF 后点击阅读器工具栏中的 `MD`；或者在文库中右键单个 PDF/条目并选择
+2. 打开 PDF 后点击阅读器工具栏中的文件图标；或者在文库中右键单个 PDF/条目并选择
    `Read as Markdown with Mktero`。
 3. Mktero 会创建一个临时 Zotero 标签页并显示转换进度。相同 PDF 已有有效缓存时，
    会跳过上传和远程解析。
@@ -157,6 +158,7 @@ XPI 中的文件顺序和时间戳固定；相同源码与依赖连续构建会�
 src/bootstrap.js   Zotero 生命周期与依赖装配
 src/mineru/        MinerU API、解析配置和结果解包
 src/cache/         Markdown 与图片缓存
+src/icons/         Lucide 图标定义与跨 Zotero 窗口的 SVG 创建器
 src/i18n/          英文、简体中文消息与 Zotero 语言匹配逻辑
 src/markdown/      Markdown 规范化、分析和安全渲染
 src/editor/        CodeMirror 只读视图与引用/图片交互
@@ -190,7 +192,7 @@ SHA-256 校验文件和 Zotero 更新清单。标签与 `manifest.json` 版本�
 
 ## 转换排障
 
-在 Zotero 中打开 `帮助 -> 调试输出日志`，启用日志后重新执行 `MD` 操作，再选择查看输出并
+在 Zotero 中打开 `帮助 -> 调试输出日志`，启用日志后重新执行转换操作，再选择查看输出并
 筛选 `Mktero:`。常见阶段如下：
 
 - `requesting a MinerU upload URL`：正在创建 MinerU 任务。

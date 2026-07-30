@@ -56,8 +56,11 @@ test('creates rendered annotations in the XHTML namespace', () => {
         '.cm-mktero-pdf-annotation-note-icon'
     );
     assert.equal(icon?.namespaceURI, SVG_NAMESPACE);
-    assert.equal(icon?.getAttribute('viewBox'), '0 0 16 16');
-    assert.equal(icon?.querySelectorAll('path').length, 2);
+    assert.equal(icon?.getAttribute('data-lucide'), 'message-square-text');
+    assert.equal(icon?.getAttribute('viewBox'), '0 0 24 24');
+    assert.equal(icon?.getAttribute('stroke'), 'currentColor');
+    assert.equal(icon?.getAttribute('aria-hidden'), 'true');
+    assert.equal(icon?.querySelectorAll('path').length, 4);
     assert.equal(annotation.textContent, 'Visible');
 
     document.createElement = createElement;

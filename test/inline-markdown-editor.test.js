@@ -2614,6 +2614,22 @@ test('previews a rendered image with zoom and drag controls', () => {
 
     const closeButton = dialog.querySelector('[aria-label="Close image preview"]');
     const zoomOutButton = dialog.querySelector('[aria-label="Zoom out"]');
+    const zoomInButton = dialog.querySelector('[aria-label="Zoom in"]');
+    assert.equal(
+        zoomOutButton.querySelector('svg')?.getAttribute('data-lucide'),
+        'zoom-out'
+    );
+    assert.equal(
+        zoomInButton.querySelector('svg')?.getAttribute('data-lucide'),
+        'zoom-in'
+    );
+    assert.equal(
+        closeButton.querySelector('svg')?.getAttribute('data-lucide'),
+        'x'
+    );
+    assert.equal(zoomOutButton.textContent, '');
+    assert.equal(zoomInButton.textContent, '');
+    assert.equal(closeButton.textContent, '');
     assert.equal(document.activeElement, closeButton);
     dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
         key: 'Tab',
@@ -2627,7 +2643,7 @@ test('previews a rendered image with zoom and drag controls', () => {
     }));
     assert.equal(document.activeElement, closeButton);
 
-    dialog.querySelector('[aria-label="Zoom in"]').click();
+    zoomInButton.click();
     assert.equal(scale.textContent, '125%');
     assert.match(previewImage.style.transform, /scale\(1\.25\)/);
 

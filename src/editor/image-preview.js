@@ -1,4 +1,8 @@
 import { createLocalization } from '../i18n/localization.js';
+import {
+    createLucideIcon,
+    LUCIDE_ICONS,
+} from '../icons/lucide-icon.js';
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
@@ -103,13 +107,16 @@ export function createImagePreview(parent, {
         renderTransform();
     };
 
-    const createButton = (label, text, onClick) => {
+    const createButton = (label, icon, onClick) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'mktero-image-preview-button';
         button.setAttribute('aria-label', label);
         button.title = label;
-        button.textContent = text;
+        button.appendChild(createLucideIcon(document, icon, {
+            className: 'mktero-image-preview-button-icon',
+            size: 20,
+        }));
         button.addEventListener('click', onClick);
         return button;
     };
@@ -172,7 +179,7 @@ export function createImagePreview(parent, {
         controls.className = 'mktero-image-preview-controls';
         zoomOutButton = createButton(
             t('image.zoomOut'),
-            '−',
+            LUCIDE_ICONS.zoomOut,
             () => changeScale(-SCALE_STEP)
         );
         scaleOutput = document.createElement('output');
@@ -180,10 +187,14 @@ export function createImagePreview(parent, {
         scaleOutput.setAttribute('aria-live', 'polite');
         zoomInButton = createButton(
             t('image.zoomIn'),
-            '+',
+            LUCIDE_ICONS.zoomIn,
             () => changeScale(SCALE_STEP)
         );
-        const closeButton = createButton(t('image.closePreview'), '×', close);
+        const closeButton = createButton(
+            t('image.closePreview'),
+            LUCIDE_ICONS.x,
+            close
+        );
         controls.append(zoomOutButton, scaleOutput, zoomInButton, closeButton);
 
         dialog.append(stage, controls);

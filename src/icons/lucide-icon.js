@@ -1,0 +1,93 @@
+import {
+    ChevronLeft,
+    ChevronRight,
+    FileText,
+    LoaderCircle,
+    MessageSquareText,
+    X,
+    ZoomIn,
+    ZoomOut,
+} from 'lucide';
+
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const DEFAULT_ATTRIBUTES = Object.freeze({
+    xmlns: SVG_NAMESPACE,
+    width: '24',
+    height: '24',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '2',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+});
+
+export const LUCIDE_ICONS = Object.freeze({
+    chevronLeft: Object.freeze({
+        name: 'chevron-left',
+        nodes: ChevronLeft,
+    }),
+    chevronRight: Object.freeze({
+        name: 'chevron-right',
+        nodes: ChevronRight,
+    }),
+    fileText: Object.freeze({
+        name: 'file-text',
+        nodes: FileText,
+    }),
+    loaderCircle: Object.freeze({
+        name: 'loader-circle',
+        nodes: LoaderCircle,
+    }),
+    messageSquareText: Object.freeze({
+        name: 'message-square-text',
+        nodes: MessageSquareText,
+    }),
+    x: Object.freeze({
+        name: 'x',
+        nodes: X,
+    }),
+    zoomIn: Object.freeze({
+        name: 'zoom-in',
+        nodes: ZoomIn,
+    }),
+    zoomOut: Object.freeze({
+        name: 'zoom-out',
+        nodes: ZoomOut,
+    }),
+});
+
+export function createLucideIcon(
+    document,
+    icon,
+    { className = '', size = 24 } = {}
+) {
+    const classes = ['lucide', `lucide-${icon.name}`, className]
+        .filter(Boolean)
+        .join(' ');
+    const svg = createSvgElement(document, 'svg', {
+        ...DEFAULT_ATTRIBUTES,
+        width: String(size),
+        height: String(size),
+        class: classes,
+        'data-lucide': icon.name,
+        'aria-hidden': 'true',
+        focusable: 'false',
+    });
+    appendIconNodes(document, svg, icon.nodes);
+    return svg;
+}
+
+function appendIconNodes(document, parent, nodes) {
+    for (const [tagName, attributes] of nodes) {
+        parent.appendChild(createSvgElement(document, tagName, attributes));
+    }
+}
+
+function createSvgElement(document, tagName, attributes) {
+    const element = document.createElementNS(SVG_NAMESPACE, tagName);
+    for (const [name, value] of Object.entries(attributes)) {
+        element.setAttribute(name, String(value));
+    }
+    return element;
+}

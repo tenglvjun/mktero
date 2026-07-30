@@ -12,6 +12,10 @@ import {
 } from '../core/pdf-annotation.js';
 import { createLocalization } from '../i18n/localization.js';
 import { extractMarkdownOutline } from '../markdown/markdown-outline.js';
+import {
+    createLucideIcon,
+    LUCIDE_ICONS,
+} from '../icons/lucide-icon.js';
 import { createLoadingPresentation } from './markdown-loading-state.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
@@ -34,8 +38,8 @@ const SIDE_PANEL_CONFIG = Object.freeze({
         resizeLabelKey: 'viewer.outlineResize',
         collapseLabelKey: 'viewer.outlineCollapse',
         expandLabelKey: 'viewer.outlineExpand',
-        collapseGlyph: '‹',
-        expandGlyph: '›',
+        collapseIcon: LUCIDE_ICONS.chevronLeft,
+        expandIcon: LUCIDE_ICONS.chevronRight,
     }),
     notes: Object.freeze({
         elementKey: 'notes',
@@ -51,8 +55,8 @@ const SIDE_PANEL_CONFIG = Object.freeze({
         resizeLabelKey: 'viewer.notesResize',
         collapseLabelKey: 'viewer.notesCollapse',
         expandLabelKey: 'viewer.notesExpand',
-        collapseGlyph: '›',
-        expandGlyph: '‹',
+        collapseIcon: LUCIDE_ICONS.chevronRight,
+        expandIcon: LUCIDE_ICONS.chevronLeft,
     }),
 });
 export function createMarkdownTabView({
@@ -256,10 +260,14 @@ class MarkdownTabView {
             class: 'message error',
         });
         error.hidden = true;
-        const spinner = this.createElement('div', {
-            class: 'loading-spinner',
-            'aria-hidden': 'true',
-        });
+        const spinner = createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.loaderCircle,
+            {
+                className: 'loading-spinner',
+                size: 38,
+            }
+        );
         const loadingTitle = this.createElement(
             'h2',
             { id: 'mktero-loading-title' },
@@ -429,19 +437,16 @@ class MarkdownTabView {
             'aria-label': this.t(panel.resizeLabelKey),
             title: this.t(panel.resizeLabelKey),
         });
-        const toggle = this.createElement(
-            'button',
-            {
-                id: `${id}-toggle`,
-                class: `markdown-side-panel-toggle markdown-${name}-toggle`,
-                type: 'button',
-                'aria-controls': id,
-                'aria-expanded': 'true',
-                'aria-label': this.t(panel.collapseLabelKey),
-                title: this.t(panel.collapseLabelKey),
-            },
-            panel.collapseGlyph
-        );
+        const toggle = this.createElement('button', {
+            id: `${id}-toggle`,
+            class: `markdown-side-panel-toggle markdown-${name}-toggle`,
+            type: 'button',
+            'aria-controls': id,
+            'aria-expanded': 'true',
+            'aria-label': this.t(panel.collapseLabelKey),
+            title: this.t(panel.collapseLabelKey),
+        });
+        toggle.appendChild(this.createSidePanelIcon(panel.collapseIcon));
         const edge = this.createElement('div', {
             class: `markdown-side-panel-edge markdown-${name}-edge`,
         });
@@ -606,9 +611,9 @@ class MarkdownTabView {
             panel.collapsedClass,
             !visible
         );
-        toggle.textContent = visible
-            ? panel.collapseGlyph
-            : panel.expandGlyph;
+        toggle.replaceChildren(this.createSidePanelIcon(
+            visible ? panel.collapseIcon : panel.expandIcon
+        ));
         toggle.setAttribute('aria-expanded', String(visible));
         this.syncSidePanelControlLabels(name);
     }
@@ -641,6 +646,13 @@ class MarkdownTabView {
             resizer: this.elements[panel.resizerKey],
             toggle: this.elements[panel.toggleKey],
         };
+    }
+
+    createSidePanelIcon(icon) {
+        return createLucideIcon(this.document, icon, {
+            className: 'markdown-side-panel-toggle-icon',
+            size: 18,
+        });
     }
 
     syncOutline(markdown) {

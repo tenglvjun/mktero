@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { unzipSync } from 'fflate';
+import { strFromU8, unzipSync } from 'fflate';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(
@@ -34,11 +34,13 @@ test('builds reproducible release assets and Zotero update metadata', async () =
     await buildProject();
     const secondXPI = await readFile(path.join(projectRoot, 'build', xpiName));
     const digest = createHash('sha256').update(firstXPI).digest('hex');
+    const packageEntries = unzipSync(firstXPI);
 
     assert.deepEqual(secondXPI, firstXPI);
     assert.equal(checksum, `${digest}  ${xpiName}\n`);
-    assert.deepEqual(Object.keys(unzipSync(firstXPI)).sort(), [
+    assert.deepEqual(Object.keys(packageEntries).sort(), [
         'bootstrap.js',
+        'licenses/lucide.txt',
         'manifest.json',
         'prefs.js',
         'ui/icons/mktero.svg',
@@ -46,6 +48,10 @@ test('builds reproducible release assets and Zotero update metadata', async () =
         'ui/preferences.js',
         'ui/preferences.xhtml',
     ]);
+    assert.match(
+        strFromU8(packageEntries['licenses/lucide.txt']),
+        /Copyright \(c\) 2026 Lucide Icons and Contributors/
+    );
     assert.deepEqual(updates, {
         addons: {
             [manifest.applications.zotero.id]: {

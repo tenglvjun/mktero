@@ -314,12 +314,7 @@ test('styles Zotero-colored PDF annotations and their note popup', () => {
     assert.match(noteIcon, /left:\s*-6px/);
     assert.match(noteIcon, /width:\s*15px/);
     assert.match(noteIcon, /height:\s*15px/);
-
-    const noteBubble = ruleBody([
-        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-bubble,',
-        '.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation-note-line',
-    ].join('\n'));
-    assert.match(noteBubble, /stroke:\s*currentColor/);
+    assert.match(noteIcon, /filter:\s*drop-shadow/);
 
     const popup = ruleBody('.mktero-annotation-popup');
     assert.match(popup, /position:\s*fixed/);

@@ -152,7 +152,12 @@ function createToolbarDocument() {
             let click;
             return {
                 dataset: {},
+                children: [],
                 setAttribute() {},
+                appendChild(child) {
+                    this.children.push(child);
+                    return child;
+                },
                 addEventListener(type, handler) {
                     if (type === 'click') click = handler;
                 },
@@ -160,6 +165,9 @@ function createToolbarDocument() {
                     click?.();
                 },
             };
+        },
+        createElementNS(_namespace, tagName) {
+            return this.createElement(tagName);
         },
     };
 }
