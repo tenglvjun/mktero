@@ -111,6 +111,12 @@ globalThis.startup = async function startup({ id, rootURI }) {
         createPDFAnnotation: (itemID, draft) => (
             runtime.annotationActions.createFromText(itemID, draft)
         ),
+        deletePDFAnnotation: (itemID, annotationID) => (
+            runtime.annotationActions.deleteAnnotation(itemID, annotationID)
+        ),
+        onSynchronizationChange: itemID => (
+            runtime.annotationOverlayRefresher?.refresh([itemID])
+        ),
         onError: error => Zotero.logError?.(error),
     });
     runtime.localAnnotations = localAnnotations;
@@ -164,6 +170,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
 globalThis.shutdown = function shutdown() {
     abortAllConversions();
     runtime.disposeAnnotationObserver?.();
+    runtime.localAnnotations?.dispose();
     runtime.annotationOverlayRefresher?.dispose();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();

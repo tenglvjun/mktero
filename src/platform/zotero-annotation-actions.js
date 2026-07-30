@@ -62,10 +62,11 @@ export function createZoteroAnnotationActions(zotero, {
                 json
             );
             if (existing) {
+                await updateMatchingAnnotation(zotero, existing, json);
                 return normalizeCreatedAnnotation(existing, {
                     ...json,
                     key: existing.key,
-                });
+                }, { reused: true });
             }
             json.key = zotero.DataObjectUtilities.generateKey();
             let saved;
@@ -76,7 +77,7 @@ export function createZoteroAnnotationActions(zotero, {
                     { notifierQueue }
                 );
             });
-            return normalizeCreatedAnnotation(saved, json);
+            return normalizeCreatedAnnotation(saved, json, { reused: false });
         },
         async changeColor(itemID, annotationID, color) {
             const normalizedColor = String(color || '').toLowerCase();
@@ -139,13 +140,35 @@ async function findMatchingAnnotation(zotero, attachment, draft) {
     return annotations.find(annotation => (
         annotation?.annotationType === draft.type
         && annotation.annotationText === draft.text
-        && String(annotation.annotationComment || '') === draft.comment
-        && String(annotation.annotationColor || '').toLowerCase() === draft.color
+        && annotation.isEditable?.() !== false
         && sameAnnotationPosition(
             annotation.annotationPosition,
             draft.position
         )
     )) || null;
+}
+
+async function updateMatchingAnnotation(zotero, annotation, draft) {
+    const comment = String(annotation.annotationComment || '');
+    const color = String(annotation.annotationColor || '').toLowerCase();
+    if (comment === draft.comment && color === draft.color) return;
+    const previousComment = annotation.annotationComment;
+    const previousColor = annotation.annotationColor;
+    try {
+        await withNotifierQueue(zotero, async notifierQueue => {
+            annotation.annotationComment = draft.comment;
+            annotation.annotationColor = draft.color;
+            await annotation.saveTx({
+                skipDateModifiedUpdate: true,
+                notifierQueue,
+            });
+        });
+    }
+    catch (error) {
+        annotation.annotationComment = previousComment;
+        annotation.annotationColor = previousColor;
+        throw error;
+    }
 }
 
 function sameAnnotationPosition(value, expected) {
@@ -203,7 +226,7 @@ function validRect(rect) {
         && rect[3] > rect[1];
 }
 
-function normalizeCreatedAnnotation(annotation, fallback) {
+function normalizeCreatedAnnotation(annotation, fallback, { reused }) {
     const position = parseAnnotationPosition(
         annotation?.annotationPosition,
         fallback.position
@@ -222,6 +245,7 @@ function normalizeCreatedAnnotation(annotation, fallback) {
         sortIndex: String(
             annotation?.annotationSortIndex || fallback.sortIndex
         ),
+        reused,
     };
 }
 

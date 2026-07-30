@@ -732,7 +732,62 @@ test('reuses an identical Zotero highlight after a synchronization retry', async
     });
 
     assert.equal(created.id, 'EXIST001');
+    assert.equal(created.reused, true);
     assert.equal(saveCalls, 0);
+});
+
+test('updates an existing highlight at the same PDF position', async () => {
+    const position = {
+        pageIndex: 0,
+        rects: [[72, 700, 280, 720]],
+    };
+    let itemSaveCalls = 0;
+    const existing = {
+        key: 'EXIST001',
+        annotationType: 'highlight',
+        annotationText: 'The sound of stress recovery',
+        annotationComment: 'Old note',
+        annotationColor: '#ffd400',
+        annotationPageLabel: '1',
+        annotationSortIndex: '00000|000001|00000',
+        annotationPosition: JSON.stringify(position),
+        isEditable: () => true,
+        async saveTx() {
+            itemSaveCalls++;
+        },
+    };
+    let createCalls = 0;
+    const zotero = createZoteroForAnnotationCreation({
+        view: {},
+        async saveFromJSON() {
+            createCalls++;
+        },
+    });
+    zotero.Items.get(42).getAnnotations = () => [existing];
+    zotero.Items.loadDataTypes = async () => {};
+    const actions = createZoteroAnnotationActions(zotero, {
+        async locateText() {
+            return {
+                text: existing.annotationText,
+                pageLabel: existing.annotationPageLabel,
+                sortIndex: existing.annotationSortIndex,
+                position,
+            };
+        },
+    });
+
+    const synchronized = await actions.createFromText(42, {
+        text: existing.annotationText,
+        comment: 'Revised note',
+        color: '#ff6666',
+    });
+
+    assert.equal(synchronized.id, 'EXIST001');
+    assert.equal(synchronized.reused, true);
+    assert.equal(existing.annotationComment, 'Revised note');
+    assert.equal(existing.annotationColor, '#ff6666');
+    assert.equal(itemSaveCalls, 1);
+    assert.equal(createCalls, 0);
 });
 
 test('changes the color of an annotation owned by the current PDF', async () => {

@@ -22,7 +22,9 @@ export class MarkdownLocalAnnotations {
         store,
         createID = createAnnotationID,
         createPDFAnnotation = null,
+        deletePDFAnnotation = null,
         onError = () => {},
+        onSynchronizationChange = () => {},
     }) {
         if (!store?.get || !store?.put) {
             throw new TypeError('A Markdown annotation store is required');
@@ -30,32 +32,38 @@ export class MarkdownLocalAnnotations {
         this.store = store;
         this.createID = createID;
         this.createPDFAnnotation = createPDFAnnotation;
+        this.deletePDFAnnotation = deletePDFAnnotation;
         this.onError = onError;
+        this.onSynchronizationChange = onSynchronizationChange;
         this.operationTails = new Map();
+        this.synchronizationRequests = new Map();
+        this.synchronizationTasks = new Map();
+        this.synchronizationFailures = new Map();
+        this.active = true;
     }
 
     async resolve(itemID, markdown) {
         if (typeof markdown !== 'string') {
             throw new TypeError('Markdown must be a string');
         }
-        return this.#withOperation(itemID, () => (
+        const result = await this.#withOperation(itemID, () => (
             this.#resolve(itemID, markdown)
         ));
+        const failures = this.synchronizationFailures.get(itemID);
+        const matchedIDs = result.matched.map(annotation => annotation.id);
+        const retryIDs = matchedIDs.filter(id => !failures?.has(id));
+        this.#requestSynchronization(itemID, retryIDs);
+        if (matchedIDs.some(id => failures?.has(id))) {
+            result.warning ||= 'Some local Markdown annotations could not be synchronized to the PDF.';
+        }
+        return result;
     }
 
     async #resolve(itemID, markdown) {
         try {
             const annotations = normalizeCollection(await this.store.get(itemID));
             const resolved = resolveAnnotations(markdown, annotations);
-            if (typeof this.createPDFAnnotation !== 'function'
-                || !resolved.matched.length) {
-                return resolved;
-            }
-            return await this.#synchronizeResolved(
-                itemID,
-                annotations,
-                resolved
-            );
+            return resolved;
         }
         catch (error) {
             this.#reportError(error);
@@ -67,23 +75,14 @@ export class MarkdownLocalAnnotations {
         }
     }
 
-    create(itemID, draft) {
-        return this.#withOperation(itemID, async () => {
+    async create(itemID, draft) {
+        const created = await this.#withOperation(itemID, async () => {
             const annotation = normalizeAnnotation({
                 ...draft,
                 id: `mktero-${this.createID()}`,
                 source: 'markdown',
                 type: 'highlight',
             });
-            if (typeof this.createPDFAnnotation === 'function') {
-                const saved = await this.createPDFAnnotation(itemID, {
-                    text: annotation.text,
-                    comment: annotation.comment,
-                    color: annotation.color,
-                    ranges: annotation.ranges,
-                });
-                return resolvedPDFAnnotation(saved, annotation.ranges[0]);
-            }
             const annotations = normalizeCollection(await this.store.get(itemID));
             if (annotations.length >= MAX_LOCAL_ANNOTATIONS) {
                 throw new Error('Markdown annotation count exceeds the safety limit');
@@ -92,10 +91,13 @@ export class MarkdownLocalAnnotations {
             await this.store.put(itemID, [...annotations, annotation]);
             return resolvedAnnotation(annotation, annotation.ranges[0]);
         });
+        this.#clearSynchronizationFailure(itemID, created.id);
+        this.#requestSynchronization(itemID, [created.id]);
+        return created;
     }
 
-    update(itemID, annotationID, changes) {
-        return this.#withOperation(itemID, async () => {
+    async update(itemID, annotationID, changes) {
+        const updated = await this.#withOperation(itemID, async () => {
             const annotations = normalizeCollection(await this.store.get(itemID));
             const targetID = String(annotationID || '');
             const index = annotations.findIndex(annotation => (
@@ -116,12 +118,15 @@ export class MarkdownLocalAnnotations {
             await this.store.put(itemID, updated);
             return resolvedAnnotation(annotation, annotation.ranges[0]);
         });
+        this.#clearSynchronizationFailure(itemID, updated.id);
+        this.#requestSynchronization(itemID, [updated.id]);
+        return updated;
     }
 
-    delete(itemID, annotationID) {
-        return this.#withOperation(itemID, async () => {
+    async delete(itemID, annotationID) {
+        const targetID = String(annotationID || '');
+        await this.#withOperation(itemID, async () => {
             const annotations = normalizeCollection(await this.store.get(itemID));
-            const targetID = String(annotationID || '');
             const updated = annotations.filter(annotation => (
                 annotation.id !== targetID
             ));
@@ -130,50 +135,129 @@ export class MarkdownLocalAnnotations {
             }
             await this.store.put(itemID, updated);
         });
+        this.#clearSynchronizationFailure(itemID, targetID);
     }
 
-    async #synchronizeResolved(itemID, stored, resolved) {
-        const synchronized = new Map();
-        let synchronizationFailed = false;
-        for (const annotation of resolved.matched) {
-            try {
-                const saved = await this.createPDFAnnotation(itemID, {
-                    text: annotation.text,
-                    comment: annotation.comment,
-                    color: annotation.color,
-                    ranges: annotation.ranges,
-                });
-                synchronized.set(
-                    annotation.id,
-                    resolvedPDFAnnotation(saved, annotation.ranges[0])
-                );
+    dispose() {
+        this.active = false;
+        this.synchronizationRequests.clear();
+    }
+
+    #requestSynchronization(itemID, annotationIDs) {
+        if (!this.active
+            || typeof this.createPDFAnnotation !== 'function') {
+            return;
+        }
+        if (annotationIDs.length) {
+            let requested = this.synchronizationRequests.get(itemID);
+            if (!requested) {
+                requested = new Set();
+                this.synchronizationRequests.set(itemID, requested);
             }
-            catch (error) {
-                synchronizationFailed = true;
-                this.#reportError(error);
+            for (const annotationID of annotationIDs) {
+                requested.add(annotationID);
             }
         }
-        if (synchronized.size) {
-            try {
+        if (!this.synchronizationRequests.get(itemID)?.size) return;
+        if (this.synchronizationTasks.has(itemID)) return;
+        const task = this.#runSynchronization(itemID)
+            .catch(error => this.#reportError(error))
+            .finally(() => {
+                if (this.synchronizationTasks.get(itemID) === task) {
+                    this.synchronizationTasks.delete(itemID);
+                }
+                if (this.active
+                    && this.synchronizationRequests.get(itemID)?.size) {
+                    this.#requestSynchronization(itemID, []);
+                }
+            });
+        this.synchronizationTasks.set(itemID, task);
+    }
+
+    async #runSynchronization(itemID) {
+        while (this.active) {
+            const requested = this.synchronizationRequests.get(itemID);
+            if (!requested?.size) return;
+            const annotationIDs = new Set(requested);
+            this.synchronizationRequests.delete(itemID);
+            const annotations = await this.#withOperation(itemID, async () => (
+                normalizeCollection(await this.store.get(itemID))
+                    .filter(annotation => annotationIDs.has(annotation.id))
+            ));
+            for (const annotation of annotations) {
+                if (!this.active) return;
+                await this.#synchronizeAnnotation(itemID, annotation);
+            }
+        }
+    }
+
+    async #synchronizeAnnotation(itemID, annotation) {
+        try {
+            const saved = await this.createPDFAnnotation(itemID, {
+                text: annotation.text,
+                comment: annotation.comment,
+                color: annotation.color,
+                ranges: annotation.ranges,
+            });
+            const status = await this.#withOperation(itemID, async () => {
+                const current = normalizeCollection(
+                    await this.store.get(itemID)
+                );
+                const target = current.find(existing => (
+                    existing.id === annotation.id
+                ));
+                if (!target) return 'deleted';
+                if (!sameAnnotation(target, annotation)) return 'changed';
                 await this.store.put(
                     itemID,
-                    stored.filter(annotation => !synchronized.has(annotation.id))
+                    current.filter(existing => existing.id !== annotation.id)
                 );
+                return 'removed';
+            });
+            this.#clearSynchronizationFailure(itemID, annotation.id);
+            if (status === 'removed') {
+                this.#notifySynchronizationChange(itemID);
             }
-            catch (error) {
-                synchronizationFailed = true;
-                this.#reportError(error);
+            else if (status === 'changed') {
+                this.#requestSynchronization(itemID, [annotation.id]);
+            }
+            else if (!saved?.reused
+                && typeof this.deletePDFAnnotation === 'function') {
+                try {
+                    await this.deletePDFAnnotation(itemID, saved.id);
+                }
+                catch (error) {
+                    this.#reportError(error);
+                }
             }
         }
-        return {
-            matched: resolved.matched.map(annotation => (
-                synchronized.get(annotation.id) || annotation
-            )),
-            unmatched: resolved.unmatched,
-            ...(synchronizationFailed ? {
-                warning: 'Some local Markdown annotations could not be synchronized to the PDF.',
-            } : {}),
-        };
+        catch (error) {
+            let failures = this.synchronizationFailures.get(itemID);
+            if (!failures) {
+                failures = new Set();
+                this.synchronizationFailures.set(itemID, failures);
+            }
+            const firstFailure = !failures.has(annotation.id);
+            failures.add(annotation.id);
+            this.#reportError(error);
+            if (firstFailure) this.#notifySynchronizationChange(itemID);
+        }
+    }
+
+    #clearSynchronizationFailure(itemID, annotationID) {
+        const failures = this.synchronizationFailures.get(itemID);
+        failures?.delete(annotationID);
+        if (!failures?.size) this.synchronizationFailures.delete(itemID);
+    }
+
+    #notifySynchronizationChange(itemID) {
+        try {
+            const pending = this.onSynchronizationChange(itemID);
+            Promise.resolve(pending).catch(error => this.#reportError(error));
+        }
+        catch (error) {
+            this.#reportError(error);
+        }
     }
 
     #reportError(error) {
@@ -290,21 +374,13 @@ function resolvedAnnotation(annotation, range) {
     };
 }
 
-function resolvedPDFAnnotation(annotation, range) {
-    const id = String(annotation?.id || '');
-    if (!id) throw new Error('Zotero PDF annotation was not created');
-    return {
-        ...annotation,
-        id,
-        source: 'zotero',
-        type: 'highlight',
-        matchKind: 'exact',
-        ranges: [{ from: range.from, to: range.to }],
-        sortIndex: String(
-            annotation.sortIndex
-            || String(range.from).padStart(12, '0')
-        ),
-    };
+function sameAnnotation(left, right) {
+    return left.id === right.id
+        && left.text === right.text
+        && left.comment === right.comment
+        && left.color === right.color
+        && left.ranges[0].from === right.ranges[0].from
+        && left.ranges[0].to === right.ranges[0].to;
 }
 
 function normalizeCollection(value) {

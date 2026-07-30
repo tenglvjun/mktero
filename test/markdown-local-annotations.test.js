@@ -45,8 +45,11 @@ test('creates, updates, and deletes a persistent Markdown annotation', async () 
 
 test('creates a Zotero PDF annotation for a Markdown highlight', async () => {
     const createdPDFAnnotations = [];
+    const synchronizationChanges = [];
+    const store = createMemoryStore();
     const annotations = new MarkdownLocalAnnotations({
-        store: createMemoryStore(),
+        store,
+        createID: () => 'local-1',
         createPDFAnnotation: async (itemID, annotation) => {
             createdPDFAnnotations.push({ itemID, annotation });
             return {
@@ -55,6 +58,9 @@ test('creates a Zotero PDF annotation for a Markdown highlight', async () => {
                 source: 'zotero',
                 pageLabel: '1',
             };
+        },
+        onSynchronizationChange: itemID => {
+            synchronizationChanges.push(itemID);
         },
     });
     const draft = {
@@ -66,12 +72,84 @@ test('creates a Zotero PDF annotation for a Markdown highlight', async () => {
 
     const created = await annotations.create(42, draft);
 
-    assert.equal(created.id, 'ZOTERO001');
-    assert.equal(created.source, 'zotero');
+    assert.equal(created.id, 'mktero-local-1');
+    assert.equal(created.source, 'markdown');
+    await waitFor(() => createdPDFAnnotations.length === 1);
     assert.deepEqual(createdPDFAnnotations, [{
         itemID: 42,
         annotation: draft,
     }]);
+    await waitFor(async () => (await store.get(42)).length === 0);
+    assert.deepEqual(synchronizationChanges, [42]);
+});
+
+test('persists a Markdown highlight without waiting for PDF synchronization', async () => {
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        createPDFAnnotation: async () => new Promise(() => {}),
+    });
+    const draft = {
+        text: 'The sound of stress recovery',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 28 }],
+    };
+
+    const outcome = await Promise.race([
+        annotations.create(42, draft),
+        new Promise(resolve => setImmediate(() => resolve('stalled'))),
+    ]);
+
+    assert.notEqual(outcome, 'stalled');
+    assert.equal(outcome.id, 'mktero-local-1');
+    assert.equal(outcome.source, 'markdown');
+    assert.deepEqual(await store.get(42), [{
+        ...draft,
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+    }]);
+    annotations.dispose();
+});
+
+test('deletes a newly synchronized PDF highlight after its local draft was deleted', async () => {
+    let finishSynchronization;
+    let synchronizationStarted = false;
+    const synchronization = new Promise(resolve => {
+        finishSynchronization = resolve;
+    });
+    const deleted = [];
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            synchronizationStarted = true;
+            return synchronization;
+        },
+        async deletePDFAnnotation(itemID, annotationID) {
+            deleted.push({ itemID, annotationID });
+        },
+    });
+    const created = await annotations.create(42, {
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    });
+    await waitFor(() => synchronizationStarted);
+
+    await annotations.delete(42, created.id);
+    finishSynchronization({ id: 'ZOTERO001', reused: false });
+
+    await waitFor(() => deleted.length === 1);
+    assert.deepEqual(deleted, [{
+        itemID: 42,
+        annotationID: 'ZOTERO001',
+    }]);
+    assert.deepEqual(await store.get(42), []);
 });
 
 test('migrates an existing local Markdown highlight into Zotero PDF', async () => {
@@ -109,10 +187,10 @@ test('migrates an existing local Markdown highlight into Zotero PDF', async () =
         'The The sound of stress recovery continues.'
     );
 
-    assert.deepEqual(await store.get(42), []);
-    assert.equal(result.matched[0].id, 'ZOTERO001');
-    assert.equal(result.matched[0].source, 'zotero');
-    assert.deepEqual(result.matched[0].ranges, [{ from: 4, to: 32 }]);
+    assert.equal(result.matched[0].id, 'mktero-local-1');
+    assert.equal(result.matched[0].source, 'markdown');
+    await waitFor(() => synchronized.length === 1);
+    await waitFor(async () => (await store.get(42)).length === 0);
     assert.deepEqual(synchronized, [{
         itemID: 42,
         draft: {
@@ -149,10 +227,16 @@ test('keeps a local highlight when PDF synchronization fails', async () => {
         'The The sound of stress recovery continues.'
     );
 
+    await waitFor(() => errors.length === 1);
+    const retried = await annotations.resolve(
+        42,
+        'The The sound of stress recovery continues.'
+    );
+
     assert.deepEqual(await store.get(42), [local]);
     assert.equal(result.matched[0].id, local.id);
     assert.equal(
-        result.warning,
+        retried.warning,
         'Some local Markdown annotations could not be synchronized to the PDF.'
     );
     assert.deepEqual(errors, ['PDF text not found']);
@@ -192,15 +276,16 @@ test('serializes concurrent migration of the same local highlight', async () => 
     await Promise.resolve();
     await Promise.resolve();
     const second = annotations.resolve(42, markdown);
-    await Promise.resolve();
-    await Promise.resolve();
+    const secondResult = await second;
 
+    await waitFor(() => createCalls === 1);
     assert.equal(createCalls, 1);
+    assert.equal(secondResult.matched[0].id, 'mktero-local-1');
     releaseCreation();
-    const [firstResult, secondResult] = await Promise.all([first, second]);
-    assert.equal(firstResult.matched[0].id, 'ZOTERO001');
-    assert.deepEqual(secondResult.matched, []);
-    assert.deepEqual(await store.get(42), []);
+    const firstResult = await first;
+    assert.equal(firstResult.matched[0].id, 'mktero-local-1');
+    await waitFor(async () => (await store.get(42)).length === 0);
+    assert.equal(createCalls, 1);
 });
 
 test('restores saved ranges and relocates a uniquely moved Markdown quote', async () => {
@@ -353,4 +438,12 @@ function createMemoryStore(initial = []) {
             value = structuredClone(annotations);
         },
     };
+}
+
+async function waitFor(predicate) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+        if (await predicate()) return;
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.fail('Condition was not reached');
 }
