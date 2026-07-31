@@ -416,7 +416,7 @@ function registerReaderToolbarAction() {
         zotero: Zotero,
         pluginID: runtime.id,
         onOpen: openReaderAsMarkdown,
-        onPDFReaderOpened: reader => (
+        onPDFReaderAvailable: reader => (
             runtime.localAnnotations?.synchronizePending(
                 reader.itemID,
                 { reader }

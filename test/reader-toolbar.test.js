@@ -92,7 +92,7 @@ test('synchronizes pending annotations when a PDF reader opens', async () => {
         zotero,
         pluginID: 'mktero@example.com',
         onOpen: () => {},
-        onPDFReaderOpened: async reader => ready.push(reader.itemID),
+        onPDFReaderAvailable: async reader => ready.push(reader.itemID),
     });
     const reader = { type: 'pdf', itemID: 42 };
 
@@ -123,7 +123,7 @@ test('routes deferred synchronization errors through the toolbar handler', async
         zotero,
         pluginID: 'mktero@example.com',
         onOpen: () => {},
-        onPDFReaderOpened: async () => {
+        onPDFReaderAvailable: async () => {
             throw new Error('Could not load pending annotations');
         },
         onError: (error, failedReader) => {
@@ -161,7 +161,7 @@ test('synchronizes an open PDF even before its toolbar document exists', async (
         zotero,
         pluginID: 'mktero@example.com',
         onOpen: () => {},
-        onPDFReaderOpened: openReader => opened.push(openReader.itemID),
+        onPDFReaderAvailable: openReader => opened.push(openReader.itemID),
     });
     await Promise.resolve();
     await Promise.resolve();
@@ -222,7 +222,7 @@ test('does not add the action to non-PDF readers', () => {
         zotero,
         pluginID: 'mktero@example.com',
         onOpen: async () => {},
-        onPDFReaderOpened: reader => ready.push(reader.itemID),
+        onPDFReaderAvailable: reader => ready.push(reader.itemID),
     });
     const appended = [];
 
@@ -256,6 +256,32 @@ test('uses Zotero plugin cleanup instead of the broken 9.0 listener unregister A
     dispose();
 
     assert.equal(unregisterCalls, 0);
+});
+
+test('cancels a queued PDF availability notification during cleanup', async () => {
+    const reader = { type: 'pdf', itemID: 42 };
+    const zotero = {
+        Reader: {
+            _readers: [reader],
+            registerEventListener() {},
+            unregisterEventListener() {},
+        },
+    };
+    const available = [];
+    const dispose = registerReaderToolbar({
+        zotero,
+        pluginID: 'mktero@example.com',
+        onOpen: () => {},
+        onPDFReaderAvailable: openReader => {
+            available.push(openReader.itemID);
+        },
+    });
+
+    dispose();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(available, []);
 });
 
 test('adds and removes the toolbar action without restarting Zotero', async () => {
@@ -340,7 +366,7 @@ test('synchronizes and cleans up PDF readers across Zotero windows', async () =>
         zotero,
         pluginID: 'mktero@example.com',
         onOpen: () => {},
-        onPDFReaderOpened: reader => synchronized.push(reader.itemID),
+        onPDFReaderAvailable: reader => synchronized.push(reader.itemID),
     });
     await Promise.resolve();
     await Promise.resolve();

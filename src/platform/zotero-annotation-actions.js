@@ -30,7 +30,8 @@ export function createZoteroAnnotationActions(zotero, {
         searchTimeout,
     });
     return {
-        async createFromText(itemID, draft, { reader = null } = {}) {
+        async createFromText(itemID, draft, context = null) {
+            const reader = context?.reader || null;
             const text = String(draft?.text || '');
             const comment = String(draft?.comment || '');
             const color = String(draft?.color || '').toLowerCase();

@@ -162,7 +162,7 @@ test('locates Markdown text through an open Zotero PDF reader', async () => {
         text: 'The sound of stress recovery',
         comment: '',
         color: '#ffd400',
-    });
+    }, null);
 
     assert.equal(created.id, 'SYNC0001');
     assert.deepEqual(savedJSON.position, {
