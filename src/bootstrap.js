@@ -108,8 +108,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
             ioUtils: IOUtils,
             pathUtils: PathUtils,
         }),
-        createPDFAnnotation: (itemID, draft) => (
-            runtime.annotationActions.createFromText(itemID, draft)
+        createPDFAnnotation: (itemID, draft, context) => (
+            runtime.annotationActions.createFromText(itemID, draft, context)
         ),
         deletePDFAnnotation: (itemID, annotationID) => (
             runtime.annotationActions.deleteAnnotation(itemID, annotationID)
@@ -416,8 +416,11 @@ function registerReaderToolbarAction() {
         zotero: Zotero,
         pluginID: runtime.id,
         onOpen: openReaderAsMarkdown,
-        onReaderReady: reader => (
-            runtime.localAnnotations?.synchronizePending(reader.itemID)
+        onPDFReaderOpened: reader => (
+            runtime.localAnnotations?.synchronizePending(
+                reader.itemID,
+                { reader }
+            )
         ),
         onError: handleOpenError,
         translate: runtimeTranslate,

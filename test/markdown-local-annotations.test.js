@@ -171,10 +171,12 @@ test('synchronizes deferred Markdown highlights when the PDF is opened later', a
     const store = createMemoryStore([local]);
     let readerOpen = false;
     let createCalls = 0;
+    const contexts = [];
     const annotations = new MarkdownLocalAnnotations({
         store,
-        async createPDFAnnotation() {
+        async createPDFAnnotation(_itemID, _draft, context) {
             createCalls++;
+            contexts.push(context);
             return readerOpen
                 ? { id: 'ZOTERO001', source: 'zotero' }
                 : { deferred: true };
@@ -186,10 +188,12 @@ test('synchronizes deferred Markdown highlights when the PDF is opened later', a
     assert.deepEqual(await store.get(42), [local]);
 
     readerOpen = true;
-    await annotations.synchronizePending(42);
+    const context = { reader: { itemID: 42 } };
+    await annotations.synchronizePending(42, context);
 
     await waitFor(() => createCalls === 2);
     await waitFor(async () => (await store.get(42)).length === 0);
+    assert.deepEqual(contexts, [null, context]);
 });
 
 test('deletes a newly synchronized PDF highlight after its local draft was deleted', async () => {

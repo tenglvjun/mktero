@@ -284,6 +284,34 @@ test('defers PDF synchronization when no PDF reader is already open', async () =
     assert.deepEqual(openCalls, []);
 });
 
+test('uses a newly opened PDF reader before Zotero registers it globally', async () => {
+    const text = 'Selected paper title';
+    const view = createSearchView({
+        total: 1,
+        annotation: locatedAnnotation(text),
+    });
+    const openedReader = createReader(view);
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            return { key: json.key };
+        },
+    });
+    zotero.Reader._readers = [];
+    zotero.Reader.open = () => {
+        assert.fail('Synchronization must not open another PDF reader');
+    };
+    const actions = createZoteroAnnotationActions(zotero);
+
+    const created = await actions.createFromText(42, {
+        text,
+        comment: '',
+        color: '#ffd400',
+    }, { reader: openedReader });
+
+    assert.equal(created.id, 'SYNC0001');
+});
+
 test('reports when Markdown text cannot be found uniquely in the PDF', async () => {
     for (const [total, code] of [
         [0, 'MKTERO_PDF_TEXT_NOT_FOUND'],

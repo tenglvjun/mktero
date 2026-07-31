@@ -37,6 +37,7 @@ export class MarkdownLocalAnnotations {
         this.onSynchronizationChange = onSynchronizationChange;
         this.operationTails = new Map();
         this.synchronizationRequests = new Map();
+        this.synchronizationContexts = new Map();
         this.synchronizationTasks = new Map();
         this.synchronizationFailures = new Map();
         this.active = true;
@@ -140,20 +141,21 @@ export class MarkdownLocalAnnotations {
         this.#clearSynchronizationFailure(itemID, targetID);
     }
 
-    async synchronizePending(itemID) {
+    async synchronizePending(itemID, context = null) {
         const annotationIDs = await this.#withOperation(itemID, async () => (
             normalizeCollection(await this.store.get(itemID))
                 .map(annotation => annotation.id)
         ));
-        this.#requestSynchronization(itemID, annotationIDs);
+        this.#requestSynchronization(itemID, annotationIDs, context);
     }
 
     dispose() {
         this.active = false;
         this.synchronizationRequests.clear();
+        this.synchronizationContexts.clear();
     }
 
-    #requestSynchronization(itemID, annotationIDs) {
+    #requestSynchronization(itemID, annotationIDs, context = null) {
         if (!this.active
             || typeof this.createPDFAnnotation !== 'function') {
             return;
@@ -166,6 +168,9 @@ export class MarkdownLocalAnnotations {
             }
             for (const annotationID of annotationIDs) {
                 requested.add(annotationID);
+            }
+            if (context !== null) {
+                this.synchronizationContexts.set(itemID, context);
             }
         }
         if (!this.synchronizationRequests.get(itemID)?.size) return;
@@ -190,25 +195,27 @@ export class MarkdownLocalAnnotations {
             if (!requested?.size) return;
             const annotationIDs = new Set(requested);
             this.synchronizationRequests.delete(itemID);
+            const context = this.synchronizationContexts.get(itemID) || null;
+            this.synchronizationContexts.delete(itemID);
             const annotations = await this.#withOperation(itemID, async () => (
                 normalizeCollection(await this.store.get(itemID))
                     .filter(annotation => annotationIDs.has(annotation.id))
             ));
             for (const annotation of annotations) {
                 if (!this.active) return;
-                await this.#synchronizeAnnotation(itemID, annotation);
+                await this.#synchronizeAnnotation(itemID, annotation, context);
             }
         }
     }
 
-    async #synchronizeAnnotation(itemID, annotation) {
+    async #synchronizeAnnotation(itemID, annotation, context) {
         try {
             const saved = await this.createPDFAnnotation(itemID, {
                 text: annotation.text,
                 comment: annotation.comment,
                 color: annotation.color,
                 ranges: annotation.ranges,
-            });
+            }, context);
             if (saved?.deferred) return;
             const status = await this.#withOperation(itemID, async () => {
                 const current = normalizeCollection(
@@ -230,7 +237,11 @@ export class MarkdownLocalAnnotations {
                 this.#notifySynchronizationChange(itemID);
             }
             else if (status === 'changed') {
-                this.#requestSynchronization(itemID, [annotation.id]);
+                this.#requestSynchronization(
+                    itemID,
+                    [annotation.id],
+                    context
+                );
             }
             else if (!saved?.reused
                 && typeof this.deletePDFAnnotation === 'function') {

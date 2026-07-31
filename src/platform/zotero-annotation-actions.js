@@ -30,7 +30,7 @@ export function createZoteroAnnotationActions(zotero, {
         searchTimeout,
     });
     return {
-        async createFromText(itemID, draft) {
+        async createFromText(itemID, draft, { reader = null } = {}) {
             const text = String(draft?.text || '');
             const comment = String(draft?.comment || '');
             const color = String(draft?.color || '').toLowerCase();
@@ -46,7 +46,7 @@ export function createZoteroAnnotationActions(zotero, {
             if (!attachment?.isPDFAttachment?.()) {
                 throw new Error('PDF attachment is unavailable');
             }
-            const locatedText = await textLocator(itemID, text);
+            const locatedText = await textLocator(itemID, text, { reader });
             if (!locatedText) return { deferred: true };
             const located = validateLocatedText(locatedText);
             const json = {
@@ -269,11 +269,11 @@ function createZoteroPDFTextLocator(zotero, {
     now,
     searchTimeout,
 }) {
-    return async (itemID, text) => {
+    return async (itemID, text, { reader: openedReader = null } = {}) => {
         const timeout = Number.isFinite(searchTimeout)
             ? Math.max(1_000, Math.min(searchTimeout, 60_000))
             : 15_000;
-        const reader = readerForItem(zotero, itemID);
+        const reader = readerForItem(zotero, itemID, openedReader);
         if (!reader) return null;
         return locateTextInReader(reader, text, {
             cloneIntoReader,
@@ -519,7 +519,8 @@ function createNormalizedPDFSearchTracker(text) {
     };
 }
 
-function readerForItem(zotero, itemID) {
+function readerForItem(zotero, itemID, openedReader) {
+    if (openedReader?.itemID === itemID) return openedReader;
     return zotero.Reader?._readers?.find(reader => (
         reader?.itemID === itemID
     )) || null;

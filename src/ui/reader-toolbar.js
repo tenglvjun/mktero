@@ -11,7 +11,7 @@ export function registerReaderToolbar({
     zotero,
     pluginID,
     onOpen,
-    onReaderReady = null,
+    onPDFReaderOpened = null,
     onError = defaultErrorHandler,
     translate = translateEnglish,
 }) {
@@ -20,8 +20,24 @@ export function registerReaderToolbar({
     }
 
     let active = true;
-    const handler = ({ reader, doc, append }) => {
+    const notifyPDFReaderOpened = reader => {
+        if (!active
+            || reader?.type !== 'pdf'
+            || typeof onPDFReaderOpened !== 'function') {
+            return;
+        }
+        Promise.resolve()
+            .then(() => onPDFReaderOpened(reader))
+            .catch(error => onError(error, reader));
+    };
+    const handler = ({
+        reader,
+        doc,
+        append,
+        suppressOpenedNotification = false,
+    }) => {
         if (!active || reader?.type !== 'pdf') return;
+        if (!suppressOpenedNotification) notifyPDFReaderOpened(reader);
         if (doc.querySelector?.(BUTTON_SELECTOR)) return;
 
         const button = doc.createElement('button');
@@ -38,15 +54,10 @@ export function registerReaderToolbar({
             Promise.resolve(onOpen(reader)).catch(error => onError(error, reader));
         });
         append(button);
-        if (typeof onReaderReady === 'function') {
-            Promise.resolve()
-                .then(() => onReaderReady(reader))
-                .catch(error => onError(error, reader));
-        }
     };
 
     zotero.Reader.registerEventListener('renderToolbar', handler, pluginID);
-    injectOpenReaderToolbars(zotero, handler);
+    injectOpenReaderToolbars(zotero, handler, notifyPDFReaderOpened);
     return () => {
         if (!active) return;
         active = false;
@@ -61,8 +72,9 @@ export function registerReaderToolbar({
     };
 }
 
-function injectOpenReaderToolbars(zotero, handler) {
+function injectOpenReaderToolbars(zotero, handler, notifyPDFReaderOpened) {
     for (const reader of getOpenReaders(zotero)) {
+        notifyPDFReaderOpened(reader);
         try {
             const doc = getReaderDocument(reader);
             removeToolbarButtonsFromDocument(doc);
@@ -71,6 +83,7 @@ function injectOpenReaderToolbars(zotero, handler) {
             handler({
                 reader,
                 doc,
+                suppressOpenedNotification: true,
                 append(element) {
                     const section = doc.createElement('div');
                     section.className = 'section';
