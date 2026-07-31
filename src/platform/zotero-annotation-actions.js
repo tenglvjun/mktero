@@ -18,11 +18,13 @@ const MAX_PDF_FALLBACK_TOTAL_TEXT_LENGTH = 10_000_000;
 
 export function createZoteroAnnotationActions(zotero, {
     locateText = null,
+    cloneIntoReader = defaultCloneIntoReader,
     delay = defaultDelay,
     now = () => Date.now(),
     searchTimeout = 15_000,
 } = {}) {
     const textLocator = locateText || createZoteroPDFTextLocator(zotero, {
+        cloneIntoReader,
         delay,
         now,
         searchTimeout,
@@ -262,6 +264,7 @@ function parseAnnotationPosition(value, fallback) {
 }
 
 function createZoteroPDFTextLocator(zotero, {
+    cloneIntoReader,
     delay,
     now,
     searchTimeout,
@@ -278,6 +281,7 @@ function createZoteroPDFTextLocator(zotero, {
         const { reader } = readerContext;
         try {
             return await locateTextInReader(reader, text, {
+                cloneIntoReader,
                 delay,
                 now,
                 timeout,
@@ -294,14 +298,31 @@ function createZoteroPDFTextLocator(zotero, {
     };
 }
 
-async function locateTextInReader(reader, text, { delay, now, timeout }) {
+async function locateTextInReader(reader, text, options) {
+    const readerFrame = reader?._iframe;
+    const previousDocShellState = readerFrame?.docShellIsActive;
+    if (readerFrame && typeof previousDocShellState === 'boolean') {
+        readerFrame.docShellIsActive = true;
+    }
+    try {
+        return await locateTextInActiveReader(reader, text, options);
+    }
+    finally {
+        if (readerFrame && typeof previousDocShellState === 'boolean') {
+            readerFrame.docShellIsActive = previousDocShellState;
+        }
+    }
+}
+
+async function locateTextInActiveReader(reader, text, {
+    cloneIntoReader,
+    delay,
+    now,
+    timeout,
+}) {
     const waitOptions = { delay, now, timeout };
     await waitForReaderPromise(reader._initPromise, waitOptions);
     const internalReader = reader._internalReader;
-    await waitForReaderPromise(
-        internalReader?.initializedPromise,
-        waitOptions
-    );
     const view = internalReader?._primaryView;
     await waitForReaderPromise(view?.initializedPromise, waitOptions);
     if (!view || typeof view.setFindState !== 'function') {
@@ -312,14 +333,9 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
     }
 
     const previousFindState = view._findState || inactiveFindState();
-    const readerFrame = reader._iframe;
-    const previousDocShellState = readerFrame?.docShellIsActive;
-    if (readerFrame && typeof previousDocShellState === 'boolean') {
-        readerFrame.docShellIsActive = true;
-    }
     let searchError = null;
     try {
-        await view.setFindState({
+        await setReaderFindState(view, reader, {
             active: true,
             query: text,
             highlightAll: false,
@@ -327,7 +343,7 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
             entireWord: false,
             index: null,
             result: null,
-        });
+        }, cloneIntoReader);
         let result = await waitForPDFTextResult(
             view,
             text,
@@ -351,7 +367,7 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
             }
             if (fallback.query) {
                 usedNormalizedQuery = true;
-                await view.setFindState({
+                await setReaderFindState(view, reader, {
                     active: true,
                     query: fallback.query,
                     highlightAll: false,
@@ -359,7 +375,7 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
                     entireWord: false,
                     index: null,
                     result: null,
-                });
+                }, cloneIntoReader);
                 result = await waitForPDFTextResult(
                     view,
                     fallback.query,
@@ -395,17 +411,31 @@ async function locateTextInReader(reader, text, { delay, now, timeout }) {
     }
     finally {
         try {
-            await view.setFindState(previousFindState);
+            await setReaderFindState(
+                view,
+                reader,
+                previousFindState,
+                cloneIntoReader
+            );
         }
         catch (error) {
             if (!searchError) throw error;
         }
-        finally {
-            if (readerFrame && typeof previousDocShellState === 'boolean') {
-                readerFrame.docShellIsActive = previousDocShellState;
-            }
-        }
     }
+}
+
+async function setReaderFindState(view, reader, state, cloneIntoReader) {
+    const readerState = cloneIntoReader(state, reader?._iframeWindow);
+    await view.setFindState(readerState);
+}
+
+function defaultCloneIntoReader(value, target) {
+    if (!target
+        || typeof Components === 'undefined'
+        || typeof Components.utils?.cloneInto !== 'function') {
+        return value;
+    }
+    return Components.utils.cloneInto(value, target);
 }
 
 function findNormalizedPDFSearchQuery(view, text, tracker = null) {

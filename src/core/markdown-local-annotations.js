@@ -42,7 +42,7 @@ export class MarkdownLocalAnnotations {
         this.active = true;
     }
 
-    async resolve(itemID, markdown) {
+    async resolve(itemID, markdown, { retryFailed = false } = {}) {
         if (typeof markdown !== 'string') {
             throw new TypeError('Markdown must be a string');
         }
@@ -51,7 +51,9 @@ export class MarkdownLocalAnnotations {
         ));
         const failures = this.synchronizationFailures.get(itemID);
         const matchedIDs = result.matched.map(annotation => annotation.id);
-        const retryIDs = matchedIDs.filter(id => !failures?.has(id));
+        const retryIDs = retryFailed
+            ? matchedIDs
+            : matchedIDs.filter(id => !failures?.has(id));
         this.#requestSynchronization(itemID, retryIDs);
         if (matchedIDs.some(id => failures?.has(id))) {
             result.warning ||= 'Some local Markdown annotations could not be synchronized to the PDF.';

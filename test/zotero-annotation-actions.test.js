@@ -177,6 +177,83 @@ test('locates Markdown text through an open Zotero PDF reader', async () => {
     );
 });
 
+test('activates a background PDF reader before waiting for initialization', async () => {
+    const text = 'Selected paper title';
+    const view = createSearchView({
+        total: 1,
+        annotation: locatedAnnotation(text),
+    });
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            return { key: json.key };
+        },
+    });
+    const reader = zotero.Reader._readers[0];
+    reader._iframe = { docShellIsActive: false };
+    let resolveInitialization;
+    reader._initPromise = new Promise(resolve => {
+        resolveInitialization = resolve;
+    });
+    let clock = 0;
+    let activatedBeforeInitialization = false;
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        async delay(milliseconds) {
+            clock += milliseconds;
+            if (reader._iframe.docShellIsActive) {
+                activatedBeforeInitialization = true;
+                resolveInitialization();
+                await Promise.resolve();
+            }
+        },
+        searchTimeout: 1_000,
+    });
+
+    const created = await actions.createFromText(42, {
+        text,
+        comment: '',
+        color: '#ffd400',
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+    assert.equal(activatedBeforeInitialization, true);
+    assert.equal(reader._iframe.docShellIsActive, false);
+});
+
+test('uses a ready PDF view when the internal reader promise remains pending', async () => {
+    const text = 'Selected paper title';
+    const view = createSearchView({
+        total: 1,
+        annotation: locatedAnnotation(text),
+    });
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            return { key: json.key };
+        },
+    });
+    zotero.Reader._readers[0]._internalReader.initializedPromise = (
+        new Promise(() => {})
+    );
+    let clock = 0;
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        delay: async milliseconds => {
+            clock += milliseconds;
+        },
+        searchTimeout: 1_000,
+    });
+
+    const created = await actions.createFromText(42, {
+        text,
+        comment: '',
+        color: '#ffd400',
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+});
+
 test('opens a background PDF reader when none is already open', async () => {
     const view = createSearchView({
         total: 1,
@@ -404,6 +481,70 @@ test('locates Markdown text split by a PDF line-end hyphen', async () => {
         pageIndex: 0,
         rects: [[72, 700, 280, 720]],
     });
+});
+
+test('clones find states into the Zotero reader realm', async () => {
+    const queries = [];
+    const readerRealm = {};
+    const readerValues = new WeakSet();
+    let savedJSON;
+    const view = {
+        _findState: { active: false, query: '', result: null },
+        initializedPromise: Promise.resolve(),
+        setFindState(state) {
+            this._findState = state;
+            if (!state.active || !readerValues.has(state)) return;
+            queries.push(state.query);
+            markSearchComplete(this, state.query);
+            this._findController._pageContents = [HYPHENATED_PDF_PASSAGE];
+            this._findState = {
+                ...state,
+                result: state.query === HYPHENATED_PDF_PASSAGE
+                    ? {
+                        total: 1,
+                        annotation: locatedAnnotation(
+                            HYPHENATED_PDF_PASSAGE
+                        ),
+                    }
+                    : { total: 0 },
+            };
+        },
+    };
+    let clock = 0;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            savedJSON = json;
+            return { key: json.key };
+        },
+    });
+    zotero.Reader._readers[0]._iframeWindow = readerRealm;
+    const actions = createZoteroAnnotationActions(zotero, {
+        cloneIntoReader(value, target) {
+            assert.equal(target, readerRealm);
+            const cloned = { ...value };
+            readerValues.add(cloned);
+            return cloned;
+        },
+        now: () => clock,
+        delay: async () => {
+            clock += 250;
+        },
+        searchTimeout: 1_000,
+    });
+
+    const created = await actions.createFromText(42, {
+        text: HYPHENATED_MARKDOWN_PASSAGE,
+        comment: '',
+        color: '#a28ae5',
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+    assert.equal(savedJSON.text, HYPHENATED_MARKDOWN_PASSAGE);
+    assert.deepEqual(queries, [
+        HYPHENATED_MARKDOWN_PASSAGE,
+        HYPHENATED_PDF_PASSAGE,
+    ]);
 });
 
 test('recovers a line-end hyphen when extracted pages remain pending', async () => {

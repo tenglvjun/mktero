@@ -191,6 +191,7 @@ test('adds current Zotero PDF annotations without changing Markdown', async () =
 });
 
 test('combines Zotero PDF annotations with local Markdown annotations', async () => {
+    const localResolveOptions = [];
     const service = new MarkdownDocumentService({
         extractor: {
             extract: async () => ({
@@ -209,7 +210,8 @@ test('combines Zotero PDF annotations with local Markdown annotations', async ()
             },
         },
         localAnnotations: {
-            async resolve() {
+            async resolve(_itemID, _markdown, options) {
+                localResolveOptions.push(options);
                 return {
                     matched: [{
                         id: 'mktero-local-1',
@@ -223,10 +225,15 @@ test('combines Zotero PDF annotations with local Markdown annotations', async ()
     });
 
     const result = await service.convert(42);
+    await service.resolveAnnotations(42, 'Important result.');
 
     assert.deepEqual(result.annotationOverlay.matched.map(({ id }) => id), [
         'PDF1',
         'mktero-local-1',
+    ]);
+    assert.deepEqual(localResolveOptions, [
+        { retryFailed: true },
+        { retryFailed: false },
     ]);
 });
 

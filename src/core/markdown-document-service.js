@@ -67,7 +67,11 @@ export class MarkdownDocumentService {
             result.assets = extracted.assets;
             result.assetBasePath = extracted.assetBasePath || '';
         }
-        const annotationResult = await this.resolveAnnotations(itemID, markdown);
+        const annotationResult = await this.resolveAnnotations(
+            itemID,
+            markdown,
+            { retryLocalAnnotations: true },
+        );
         result.warnings = [
             ...result.warnings,
             ...annotationResult.warnings,
@@ -78,7 +82,9 @@ export class MarkdownDocumentService {
         return result;
     }
 
-    async resolveAnnotations(itemID, markdown) {
+    async resolveAnnotations(itemID, markdown, {
+        retryLocalAnnotations = false,
+    } = {}) {
         const overlays = [];
         const warnings = [];
         if (this.annotationOverlay) {
@@ -93,7 +99,8 @@ export class MarkdownDocumentService {
         if (this.localAnnotations) {
             const localResult = await this.localAnnotations.resolve(
                 itemID,
-                markdown
+                markdown,
+                { retryFailed: retryLocalAnnotations },
             );
             const { warning, ...localOverlay } = localResult;
             overlays.push(localOverlay);

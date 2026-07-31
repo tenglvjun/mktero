@@ -242,6 +242,38 @@ test('keeps a local highlight when PDF synchronization fails', async () => {
     assert.deepEqual(errors, ['PDF text not found']);
 });
 
+test('retries a failed PDF synchronization when explicitly requested', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'The sound of stress recovery',
+        comment: 'Paper title',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 32 }],
+    };
+    const store = createMemoryStore([local]);
+    let createCalls = 0;
+    const errors = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            createCalls++;
+            if (createCalls === 1) throw new Error('PDF reader unavailable');
+            return { id: 'ZOTERO001', source: 'zotero' };
+        },
+        onError: error => errors.push(error.message),
+    });
+    const markdown = 'The The sound of stress recovery continues.';
+
+    await annotations.resolve(42, markdown);
+    await waitFor(() => errors.length === 1);
+    await annotations.resolve(42, markdown, { retryFailed: true });
+
+    await waitFor(() => createCalls === 2);
+    await waitFor(async () => (await store.get(42)).length === 0);
+});
+
 test('serializes concurrent migration of the same local highlight', async () => {
     const local = {
         id: 'mktero-local-1',
