@@ -46,9 +46,9 @@ export function createZoteroAnnotationActions(zotero, {
             if (!attachment?.isPDFAttachment?.()) {
                 throw new Error('PDF attachment is unavailable');
             }
-            const located = validateLocatedText(
-                await textLocator(itemID, text)
-            );
+            const locatedText = await textLocator(itemID, text);
+            if (!locatedText) return { deferred: true };
+            const located = validateLocatedText(locatedText);
             const json = {
                 type: 'highlight',
                 text: located.text,
@@ -273,28 +273,14 @@ function createZoteroPDFTextLocator(zotero, {
         const timeout = Number.isFinite(searchTimeout)
             ? Math.max(1_000, Math.min(searchTimeout, 60_000))
             : 15_000;
-        const readerContext = await readerForItem(zotero, itemID, {
+        const reader = readerForItem(zotero, itemID);
+        if (!reader) return null;
+        return locateTextInReader(reader, text, {
+            cloneIntoReader,
             delay,
             now,
             timeout,
         });
-        const { reader } = readerContext;
-        try {
-            return await locateTextInReader(reader, text, {
-                cloneIntoReader,
-                delay,
-                now,
-                timeout,
-            });
-        }
-        finally {
-            try {
-                readerContext.close?.();
-            }
-            catch (error) {
-                zotero.logError?.(error);
-            }
-        }
     };
 }
 
@@ -533,44 +519,10 @@ function createNormalizedPDFSearchTracker(text) {
     };
 }
 
-async function readerForItem(zotero, itemID, waitOptions) {
-    const findReader = () => zotero.Reader?._readers?.find(reader => (
+function readerForItem(zotero, itemID) {
+    return zotero.Reader?._readers?.find(reader => (
         reader?.itemID === itemID
-    ));
-    let reader = findReader();
-    let temporaryReader = null;
-    if (!reader && typeof zotero.Reader?.open === 'function') {
-        const opening = zotero.Reader.open(itemID, null, {
-            openInBackground: true,
-        });
-        try {
-            temporaryReader = await waitForReaderPromise(
-                opening,
-                waitOptions
-            );
-        }
-        catch (error) {
-            Promise.resolve(opening)
-                .then(lateReader => lateReader?.close?.())
-                .catch(lateError => zotero.logError?.(lateError));
-            throw error;
-        }
-        reader = temporaryReader;
-    }
-    reader ||= await waitForValue(findReader, waitOptions);
-    if (!reader) {
-        throw annotationSyncError(
-            'MKTERO_PDF_READER_UNAVAILABLE',
-            'Zotero PDF reader is unavailable'
-        );
-    }
-    return {
-        reader,
-        close: temporaryReader === reader
-            && typeof reader.close === 'function'
-            ? () => reader.close()
-            : null,
-    };
+    )) || null;
 }
 
 async function waitForPDFTextResult(view, text, {
@@ -690,16 +642,6 @@ function pdfSearchCompleted(view, text) {
         && !controller._findTimeout
         && Number.isInteger(pending?.size)
         && pending.size === 0;
-}
-
-async function waitForValue(read, { delay, now, timeout }) {
-    const startedAt = now();
-    while (now() - startedAt <= timeout) {
-        const value = read();
-        if (value) return value;
-        await delay(25);
-    }
-    return null;
 }
 
 async function waitForReaderPromise(promise, { delay, now, timeout }) {

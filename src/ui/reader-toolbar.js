@@ -11,6 +11,7 @@ export function registerReaderToolbar({
     zotero,
     pluginID,
     onOpen,
+    onReaderReady = null,
     onError = defaultErrorHandler,
     translate = translateEnglish,
 }) {
@@ -37,6 +38,11 @@ export function registerReaderToolbar({
             Promise.resolve(onOpen(reader)).catch(error => onError(error, reader));
         });
         append(button);
+        if (typeof onReaderReady === 'function') {
+            Promise.resolve()
+                .then(() => onReaderReady(reader))
+                .catch(error => onError(error, reader));
+        }
     };
 
     zotero.Reader.registerEventListener('renderToolbar', handler, pluginID);

@@ -177,7 +177,7 @@ test('locates Markdown text through an open Zotero PDF reader', async () => {
     );
 });
 
-test('activates a background PDF reader before waiting for initialization', async () => {
+test('activates an inactive PDF reader before waiting for initialization', async () => {
     const text = 'Selected paper title';
     const view = createSearchView({
         total: 1,
@@ -254,18 +254,16 @@ test('uses a ready PDF view when the internal reader promise remains pending', a
     assert.equal(created.id, 'SYNC0001');
 });
 
-test('opens a background PDF reader when none is already open', async () => {
+test('defers PDF synchronization when no PDF reader is already open', async () => {
     const view = createSearchView({
         total: 1,
         annotation: locatedAnnotation('Selected paper title'),
     });
     const reader = createReader(view);
-    let closeCalls = 0;
-    reader.close = () => closeCalls++;
     const zotero = createZoteroForAnnotationCreation({
         view,
-        async saveFromJSON(_attachment, json) {
-            return { key: json.key };
+        async saveFromJSON() {
+            assert.fail('A deferred annotation must not be saved');
         },
     });
     zotero.Reader._readers = [];
@@ -276,19 +274,14 @@ test('opens a background PDF reader when none is already open', async () => {
     };
     const actions = createZoteroAnnotationActions(zotero);
 
-    const created = await actions.createFromText(42, {
+    const result = await actions.createFromText(42, {
         text: 'Selected paper title',
         comment: '',
         color: '#ffd400',
     });
 
-    assert.equal(created.id, 'SYNC0001');
-    assert.deepEqual(openCalls, [[
-        42,
-        null,
-        { openInBackground: true },
-    ]]);
-    assert.equal(closeCalls, 1);
+    assert.deepEqual(result, { deferred: true });
+    assert.deepEqual(openCalls, []);
 });
 
 test('reports when Markdown text cannot be found uniquely in the PDF', async () => {
@@ -765,16 +758,8 @@ test('does not wait forever for PDF reader initialization', async () => {
     assert.equal(outcome, 'MKTERO_PDF_READER_UNAVAILABLE');
 });
 
-test('closes a background PDF reader that opens after its timeout', async () => {
-    let clock = 0;
-    let resolveOpening;
-    const opening = new Promise(resolve => {
-        resolveOpening = resolve;
-    });
+test('does not wait or open a PDF reader solely for synchronization', async () => {
     const view = createSearchView({ total: 0 });
-    const lateReader = createReader(view);
-    let closeCalls = 0;
-    lateReader.close = () => closeCalls++;
     const zotero = createZoteroForAnnotationCreation({
         view,
         async saveFromJSON() {
@@ -782,28 +767,31 @@ test('closes a background PDF reader that opens after its timeout', async () => 
         },
     });
     zotero.Reader._readers = [];
-    zotero.Reader.open = () => opening;
+    let openCalls = 0;
+    zotero.Reader.open = () => {
+        openCalls++;
+        return new Promise(() => {});
+    };
+    let delayCalls = 0;
     const actions = createZoteroAnnotationActions(zotero, {
-        now: () => clock,
         delay: async () => {
-            clock += 250;
+            delayCalls++;
         },
         searchTimeout: 1_000,
     });
 
-    await assert.rejects(
+    const outcome = await Promise.race([
         actions.createFromText(42, {
             text: 'Selected paper title',
             comment: '',
             color: '#ffd400',
         }),
-        error => error.code === 'MKTERO_PDF_READER_UNAVAILABLE'
-    );
-    resolveOpening(lateReader);
-    await Promise.resolve();
-    await Promise.resolve();
+        new Promise(resolve => setImmediate(() => resolve('stalled'))),
+    ]);
 
-    assert.equal(closeCalls, 1);
+    assert.deepEqual(outcome, { deferred: true });
+    assert.equal(openCalls, 0);
+    assert.equal(delayCalls, 0);
 });
 
 test('prefers an exact PDF text match over line-end hyphen recovery', async () => {

@@ -140,6 +140,14 @@ export class MarkdownLocalAnnotations {
         this.#clearSynchronizationFailure(itemID, targetID);
     }
 
+    async synchronizePending(itemID) {
+        const annotationIDs = await this.#withOperation(itemID, async () => (
+            normalizeCollection(await this.store.get(itemID))
+                .map(annotation => annotation.id)
+        ));
+        this.#requestSynchronization(itemID, annotationIDs);
+    }
+
     dispose() {
         this.active = false;
         this.synchronizationRequests.clear();
@@ -201,6 +209,7 @@ export class MarkdownLocalAnnotations {
                 color: annotation.color,
                 ranges: annotation.ranges,
             });
+            if (saved?.deferred) return;
             const status = await this.#withOperation(itemID, async () => {
                 const current = normalizeCollection(
                     await this.store.get(itemID)

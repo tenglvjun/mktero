@@ -114,6 +114,84 @@ test('persists a Markdown highlight without waiting for PDF synchronization', as
     annotations.dispose();
 });
 
+test('keeps a deferred Markdown highlight without reporting a failure', async () => {
+    const store = createMemoryStore();
+    const errors = [];
+    const synchronizationChanges = [];
+    let createCalls = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        createPDFAnnotation: async () => {
+            createCalls++;
+            return { deferred: true };
+        },
+        onError: error => errors.push(error.message),
+        onSynchronizationChange: itemID => {
+            synchronizationChanges.push(itemID);
+        },
+    });
+    const draft = {
+        text: 'The sound of stress recovery',
+        comment: 'Paper title',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 28 }],
+    };
+
+    const created = await annotations.create(42, draft);
+    await waitFor(() => createCalls === 1);
+    const resolved = await annotations.resolve(
+        42,
+        'The sound of stress recovery continues.'
+    );
+    await waitFor(() => createCalls === 2);
+
+    assert.equal(created.id, 'mktero-local-1');
+    assert.deepEqual(await store.get(42), [{
+        ...draft,
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+    }]);
+    assert.equal(resolved.warning, undefined);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(synchronizationChanges, []);
+});
+
+test('synchronizes deferred Markdown highlights when the PDF is opened later', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'The sound of stress recovery',
+        comment: 'Paper title',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 28 }],
+    };
+    const store = createMemoryStore([local]);
+    let readerOpen = false;
+    let createCalls = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            createCalls++;
+            return readerOpen
+                ? { id: 'ZOTERO001', source: 'zotero' }
+                : { deferred: true };
+        },
+    });
+
+    await annotations.synchronizePending(42);
+    await waitFor(() => createCalls === 1);
+    assert.deepEqual(await store.get(42), [local]);
+
+    readerOpen = true;
+    await annotations.synchronizePending(42);
+
+    await waitFor(() => createCalls === 2);
+    await waitFor(async () => (await store.get(42)).length === 0);
+});
+
 test('deletes a newly synchronized PDF highlight after its local draft was deleted', async () => {
     let finishSynchronization;
     let synchronizationStarted = false;

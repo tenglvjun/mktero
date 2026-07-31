@@ -416,6 +416,9 @@ function registerReaderToolbarAction() {
         zotero: Zotero,
         pluginID: runtime.id,
         onOpen: openReaderAsMarkdown,
+        onReaderReady: reader => (
+            runtime.localAnnotations?.synchronizePending(reader.itemID)
+        ),
         onError: handleOpenError,
         translate: runtimeTranslate,
     });
