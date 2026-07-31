@@ -432,7 +432,56 @@ main {
     min-height: 0;
 }
 
-.markdown-editor { flex: 1; }
+.markdown-editor {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+}
+
+.markdown-reader-actions {
+    display: flex;
+    min-height: 42px;
+    padding: 5px 12px;
+    flex: 0 0 42px;
+    align-items: center;
+    justify-content: flex-end;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 68%, var(--background));
+}
+
+.markdown-reader-action {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    place-items: center;
+}
+
+.markdown-reader-action:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    color: var(--accent);
+}
+
+.markdown-reader-action:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.markdown-reader-action:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.markdown-reader-action.is-reparsing .markdown-reader-action-icon {
+    animation: mktero-spin 0.85s linear infinite;
+}
 
 .markdown-editor-host {
     position: relative;
@@ -440,6 +489,7 @@ main {
     height: 100%;
     min-width: 0;
     min-height: 0;
+    flex: 1;
 }
 
 .mktero-image-preview {

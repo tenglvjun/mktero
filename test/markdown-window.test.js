@@ -166,6 +166,56 @@ test('updates Markdown and PDF annotations as one editor document', () => {
     view.destroy();
 });
 
+test('reparses the current PDF from an accessible icon action', async () => {
+    let reparseCalls = 0;
+    let finishReparse;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onReparse: () => {
+            reparseCalls += 1;
+            return new Promise(resolve => {
+                finishReparse = resolve;
+            });
+        },
+    });
+    const { view, shadow } = createView(model);
+
+    const reparse = shadow.querySelector('#mktero-reparse');
+    const hint = 'Reparse PDF. This uploads the PDF again and may consume '
+        + 'conversion service quota.';
+    assert.equal(reparse?.localName, 'button');
+    assert.equal(reparse?.getAttribute('aria-label'), hint);
+    assert.equal(reparse?.getAttribute('title'), hint);
+    assert.equal(shadow.querySelector('.markdown-reader-actions').hidden, false);
+    assert.equal(
+        reparse?.querySelector('svg')?.getAttribute('data-lucide'),
+        'refresh-cw'
+    );
+    assert.equal(reparse?.disabled, false);
+
+    reparse.click();
+    assert.equal(reparseCalls, 1);
+    assert.equal(reparse.disabled, true);
+    reparse.click();
+    assert.equal(reparseCalls, 1);
+
+    view.render({
+        ...model,
+        status: 'loading',
+        progress: 20,
+        preserveContent: true,
+    });
+    assert.equal(reparse.disabled, true);
+    assert.equal(reparse.getAttribute('aria-busy'), 'true');
+    finishReparse();
+    await Promise.resolve();
+
+    view.destroy();
+});
+
 test('updates the visible annotation after Zotero saves a new color', async () => {
     const updates = [];
     const saved = [];
@@ -771,7 +821,8 @@ test('mounts the Markdown UI in an isolated inline shadow root', () => {
     assert.equal(shadow.querySelector('#mktero-status'), null);
     assert.equal(shadow.querySelector('#mktero-save-status'), null);
     assert.equal(shadow.querySelector('#mktero-title'), null);
-    assert.equal(shadow.querySelector('#mktero-reparse'), null);
+    assert.ok(shadow.querySelector('#mktero-reparse'));
+    assert.equal(shadow.querySelector('.markdown-reader-actions').hidden, true);
     assert.equal(shadow.querySelector('#mktero-copy'), null);
     assert.equal(shadow.querySelector('#mktero-show-preview'), null);
     assert.equal(shadow.querySelector('#mktero-show-source'), null);
@@ -874,6 +925,10 @@ test('localizes the Markdown viewer chrome from the Zotero locale', () => {
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
     assert.equal(shadow.querySelector('.markdown-notes-title').textContent, '笔记');
     assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, '暂无笔记');
+    assert.equal(
+        shadow.querySelector('#mktero-reparse').getAttribute('title'),
+        '重新解析 PDF。这会再次上传 PDF，并可能消耗转换服务额度。'
+    );
 
     view.destroy();
 });

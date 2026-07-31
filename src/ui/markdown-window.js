@@ -181,6 +181,7 @@ class MarkdownTabView {
         elements.warning.hidden = !model.warnings?.length;
         elements.warning.textContent = model.warnings?.join(' ') || '';
         this.syncContentVisibility(showContent);
+        this.syncReparseAction(model, loadingView);
 
         if (loadingView.visible) {
             elements.loadingTitle.textContent = loadingView.title;
@@ -453,11 +454,12 @@ class MarkdownTabView {
             id: 'mktero-editor',
             class: 'markdown-editor-host',
         });
+        const documentActions = this.createDocumentActions();
         const editorSection = this.createElement('section', {
             class: 'markdown-editor',
             'aria-label': this.t('viewer.readOnly'),
         });
-        editorSection.appendChild(editorHost);
+        appendChildren(editorSection, documentActions.toolbar, editorHost);
         const outlineTitle = this.createElement(
             'h2',
             { class: 'markdown-outline-title' },
@@ -541,8 +543,35 @@ class MarkdownTabView {
             notesResizer: notesControls.resizer,
             notesToggle: notesControls.toggle,
             editorHost,
+            editorActions: documentActions.toolbar,
             editorSection,
+            reparse: documentActions.reparse,
         };
+    }
+
+    createDocumentActions() {
+        const reparse = this.createElement('button', {
+            id: 'mktero-reparse',
+            class: 'markdown-reader-action',
+            type: 'button',
+            'aria-label': this.t('viewer.reparse'),
+            title: this.t('viewer.reparse'),
+        });
+        reparse.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.refreshCw,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        const editorActions = this.createElement('div', {
+            class: 'markdown-reader-actions',
+            role: 'toolbar',
+            'aria-label': this.t('viewer.documentActions'),
+        });
+        editorActions.appendChild(reparse);
+        return { toolbar: editorActions, reparse };
     }
 
     createSidePanelEdge(name) {
@@ -588,6 +617,25 @@ class MarkdownTabView {
     }
 
     bindActions() {
+        this.listen(this.elements.reparse, 'click', () => {
+            if (this.elements.reparse.disabled
+                || typeof this.model.onReparse !== 'function') {
+                return;
+            }
+            this.elements.reparse.disabled = true;
+            try {
+                Promise.resolve(this.model.onReparse())
+                    .catch(error => this.zotero?.logError?.(error))
+                    .finally(() => this.syncReparseAction(
+                        this.model,
+                        createLoadingPresentation(this.model, this.t)
+                    ));
+            }
+            catch (error) {
+                this.zotero?.logError?.(error);
+                this.elements.reparse.disabled = false;
+            }
+        });
         this.listen(this.elements.outlineList, 'click', event => {
             const button = event.target?.closest?.('.markdown-outline-link');
             if (!button || !this.elements.outlineList.contains(button)) return;
@@ -650,6 +698,12 @@ class MarkdownTabView {
             'aria-label',
             this.t('viewer.readOnly')
         );
+        this.elements.editorActions.setAttribute(
+            'aria-label',
+            this.t('viewer.documentActions')
+        );
+        this.elements.reparse.setAttribute('aria-label', this.t('viewer.reparse'));
+        this.elements.reparse.setAttribute('title', this.t('viewer.reparse'));
         this.elements.outline.setAttribute('aria-label', this.t('viewer.outline'));
         this.elements.outlineTitle.textContent = this.t('viewer.outlineTitle');
         this.elements.outlineList.querySelector('.markdown-outline-empty')
@@ -660,6 +714,15 @@ class MarkdownTabView {
             ?.replaceChildren(this.t('viewer.notesEmpty'));
         this.syncSidePanelControlLabels('outline');
         this.syncSidePanelControlLabels('notes');
+    }
+
+    syncReparseAction(model, loadingView) {
+        const available = typeof model.onReparse === 'function';
+        const reparsing = loadingView.visible && loadingView.preserveContent;
+        this.elements.editorActions.hidden = !available;
+        this.elements.reparse.disabled = !available || loadingView.visible;
+        this.elements.reparse.setAttribute('aria-busy', String(reparsing));
+        this.elements.reparse.classList.toggle('is-reparsing', reparsing);
     }
 
     syncSidePanelControlLabels(name) {

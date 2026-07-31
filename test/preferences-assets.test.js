@@ -39,7 +39,7 @@ test('ships MinerU token, cache preferences, and localized Markdown UI assets', 
     assert.doesNotMatch(bootstrap, /observeMkteroLanguagePreference/);
     assert.match(markdownView, /createInlineMarkdownEditor/);
     assert.doesNotMatch(markdownView, /'mktero-show-source'/);
-    assert.doesNotMatch(markdownView, /'mktero-reparse'/);
+    assert.match(markdownView, /'mktero-reparse'/);
     assert.match(markdownView, /__MKTERO_MARKDOWN_STYLES__/);
     assert.doesNotMatch(markdownView, /STYLESHEET_CACHE_KEY/);
     assert.match(markdownView, /error\.markdownStylesUnavailable/);
