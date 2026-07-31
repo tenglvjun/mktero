@@ -433,30 +433,30 @@ main {
 }
 
 .markdown-editor {
+    position: relative;
     display: flex;
     flex: 1;
     flex-direction: column;
 }
 
 .markdown-reader-actions {
+    position: absolute;
+    z-index: 4;
+    right: 16px;
+    bottom: 16px;
     display: flex;
-    min-height: 42px;
-    padding: 5px 12px;
-    flex: 0 0 42px;
     align-items: center;
-    justify-content: flex-end;
-    border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface) 68%, var(--background));
 }
 
 .markdown-reader-action {
     display: grid;
-    width: 30px;
-    height: 30px;
+    width: 40px;
+    height: 40px;
     padding: 0;
-    border: 1px solid transparent;
-    border-radius: 5px;
-    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 3px 12px rgb(0 0 0 / 18%);
     color: var(--muted);
     cursor: pointer;
     font: inherit;
@@ -464,14 +464,14 @@ main {
 }
 
 .markdown-reader-action:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--accent) 24%, transparent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
     color: var(--accent);
 }
 
 .markdown-reader-action:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-    outline-offset: -2px;
+    outline-offset: 2px;
 }
 
 .markdown-reader-action:disabled {

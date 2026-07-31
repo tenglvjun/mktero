@@ -213,15 +213,24 @@ test('styles a responsive PDF notes panel beside the editor', () => {
     assert.match(comment, /overflow-wrap:\s*anywhere/);
 });
 
-test('keeps the document action toolbar compact and stable', () => {
+test('anchors the document action in the Markdown lower-right corner', () => {
+    const editor = ruleBody('.markdown-editor');
+    assert.match(editor, /position:\s*relative/);
+
     const actions = ruleBody('.markdown-reader-actions');
-    assert.match(actions, /min-height:\s*42px/);
-    assert.match(actions, /flex:\s*0 0 42px/);
-    assert.match(actions, /justify-content:\s*flex-end/);
+    assert.match(actions, /position:\s*absolute/);
+    assert.match(actions, /right:\s*16px/);
+    assert.match(actions, /bottom:\s*16px/);
+    assert.match(actions, /z-index:\s*4/);
+    assert.doesNotMatch(actions, /min-height/);
+    assert.doesNotMatch(actions, /border-bottom/);
 
     const action = ruleBody('.markdown-reader-action');
-    assert.match(action, /width:\s*30px/);
-    assert.match(action, /height:\s*30px/);
+    assert.match(action, /width:\s*40px/);
+    assert.match(action, /height:\s*40px/);
+    assert.match(action, /border-radius:\s*50%/);
+    assert.match(action, /background:\s*var\(--surface\)/);
+    assert.match(action, /box-shadow:/);
     assert.match(action, /place-items:\s*center/);
 
     const reparsing = ruleBody(
