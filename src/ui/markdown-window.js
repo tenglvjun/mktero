@@ -643,19 +643,24 @@ class MarkdownTabView {
             if (Number.isFinite(offset)) this.editor.scrollToOffset?.(offset);
         });
         this.listen(this.elements.notesList, 'click', event => {
+            const openPDF = event.target?.closest?.(
+                '.markdown-note-open-pdf'
+            );
+            if (openPDF && this.elements.notesList.contains(openPDF)) {
+                const annotationID = openPDF.getAttribute('data-annotation-id');
+                this.runNoteButtonAction(openPDF, () => (
+                    this.model.onOpenAnnotationInPDF(annotationID)
+                ));
+                return;
+            }
             const retry = event.target?.closest?.(
                 '.markdown-note-sync-retry'
             );
             if (retry && this.elements.notesList.contains(retry)) {
-                retry.disabled = true;
                 const annotationID = retry.getAttribute('data-annotation-id');
-                Promise.resolve(
+                this.runNoteButtonAction(retry, () => (
                     this.retryMarkdownAnnotationSynchronization(annotationID)
-                )
-                    .catch(error => this.zotero?.logError?.(error))
-                    .finally(() => {
-                        if (retry.parentNode) retry.disabled = false;
-                    });
+                ));
                 return;
             }
             const button = event.target?.closest?.('.markdown-note-link');
@@ -677,6 +682,16 @@ class MarkdownTabView {
             this.finishSidePanelResize('outline');
             this.finishSidePanelResize('notes');
         });
+    }
+
+    runNoteButtonAction(button, action) {
+        button.disabled = true;
+        Promise.resolve()
+            .then(action)
+            .catch(error => this.zotero?.logError?.(error))
+            .finally(() => {
+                if (button.parentNode) button.disabled = false;
+            });
     }
 
     bindSidePanelActions(name) {
@@ -937,7 +952,23 @@ class MarkdownTabView {
             class: 'markdown-note-item',
         });
         item.appendChild(button);
-        if (annotation.synchronization?.status === 'failed') {
+        if (!isMarkdownAnnotation(annotation)
+            && typeof this.model.onOpenAnnotationInPDF === 'function') {
+            const openPDF = this.createElement('button', {
+                class: 'markdown-note-open-pdf',
+                type: 'button',
+                'data-annotation-id': String(annotation.id || ''),
+                'aria-label': this.t('annotation.openInPDF'),
+                title: this.t('annotation.openInPDF'),
+            });
+            openPDF.appendChild(createLucideIcon(
+                this.document,
+                LUCIDE_ICONS.externalLink,
+                { className: 'markdown-note-open-pdf-icon', size: 15 }
+            ));
+            item.appendChild(openPDF);
+        }
+        else if (annotation.synchronization?.status === 'failed') {
             const retry = this.createElement('button', {
                 class: 'markdown-note-sync-retry',
                 type: 'button',

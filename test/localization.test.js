@@ -57,6 +57,8 @@ test('localizes Markdown annotation synchronization status', () => {
         'Multiple PDF matches'
     );
     assert.equal(chinese.t('annotation.syncPending'), '等待同步到 Zotero');
+    assert.equal(english.t('annotation.openInPDF'), 'View in PDF');
+    assert.equal(chinese.t('annotation.openInPDF'), '在 PDF 中查看');
     assert.equal(
         chinese.t('annotation.syncFailed.textAmbiguous'),
         'PDF 中存在多处匹配'

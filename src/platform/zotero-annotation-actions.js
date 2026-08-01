@@ -30,6 +30,20 @@ export function createZoteroAnnotationActions(zotero, {
         searchTimeout,
     });
     return {
+        async openInPDF(itemID, annotationID) {
+            const attachment = zotero.Items.get(itemID);
+            if (!attachment?.isPDFAttachment?.()) {
+                throw new Error('PDF attachment is unavailable');
+            }
+            const key = String(annotationID || '');
+            if (!key || key.length > 128) {
+                throw new Error('PDF annotation is unavailable');
+            }
+            if (typeof zotero.Reader?.open !== 'function') {
+                throw new Error('PDF reader is unavailable');
+            }
+            return zotero.Reader.open(itemID, { annotationID: key });
+        },
         async createFromText(itemID, draft, context = null) {
             const reader = context?.reader || null;
             const text = String(draft?.text || '');

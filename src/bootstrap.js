@@ -233,6 +233,9 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         onDeleteAnnotation: annotationID => (
             runAnnotationAction('deleteAnnotation', itemID, annotationID)
         ),
+        onOpenAnnotationInPDF: annotationID => (
+            runAnnotationAction('openInPDF', itemID, annotationID)
+        ),
         onCreateMarkdownAnnotation: draft => (
             runMarkdownAnnotationAction('create', itemID, draft)
         ),

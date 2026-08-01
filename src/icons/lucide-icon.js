@@ -2,6 +2,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Clock,
+    ExternalLink,
     FileText,
     LoaderCircle,
     MessageSquarePlus,
@@ -39,6 +40,10 @@ export const LUCIDE_ICONS = Object.freeze({
     clock: Object.freeze({
         name: 'clock',
         nodes: Clock,
+    }),
+    externalLink: Object.freeze({
+        name: 'external-link',
+        nodes: ExternalLink,
     }),
     fileText: Object.freeze({
         name: 'file-text',

@@ -338,7 +338,8 @@ main {
 
 .markdown-note-sync-label { overflow-wrap: anywhere; }
 
-.markdown-note-sync-retry {
+.markdown-note-sync-retry,
+.markdown-note-open-pdf {
     display: inline-grid;
     width: 28px;
     height: 28px;
@@ -347,14 +348,23 @@ main {
     padding: 0;
     border: 1px solid transparent;
     border-radius: 5px;
-    color: var(--warning);
     background: transparent;
     cursor: pointer;
 }
 
+.markdown-note-sync-retry { color: var(--warning); }
+
+.markdown-note-open-pdf { color: var(--muted); }
+
 .markdown-note-sync-retry:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--warning) 30%, transparent);
     background: color-mix(in srgb, var(--warning) 9%, transparent);
+}
+
+.markdown-note-open-pdf:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 
 .markdown-note-sync-retry:focus-visible {
@@ -362,7 +372,13 @@ main {
     outline-offset: -2px;
 }
 
-.markdown-note-sync-retry:disabled {
+.markdown-note-open-pdf:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.markdown-note-sync-retry:disabled,
+.markdown-note-open-pdf:disabled {
     cursor: default;
     opacity: 0.5;
 }

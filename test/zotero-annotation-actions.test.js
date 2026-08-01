@@ -108,6 +108,59 @@ test('creates a Zotero PDF highlight from located Markdown text', async () => {
     assert.equal(committedQueue, queue);
 });
 
+test('opens a Zotero PDF reader at the selected annotation', async () => {
+    const attachment = {
+        id: 42,
+        isPDFAttachment: () => true,
+    };
+    const opened = [];
+    const zotero = {
+        Items: {
+            get: id => id === 42 ? attachment : null,
+        },
+        Reader: {
+            async open(...args) {
+                opened.push(args);
+            },
+        },
+    };
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await actions.openInPDF(42, 'HIGH0001');
+
+    assert.deepEqual(opened, [[42, { annotationID: 'HIGH0001' }]]);
+});
+
+test('opens annotations from different windows through the shared reader manager', async () => {
+    const attachments = new Map([
+        [42, { isPDFAttachment: () => true }],
+        [84, { isPDFAttachment: () => true }],
+    ]);
+    const opened = [];
+    const zotero = {
+        Items: {
+            get: id => attachments.get(id) || null,
+        },
+        Reader: {
+            async open(itemID, location) {
+                opened.push({ itemID, location });
+            },
+        },
+    };
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await actions.openInPDF(42, 'WINDOW01');
+    await actions.openInPDF(84, 'WINDOW02');
+
+    assert.deepEqual(opened, [{
+        itemID: 42,
+        location: { annotationID: 'WINDOW01' },
+    }, {
+        itemID: 84,
+        location: { annotationID: 'WINDOW02' },
+    }]);
+});
+
 test('locates Markdown text through an open Zotero PDF reader', async () => {
     const previousFindState = {
         active: false,

@@ -235,22 +235,26 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
         onChangeAnnotationColor: () => calls.push('stale-color'),
         onUpdateAnnotationComment: () => calls.push('stale-comment'),
         onDeleteAnnotation: () => calls.push('stale-delete'),
+        onOpenAnnotationInPDF: () => calls.push('stale-open'),
     });
     const second = presenter.open(42, {
         onChangeAnnotationColor: (id, color) => calls.push({ id, color }),
         onUpdateAnnotationComment: (id, comment) => calls.push({ id, comment }),
         onDeleteAnnotation: id => calls.push({ deleted: id }),
+        onOpenAnnotationInPDF: id => calls.push({ opened: id }),
     });
 
     await second.model.onChangeAnnotationColor('ANN00001', '#ff6666');
     await second.model.onUpdateAnnotationComment('ANN00001', 'Review this');
     await second.model.onDeleteAnnotation('ANN00001');
+    await second.model.onOpenAnnotationInPDF('ANN00001');
 
     assert.equal(first.model, second.model);
     assert.deepEqual(calls, [
         { id: 'ANN00001', color: '#ff6666' },
         { id: 'ANN00001', comment: 'Review this' },
         { deleted: 'ANN00001' },
+        { opened: 'ANN00001' },
     ]);
 });
 

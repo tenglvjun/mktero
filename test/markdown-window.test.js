@@ -739,6 +739,80 @@ test('shows PDF notes safely and jumps matched notes to Markdown', () => {
     }
 });
 
+test('opens Zotero annotations in PDF from the notes panel', async () => {
+    const opened = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Matched PDF note and pending local note.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Matched PDF note',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '3',
+                pageIndex: 2,
+                sortIndex: '00001',
+                ranges: [{ from: 0, to: 16 }],
+            }, {
+                id: 'mktero-pending-1',
+                source: 'markdown',
+                type: 'highlight',
+                text: 'pending local note',
+                comment: '',
+                color: '#2ea8e5',
+                ranges: [{ from: 21, to: 39 }],
+                synchronization: { status: 'pending' },
+            }],
+            unmatched: [{
+                id: 'UNDER001',
+                type: 'underline',
+                text: 'Missing PDF note',
+                comment: '',
+                color: '#2ea8e5',
+                pageLabel: '7',
+                pageIndex: 6,
+                sortIndex: '00002',
+                reason: 'not-found',
+            }],
+        },
+        sourceKind: 'markdown',
+        async onOpenAnnotationInPDF(annotationID) {
+            opened.push(annotationID);
+        },
+    });
+    const { document, view, shadow } = createView(model);
+
+    try {
+        const buttons = [
+            ...shadow.querySelectorAll('.markdown-note-open-pdf'),
+        ];
+        assert.equal(buttons.length, 2);
+        assert.deepEqual(
+            buttons.map(button => button.getAttribute('data-annotation-id')),
+            ['HIGH0001', 'UNDER001']
+        );
+        assert.equal(buttons[0].getAttribute('aria-label'), 'View in PDF');
+        assert.equal(
+            buttons[0].querySelector('svg')?.getAttribute('data-lucide'),
+            'external-link'
+        );
+
+        buttons[1].dispatchEvent(new document.defaultView.Event('click', {
+            bubbles: true,
+        }));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        assert.deepEqual(opened, ['UNDER001']);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('shows local annotation synchronization status and retries failures', async () => {
     const retryCalls = [];
     const model = createModel({

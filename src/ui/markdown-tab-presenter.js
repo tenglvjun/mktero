@@ -33,6 +33,7 @@ export class MarkdownTabPresenter {
         onChangeAnnotationColor,
         onUpdateAnnotationComment,
         onDeleteAnnotation,
+        onOpenAnnotationInPDF,
         onCreateMarkdownAnnotation,
         onUpdateMarkdownAnnotation,
         onDeleteMarkdownAnnotation,
@@ -59,6 +60,9 @@ export class MarkdownTabPresenter {
             }
             if (onDeleteAnnotation) {
                 existing.model.onDeleteAnnotation = onDeleteAnnotation;
+            }
+            if (onOpenAnnotationInPDF) {
+                existing.model.onOpenAnnotationInPDF = onOpenAnnotationInPDF;
             }
             if (onCreateMarkdownAnnotation) {
                 existing.model.onCreateMarkdownAnnotation
@@ -87,6 +91,7 @@ export class MarkdownTabPresenter {
                 onChangeAnnotationColor,
                 onUpdateAnnotationComment,
                 onDeleteAnnotation,
+                onOpenAnnotationInPDF,
                 onCreateMarkdownAnnotation,
                 onUpdateMarkdownAnnotation,
                 onDeleteMarkdownAnnotation,
