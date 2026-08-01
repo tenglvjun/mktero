@@ -188,8 +188,8 @@ npm run build
 构建结果位于：
 
 - `build/package/`：未压缩插件目录
-- `build/mktero-0.2.2.xpi`：可安装插件包
-- `build/mktero-0.2.2.xpi.sha256`：只引用 XPI 文件名的 SHA-256 校验文件
+- `build/mktero-0.2.3.xpi`：可安装插件包
+- `build/mktero-0.2.3.xpi.sha256`：只引用 XPI 文件名的 SHA-256 校验文件
 - `build/updates.json`：与当前版本、下载地址和 XPI 哈希一致的 Zotero 更新清单
 
 XPI 中的文件顺序和时间戳固定；相同源码与依赖连续构建会得到相同的 XPI 哈希。
@@ -222,8 +222,8 @@ scripts/build.mjs  esbuild 与 XPI 打包脚本
 随后创建带 `v` 前缀、与清单版本完全一致的标签：
 
 ```bash
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.3
+git push origin v0.2.3
 ```
 
 标签推送后，[Release 工作流](./.github/workflows/release.yml)会自动执行语法检查、完整测试
