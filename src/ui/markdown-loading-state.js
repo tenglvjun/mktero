@@ -9,18 +9,25 @@ export function createLoadingPresentation(model = {}, translate = translateEngli
 
     const progress = normalizeConversionProgress(model.progress);
     const preserveContent = Boolean(model.preserveContent);
+    const resumingTask = Boolean(model.resumingTask);
     return {
         visible: true,
         preserveContent,
         progress,
         progressLabel: `${progress}%`,
-        title: translate(preserveContent
-            ? 'loading.reparsingTitle'
-            : 'loading.convertingTitle'),
-        detail: progressDetail(progress, translate),
-        hint: preserveContent
-            ? translate('loading.reparseHint')
-            : translate('loading.defaultHint'),
+        title: translate(resumingTask
+            ? 'loading.resumingTitle'
+            : preserveContent
+                ? 'loading.reparsingTitle'
+                : 'loading.convertingTitle'),
+        detail: resumingTask && progress < CONVERSION_PROGRESS.DOWNLOADING
+            ? translate('loading.resuming')
+            : progressDetail(progress, translate),
+        hint: translate(resumingTask
+            ? 'loading.resumeHint'
+            : preserveContent
+                ? 'loading.reparseHint'
+                : 'loading.defaultHint'),
     };
 }
 

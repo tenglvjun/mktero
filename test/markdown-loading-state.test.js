@@ -52,6 +52,28 @@ test('uses a compact loading presentation while reparsing existing Markdown', ()
     );
 });
 
+test('makes resumed conversion work visible without exposing task details', () => {
+    assert.deepEqual(createLoadingPresentation({
+        status: 'loading',
+        progress: 42,
+        preserveContent: false,
+        resumingTask: true,
+    }), {
+        visible: true,
+        preserveContent: false,
+        progress: 42,
+        progressLabel: '42%',
+        title: 'Resuming PDF conversion…',
+        detail: 'Continuing the previous conversion task.',
+        hint: 'The PDF has already been uploaded and will not be uploaded again.',
+    });
+    assert.equal(createLoadingPresentation({
+        status: 'loading',
+        progress: 97,
+        resumingTask: true,
+    }).detail, 'Downloading and preparing the Markdown result.');
+});
+
 test('hides the loading presentation outside conversion and clamps invalid progress', () => {
     assert.equal(createLoadingPresentation({ status: 'ready' }).visible, false);
     assert.equal(
@@ -77,4 +99,13 @@ test('localizes conversion progress', () => {
         presentation.hint,
         '这可能需要几分钟。转换完成前请保持此标签页打开。'
     );
+
+    const resumed = createLoadingPresentation({
+        status: 'loading',
+        progress: 42,
+        resumingTask: true,
+    }, (key, variables) => translateMessage('zh-CN', key, variables));
+    assert.equal(resumed.title, '正在恢复上次 PDF 转换…');
+    assert.equal(resumed.detail, '正在继续查询上次的转换任务。');
+    assert.equal(resumed.hint, 'PDF 已完成上传，不会再次上传。');
 });

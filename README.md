@@ -19,7 +19,8 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
   `Read as Markdown with Mktero` 打开；普通条目会使用找到的第一个 PDF 附件。
 - 使用 MinerU VLM 模型执行 OCR，并启用公式和表格识别。
 - 在转换标签页中显示排队、上传、解析和下载进度；关闭标签页只会停止本地等待。PDF
-  已完成上传时，MinerU 任务可以继续执行，再次打开相同 PDF 会恢复查询而不会重复上传。
+  已完成上传时，MinerU 任务可以继续执行，再次打开相同 PDF 会显示正在恢复上次转换，
+  并明确提示不会重复上传。
 - 可通过 Markdown 内容区域右下角的刷新按钮重新解析当前 PDF；操作提示会明确说明 PDF
   将再次上传，并可能消耗转换服务额度。重新解析期间保留当前内容，新结果失败时继续显示
   原结果。
@@ -241,6 +242,7 @@ SHA-256 校验文件和 Zotero 更新清单。标签与 `manifest.json` 版本�
 - `MinerU parsing finished; downloading the result`：正在下载结果压缩包。
 - `completed from local cache; MinerU upload skipped`：已命中本地缓存，没有发起上传。
 - `completed from a resumed MinerU task`：恢复了此前已上传的任务，没有重复上传。
+- `resuming an uploaded MinerU task; PDF upload skipped`：正在继续查询此前已上传的任务。
 - `completed through a new MinerU task`：本次新建并上传了 MinerU 任务。
 
 日志不会记录 API Token、预签名上传地址、`batchID` 或 PDF 内容。若仍然失败，请优先检查

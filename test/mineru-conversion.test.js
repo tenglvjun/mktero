@@ -14,6 +14,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { MarkdownCache } from '../src/cache/markdown-cache.js';
+import { CONVERSION_PROGRESS } from '../src/core/conversion-progress.js';
 import {
     createTaskDataID,
     MinerUConversion,
@@ -46,6 +47,41 @@ test('rejects MinerU task creation without a secure random source', () => {
         () => createTaskDataID({}),
         /Secure random number generation is unavailable/
     );
+});
+
+test('marks progress while collecting a resumed MinerU task', async () => {
+    const progress = [];
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() {
+                throw new Error('the PDF must not be uploaded again');
+            },
+            async collect({ onProgress }) {
+                onProgress(42);
+                return { markdown: '# Resumed result' };
+            },
+        },
+        pendingTasks: createMemoryPendingTasks({
+            batchID: 'batch-resumed',
+            dataID: 'mktero-task-resumed',
+            uploadedAt: 1_700_000_000_000,
+        }),
+        now: () => 1_700_000_000_001,
+    });
+
+    const result = await conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        onProgress: (value, state) => progress.push([value, state]),
+    });
+
+    assert.equal(result.origin, 'resumed');
+    assert.deepEqual(progress, [
+        [CONVERSION_PROGRESS.PARSING, { resumingTask: true }],
+        [42, { resumingTask: true }],
+    ]);
 });
 
 test('resumes an uploaded MinerU task across conversion instances', async t => {

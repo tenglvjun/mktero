@@ -4,6 +4,7 @@ import { translateMessage } from '../src/i18n/localization.js';
 import {
     createConversionFailureChanges,
     createConversionLoadingChanges,
+    createConversionProgressChanges,
     createConversionReadyChanges,
     snapshotReadyResult,
 } from '../src/ui/markdown-tab-state.js';
@@ -39,7 +40,23 @@ test('keeps the current Markdown visible while a forced reparse is running', () 
     assert.equal(loading.markdown, '# Cached paper');
     assert.equal(loading.cacheHit, true);
     assert.equal(loading.cacheKey, 'a'.repeat(64));
+    assert.equal(loading.resumingTask, false);
     assert.deepEqual(loading.annotationOverlay, current.annotationOverlay);
+});
+
+test('tracks whether loading progress belongs to a resumed task', () => {
+    assert.deepEqual(createConversionProgressChanges(42, {
+        resumingTask: true,
+    }), {
+        status: 'loading',
+        progress: 42,
+        resumingTask: true,
+    });
+    assert.deepEqual(createConversionProgressChanges(5), {
+        status: 'loading',
+        progress: 5,
+        resumingTask: false,
+    });
 });
 
 test('restores the previous result with a warning when reparse fails', () => {
@@ -62,6 +79,7 @@ test('restores the previous result with a warning when reparse fails', () => {
     assert.equal(failure.markdown, '# Cached paper');
     assert.equal(failure.cacheHit, true);
     assert.equal(failure.preserveContent, false);
+    assert.equal(failure.resumingTask, false);
     assert.deepEqual(failure.warnings, [
         'Existing warning.',
         'Reparse failed: MinerU is unavailable',
@@ -81,11 +99,13 @@ test('uses the normal empty and error states without a previous result', () => {
         warnings: [],
         error: '',
         preserveContent: false,
+        resumingTask: false,
     });
     assert.deepEqual(createConversionFailureChanges('Conversion failed', null), {
         status: 'error',
         error: 'Conversion failed',
         preserveContent: false,
+        resumingTask: false,
     });
 });
 
@@ -105,6 +125,7 @@ test('clears figures when a successful reparse has no assets', () => {
         status: 'ready',
         progress: 100,
         preserveContent: false,
+        resumingTask: false,
     });
 });
 

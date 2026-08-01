@@ -53,6 +53,7 @@ import {
 import {
     createConversionFailureChanges,
     createConversionLoadingChanges,
+    createConversionProgressChanges,
     createConversionReadyChanges,
     snapshotReadyResult,
 } from './ui/markdown-tab-state.js';
@@ -271,20 +272,23 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         const result = await runtime.service.convert(itemID, {
             signal: controller.signal,
             forceRefresh,
-            onProgress(progress) {
+            onProgress(progress, state) {
                 const normalizedProgress = normalizeConversionProgress(progress);
                 if (normalizedProgress !== lastLoggedProgress) {
                     lastLoggedProgress = normalizedProgress;
                     Zotero.debug(
                         `Mktero: item ${itemID}: `
-                        + `${conversionProgressLog(normalizedProgress)} `
+                        + `${conversionProgressLog(
+                            normalizedProgress,
+                            Boolean(state?.resumingTask)
+                        )} `
                         + `(${normalizedProgress}%)`
                     );
                 }
-                runtime.presenter?.update(presentation, {
-                    status: 'loading',
-                    progress: normalizedProgress,
-                });
+                runtime.presenter?.update(
+                    presentation,
+                    createConversionProgressChanges(normalizedProgress, state)
+                );
             },
         });
         Zotero.debug(
@@ -355,12 +359,15 @@ async function runMarkdownAnnotationAction(action, ...args) {
     }
 }
 
-function conversionProgressLog(progress) {
+function conversionProgressLog(progress, resumingTask = false) {
     if (progress >= CONVERSION_PROGRESS.COMPLETE) {
         return 'conversion result available';
     }
     if (progress >= CONVERSION_PROGRESS.DOWNLOADING) {
         return 'MinerU parsing finished; downloading the result';
+    }
+    if (resumingTask) {
+        return 'resuming an uploaded MinerU task; PDF upload skipped';
     }
     if (progress >= CONVERSION_PROGRESS.PARSING) {
         return 'PDF upload completed; MinerU is parsing';

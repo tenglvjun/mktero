@@ -260,6 +260,7 @@ function createInitialModel(itemID, actions, translate) {
         cacheKey: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
         preserveContent: false,
+        resumingTask: false,
         warnings: [],
         error: '',
         ...actions,

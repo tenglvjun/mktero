@@ -72,15 +72,18 @@ export class MinerUConversion {
             onProgress(CONVERSION_PROGRESS.COMPLETE);
             return { result: selected.result, origin: 'cache', warnings };
         }
+        const reportProgress = selected.origin === 'resumed'
+            ? progress => onProgress(progress, { resumingTask: true })
+            : onProgress;
         if (selected.origin === 'resumed') {
-            onProgress(CONVERSION_PROGRESS.PARSING);
+            reportProgress(CONVERSION_PROGRESS.PARSING);
         }
         let result;
         try {
             result = await this.client.collect({
                 apiKey,
                 task: selected.task,
-                onProgress,
+                onProgress: reportProgress,
                 signal,
             });
         }

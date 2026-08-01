@@ -37,6 +37,7 @@ export function createConversionLoadingChanges(
             progress: 0,
             error: '',
             preserveContent: true,
+            resumingTask: false,
         };
     }
     return {
@@ -51,6 +52,15 @@ export function createConversionLoadingChanges(
         warnings: [],
         error: '',
         preserveContent: false,
+        resumingTask: false,
+    };
+}
+
+export function createConversionProgressChanges(progress, state = {}) {
+    return {
+        status: 'loading',
+        progress,
+        resumingTask: Boolean(state?.resumingTask),
     };
 }
 
@@ -64,6 +74,7 @@ export function createConversionReadyChanges(result) {
         status: 'ready',
         progress: 100,
         preserveContent: false,
+        resumingTask: false,
     };
 }
 
@@ -83,11 +94,13 @@ export function createConversionFailureChanges(
             ],
             error: '',
             preserveContent: false,
+            resumingTask: false,
         };
     }
     return {
         status: 'error',
         error: message,
         preserveContent: false,
+        resumingTask: false,
     };
 }
