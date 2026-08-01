@@ -7,6 +7,11 @@ Mktero 是一个适用于 Zotero 7、8 和 9 的 PDF 阅读插件。它通过 Mi
 PDF 转换为 Markdown，并在 Zotero 标签页中以只读、行内渲染的方式展示正文、
 公式、表格、图片和学术引用。
 
+![Mktero 在 Zotero 中转换、阅读和标注学术 PDF](./docs/assets/mktero-demo.gif)
+
+从 Zotero 文库打开 PDF，在重排后的 Markdown 中浏览引用、图表和标注，并随时返回
+原始 PDF 核对。
+
 ```text
 Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安全渲染 -> Mktero 标签页
                                                         -> 本地内容缓存
