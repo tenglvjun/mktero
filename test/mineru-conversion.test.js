@@ -14,10 +14,39 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { MarkdownCache } from '../src/cache/markdown-cache.js';
-import { MinerUConversion } from '../src/mineru/mineru-conversion.js';
+import {
+    createTaskDataID,
+    MinerUConversion,
+} from '../src/mineru/mineru-conversion.js';
 import { MinerUPendingTaskStore } from '../src/mineru/pending-task-store.js';
 
 const CONVERSION_KEY = 'a'.repeat(64);
+
+test('creates MinerU task data IDs with a secure UUID', () => {
+    const dataID = createTaskDataID({
+        randomUUID: () => '12345678-1234-4321-8765-123456789abc',
+    });
+
+    assert.equal(dataID, 'mktero-12345678-1234-4321-8765-123456789abc');
+});
+
+test('creates MinerU task data IDs with secure random bytes as a fallback', () => {
+    const dataID = createTaskDataID({
+        getRandomValues(bytes) {
+            bytes.set(Array.from({ length: 16 }, (_, index) => index));
+            return bytes;
+        },
+    });
+
+    assert.equal(dataID, 'mktero-000102030405060708090a0b0c0d0e0f');
+});
+
+test('rejects MinerU task creation without a secure random source', () => {
+    assert.throws(
+        () => createTaskDataID({}),
+        /Secure random number generation is unavailable/
+    );
+});
 
 test('resumes an uploaded MinerU task across conversion instances', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-conversion-'));

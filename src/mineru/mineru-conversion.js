@@ -328,10 +328,20 @@ export class MinerUConversion {
     }
 }
 
-function createTaskDataID() {
-    const random = globalThis.crypto?.randomUUID?.()
-        || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    return `mktero-${random}`;
+export function createTaskDataID(secureRandom = globalThis.crypto) {
+    if (typeof secureRandom?.randomUUID === 'function') {
+        return `mktero-${secureRandom.randomUUID()}`;
+    }
+    if (typeof secureRandom?.getRandomValues === 'function') {
+        const bytes = new Uint8Array(16);
+        secureRandom.getRandomValues(bytes);
+        const random = Array.from(
+            bytes,
+            byte => byte.toString(16).padStart(2, '0')
+        ).join('');
+        return `mktero-${random}`;
+    }
+    throw new Error('Secure random number generation is unavailable');
 }
 
 function isTerminalTaskError(error) {
