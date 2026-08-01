@@ -25,6 +25,10 @@ import {
 } from './extractors/mineru-extractor.js';
 import { ZoteroAnnotationExtractor } from './extractors/zotero-annotation-extractor.js';
 import { MinerUClient } from './mineru/mineru-client.js';
+import { MinerUConversion } from './mineru/mineru-conversion.js';
+import {
+    createZoteroMinerUPendingTaskStore,
+} from './mineru/pending-task-store.js';
 import { createRuntimeAbortController } from './platform/abort-controller.js';
 import {
     createZoteroAnnotationActions,
@@ -120,15 +124,25 @@ globalThis.startup = async function startup({ id, rootURI }) {
         onError: error => Zotero.logError?.(error),
     });
     runtime.localAnnotations = localAnnotations;
+    const pendingTasks = createZoteroMinerUPendingTaskStore({
+        zotero: Zotero,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+    });
+    const conversion = new MinerUConversion({
+        client: new MinerUClient({
+            createAbortController: createZoteroAbortController,
+        }),
+        pendingTasks,
+        cache,
+        onError: error => Zotero.logError?.(error),
+    });
     runtime.service = new MarkdownDocumentService({
         extractor: new MinerUDocumentExtractor({
             zotero: Zotero,
-            client: new MinerUClient({
-                createAbortController: createZoteroAbortController,
-            }),
+            conversion,
             getApiKey: () => getMinerUApiKey(Zotero),
             readFile: path => IOUtils.read(path),
-            cache,
             createCacheKey: fileData => createMinerUCacheKey(fileData),
             isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         }),
@@ -149,6 +163,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }
     );
     cache.prune().catch(error => Zotero.logError(error));
+    pendingTasks.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
     const preferencePaneID = await registerMinerUPreferencesPane({
         zotero: Zotero,
@@ -275,7 +290,9 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         Zotero.debug(
             result.cacheHit
                 ? `Mktero: item ${itemID}: completed from local cache; MinerU upload skipped`
-                : `Mktero: item ${itemID}: completed through MinerU API`
+                : result.resumedTask
+                    ? `Mktero: item ${itemID}: completed from a resumed MinerU task`
+                    : `Mktero: item ${itemID}: completed through a new MinerU task`
         );
         runtime.presenter?.update(
             presentation,

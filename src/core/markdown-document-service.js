@@ -60,6 +60,9 @@ export class MarkdownDocumentService {
         if ('cacheHit' in extracted) {
             result.cacheHit = Boolean(extracted.cacheHit);
         }
+        if ('resumedTask' in extracted) {
+            result.resumedTask = Boolean(extracted.resumedTask);
+        }
         if (extracted.cacheKey) {
             result.cacheKey = extracted.cacheKey;
         }

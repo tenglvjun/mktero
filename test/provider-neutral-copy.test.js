@@ -36,6 +36,12 @@ test('localizes known conversion errors and hides unknown internal messages', ()
         ),
         '转换服务无法解析此 PDF：page limit exceeded'
     );
+    const unavailableTask = new Error('The MinerU task is no longer available');
+    unavailableTask.code = 'MINERU_TASK_NOT_FOUND';
+    assert.equal(
+        localizeConversionError(unavailableTask, translate),
+        '之前的 PDF 转换任务已失效，请重试。'
+    );
     assert.equal(
         localizeConversionError(new Error('internal implementation detail'), translate),
         'PDF 转换失败。'

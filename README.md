@@ -18,7 +18,8 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
 - 在文库中右键单个 PDF 或带有 PDF 附件的条目，通过
   `Read as Markdown with Mktero` 打开；普通条目会使用找到的第一个 PDF 附件。
 - 使用 MinerU VLM 模型执行 OCR，并启用公式和表格识别。
-- 在转换标签页中显示排队、上传、解析和下载进度；关闭标签页会取消仍在进行的转换。
+- 在转换标签页中显示排队、上传、解析和下载进度；关闭标签页只会停止本地等待。PDF
+  已完成上传时，MinerU 任务可以继续执行，再次打开相同 PDF 会恢复查询而不会重复上传。
 - 可通过 Markdown 内容区域右下角的刷新按钮重新解析当前 PDF；操作提示会明确说明 PDF
   将再次上传，并可能消耗转换服务额度。重新解析期间保留当前内容，新结果失败时继续显示
   原结果。
@@ -86,7 +87,7 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md 与图片 -> 规范化与安�
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |
 | API Token | 空 | 缓存未命中时必填，用于调用 MinerU API |
-| Reuse conversion results | 开启 | 复用相同 PDF 内容和解析配置对应的本地结果 |
+| Reuse conversion results | 开启 | 复用相同 PDF 内容和解析配置对应的本地结果；关闭后仍会恢复已上传但未完成的任务 |
 
 API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不会加密。
 
@@ -96,7 +97,7 @@ API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不�
 2. 打开 PDF 后点击阅读器工具栏中的文件图标；或者在文库中右键单个 PDF/条目并选择
    `Read as Markdown with Mktero`。
 3. Mktero 会创建一个临时 Zotero 标签页并显示转换进度。相同 PDF 已有有效缓存时，
-   会跳过上传和远程解析。
+   会跳过上传和远程解析；已有未完成任务时，会继续查询该任务而不再上传 PDF。
 4. 在只读视图中选择和复制文本，使用 `Ctrl+F` 或 `Cmd+F` 搜索，并通过目录、引用预览
    和图表预览浏览文档。已有的 Zotero PDF 高亮和下划线会使用原标注颜色显示；悬停划词
    可更改颜色或删除标注，点击划词可添加评论，点击已有笔记图标可修改评论。拖动选中
@@ -106,7 +107,9 @@ API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不�
 5. 需要忽略缓存并重新解析时，点击 Markdown 内容区域右下角的刷新按钮。该操作会再次上传
    PDF，并可能消耗转换服务额度。
 
-Mktero 标签页不会写入 Zotero 会话状态；关闭 Zotero 后不会自动恢复这些标签页。
+Mktero 标签页不会写入 Zotero 会话状态；关闭 Zotero 后不会自动恢复这些标签页。关闭标签页
+或 Zotero 会停止当前的本地查询，但不会远程取消已完成上传的 MinerU 任务。以后再次主动打开
+相同 PDF 时，Mktero 会在任务记录有效期内继续查询结果。
 
 ## 缓存与隐私
 
@@ -120,6 +123,13 @@ Mktero 标签页不会写入 Zotero 会话状态；关闭 Zotero 后不会自动
 
 缓存未命中时，Mktero 会把完整 PDF 上传到 MinerU 进行解析。返回的图片仅用于当前
 Markdown 标签页和本地缓存，不会导入为 Zotero 附件。
+
+为避免关闭标签页或重启 Zotero 后重复上传，Mktero 会把已上传但尚未取得结果的任务元数据
+保存在当前 Zotero 配置文件的 `mktero-conversions/v1` 目录。记录使用 PDF 内容与解析配置的
+SHA-256 键，只包含 MinerU `batchID`、Mktero 生成的 `dataID` 和上传时间，不包含 API Token、
+PDF 内容、文件名、本地路径、上传地址、下载地址或 API 原始响应。记录在本机未加密，最多
+保留 256 条，24 小时后过期；任务成功或确认无法恢复后会删除。任务恢复独立于已完成结果的
+缓存开关，即使关闭 `Reuse conversion results`，也不会因此重复提交仍可恢复的远程任务。
 
 PDF 标注从当前 Zotero 文库的本地标注条目中读取，不会发送给 MinerU，也不会写入
 Mktero Markdown 缓存。每次转换或从缓存打开文档时都会重新读取标注；评论新增或修改、
@@ -230,9 +240,10 @@ SHA-256 校验文件和 Zotero 更新清单。标签与 `manifest.json` 版本�
 - `PDF upload completed; MinerU is parsing`：上传成功，MinerU 正在解析。
 - `MinerU parsing finished; downloading the result`：正在下载结果压缩包。
 - `completed from local cache; MinerU upload skipped`：已命中本地缓存，没有发起上传。
-- `completed through MinerU API`：已通过 MinerU API 完成转换。
+- `completed from a resumed MinerU task`：恢复了此前已上传的任务，没有重复上传。
+- `completed through a new MinerU task`：本次新建并上传了 MinerU 任务。
 
-日志不会记录 API Token、预签名上传地址或 PDF 内容。若仍然失败，请优先检查
+日志不会记录 API Token、预签名上传地址、`batchID` 或 PDF 内容。若仍然失败，请优先检查
 本地附件是否可用、Token 是否有效，以及当前网络能否访问 MinerU。
 
 ## License

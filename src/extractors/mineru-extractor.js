@@ -11,23 +11,23 @@ export class MinerUConfigurationError extends Error {
 export class MinerUDocumentExtractor {
     constructor({
         zotero,
-        client,
+        conversion,
         getApiKey,
         readFile,
-        cache = null,
         createCacheKey = null,
         isCacheEnabled = () => false,
         onCacheError = error => zotero.logError?.(error),
     }) {
         if (!zotero) throw new TypeError('A Zotero runtime is required');
-        if (!client) throw new TypeError('A MinerU client is required');
+        if (!conversion?.convert) {
+            throw new TypeError('A MinerU conversion module is required');
+        }
         if (!getApiKey) throw new TypeError('A MinerU API Token provider is required');
         if (!readFile) throw new TypeError('A file reader is required');
         this.zotero = zotero;
-        this.client = client;
+        this.conversion = conversion;
         this.getApiKey = getApiKey;
         this.readFile = readFile;
-        this.cache = cache;
         this.createCacheKey = createCacheKey;
         this.isCacheEnabled = isCacheEnabled;
         this.onCacheError = onCacheError;
@@ -50,11 +50,10 @@ export class MinerUDocumentExtractor {
         const title = item.parentItem?.getDisplayTitle?.()
             || item.getDisplayTitle?.()
             || 'Untitled PDF';
-        const cacheAvailable = Boolean(this.cache && this.createCacheKey);
-        const cacheEnabled = cacheAvailable && Boolean(this.isCacheEnabled());
+        const cacheEnabled = Boolean(this.isCacheEnabled());
         const warnings = [];
         let cacheKey = null;
-        if (cacheAvailable) {
+        if (this.createCacheKey) {
             try {
                 cacheKey = await this.createCacheKey(fileData);
             }
@@ -63,49 +62,36 @@ export class MinerUDocumentExtractor {
                 warnings.push('The local Markdown cache is unavailable.');
             }
         }
-        if (cacheKey && !forceRefresh) {
-            let cached = null;
-            try {
-                cached = await this.cache.get(cacheKey);
-            }
-            catch (error) {
-                this.#reportCacheError(error);
-                warnings.push('The local Markdown cache could not be read.');
-            }
-            if (cached && (cacheEnabled || cached.userEdited)) {
-                onProgress?.(100);
-                return createResult(
-                    title,
-                    normalizeMinerUResult(cached),
-                    true,
-                    warnings,
-                    cacheKey
-                );
-            }
-        }
-
         const apiKey = String(this.getApiKey() || '').trim();
-        if (!apiKey) throw new MinerUConfigurationError();
-
-        const parsedResult = await this.client.parse({
-            apiKey,
-            fileName: item.attachmentFilename || `zotero-${itemID}.pdf`,
-            fileData,
-            dataID: `zotero-${itemID}`,
-            onProgress,
-            signal,
-        });
-        if (cacheKey && cacheEnabled) {
-            try {
-                await this.cache.put(cacheKey, parsedResult);
-            }
-            catch (error) {
-                this.#reportCacheError(error);
-                warnings.push('The Markdown result could not be saved to the local cache.');
-            }
+        let converted;
+        try {
+            converted = await this.conversion.convert({
+                key: cacheKey,
+                apiKey,
+                fileName: item.attachmentFilename || `zotero-${itemID}.pdf`,
+                fileData,
+                cacheEnabled,
+                forceRefresh,
+                onProgress,
+                signal,
+            });
         }
-        const result = normalizeMinerUResult(parsedResult);
-        return createResult(title, result, false, warnings, cacheKey);
+        catch (error) {
+            if (error?.message === 'A MinerU API Token is required') {
+                throw new MinerUConfigurationError();
+            }
+            throw error;
+        }
+        warnings.push(...(converted.warnings || []));
+        const result = normalizeMinerUResult(converted.result);
+        return createResult(
+            title,
+            result,
+            converted.origin === 'cache',
+            warnings,
+            cacheKey,
+            converted.origin === 'resumed'
+        );
     }
 
     #reportCacheError(error) {
@@ -124,7 +110,14 @@ function normalizeMinerUResult(result) {
     return markdown === result.markdown ? result : { ...result, markdown };
 }
 
-function createResult(title, parsedResult, cacheHit, warnings = [], cacheKey = null) {
+function createResult(
+    title,
+    parsedResult,
+    cacheHit,
+    warnings = [],
+    cacheKey = null,
+    resumedTask = false
+) {
     const extracted = {
         kind: 'markdown',
         title,
@@ -135,6 +128,7 @@ function createResult(title, parsedResult, cacheHit, warnings = [], cacheKey = n
         totalPages: parsedResult.totalPages,
         warnings,
         cacheHit,
+        resumedTask,
     };
     if (cacheKey) extracted.cacheKey = cacheKey;
     if (parsedResult.userEdited) extracted.userEdited = true;

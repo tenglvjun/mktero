@@ -23,6 +23,7 @@ const ERROR_CODE_KEYS = new Map([
     ['MINERU_TRANSIENT_API_ERROR', 'error.requestFailed'],
     ['MINERU_INVALID_RESPONSE', 'error.invalidResponse'],
     ['MINERU_ARCHIVE_TOO_LARGE', 'error.resultTooLarge'],
+    ['MINERU_TASK_NOT_FOUND', 'error.taskUnavailable'],
 ]);
 
 const WARNING_MESSAGE_KEYS = new Map([

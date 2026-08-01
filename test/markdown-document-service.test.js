@@ -130,6 +130,7 @@ test('passes through Markdown produced by MinerU', async () => {
                 totalPages: 2,
                 warnings: [],
                 cacheHit: true,
+                resumedTask: true,
                 cacheKey: 'a'.repeat(64),
             }),
         },
@@ -140,6 +141,7 @@ test('passes through Markdown produced by MinerU', async () => {
     assert.equal(result.markdown, '# Already Markdown\n\n| A | B |');
     assert.equal(result.sourceKind, 'markdown');
     assert.equal(result.cacheHit, true);
+    assert.equal(result.resumedTask, true);
     assert.equal(result.cacheKey, 'a'.repeat(64));
 });
 

@@ -57,6 +57,25 @@ export class MinerUClient {
         onProgress = () => {},
         signal,
     }) {
+        const task = await this.submit({
+            apiKey,
+            fileName,
+            fileData,
+            dataID,
+            onProgress,
+            signal,
+        });
+        return this.collect({ apiKey, task, onProgress, signal });
+    }
+
+    async submit({
+        apiKey,
+        fileName,
+        fileData,
+        dataID,
+        onProgress = () => {},
+        signal,
+    }) {
         const token = String(apiKey || '').trim();
         if (!token) throw new Error('A MinerU API Token is required');
         if (!fileName) throw new Error('A PDF file name is required');
@@ -98,6 +117,23 @@ export class MinerUClient {
         }
         onProgress(CONVERSION_PROGRESS.PARSING);
 
+        return { batchID, dataID, fileName };
+    }
+
+    async collect({
+        apiKey,
+        task,
+        onProgress = () => {},
+        signal,
+    }) {
+        const token = String(apiKey || '').trim();
+        if (!token) throw new Error('A MinerU API Token is required');
+        const batchID = String(task?.batchID || '');
+        if (!batchID) throw new Error('A MinerU batch ID is required');
+        const dataID = String(task?.dataID || '');
+        const fileName = String(task?.fileName || '');
+        throwIfAborted(signal);
+
         const completed = await this.#poll({
             token,
             batchID,
@@ -112,10 +148,20 @@ export class MinerUClient {
             () => this.#downloadArchive(completed.full_zip_url, signal),
             signal
         );
-        const extracted = this.extractResultFromZip(archive);
+        let extracted;
+        try {
+            extracted = this.extractResultFromZip(archive);
+        }
+        catch (error) {
+            if (!error?.code) error.code = 'MINERU_INVALID_RESULT';
+            throw error;
+        }
         const markdown = typeof extracted === 'string' ? extracted : extracted.markdown;
         if (!markdown.trim()) {
-            throw new Error('MinerU returned an empty Markdown document');
+            throw codedError(
+                'MinerU returned an empty Markdown document',
+                'MINERU_EMPTY_RESULT'
+            );
         }
 
         throwIfAborted(signal);
@@ -133,22 +179,41 @@ export class MinerUClient {
     async #poll({ token, batchID, dataID, fileName, onProgress, signal }) {
         let lastExtractProgress = null;
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
-            const response = await this.#withRetry(
-                () => this.#requestJSON(
-                    `${this.apiBase}/extract-results/batch/${encodeURIComponent(batchID)}`,
-                    { headers: authorizedHeaders(token), signal }
-                ),
-                signal
-            );
+            let response;
+            try {
+                response = await this.#withRetry(
+                    () => this.#requestJSON(
+                        `${this.apiBase}/extract-results/batch/${encodeURIComponent(batchID)}`,
+                        { headers: authorizedHeaders(token), signal }
+                    ),
+                    signal
+                );
+            }
+            catch (error) {
+                if (error?.code === 'MINERU_HTTP_ERROR'
+                    && error.status === 404) {
+                    throw codedError(
+                        'The MinerU task is no longer available',
+                        'MINERU_TASK_NOT_FOUND'
+                    );
+                }
+                throw error;
+            }
             const results = response.data?.extract_result;
             const result = findResult(results, dataID, fileName);
 
             if (result?.state === 'failed') {
-                throw new Error(`MinerU parsing failed: ${result.err_msg || 'unknown error'}`);
+                throw codedError(
+                    `MinerU parsing failed: ${result.err_msg || 'unknown error'}`,
+                    'MINERU_TASK_FAILED'
+                );
             }
             if (result?.state === 'done') {
                 if (!result.full_zip_url) {
-                    throw new Error('MinerU completed without a result archive');
+                    throw codedError(
+                        'MinerU completed without a result archive',
+                        'MINERU_RESULT_MISSING'
+                    );
                 }
                 return {
                     ...result,
@@ -279,6 +344,12 @@ export class MinerUClient {
 
 function authorizedHeaders(token) {
     return { Authorization: `Bearer ${token}` };
+}
+
+function codedError(message, code) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
 }
 
 function authorizedJSONHeaders(token) {

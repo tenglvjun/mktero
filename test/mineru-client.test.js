@@ -14,6 +14,90 @@ function jsonResponse(body, status = 200, headers = undefined) {
     };
 }
 
+test('returns a resumable task after upload without polling for results', async () => {
+    const requests = [];
+    const responses = [
+        jsonResponse({
+            code: 0,
+            data: {
+                batch_id: 'batch-1',
+                file_urls: ['https://upload.example/paper'],
+            },
+        }),
+        { ok: true, status: 200 },
+    ];
+    const client = new MinerUClient({
+        fetch: async (url, options = {}) => {
+            requests.push({ url, options });
+            return responses.shift();
+        },
+    });
+
+    const task = await client.submit({
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([37, 80, 68, 70]),
+        dataID: 'mktero-task-1',
+    });
+
+    assert.deepEqual(task, {
+        batchID: 'batch-1',
+        dataID: 'mktero-task-1',
+        fileName: 'paper.pdf',
+    });
+    assert.deepEqual(requests.map(request => request.url), [
+        'https://mineru.net/api/v4/file-urls/batch',
+        'https://upload.example/paper',
+    ]);
+});
+
+test('collects a previously uploaded task without uploading the PDF again', async () => {
+    const requests = [];
+    const responses = [
+        jsonResponse({
+            code: 0,
+            data: {
+                extract_result: [{
+                    data_id: 'mktero-task-1',
+                    state: 'done',
+                    full_zip_url: 'https://download.example/result.zip',
+                    extract_progress: {
+                        extracted_pages: 3,
+                        total_pages: 3,
+                    },
+                }],
+            },
+        }),
+        {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+        },
+    ];
+    const client = new MinerUClient({
+        fetch: async (url, options = {}) => {
+            requests.push({ url, options });
+            return responses.shift();
+        },
+        extractMarkdownFromZip: () => '# Resumed result',
+    });
+
+    const result = await client.collect({
+        apiKey: 'secret-token',
+        task: {
+            batchID: 'batch-1',
+            dataID: 'mktero-task-1',
+        },
+    });
+
+    assert.equal(result.markdown, '# Resumed result');
+    assert.equal(result.totalPages, 3);
+    assert.deepEqual(requests.map(request => request.url), [
+        'https://mineru.net/api/v4/extract-results/batch/batch-1',
+        'https://download.example/result.zip',
+    ]);
+});
+
 test('uploads a local PDF and returns MinerU Markdown', async () => {
     const requests = [];
     const responses = [
@@ -145,7 +229,26 @@ test('reports MinerU task failures without polling forever', async () => {
             fileData: new Uint8Array([1]),
             dataID: 'zotero-42',
         }),
-        /page limit exceeded/
+        error => error.code === 'MINERU_TASK_FAILED'
+            && /page limit exceeded/.test(error.message)
+    );
+});
+
+test('classifies a missing remote batch as a terminal task failure', async () => {
+    const client = new MinerUClient({
+        fetch: async () => jsonResponse({ code: 0 }, 404),
+        maxRetryAttempts: 1,
+    });
+
+    await assert.rejects(
+        () => client.collect({
+            apiKey: 'secret-token',
+            task: {
+                batchID: 'batch-missing',
+                dataID: 'mktero-task-missing',
+            },
+        }),
+        error => error.code === 'MINERU_TASK_NOT_FOUND'
     );
 });
 
