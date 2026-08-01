@@ -73,6 +73,7 @@ test('creates a Zotero PDF annotation for a Markdown highlight', async () => {
     const created = await annotations.create(42, draft);
 
     assert.equal(created.id, 'mktero-local-1');
+    assert.deepEqual(created.synchronization, { status: 'pending' });
     assert.equal(created.source, 'markdown');
     await waitFor(() => createdPDFAnnotations.length === 1);
     assert.deepEqual(createdPDFAnnotations, [{
@@ -154,6 +155,9 @@ test('keeps a deferred Markdown highlight without reporting a failure', async ()
         type: 'highlight',
     }]);
     assert.equal(resolved.warning, undefined);
+    assert.deepEqual(resolved.matched[0].synchronization, {
+        status: 'pending',
+    });
     assert.deepEqual(errors, []);
     assert.deepEqual(synchronizationChanges, []);
 });
@@ -299,7 +303,9 @@ test('keeps a local highlight when PDF synchronization fails', async () => {
     const annotations = new MarkdownLocalAnnotations({
         store,
         async createPDFAnnotation() {
-            throw new Error('PDF text not found');
+            const error = new Error('PDF text not found');
+            error.code = 'MKTERO_PDF_TEXT_NOT_FOUND';
+            throw error;
         },
         onError: error => errors.push(error.message),
     });
@@ -317,6 +323,13 @@ test('keeps a local highlight when PDF synchronization fails', async () => {
 
     assert.deepEqual(await store.get(42), [local]);
     assert.equal(result.matched[0].id, local.id);
+    assert.deepEqual(result.matched[0].synchronization, {
+        status: 'pending',
+    });
+    assert.deepEqual(retried.matched[0].synchronization, {
+        status: 'failed',
+        reason: 'text-not-found',
+    });
     assert.equal(
         retried.warning,
         'Some local Markdown annotations could not be synchronized to the PDF.'
@@ -354,6 +367,120 @@ test('retries a failed PDF synchronization when explicitly requested', async () 
 
     await waitFor(() => createCalls === 2);
     await waitFor(async () => (await store.get(42)).length === 0);
+});
+
+test('retries one failed PDF synchronization through the public interface', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'The sound of stress recovery',
+        comment: 'Paper title',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 32 }],
+    };
+    const store = createMemoryStore([local]);
+    let createCalls = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            createCalls++;
+            if (createCalls === 1) {
+                const error = new Error('PDF reader unavailable');
+                error.code = 'MKTERO_PDF_READER_UNAVAILABLE';
+                throw error;
+            }
+            return { id: 'ZOTERO001', source: 'zotero' };
+        },
+    });
+    const markdown = 'The The sound of stress recovery continues.';
+
+    await annotations.resolve(42, markdown);
+    await waitFor(() => createCalls === 1);
+    const failed = await annotations.resolve(42, markdown);
+    const retrying = await annotations.retrySynchronization(
+        42,
+        local.id
+    );
+
+    assert.deepEqual(failed.matched[0].synchronization, {
+        status: 'failed',
+        reason: 'reader-unavailable',
+    });
+    assert.deepEqual(retrying, {
+        id: local.id,
+        synchronization: { status: 'pending' },
+    });
+    await waitFor(() => createCalls === 2);
+    await waitFor(async () => (await store.get(42)).length === 0);
+});
+
+test('does not expose unexpected synchronization error details', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    };
+    const store = createMemoryStore([local]);
+    let createCalls = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            createCalls++;
+            throw new Error('authenticated response must stay private');
+        },
+    });
+
+    await annotations.resolve(42, 'Selected text');
+    await waitFor(() => createCalls === 1);
+    const result = await annotations.resolve(42, 'Selected text');
+
+    assert.deepEqual(result.matched[0].synchronization, {
+        status: 'failed',
+        reason: 'unknown',
+    });
+    assert.doesNotMatch(
+        JSON.stringify(result.matched[0]),
+        /authenticated response/
+    );
+});
+
+test('keeps synchronization failures visible when a local quote is unmatched', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    };
+    const store = createMemoryStore([local]);
+    let createCalls = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            createCalls++;
+            const error = new Error('PDF text is ambiguous');
+            error.code = 'MKTERO_PDF_TEXT_AMBIGUOUS';
+            throw error;
+        },
+    });
+
+    await annotations.resolve(42, 'Selected text');
+    await waitFor(() => createCalls === 1);
+    const result = await annotations.resolve(42, 'Replacement text');
+
+    assert.equal(result.matched.length, 0);
+    assert.equal(result.unmatched[0].id, local.id);
+    assert.deepEqual(result.unmatched[0].synchronization, {
+        status: 'failed',
+        reason: 'text-ambiguous',
+    });
 });
 
 test('serializes concurrent migration of the same local highlight', async () => {

@@ -247,6 +247,13 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         onDeleteMarkdownAnnotation: annotationID => (
             runMarkdownAnnotationAction('delete', itemID, annotationID)
         ),
+        onRetryMarkdownAnnotationSynchronization: annotationID => (
+            runMarkdownAnnotationAction(
+                'retrySynchronization',
+                itemID,
+                annotationID
+            )
+        ),
     });
     if (!presentation.created
         && presentation.model.status !== 'error'

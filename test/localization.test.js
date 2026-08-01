@@ -46,3 +46,19 @@ test('creates a fixed localization from the Zotero locale', () => {
     assert.equal(chinese.t('annotation.noteEditor'), '编辑笔记');
     assert.equal(chinese.t('annotation.saveNote'), '保存');
 });
+
+test('localizes Markdown annotation synchronization status', () => {
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const chinese = createLocalization({ zoteroLocale: 'zh-CN' });
+
+    assert.equal(english.t('annotation.syncPending'), 'Pending Zotero sync');
+    assert.equal(
+        english.t('annotation.syncFailed.textAmbiguous'),
+        'Multiple PDF matches'
+    );
+    assert.equal(chinese.t('annotation.syncPending'), '等待同步到 Zotero');
+    assert.equal(
+        chinese.t('annotation.syncFailed.textAmbiguous'),
+        'PDF 中存在多处匹配'
+    );
+});

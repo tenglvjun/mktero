@@ -16,6 +16,12 @@ const MAX_MATCH_CANDIDATES = 10_000;
 const MAX_MATCHABLE_MARKDOWN_LENGTH = 8 * 1024 * 1024;
 const MAX_TOTAL_SOURCE_RANGE_LENGTH = 8 * 1024 * 1024;
 const LOCAL_ANNOTATION_ID = /^mktero-[a-z0-9-]{1,128}$/i;
+const SYNCHRONIZATION_FAILURE_REASONS = new Map([
+    ['MKTERO_PDF_TEXT_NOT_FOUND', 'text-not-found'],
+    ['MKTERO_PDF_TEXT_AMBIGUOUS', 'text-ambiguous'],
+    ['MKTERO_PDF_READER_UNAVAILABLE', 'reader-unavailable'],
+    ['MKTERO_PDF_TEXT_SEARCH_TIMEOUT', 'search-timeout'],
+]);
 
 export class MarkdownLocalAnnotations {
     constructor({
@@ -47,16 +53,18 @@ export class MarkdownLocalAnnotations {
         if (typeof markdown !== 'string') {
             throw new TypeError('Markdown must be a string');
         }
-        const result = await this.#withOperation(itemID, () => (
+        let result = await this.#withOperation(itemID, () => (
             this.#resolve(itemID, markdown)
         ));
         const failures = this.synchronizationFailures.get(itemID);
+        result = applySynchronizationStates(result, failures);
         const matchedIDs = result.matched.map(annotation => annotation.id);
         const retryIDs = retryFailed
             ? matchedIDs
             : matchedIDs.filter(id => !failures?.has(id));
         this.#requestSynchronization(itemID, retryIDs);
-        if (matchedIDs.some(id => failures?.has(id))) {
+        if ([...result.matched, ...result.unmatched]
+            .some(annotation => failures?.has(annotation.id))) {
             result.warning ||= 'Some local Markdown annotations could not be synchronized to the PDF.';
         }
         return result;
@@ -129,7 +137,9 @@ export class MarkdownLocalAnnotations {
     async delete(itemID, annotationID) {
         const targetID = String(annotationID || '');
         await this.#withOperation(itemID, async () => {
-            const annotations = normalizeCollection(await this.store.get(itemID));
+            const annotations = normalizeCollection(
+                await this.store.get(itemID)
+            );
             const updated = annotations.filter(annotation => (
                 annotation.id !== targetID
             ));
@@ -147,6 +157,22 @@ export class MarkdownLocalAnnotations {
                 .map(annotation => annotation.id)
         ));
         this.#requestSynchronization(itemID, annotationIDs, context);
+    }
+
+    async retrySynchronization(itemID, annotationID, context = null) {
+        const targetID = String(annotationID || '');
+        await this.#withOperation(itemID, async () => {
+            const annotations = normalizeCollection(await this.store.get(itemID));
+            if (!annotations.some(annotation => annotation.id === targetID)) {
+                throw new Error('Markdown annotation is unavailable');
+            }
+        });
+        this.#clearSynchronizationFailure(itemID, targetID);
+        this.#requestSynchronization(itemID, [targetID], context);
+        return {
+            id: targetID,
+            synchronization: { status: 'pending' },
+        };
     }
 
     dispose() {
@@ -256,13 +282,14 @@ export class MarkdownLocalAnnotations {
         catch (error) {
             let failures = this.synchronizationFailures.get(itemID);
             if (!failures) {
-                failures = new Set();
+                failures = new Map();
                 this.synchronizationFailures.set(itemID, failures);
             }
-            const firstFailure = !failures.has(annotation.id);
-            failures.add(annotation.id);
+            const reason = synchronizationFailureReason(error);
+            const changed = failures.get(annotation.id) !== reason;
+            failures.set(annotation.id, reason);
             this.#reportError(error);
-            if (firstFailure) this.#notifySynchronizationChange(itemID);
+            if (changed) this.#notifySynchronizationChange(itemID);
         }
     }
 
@@ -393,7 +420,29 @@ function resolvedAnnotation(annotation, range) {
         matchKind: 'local',
         ranges: [{ from: range.from, to: range.to }],
         sortIndex: String(range.from).padStart(12, '0'),
+        synchronization: { status: 'pending' },
     };
+}
+
+function applySynchronizationStates(result, failures) {
+    const applyState = annotation => {
+        const reason = failures?.get(annotation.id);
+        return {
+            ...annotation,
+            synchronization: reason
+                ? { status: 'failed', reason }
+                : { status: 'pending' },
+        };
+    };
+    return {
+        ...result,
+        matched: result.matched.map(applyState),
+        unmatched: result.unmatched.map(applyState),
+    };
+}
+
+function synchronizationFailureReason(error) {
+    return SYNCHRONIZATION_FAILURE_REASONS.get(error?.code) || 'unknown';
 }
 
 function sameAnnotation(left, right) {

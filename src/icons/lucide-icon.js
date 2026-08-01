@@ -1,12 +1,14 @@
 import {
     ChevronLeft,
     ChevronRight,
+    Clock,
     FileText,
     LoaderCircle,
     MessageSquarePlus,
     MessageSquareText,
     RefreshCw,
     Trash2,
+    TriangleAlert,
     X,
     ZoomIn,
     ZoomOut,
@@ -34,6 +36,10 @@ export const LUCIDE_ICONS = Object.freeze({
         name: 'chevron-right',
         nodes: ChevronRight,
     }),
+    clock: Object.freeze({
+        name: 'clock',
+        nodes: Clock,
+    }),
     fileText: Object.freeze({
         name: 'file-text',
         nodes: FileText,
@@ -57,6 +63,10 @@ export const LUCIDE_ICONS = Object.freeze({
     trash2: Object.freeze({
         name: 'trash-2',
         nodes: Trash2,
+    }),
+    triangleAlert: Object.freeze({
+        name: 'triangle-alert',
+        nodes: TriangleAlert,
     }),
     x: Object.freeze({
         name: 'x',

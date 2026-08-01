@@ -262,7 +262,12 @@ main {
     scrollbar-width: thin;
 }
 
-.markdown-note-item { margin: 4px 0; }
+.markdown-note-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    margin: 4px 0;
+}
 
 .markdown-note-link {
     display: block;
@@ -297,6 +302,7 @@ main {
 
 .markdown-note-metadata {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
     margin-bottom: 5px;
@@ -316,6 +322,49 @@ main {
 .markdown-note-unavailable {
     margin-left: auto;
     color: var(--warning);
+}
+
+.markdown-note-sync {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+}
+
+.markdown-note-sync--failed { color: var(--warning); }
+
+.markdown-note-sync-icon { flex: 0 0 auto; }
+
+.markdown-note-sync-label { overflow-wrap: anywhere; }
+
+.markdown-note-sync-retry {
+    display: inline-grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    margin: 5px 5px 0 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: var(--warning);
+    background: transparent;
+    cursor: pointer;
+}
+
+.markdown-note-sync-retry:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+    background: color-mix(in srgb, var(--warning) 9%, transparent);
+}
+
+.markdown-note-sync-retry:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--warning) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.markdown-note-sync-retry:disabled {
+    cursor: default;
+    opacity: 0.5;
 }
 
 .markdown-note-quote {

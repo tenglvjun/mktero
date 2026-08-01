@@ -263,11 +263,17 @@ test('exposes and refreshes local Markdown annotation actions', async () => {
         onCreateMarkdownAnnotation: () => calls.push('stale-create'),
         onUpdateMarkdownAnnotation: () => calls.push('stale-update'),
         onDeleteMarkdownAnnotation: () => calls.push('stale-delete'),
+        onRetryMarkdownAnnotationSynchronization: () => (
+            calls.push('stale-retry')
+        ),
     });
     const second = presenter.open(42, {
         onCreateMarkdownAnnotation: draft => calls.push({ draft }),
         onUpdateMarkdownAnnotation: (id, changes) => calls.push({ id, changes }),
         onDeleteMarkdownAnnotation: id => calls.push({ deleted: id }),
+        onRetryMarkdownAnnotationSynchronization: id => (
+            calls.push({ retried: id })
+        ),
     });
     const draft = { text: 'Selected', ranges: [{ from: 0, to: 8 }] };
 
@@ -277,12 +283,16 @@ test('exposes and refreshes local Markdown annotation actions', async () => {
         { comment: 'Review this' }
     );
     await second.model.onDeleteMarkdownAnnotation('mktero-local-1');
+    await second.model.onRetryMarkdownAnnotationSynchronization(
+        'mktero-local-2'
+    );
 
     assert.equal(first.model, second.model);
     assert.deepEqual(calls, [
         { draft },
         { id: 'mktero-local-1', changes: { comment: 'Review this' } },
         { deleted: 'mktero-local-1' },
+        { retried: 'mktero-local-2' },
     ]);
 });
 

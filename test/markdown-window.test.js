@@ -739,6 +739,96 @@ test('shows PDF notes safely and jumps matched notes to Markdown', () => {
     }
 });
 
+test('shows local annotation synchronization status and retries failures', async () => {
+    const retryCalls = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Pending note and failed note.',
+        annotationOverlay: {
+            matched: [{
+                id: 'mktero-pending-1',
+                source: 'markdown',
+                type: 'highlight',
+                text: 'Pending note',
+                comment: '',
+                color: '#ffd400',
+                ranges: [{ from: 0, to: 12 }],
+                synchronization: { status: 'pending' },
+            }, {
+                id: 'mktero-failed-1',
+                source: 'markdown',
+                type: 'highlight',
+                text: 'failed note',
+                comment: '',
+                color: '#ff6666',
+                ranges: [{ from: 17, to: 28 }],
+                synchronization: {
+                    status: 'failed',
+                    reason: 'text-not-found',
+                },
+            }],
+            unmatched: [],
+        },
+        sourceKind: 'markdown',
+        async onRetryMarkdownAnnotationSynchronization(annotationID) {
+            retryCalls.push(annotationID);
+            return {
+                id: annotationID,
+                synchronization: { status: 'pending' },
+            };
+        },
+    });
+    const { document, view, shadow } = createView(model);
+
+    try {
+        assert.equal(
+            shadow.querySelectorAll('.markdown-note-sync').length,
+            2
+        );
+        const pending = shadow.querySelector('.markdown-note-sync--pending');
+        const failed = shadow.querySelector('.markdown-note-sync--failed');
+        assert.match(pending.textContent, /Pending Zotero sync/);
+        assert.equal(
+            pending.querySelector('svg')?.getAttribute('data-lucide'),
+            'clock'
+        );
+        assert.match(failed.textContent, /PDF text not found/);
+        assert.equal(
+            failed.querySelector('svg')?.getAttribute('data-lucide'),
+            'triangle-alert'
+        );
+
+        const retry = shadow.querySelector('.markdown-note-sync-retry');
+        assert.equal(retry.getAttribute('type'), 'button');
+        assert.equal(retry.getAttribute('data-annotation-id'), 'mktero-failed-1');
+        assert.equal(retry.getAttribute('aria-label'), 'Retry Zotero sync');
+        assert.equal(
+            retry.querySelector('svg')?.getAttribute('data-lucide'),
+            'refresh-cw'
+        );
+
+        retry.dispatchEvent(new document.defaultView.Event('click', {
+            bubbles: true,
+        }));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        assert.deepEqual(retryCalls, ['mktero-failed-1']);
+        assert.equal(
+            shadow.querySelectorAll('.markdown-note-sync-retry').length,
+            0
+        );
+        assert.equal(
+            shadow.querySelectorAll('.markdown-note-sync--pending').length,
+            2
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('shows a live Markdown outline and scrolls to the selected heading', () => {
     const markdown = '# Overview\n\n## Methods\n\n### Results';
     const scrolledOffsets = [];

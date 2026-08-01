@@ -36,6 +36,7 @@ export class MarkdownTabPresenter {
         onCreateMarkdownAnnotation,
         onUpdateMarkdownAnnotation,
         onDeleteMarkdownAnnotation,
+        onRetryMarkdownAnnotationSynchronization,
     } = {}) {
         this.ensureSessionStateFilter();
         const owner = this.zotero.getMainWindow?.();
@@ -71,6 +72,10 @@ export class MarkdownTabPresenter {
                 existing.model.onDeleteMarkdownAnnotation
                     = onDeleteMarkdownAnnotation;
             }
+            if (onRetryMarkdownAnnotationSynchronization) {
+                existing.model.onRetryMarkdownAnnotationSynchronization
+                    = onRetryMarkdownAnnotationSynchronization;
+            }
             tabs.select(existing.tabID);
             return { ...existing, created: false };
         }
@@ -85,6 +90,7 @@ export class MarkdownTabPresenter {
                 onCreateMarkdownAnnotation,
                 onUpdateMarkdownAnnotation,
                 onDeleteMarkdownAnnotation,
+                onRetryMarkdownAnnotationSynchronization,
             },
             this.localization.t.bind(this.localization)
         );

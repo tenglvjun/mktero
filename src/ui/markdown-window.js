@@ -643,6 +643,21 @@ class MarkdownTabView {
             if (Number.isFinite(offset)) this.editor.scrollToOffset?.(offset);
         });
         this.listen(this.elements.notesList, 'click', event => {
+            const retry = event.target?.closest?.(
+                '.markdown-note-sync-retry'
+            );
+            if (retry && this.elements.notesList.contains(retry)) {
+                retry.disabled = true;
+                const annotationID = retry.getAttribute('data-annotation-id');
+                Promise.resolve(
+                    this.retryMarkdownAnnotationSynchronization(annotationID)
+                )
+                    .catch(error => this.zotero?.logError?.(error))
+                    .finally(() => {
+                        if (retry.parentNode) retry.disabled = false;
+                    });
+                return;
+            }
             const button = event.target?.closest?.('.markdown-note-link');
             if (!button
                 || button.hasAttribute('disabled')
@@ -922,6 +937,21 @@ class MarkdownTabView {
             class: 'markdown-note-item',
         });
         item.appendChild(button);
+        if (annotation.synchronization?.status === 'failed') {
+            const retry = this.createElement('button', {
+                class: 'markdown-note-sync-retry',
+                type: 'button',
+                'data-annotation-id': String(annotation.id || ''),
+                'aria-label': this.t('annotation.retrySync'),
+                title: this.t('annotation.retrySync'),
+            });
+            retry.appendChild(createLucideIcon(
+                this.document,
+                LUCIDE_ICONS.refreshCw,
+                { className: 'markdown-note-sync-retry-icon', size: 15 }
+            ));
+            item.appendChild(retry);
+        }
         return item;
     }
 
@@ -973,7 +1003,54 @@ class MarkdownTabView {
                 this.t('viewer.noteUnavailable')
             ));
         }
+        const synchronization = this.createNoteSynchronization(annotation);
+        if (synchronization) metadata.appendChild(synchronization);
         return metadata;
+    }
+
+    createNoteSynchronization(annotation) {
+        const status = annotation.synchronization?.status;
+        if (status !== 'pending' && status !== 'failed') return null;
+        const failed = status === 'failed';
+        const label = failed
+            ? this.t(synchronizationFailureLabelKey(
+                annotation.synchronization?.reason
+            ))
+            : this.t('annotation.syncPending');
+        const element = this.createElement('span', {
+            class: `markdown-note-sync markdown-note-sync--${status}`,
+            title: label,
+        });
+        element.appendChild(createLucideIcon(
+            this.document,
+            failed ? LUCIDE_ICONS.triangleAlert : LUCIDE_ICONS.clock,
+            { className: 'markdown-note-sync-icon', size: 13 }
+        ));
+        element.appendChild(this.createElement(
+            'span',
+            { class: 'markdown-note-sync-label' },
+            label
+        ));
+        return element;
+    }
+
+    async retryMarkdownAnnotationSynchronization(annotationID) {
+        if (typeof this.model.onRetryMarkdownAnnotationSynchronization
+            !== 'function') {
+            throw new Error('Markdown annotation synchronization is unavailable');
+        }
+        const retried = await this.model
+            .onRetryMarkdownAnnotationSynchronization(annotationID);
+        const current = findOverlayAnnotation(
+            this.model.annotationOverlay,
+            annotationID
+        );
+        if (!isMarkdownAnnotation(current)) return retried;
+        this.replaceVisibleAnnotation(annotationID, {
+            ...current,
+            synchronization: { status: 'pending' },
+        });
+        return retried;
     }
 
     openLink(href) {
@@ -1105,6 +1182,21 @@ function findOverlayAnnotation(annotationOverlay, annotationID) {
 
 function isMarkdownAnnotation(annotation) {
     return annotation?.source === 'markdown';
+}
+
+function synchronizationFailureLabelKey(reason) {
+    switch (reason) {
+        case 'text-not-found':
+            return 'annotation.syncFailed.textNotFound';
+        case 'text-ambiguous':
+            return 'annotation.syncFailed.textAmbiguous';
+        case 'reader-unavailable':
+            return 'annotation.syncFailed.readerUnavailable';
+        case 'search-timeout':
+            return 'annotation.syncFailed.searchTimeout';
+        default:
+            return 'annotation.syncFailed.unknown';
+    }
 }
 
 function annotationUpdate(annotation, changes) {
