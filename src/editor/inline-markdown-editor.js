@@ -7,6 +7,7 @@ import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
 import { createLocalization } from '../i18n/localization.js';
+import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
     createInlineRenderingExtension,
     refreshInlineRendering,
@@ -88,6 +89,8 @@ export function createInlineMarkdownEditor({
     changeAnnotationColor,
     updateAnnotationComment,
     deleteAnnotation,
+    copySourcedMarkdown,
+    onSourcedCopyError,
     openSourceLocation,
     onSourceNavigationError,
     localization = createLocalization(),
@@ -111,6 +114,7 @@ export function createInlineMarkdownEditor({
         changeAnnotationColor,
         updateAnnotationComment,
         deleteAnnotation,
+        copySourcedMarkdown,
     });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
         resolveImageURL,
@@ -191,6 +195,8 @@ export function createInlineMarkdownEditor({
                     tablePreviewPopup,
                     figurePreviewPopup,
                     annotationPopup,
+                    copySourcedMarkdown,
+                    onSourcedCopyError,
                     openSourceLocation,
                     onSourceNavigationError,
                     activateCitation:
@@ -230,6 +236,7 @@ export function createInlineMarkdownEditor({
         activateDOMGlobals(ownerWindow);
         const selection = selectedMarkdownAnnotation(view);
         if (!selection) return;
+        const copyTarget = { kind: 'selection', ...selection };
         for (const popup of interactionPopups) {
             if (popup !== annotationPopup) popup.close();
         }
@@ -239,6 +246,12 @@ export function createInlineMarkdownEditor({
                 event.target
             ),
             selection,
+            copyTarget,
+            canCopySource: canCreateSourcedEvidence(
+                view.state.doc.toString(),
+                currentSourceMap,
+                copyTarget
+            ),
         });
     };
     const closeSelectionActions = event => {
@@ -248,6 +261,7 @@ export function createInlineMarkdownEditor({
     };
     parent.addEventListener('mousedown', closeSelectionActions, true);
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
+    let currentSourceMap = [];
     const setDocument = ({ markdown, annotationOverlay, sourceMap }) => {
         activateDOMGlobals(ownerWindow);
         for (const feature of referenceFeatureList) {
@@ -256,12 +270,13 @@ export function createInlineMarkdownEditor({
         }
         annotationPopup.close();
         const value = String(markdown || '');
+        currentSourceMap = Array.isArray(sourceMap) ? sourceMap : [];
         const effects = [
             ...referenceFeatureList.map(feature => feature.effect.of(null)),
             setAnnotationOverlay.of(
                 annotationOverlay || createEmptyAnnotationOverlay()
             ),
-            setSourceMap.of(Array.isArray(sourceMap) ? sourceMap : []),
+            setSourceMap.of(currentSourceMap),
         ];
         if (value === view.state.doc.toString()) {
             view.dispatch({ effects });
@@ -329,6 +344,16 @@ export function createInlineMarkdownEditor({
             }
         },
     };
+}
+
+function canCreateSourcedEvidence(markdown, sourceMap, target) {
+    try {
+        createEvidenceSnippet({ markdown, sourceMap, target });
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 
 function createTimedTargetHighlight({

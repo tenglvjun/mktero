@@ -126,6 +126,53 @@ test('shows accessible PDF source actions only for mapped Markdown blocks', asyn
     dom.window.close();
 });
 
+test('copies an entire mapped Markdown block with its source', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Mapped paragraph with source.';
+    const copied = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        copySourcedMarkdown: async target => copied.push(target),
+    });
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 2, bbox: [100, 200, 900, 300] }],
+        }],
+    });
+
+    const copy = document.querySelector('.cm-mktero-source-copy');
+    assert.ok(copy);
+    assert.equal(copy.getAttribute('aria-label'), 'Copy with source');
+    assert.equal(
+        copy.querySelector('svg')?.getAttribute('data-lucide'),
+        'copy'
+    );
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(copied, [{
+        kind: 'block',
+        from: 0,
+        to: markdown.length,
+    }]);
+    assert.equal(
+        copy.querySelector('svg')?.getAttribute('data-lucide'),
+        'check'
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('keeps PDF source actions beside rendered image, formula, and table blocks', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -276,6 +323,35 @@ test('omits PDF source actions for malformed source-map entries', () => {
     });
 
     assert.equal(document.querySelector('.cm-mktero-source-link'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('omits sourced copy for a mapped block that is unsafe to export', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '$$\n\\def\\unsafe{payload}\n$$';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        openSourceLocation: () => {},
+        copySourcedMarkdown: async () => assert.fail('must not copy'),
+    });
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'equation',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 300] }],
+        }],
+    });
+
+    assert.ok(document.querySelector('.cm-mktero-source-link'));
+    assert.equal(document.querySelector('.cm-mktero-source-copy'), null);
 
     editor.destroy();
     dom.window.close();
@@ -3255,6 +3331,86 @@ test('shows Markdown annotation actions after selecting ordinary text', () => {
     assert.ok(actions);
     assert.ok(actions.querySelector('[data-action="add-note"]'));
     assert.match(document.getSelection().toString(), /Select this Markdown text/);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('copies a reliably mapped selection with its source', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const copied = [];
+    const markdown = 'Select this mapped Markdown text.';
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        copySourcedMarkdown: async target => copied.push(target),
+    });
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 1, bbox: [100, 100, 900, 200] }],
+        }],
+    });
+    const line = document.querySelector('.cm-line');
+    const text = textNodeContaining(line, markdown);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const copy = document.querySelector(
+        '.mktero-markdown-selection-actions '
+        + '[data-action="copy-with-source"]'
+    );
+    assert.ok(copy);
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(copied, [{
+        kind: 'selection',
+        text: markdown,
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not offer sourced copy for an unmapped selection', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Unmapped selection.',
+        copySourcedMarkdown: async () => assert.fail('must not copy'),
+    });
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    assert.equal(
+        document.querySelector('[data-action="copy-with-source"]'),
+        null
+    );
 
     editor.destroy();
     dom.window.close();

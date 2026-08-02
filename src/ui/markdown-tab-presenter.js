@@ -35,6 +35,7 @@ export class MarkdownTabPresenter {
         onDeleteAnnotation,
         onOpenAnnotationInPDF,
         onOpenSourceInPDF,
+        onCopySourcedMarkdown,
         onCreateMarkdownAnnotation,
         onUpdateMarkdownAnnotation,
         onDeleteMarkdownAnnotation,
@@ -68,6 +69,9 @@ export class MarkdownTabPresenter {
             if (onOpenSourceInPDF) {
                 existing.model.onOpenSourceInPDF = onOpenSourceInPDF;
             }
+            if (onCopySourcedMarkdown) {
+                existing.model.onCopySourcedMarkdown = onCopySourcedMarkdown;
+            }
             if (onCreateMarkdownAnnotation) {
                 existing.model.onCreateMarkdownAnnotation
                     = onCreateMarkdownAnnotation;
@@ -97,6 +101,7 @@ export class MarkdownTabPresenter {
                 onDeleteAnnotation,
                 onOpenAnnotationInPDF,
                 onOpenSourceInPDF,
+                onCopySourcedMarkdown,
                 onCreateMarkdownAnnotation,
                 onUpdateMarkdownAnnotation,
                 onDeleteMarkdownAnnotation,

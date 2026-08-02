@@ -27,6 +27,7 @@ export function createAnnotationPopup(parent, {
     changeAnnotationColor,
     updateAnnotationComment,
     deleteAnnotation,
+    copySourcedMarkdown,
 } = {}) {
     const t = localization.t.bind(localization);
     const anchoredPopup = createAnchoredPopup(parent, {
@@ -78,7 +79,12 @@ export function createAnnotationPopup(parent, {
             focusContent: focusNoteInput,
         });
     };
-    const openSelection = ({ anchor, selection }) => {
+    const openSelection = ({
+        anchor,
+        selection,
+        copyTarget,
+        canCopySource = false,
+    }) => {
         if (!selection) return;
         const annotation = {
             ...selection,
@@ -94,6 +100,10 @@ export function createAnnotationPopup(parent, {
             renderContent({ document, close, reposition }) {
                 return createMarkdownSelectionActions(document, annotation, t, {
                     createMarkdownAnnotation,
+                    copySourcedMarkdown: canCopySource
+                        && typeof copySourcedMarkdown === 'function'
+                        ? () => copySourcedMarkdown(copyTarget)
+                        : undefined,
                     openNote: () => openDraftNote({ anchor, annotation }),
                     close,
                     reposition,
@@ -238,7 +248,13 @@ function createMarkdownSelectionActions(
     document,
     annotation,
     translate,
-    { createMarkdownAnnotation, openNote, close, reposition }
+    {
+        createMarkdownAnnotation,
+        copySourcedMarkdown,
+        openNote,
+        close,
+        reposition,
+    }
 ) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
     content.className = [
@@ -257,8 +273,8 @@ function createMarkdownSelectionActions(
     error.hidden = true;
     const canCreate = typeof createMarkdownAnnotation === 'function';
 
-    const run = async action => {
-        for (const control of controls) control.disabled = true;
+    const run = async (action, errorKey = 'annotation.actionFailed') => {
+        for (const control of controls) control.button.disabled = true;
         error.hidden = true;
         try {
             await action();
@@ -268,13 +284,15 @@ function createMarkdownSelectionActions(
             error.textContent = annotationErrorMessage(
                 cause,
                 translate,
-                'annotation.actionFailed'
+                errorKey
             );
             error.hidden = false;
             reposition?.();
         }
         finally {
-            for (const control of controls) control.disabled = !canCreate;
+            for (const control of controls) {
+                control.button.disabled = !control.enabled;
+            }
         }
     };
 
@@ -294,7 +312,7 @@ function createMarkdownSelectionActions(
         button.addEventListener('click', () => run(() => (
             createMarkdownAnnotation({ ...annotation, color: option.value })
         )));
-        controls.push(button);
+        controls.push({ button, enabled: canCreate });
         palette.appendChild(button);
     }
     content.appendChild(palette);
@@ -312,8 +330,29 @@ function createMarkdownSelectionActions(
         { className: 'mktero-annotation-note-action-icon', size: 16 }
     ));
     noteButton.addEventListener('click', openNote);
-    controls.push(noteButton);
-    content.append(noteButton, error);
+    controls.push({ button: noteButton, enabled: canCreate });
+    content.appendChild(noteButton);
+
+    if (typeof copySourcedMarkdown === 'function') {
+        const copyButton = document.createElementNS(XHTML_NAMESPACE, 'button');
+        copyButton.className = 'mktero-annotation-copy-button';
+        copyButton.type = 'button';
+        copyButton.dataset.action = 'copy-with-source';
+        copyButton.setAttribute('aria-label', translate('evidence.copyWithSource'));
+        copyButton.setAttribute('title', translate('evidence.copyWithSource'));
+        copyButton.appendChild(createLucideIcon(
+            document,
+            LUCIDE_ICONS.copy,
+            { className: 'mktero-evidence-copy-icon', size: 16 }
+        ));
+        copyButton.addEventListener('click', () => run(
+            copySourcedMarkdown,
+            'evidence.copyFailed'
+        ));
+        controls.push({ button: copyButton, enabled: true });
+        content.appendChild(copyButton);
+    }
+    content.appendChild(error);
     return content;
 }
 

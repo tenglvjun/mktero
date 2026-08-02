@@ -4,6 +4,7 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
+import { isValidSourceMapEntry } from '../core/markdown-source-map.js';
 import { findMinerUAlgorithmGroups } from '../markdown/markdown-algorithms.js';
 import {
     findDisplayMathMatches,
@@ -39,9 +40,7 @@ import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-tex
 import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
     createSourceLocationActions,
-    createSourceLocationButton,
     sourceMapEntriesForRange,
-    validSourceMapEntry,
 } from './source-location-button.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
@@ -67,6 +66,8 @@ class RenderedMarkdownWidget extends WidgetType {
         extraClassName = '',
         translate = translateEnglish,
         sourceMap,
+        copySourcedMarkdown,
+        onSourcedCopyError,
         openSourceLocation,
         onSourceNavigationError,
     }) {
@@ -84,6 +85,8 @@ class RenderedMarkdownWidget extends WidgetType {
         this.annotationKey = JSON.stringify(annotations);
         this.extraClassName = extraClassName;
         this.translate = translate;
+        this.copySourcedMarkdown = copySourcedMarkdown;
+        this.onSourcedCopyError = onSourcedCopyError;
         this.openSourceLocation = openSourceLocation;
         this.onSourceNavigationError = onSourceNavigationError;
         const sourceEntries = ['inline', 'image-inline', 'math'].includes(display)
@@ -131,9 +134,13 @@ class RenderedMarkdownWidget extends WidgetType {
             inline
         );
         if (this.sourceEntries.length
-            && typeof this.openSourceLocation === 'function') {
+            && (typeof this.openSourceLocation === 'function'
+                || typeof this.copySourcedMarkdown === 'function')) {
             installRenderedSourceLocationButtons(container, this.sourceEntries, {
                 display: this.display,
+                markdown: view.state.doc.toString(),
+                copySourcedMarkdown: this.copySourcedMarkdown,
+                onSourcedCopyError: this.onSourcedCopyError,
                 openSourceLocation: this.openSourceLocation,
                 onSourceNavigationError: this.onSourceNavigationError,
                 translate: this.translate,
@@ -169,7 +176,9 @@ class RenderedMarkdownWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
-        if (event.target?.closest?.('.cm-mktero-source-link')) return true;
+        if (event.target?.closest?.(
+            '.cm-mktero-source-link, .cm-mktero-source-copy'
+        )) return true;
         if (event.type === 'mousedown'
             && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
             return true;
@@ -222,9 +231,9 @@ function installFigurePanelSourceLocationButtons(container, entries, options) {
             panel.appendChild(target);
         }
         panel.classList.add('mktero-figure-source-panel');
-        panel.prepend(createSourceLocationButton(
+        panel.prepend(createSourceLocationActions(
             container.ownerDocument,
-            entries[index],
+            [entries[index]],
             options
         ));
     }
@@ -308,9 +317,18 @@ class AnnotationNoteWidget extends WidgetType {
 }
 
 class SourceLocationWidget extends WidgetType {
-    constructor(entry, openSourceLocation, onSourceNavigationError, translate) {
+    constructor(
+        entry,
+        copySourcedMarkdown,
+        onSourcedCopyError,
+        openSourceLocation,
+        onSourceNavigationError,
+        translate
+    ) {
         super();
         this.entry = entry;
+        this.copySourcedMarkdown = copySourcedMarkdown;
+        this.onSourcedCopyError = onSourcedCopyError;
         this.openSourceLocation = openSourceLocation;
         this.onSourceNavigationError = onSourceNavigationError;
         this.translate = translate;
@@ -322,7 +340,10 @@ class SourceLocationWidget extends WidgetType {
     }
 
     toDOM(view) {
-        return createSourceLocationButton(view.dom.ownerDocument, this.entry, {
+        return createSourceLocationActions(view.dom.ownerDocument, [this.entry], {
+            markdown: view.state.doc.toString(),
+            copySourcedMarkdown: this.copySourcedMarkdown,
+            onSourcedCopyError: this.onSourcedCopyError,
             openSourceLocation: this.openSourceLocation,
             onSourceNavigationError: this.onSourceNavigationError,
             translate: this.translate,
@@ -342,6 +363,8 @@ export function createInlineRenderingExtension({
     tablePreviewPopup,
     figurePreviewPopup,
     annotationPopup,
+    copySourcedMarkdown,
+    onSourcedCopyError,
     openSourceLocation,
     onSourceNavigationError,
     activateCitation,
@@ -357,6 +380,8 @@ export function createInlineRenderingExtension({
         tablePreviewPopup,
         figurePreviewPopup,
         annotationPopup,
+        copySourcedMarkdown,
+        onSourcedCopyError,
         openSourceLocation,
         onSourceNavigationError,
         activateCitation,
@@ -662,12 +687,15 @@ function buildDecorations(state, context) {
 }
 
 function decorateSourceLocations(state, decorations, context) {
-    if (typeof context.openSourceLocation !== 'function') return;
+    if (typeof context.openSourceLocation !== 'function'
+        && typeof context.copySourcedMarkdown !== 'function') return;
     for (const entry of context.sourceMap) {
-        if (!validSourceMapEntry(entry, state.doc.length)) continue;
+        if (!isValidSourceMapEntry(entry, state.doc.length)) continue;
         decorations.push(Decoration.widget({
             widget: new SourceLocationWidget(
                 entry,
+                context.copySourcedMarkdown,
+                context.onSourcedCopyError,
                 context.openSourceLocation,
                 context.onSourceNavigationError,
                 context.translate

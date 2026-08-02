@@ -200,6 +200,17 @@ export function isValidSourceLocation(value) {
         && isValidNormalizedSourceBBox(value.bbox);
 }
 
+export function isValidSourceMapEntry(value, documentLength = Infinity) {
+    return Number.isSafeInteger(value?.markdownFrom)
+        && Number.isSafeInteger(value?.markdownTo)
+        && value.markdownFrom >= 0
+        && value.markdownTo > value.markdownFrom
+        && value.markdownTo <= documentLength
+        && Array.isArray(value.locations)
+        && value.locations.length > 0
+        && value.locations.every(isValidSourceLocation);
+}
+
 export function isValidNormalizedSourceBBox(value) {
     return Array.isArray(value)
         && value.length === 4

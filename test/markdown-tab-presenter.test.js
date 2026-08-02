@@ -237,6 +237,7 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
         onDeleteAnnotation: () => calls.push('stale-delete'),
         onOpenAnnotationInPDF: () => calls.push('stale-open'),
         onOpenSourceInPDF: () => calls.push('stale-source'),
+        onCopySourcedMarkdown: () => calls.push('stale-copy'),
     });
     const second = presenter.open(42, {
         onChangeAnnotationColor: (id, color) => calls.push({ id, color }),
@@ -244,6 +245,7 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
         onDeleteAnnotation: id => calls.push({ deleted: id }),
         onOpenAnnotationInPDF: id => calls.push({ opened: id }),
         onOpenSourceInPDF: location => calls.push({ source: location }),
+        onCopySourcedMarkdown: target => calls.push({ copied: target }),
     });
 
     await second.model.onChangeAnnotationColor('ANN00001', '#ff6666');
@@ -253,6 +255,11 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
     await second.model.onOpenSourceInPDF({
         pageIndex: 2,
         bbox: [100, 200, 900, 300],
+    });
+    await second.model.onCopySourcedMarkdown({
+        kind: 'block',
+        from: 0,
+        to: 16,
     });
 
     assert.equal(first.model, second.model);
@@ -267,6 +274,7 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
                 bbox: [100, 200, 900, 300],
             },
         },
+        { copied: { kind: 'block', from: 0, to: 16 } },
     ]);
 });
 

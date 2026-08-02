@@ -204,6 +204,32 @@ test('forwards mapped source locations to the current tab model', async () => {
     view.destroy();
 });
 
+test('forwards sourced Markdown copy targets to the current tab model', async () => {
+    let editorOptions;
+    const copied = [];
+    const model = createModel({
+        status: 'ready',
+        markdown: 'Mapped paragraph.',
+        onCopySourcedMarkdown: target => copied.push(target),
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+    const target = { kind: 'block', from: 0, to: 17 };
+
+    await editorOptions.copySourcedMarkdown(target);
+
+    assert.deepEqual(copied, [target]);
+    view.destroy();
+});
+
 test('reparses the current PDF from an accessible icon action', async () => {
     let reparseCalls = 0;
     let finishReparse;

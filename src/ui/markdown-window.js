@@ -154,6 +154,7 @@ class MarkdownTabView {
             deleteAnnotation: annotationID => (
                 this.deleteAnnotation(annotationID)
             ),
+            copySourcedMarkdown: target => this.copySourcedMarkdown(target),
             openSourceLocation: location => this.openSourceLocation(location),
             onSourceNavigationError: error => this.zotero?.logError?.(error),
             localization: this.localization,
@@ -237,6 +238,13 @@ class MarkdownTabView {
             throw new Error('PDF source navigation is unavailable');
         }
         return this.model.onOpenSourceInPDF(location);
+    }
+
+    copySourcedMarkdown(target) {
+        if (typeof this.model.onCopySourcedMarkdown !== 'function') {
+            throw new Error('Sourced Markdown copy is unavailable');
+        }
+        return this.model.onCopySourcedMarkdown(target);
     }
 
     async changeAnnotationColor(annotationID, color) {

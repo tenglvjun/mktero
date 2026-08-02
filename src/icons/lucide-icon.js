@@ -1,7 +1,9 @@
 import {
+    Check,
     ChevronLeft,
     ChevronRight,
     Clock,
+    Copy,
     ExternalLink,
     FileText,
     LoaderCircle,
@@ -29,6 +31,10 @@ const DEFAULT_ATTRIBUTES = Object.freeze({
 });
 
 export const LUCIDE_ICONS = Object.freeze({
+    check: Object.freeze({
+        name: 'check',
+        nodes: Check,
+    }),
     chevronLeft: Object.freeze({
         name: 'chevron-left',
         nodes: ChevronLeft,
@@ -40,6 +46,10 @@ export const LUCIDE_ICONS = Object.freeze({
     clock: Object.freeze({
         name: 'clock',
         nodes: Clock,
+    }),
+    copy: Object.freeze({
+        name: 'copy',
+        nodes: Copy,
     }),
     externalLink: Object.freeze({
         name: 'external-link',

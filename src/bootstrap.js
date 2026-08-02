@@ -16,6 +16,10 @@ import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import { MarkdownAnnotationOverlay } from './core/markdown-annotation-overlay.js';
 import { MarkdownLocalAnnotations } from './core/markdown-local-annotations.js';
 import {
+    createEvidenceSnippet,
+    formatEvidenceMarkdown,
+} from './markdown/markdown-evidence.js';
+import {
     CONVERSION_PROGRESS,
     normalizeConversionProgress,
 } from './core/conversion-progress.js';
@@ -36,6 +40,10 @@ import {
 import {
     createZoteroSourceNavigation,
 } from './platform/zotero-source-navigation.js';
+import { createZoteroClipboard } from './platform/zotero-clipboard.js';
+import {
+    createZoteroEvidenceReference,
+} from './platform/zotero-evidence-reference.js';
 import {
     registerZoteroAnnotationObserver,
 } from './platform/zotero-annotation-observer.js';
@@ -71,6 +79,8 @@ const runtime = {
     localization: null,
     annotationActions: null,
     sourceNavigation: null,
+    clipboard: null,
+    evidenceReference: null,
     disposeAnnotationObserver: null,
     annotationOverlayRefresher: null,
     localAnnotations: null,
@@ -93,6 +103,13 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.localization = localization;
     runtime.annotationActions = createZoteroAnnotationActions(Zotero);
     runtime.sourceNavigation = createZoteroSourceNavigation(Zotero);
+    runtime.clipboard = createZoteroClipboard(
+        typeof Components === 'undefined' ? null : Components
+    );
+    runtime.evidenceReference = createZoteroEvidenceReference(
+        Zotero,
+        runtimeTranslate
+    );
     runtime.presenter = new MarkdownTabPresenter({
         zotero: Zotero,
         rootURI,
@@ -207,6 +224,8 @@ globalThis.shutdown = function shutdown() {
     runtime.localization = null;
     runtime.annotationActions = null;
     runtime.sourceNavigation = null;
+    runtime.clipboard = null;
+    runtime.evidenceReference = null;
     runtime.disposeAnnotationObserver = null;
     runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
@@ -243,6 +262,7 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
             runAnnotationAction('openInPDF', itemID, annotationID)
         ),
         onOpenSourceInPDF: location => openSourceInPDF(itemID, location),
+        onCopySourcedMarkdown: target => copySourcedMarkdown(itemID, target),
         onCreateMarkdownAnnotation: draft => (
             runMarkdownAnnotationAction('create', itemID, draft)
         ),
@@ -373,6 +393,38 @@ async function openSourceInPDF(itemID, location) {
         Zotero.logError?.(error);
         const message = runtimeTranslate('source.navigationFailed');
         Zotero.getMainWindow?.()?.alert?.(`Mktero: ${message}`);
+    }
+}
+
+async function copySourcedMarkdown(itemID, target) {
+    try {
+        const model = runtime.presenter?.get(itemID)?.model;
+        if (model?.status !== 'ready') {
+            throw new Error('The Markdown document is unavailable');
+        }
+        const snippet = createEvidenceSnippet({
+            markdown: model.markdown,
+            sourceMap: model.sourceMap,
+            target,
+        });
+        if (typeof runtime.evidenceReference?.resolve !== 'function'
+            || typeof runtime.clipboard?.writeText !== 'function') {
+            throw new Error('Sourced Markdown copy is unavailable');
+        }
+        const reference = await runtime.evidenceReference.resolve(
+            itemID,
+            snippet.pageIndexes
+        );
+        const markdown = formatEvidenceMarkdown(
+            snippet,
+            reference,
+            runtimeTranslate
+        );
+        await runtime.clipboard.writeText(markdown);
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        throw error;
     }
 }
 
