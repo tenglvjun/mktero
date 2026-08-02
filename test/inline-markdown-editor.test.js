@@ -126,17 +126,17 @@ test('shows accessible PDF source actions only for mapped Markdown blocks', asyn
     dom.window.close();
 });
 
-test('copies an entire mapped Markdown block with its source', async () => {
+test('does not show sourced copy beside a mapped Markdown block', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
     const { document } = dom.window;
     const markdown = 'Mapped paragraph with source.';
-    const copied = [];
     const editor = createInlineMarkdownEditor({
         parent: document.querySelector('#editor'),
         initialMarkdown: '',
-        copySourcedMarkdown: async target => copied.push(target),
+        copySourcedMarkdown: async () => assert.fail('must not copy'),
+        openSourceLocation: () => {},
     });
     editor.setDocument({
         markdown,
@@ -148,26 +148,9 @@ test('copies an entire mapped Markdown block with its source', async () => {
         }],
     });
 
-    const copy = document.querySelector('.cm-mktero-source-copy');
-    assert.ok(copy);
-    assert.equal(copy.getAttribute('aria-label'), 'Copy with source');
-    assert.equal(
-        copy.querySelector('svg')?.getAttribute('data-lucide'),
-        'copy'
-    );
-    copy.click();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    assert.deepEqual(copied, [{
-        kind: 'block',
-        from: 0,
-        to: markdown.length,
-    }]);
-    assert.equal(
-        copy.querySelector('svg')?.getAttribute('data-lucide'),
-        'check'
-    );
+    assert.ok(document.querySelector('.cm-mktero-source-link'));
+    assert.equal(document.querySelector('.cm-mktero-source-copy'), null);
+    assert.equal(document.querySelector('[data-action="copy-with-source"]'), null);
 
     editor.destroy();
     dom.window.close();
@@ -3333,6 +3316,71 @@ test('shows Markdown annotation actions after selecting ordinary text', () => {
     assert.match(document.getSelection().toString(), /Select this Markdown text/);
 
     editor.destroy();
+    dom.window.close();
+});
+
+test('anchors selection actions above the first selected line', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    Object.defineProperties(dom.window, {
+        innerWidth: { configurable: true, value: 1000 },
+        innerHeight: { configurable: true, value: 800 },
+    });
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'First selected line.\nSecond selected line.',
+    });
+    const content = document.querySelector('.cm-content');
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    range.getClientRects = () => [{
+        top: 300,
+        right: 440,
+        bottom: 320,
+        left: 300,
+        width: 140,
+        height: 20,
+    }, {
+        top: 302,
+        right: 700,
+        bottom: 318,
+        left: 450,
+        width: 250,
+        height: 16,
+    }, {
+        top: 500,
+        right: 400,
+        bottom: 520,
+        left: 300,
+        width: 100,
+        height: 20,
+    }];
+    document.getSelection().addRange(range);
+    const originalGetBoundingClientRect =
+        dom.window.HTMLElement.prototype.getBoundingClientRect;
+    dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+        if (this.classList.contains('mktero-annotation-popup')) {
+            return { height: 60, width: 300 };
+        }
+        return originalGetBoundingClientRect.call(this);
+    };
+
+    content.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const popup = document.querySelector('.mktero-annotation-popup');
+    assert.equal(popup?.dataset.placement, 'top');
+    assert.equal(popup?.style.left, '350px');
+    assert.equal(popup?.style.top, '230px');
+
+    editor.destroy();
+    dom.window.HTMLElement.prototype.getBoundingClientRect =
+        originalGetBoundingClientRect;
     dom.window.close();
 });
 

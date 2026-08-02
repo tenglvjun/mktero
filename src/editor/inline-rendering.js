@@ -69,8 +69,6 @@ class RenderedMarkdownWidget extends WidgetType {
         extraClassName = '',
         translate = translateEnglish,
         sourceMap,
-        copySourcedMarkdown,
-        onSourcedCopyError,
         openSourceLocation,
         onSourceNavigationError,
     }) {
@@ -88,8 +86,6 @@ class RenderedMarkdownWidget extends WidgetType {
         this.annotationKey = JSON.stringify(annotations);
         this.extraClassName = extraClassName;
         this.translate = translate;
-        this.copySourcedMarkdown = copySourcedMarkdown;
-        this.onSourcedCopyError = onSourcedCopyError;
         this.openSourceLocation = openSourceLocation;
         this.onSourceNavigationError = onSourceNavigationError;
         const sourceEntries = ['inline', 'image-inline', 'math'].includes(display)
@@ -137,13 +133,9 @@ class RenderedMarkdownWidget extends WidgetType {
             inline
         );
         if (this.sourceEntries.length
-            && (typeof this.openSourceLocation === 'function'
-                || typeof this.copySourcedMarkdown === 'function')) {
+            && typeof this.openSourceLocation === 'function') {
             installRenderedSourceLocationButtons(container, this.sourceEntries, {
                 display: this.display,
-                markdown: view.state.doc.toString(),
-                copySourcedMarkdown: this.copySourcedMarkdown,
-                onSourcedCopyError: this.onSourcedCopyError,
                 openSourceLocation: this.openSourceLocation,
                 onSourceNavigationError: this.onSourceNavigationError,
                 translate: this.translate,
@@ -179,9 +171,7 @@ class RenderedMarkdownWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
-        if (event.target?.closest?.(
-            '.cm-mktero-source-link, .cm-mktero-source-copy'
-        )) return true;
+        if (event.target?.closest?.('.cm-mktero-source-link')) return true;
         if (event.type === 'mousedown'
             && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
             return true;
@@ -322,16 +312,12 @@ class AnnotationNoteWidget extends WidgetType {
 class SourceLocationWidget extends WidgetType {
     constructor(
         entry,
-        copySourcedMarkdown,
-        onSourcedCopyError,
         openSourceLocation,
         onSourceNavigationError,
         translate
     ) {
         super();
         this.entry = entry;
-        this.copySourcedMarkdown = copySourcedMarkdown;
-        this.onSourcedCopyError = onSourcedCopyError;
         this.openSourceLocation = openSourceLocation;
         this.onSourceNavigationError = onSourceNavigationError;
         this.translate = translate;
@@ -344,9 +330,6 @@ class SourceLocationWidget extends WidgetType {
 
     toDOM(view) {
         return createSourceLocationActions(view.dom.ownerDocument, [this.entry], {
-            markdown: view.state.doc.toString(),
-            copySourcedMarkdown: this.copySourcedMarkdown,
-            onSourcedCopyError: this.onSourcedCopyError,
             openSourceLocation: this.openSourceLocation,
             onSourceNavigationError: this.onSourceNavigationError,
             translate: this.translate,
@@ -366,8 +349,6 @@ export function createInlineRenderingExtension({
     tablePreviewPopup,
     figurePreviewPopup,
     annotationPopup,
-    copySourcedMarkdown,
-    onSourcedCopyError,
     openSourceLocation,
     onSourceNavigationError,
     activateCitation,
@@ -383,8 +364,6 @@ export function createInlineRenderingExtension({
         tablePreviewPopup,
         figurePreviewPopup,
         annotationPopup,
-        copySourcedMarkdown,
-        onSourcedCopyError,
         openSourceLocation,
         onSourceNavigationError,
         activateCitation,
@@ -690,15 +669,12 @@ function buildDecorations(state, context) {
 }
 
 function decorateSourceLocations(state, decorations, context) {
-    if (typeof context.openSourceLocation !== 'function'
-        && typeof context.copySourcedMarkdown !== 'function') return;
+    if (typeof context.openSourceLocation !== 'function') return;
     for (const entry of context.sourceMap) {
         if (!isValidSourceMapEntry(entry, state.doc.length)) continue;
         decorations.push(Decoration.widget({
             widget: new SourceLocationWidget(
                 entry,
-                context.copySourcedMarkdown,
-                context.onSourcedCopyError,
                 context.openSourceLocation,
                 context.onSourceNavigationError,
                 context.translate
@@ -1249,7 +1225,7 @@ function selectionNodeInEditor(view, node) {
 
 export function selectionAnchor(selection, fallback) {
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    const rect = lastSelectionRect(range)
+    const rect = firstVisibleSelectionRect(range, fallback)
         || fallback?.getBoundingClientRect?.()
         || emptyRect();
     const snapshot = {
@@ -1263,10 +1239,39 @@ export function selectionAnchor(selection, fallback) {
     return { getBoundingClientRect: () => snapshot };
 }
 
-function lastSelectionRect(range) {
-    const rectangles = range?.getClientRects?.();
-    if (rectangles?.length) return rectangles[rectangles.length - 1];
+function firstVisibleSelectionRect(range, fallback) {
+    const rectangles = Array.from(range?.getClientRects?.() || [])
+        .filter(rect => rect.width > 0 && rect.height > 0);
+    const ownerWindow = range?.commonAncestorContainer?.ownerDocument
+        ?.defaultView || fallback?.ownerDocument?.defaultView;
+    const viewportWidth = ownerWindow?.innerWidth || 0;
+    const viewportHeight = ownerWindow?.innerHeight || 0;
+    const first = rectangles.find(rect => (
+        rect.bottom > 0
+        && rect.right > 0
+        && rect.top < viewportHeight
+        && rect.left < viewportWidth
+    )) || rectangles[0];
+    if (first) return mergeSelectionLineRects(rectangles, first);
     return range?.getBoundingClientRect?.() || null;
+}
+
+function mergeSelectionLineRects(rectangles, first) {
+    const lineRects = rectangles.filter(rect => (
+        Math.min(rect.bottom, first.bottom) > Math.max(rect.top, first.top)
+    ));
+    const top = Math.min(...lineRects.map(rect => rect.top));
+    const right = Math.max(...lineRects.map(rect => rect.right));
+    const bottom = Math.max(...lineRects.map(rect => rect.bottom));
+    const left = Math.min(...lineRects.map(rect => rect.left));
+    return {
+        top,
+        right,
+        bottom,
+        left,
+        width: right - left,
+        height: bottom - top,
+    };
 }
 
 function emptyRect() {

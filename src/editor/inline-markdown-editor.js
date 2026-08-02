@@ -90,7 +90,6 @@ export function createInlineMarkdownEditor({
     updateAnnotationComment,
     deleteAnnotation,
     copySourcedMarkdown,
-    onSourcedCopyError,
     openSourceLocation,
     onSourceNavigationError,
     localization = createLocalization(),
@@ -195,8 +194,6 @@ export function createInlineMarkdownEditor({
                     tablePreviewPopup,
                     figurePreviewPopup,
                     annotationPopup,
-                    copySourcedMarkdown,
-                    onSourcedCopyError,
                     openSourceLocation,
                     onSourceNavigationError,
                     activateCitation:

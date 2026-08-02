@@ -24,8 +24,6 @@ export class RenderedTableWidget extends WidgetType {
         annotations = [],
         translate,
         sourceMap,
-        copySourcedMarkdown,
-        onSourcedCopyError,
         openSourceLocation,
         onSourceNavigationError,
     }) {
@@ -42,8 +40,6 @@ export class RenderedTableWidget extends WidgetType {
         this.annotations = annotations;
         this.annotationKey = JSON.stringify(annotations);
         this.translate = translate;
-        this.copySourcedMarkdown = copySourcedMarkdown;
-        this.onSourcedCopyError = onSourcedCopyError;
         this.openSourceLocation = openSourceLocation;
         this.onSourceNavigationError = onSourceNavigationError;
         this.sourceEntries = sourceMapEntriesForRange(
@@ -79,15 +75,11 @@ export class RenderedTableWidget extends WidgetType {
         );
         appendRenderedMarkdown(container, this.source, this.resolveImageURL);
         if (this.sourceEntries.length
-            && (typeof this.openSourceLocation === 'function'
-                || typeof this.copySourcedMarkdown === 'function')) {
+            && typeof this.openSourceLocation === 'function') {
             container.prepend(createSourceLocationActions(
                 document,
                 this.sourceEntries,
                 {
-                    markdown: view.state.doc.toString(),
-                    copySourcedMarkdown: this.copySourcedMarkdown,
-                    onSourcedCopyError: this.onSourcedCopyError,
                     openSourceLocation: this.openSourceLocation,
                     onSourceNavigationError: this.onSourceNavigationError,
                     translate: this.translate,
@@ -124,9 +116,7 @@ export class RenderedTableWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
-        if (event.target?.closest?.(
-            '.cm-mktero-source-link, .cm-mktero-source-copy'
-        )) return true;
+        if (event.target?.closest?.('.cm-mktero-source-link')) return true;
         if (event.type === 'mousedown'
             && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
             return true;
