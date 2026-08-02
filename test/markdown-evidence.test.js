@@ -39,6 +39,26 @@ test('creates a quoted evidence snippet for a reliably mapped selection', () => 
     });
 });
 
+test('creates evidence for a selection spanning rendered inline math', () => {
+    const markdown = 'Before $n = 22$ after.';
+    const snippet = createEvidenceSnippet({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 200] }],
+        }],
+        target: {
+            kind: 'selection',
+            text: 'Before n = 22 after.',
+            ranges: [{ from: 0, to: markdown.length }],
+        },
+    });
+
+    assert.equal(snippet.markdown, '> Before n \\= 22 after\\.');
+});
+
 test('formats evidence with localized links for every source page', () => {
     const snippet = createEvidenceSnippet({
         markdown: 'A reliable result is reported.',
@@ -170,7 +190,7 @@ test('neutralizes Markdown syntax, math, and bare links in quoted prose', () => 
 
     assert.equal(snippet.markdown, [
         '> Prefix \\# Result',
-        '> https\\:\\/\\/example\\.com and \\$x\\$ \\> baseline\\.',
+        '> https\\:\\/\\/example\\.com and x \\> baseline\\.',
     ].join('\n'));
 });
 

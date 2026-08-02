@@ -1,4 +1,5 @@
 import { GFM, parser } from '@lezer/markdown';
+import { findInlineMathMatches } from './markdown-html.js';
 import { isNumericCitationContent } from './text-normalization.js';
 
 const MARKDOWN_PARSER = parser.configure(GFM);
@@ -20,6 +21,12 @@ const HIDDEN_URL_PARENT_NAMES = new Set([
     'Image',
     'Link',
     'LinkReference',
+]);
+const MATH_EXCLUDED_NODE_NAMES = new Set([
+    'CodeBlock',
+    'FencedCode',
+    'HTMLBlock',
+    'InlineCode',
 ]);
 
 export function createVisibleMarkdownTextIndex(markdown) {
@@ -69,8 +76,12 @@ export function createVisibleMarkdownTextIndex(markdown) {
 
 function collectHiddenRanges(markdown) {
     const ranges = [];
+    const mathExcludedRanges = [];
     MARKDOWN_PARSER.parse(markdown).iterate({
         enter(node) {
+            if (MATH_EXCLUDED_NODE_NAMES.has(node.name)) {
+                mathExcludedRanges.push({ from: node.from, to: node.to });
+            }
             if (HIDDEN_SUBTREE_NAMES.has(node.name)) {
                 ranges.push({ from: node.from, to: node.to });
                 return false;
@@ -83,6 +94,20 @@ function collectHiddenRanges(markdown) {
             return undefined;
         },
     });
+    for (const match of findInlineMathMatches(markdown)) {
+        if (overlapsAnyRange(match, mathExcludedRanges)) continue;
+        if (match.text.startsWith('^')) continue;
+        const contentOffset = match.raw.indexOf(match.text);
+        if (contentOffset < 0) continue;
+        const contentFrom = match.start + contentOffset;
+        const contentTo = contentFrom + match.text.length;
+        if (match.start < contentFrom) {
+            ranges.push({ from: match.start, to: contentFrom });
+        }
+        if (contentTo < match.end) {
+            ranges.push({ from: contentTo, to: match.end });
+        }
+    }
     ranges.sort((left, right) => left.from - right.from || left.to - right.to);
     const merged = [];
     for (const range of ranges) {
@@ -95,6 +120,10 @@ function collectHiddenRanges(markdown) {
         }
     }
     return merged;
+}
+
+function overlapsAnyRange(target, ranges) {
+    return ranges.some(range => target.start < range.to && target.end > range.from);
 }
 
 function isVisibleNumericCitationMark(node, markdown) {

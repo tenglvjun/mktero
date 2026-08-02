@@ -37,7 +37,10 @@ import {
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
 import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
-import { findTextOccurrences } from '../markdown/text-normalization.js';
+import {
+    findTextOccurrences,
+    normalizeText,
+} from '../markdown/text-normalization.js';
 import {
     createSourceLocationActions,
     sourceMapEntriesForRange,
@@ -1093,9 +1096,7 @@ export function selectedMarkdownAnnotation(view) {
         return null;
     }
     const text = selection.toString();
-    if (!text.trim() || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) {
-        return null;
-    }
+    if (!text.trim()) return null;
     const renderedStart = renderedSelectionContainer(
         range.startContainer,
         view
@@ -1106,13 +1107,23 @@ export function selectedMarkdownAnnotation(view) {
             ? selectedRenderedMarkdownAnnotation(view, range, text)
             : null;
     }
-    if (selectionIntersectsRenderedContent(view, range)) return null;
+    const renderedIntersections = intersectingRenderedContent(view, range);
+    if (renderedIntersections === null) return null;
     try {
         const first = view.posAtDOM(range.startContainer, range.startOffset);
         const second = view.posAtDOM(range.endContainer, range.endOffset);
         const from = Math.min(first, second);
         const to = Math.max(first, second);
         if (to <= from) return null;
+        if (renderedIntersections.length) {
+            return selectedInlineMathAnnotation(
+                view,
+                renderedIntersections,
+                from,
+                to
+            );
+        }
+        if (text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
         return { text, ranges: [{ from, to }] };
     }
     catch {
@@ -1134,7 +1145,7 @@ function selectedRenderedMarkdownAnnotation(view, range, selectedText) {
         return null;
     }
     const text = selectedText.trim();
-    if (!text) return null;
+    if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     const source = view.state.sliceDoc(sourceFrom, sourceTo);
     const renderedOffset = renderedSelectionTextOffset(
         start,
@@ -1187,19 +1198,40 @@ function renderedSelectionTextOffset(container, range, selectedText) {
     return prefix.toString().length + leadingWhitespace;
 }
 
-function selectionIntersectsRenderedContent(view, range) {
-    if (typeof range.intersectsNode !== 'function') return true;
+function intersectingRenderedContent(view, range) {
+    if (typeof range.intersectsNode !== 'function') return null;
+    const intersections = [];
     for (const container of view.dom.querySelectorAll(
         '.cm-mktero-rendered[data-markdown-from][data-markdown-to]'
     )) {
         try {
-            if (range.intersectsNode(container)) return true;
+            if (range.intersectsNode(container)) intersections.push(container);
         }
         catch {
-            return true;
+            return null;
         }
     }
-    return false;
+    return intersections;
+}
+
+function selectedInlineMathAnnotation(view, containers, from, to) {
+    for (const container of containers) {
+        const markdownFrom = Number(container.dataset.markdownFrom);
+        const markdownTo = Number(container.dataset.markdownTo);
+        if (!container.classList.contains('cm-mktero-math')
+            || !Number.isSafeInteger(markdownFrom)
+            || !Number.isSafeInteger(markdownTo)
+            || markdownFrom < from
+            || markdownTo > to) {
+            return null;
+        }
+    }
+    const visible = createVisibleMarkdownTextIndex(
+        view.state.sliceDoc(from, to)
+    ).text;
+    const text = normalizeText(visible);
+    if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
+    return { text, ranges: [{ from, to }] };
 }
 
 function renderedSelectionContainer(node, view) {

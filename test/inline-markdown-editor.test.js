@@ -3387,6 +3387,49 @@ test('copies a reliably mapped selection with its source', async () => {
     dom.window.close();
 });
 
+test('shows selection actions across inline math', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Before $n = 22$ after.';
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const line = document.querySelector('.cm-line');
+    const start = textNodeContaining(line, 'Before');
+    const end = textNodeContaining(line, 'after.');
+    const range = document.createRange();
+    range.setStart(start, 0);
+    range.setEnd(end, end.textContent.length);
+    document.getSelection().addRange(range);
+
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    assert.ok(document.querySelector('.cm-mktero-math'));
+    const actions = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(actions);
+    actions.querySelector('[data-color="#ffd400"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.text, 'Before n = 22 after.');
+    assert.deepEqual(created.ranges, [{ from: 0, to: markdown.length }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('does not offer sourced copy for an unmapped selection', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
