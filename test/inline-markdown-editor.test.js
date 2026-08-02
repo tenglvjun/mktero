@@ -61,7 +61,7 @@ test('keeps Markdown as the source of truth in a read-only surface', () => {
     dom.window.close();
 });
 
-test('shows accessible PDF source actions only for mapped Markdown blocks', async () => {
+test('opens a reliably mapped PDF source from the selection actions', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
@@ -92,17 +92,6 @@ test('shows accessible PDF source actions only for mapped Markdown blocks', asyn
         }],
     });
 
-    const actions = document.querySelectorAll('.cm-mktero-source-link');
-    assert.equal(actions.length, 1);
-    assert.equal(actions[0].localName, 'button');
-    assert.equal(actions[0].getAttribute('aria-label'), 'View in PDF');
-    assert.equal(actions[0].getAttribute('title'), 'View in PDF');
-    assert.equal(actions[0].getAttribute('data-location-count'), '2');
-    assert.equal(
-        actions[0].querySelector('svg')?.getAttribute('data-lucide'),
-        'external-link'
-    );
-
     const mappedText = textNodeContaining(
         document.querySelector('.cm-content'),
         'Mapped paragraph'
@@ -113,30 +102,48 @@ test('shows accessible PDF source actions only for mapped Markdown blocks', asyn
     range.setEnd(mappedText, 6);
     selection.removeAllRanges();
     selection.addRange(range);
-    actions[0].click();
+    mappedText.parentElement.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    assert.equal(document.querySelector('.cm-mktero-source-link'), null);
+    const action = document.querySelector(
+        '.mktero-markdown-selection-actions [data-action="view-in-pdf"]'
+    );
+    assert.ok(action);
+    assert.equal(action.getAttribute('aria-label'), 'View in PDF');
+    assert.equal(action.getAttribute('title'), 'View in PDF');
+    assert.equal(
+        action.querySelector('svg')?.getAttribute('data-lucide'),
+        'external-link'
+    );
+    action.click();
+    await Promise.resolve();
     await Promise.resolve();
 
     assert.deepEqual(opened, [locations[0]]);
     assert.equal(selection.toString(), 'Mapped');
 
-    editor.setDocument({ markdown, sourceMap: [] });
-    assert.equal(document.querySelector('.cm-mktero-source-link'), null);
-
     editor.destroy();
     dom.window.close();
 });
 
-test('does not show sourced copy beside a mapped Markdown block', () => {
+test('reports a PDF source navigation failure from the selection actions', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
     const { document } = dom.window;
     const markdown = 'Mapped paragraph with source.';
+    const failure = new Error('navigation failed');
+    const reported = [];
     const editor = createInlineMarkdownEditor({
         parent: document.querySelector('#editor'),
         initialMarkdown: '',
-        copySourcedMarkdown: async () => assert.fail('must not copy'),
-        openSourceLocation: () => {},
+        openSourceLocation: async () => {
+            throw failure;
+        },
+        onSourceNavigationError: error => reported.push(error),
     });
     editor.setDocument({
         markdown,
@@ -144,19 +151,39 @@ test('does not show sourced copy beside a mapped Markdown block', () => {
             type: 'text',
             markdownFrom: 0,
             markdownTo: markdown.length,
-            locations: [{ pageIndex: 2, bbox: [100, 200, 900, 300] }],
+            locations: [{ pageIndex: 1, bbox: [100, 200, 900, 300] }],
         }],
     });
 
-    assert.ok(document.querySelector('.cm-mktero-source-link'));
-    assert.equal(document.querySelector('.cm-mktero-source-copy'), null);
-    assert.equal(document.querySelector('[data-action="copy-with-source"]'), null);
+    const mappedText = textNodeContaining(
+        document.querySelector('.cm-content'),
+        'Mapped paragraph'
+    );
+    const range = document.createRange();
+    range.setStart(mappedText, 0);
+    range.setEnd(mappedText, 6);
+    document.getSelection().addRange(range);
+    mappedText.parentElement.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    document.querySelector('[data-action="view-in-pdf"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(reported, [failure]);
+    const error = document.querySelector('.mktero-annotation-action-error');
+    assert.equal(error.hidden, false);
+    assert.equal(
+        error.textContent,
+        'The PDF source location could not be opened.'
+    );
 
     editor.destroy();
     dom.window.close();
 });
 
-test('keeps PDF source actions beside rendered image, formula, and table blocks', () => {
+test('does not render PDF source buttons beside mapped Markdown blocks', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
@@ -190,7 +217,7 @@ test('keeps PDF source actions beside rendered image, formula, and table blocks'
 
     assert.equal(
         document.querySelectorAll('.cm-mktero-source-link').length,
-        3
+        0
     );
     assert.ok(document.querySelector('.cm-mktero-image'));
     assert.ok(document.querySelector('.cm-mktero-math-display'));
@@ -200,86 +227,7 @@ test('keeps PDF source actions beside rendered image, formula, and table blocks'
     dom.window.close();
 });
 
-test('keeps separate PDF source actions for a grouped table caption and body', async () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
-    const caption = 'Table 1. Values by group';
-    const table = '| A | B |\n| --- | --- |\n| 1 | 2 |';
-    const markdown = `${caption}\n\n${table}`;
-    const sourceMap = [caption, table].map((block, index) => ({
-        type: index === 0 ? 'text' : 'table',
-        markdownFrom: markdown.indexOf(block),
-        markdownTo: markdown.indexOf(block) + block.length,
-        locations: [{
-            pageIndex: index,
-            bbox: [100, 100, 900, 300],
-        }],
-    }));
-    const opened = [];
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: '',
-        resolveImageURL: () => null,
-        openSourceLocation: location => opened.push(location),
-    });
-
-    editor.setDocument({ markdown, sourceMap });
-
-    const renderedTable = document.querySelector('.cm-mktero-table');
-    const actions = renderedTable.querySelectorAll('.cm-mktero-source-link');
-    assert.equal(actions.length, 2);
-    actions[1].click();
-    await Promise.resolve();
-    assert.deepEqual(opened, [sourceMap[1].locations[0]]);
-
-    editor.destroy();
-    dom.window.close();
-});
-
-test('shows a separate PDF source action for each mapped figure panel', async () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
-    const panels = [
-        '![](images/panel-a.jpg)',
-        '![](images/panel-b.jpg)',
-    ];
-    const markdown = `${panels.join('\n\n')}  \nFigure 1. Panel comparison.`;
-    const locations = panels.map((panel, index) => ({
-        type: 'image',
-        markdownFrom: markdown.indexOf(panel),
-        markdownTo: markdown.indexOf(panel) + panel.length,
-        locations: [{
-            pageIndex: index,
-            bbox: [100, 100, 900, 700],
-        }],
-    }));
-    const opened = [];
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: '',
-        resolveImageURL: path => `blob:mktero-${path}`,
-        openSourceLocation: location => opened.push(location),
-    });
-
-    editor.setDocument({ markdown, sourceMap: locations });
-
-    const figure = document.querySelector('.mktero-figure-group');
-    const actions = figure.querySelectorAll('.cm-mktero-source-link');
-    assert.equal(actions.length, 2);
-    assert.equal(figure.querySelectorAll('.mktero-figure-source-panel').length, 2);
-    actions[1].click();
-    await Promise.resolve();
-    assert.deepEqual(opened, [locations[1].locations[0]]);
-
-    editor.destroy();
-    dom.window.close();
-});
-
-test('omits PDF source actions for malformed source-map entries', () => {
+test('does not offer PDF source navigation for an invalid mapping', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
@@ -305,72 +253,18 @@ test('omits PDF source actions for malformed source-map entries', () => {
         }],
     });
 
-    assert.equal(document.querySelector('.cm-mktero-source-link'), null);
-
-    editor.destroy();
-    dom.window.close();
-});
-
-test('omits sourced copy for a mapped block that is unsafe to export', () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
-    const markdown = '$$\n\\def\\unsafe{payload}\n$$';
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: '',
-        openSourceLocation: () => {},
-        copySourcedMarkdown: async () => assert.fail('must not copy'),
-    });
-    editor.setDocument({
-        markdown,
-        sourceMap: [{
-            type: 'equation',
-            markdownFrom: 0,
-            markdownTo: markdown.length,
-            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 300] }],
-        }],
-    });
-
-    assert.ok(document.querySelector('.cm-mktero-source-link'));
-    assert.equal(document.querySelector('.cm-mktero-source-copy'), null);
-
-    editor.destroy();
-    dom.window.close();
-});
-
-test('does not duplicate a paragraph source action on its inline formula', () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
-    const markdown = 'Mapped paragraph with inline $x^2$ formula.';
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: '',
-        resolveImageURL: () => null,
-        openSourceLocation: () => {},
-    });
-
-    editor.setDocument({
-        markdown,
-        sourceMap: [{
-            type: 'text',
-            markdownFrom: 0,
-            markdownTo: markdown.length,
-            locations: [{
-                pageIndex: 0,
-                bbox: [100, 100, 900, 180],
-            }],
-        }],
-    });
-
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
     assert.equal(
-        document.querySelectorAll('.cm-mktero-source-link').length,
-        1
+        document.querySelector('[data-action="view-in-pdf"]'),
+        null
     );
-    assert.ok(document.querySelector('.cm-mktero-math'));
 
     editor.destroy();
     dom.window.close();
@@ -3435,6 +3329,50 @@ test('copies a reliably mapped selection with its source', async () => {
     dom.window.close();
 });
 
+test('keeps PDF navigation when a mapped selection cannot be copied with source', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Selection with many mapped source regions.';
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        copySourcedMarkdown: async () => assert.fail('must not copy'),
+        openSourceLocation: async () => {},
+    });
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: Array.from({ length: 257 }, (_, index) => ({
+                pageIndex: index,
+                bbox: [100, 100, 900, 200],
+            })),
+        }],
+    });
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    assert.ok(document.querySelector('[data-action="view-in-pdf"]'));
+    assert.equal(
+        document.querySelector('[data-action="copy-with-source"]'),
+        null
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('shows selection actions across inline math', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -3478,7 +3416,7 @@ test('shows selection actions across inline math', async () => {
     dom.window.close();
 });
 
-test('does not offer sourced copy for an unmapped selection', () => {
+test('does not offer sourced actions for an unmapped selection', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
@@ -3488,6 +3426,7 @@ test('does not offer sourced copy for an unmapped selection', () => {
         parent: document.querySelector('#editor'),
         initialMarkdown: 'Unmapped selection.',
         copySourcedMarkdown: async () => assert.fail('must not copy'),
+        openSourceLocation: async () => assert.fail('must not navigate'),
     });
     const line = document.querySelector('.cm-line');
     const range = document.createRange();
@@ -3500,6 +3439,10 @@ test('does not offer sourced copy for an unmapped selection', () => {
 
     assert.equal(
         document.querySelector('[data-action="copy-with-source"]'),
+        null
+    );
+    assert.equal(
+        document.querySelector('[data-action="view-in-pdf"]'),
         null
     );
 

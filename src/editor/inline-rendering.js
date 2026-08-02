@@ -4,7 +4,6 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
-import { isValidSourceMapEntry } from '../core/markdown-source-map.js';
 import { findMinerUAlgorithmGroups } from '../markdown/markdown-algorithms.js';
 import {
     findDisplayMathMatches,
@@ -41,10 +40,6 @@ import {
     findTextOccurrences,
     normalizeText,
 } from '../markdown/text-normalization.js';
-import {
-    createSourceLocationActions,
-    sourceMapEntriesForRange,
-} from './source-location-button.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const MAX_MATCH_CANDIDATES = 10_000;
@@ -53,7 +48,6 @@ export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
 export const setAnnotationOverlay = StateEffect.define();
-export const setSourceMap = StateEffect.define();
 
 class RenderedMarkdownWidget extends WidgetType {
     constructor({
@@ -68,9 +62,6 @@ class RenderedMarkdownWidget extends WidgetType {
         annotations = [],
         extraClassName = '',
         translate = translateEnglish,
-        sourceMap,
-        openSourceLocation,
-        onSourceNavigationError,
     }) {
         super();
         this.source = source;
@@ -86,22 +77,6 @@ class RenderedMarkdownWidget extends WidgetType {
         this.annotationKey = JSON.stringify(annotations);
         this.extraClassName = extraClassName;
         this.translate = translate;
-        this.openSourceLocation = openSourceLocation;
-        this.onSourceNavigationError = onSourceNavigationError;
-        const sourceEntries = ['inline', 'image-inline', 'math'].includes(display)
-            ? []
-            : sourceMapEntriesForRange(
-                sourceMap,
-                from,
-                from + source.length
-            );
-        this.sourceEntries = sourceEntriesForRenderedDisplay(
-            sourceEntries,
-            display,
-            from,
-            from + source.length
-        );
-        this.sourceEntryKey = JSON.stringify(this.sourceEntries);
     }
 
     eq(other) {
@@ -111,7 +86,6 @@ class RenderedMarkdownWidget extends WidgetType {
             && this.renderVersion === other.renderVersion
             && this.citationKey === other.citationKey
             && this.annotationKey === other.annotationKey
-            && this.sourceEntryKey === other.sourceEntryKey
             && this.extraClassName === other.extraClassName;
     }
 
@@ -132,15 +106,6 @@ class RenderedMarkdownWidget extends WidgetType {
             this.resolveImageURL,
             inline
         );
-        if (this.sourceEntries.length
-            && typeof this.openSourceLocation === 'function') {
-            installRenderedSourceLocationButtons(container, this.sourceEntries, {
-                display: this.display,
-                openSourceLocation: this.openSourceLocation,
-                onSourceNavigationError: this.onSourceNavigationError,
-                translate: this.translate,
-            });
-        }
         installRenderedCitations(container, this.citations);
         if (['math', 'math-display'].includes(this.display)) {
             wrapRenderedMathAnnotations(
@@ -171,7 +136,6 @@ class RenderedMarkdownWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
-        if (event.target?.closest?.('.cm-mktero-source-link')) return true;
         if (event.type === 'mousedown'
             && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
             return true;
@@ -180,57 +144,6 @@ class RenderedMarkdownWidget extends WidgetType {
             '.cm-mktero-citation, .cm-mktero-pdf-annotation'
         );
     }
-}
-
-function sourceEntriesForRenderedDisplay(entries, display, from, to) {
-    if (['inline', 'image-inline', 'math'].includes(display)) return [];
-    if (display === 'image') {
-        return entries.filter(entry => ['chart', 'image'].includes(entry.type));
-    }
-    if (display === 'math-display') {
-        return entries.filter(entry => (
-            entry.type === 'equation'
-            && entry.markdownFrom === from
-            && entry.markdownTo === to
-        )).slice(0, 1);
-    }
-    return entries.slice(0, 1);
-}
-
-function installRenderedSourceLocationButtons(container, entries, options) {
-    if (options.display === 'image'
-        && installFigurePanelSourceLocationButtons(container, entries, options)) {
-        return;
-    }
-    container.prepend(createSourceLocationActions(
-        container.ownerDocument,
-        entries,
-        options
-    ));
-}
-
-function installFigurePanelSourceLocationButtons(container, entries, options) {
-    const figure = container.querySelector('.mktero-figure-group');
-    const targets = figure
-        ? [...figure.querySelectorAll('img, .missing-image')]
-        : [];
-    if (targets.length !== entries.length) return false;
-    for (const [index, target] of targets.entries()) {
-        let panel = target.closest('.mktero-figure-panel');
-        if (!panel || panel.parentElement !== figure) {
-            panel = container.ownerDocument.createElement('div');
-            panel.className = 'mktero-figure-panel';
-            target.replaceWith(panel);
-            panel.appendChild(target);
-        }
-        panel.classList.add('mktero-figure-source-panel');
-        panel.prepend(createSourceLocationActions(
-            container.ownerDocument,
-            [entries[index]],
-            options
-        ));
-    }
-    return true;
 }
 
 class TextMarkerWidget extends WidgetType {
@@ -309,38 +222,6 @@ class AnnotationNoteWidget extends WidgetType {
     }
 }
 
-class SourceLocationWidget extends WidgetType {
-    constructor(
-        entry,
-        openSourceLocation,
-        onSourceNavigationError,
-        translate
-    ) {
-        super();
-        this.entry = entry;
-        this.openSourceLocation = openSourceLocation;
-        this.onSourceNavigationError = onSourceNavigationError;
-        this.translate = translate;
-        this.key = JSON.stringify(entry);
-    }
-
-    eq(other) {
-        return this.key === other.key;
-    }
-
-    toDOM(view) {
-        return createSourceLocationActions(view.dom.ownerDocument, [this.entry], {
-            openSourceLocation: this.openSourceLocation,
-            onSourceNavigationError: this.onSourceNavigationError,
-            translate: this.translate,
-        });
-    }
-
-    ignoreEvent() {
-        return true;
-    }
-}
-
 export function createInlineRenderingExtension({
     resolveImageURL,
     openLink,
@@ -349,8 +230,6 @@ export function createInlineRenderingExtension({
     tablePreviewPopup,
     figurePreviewPopup,
     annotationPopup,
-    openSourceLocation,
-    onSourceNavigationError,
     activateCitation,
     activateTableReference,
     activateFigureReference,
@@ -364,8 +243,6 @@ export function createInlineRenderingExtension({
         tablePreviewPopup,
         figurePreviewPopup,
         annotationPopup,
-        openSourceLocation,
-        onSourceNavigationError,
         activateCitation,
         activateTableReference,
         activateFigureReference,
@@ -375,7 +252,6 @@ export function createInlineRenderingExtension({
         highlightedTableID: null,
         highlightedFigureID: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
-        sourceMap: [],
         annotationTargets: new Map(),
         citationAnalysisDocument: null,
         citationAnalysis: null,
@@ -400,7 +276,6 @@ export function createInlineRenderingExtension({
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
             let annotationOverlayChanged = false;
-            let sourceMapChanged = false;
             if (shouldRefresh) context.renderVersion++;
             for (const effect of transaction.effects) {
                 if (effect.is(setReferenceHighlight)) {
@@ -425,19 +300,12 @@ export function createInlineRenderingExtension({
                     );
                     annotationOverlayChanged = true;
                 }
-                else if (effect.is(setSourceMap)) {
-                    context.sourceMap = Array.isArray(effect.value)
-                        ? effect.value
-                        : [];
-                    sourceMapChanged = true;
-                }
             }
             if (transaction.docChanged
                 || referenceHighlightChanged
                 || tableHighlightChanged
                 || figureHighlightChanged
                 || annotationOverlayChanged
-                || sourceMapChanged
                 || shouldRefresh) {
                 return buildDecorations(transaction.state, context);
             }
@@ -664,24 +532,7 @@ function buildDecorations(state, context) {
         context,
         [...renderedGroups, ...renderedMathRanges]
     );
-    decorateSourceLocations(state, decorations, context);
     return Decoration.set(decorations, true);
-}
-
-function decorateSourceLocations(state, decorations, context) {
-    if (typeof context.openSourceLocation !== 'function') return;
-    for (const entry of context.sourceMap) {
-        if (!isValidSourceMapEntry(entry, state.doc.length)) continue;
-        decorations.push(Decoration.widget({
-            widget: new SourceLocationWidget(
-                entry,
-                context.openSourceLocation,
-                context.onSourceNavigationError,
-                context.translate
-            ),
-            side: -100,
-        }).range(entry.markdownFrom));
-    }
 }
 
 function decoratePDFAnnotations(state, decorations, context, renderedRanges) {

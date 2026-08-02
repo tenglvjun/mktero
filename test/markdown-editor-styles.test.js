@@ -43,50 +43,6 @@ test('article layout outranks the CodeMirror adopted base theme', () => {
     assert.match(heading, /line-height:\s*1\.3/);
 });
 
-test('keeps PDF source actions stable and reveals them on hover or focus', () => {
-    const action = ruleBody(
-        '.markdown-editor-host > .cm-editor .cm-mktero-source-link'
-    );
-    assert.match(action, /display:\s*inline-grid/);
-    assert.match(action, /width:\s*24px/);
-    assert.match(action, /height:\s*24px/);
-    assert.match(action, /opacity:\s*0/);
-    assert.match(action, /border-radius:\s*4px/);
-
-    const sourceLink = ruleBody(
-        '.markdown-editor-host > .cm-editor .cm-mktero-source-link'
-    );
-    assert.match(sourceLink, /margin-inline:\s*-30px 6px/);
-
-    const actionGroup = ruleBody(
-        '.markdown-editor-host > .cm-editor .cm-mktero-source-actions'
-    );
-    assert.match(actionGroup, /display:\s*inline-flex/);
-    assert.match(actionGroup, /margin-inline:\s*-30px 6px/);
-    assert.match(actionGroup, /gap:\s*4px/);
-
-    const visible = ruleBody([
-        '.markdown-editor-host > .cm-editor .cm-line:hover .cm-mktero-source-link,',
-        '.markdown-editor-host > .cm-editor .cm-mktero-rendered:hover > .cm-mktero-source-link,',
-        '.markdown-editor-host > .cm-editor .cm-mktero-source-link:focus-visible',
-    ].join('\n'));
-    assert.match(visible, /opacity:\s*1/);
-
-    const renderedAction = ruleBody(
-        '.markdown-editor-host > .cm-editor .cm-mktero-rendered > .cm-mktero-source-actions'
-    );
-    assert.match(renderedAction, /position:\s*absolute/);
-    assert.match(renderedAction, /left:\s*-30px/);
-    assert.match(renderedAction, /margin:\s*0/);
-
-    const figureAction = ruleBody([
-        '.markdown-editor-host > .cm-editor .mktero-figure-source-panel',
-        '    > .cm-mktero-source-actions',
-    ].join('\n'));
-    assert.match(figureAction, /position:\s*absolute/);
-    assert.match(figureAction, /left:\s*-30px/);
-});
-
 test('wide Markdown tables scroll inside the aligned reading column', () => {
     const tableFrame = ruleBody([
         '.markdown-editor-host > .cm-editor .cm-mktero-table,',
@@ -433,6 +389,7 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
         '.mktero-annotation-color-button,',
         '.mktero-annotation-delete-button,',
         '.mktero-annotation-note-button,',
+        '.mktero-annotation-source-button,',
         '.mktero-annotation-copy-button',
     ].join('\n'));
     assert.match(colorButton, /width:\s*25px/);

@@ -28,6 +28,8 @@ export function createAnnotationPopup(parent, {
     updateAnnotationComment,
     deleteAnnotation,
     copySourcedMarkdown,
+    openSourceLocation,
+    onSourceNavigationError,
 } = {}) {
     const t = localization.t.bind(localization);
     const anchoredPopup = createAnchoredPopup(parent, {
@@ -83,6 +85,7 @@ export function createAnnotationPopup(parent, {
         anchor,
         selection,
         copyTarget,
+        sourceLocation,
         canCopySource = false,
     }) => {
         if (!selection) return;
@@ -103,6 +106,18 @@ export function createAnnotationPopup(parent, {
                     copySourcedMarkdown: canCopySource
                         && typeof copySourcedMarkdown === 'function'
                         ? () => copySourcedMarkdown(copyTarget)
+                        : undefined,
+                    viewPDFSource: sourceLocation
+                        && typeof openSourceLocation === 'function'
+                        ? async () => {
+                            try {
+                                await openSourceLocation(sourceLocation);
+                            }
+                            catch (error) {
+                                onSourceNavigationError?.(error);
+                                throw error;
+                            }
+                        }
                         : undefined,
                     openNote: () => openDraftNote({ anchor, annotation }),
                     close,
@@ -251,6 +266,7 @@ function createMarkdownSelectionActions(
     {
         createMarkdownAnnotation,
         copySourcedMarkdown,
+        viewPDFSource,
         openNote,
         close,
         reposition,
@@ -332,6 +348,26 @@ function createMarkdownSelectionActions(
     noteButton.addEventListener('click', openNote);
     controls.push({ button: noteButton, enabled: canCreate });
     content.appendChild(noteButton);
+
+    if (typeof viewPDFSource === 'function') {
+        const sourceButton = document.createElementNS(XHTML_NAMESPACE, 'button');
+        sourceButton.className = 'mktero-annotation-source-button';
+        sourceButton.type = 'button';
+        sourceButton.dataset.action = 'view-in-pdf';
+        sourceButton.setAttribute('aria-label', translate('source.viewInPDF'));
+        sourceButton.setAttribute('title', translate('source.viewInPDF'));
+        sourceButton.appendChild(createLucideIcon(
+            document,
+            LUCIDE_ICONS.externalLink,
+            { className: 'mktero-source-action-icon', size: 16 }
+        ));
+        sourceButton.addEventListener('click', () => run(
+            viewPDFSource,
+            'source.navigationFailed'
+        ));
+        controls.push({ button: sourceButton, enabled: true });
+        content.appendChild(sourceButton);
+    }
 
     if (typeof copySourcedMarkdown === 'function') {
         const copyButton = document.createElementNS(XHTML_NAMESPACE, 'button');

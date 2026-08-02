@@ -6,6 +6,7 @@ import { GFM } from '@lezer/markdown';
 import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
+import { isValidSourceMapEntry } from '../core/markdown-source-map.js';
 import { createLocalization } from '../i18n/localization.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
@@ -14,7 +15,6 @@ import {
     selectedMarkdownAnnotation,
     selectionAnchor,
     setAnnotationOverlay,
-    setSourceMap,
     setFigureHighlight,
     setReferenceHighlight,
     setTableHighlight,
@@ -114,6 +114,8 @@ export function createInlineMarkdownEditor({
         updateAnnotationComment,
         deleteAnnotation,
         copySourcedMarkdown,
+        openSourceLocation,
+        onSourceNavigationError,
     });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
         resolveImageURL,
@@ -194,8 +196,6 @@ export function createInlineMarkdownEditor({
                     tablePreviewPopup,
                     figurePreviewPopup,
                     annotationPopup,
-                    openSourceLocation,
-                    onSourceNavigationError,
                     activateCitation:
                         referenceFeatures.citation.highlight.activate,
                     activateTableReference:
@@ -234,6 +234,11 @@ export function createInlineMarkdownEditor({
         const selection = selectedMarkdownAnnotation(view);
         if (!selection) return;
         const copyTarget = { kind: 'selection', ...selection };
+        const evidence = createSourcedEvidence(
+            view.state.doc.toString(),
+            currentSourceMap,
+            copyTarget
+        );
         for (const popup of interactionPopups) {
             if (popup !== annotationPopup) popup.close();
         }
@@ -244,11 +249,12 @@ export function createInlineMarkdownEditor({
             ),
             selection,
             copyTarget,
-            canCopySource: canCreateSourcedEvidence(
-                view.state.doc.toString(),
+            sourceLocation: selectionSourceLocation(
                 currentSourceMap,
-                copyTarget
+                copyTarget,
+                view.state.doc.length
             ),
+            canCopySource: Boolean(evidence),
         });
     };
     const closeSelectionActions = event => {
@@ -273,7 +279,6 @@ export function createInlineMarkdownEditor({
             setAnnotationOverlay.of(
                 annotationOverlay || createEmptyAnnotationOverlay()
             ),
-            setSourceMap.of(currentSourceMap),
         ];
         if (value === view.state.doc.toString()) {
             view.dispatch({ effects });
@@ -343,14 +348,35 @@ export function createInlineMarkdownEditor({
     };
 }
 
-function canCreateSourcedEvidence(markdown, sourceMap, target) {
+function createSourcedEvidence(markdown, sourceMap, target) {
     try {
-        createEvidenceSnippet({ markdown, sourceMap, target });
-        return true;
+        return createEvidenceSnippet({ markdown, sourceMap, target });
     }
     catch {
-        return false;
+        return null;
     }
+}
+
+function selectionSourceLocation(sourceMap, target, documentLength) {
+    const range = target?.ranges?.length === 1 ? target.ranges[0] : null;
+    if (!Number.isSafeInteger(range?.from)
+        || !Number.isSafeInteger(range?.to)
+        || range.from < 0
+        || range.to <= range.from
+        || range.to > documentLength) {
+        return null;
+    }
+    const entries = Array.isArray(sourceMap) ? sourceMap.filter(entry => (
+        isValidSourceMapEntry(entry, documentLength)
+        && entry.markdownFrom <= range.from
+        && entry.markdownTo >= range.to
+    )) : [];
+    if (entries.length !== 1) return null;
+    const location = entries[0].locations[0];
+    return location ? {
+        pageIndex: location.pageIndex,
+        bbox: [...location.bbox],
+    } : null;
 }
 
 function createTimedTargetHighlight({
