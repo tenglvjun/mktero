@@ -5,6 +5,10 @@ import {
     openRenderedLink,
 } from './rendered-markdown-dom.js';
 import { installRenderedAnnotations } from './pdf-annotations.js';
+import {
+    createSourceLocationActions,
+    sourceMapEntriesForRange,
+} from './source-location-button.js';
 
 export class RenderedTableWidget extends WidgetType {
     constructor({
@@ -19,6 +23,9 @@ export class RenderedTableWidget extends WidgetType {
         highlighted = false,
         annotations = [],
         translate,
+        sourceMap,
+        openSourceLocation,
+        onSourceNavigationError,
     }) {
         super();
         this.source = source;
@@ -33,6 +40,14 @@ export class RenderedTableWidget extends WidgetType {
         this.annotations = annotations;
         this.annotationKey = JSON.stringify(annotations);
         this.translate = translate;
+        this.openSourceLocation = openSourceLocation;
+        this.onSourceNavigationError = onSourceNavigationError;
+        this.sourceEntries = sourceMapEntriesForRange(
+            sourceMap,
+            annotationSourceFrom,
+            annotationSourceFrom + annotationSource.length
+        );
+        this.sourceEntryKey = JSON.stringify(this.sourceEntries);
     }
 
     eq(other) {
@@ -42,7 +57,8 @@ export class RenderedTableWidget extends WidgetType {
             && this.caption?.text === other.caption?.text
             && this.renderVersion === other.renderVersion
             && this.highlighted === other.highlighted
-            && this.annotationKey === other.annotationKey;
+            && this.annotationKey === other.annotationKey
+            && this.sourceEntryKey === other.sourceEntryKey;
     }
 
     toDOM(view) {
@@ -58,6 +74,18 @@ export class RenderedTableWidget extends WidgetType {
             this.annotationSourceFrom + this.annotationSource.length
         );
         appendRenderedMarkdown(container, this.source, this.resolveImageURL);
+        if (this.sourceEntries.length
+            && typeof this.openSourceLocation === 'function') {
+            container.prepend(createSourceLocationActions(
+                document,
+                this.sourceEntries,
+                {
+                    openSourceLocation: this.openSourceLocation,
+                    onSourceNavigationError: this.onSourceNavigationError,
+                    translate: this.translate,
+                }
+            ));
+        }
         const table = container.querySelector('table');
         if (table && this.caption) {
             table.prepend(createTableCaption(document, this.caption));
@@ -88,6 +116,7 @@ export class RenderedTableWidget extends WidgetType {
     }
 
     ignoreEvent(event) {
+        if (event.target?.closest?.('.cm-mktero-source-link')) return true;
         if (event.type === 'mousedown'
             && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
             return true;

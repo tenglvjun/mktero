@@ -21,6 +21,12 @@ test('keeps the current Markdown visible while a forced reparse is running', () 
         sourceKind: 'markdown',
         cacheHit: true,
         cacheKey: 'a'.repeat(64),
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 14,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 180] }],
+        }],
         extractedPages: 2,
         totalPages: 2,
         annotationOverlay: {
@@ -42,6 +48,7 @@ test('keeps the current Markdown visible while a forced reparse is running', () 
     assert.equal(loading.cacheKey, 'a'.repeat(64));
     assert.equal(loading.resumingTask, false);
     assert.deepEqual(loading.annotationOverlay, current.annotationOverlay);
+    assert.equal(loading.sourceMap, current.sourceMap);
 });
 
 test('tracks whether loading progress belongs to a resumed task', () => {
@@ -95,6 +102,7 @@ test('uses the normal empty and error states without a previous result', () => {
         assetBasePath: '',
         cacheHit: false,
         cacheKey: null,
+        sourceMap: [],
         annotationOverlay: { matched: [], unmatched: [] },
         warnings: [],
         error: '',
@@ -118,6 +126,7 @@ test('clears figures when a successful reparse has no assets', () => {
         assets: [],
         assetBasePath: '',
         cacheKey: null,
+        sourceMap: [],
         annotationOverlay: { matched: [], unmatched: [] },
         title: 'Reparsed paper',
         markdown: '# Reparsed',

@@ -35,6 +35,15 @@ test('restores cached Markdown and images across cache instances', async t => {
     };
     const result = {
         markdown: '# Cached paper',
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 2,
+            markdownTo: 14,
+            locations: [{
+                pageIndex: 1,
+                bbox: [100, 200, 900, 260],
+            }],
+        }],
         assets: [{
             path: 'result/images/figure.png',
             mimeType: 'image/png',
@@ -52,6 +61,7 @@ test('restores cached Markdown and images across cache instances', async t => {
     assert.equal(restored.assetBasePath, 'result');
     assert.equal(restored.extractedPages, 2);
     assert.equal(restored.totalPages, 3);
+    assert.deepEqual(restored.sourceMap, result.sourceMap);
     assert.deepEqual(restored.assets.map(asset => ({
         path: asset.path,
         mimeType: asset.mimeType,
@@ -85,6 +95,113 @@ test('stores an intentionally empty user-edited Markdown document', async t => {
         totalPages: null,
         userEdited: true,
     });
+});
+
+test('reads a cache entry created before source maps were available', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const cache = new MarkdownCache({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    });
+
+    await cache.put(CACHE_KEY, { markdown: '# Legacy cache' });
+    const restored = await cache.get(CACHE_KEY);
+
+    assert.equal(restored.markdown, '# Legacy cache');
+    assert.equal('sourceMap' in restored, false);
+});
+
+test('rejects an invalid source rectangle before caching it', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const cache = new MarkdownCache({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    });
+
+    await assert.rejects(() => cache.put(CACHE_KEY, {
+        markdown: 'Mapped source text.',
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 19,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 1001, 200] }],
+        }],
+    }), /source location/i);
+});
+
+test('rejects source maps that exceed byte or aggregate location budgets', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    };
+    const result = {
+        markdown: 'Mapped source text.',
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 19,
+            locations: [
+                { pageIndex: 0, bbox: [100, 100, 900, 200] },
+                { pageIndex: 1, bbox: [100, 100, 900, 200] },
+            ],
+        }],
+    };
+
+    await assert.rejects(
+        () => new MarkdownCache({
+            ...options,
+            maxSourceMapBytes: 2,
+        }).put(CACHE_KEY, result),
+        /source map size limit/i
+    );
+    await assert.rejects(
+        () => new MarkdownCache({
+            ...options,
+            maxSourceLocations: 1,
+        }).put(CACHE_KEY, result),
+        /source map location limit/i
+    );
+});
+
+test('checks a cached source-map file size before reading it', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const ioUtils = createNodeIOUtils();
+    const cache = new MarkdownCache({
+        rootPath,
+        ioUtils,
+        pathUtils: { join: path.join, filename: path.basename },
+    });
+    await cache.put(CACHE_KEY, {
+        markdown: 'Mapped source text.',
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 19,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 200] }],
+        }],
+    });
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    const sourceMapFile = (await readdir(entryPath)).find(file => (
+        file.startsWith('source-map-')
+    ));
+    await writeFile(path.join(entryPath, sourceMapFile), ' '.repeat(1024));
+    const originalReadUTF8 = ioUtils.readUTF8;
+    let sourceMapReads = 0;
+    ioUtils.readUTF8 = filePath => {
+        if (path.basename(filePath).startsWith('source-map-')) sourceMapReads++;
+        return originalReadUTF8(filePath);
+    };
+
+    assert.equal(await cache.get(CACHE_KEY), null);
+    assert.equal(sourceMapReads, 0);
 });
 
 test('prunes the oldest entry when the cache exceeds its entry limit', async t => {

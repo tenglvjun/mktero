@@ -79,7 +79,15 @@ test('collects a previously uploaded task without uploading the PDF again', asyn
             requests.push({ url, options });
             return responses.shift();
         },
-        extractMarkdownFromZip: () => '# Resumed result',
+        extractMarkdownFromZip: () => ({
+            markdown: '# Resumed result',
+            contentList: [{
+                type: 'text',
+                text: 'Resumed result',
+                pageIndex: 0,
+                bbox: [100, 100, 900, 180],
+            }],
+        }),
     });
 
     const result = await client.collect({
@@ -92,6 +100,12 @@ test('collects a previously uploaded task without uploading the PDF again', asyn
 
     assert.equal(result.markdown, '# Resumed result');
     assert.equal(result.totalPages, 3);
+    assert.deepEqual(result.contentList, [{
+        type: 'text',
+        text: 'Resumed result',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 180],
+    }]);
     assert.deepEqual(requests.map(request => request.url), [
         'https://mineru.net/api/v4/extract-results/batch/batch-1',
         'https://download.example/result.zip',

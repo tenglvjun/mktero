@@ -154,6 +154,8 @@ class MarkdownTabView {
             deleteAnnotation: annotationID => (
                 this.deleteAnnotation(annotationID)
             ),
+            openSourceLocation: location => this.openSourceLocation(location),
+            onSourceNavigationError: error => this.zotero?.logError?.(error),
             localization: this.localization,
         });
         this.syncOutline('');
@@ -194,6 +196,7 @@ class MarkdownTabView {
                 this.editor.setDocument({
                     markdown: '',
                     annotationOverlay: createEmptyAnnotationOverlay(),
+                    sourceMap: [],
                 });
                 this.syncOutline('');
                 this.syncNotes(createEmptyAnnotationOverlay(), 0);
@@ -209,6 +212,7 @@ class MarkdownTabView {
             this.editor.setDocument({
                 markdown,
                 annotationOverlay,
+                sourceMap: Array.isArray(model.sourceMap) ? model.sourceMap : [],
             });
             this.syncOutline(markdown);
             this.syncNotes(annotationOverlay, markdown.length);
@@ -226,6 +230,13 @@ class MarkdownTabView {
         this.editor?.destroy();
         this.revokeAssetURLs();
         this.root.remove?.();
+    }
+
+    openSourceLocation(location) {
+        if (typeof this.model.onOpenSourceInPDF !== 'function') {
+            throw new Error('PDF source navigation is unavailable');
+        }
+        return this.model.onOpenSourceInPDF(location);
     }
 
     async changeAnnotationColor(annotationID, color) {

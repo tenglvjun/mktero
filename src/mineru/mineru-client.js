@@ -171,6 +171,9 @@ export class MinerUClient {
             markdown,
             assets: typeof extracted === 'string' ? [] : extracted.assets || [],
             assetBasePath: typeof extracted === 'string' ? '' : extracted.assetBasePath || '',
+            contentList: typeof extracted === 'string'
+                ? []
+                : extracted.contentList || [],
             extractedPages: totalPages,
             totalPages,
         };

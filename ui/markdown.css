@@ -686,6 +686,47 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-line { padding-inline: 0; }
 
+.markdown-editor-host > .cm-editor .cm-mktero-source-link {
+    display: inline-grid;
+    width: 24px;
+    height: 24px;
+    margin-inline: -30px 6px;
+    padding: 0;
+    place-items: center;
+    vertical-align: 0.08em;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgb(31 35 40 / 10%);
+    opacity: 0;
+    cursor: pointer;
+    transition: color 120ms ease, opacity 120ms ease, box-shadow 120ms ease;
+}
+
+.markdown-editor-host > .cm-editor .cm-line:hover .cm-mktero-source-link,
+.markdown-editor-host > .cm-editor .cm-mktero-rendered:hover > .cm-mktero-source-link,
+.markdown-editor-host > .cm-editor .cm-mktero-source-link:focus-visible {
+    color: var(--accent);
+    box-shadow: 0 2px 5px rgb(31 35 40 / 16%);
+    opacity: 1;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-source-link:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 2px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-source-link:disabled {
+    cursor: wait;
+}
+
+@media (hover: none) {
+    .markdown-editor-host > .cm-editor .cm-mktero-source-link {
+        opacity: 0.7;
+    }
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-heading {
     padding-top: 0.7em;
     padding-bottom: 0.2em;
@@ -1475,8 +1516,52 @@ main {
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-rendered {
+    position: relative;
     max-width: 100%;
     white-space: normal;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-rendered > .cm-mktero-source-link {
+    position: absolute;
+    z-index: 2;
+    top: 4px;
+    left: -30px;
+    margin: 0;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-source-actions {
+    position: absolute;
+    z-index: 2;
+    top: 4px;
+    left: -30px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-source-actions > .cm-mktero-source-link {
+    margin: 0;
+}
+
+.markdown-editor-host > .cm-editor .mktero-figure-source-panel {
+    position: relative;
+}
+
+.markdown-editor-host > .cm-editor .mktero-figure-source-panel > .cm-mktero-source-link {
+    position: absolute;
+    z-index: 2;
+    top: 4px;
+    left: -30px;
+    margin: 0;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-rendered:hover
+    > .cm-mktero-source-actions .cm-mktero-source-link,
+.markdown-editor-host > .cm-editor .mktero-figure-source-panel:hover
+    > .cm-mktero-source-link {
+    color: var(--accent);
+    box-shadow: 0 2px 5px rgb(31 35 40 / 16%);
+    opacity: 1;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-rendered img[role="button"] {

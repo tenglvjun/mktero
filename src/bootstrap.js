@@ -34,6 +34,9 @@ import {
     createZoteroAnnotationActions,
 } from './platform/zotero-annotation-actions.js';
 import {
+    createZoteroSourceNavigation,
+} from './platform/zotero-source-navigation.js';
+import {
     registerZoteroAnnotationObserver,
 } from './platform/zotero-annotation-observer.js';
 import {
@@ -67,6 +70,7 @@ const runtime = {
     preferencePaneID: null,
     localization: null,
     annotationActions: null,
+    sourceNavigation: null,
     disposeAnnotationObserver: null,
     annotationOverlayRefresher: null,
     localAnnotations: null,
@@ -88,6 +92,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.localization = localization;
     runtime.annotationActions = createZoteroAnnotationActions(Zotero);
+    runtime.sourceNavigation = createZoteroSourceNavigation(Zotero);
     runtime.presenter = new MarkdownTabPresenter({
         zotero: Zotero,
         rootURI,
@@ -201,6 +206,7 @@ globalThis.shutdown = function shutdown() {
     runtime.rootURI = null;
     runtime.localization = null;
     runtime.annotationActions = null;
+    runtime.sourceNavigation = null;
     runtime.disposeAnnotationObserver = null;
     runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
@@ -236,6 +242,7 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
         onOpenAnnotationInPDF: annotationID => (
             runAnnotationAction('openInPDF', itemID, annotationID)
         ),
+        onOpenSourceInPDF: location => openSourceInPDF(itemID, location),
         onCreateMarkdownAnnotation: draft => (
             runMarkdownAnnotationAction('create', itemID, draft)
         ),
@@ -352,6 +359,20 @@ async function runAnnotationAction(action, ...args) {
     catch (error) {
         Zotero.logError?.(error);
         throw error;
+    }
+}
+
+async function openSourceInPDF(itemID, location) {
+    try {
+        if (typeof runtime.sourceNavigation?.open !== 'function') {
+            throw new Error('PDF source navigation is unavailable');
+        }
+        await runtime.sourceNavigation.open(itemID, location);
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        const message = runtimeTranslate('source.navigationFailed');
+        Zotero.getMainWindow?.()?.alert?.(`Mktero: ${message}`);
     }
 }
 

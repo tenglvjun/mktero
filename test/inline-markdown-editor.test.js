@@ -61,6 +61,262 @@ test('keeps Markdown as the source of truth in a read-only surface', () => {
     dom.window.close();
 });
 
+test('shows accessible PDF source actions only for mapped Markdown blocks', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Mapped paragraph with source.\n\nUnmapped paragraph.';
+    const locations = [{
+        pageIndex: 2,
+        bbox: [100, 200, 900, 300],
+    }, {
+        pageIndex: 3,
+        bbox: [100, 100, 900, 180],
+    }];
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        openSourceLocation: location => opened.push(location),
+    });
+
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.indexOf('\n\n'),
+            locations,
+        }],
+    });
+
+    const actions = document.querySelectorAll('.cm-mktero-source-link');
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].localName, 'button');
+    assert.equal(actions[0].getAttribute('aria-label'), 'View in PDF');
+    assert.equal(actions[0].getAttribute('title'), 'View in PDF');
+    assert.equal(actions[0].getAttribute('data-location-count'), '2');
+    assert.equal(
+        actions[0].querySelector('svg')?.getAttribute('data-lucide'),
+        'external-link'
+    );
+
+    const mappedText = textNodeContaining(
+        document.querySelector('.cm-content'),
+        'Mapped paragraph'
+    );
+    const selection = dom.window.getSelection();
+    const range = document.createRange();
+    range.setStart(mappedText, 0);
+    range.setEnd(mappedText, 6);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    actions[0].click();
+    await Promise.resolve();
+
+    assert.deepEqual(opened, [locations[0]]);
+    assert.equal(selection.toString(), 'Mapped');
+
+    editor.setDocument({ markdown, sourceMap: [] });
+    assert.equal(document.querySelector('.cm-mktero-source-link'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps PDF source actions beside rendered image, formula, and table blocks', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const blocks = [
+        '![Figure](images/figure.png)',
+        '$$\nE = mc^2\n$$',
+        '| A | B |\n| --- | --- |\n| 1 | 2 |',
+    ];
+    const markdown = blocks.join('\n\n');
+    const sourceMap = blocks.map((block, index) => {
+        const markdownFrom = markdown.indexOf(block);
+        return {
+            type: ['image', 'equation', 'table'][index],
+            markdownFrom,
+            markdownTo: markdownFrom + block.length,
+            locations: [{
+                pageIndex: index,
+                bbox: [100, 100, 900, 700],
+            }],
+        };
+    });
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => 'blob:figure',
+        openSourceLocation: () => {},
+    });
+
+    editor.setDocument({ markdown, sourceMap });
+
+    assert.equal(
+        document.querySelectorAll('.cm-mktero-source-link').length,
+        3
+    );
+    assert.ok(document.querySelector('.cm-mktero-image'));
+    assert.ok(document.querySelector('.cm-mktero-math-display'));
+    assert.ok(document.querySelector('.cm-mktero-table'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps separate PDF source actions for a grouped table caption and body', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const caption = 'Table 1. Values by group';
+    const table = '| A | B |\n| --- | --- |\n| 1 | 2 |';
+    const markdown = `${caption}\n\n${table}`;
+    const sourceMap = [caption, table].map((block, index) => ({
+        type: index === 0 ? 'text' : 'table',
+        markdownFrom: markdown.indexOf(block),
+        markdownTo: markdown.indexOf(block) + block.length,
+        locations: [{
+            pageIndex: index,
+            bbox: [100, 100, 900, 300],
+        }],
+    }));
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        openSourceLocation: location => opened.push(location),
+    });
+
+    editor.setDocument({ markdown, sourceMap });
+
+    const renderedTable = document.querySelector('.cm-mktero-table');
+    const actions = renderedTable.querySelectorAll('.cm-mktero-source-link');
+    assert.equal(actions.length, 2);
+    actions[1].click();
+    await Promise.resolve();
+    assert.deepEqual(opened, [sourceMap[1].locations[0]]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('shows a separate PDF source action for each mapped figure panel', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const panels = [
+        '![](images/panel-a.jpg)',
+        '![](images/panel-b.jpg)',
+    ];
+    const markdown = `${panels.join('\n\n')}  \nFigure 1. Panel comparison.`;
+    const locations = panels.map((panel, index) => ({
+        type: 'image',
+        markdownFrom: markdown.indexOf(panel),
+        markdownTo: markdown.indexOf(panel) + panel.length,
+        locations: [{
+            pageIndex: index,
+            bbox: [100, 100, 900, 700],
+        }],
+    }));
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: path => `blob:mktero-${path}`,
+        openSourceLocation: location => opened.push(location),
+    });
+
+    editor.setDocument({ markdown, sourceMap: locations });
+
+    const figure = document.querySelector('.mktero-figure-group');
+    const actions = figure.querySelectorAll('.cm-mktero-source-link');
+    assert.equal(actions.length, 2);
+    assert.equal(figure.querySelectorAll('.mktero-figure-source-panel').length, 2);
+    actions[1].click();
+    await Promise.resolve();
+    assert.deepEqual(opened, [locations[1].locations[0]]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('omits PDF source actions for malformed source-map entries', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Mapped paragraph with invalid source coordinates.';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        openSourceLocation: () => {},
+    });
+
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{
+                pageIndex: 0,
+                bbox: [100, 100, 1001, 200],
+            }],
+        }],
+    });
+
+    assert.equal(document.querySelector('.cm-mktero-source-link'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not duplicate a paragraph source action on its inline formula', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Mapped paragraph with inline $x^2$ formula.';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        openSourceLocation: () => {},
+    });
+
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{
+                pageIndex: 0,
+                bbox: [100, 100, 900, 180],
+            }],
+        }],
+    });
+
+    assert.equal(
+        document.querySelectorAll('.cm-mktero-source-link').length,
+        1
+    );
+    assert.ok(document.querySelector('.cm-mktero-math'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('renders matched PDF annotations with their Zotero colors', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

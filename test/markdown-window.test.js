@@ -22,6 +22,7 @@ function createModel(changes = {}) {
         sourceKind: null,
         cacheHit: false,
         cacheKey: null,
+        sourceMap: [],
         annotationOverlay: { matched: [], unmatched: [] },
         preserveContent: false,
         warnings: [],
@@ -129,6 +130,12 @@ test('shows Markdown without editing controls', () => {
 
 test('updates Markdown and PDF annotations as one editor document', () => {
     const updates = [];
+    const sourceMap = [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: 9,
+        locations: [{ pageIndex: 3, bbox: [100, 120, 900, 220] }],
+    }];
     const annotationOverlay = {
         matched: [{
             id: 'HIGH0001',
@@ -146,6 +153,7 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         progress: 100,
         markdown: 'Important result.',
         annotationOverlay,
+        sourceMap,
     }), {}, {
         editorFactory() {
             return {
@@ -162,7 +170,37 @@ test('updates Markdown and PDF annotations as one editor document', () => {
     assert.deepEqual(updates, [{
         markdown: 'Important result.',
         annotationOverlay,
+        sourceMap,
     }]);
+    view.destroy();
+});
+
+test('forwards mapped source locations to the current tab model', async () => {
+    let editorOptions;
+    const opened = [];
+    const model = createModel({
+        status: 'ready',
+        markdown: 'Mapped paragraph.',
+        onOpenSourceInPDF: location => opened.push(location),
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+    const location = {
+        pageIndex: 2,
+        bbox: [100, 200, 900, 300],
+    };
+
+    await editorOptions.openSourceLocation(location);
+
+    assert.deepEqual(opened, [location]);
     view.destroy();
 });
 

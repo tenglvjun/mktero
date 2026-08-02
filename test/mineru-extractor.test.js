@@ -198,7 +198,7 @@ test('continues without recovery when the conversion key cannot be created', asy
     assert.deepEqual(logged, [cacheError]);
 });
 
-test('normalizes MinerU Markdown after the conversion result is persisted', async () => {
+test('normalizes MinerU Markdown and exposes its PDF source map', async () => {
     const source = 'The framework improves the ability to change perspective on\n\n'
         + 'an event), and context engagement.';
     const extractor = new MinerUDocumentExtractor({
@@ -206,7 +206,20 @@ test('normalizes MinerU Markdown after the conversion result is persisted', asyn
         conversion: {
             async convert() {
                 return {
-                    result: { markdown: source },
+                    result: {
+                        markdown: source,
+                        contentList: [{
+                            type: 'text',
+                            text: 'The framework improves the ability to change perspective on',
+                            pageIndex: 0,
+                            bbox: [100, 120, 900, 220],
+                        }, {
+                            type: 'text',
+                            text: 'an event), and context engagement.',
+                            pageIndex: 1,
+                            bbox: [100, 80, 900, 160],
+                        }],
+                    },
                     origin: 'fresh',
                     warnings: [],
                 };
@@ -224,6 +237,15 @@ test('normalizes MinerU Markdown after the conversion result is persisted', asyn
             + 'an event), and context engagement.'
     );
     assert.equal(source.includes('\n\n'), true);
+    assert.deepEqual(result.sourceMap, [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: result.markdown.length,
+        locations: [
+            { pageIndex: 0, bbox: [100, 120, 900, 220] },
+            { pageIndex: 1, bbox: [100, 80, 900, 160] },
+        ],
+    }]);
 });
 
 test('does not normalize Markdown explicitly edited by the user', async () => {

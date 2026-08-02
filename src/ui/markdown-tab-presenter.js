@@ -34,6 +34,7 @@ export class MarkdownTabPresenter {
         onUpdateAnnotationComment,
         onDeleteAnnotation,
         onOpenAnnotationInPDF,
+        onOpenSourceInPDF,
         onCreateMarkdownAnnotation,
         onUpdateMarkdownAnnotation,
         onDeleteMarkdownAnnotation,
@@ -64,6 +65,9 @@ export class MarkdownTabPresenter {
             if (onOpenAnnotationInPDF) {
                 existing.model.onOpenAnnotationInPDF = onOpenAnnotationInPDF;
             }
+            if (onOpenSourceInPDF) {
+                existing.model.onOpenSourceInPDF = onOpenSourceInPDF;
+            }
             if (onCreateMarkdownAnnotation) {
                 existing.model.onCreateMarkdownAnnotation
                     = onCreateMarkdownAnnotation;
@@ -92,6 +96,7 @@ export class MarkdownTabPresenter {
                 onUpdateAnnotationComment,
                 onDeleteAnnotation,
                 onOpenAnnotationInPDF,
+                onOpenSourceInPDF,
                 onCreateMarkdownAnnotation,
                 onUpdateMarkdownAnnotation,
                 onDeleteMarkdownAnnotation,
@@ -269,6 +274,7 @@ function createInitialModel(itemID, actions, translate) {
         sourceKind: null,
         cacheHit: false,
         cacheKey: null,
+        sourceMap: [],
         annotationOverlay: createEmptyAnnotationOverlay(),
         preserveContent: false,
         resumingTask: false,

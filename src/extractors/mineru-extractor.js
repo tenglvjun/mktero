@@ -1,4 +1,4 @@
-import { normalizeMinerUMarkdown } from '../mineru/markdown-normalizer.js';
+import { prepareMinerUResult } from '../mineru/mineru-result.js';
 
 export class MinerUConfigurationError extends Error {
     constructor() {
@@ -83,7 +83,7 @@ export class MinerUDocumentExtractor {
             throw error;
         }
         warnings.push(...(converted.warnings || []));
-        const result = normalizeMinerUResult(converted.result);
+        const result = prepareMinerUResult(converted.result);
         return createResult(
             title,
             result,
@@ -104,12 +104,6 @@ export class MinerUDocumentExtractor {
     }
 }
 
-function normalizeMinerUResult(result) {
-    if (result.userEdited) return result;
-    const markdown = normalizeMinerUMarkdown(result.markdown);
-    return markdown === result.markdown ? result : { ...result, markdown };
-}
-
 function createResult(
     title,
     parsedResult,
@@ -126,6 +120,7 @@ function createResult(
         assetBasePath: parsedResult.assetBasePath || '',
         extractedPages: parsedResult.extractedPages,
         totalPages: parsedResult.totalPages,
+        sourceMap: parsedResult.sourceMap,
         warnings,
         cacheHit,
         resumedTask,

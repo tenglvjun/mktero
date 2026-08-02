@@ -66,6 +66,9 @@ export class MarkdownDocumentService {
         if (extracted.cacheKey) {
             result.cacheKey = extracted.cacheKey;
         }
+        if (Array.isArray(extracted.sourceMap)) {
+            result.sourceMap = extracted.sourceMap;
+        }
         if (extracted.assets?.length) {
             result.assets = extracted.assets;
             result.assetBasePath = extracted.assetBasePath || '';

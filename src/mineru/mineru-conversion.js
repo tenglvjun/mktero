@@ -3,6 +3,7 @@ import {
     DEFAULT_PENDING_TASK_MAX_AGE_MS,
     DEFAULT_PENDING_TASK_MAX_ENTRIES,
 } from './pending-task-store.js';
+import { prepareMinerUResult } from './mineru-result.js';
 
 export class MinerUConversion {
     constructor({
@@ -80,12 +81,12 @@ export class MinerUConversion {
         }
         let result;
         try {
-            result = await this.client.collect({
+            result = prepareMinerUResult(await this.client.collect({
                 apiKey,
                 task: selected.task,
                 onProgress: reportProgress,
                 signal,
-            });
+            }));
         }
         catch (error) {
             if (isTerminalTaskError(error)) {
@@ -118,12 +119,12 @@ export class MinerUConversion {
             onProgress,
             signal,
         });
-        const result = await this.client.collect({
+        const result = prepareMinerUResult(await this.client.collect({
             apiKey,
             task,
             onProgress,
             signal,
-        });
+        }));
         return { result, origin: 'fresh', warnings: [] };
     }
 

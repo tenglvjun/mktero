@@ -120,6 +120,12 @@ test('rejects an empty structured document as non-extractable', async () => {
 });
 
 test('passes through Markdown produced by MinerU', async () => {
+    const sourceMap = [{
+        type: 'text',
+        markdownFrom: 2,
+        markdownTo: 18,
+        locations: [{ pageIndex: 0, bbox: [100, 120, 900, 220] }],
+    }];
     const service = new MarkdownDocumentService({
         extractor: {
             extract: async () => ({
@@ -132,6 +138,7 @@ test('passes through Markdown produced by MinerU', async () => {
                 cacheHit: true,
                 resumedTask: true,
                 cacheKey: 'a'.repeat(64),
+                sourceMap,
             }),
         },
     });
@@ -143,6 +150,7 @@ test('passes through Markdown produced by MinerU', async () => {
     assert.equal(result.cacheHit, true);
     assert.equal(result.resumedTask, true);
     assert.equal(result.cacheKey, 'a'.repeat(64));
+    assert.equal(result.sourceMap, sourceMap);
 });
 
 test('adds current Zotero PDF annotations without changing Markdown', async () => {

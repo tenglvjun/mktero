@@ -584,13 +584,25 @@ test('returns a successful result with a warning when cache writing fails', asyn
     assert.deepEqual(reported, [cacheError]);
 });
 
-test('stores raw MinerU Markdown before extractor normalization', async () => {
+test('stores normalized MinerU Markdown with its PDF source map', async () => {
     const rawResult = {
-        markdown: 'A sentence that MinerU split in\n\nthe middle.',
+        markdown: 'The framework improves the ability to change perspective on\n\n'
+            + 'an event), and context engagement.',
+        contentList: [{
+            type: 'text',
+            text: 'The framework improves the ability to change perspective on',
+            pageIndex: 0,
+            bbox: [100, 100, 900, 200],
+        }, {
+            type: 'text',
+            text: 'an event), and context engagement.',
+            pageIndex: 1,
+            bbox: [100, 80, 900, 160],
+        }],
     };
     let cachedResult = null;
     const conversion = new MinerUConversion({
-        client: createSuccessfulClient(rawResult.markdown),
+        client: createSuccessfulClient(rawResult),
         pendingTasks: createMemoryPendingTasks(),
         cache: {
             get: async () => null,
@@ -608,8 +620,19 @@ test('stores raw MinerU Markdown before extractor normalization', async () => {
         cacheEnabled: true,
     });
 
-    assert.equal(cachedResult.markdown, rawResult.markdown);
-    assert.equal(result.result.markdown, rawResult.markdown);
+    const normalized = 'The framework improves the ability to change perspective on '
+        + 'an event), and context engagement.';
+    assert.equal(cachedResult.markdown, normalized);
+    assert.equal(result.result.markdown, normalized);
+    assert.deepEqual(cachedResult.sourceMap, [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: normalized.length,
+        locations: [
+            { pageIndex: 0, bbox: [100, 100, 900, 200] },
+            { pageIndex: 1, bbox: [100, 80, 900, 160] },
+        ],
+    }]);
 });
 
 test('keeps an uploaded task after transient and caller-abort failures', async t => {
@@ -774,13 +797,13 @@ test('does not upload when pending-task lookup is uncertain', async () => {
     assert.deepEqual(reported, [readError]);
 });
 
-function createSuccessfulClient(markdown) {
+function createSuccessfulClient(result) {
     return {
         async submit({ dataID, fileName }) {
             return { batchID: 'batch-success', dataID, fileName };
         },
         async collect() {
-            return { markdown };
+            return typeof result === 'string' ? { markdown: result } : result;
         },
     };
 }

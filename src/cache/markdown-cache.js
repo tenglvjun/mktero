@@ -1,5 +1,6 @@
 import { toUint8Array } from '../mineru/binary.js';
 import { MINERU_PARSER_PROFILE_ID } from '../mineru/parser-profile.js';
+import { isValidSourceLocation } from '../core/markdown-source-map.js';
 
 const CACHE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'entry.json';
@@ -7,6 +8,8 @@ const MARKDOWN_FILE = 'document.md';
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 100;
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export const DEFAULT_MAX_SOURCE_MAP_BYTES = 20 * 1024 * 1024;
+export const DEFAULT_MAX_SOURCE_LOCATIONS = 100_000;
 export const DEFAULT_MINERU_PARSER_PROFILE = MINERU_PARSER_PROFILE_ID;
 
 export function createZoteroMarkdownCache({ zotero, ioUtils, pathUtils }) {
@@ -50,6 +53,8 @@ export class MarkdownCache {
         maxBytes = DEFAULT_MAX_BYTES,
         maxEntries = DEFAULT_MAX_ENTRIES,
         maxAgeMs = DEFAULT_MAX_AGE_MS,
+        maxSourceMapBytes = DEFAULT_MAX_SOURCE_MAP_BYTES,
+        maxSourceLocations = DEFAULT_MAX_SOURCE_LOCATIONS,
     }) {
         if (!rootPath) throw new TypeError('A cache root path is required');
         if (!ioUtils) throw new TypeError('An IOUtils adapter is required');
@@ -61,6 +66,8 @@ export class MarkdownCache {
         this.maxBytes = maxBytes;
         this.maxEntries = maxEntries;
         this.maxAgeMs = maxAgeMs;
+        this.maxSourceMapBytes = maxSourceMapBytes;
+        this.maxSourceLocations = maxSourceLocations;
         this.operationTail = Promise.resolve();
     }
 
@@ -76,13 +83,13 @@ export class MarkdownCache {
 
         try {
             const metadata = JSON.parse(await this.io.readUTF8(metadataPath));
-            validateMetadata(metadata, cacheKey);
+            validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
             if (this.#isExpired(metadata)) {
                 await this.io.remove(entryPath, { recursive: true, ignoreAbsent: true });
                 return null;
             }
             const markdownFile = metadata.markdownFile || MARKDOWN_FILE;
-            const [markdown, assets] = await Promise.all([
+            const [markdown, assets, sourceMapJSON] = await Promise.all([
                 this.io.readUTF8(this.path.join(entryPath, markdownFile)),
                 Promise.all(metadata.assets.map(async asset => {
                     const data = await this.io.read(
@@ -97,9 +104,25 @@ export class MarkdownCache {
                         data,
                     };
                 })),
+                metadata.sourceMapFile
+                    ? this.#readSourceMapJSON(entryPath, metadata)
+                    : null,
             ]);
             if (new TextEncoder().encode(markdown).length !== metadata.markdownBytes) {
                 throw new Error('Cached Markdown size does not match its metadata');
+            }
+            let sourceMap;
+            if (sourceMapJSON !== null) {
+                if (new TextEncoder().encode(sourceMapJSON).length
+                    !== metadata.sourceMapBytes) {
+                    throw new Error('Cached source map size does not match its metadata');
+                }
+                sourceMap = JSON.parse(sourceMapJSON);
+                validateSourceMap(
+                    sourceMap,
+                    markdown.length,
+                    this.maxSourceLocations
+                );
             }
             metadata.lastAccessedAt = this.now();
             await this.#writeMetadata(metadataPath, metadata).catch(() => {});
@@ -110,6 +133,7 @@ export class MarkdownCache {
                 assetBasePath: metadata.assetBasePath,
                 extractedPages: metadata.extractedPages,
                 totalPages: metadata.totalPages,
+                ...(sourceMap ? { sourceMap } : {}),
                 ...(metadata.userEdited ? { userEdited: true } : {}),
             };
         }
@@ -141,6 +165,7 @@ export class MarkdownCache {
         const previousMetadata = await this.#readMetadata(metadataPath, cacheKey);
         const generation = createGenerationID(this.now());
         const markdownFile = `document-${generation}.md`;
+        const sourceMapFile = `source-map-${generation}.json`;
         const writtenPaths = [];
         const temporaryPaths = [];
         const assets = [];
@@ -170,6 +195,26 @@ export class MarkdownCache {
             writtenPaths.push(markdownPath);
             const timestamp = this.now();
             const markdownBytes = new TextEncoder().encode(result.markdown).length;
+            let sourceMapBytes = 0;
+            if (Array.isArray(result.sourceMap)) {
+                validateSourceMap(
+                    result.sourceMap,
+                    result.markdown.length,
+                    this.maxSourceLocations
+                );
+                const sourceMapJSON = JSON.stringify(result.sourceMap);
+                sourceMapBytes = new TextEncoder().encode(sourceMapJSON).length;
+                if (sourceMapBytes > this.maxSourceMapBytes) {
+                    throw new Error('Cached source map exceeds the source map size limit');
+                }
+                const sourceMapPath = this.path.join(entryPath, sourceMapFile);
+                const temporarySourceMapPath = `${sourceMapPath}.tmp`;
+                temporaryPaths.push(temporarySourceMapPath);
+                await this.io.writeUTF8(sourceMapPath, sourceMapJSON, {
+                    tmpPath: temporarySourceMapPath,
+                });
+                writtenPaths.push(sourceMapPath);
+            }
             const metadata = {
                 schemaVersion: CACHE_SCHEMA_VERSION,
                 cacheKey,
@@ -180,10 +225,14 @@ export class MarkdownCache {
                 extractedPages: result.extractedPages ?? null,
                 totalPages: result.totalPages ?? null,
                 markdownBytes,
-                sizeBytes: markdownBytes
+                sizeBytes: markdownBytes + sourceMapBytes
                     + assets.reduce((total, asset) => total + asset.size, 0),
                 assets,
             };
+            if (Array.isArray(result.sourceMap)) {
+                metadata.sourceMapFile = sourceMapFile;
+                metadata.sourceMapBytes = sourceMapBytes;
+            }
             if (result.userEdited) metadata.userEdited = true;
             temporaryPaths.push(`${metadataPath}.tmp`);
             await this.#writeMetadata(metadataPath, metadata);
@@ -221,7 +270,7 @@ export class MarkdownCache {
                 );
                 const cacheKey = this.path.filename(entryPath);
                 validateCacheKey(cacheKey);
-                validateMetadata(metadata, cacheKey);
+                validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
                 if (this.#isExpired(metadata, now)) {
                     if (removeInvalid) {
                         await this.io.remove(entryPath, {
@@ -292,11 +341,22 @@ export class MarkdownCache {
         });
     }
 
+    async #readSourceMapJSON(entryPath, metadata) {
+        const filePath = this.path.join(entryPath, metadata.sourceMapFile);
+        const fileInfo = await this.io.stat(filePath);
+        if (!Number.isSafeInteger(fileInfo?.size)
+            || fileInfo.size !== metadata.sourceMapBytes
+            || fileInfo.size > this.maxSourceMapBytes) {
+            throw new Error('Cached source map file size is invalid');
+        }
+        return this.io.readUTF8(filePath);
+    }
+
     async #readMetadata(metadataPath, cacheKey) {
         if (!(await this.io.exists(metadataPath))) return null;
         try {
             const metadata = JSON.parse(await this.io.readUTF8(metadataPath));
-            validateMetadata(metadata, cacheKey);
+            validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
             return metadata;
         }
         catch {
@@ -308,6 +368,9 @@ export class MarkdownCache {
         if (!metadata) return;
         const files = [
             this.path.join(entryPath, metadata.markdownFile || MARKDOWN_FILE),
+            ...(metadata.sourceMapFile
+                ? [this.path.join(entryPath, metadata.sourceMapFile)]
+                : []),
             ...(metadata.assets || []).map(asset => (
                 this.path.join(entryPath, 'assets', asset.file)
             )),
@@ -348,7 +411,7 @@ function validateCacheKey(cacheKey) {
     }
 }
 
-function validateMetadata(metadata, cacheKey) {
+function validateMetadata(metadata, cacheKey, maxSourceMapBytes) {
     if (metadata?.schemaVersion !== CACHE_SCHEMA_VERSION
         || metadata.cacheKey !== cacheKey
         || !Number.isFinite(metadata.markdownBytes)
@@ -358,6 +421,14 @@ function validateMetadata(metadata, cacheKey) {
         || !Number.isFinite(metadata.lastAccessedAt)
         || (metadata.markdownFile !== undefined
             && !/^document-[a-z0-9-]+\.md$/.test(metadata.markdownFile))
+        || (metadata.sourceMapFile !== undefined
+            && !/^source-map-[a-z0-9-]+\.json$/.test(metadata.sourceMapFile))
+        || (metadata.sourceMapFile !== undefined
+            && (!Number.isSafeInteger(metadata.sourceMapBytes)
+                || metadata.sourceMapBytes < 0
+                || metadata.sourceMapBytes > maxSourceMapBytes))
+        || (metadata.sourceMapBytes !== undefined
+            && metadata.sourceMapFile === undefined)
         || typeof metadata.assetBasePath !== 'string'
         || (metadata.userEdited !== undefined
             && typeof metadata.userEdited !== 'boolean')
@@ -372,6 +443,35 @@ function validateMetadata(metadata, cacheKey) {
             || !Number.isFinite(asset.size)
             || asset.size < 0) {
             throw new Error('Invalid cached image metadata');
+        }
+    }
+}
+
+function validateSourceMap(sourceMap, markdownLength, maxLocations) {
+    if (!Array.isArray(sourceMap) || sourceMap.length > 100_000) {
+        throw new Error('Invalid cached source map');
+    }
+    let locationCount = 0;
+    for (const entry of sourceMap) {
+        if (typeof entry?.type !== 'string'
+            || !Number.isSafeInteger(entry.markdownFrom)
+            || !Number.isSafeInteger(entry.markdownTo)
+            || entry.markdownFrom < 0
+            || entry.markdownTo <= entry.markdownFrom
+            || entry.markdownTo > markdownLength
+            || !Array.isArray(entry.locations)
+            || !entry.locations.length
+            || entry.locations.length > 1000) {
+            throw new Error('Invalid cached source map entry');
+        }
+        locationCount += entry.locations.length;
+        if (locationCount > maxLocations) {
+            throw new Error('Cached source map exceeds the source map location limit');
+        }
+        for (const location of entry.locations) {
+            if (!isValidSourceLocation(location)) {
+                throw new Error('Invalid cached source location');
+            }
         }
     }
 }
