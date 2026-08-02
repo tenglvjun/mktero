@@ -3,6 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Zotero](https://img.shields.io/badge/Zotero-7%20%7C%208%20%7C%209-cc2936.svg)](https://www.zotero.org/)
 
+[产品介绍页](https://tenglvjun.github.io/mktero/) · [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest)
+
 Mktero 是一个适用于 Zotero 7、8 和 9 的 PDF 阅读插件。它通过 MinerU 将本地
 PDF 转换为 Markdown，并在 Zotero 标签页中以只读、行内渲染的方式展示正文、
 公式、表格、图片和学术引用。
