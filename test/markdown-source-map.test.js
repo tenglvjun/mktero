@@ -119,6 +119,117 @@ test('maps unique MinerU content to Markdown blocks and keeps merged locations',
     ]);
 });
 
+test('maps unique prose across PDF and Markdown notation differences', () => {
+    const markdown = 'The Kaiser-Meyer result used Bartlett\'s statistic '
+        + '$\\chi^2(12) = 34.5$ , explaining $46.48\\%$ of the variance.';
+    const contentText = 'The KaiserMeyer result used Bartlett\u2019s statistic '
+        + '\u03c72(12) = 34.5, explaining 46.48% of the variance.';
+
+    const sourceMap = createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: contentText,
+        pageIndex: 5,
+        bbox: [100, 120, 900, 260],
+    }]);
+
+    assert.deepEqual(sourceMap, [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: markdown.length,
+        locations: [{ pageIndex: 5, bbox: [100, 120, 900, 260] }],
+    }]);
+});
+
+test('does not guess when tolerant source text matches multiple blocks', () => {
+    const paragraphs = [
+        'The Kaiser-Meyer result used Bartlett\'s statistic $\\chi^2(12)$.',
+        'The KaiserMeyer result used Bartlett\'s statistic $\\chi^2(12)$.',
+    ];
+
+    assert.deepEqual(createMarkdownSourceMap(paragraphs.join('\n\n'), [{
+        type: 'text',
+        text: 'The KaiserMeyer result used Bartlett\u2019s statistic \u03c72(12).',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 200],
+    }]), []);
+});
+
+test('prefers an exact source match over tolerant alternatives', () => {
+    const first = 'A well-being measure contains enough source text.';
+    const second = 'A wellbeing measure contains enough source text.';
+    const markdown = `${first}\n\n${second}`;
+
+    assert.deepEqual(createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: second,
+        pageIndex: 1,
+        bbox: [100, 100, 900, 200],
+    }]), [{
+        type: 'text',
+        markdownFrom: first.length + 2,
+        markdownTo: markdown.length,
+        locations: [{ pageIndex: 1, bbox: [100, 100, 900, 200] }],
+    }]);
+});
+
+test('does not discard numeric minus signs during tolerant matching', () => {
+    const markdown = 'The reported interval was 10\u221220 points in this sample.';
+
+    assert.deepEqual(createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: 'The reported interval was 1020 points in this sample.',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 200],
+    }]), []);
+});
+
+test('handles long punctuation whitespace within the tolerant work budget', () => {
+    const whitespace = ' '.repeat(4 * 1024);
+    const markdown = `A uniquely mapped result${whitespace}, with enough text.`;
+
+    assert.equal(createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: 'A uniquely mapped result, with enough text.',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 200],
+    }], {
+        maxMatchWork: markdown.length * 2,
+    }).length, 1);
+});
+
+test('handles dense LaTeX tolerance within the matching budget', () => {
+    const terms = 16 * 1024;
+    const markdown = `A unique sequence starts ${'\\chi '.repeat(terms)}and ends here.`;
+    const contentText = `A unique sequence starts ${'\u03c7 '.repeat(terms)}and ends here.`;
+
+    assert.equal(createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: contentText,
+        pageIndex: 0,
+        bbox: [100, 100, 900, 200],
+    }], {
+        maxMatchWork: markdown.length * 2,
+    }).length, 1);
+});
+
+test('skips source-map indexing when no block can spend matching work', () => {
+    const markdown = '\\chi'.repeat(64 * 1024);
+    const contentBlock = {
+        type: 'text',
+        text: 'A source block that cannot spend matching work.',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 200],
+    };
+
+    assert.deepEqual(createMarkdownSourceMap(markdown, []), []);
+    assert.deepEqual(createMarkdownSourceMap(markdown, [contentBlock], {
+        maxContentBlocks: 0,
+    }), []);
+    assert.deepEqual(createMarkdownSourceMap(markdown, [contentBlock], {
+        maxMatchWork: 0,
+    }), []);
+});
+
 test('returns no mappings for malformed inputs', () => {
     assert.deepEqual(createMarkdownSourceMap(null, []), []);
     assert.deepEqual(createMarkdownSourceMap('# Paper', null), []);
@@ -194,5 +305,21 @@ test('bounds source-map memory and matching work independently of extraction', (
     }).length, 1);
     assert.equal(createMarkdownSourceMap(markdown, contentList, {
         maxMatchWork: markdown.length,
+    }).length, 1);
+
+    const tolerantMarkdown = 'A Kaiser-Meyer result used $\\chi^2(12)$ '
+        + 'and explained $46.48\\%$ of the variance.';
+    const tolerantContent = [{
+        type: 'text',
+        text: 'A KaiserMeyer result used \u03c72(12) '
+            + 'and explained 46.48% of the variance.',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 200],
+    }];
+    assert.equal(createMarkdownSourceMap(tolerantMarkdown, tolerantContent, {
+        maxMatchWork: tolerantMarkdown.length,
+    }).length, 0);
+    assert.equal(createMarkdownSourceMap(tolerantMarkdown, tolerantContent, {
+        maxMatchWork: tolerantMarkdown.length * 2,
     }).length, 1);
 });

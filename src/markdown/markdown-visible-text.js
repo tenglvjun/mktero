@@ -43,6 +43,7 @@ export function createVisibleMarkdownTextIndex(markdown) {
                 visibleFrom,
                 visibleTo: visibleFrom + chunk.length,
                 sourceFrom,
+                sourceTo: hidden.from,
             });
             visibleFrom += chunk.length;
         }
@@ -55,10 +56,12 @@ export function createVisibleMarkdownTextIndex(markdown) {
             visibleFrom,
             visibleTo: visibleFrom + chunk.length,
             sourceFrom,
+            sourceTo: markdown.length,
         });
     }
+    const text = chunks.join('');
     return {
-        text: chunks.join(''),
+        text,
         sourceOffsetAt(offset) {
             const segment = findSegment(segments, offset);
             return segment
@@ -70,6 +73,33 @@ export function createVisibleMarkdownTextIndex(markdown) {
                 from: this.sourceOffsetAt(from),
                 to: this.sourceOffsetAt(from + length - 1) + 1,
             };
+        },
+        textForSourceRange(from, to) {
+            if (!Number.isSafeInteger(from)
+                || !Number.isSafeInteger(to)
+                || from < 0
+                || to <= from
+                || to > markdown.length) {
+                return '';
+            }
+            const output = [];
+            let index = findFirstSourceSegment(segments, from);
+            while (index < segments.length) {
+                const segment = segments[index];
+                if (segment.sourceFrom >= to) break;
+                const overlapFrom = Math.max(from, segment.sourceFrom);
+                const overlapTo = Math.min(to, segment.sourceTo);
+                if (overlapFrom < overlapTo) {
+                    const visibleFrom = segment.visibleFrom
+                        + overlapFrom - segment.sourceFrom;
+                    output.push(text.slice(
+                        visibleFrom,
+                        visibleFrom + overlapTo - overlapFrom
+                    ));
+                }
+                index++;
+            }
+            return output.join('');
         },
     };
 }
@@ -159,4 +189,15 @@ function findSegment(segments, offset) {
         }
     }
     return null;
+}
+
+function findFirstSourceSegment(segments, offset) {
+    let low = 0;
+    let high = segments.length;
+    while (low < high) {
+        const middle = (low + high) >> 1;
+        if (segments[middle].sourceTo <= offset) low = middle + 1;
+        else high = middle;
+    }
+    return low;
 }

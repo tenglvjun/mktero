@@ -21,6 +21,9 @@ export function createMarkdownSourceMap(markdown, contentList, {
 } = {}) {
     if (typeof markdown !== 'string' || !Array.isArray(contentList)) return [];
     if (markdown.length > normalizedLimit(maxMarkdownLength)) return [];
+    const blockLimit = normalizedLimit(maxContentBlocks);
+    const matchWorkLimit = normalizedLimit(maxMatchWork);
+    if (!contentList.length || !blockLimit || !matchWorkLimit) return [];
 
     const syntaxRanges = collectSyntaxRanges(markdown);
     const visible = createVisibleMarkdownTextIndex(markdown);
@@ -28,9 +31,19 @@ export function createMarkdownSourceMap(markdown, contentList, {
         visible.text,
         visible.sourceOffsetAt
     );
+    let tolerantBlockTexts;
+    const getTolerantBlockTexts = () => {
+        if (!tolerantBlockTexts) {
+            tolerantBlockTexts = syntaxRanges.blocks.map(range => (
+                normalizeTolerantText(
+                    visible.textForSourceRange(range.from, range.to)
+                )
+            ));
+        }
+        return tolerantBlockTexts;
+    };
     const entries = new Map();
-    const matchBudget = { remaining: normalizedLimit(maxMatchWork) };
-    const blockLimit = normalizedLimit(maxContentBlocks);
+    const matchBudget = { remaining: matchWorkLimit };
 
     for (let index = 0; index < contentList.length && index < blockLimit; index++) {
         const contentBlock = contentList[index];
@@ -39,6 +52,7 @@ export function createMarkdownSourceMap(markdown, contentList, {
             contentBlock,
             markdown,
             visibleIndex,
+            getTolerantBlockTexts,
             syntaxRanges,
             matchBudget
         );
@@ -119,6 +133,7 @@ function matchContentBlock(
     contentBlock,
     markdown,
     visibleIndex,
+    getTolerantBlockTexts,
     syntaxRanges,
     matchBudget
 ) {
@@ -146,14 +161,60 @@ function matchContentBlock(
         return MATCH_BUDGET_EXHAUSTED;
     }
     const occurrences = findTextOccurrences(visibleIndex.text, target, 2);
-    if (occurrences.offsets.length !== 1 || occurrences.truncated) return null;
-    const matchedRange = visibleIndex.sourceRange(
-        occurrences.offsets[0],
-        target.length
-    );
+    let matchedRange;
+    if (occurrences.offsets.length === 1 && !occurrences.truncated) {
+        matchedRange = visibleIndex.sourceRange(
+            occurrences.offsets[0],
+            target.length
+        );
+    }
+    else if (occurrences.offsets.length || occurrences.truncated) {
+        return null;
+    }
+    else {
+        if (!consumeMatchWork(matchBudget, visibleIndex.text.length)) {
+            return MATCH_BUDGET_EXHAUSTED;
+        }
+        const tolerantTarget = normalizeTolerantText(contentBlock.text);
+        if ([...tolerantTarget].length < MIN_TEXT_MATCH_LENGTH) return null;
+        matchedRange = findTolerantBlockMatch(
+            syntaxRanges.blocks,
+            getTolerantBlockTexts(),
+            tolerantTarget
+        );
+        if (!matchedRange) return null;
+    }
     return compatibleSyntaxRange(contentBlock.type, matchedRange, syntaxRanges)
         ? matchedRange
         : null;
+}
+
+function normalizeTolerantText(value) {
+    return String(value)
+        .normalize('NFKC')
+        .replace(/[\u2018\u2019]/gu, '\'')
+        .replace(/[\u201c\u201d]/gu, '"')
+        .replace(/\\chi(?![\p{L}\p{N}])/gu, '\u03c7')
+        .replace(/\\([%$#&_{}])/gu, '$1')
+        .replace(/[$}{]/gu, '')
+        .replace(/\^(?=[\p{L}\p{N}])/gu, '')
+        .replace(/(\p{L}{2})[-\u2010\u2011](?=\p{L}{2})/gu, '$1')
+        .replace(/[\u2010-\u2014\u2212]/gu, '-')
+        .replace(/\s+([,.;:!?%)\]])/gu, '$1')
+        .replace(/\s+/gu, ' ')
+        .trim();
+}
+
+function findTolerantBlockMatch(blocks, blockTexts, target) {
+    let matchedRange = null;
+    for (let index = 0; index < blocks.length; index++) {
+        const occurrences = findTextOccurrences(blockTexts[index], target, 2);
+        if (occurrences.truncated || occurrences.offsets.length > 1) return null;
+        if (!occurrences.offsets.length) continue;
+        if (matchedRange) return null;
+        matchedRange = blocks[index];
+    }
+    return matchedRange;
 }
 
 function compatibleSyntaxRange(type, matchedRange, syntaxRanges) {
