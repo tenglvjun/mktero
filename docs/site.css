@@ -265,9 +265,6 @@ a {
     box-shadow: var(--shadow);
     display: block;
     height: auto;
-    max-height: 67vh;
-    object-fit: cover;
-    object-position: center;
     width: 100%;
 }
 
@@ -618,9 +615,7 @@ a {
     }
 
     .hero-demo img {
-        min-height: 235px;
-        object-fit: cover;
-        object-position: left center;
+        min-height: 0;
     }
 
     .workflow-grid,
@@ -684,7 +679,7 @@ a {
     }
 
     .hero-demo img {
-        min-height: 190px;
+        min-height: 0;
     }
 }
 
