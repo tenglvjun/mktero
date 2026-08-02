@@ -27,7 +27,7 @@
     "@lezer/markdown": "1.7.2",
     "fflate": "^0.8.3",
     "katex": "0.18.1",
-    "lucide": "1.27.0",
+    "lucide": "1.28.0",
     "marked": "18.0.7"
   }
 }
