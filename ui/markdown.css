@@ -1406,6 +1406,21 @@ main {
     margin-top: 10px;
 }
 
+.mktero-figure-preview-viewport .mktero-figure-panels-horizontal {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+    gap: 10px;
+    align-items: start;
+}
+
+.mktero-figure-preview-viewport .mktero-figure-panels-horizontal img {
+    width: 100%;
+}
+
+.mktero-figure-preview-viewport .mktero-figure-panels-horizontal img + img {
+    margin-top: 0;
+}
+
 .mktero-figure-preview-viewport .mktero-figure-panel {
     display: flex;
     max-width: 100%;
@@ -1530,6 +1545,21 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-group img + img {
     margin-top: 12px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-horizontal {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+    gap: 12px;
+    align-items: start;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-horizontal img {
+    width: 100%;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-horizontal img + img {
+    margin-top: 0;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel {

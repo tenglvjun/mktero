@@ -148,6 +148,27 @@ export function findAcademicFigureGroups(markdown) {
         const images = collectNearbyImages(lines, index, blockedLines);
         if (images.length < 2) continue;
 
+        const embeddedCaptions = images
+            .map(image => captionFromImageLine(lines[image.index].raw))
+            .filter(Boolean);
+        const horizontal = images.slice(0, -1).every(image => (
+            MARKDOWN_HARD_BREAK_PATTERN.test(lines[image.index].raw)
+        ));
+        if (images.length === 2
+            && embeddedCaptions.length === 1
+            && horizontal
+            && describesSharedABFigurePanels(embeddedCaptions[0])) {
+            groups.push({
+                from: lines[index].from,
+                to: lines[images.at(-1).index].to,
+                caption: embeddedCaptions[0],
+                images,
+                layout: 'horizontal',
+            });
+            index = images.at(-1).index;
+            continue;
+        }
+
         const captionIndex = nearbyLineIndex(lines, images.at(-1).index + 1);
         if (captionIndex >= lines.length || blockedLines.has(captionIndex)) continue;
         const trailingCaption = parseCaptionLine(lines[captionIndex].raw);
@@ -476,6 +497,18 @@ function parseCaptionLine(line) {
     return parseAcademicFigureCaption(
         source.slice(0, source.length - ending.length)
     );
+}
+
+function captionFromImageLine(line) {
+    const match = CAPTIONED_IMAGE_LINE_PATTERN.exec(line || '');
+    return match
+        ? parseAcademicFigureCaption(unescapeImageDescription(match[1]))
+        : null;
+}
+
+export function describesSharedABFigurePanels(caption) {
+    return /\(\s*a\s*\)/iu.test(caption?.description || '')
+        && /\(\s*b\s*\)/iu.test(caption?.description || '');
 }
 
 function isIndentedCodeLine(line) {

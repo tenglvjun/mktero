@@ -157,12 +157,20 @@ function renderStandaloneAcademicFigureGroup(
     });
     if (panels.some(panel => !panel)) return null;
 
-    return '<figure class="mktero-figure mktero-figure-group">'
-        + panels.map(panel => renderFigurePanel(
-            panel,
-            resolveImageURL,
-            mathBudget
-        )).join('')
+    const horizontal = group.layout === 'horizontal';
+    const layoutClass = horizontal
+        ? ' mktero-figure-group-horizontal'
+        : '';
+    const renderedPanels = panels.map(panel => renderFigurePanel(
+        panel,
+        resolveImageURL,
+        mathBudget
+    )).join('');
+    const panelHTML = horizontal
+        ? `<div class="mktero-figure-panels-horizontal">${renderedPanels}</div>`
+        : renderedPanels;
+    return `<figure class="mktero-figure mktero-figure-group${layoutClass}">`
+        + panelHTML
         + renderFigureCaption(group.caption, mathBudget)
         + '</figure>\n';
 }
