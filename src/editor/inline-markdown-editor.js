@@ -6,7 +6,9 @@ import { GFM } from '@lezer/markdown';
 import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
-import { isValidSourceMapEntry } from '../core/markdown-source-map.js';
+import {
+    findUniqueContainingSourceMapEntry,
+} from '../core/markdown-source-map.js';
 import { createLocalization } from '../i18n/localization.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
@@ -366,13 +368,12 @@ function selectionSourceLocation(sourceMap, target, documentLength) {
         || range.to > documentLength) {
         return null;
     }
-    const entries = Array.isArray(sourceMap) ? sourceMap.filter(entry => (
-        isValidSourceMapEntry(entry, documentLength)
-        && entry.markdownFrom <= range.from
-        && entry.markdownTo >= range.to
-    )) : [];
-    if (entries.length !== 1) return null;
-    const location = entries[0].locations[0];
+    const entry = findUniqueContainingSourceMapEntry(
+        sourceMap,
+        range,
+        documentLength
+    );
+    const location = entry?.locations[0];
     return location ? {
         pageIndex: location.pageIndex,
         bbox: [...location.bbox],

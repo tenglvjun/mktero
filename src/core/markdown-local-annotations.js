@@ -79,21 +79,28 @@ export class MarkdownLocalAnnotations {
         try {
             const annotations = normalizeCollection(await this.store.get(itemID));
             const resolved = resolveAnnotations(markdown, annotations);
-            const backfilled = backfillPDFPageIndexHints(
+            const refreshed = refreshPDFPageIndexHints(
                 annotations,
                 resolved.matched,
                 sourceMap,
                 markdown.length
             );
-            if (!backfilled.changed) return resolved;
-            await this.store.put(itemID, backfilled.annotations);
+            if (!refreshed.changed) return resolved;
+            await this.store.put(itemID, refreshed.annotations);
             return {
                 ...resolved,
                 matched: resolved.matched.map(annotation => {
-                    const pdfPageIndexHint = backfilled.hints.get(annotation.id);
-                    return pdfPageIndexHint === undefined
-                        ? annotation
-                        : { ...annotation, pdfPageIndexHint };
+                    const current = refreshed.byID.get(annotation.id);
+                    const {
+                        pdfPageIndexHint: _staleHint,
+                        ...withoutHint
+                    } = annotation;
+                    return current?.pdfPageIndexHint === undefined
+                        ? withoutHint
+                        : {
+                            ...withoutHint,
+                            pdfPageIndexHint: current.pdfPageIndexHint,
+                        };
                 }),
             };
         }
@@ -520,41 +527,49 @@ function normalizeAnnotation(value) {
     };
 }
 
-function backfillPDFPageIndexHints(
+function refreshPDFPageIndexHints(
     annotations,
     matched,
     sourceMap,
     documentLength
 ) {
-    const hints = new Map();
-    if (!Array.isArray(sourceMap) || !sourceMap.length) {
-        return { annotations, hints, changed: false };
+    const byID = new Map(annotations.map(annotation => (
+        [annotation.id, annotation]
+    )));
+    if (!Array.isArray(sourceMap)) {
+        return { annotations, byID, changed: false };
     }
     const matchedRanges = new Map(matched.map(annotation => (
         [annotation.id, annotation.ranges[0]]
     )));
     let remainingWork = MAX_SOURCE_MAP_PAGE_HINT_WORK;
+    let changed = false;
     const updated = annotations.map(annotation => {
-        if (annotation.pdfPageIndexHint !== undefined
-            || remainingWork < sourceMap.length) {
-            return annotation;
-        }
         const range = matchedRanges.get(annotation.id);
-        if (!range) return annotation;
+        if (!range || remainingWork < sourceMap.length) return annotation;
         remainingWork -= sourceMap.length;
         const pdfPageIndexHint = resolvePDFPageIndexHint(
             sourceMap,
             range,
             documentLength
         );
-        if (pdfPageIndexHint === null) return annotation;
-        hints.set(annotation.id, pdfPageIndexHint);
-        return { ...annotation, pdfPageIndexHint };
+        const currentHint = annotation.pdfPageIndexHint ?? null;
+        if (pdfPageIndexHint === currentHint) return annotation;
+        changed = true;
+        const {
+            pdfPageIndexHint: _staleHint,
+            ...withoutHint
+        } = annotation;
+        const refreshed = pdfPageIndexHint === null
+            ? withoutHint
+            : { ...withoutHint, pdfPageIndexHint };
+        byID.set(annotation.id, refreshed);
+        return refreshed;
     });
     return {
         annotations: updated,
-        hints,
-        changed: hints.size > 0,
+        byID,
+        changed,
     };
 }
 

@@ -277,6 +277,23 @@ export function resolvePDFPageIndexHint(
     range,
     documentLength = Infinity
 ) {
+    const match = findUniqueContainingSourceMapEntry(
+        sourceMap,
+        range,
+        documentLength
+    );
+    if (!match) return null;
+    const pageIndex = match.locations[0].pageIndex;
+    return match.locations.every(location => location.pageIndex === pageIndex)
+        ? pageIndex
+        : null;
+}
+
+export function findUniqueContainingSourceMapEntry(
+    sourceMap,
+    range,
+    documentLength = Infinity
+) {
     if (!Array.isArray(sourceMap)
         || !Number.isSafeInteger(range?.from)
         || !Number.isSafeInteger(range?.to)
@@ -295,11 +312,7 @@ export function resolvePDFPageIndexHint(
         if (match) return null;
         match = entry;
     }
-    if (!match) return null;
-    const pageIndex = match.locations[0].pageIndex;
-    return match.locations.every(location => location.pageIndex === pageIndex)
-        ? pageIndex
-        : null;
+    return match;
 }
 
 export function isValidNormalizedSourceBBox(value) {

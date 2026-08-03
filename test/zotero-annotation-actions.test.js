@@ -424,51 +424,56 @@ test('reports when Markdown text cannot be found uniquely in the PDF', async () 
     }
 });
 
-test('uses the unique native PDF match on the hinted page', async () => {
-    const text = 'basal body temperature';
-    const results = [
+test('disambiguates the repeated temperature terms on their source pages', async () => {
+    const cases = [
         {
-            total: 2,
-            index: 0,
-            pageIndex: 0,
-            annotation: locatedAnnotationAtPage(text, 0),
+            text: 'basal body temperature',
+            pageIndexHint: 0,
+            resultPages: [0, 8, 8, 9],
         },
         {
-            total: 2,
-            index: 1,
-            pageIndex: 8,
-            annotation: locatedAnnotationAtPage(text, 8),
+            text: 'core body temperature',
+            pageIndexHint: 1,
+            resultPages: [1, 8],
         },
     ];
-    let findNextCalls = 0;
-    const view = createSearchView(results[0]);
-    view.findNext = function findNext() {
-        findNextCalls++;
-        const index = (this._findState.result.index + 1) % results.length;
-        this._findState = { ...this._findState, result: results[index] };
-    };
-    let savedJSON;
-    const zotero = createZoteroForAnnotationCreation({
-        view,
-        async saveFromJSON(_attachment, json) {
-            savedJSON = json;
-            return { key: json.key };
-        },
-    });
-    const actions = createZoteroAnnotationActions(zotero);
+    for (const { text, pageIndexHint, resultPages } of cases) {
+        const results = resultPages.map((pageIndex, index) => ({
+            total: resultPages.length,
+            index,
+            pageIndex,
+            annotation: locatedAnnotationAtPage(text, pageIndex),
+        }));
+        let findNextCalls = 0;
+        const view = createSearchView(results[0]);
+        view.findNext = function findNext() {
+            findNextCalls++;
+            const index = (this._findState.result.index + 1) % results.length;
+            this._findState = { ...this._findState, result: results[index] };
+        };
+        let savedJSON;
+        const zotero = createZoteroForAnnotationCreation({
+            view,
+            async saveFromJSON(_attachment, json) {
+                savedJSON = json;
+                return { key: json.key };
+            },
+        });
+        const actions = createZoteroAnnotationActions(zotero);
 
-    const created = await actions.createFromText(42, {
-        text,
-        comment: '',
-        color: '#ffd400',
-        pdfPageIndexHint: 0,
-    });
+        const created = await actions.createFromText(42, {
+            text,
+            comment: '',
+            color: '#ffd400',
+            pdfPageIndexHint: pageIndexHint,
+        });
 
-    assert.equal(created.id, 'SYNC0001');
-    assert.equal(savedJSON.position.pageIndex, 0);
-    assert.deepEqual(savedJSON.position.rects, [[72, 700, 280, 720]]);
-    assert.equal(findNextCalls, 1);
-    assert.equal(view._findState.active, false);
+        assert.equal(created.id, 'SYNC0001');
+        assert.equal(savedJSON.position.pageIndex, pageIndexHint);
+        assert.deepEqual(savedJSON.position.rects, [[72, 700, 280, 720]]);
+        assert.equal(findNextCalls, resultPages.length - 1);
+        assert.equal(view._findState.active, false);
+    }
 });
 
 test('rejects multiple native PDF matches on the hinted page', async () => {

@@ -348,6 +348,81 @@ test('backfills a PDF page hint before synchronizing an existing highlight', asy
     assert.equal((await store.get(42))[0].pdfPageIndexHint, 0);
 });
 
+test('refreshes a stale PDF page hint from the current source map', async () => {
+    const markdown = 'The core body temperature remained elevated.';
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'core body temperature',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 25 }],
+        pdfPageIndexHint: 0,
+    };
+    const store = createMemoryStore([local]);
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation(_itemID, draft) {
+            synchronized.push(draft);
+            return { deferred: true };
+        },
+    });
+
+    await annotations.resolve(42, markdown, {
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 1, bbox: [100, 100, 900, 220] }],
+        }],
+    });
+
+    await waitFor(() => synchronized.length === 1);
+    assert.equal(synchronized[0].pdfPageIndexHint, 1);
+    assert.equal((await store.get(42))[0].pdfPageIndexHint, 1);
+});
+
+test('removes a stale PDF page hint when current source evidence is ambiguous', async () => {
+    const markdown = 'The core body temperature remained elevated.';
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'core body temperature',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 25 }],
+        pdfPageIndexHint: 0,
+    };
+    const store = createMemoryStore([local]);
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation(_itemID, draft) {
+            synchronized.push(draft);
+            return { deferred: true };
+        },
+    });
+
+    await annotations.resolve(42, markdown, {
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [
+                { pageIndex: 0, bbox: [100, 100, 900, 220] },
+                { pageIndex: 1, bbox: [100, 100, 900, 220] },
+            ],
+        }],
+    });
+
+    await waitFor(() => synchronized.length === 1);
+    assert.equal('pdfPageIndexHint' in synchronized[0], false);
+    assert.equal('pdfPageIndexHint' in (await store.get(42))[0], false);
+});
+
 test('keeps a local highlight when PDF synchronization fails', async () => {
     const local = {
         id: 'mktero-local-1',

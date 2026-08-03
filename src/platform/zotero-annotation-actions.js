@@ -351,106 +351,13 @@ async function locateTextInActiveReader(reader, text, {
     const previousFindState = view._findState || inactiveFindState();
     let searchError = null;
     try {
-        await setReaderFindState(view, reader, {
-            active: true,
-            query: text,
-            highlightAll: false,
-            caseSensitive: false,
-            entireWord: false,
-            index: null,
-            result: null,
-        }, cloneIntoReader);
-        let result = await waitForPDFTextResult(
-            view,
-            text,
-            { delay, now, timeout, allowNormalizedFallback: true }
-        );
-        let usedNormalizedQuery = false;
-        let activeQuery = text;
-        if (!result) {
-            throw annotationSyncError(
-                'MKTERO_PDF_TEXT_SEARCH_TIMEOUT',
-                'Timed out while locating text in the PDF'
-            );
-        }
-        if (!result.total) {
-            const fallback = result.normalizedFallback
-                || findNormalizedPDFSearchQuery(view, text);
-            if (fallback.ambiguous) {
-                throw annotationSyncError(
-                    'MKTERO_PDF_TEXT_AMBIGUOUS',
-                    'Selected Markdown text occurs more than once in the PDF'
-                );
-            }
-            if (fallback.query) {
-                usedNormalizedQuery = true;
-                activeQuery = fallback.query;
-                await setReaderFindState(view, reader, {
-                    active: true,
-                    query: fallback.query,
-                    highlightAll: false,
-                    caseSensitive: false,
-                    entireWord: false,
-                    index: null,
-                    result: null,
-                }, cloneIntoReader);
-                result = await waitForPDFTextResult(
-                    view,
-                    fallback.query,
-                    { delay, now, timeout }
-                );
-                if (!result) {
-                    throw annotationSyncError(
-                        'MKTERO_PDF_TEXT_SEARCH_TIMEOUT',
-                        'Timed out while locating text in the PDF'
-                    );
-                }
-            }
-        }
-        if (!result.total) {
-            throw annotationSyncError(
-                'MKTERO_PDF_TEXT_NOT_FOUND',
-                'Selected Markdown text was not found in the PDF'
-            );
-        }
-        let annotation = result.annotation;
-        if (result.total !== 1) {
-            if (pdfPageIndexHint === null) {
-                throw annotationSyncError(
-                    'MKTERO_PDF_TEXT_AMBIGUOUS',
-                    'Selected Markdown text occurs more than once in the PDF'
-                );
-            }
-            result = await waitForCompletedPDFTextResult(
-                view,
-                activeQuery,
-                { delay, now, timeout }
-            );
-            if (!result) {
-                throw annotationSyncError(
-                    'MKTERO_PDF_TEXT_SEARCH_TIMEOUT',
-                    'Timed out while locating text in the PDF'
-                );
-            }
-            if (!result.total) {
-                throw annotationSyncError(
-                    'MKTERO_PDF_TEXT_NOT_FOUND',
-                    'Selected Markdown text was not found in the PDF'
-                );
-            }
-            annotation = result.total === 1
-                ? result.annotation
-                : await findUniquePDFTextResultOnPage(
-                    view,
-                    activeQuery,
-                    result,
-                    pdfPageIndexHint,
-                    { delay, now, timeout }
-                );
-        }
-        return usedNormalizedQuery
-            ? { ...annotation, text }
-            : annotation;
+        return await locatePDFTextInView(view, reader, text, {
+            cloneIntoReader,
+            delay,
+            now,
+            timeout,
+            pdfPageIndexHint,
+        });
     }
     catch (error) {
         searchError = error;
@@ -469,6 +376,113 @@ async function locateTextInActiveReader(reader, text, {
             if (!searchError) throw error;
         }
     }
+}
+
+async function locatePDFTextInView(view, reader, text, options) {
+    const search = await findPDFTextSearchResult(view, reader, text, options);
+    if (!search.result.total) throw notFoundPDFTextError();
+    const annotation = await selectPDFTextAnnotation(
+        view,
+        search.activeQuery,
+        search.result,
+        options.pdfPageIndexHint,
+        options
+    );
+    return search.usedNormalizedQuery
+        ? { ...annotation, text }
+        : annotation;
+}
+
+async function findPDFTextSearchResult(view, reader, text, options) {
+    let result = requirePDFTextSearchResult(await runPDFTextSearch(
+        view,
+        reader,
+        text,
+        { ...options, allowNormalizedFallback: true }
+    ));
+    let usedNormalizedQuery = false;
+    let activeQuery = text;
+    if (!result.total) {
+        const fallback = result.normalizedFallback
+            || findNormalizedPDFSearchQuery(view, text);
+        if (fallback.ambiguous) throw ambiguousPDFTextError();
+        if (fallback.query) {
+            usedNormalizedQuery = true;
+            activeQuery = fallback.query;
+            result = requirePDFTextSearchResult(await runPDFTextSearch(
+                view,
+                reader,
+                fallback.query,
+                options
+            ));
+        }
+    }
+    return { result, activeQuery, usedNormalizedQuery };
+}
+
+async function runPDFTextSearch(view, reader, query, {
+    cloneIntoReader,
+    delay,
+    now,
+    timeout,
+    allowNormalizedFallback = false,
+}) {
+    await setReaderFindState(view, reader, {
+        active: true,
+        query,
+        highlightAll: false,
+        caseSensitive: false,
+        entireWord: false,
+        index: null,
+        result: null,
+    }, cloneIntoReader);
+    return waitForPDFTextResult(
+        view,
+        query,
+        { delay, now, timeout, allowNormalizedFallback }
+    );
+}
+
+async function selectPDFTextAnnotation(
+    view,
+    activeQuery,
+    result,
+    pdfPageIndexHint,
+    { delay, now, timeout }
+) {
+    if (result.total === 1) return result.annotation;
+    if (pdfPageIndexHint === null) throw ambiguousPDFTextError();
+    const completedResult = requirePDFTextSearchResult(
+        await waitForCompletedPDFTextResult(
+            view,
+            activeQuery,
+            { delay, now, timeout }
+        )
+    );
+    if (!completedResult.total) throw notFoundPDFTextError();
+    if (completedResult.total === 1) return completedResult.annotation;
+    return findUniquePDFTextResultOnPage(
+        view,
+        activeQuery,
+        completedResult,
+        pdfPageIndexHint,
+        { delay, now, timeout }
+    );
+}
+
+function requirePDFTextSearchResult(result) {
+    if (result) return result;
+    throw annotationSyncError(
+        'MKTERO_PDF_TEXT_SEARCH_TIMEOUT',
+        'Timed out while locating text in the PDF'
+    );
+}
+
+function notFoundPDFTextError() {
+    return annotationSyncError(
+        'MKTERO_PDF_TEXT_NOT_FOUND',
+        'Selected Markdown text was not found in the PDF'
+    );
 }
 
 async function setReaderFindState(view, reader, state, cloneIntoReader) {

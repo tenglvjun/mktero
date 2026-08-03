@@ -1,4 +1,6 @@
-import { isValidSourceMapEntry } from '../core/markdown-source-map.js';
+import {
+    findUniqueContainingSourceMapEntry,
+} from '../core/markdown-source-map.js';
 import { findAcademicFigures } from './markdown-figures.js';
 import { createVisibleMarkdownTextIndex } from './markdown-visible-text.js';
 import { parseGFMTableRow } from './markdown-tables.js';
@@ -27,7 +29,11 @@ export function createEvidenceSnippet({
             && target.text.length > contentLimit)) {
         throw evidenceError('Evidence content is too large', EVIDENCE_TOO_LARGE);
     }
-    const entry = containingSourceEntry(sourceMap, range, source.length);
+    const entry = findUniqueContainingSourceMapEntry(
+        sourceMap,
+        range,
+        source.length
+    );
     if (!entry) {
         throw evidenceError(
             'A reliable PDF source is unavailable for this content',
@@ -132,16 +138,6 @@ function validRange(range, documentLength) {
         throw evidenceError('Evidence range is invalid', INVALID_EVIDENCE);
     }
     return { from: range.from, to: range.to };
-}
-
-function containingSourceEntry(sourceMap, range, documentLength) {
-    if (!Array.isArray(sourceMap)) return null;
-    const matches = sourceMap.filter(entry => (
-        isValidSourceMapEntry(entry, documentLength)
-        && entry.markdownFrom <= range.from
-        && entry.markdownTo >= range.to
-    ));
-    return matches.length === 1 ? matches[0] : null;
 }
 
 function uniqueLocations(locations) {
