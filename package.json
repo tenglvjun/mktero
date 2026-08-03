@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.1",
-    "jsdom": "30.0.0",
+    "jsdom": "30.0.1",
     "linkedom": "0.18.13"
   },
   "dependencies": {
