@@ -72,6 +72,38 @@ test('refreshes every affected open PDF and stops updates after disposal', async
     assert.deepEqual(updates.sort(), [42, 43]);
 });
 
+test('resolves refreshed annotations with the current source map', async () => {
+    const presentation = readyPresentation(42);
+    presentation.model.sourceMap = [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: presentation.model.markdown.length,
+        locations: [{ pageIndex: 1, bbox: [100, 100, 900, 220] }],
+    }];
+    const calls = [];
+    const refresher = createAnnotationOverlayRefresher({
+        presenter: {
+            get: () => presentation,
+            list: () => [presentation],
+            update() {},
+        },
+        service: {
+            async resolveAnnotations(...args) {
+                calls.push(args);
+                return annotationResult('refreshed');
+            },
+        },
+    });
+
+    await refresher.refresh([42]);
+
+    assert.deepEqual(calls, [[
+        42,
+        presentation.model.markdown,
+        { sourceMap: presentation.model.sourceMap },
+    ]]);
+});
+
 function readyPresentation(itemID) {
     return {
         closed: false,

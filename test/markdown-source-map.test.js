@@ -1,6 +1,54 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMarkdownSourceMap } from '../src/core/markdown-source-map.js';
+import {
+    createMarkdownSourceMap,
+    resolvePDFPageIndexHint,
+} from '../src/core/markdown-source-map.js';
+
+test('resolves a PDF page hint for a range inside one single-page source entry', () => {
+    const sourceMap = [{
+        type: 'text',
+        markdownFrom: 10,
+        markdownTo: 80,
+        locations: [
+            { pageIndex: 3, bbox: [100, 120, 900, 220] },
+            { pageIndex: 3, bbox: [100, 240, 900, 340] },
+        ],
+    }];
+
+    assert.equal(resolvePDFPageIndexHint(
+        sourceMap,
+        { from: 24, to: 46 },
+        100
+    ), 3);
+});
+
+test('does not resolve a PDF page hint from ambiguous source evidence', () => {
+    const location = pageIndex => ({
+        pageIndex,
+        bbox: [100, 120, 900, 220],
+    });
+    const entry = {
+        type: 'text',
+        markdownFrom: 10,
+        markdownTo: 80,
+        locations: [location(3)],
+    };
+
+    assert.equal(resolvePDFPageIndexHint([{
+        ...entry,
+        locations: [location(3), location(4)],
+    }], { from: 24, to: 46 }, 100), null);
+    assert.equal(resolvePDFPageIndexHint([
+        entry,
+        { ...entry, markdownFrom: 20, markdownTo: 60 },
+    ], { from: 24, to: 46 }, 100), null);
+    assert.equal(resolvePDFPageIndexHint(
+        [entry],
+        { from: 70, to: 90 },
+        100
+    ), null);
+});
 
 test('maps unique MinerU content to Markdown blocks and keeps merged locations', () => {
     const markdown = [

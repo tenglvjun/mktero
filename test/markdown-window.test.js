@@ -413,6 +413,12 @@ test('creates and edits persistent local Markdown annotations', async () => {
         status: 'ready',
         progress: 100,
         markdown: 'Important result.',
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 17,
+            locations: [{ pageIndex: 4, bbox: [100, 100, 900, 220] }],
+        }],
         annotationOverlay: { matched: [], unmatched: [] },
         async onCreateMarkdownAnnotation(annotation) {
             actions.push({ action: 'create', annotation });
@@ -472,6 +478,7 @@ test('creates and edits persistent local Markdown annotations', async () => {
         'update',
         'update',
     ]);
+    assert.equal(actions[0].annotation.pdfPageIndexHint, 4);
     assert.equal(updates.at(-1).annotationOverlay.matched[0].source, 'markdown');
 
     await editorOptions.deleteAnnotation('mktero-local-1');

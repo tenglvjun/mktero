@@ -6,6 +6,7 @@ import {
 import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
+import { resolvePDFPageIndexHint } from '../core/markdown-source-map.js';
 import {
     accessibleAnnotationText,
     comparePdfAnnotations,
@@ -302,7 +303,15 @@ class MarkdownTabView {
         if (typeof this.model.onCreateMarkdownAnnotation !== 'function') {
             throw new Error('Markdown annotation creation is unavailable');
         }
-        const saved = await this.model.onCreateMarkdownAnnotation(annotation);
+        const pdfPageIndexHint = resolvePDFPageIndexHint(
+            this.model.sourceMap,
+            annotation?.ranges?.[0],
+            String(this.model.markdown || '').length
+        );
+        const draft = pdfPageIndexHint === null
+            ? annotation
+            : { ...annotation, pdfPageIndexHint };
+        const saved = await this.model.onCreateMarkdownAnnotation(draft);
         this.model.annotationOverlay = appendMatchedAnnotation(
             this.model.annotationOverlay,
             saved

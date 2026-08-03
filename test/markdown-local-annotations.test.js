@@ -84,6 +84,31 @@ test('creates a Zotero PDF annotation for a Markdown highlight', async () => {
     assert.deepEqual(synchronizationChanges, [42]);
 });
 
+test('persists a supplied PDF page hint before first synchronization', async () => {
+    const store = createMemoryStore();
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation(_itemID, draft) {
+            synchronized.push(draft);
+            return { deferred: true };
+        },
+    });
+
+    await annotations.create(42, {
+        text: 'core body temperature',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 25 }],
+        pdfPageIndexHint: 1,
+    });
+
+    await waitFor(() => synchronized.length === 1);
+    assert.equal(synchronized[0].pdfPageIndexHint, 1);
+    assert.equal((await store.get(42))[0].pdfPageIndexHint, 1);
+});
+
 test('persists a Markdown highlight without waiting for PDF synchronization', async () => {
     const store = createMemoryStore();
     const annotations = new MarkdownLocalAnnotations({
@@ -286,6 +311,41 @@ test('migrates an existing local Markdown highlight into Zotero PDF', async () =
             ranges: local.ranges,
         },
     }]);
+});
+
+test('backfills a PDF page hint before synchronizing an existing highlight', async () => {
+    const markdown = 'The basal body temperature remained elevated.';
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'basal body temperature',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 26 }],
+    };
+    const store = createMemoryStore([local]);
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation(_itemID, draft) {
+            synchronized.push(draft);
+            return { deferred: true };
+        },
+    });
+
+    await annotations.resolve(42, markdown, {
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 220] }],
+        }],
+    });
+
+    await waitFor(() => synchronized.length === 1);
+    assert.equal(synchronized[0].pdfPageIndexHint, 0);
+    assert.equal((await store.get(42))[0].pdfPageIndexHint, 0);
 });
 
 test('keeps a local highlight when PDF synchronization fails', async () => {
@@ -631,6 +691,13 @@ test('rejects unsafe local annotation input before writing it', async () => {
         () => annotations.create(42, {
             ...draft,
             comment: 'x'.repeat(MAX_PDF_ANNOTATION_TEXT_LENGTH + 1),
+        }),
+        /Invalid Markdown annotation/
+    );
+    await assert.rejects(
+        () => annotations.create(42, {
+            ...draft,
+            pdfPageIndexHint: -1,
         }),
         /Invalid Markdown annotation/
     );

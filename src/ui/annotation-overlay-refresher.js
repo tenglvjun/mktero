@@ -27,12 +27,14 @@ export function createAnnotationOverlayRefresher({ presenter, service }) {
 
     async function refreshPresentation(presentation) {
         if (presentation.closed || presentation.model.status !== 'ready') return;
-        const { itemID, markdown } = presentation.model;
+        const { itemID, markdown, sourceMap } = presentation.model;
         const generation = Symbol('annotation-refresh');
         generations.set(itemID, generation);
         let result;
         try {
-            result = await service.resolveAnnotations(itemID, markdown);
+            result = await service.resolveAnnotations(itemID, markdown, {
+                sourceMap,
+            });
         }
         catch (error) {
             if (generations.get(itemID) === generation) {

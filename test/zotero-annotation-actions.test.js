@@ -73,9 +73,10 @@ test('creates a Zotero PDF highlight from located Markdown text', async () => {
         },
     };
     const actions = createZoteroAnnotationActions(zotero, {
-        async locateText(itemID, text) {
+        async locateText(itemID, text, options) {
             assert.equal(itemID, 42);
             assert.equal(text, selectedText);
+            assert.equal(options.pdfPageIndexHint, 0);
             return {
                 text,
                 pageLabel: '1',
@@ -93,6 +94,7 @@ test('creates a Zotero PDF highlight from located Markdown text', async () => {
         comment: 'Paper title',
         color: '#ffd400',
         ranges: [{ from: 0, to: selectedText.length }],
+        pdfPageIndexHint: 0,
     });
 
     assert.deepEqual(savedJSON, {
@@ -112,6 +114,32 @@ test('creates a Zotero PDF highlight from located Markdown text', async () => {
     assert.equal(created.source, 'zotero');
     assert.equal(created.pageIndex, 0);
     assert.equal(committedQueue, queue);
+});
+
+test('rejects an invalid PDF page hint before locating text', async () => {
+    const attachment = {
+        id: 42,
+        isPDFAttachment: () => true,
+    };
+    let locateCalls = 0;
+    const actions = createZoteroAnnotationActions({
+        Items: { get: () => attachment },
+    }, {
+        async locateText() {
+            locateCalls++;
+        },
+    });
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text: 'Selected paper title',
+            comment: '',
+            color: '#ffd400',
+            pdfPageIndexHint: -1,
+        }),
+        /Invalid PDF annotation page hint/
+    );
+    assert.equal(locateCalls, 0);
 });
 
 test('opens a Zotero PDF reader at the selected annotation', async () => {
@@ -392,6 +420,179 @@ test('reports when Markdown text cannot be found uniquely in the PDF', async () 
                 color: '#ffd400',
             }),
             error => error.code === code
+        );
+    }
+});
+
+test('uses the unique native PDF match on the hinted page', async () => {
+    const text = 'basal body temperature';
+    const results = [
+        {
+            total: 2,
+            index: 0,
+            pageIndex: 0,
+            annotation: locatedAnnotationAtPage(text, 0),
+        },
+        {
+            total: 2,
+            index: 1,
+            pageIndex: 8,
+            annotation: locatedAnnotationAtPage(text, 8),
+        },
+    ];
+    let findNextCalls = 0;
+    const view = createSearchView(results[0]);
+    view.findNext = function findNext() {
+        findNextCalls++;
+        const index = (this._findState.result.index + 1) % results.length;
+        this._findState = { ...this._findState, result: results[index] };
+    };
+    let savedJSON;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            savedJSON = json;
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero);
+
+    const created = await actions.createFromText(42, {
+        text,
+        comment: '',
+        color: '#ffd400',
+        pdfPageIndexHint: 0,
+    });
+
+    assert.equal(created.id, 'SYNC0001');
+    assert.equal(savedJSON.position.pageIndex, 0);
+    assert.deepEqual(savedJSON.position.rects, [[72, 700, 280, 720]]);
+    assert.equal(findNextCalls, 1);
+    assert.equal(view._findState.active, false);
+});
+
+test('rejects multiple native PDF matches on the hinted page', async () => {
+    const text = 'core body temperature';
+    const results = [
+        {
+            total: 3,
+            index: 0,
+            pageIndex: 1,
+            annotation: locatedAnnotationAtPage(text, 1),
+        },
+        {
+            total: 3,
+            index: 1,
+            pageIndex: 1,
+            annotation: {
+                ...locatedAnnotationAtPage(text, 1),
+                sortIndex: '00001|000002|00000',
+                position: {
+                    pageIndex: 1,
+                    rects: [[72, 600, 280, 620]],
+                },
+            },
+        },
+        {
+            total: 3,
+            index: 2,
+            pageIndex: 8,
+            annotation: locatedAnnotationAtPage(text, 8),
+        },
+    ];
+    const view = createSearchView(results[0]);
+    view.findNext = function findNext() {
+        const index = (this._findState.result.index + 1) % results.length;
+        this._findState = { ...this._findState, result: results[index] };
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON() {
+            assert.fail('An ambiguous annotation must not be saved');
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text,
+            comment: '',
+            color: '#ffd400',
+            pdfPageIndexHint: 1,
+        }),
+        error => error.code === 'MKTERO_PDF_TEXT_AMBIGUOUS'
+    );
+});
+
+test('reports when no native PDF match is on the hinted page', async () => {
+    const text = 'core body temperature';
+    const results = [
+        {
+            total: 2,
+            index: 0,
+            pageIndex: 4,
+            annotation: locatedAnnotationAtPage(text, 4),
+        },
+        {
+            total: 2,
+            index: 1,
+            pageIndex: 8,
+            annotation: locatedAnnotationAtPage(text, 8),
+        },
+    ];
+    const view = createSearchView(results[0]);
+    view.findNext = function findNext() {
+        const index = (this._findState.result.index + 1) % results.length;
+        this._findState = { ...this._findState, result: results[index] };
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON() {
+            assert.fail('A missing annotation must not be saved');
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text,
+            comment: '',
+            color: '#ffd400',
+            pdfPageIndexHint: 1,
+        }),
+        error => error.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+    );
+});
+
+test('does not guess when native PDF result traversal is unavailable or oversized', async () => {
+    for (const result of [{
+        total: 2,
+        index: 0,
+        pageIndex: 0,
+        annotation: locatedAnnotationAtPage('Selected paper title', 0),
+    }, {
+        total: 10_001,
+        index: 0,
+        pageIndex: 0,
+        annotation: locatedAnnotationAtPage('Selected paper title', 0),
+    }]) {
+        const view = createSearchView(result);
+        const zotero = createZoteroForAnnotationCreation({
+            view,
+            async saveFromJSON() {
+                assert.fail('An unverified annotation must not be saved');
+            },
+        });
+        const actions = createZoteroAnnotationActions(zotero);
+
+        await assert.rejects(
+            actions.createFromText(42, {
+                text: 'Selected paper title',
+                comment: '',
+                color: '#ffd400',
+                pdfPageIndexHint: 0,
+            }),
+            error => error.code === 'MKTERO_PDF_TEXT_AMBIGUOUS'
         );
     }
 });
@@ -1486,6 +1687,18 @@ function locatedAnnotation(text) {
         sortIndex: '00000|000001|00000',
         position: {
             pageIndex: 0,
+            rects: [[72, 700, 280, 720]],
+        },
+    };
+}
+
+function locatedAnnotationAtPage(text, pageIndex) {
+    return {
+        ...locatedAnnotation(text),
+        pageLabel: String(pageIndex + 1),
+        sortIndex: `${String(pageIndex).padStart(5, '0')}|000001|00000`,
+        position: {
+            pageIndex,
             rects: [[72, 700, 280, 720]],
         },
     };

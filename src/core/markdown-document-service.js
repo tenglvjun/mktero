@@ -76,7 +76,12 @@ export class MarkdownDocumentService {
         const annotationResult = await this.resolveAnnotations(
             itemID,
             markdown,
-            { retryLocalAnnotations: true },
+            {
+                retryLocalAnnotations: true,
+                sourceMap: Array.isArray(extracted.sourceMap)
+                    ? extracted.sourceMap
+                    : [],
+            },
         );
         result.warnings = [
             ...result.warnings,
@@ -90,6 +95,7 @@ export class MarkdownDocumentService {
 
     async resolveAnnotations(itemID, markdown, {
         retryLocalAnnotations = false,
+        sourceMap = null,
     } = {}) {
         const overlays = [];
         const warnings = [];
@@ -106,7 +112,10 @@ export class MarkdownDocumentService {
             const localResult = await this.localAnnotations.resolve(
                 itemID,
                 markdown,
-                { retryFailed: retryLocalAnnotations },
+                {
+                    retryFailed: retryLocalAnnotations,
+                    sourceMap,
+                },
             );
             const { warning, ...localOverlay } = localResult;
             overlays.push(localOverlay);
