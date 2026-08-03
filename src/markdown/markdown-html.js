@@ -153,14 +153,18 @@ function renderStandaloneAcademicFigureGroup(
         return imageToken ? {
             imageToken,
             panelLabel: image.panelLabel || '',
+            panelLabelPosition: image.panelLabelPosition || 'after',
         } : null;
     });
     if (panels.some(panel => !panel)) return null;
 
     const horizontal = group.layout === 'horizontal';
+    const vertical = group.layout === 'vertical';
     const layoutClass = horizontal
         ? ' mktero-figure-group-horizontal'
-        : '';
+        : vertical
+            ? ' mktero-figure-group-vertical'
+            : '';
     const renderedPanels = panels.map(panel => renderFigurePanel(
         panel,
         resolveImageURL,
@@ -178,11 +182,16 @@ function renderStandaloneAcademicFigureGroup(
 function renderFigurePanel(panel, resolveImageURL, mathBudget) {
     const image = renderImageToken(panel.imageToken, resolveImageURL);
     if (!panel.panelLabel) return image;
-    return '<div class="mktero-figure-panel">'
-        + image
-        + '<div class="mktero-figure-panel-label">'
+    const before = panel.panelLabelPosition === 'before';
+    const label = '<div class="mktero-figure-panel-label'
+        + (before ? ' mktero-figure-panel-label-before' : '')
+        + '">'
         + renderCaptionMathSource(panel.panelLabel, mathBudget)
-        + '</div>'
+        + '</div>';
+    return '<div class="mktero-figure-panel">'
+        + (before ? label : '')
+        + image
+        + (before ? '' : label)
         + '</div>';
 }
 

@@ -156,6 +156,11 @@ test('separates panels inside a shared academic figure', () => {
     );
     assert.match(panelLabel, /text-align:\s*center/);
 
+    const leadingPanelLabel = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel-label-before'
+    );
+    assert.match(leadingPanelLabel, /margin:\s*0 auto 6px/);
+
     const horizontalPanels = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-horizontal'
     );

@@ -477,6 +477,23 @@ test('keeps unsafe LaTeX and HTML inert in an academic image caption', () => {
     assert.doesNotMatch(html, /<script>/i);
 });
 
+test('keeps unsafe caption content inert in a marked vertical figure group', () => {
+    const html = renderMarkdownHTML([
+        '(A)   ',
+        '![](images/panel-a.jpg)   ',
+        '(B)',
+        '',
+        '![Fig. 5 Results for (a) safe and (b) <script>alert(1)</script>.]'
+            + '(images/panel-b.jpg)',
+    ].join('\n'), {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+
+    assert.match(html, /mktero-figure-group-vertical/);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.doesNotMatch(html, /<script>/i);
+});
+
 test('renders consecutive image panels with one shared academic caption', () => {
     const caption = 'Figure 2. Anxiety & depression outcomes.';
     const html = renderMarkdownHTML([

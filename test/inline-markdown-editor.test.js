@@ -2952,6 +2952,43 @@ test('renders one shared caption for consecutive MinerU figure panels', () => {
     dom.window.close();
 });
 
+test('renders marked vertical MinerU panels as one figure group', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const captionText = 'Fig. 5 Ovulation prediction (a) sensitivities and '
+        + '(b) positive predictive values (PPV).';
+    const markdown = [
+        '(A)   ',
+        '![](images/panel-a.jpg)   ',
+        '(B)',
+        '',
+        `![${captionText}](images/panel-b.jpg)`,
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: path => `blob:mktero-${path}`,
+        openLink: () => {},
+    });
+
+    const figure = document.querySelector('.mktero-figure-group-vertical');
+    assert.equal(document.querySelectorAll('.mktero-figure-group').length, 1);
+    assert.equal(figure?.querySelectorAll('img').length, 2);
+    assert.deepEqual(
+        [...figure.querySelectorAll('.mktero-figure-panel-label-before')]
+            .map(label => label.textContent),
+        ['(A)', '(B)']
+    );
+    assert.equal(figure?.querySelector('figcaption')?.textContent, captionText);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('shows resolved references cited inside a shared figure caption', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

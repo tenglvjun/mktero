@@ -8,7 +8,7 @@ import { MINERU_SOURCE_MAP_OPTIONS } from '../src/mineru/parser-profile.js';
 test('includes figure panel reassembly in the MinerU parser profile', () => {
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.figurePanels,
-        'same-page-horizontal-ab-v1'
+        'same-page-horizontal-or-labeled-vertical-ab-v2'
     );
 });
 
@@ -205,6 +205,164 @@ test('marks already adjacent bbox-backed panels as horizontal', () => {
             + `![${caption}](images/panel-b.jpg)`
     );
     assert.equal(findAcademicFigureGroups(result.markdown)[0]?.layout, 'horizontal');
+});
+
+test('reassembles vertically stacked MinerU panels with leading A/B labels', () => {
+    const caption = 'Fig. 5 Ovulation prediction (a) sensitivities and '
+        + '(b) positive predictive values (PPV).';
+    const markdown = [
+        '(A)  ',
+        '![](images/panel-a.jpg)  ',
+        '(B)',
+        '',
+        `![${caption}](images/panel-b.jpg)`,
+        '',
+        '![Fig. 6 Independent result.](images/figure-6.jpg)',
+    ].join('\n');
+    const result = prepareMinerUResult({
+        markdown,
+        contentList: [{
+            type: 'chart',
+            assetPath: 'images/panel-a.jpg',
+            pageIndex: 7,
+            bbox: [213, 139, 786, 293],
+        }, {
+            type: 'chart',
+            assetPath: 'images/panel-b.jpg',
+            pageIndex: 7,
+            bbox: [213, 312, 786, 475],
+        }, {
+            type: 'chart',
+            assetPath: 'images/figure-6.jpg',
+            pageIndex: 7,
+            bbox: [99, 631, 482, 865],
+        }],
+    });
+
+    assert.equal(result.markdown, [
+        '(A)   ',
+        '![](images/panel-a.jpg)   ',
+        '(B)',
+        '',
+        `![${caption}](images/panel-b.jpg)`,
+        '',
+        '![Fig. 6 Independent result.](images/figure-6.jpg)',
+    ].join('\n'));
+    const groups = findAcademicFigureGroups(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].layout, 'vertical');
+    assert.deepEqual(
+        groups[0].images.map(image => ({
+            source: image.source,
+            panelLabel: image.panelLabel,
+            panelLabelPosition: image.panelLabelPosition,
+        })),
+        [{
+            source: '![](images/panel-a.jpg)',
+            panelLabel: '(A)',
+            panelLabelPosition: 'before',
+        }, {
+            source: `![${caption}](images/panel-b.jpg)`,
+            panelLabel: '(B)',
+            panelLabelPosition: 'before',
+        }]
+    );
+    assert.deepEqual(
+        result.sourceMap.slice(0, 2).map(entry => ({
+            type: entry.type,
+            source: result.markdown.slice(entry.markdownFrom, entry.markdownTo),
+            locations: entry.locations,
+        })),
+        [{
+            type: 'chart',
+            source: '(A)   \n![](images/panel-a.jpg)   \n(B)',
+            locations: [{ pageIndex: 7, bbox: [213, 139, 786, 293] }],
+        }, {
+            type: 'chart',
+            source: `![${caption}](images/panel-b.jpg)`,
+            locations: [{ pageIndex: 7, bbox: [213, 312, 786, 475] }],
+        }]
+    );
+
+    const html = renderMarkdownHTML(
+        result.markdown.slice(groups[0].from, groups[0].to),
+        { resolveImageURL: path => `blob:mktero-${path}` }
+    );
+    assert.match(
+        html,
+        /<figure class="mktero-figure mktero-figure-group mktero-figure-group-vertical">/
+    );
+    assert.match(
+        html,
+        /mktero-figure-panel-label-before">\(A\)<\/div><img/
+    );
+    assert.match(
+        html,
+        /mktero-figure-panel-label-before">\(B\)<\/div><img/
+    );
+    assert.equal((html.match(/<figcaption>/g) || []).length, 1);
+});
+
+test('does not mark ambiguous vertical charts as one A/B figure', () => {
+    const caption = 'Fig. 5 Results for (a) baseline and (b) follow-up.';
+    const cases = [{
+        firstLabel: '(A)',
+        secondLabel: '(C)',
+        firstBBox: [213, 139, 786, 293],
+        secondBBox: [213, 312, 786, 475],
+    }, {
+        firstLabel: '(A)',
+        secondLabel: '(B)',
+        firstBBox: [213, 139, 786, 293],
+        secondBBox: [213, 520, 786, 683],
+    }, {
+        firstLabel: '(A)',
+        secondLabel: '(B)',
+        firstBBox: [100, 139, 430, 293],
+        secondBBox: [500, 312, 830, 475],
+    }];
+
+    for (const { firstLabel, secondLabel, firstBBox, secondBBox } of cases) {
+        const markdown = [
+            `${firstLabel}  `,
+            '![](images/panel-a.jpg)  ',
+            secondLabel,
+            '',
+            `![${caption}](images/panel-b.jpg)`,
+        ].join('\n');
+        const result = prepareMinerUResult({
+            markdown,
+            contentList: [{
+                type: 'chart',
+                assetPath: 'images/panel-a.jpg',
+                pageIndex: 7,
+                bbox: firstBBox,
+            }, {
+                type: 'chart',
+                assetPath: 'images/panel-b.jpg',
+                pageIndex: 7,
+                bbox: secondBBox,
+            }],
+        });
+
+        assert.equal(result.markdown, markdown);
+        assert.equal(findAcademicFigureGroups(result.markdown).length, 0);
+    }
+});
+
+test('requires the exact bbox-backed marker for a vertical A/B figure', () => {
+    const caption = 'Fig. 5 Results for (a) baseline and (b) follow-up.';
+    for (const spaces of ['  ', '    ']) {
+        const markdown = [
+            `(A)${spaces}`,
+            `![](images/panel-a.jpg)${spaces}`,
+            '(B)',
+            '',
+            `![${caption}](images/panel-b.jpg)`,
+        ].join('\n');
+
+        assert.equal(findAcademicFigureGroups(markdown).length, 0);
+    }
 });
 
 test('does not absorb a third hard-break image into an A/B figure group', () => {

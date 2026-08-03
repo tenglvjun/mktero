@@ -8,7 +8,12 @@ const MIN_VERTICAL_OVERLAP = 0.8;
 const MIN_HEIGHT_SIMILARITY = 0.75;
 const MAX_HORIZONTAL_OVERLAP = 20;
 const MAX_HORIZONTAL_GAP = 60;
+const MIN_HORIZONTAL_OVERLAP = 0.8;
+const MIN_WIDTH_SIMILARITY = 0.75;
+const MAX_VERTICAL_OVERLAP = 20;
+const MAX_VERTICAL_GAP = 60;
 const MAX_CHARTS_PER_PAGE = 64;
+const VERTICAL_AB_PANEL_BLOCK_PATTERN = /^( {0,3}\(\s*a\s*\))[ \t]*(\r?\n)( {0,3}!\[[ \t]*\]\([^\r\n]+\))[ \t]*(\r?\n)( {0,3}\(\s*b\s*\))[ \t]*$/iu;
 
 export function reassembleMinerUFigurePanels(markdown, sourceMap) {
     const source = String(markdown || '');
@@ -48,15 +53,20 @@ export function reassembleMinerUFigurePanels(markdown, sourceMap) {
         if (!captioned || usedCharts.has(captioned)) continue;
         const pageCharts = chartsByPage.get(captioned.locations[0].pageIndex) || [];
         if (pageCharts.length > MAX_CHARTS_PER_PAGE) continue;
-        const candidates = pageCharts.filter(candidate => (
-            candidate !== captioned
-            && !usedCharts.has(candidate)
-            && !captionedCharts.has(candidate)
-            && isHorizontalPanelPair(captioned, candidate)
-        ));
+        const candidates = pageCharts
+            .filter(candidate => (
+                candidate !== captioned
+                && !usedCharts.has(candidate)
+                && !captionedCharts.has(candidate)
+            ))
+            .map(candidate => ({
+                chart: candidate,
+                layout: panelPairLayout(source, captioned, candidate),
+            }))
+            .filter(candidate => candidate.layout);
         if (candidates.length !== 1) continue;
 
-        const partner = candidates[0];
+        const { chart: partner, layout } = candidates[0];
         const placement = interveningContentPlacement(
             source,
             validEntries,
@@ -64,6 +74,24 @@ export function reassembleMinerUFigurePanels(markdown, sourceMap) {
             partner
         );
         if (!placement) continue;
+
+        if (layout === 'vertical') {
+            if (placement !== 'none') continue;
+            const panelSource = source.slice(
+                partner.markdownFrom,
+                partner.markdownTo
+            );
+            const replacement = markVerticalABPanelBlock(panelSource);
+            if (!replacement) continue;
+            edits.push({
+                from: partner.markdownFrom,
+                to: partner.markdownTo,
+                replacement,
+            });
+            usedCharts.add(captioned);
+            usedCharts.add(partner);
+            continue;
+        }
 
         const panels = [captioned, partner].sort(compareHorizontalPosition);
         const anchor = placement === 'below'
@@ -101,6 +129,18 @@ export function reassembleMinerUFigurePanels(markdown, sourceMap) {
     }
 
     return applyNonOverlappingEdits(source, edits);
+}
+
+function panelPairLayout(source, captioned, candidate) {
+    if (isHorizontalPanelPair(captioned, candidate)) return 'horizontal';
+    if (!isVerticalPanelPair(captioned, candidate)) return null;
+
+    const panels = [captioned, candidate].sort(compareVerticalPosition);
+    if (panels[0] !== candidate || panels[1] !== captioned) return null;
+    return VERTICAL_AB_PANEL_BLOCK_PATTERN.test(source.slice(
+        candidate.markdownFrom,
+        candidate.markdownTo
+    )) ? 'vertical' : null;
 }
 
 function isSingleLocationChart(entry) {
@@ -144,6 +184,36 @@ function isHorizontalPanelPair(left, right) {
         : [rightBox, leftBox];
     const gap = secondBox[0] - firstBox[2];
     return gap >= -MAX_HORIZONTAL_OVERLAP && gap <= MAX_HORIZONTAL_GAP;
+}
+
+function isVerticalPanelPair(top, bottom) {
+    const topLocation = top.locations[0];
+    const bottomLocation = bottom.locations[0];
+    if (topLocation.pageIndex !== bottomLocation.pageIndex) return false;
+
+    const topBox = topLocation.bbox;
+    const bottomBox = bottomLocation.bbox;
+    const topWidth = topBox[2] - topBox[0];
+    const bottomWidth = bottomBox[2] - bottomBox[0];
+    const overlap = Math.min(topBox[2], bottomBox[2])
+        - Math.max(topBox[0], bottomBox[0]);
+    if (overlap / Math.min(topWidth, bottomWidth) < MIN_HORIZONTAL_OVERLAP
+        || Math.min(topWidth, bottomWidth) / Math.max(topWidth, bottomWidth)
+            < MIN_WIDTH_SIMILARITY) {
+        return false;
+    }
+
+    const [firstBox, secondBox] = topBox[1] <= bottomBox[1]
+        ? [topBox, bottomBox]
+        : [bottomBox, topBox];
+    const gap = secondBox[1] - firstBox[3];
+    return gap >= -MAX_VERTICAL_OVERLAP && gap <= MAX_VERTICAL_GAP;
+}
+
+function markVerticalABPanelBlock(source) {
+    const match = VERTICAL_AB_PANEL_BLOCK_PATTERN.exec(source);
+    if (!match) return null;
+    return `${match[1]}   ${match[2]}${match[3]}   ${match[4]}${match[5]}`;
 }
 
 function interveningContentPlacement(source, sourceMap, left, right) {
@@ -198,6 +268,10 @@ function firstEntryEndingAfter(entries, offset) {
 
 function compareHorizontalPosition(left, right) {
     return left.locations[0].bbox[0] - right.locations[0].bbox[0];
+}
+
+function compareVerticalPosition(left, right) {
+    return left.locations[0].bbox[1] - right.locations[0].bbox[1];
 }
 
 function earlierMarkdownEntry(left, right) {

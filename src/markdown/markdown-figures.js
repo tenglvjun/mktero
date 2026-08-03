@@ -11,6 +11,8 @@ const RAW_HTML_TABLE_START_PATTERN = /^ {0,3}<table(?:\s|>)/i;
 const RAW_HTML_TABLE_END_PATTERN = /<\/table>[ \t]*$/i;
 const BLANK_LINE_PATTERN = /^[ \t]*(?:\r?\n)?$/;
 const MARKDOWN_HARD_BREAK_PATTERN = /[ \t]{2,}(?:\r?\n)?$/;
+// Both markers are Markdown hard breaks; the extra space records vertical layout.
+const MINERU_VERTICAL_PANEL_MARKER_SPACES = 3;
 const MAX_PANEL_LABEL_LENGTH = 80;
 
 export function parseAcademicFigureCaption(value) {
@@ -117,6 +119,18 @@ export function findAcademicFigureGroups(markdown) {
     for (let index = 0; index < lines.length; index++) {
         if (blockedLines.has(index)) continue;
 
+        const verticalGroup = leadingVerticalABPanelGroup(
+            lines,
+            index,
+            blockedLines
+        );
+        if (verticalGroup) {
+            const { lastIndex, ...group } = verticalGroup;
+            groups.push(group);
+            index = lastIndex;
+            continue;
+        }
+
         const labeledGroup = trailingSharedPanelLabelGroup(
             lines,
             index,
@@ -152,7 +166,7 @@ export function findAcademicFigureGroups(markdown) {
             .map(image => captionFromImageLine(lines[image.index].raw))
             .filter(Boolean);
         const horizontal = images.slice(0, -1).every(image => (
-            MARKDOWN_HARD_BREAK_PATTERN.test(lines[image.index].raw)
+            hasExactTrailingSpaces(lines[image.index].raw, 2)
         ));
         if (images.length === 2
             && embeddedCaptions.length === 1
@@ -406,6 +420,74 @@ function collectNearbyImages(lines, startIndex, blockedLines) {
         index = nextIndex;
     }
     return images;
+}
+
+function leadingVerticalABPanelGroup(lines, startIndex, blockedLines) {
+    const firstLabel = markedVerticalPanelLabel(lines[startIndex], 'a');
+    if (!firstLabel) return null;
+
+    const firstImageIndex = startIndex + 1;
+    if (firstImageIndex >= lines.length
+        || blockedLines.has(firstImageIndex)
+        || !isMarkdownImageLine(lines[firstImageIndex].raw)
+        || captionFromImageLine(lines[firstImageIndex].raw)
+        || !hasExactTrailingSpaces(
+            lines[firstImageIndex].raw,
+            MINERU_VERTICAL_PANEL_MARKER_SPACES
+        )) {
+        return null;
+    }
+
+    const secondLabelIndex = firstImageIndex + 1;
+    const secondLabel = plainPanelLabel(lines[secondLabelIndex], 'b');
+    if (!secondLabel || blockedLines.has(secondLabelIndex)) return null;
+
+    const secondImageIndex = nearbyLineIndex(lines, secondLabelIndex + 1);
+    if (secondImageIndex >= lines.length
+        || blockedLines.has(secondImageIndex)
+        || !isMarkdownImageLine(lines[secondImageIndex].raw)) {
+        return null;
+    }
+    const caption = captionFromImageLine(lines[secondImageIndex].raw);
+    if (!describesSharedABFigurePanels(caption)) return null;
+
+    return {
+        from: lines[startIndex].from,
+        to: lines[secondImageIndex].to,
+        caption,
+        images: [{
+            index: firstImageIndex,
+            source: lines[firstImageIndex].text.trim(),
+            panelLabel: firstLabel,
+            panelLabelPosition: 'before',
+        }, {
+            index: secondImageIndex,
+            source: lines[secondImageIndex].text.trim(),
+            panelLabel: secondLabel,
+            panelLabelPosition: 'before',
+        }],
+        layout: 'vertical',
+        lastIndex: secondImageIndex,
+    };
+}
+
+function markedVerticalPanelLabel(line, expectedLabel) {
+    return hasExactTrailingSpaces(
+        line?.raw,
+        MINERU_VERTICAL_PANEL_MARKER_SPACES
+    ) ? plainPanelLabel(line, expectedLabel) : null;
+}
+
+function plainPanelLabel(line, expectedLabel) {
+    const text = line?.text?.trim() || '';
+    const match = /^\(\s*([ab])\s*\)$/iu.exec(text);
+    return match?.[1].toLowerCase() === expectedLabel ? text : null;
+}
+
+function hasExactTrailingSpaces(line, count) {
+    const text = String(line || '').replace(/\r?\n$/, '');
+    const marker = ' '.repeat(count);
+    return text.endsWith(marker) && !text.endsWith(`${marker} `);
 }
 
 function trailingSharedPanelLabelGroup(lines, startIndex, blockedLines) {

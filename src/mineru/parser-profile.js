@@ -10,7 +10,7 @@ export const MINERU_FILE_OPTIONS = Object.freeze({
 
 export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
     textMatching: 'exact-then-academic-v2',
-    figurePanels: 'same-page-horizontal-ab-v1',
+    figurePanels: 'same-page-horizontal-or-labeled-vertical-ab-v2',
 });
 
 export const MINERU_PARSER_PROFILE_ID = JSON.stringify({

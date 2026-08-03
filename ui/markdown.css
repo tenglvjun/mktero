@@ -1442,6 +1442,10 @@ main {
     text-align: center;
 }
 
+.mktero-figure-preview-viewport .mktero-figure-panel-label-before {
+    margin: 0 auto 5px;
+}
+
 .mktero-figure-preview-viewport figcaption {
     margin: 9px 2px 0;
     color: var(--reference-preview-muted);
@@ -1581,6 +1585,10 @@ main {
     font-size: 13px;
     line-height: 1.4;
     text-align: center;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel-label-before {
+    margin: 0 auto 6px;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure figcaption {
