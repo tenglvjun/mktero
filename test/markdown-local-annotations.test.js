@@ -423,6 +423,36 @@ test('removes a stale PDF page hint when current source evidence is ambiguous', 
     assert.equal('pdfPageIndexHint' in (await store.get(42))[0], false);
 });
 
+test('removes an unvalidated PDF page hint when source-map work is exhausted', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+        pdfPageIndexHint: 4,
+    };
+    const sourceMap = [];
+    sourceMap.length = 10_000_001;
+    const store = createMemoryStore([local]);
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation(_itemID, draft) {
+            synchronized.push(draft);
+            return { deferred: true };
+        },
+    });
+
+    await annotations.resolve(42, 'Selected text', { sourceMap });
+
+    await waitFor(() => synchronized.length === 1);
+    assert.equal('pdfPageIndexHint' in synchronized[0], false);
+    assert.equal('pdfPageIndexHint' in (await store.get(42))[0], false);
+});
+
 test('keeps a local highlight when PDF synchronization fails', async () => {
     const local = {
         id: 'mktero-local-1',

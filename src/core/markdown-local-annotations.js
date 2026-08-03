@@ -91,10 +91,9 @@ export class MarkdownLocalAnnotations {
                 ...resolved,
                 matched: resolved.matched.map(annotation => {
                     const current = refreshed.byID.get(annotation.id);
-                    const {
-                        pdfPageIndexHint: _staleHint,
-                        ...withoutHint
-                    } = annotation;
+                    const withoutHint = annotationWithoutPDFPageIndexHint(
+                        annotation
+                    );
                     return current?.pdfPageIndexHint === undefined
                         ? withoutHint
                         : {
@@ -546,7 +545,14 @@ function refreshPDFPageIndexHints(
     let changed = false;
     const updated = annotations.map(annotation => {
         const range = matchedRanges.get(annotation.id);
-        if (!range || remainingWork < sourceMap.length) return annotation;
+        if (!range) return annotation;
+        if (remainingWork < sourceMap.length) {
+            if (annotation.pdfPageIndexHint === undefined) return annotation;
+            changed = true;
+            const refreshed = annotationWithoutPDFPageIndexHint(annotation);
+            byID.set(annotation.id, refreshed);
+            return refreshed;
+        }
         remainingWork -= sourceMap.length;
         const pdfPageIndexHint = resolvePDFPageIndexHint(
             sourceMap,
@@ -556,10 +562,7 @@ function refreshPDFPageIndexHints(
         const currentHint = annotation.pdfPageIndexHint ?? null;
         if (pdfPageIndexHint === currentHint) return annotation;
         changed = true;
-        const {
-            pdfPageIndexHint: _staleHint,
-            ...withoutHint
-        } = annotation;
+        const withoutHint = annotationWithoutPDFPageIndexHint(annotation);
         const refreshed = pdfPageIndexHint === null
             ? withoutHint
             : { ...withoutHint, pdfPageIndexHint };
@@ -571,6 +574,11 @@ function refreshPDFPageIndexHints(
         byID,
         changed,
     };
+}
+
+function annotationWithoutPDFPageIndexHint(annotation) {
+    const { pdfPageIndexHint: _staleHint, ...withoutHint } = annotation;
+    return withoutHint;
 }
 
 function validRange(range, documentLength = Number.MAX_SAFE_INTEGER) {
