@@ -19,6 +19,12 @@ const HYPHENATED_PDF_PASSAGE = HYPHENATED_MARKDOWN_PASSAGE.replace(
     'investigated',
     'inves- tigated'
 );
+const STATISTICAL_MARKDOWN_PASSAGE = 'temperature 0.30\\;^{\\circ}C '
+    + '(p<0.001) and correlation (r=0.563, p<0.001); window \\pm2 to '
+    + '\\pm4; ovulation from -3 to +2';
+const STATISTICAL_PDF_PASSAGE = 'temperature 0.30 °C (p < 0.001) and '
+    + 'correlation (r = 0.563, p < 0.001); window ± 2 to ± 4; ovulation '
+    + 'from − 3 to + 2';
 
 test('creates a Zotero PDF highlight from located Markdown text', async () => {
     const selectedText = 'The sound of stress recovery: an exploratory study '
@@ -504,57 +510,35 @@ test('rejects a later-page duplicate during the long-match settle window', async
 });
 
 test('locates Markdown text split by a PDF line-end hyphen', async () => {
-    const queries = [];
-    let savedJSON;
-    const view = {
-        _findState: { active: false, query: '', result: null },
-        initializedPromise: Promise.resolve(),
-        setFindState(state) {
-            if (!state.active) {
-                this._findState = state;
-                return;
-            }
-            queries.push(state.query);
-            markSearchComplete(this, state.query);
-            this._findController._pageContents = [HYPHENATED_PDF_PASSAGE];
-            this._findState = {
-                ...state,
-                result: state.query === HYPHENATED_PDF_PASSAGE
-                    ? {
-                        total: 1,
-                        annotation: locatedAnnotation(
-                            HYPHENATED_PDF_PASSAGE
-                        ),
-                    }
-                    : { total: 0 },
-            };
-        },
-    };
-    const zotero = createZoteroForAnnotationCreation({
-        view,
-        async saveFromJSON(_attachment, json) {
-            savedJSON = json;
-            return { key: json.key };
-        },
-    });
-    const actions = createZoteroAnnotationActions(zotero);
+    const result = await createAnnotationWithNormalizedPDFSearch(
+        HYPHENATED_MARKDOWN_PASSAGE,
+        HYPHENATED_PDF_PASSAGE
+    );
 
-    const created = await actions.createFromText(42, {
-        text: HYPHENATED_MARKDOWN_PASSAGE,
-        comment: '',
-        color: '#a28ae5',
-    });
-
-    assert.equal(created.id, 'SYNC0001');
-    assert.deepEqual(queries, [
+    assert.equal(result.created.id, 'SYNC0001');
+    assert.deepEqual(result.queries, [
         HYPHENATED_MARKDOWN_PASSAGE,
         HYPHENATED_PDF_PASSAGE,
     ]);
-    assert.equal(savedJSON.text, HYPHENATED_MARKDOWN_PASSAGE);
-    assert.deepEqual(savedJSON.position, {
+    assert.equal(result.savedJSON.text, HYPHENATED_MARKDOWN_PASSAGE);
+    assert.deepEqual(result.savedJSON.position, {
         pageIndex: 0,
         rects: [[72, 700, 280, 720]],
     });
+});
+
+test('locates MinerU LaTeX and statistical text in the PDF', async () => {
+    const result = await createAnnotationWithNormalizedPDFSearch(
+        STATISTICAL_MARKDOWN_PASSAGE,
+        STATISTICAL_PDF_PASSAGE
+    );
+
+    assert.equal(result.created.id, 'SYNC0001');
+    assert.deepEqual(result.queries, [
+        STATISTICAL_MARKDOWN_PASSAGE,
+        STATISTICAL_PDF_PASSAGE,
+    ]);
+    assert.equal(result.savedJSON.text, STATISTICAL_MARKDOWN_PASSAGE);
 });
 
 test('clones find states into the Zotero reader realm', async () => {
@@ -1388,6 +1372,50 @@ test('restores the previous comment when Zotero cannot save the annotation', asy
     assert.equal(annotation.annotationComment, 'Old note');
     assert.equal(committed, true);
 });
+
+async function createAnnotationWithNormalizedPDFSearch(
+    markdownPassage,
+    pdfPassage
+) {
+    const queries = [];
+    let savedJSON;
+    const view = {
+        _findState: { active: false, query: '', result: null },
+        initializedPromise: Promise.resolve(),
+        setFindState(state) {
+            if (!state.active) {
+                this._findState = state;
+                return;
+            }
+            queries.push(state.query);
+            markSearchComplete(this, state.query);
+            this._findController._pageContents = [pdfPassage];
+            this._findState = {
+                ...state,
+                result: state.query === pdfPassage
+                    ? {
+                        total: 1,
+                        annotation: locatedAnnotation(pdfPassage),
+                    }
+                    : { total: 0 },
+            };
+        },
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            savedJSON = json;
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero);
+    const created = await actions.createFromText(42, {
+        text: markdownPassage,
+        comment: '',
+        color: '#a28ae5',
+    });
+    return { created, queries, savedJSON };
+}
 
 function createZoteroForAnnotationCreation({ view, saveFromJSON }) {
     const attachment = {

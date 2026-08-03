@@ -10,6 +10,13 @@ const CITATION_WRAPPER = /\$\[([0-9,，;；\s–—-]{1,512})\]\$/gu;
 const TRADEMARK_SUPERSCRIPT = /\$\^\{([®©™])\}\$/gu;
 const SENTENCE_FOOTNOTE_SUPERSCRIPT = /\$\^\{([0-9]{1,4})\}\$/gu;
 const SENTENCE_END = /[.!?。！？]/u;
+const RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}])(\s*)(<=|>=|!=|[=<>≤≥≠])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
+const SIGNED_NUMBER_WHITESPACE_PATTERN = /[+\-−±](\s+)(?=\d)/gu;
+const DEGREE_SYMBOL_WHITESPACE_PATTERN = /([\p{N})\]}])(\s+)(?=°)/gu;
+const LATEX_SYMBOL_REPLACEMENTS = [
+    { pattern: /(?<![\\;])(?:\\;)?\^\{\\circ\}/gu, text: '°' },
+    { pattern: /(?<!\\)\\pm(?![A-Za-z])/gu, text: '±' },
+];
 
 export function normalizePdfAnnotationText(text) {
     return createPdfAnnotationTextIndex(String(text)).text.trim();
@@ -125,7 +132,7 @@ function normalizePdfAnnotationCharacter(
     const replacement = markup.replacements.get(offset);
     if (replacement) {
         return {
-            text: character,
+            text: replacement.text ?? character,
             sourceFrom: replacement.from,
             sourceTo: replacement.to,
         };
@@ -146,6 +153,8 @@ function normalizePdfAnnotationCharacter(
 function collectNormalizationMarkup(text) {
     const ignoredOffsets = new Set();
     const replacements = new Map();
+    markLatexSymbols(text, ignoredOffsets, replacements);
+    markMathematicalWhitespace(text, ignoredOffsets);
     for (const match of text.matchAll(CITATION_WRAPPER)) {
         if (!isNumericCitationContent(match[1])) continue;
         ignoredOffsets.add(match.index);
@@ -200,6 +209,59 @@ function collectNormalizationMarkup(text) {
         }
     }
     return { ignoredOffsets, replacements };
+}
+
+function markLatexSymbols(text, ignoredOffsets, replacements) {
+    for (const replacement of LATEX_SYMBOL_REPLACEMENTS) {
+        for (const match of text.matchAll(replacement.pattern)) {
+            replacements.set(match.index, {
+                from: match.index,
+                to: match.index + match[0].length,
+                text: replacement.text,
+            });
+            markOffsetRange(
+                ignoredOffsets,
+                match.index + 1,
+                match[0].length - 1
+            );
+        }
+    }
+}
+
+function markMathematicalWhitespace(text, ignoredOffsets) {
+    for (const match of text.matchAll(RELATIONAL_OPERATOR_PATTERN)) {
+        const leftLength = match[1].length;
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + leftLength,
+            match[2].length
+        );
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + leftLength + match[2].length + match[3].length,
+            match[4].length
+        );
+    }
+    for (const match of text.matchAll(SIGNED_NUMBER_WHITESPACE_PATTERN)) {
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + match[0].length - match[1].length,
+            match[1].length
+        );
+    }
+    for (const match of text.matchAll(DEGREE_SYMBOL_WHITESPACE_PATTERN)) {
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + match[1].length,
+            match[2].length
+        );
+    }
+}
+
+function markOffsetRange(offsets, from, length) {
+    for (let offset = from; offset < from + length; offset++) {
+        offsets.add(offset);
+    }
 }
 
 function sentenceFootnoteWhitespaceFrom(text, wrapperFrom) {
