@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Zotero](https://img.shields.io/badge/Zotero-7%20%7C%208%20%7C%209-cc2936.svg)](https://www.zotero.org/)
 
-[产品介绍页](https://tenglvjun.github.io/mktero/) · [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest)
+[产品介绍页](https://tenglvjun.github.io/mktero/) · [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest) · [加入种子用户讨论](https://github.com/tenglvjun/mktero/discussions)
 
 Mktero 是一个适用于 Zotero 7、8 和 9 的 PDF 阅读插件。它通过 MinerU 将本地
 PDF 转换为 Markdown，并在 Zotero 标签页中以只读、行内渲染的方式展示正文、
@@ -198,6 +198,16 @@ Mktero Markdown 缓存。每次转换或从缓存打开文档时都会重新读�
 - 可打开的链接协议限定为 `http`、`https`、`zotero` 和当前文档片段。
 - 原始 HTML 默认转义；MinerU 表格只允许经过清理的有限标签与属性。
 - 单个结果压缩包、Markdown、图片及公式渲染均设置了本地资源上限，超限时会停止处理。
+
+## 讨论与反馈
+
+- 阅读体验、工作流建议、功能想法和 Beta 测试反馈，请前往
+  [GitHub Discussions](https://github.com/tenglvjun/mktero/discussions)。
+- 已确认且可以复现、需要跟踪修复的问题，请提交到
+  [GitHub Issues](https://github.com/tenglvjun/mktero/issues)。
+
+反馈问题时，请尽量提供 Zotero 与 Mktero 版本、操作系统、PDF 类型、复现步骤、预期行为和
+实际行为。请勿提交 API Token、私密 PDF、带认证信息的链接、本地文件路径或其他敏感信息。
 
 ## 开发
 
