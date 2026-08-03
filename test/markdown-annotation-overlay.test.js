@@ -34,11 +34,22 @@ test('maps a PDF highlight across hidden Markdown formatting', async () => {
     });
 });
 
-test('matches PDF highlights against Markdown-escaped underscores', async () => {
+test('matches PDF highlights across Markdown escapes and inline math', async () => {
+    const degreeSource = 'Results: A difference of $0.30\\;^{\\circ}C$.';
     const firstSource = 'Finding minimums (MIN) using AVG\\_MCL.';
     const secondSource = 'The algorithm HALF\\_LOCS predicted ovulation.';
-    const markdown = `${firstSource}\n\n${secondSource}`;
+    const markdown = [degreeSource, firstSource, secondSource].join('\n\n');
     const annotations = [
+        {
+            id: 'MATH0001',
+            type: 'highlight',
+            text: 'Results: A difference of 0.30\\;^{\\circ}C.',
+            comment: '',
+            color: '#ffd400',
+            pageLabel: '1',
+            pageIndex: 0,
+            sortIndex: '00001',
+        },
         {
             id: 'ESCAPE01',
             type: 'highlight',
@@ -76,6 +87,11 @@ test('matches PDF highlights against Markdown-escaped underscores', async () => 
             ),
         })),
         [
+            {
+                id: 'MATH0001',
+                matchKind: 'exact',
+                source: degreeSource,
+            },
             {
                 id: 'ESCAPE01',
                 matchKind: 'normalized',

@@ -19,22 +19,28 @@ test('keeps dollar signs visible inside inline code', () => {
 });
 
 test('unescapes Markdown punctuation only where it renders as punctuation', () => {
-    const markdown = '`HALF\\_LOCS` and HALF\\_LOCS';
+    const math = '0.30\\;^{\\circ}C';
+    const markdown = `\`HALF\\_LOCS\` and $${math}$ and HALF\\_LOCS`;
     const index = createVisibleMarkdownTextIndex(markdown);
+    const mathFrom = index.text.indexOf(math);
     const visibleFrom = index.text.lastIndexOf('HALF_LOCS');
+    const mathRange = index.sourceRange(mathFrom, math.length);
     const range = index.sourceRange(visibleFrom, 'HALF_LOCS'.length);
 
-    assert.equal(index.text, 'HALF\\_LOCS and HALF_LOCS');
+    assert.equal(index.text, `HALF\\_LOCS and ${math} and HALF_LOCS`);
+    assert.equal(markdown.slice(mathRange.from, mathRange.to), math);
     assert.equal(markdown.slice(range.from, range.to), 'HALF\\_LOCS');
 });
 
 test('handles repeated escapes and a malformed trailing backslash', () => {
+    const mathEscapeCount = 4_000;
     const escapeCount = 10_000;
-    const markdown = `${'\\_'.repeat(escapeCount)}\\`;
+    const math = '\\;'.repeat(mathEscapeCount);
+    const markdown = `$${math}$\n${'\\_'.repeat(escapeCount)}\\`;
     const index = createVisibleMarkdownTextIndex(markdown);
 
-    assert.equal(index.text, `${'_'.repeat(escapeCount)}\\`);
-    assert.deepEqual(index.sourceRange(0, 1), { from: 1, to: 2 });
+    assert.equal(index.text, `${math}\n${'_'.repeat(escapeCount)}\\`);
+    assert.deepEqual(index.sourceRange(0, 2), { from: 1, to: 3 });
     assert.deepEqual(
         index.sourceRange(index.text.length - 1, 1),
         { from: markdown.length - 1, to: markdown.length }
