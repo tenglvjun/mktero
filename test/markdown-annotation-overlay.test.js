@@ -34,6 +34,63 @@ test('maps a PDF highlight across hidden Markdown formatting', async () => {
     });
 });
 
+test('matches PDF highlights against Markdown-escaped underscores', async () => {
+    const firstSource = 'Finding minimums (MIN) using AVG\\_MCL.';
+    const secondSource = 'The algorithm HALF\\_LOCS predicted ovulation.';
+    const markdown = `${firstSource}\n\n${secondSource}`;
+    const annotations = [
+        {
+            id: 'ESCAPE01',
+            type: 'highlight',
+            text: 'Finding minimums  (MIN) using AVG_MCL.',
+            comment: '',
+            color: '#ffd400',
+            pageLabel: '4',
+            pageIndex: 3,
+            sortIndex: '00001',
+        },
+        {
+            id: 'ESCAPE02',
+            type: 'highlight',
+            text: 'The algorithm HALF_LOCS predicted ovulation.',
+            comment: '',
+            color: '#ffd400',
+            pageLabel: '4',
+            pageIndex: 3,
+            sortIndex: '00002',
+        },
+    ];
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => annotations },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(
+        result.matched.map(annotation => ({
+            id: annotation.id,
+            matchKind: annotation.matchKind,
+            source: markdown.slice(
+                annotation.ranges[0].from,
+                annotation.ranges[0].to
+            ),
+        })),
+        [
+            {
+                id: 'ESCAPE01',
+                matchKind: 'normalized',
+                source: firstSource,
+            },
+            {
+                id: 'ESCAPE02',
+                matchKind: 'exact',
+                source: secondSource,
+            },
+        ]
+    );
+    assert.deepEqual(result.unmatched, []);
+});
+
 test('matches PDF text after Unicode and whitespace normalization', async () => {
     const annotation = {
         id: 'HIGH0002',

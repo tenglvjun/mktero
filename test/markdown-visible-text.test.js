@@ -18,6 +18,29 @@ test('keeps dollar signs visible inside inline code', () => {
     assert.equal(index.text, 'price $5$ and x');
 });
 
+test('unescapes Markdown punctuation only where it renders as punctuation', () => {
+    const markdown = '`HALF\\_LOCS` and HALF\\_LOCS';
+    const index = createVisibleMarkdownTextIndex(markdown);
+    const visibleFrom = index.text.lastIndexOf('HALF_LOCS');
+    const range = index.sourceRange(visibleFrom, 'HALF_LOCS'.length);
+
+    assert.equal(index.text, 'HALF\\_LOCS and HALF_LOCS');
+    assert.equal(markdown.slice(range.from, range.to), 'HALF\\_LOCS');
+});
+
+test('handles repeated escapes and a malformed trailing backslash', () => {
+    const escapeCount = 10_000;
+    const markdown = `${'\\_'.repeat(escapeCount)}\\`;
+    const index = createVisibleMarkdownTextIndex(markdown);
+
+    assert.equal(index.text, `${'_'.repeat(escapeCount)}\\`);
+    assert.deepEqual(index.sourceRange(0, 1), { from: 1, to: 2 });
+    assert.deepEqual(
+        index.sourceRange(index.text.length - 1, 1),
+        { from: markdown.length - 1, to: markdown.length }
+    );
+});
+
 test('preserves MinerU superscript math for PDF annotation matching', () => {
     const markdown = 'Sentence. $^{11}$ BOSE $^{®}$ headphones';
     const index = createVisibleMarkdownTextIndex(markdown);

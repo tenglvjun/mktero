@@ -116,6 +116,9 @@ function collectHiddenRanges(markdown) {
                 ranges.push({ from: node.from, to: node.to });
                 return false;
             }
+            if (node.name === 'Escape') {
+                ranges.push({ from: node.from, to: node.from + 1 });
+            }
             if ((HIDDEN_NODE_NAMES.has(node.name)
                 && !isVisibleNumericCitationMark(node, markdown))
                 || hiddenURL(node)) {
