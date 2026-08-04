@@ -7,6 +7,7 @@ import {
 import { sha256Hex } from '../src/core/sha256.js';
 import {
     SavedMarkdownNoteConflictError,
+    createZoteroBlobFactory,
     ZoteroSavedMarkdownStore,
 } from '../src/platform/zotero-saved-markdown-store.js';
 
@@ -14,6 +15,7 @@ function createHarness(options = {}) {
     const items = new Map();
     const files = new Map();
     const importedContentTypes = [];
+    const BlobType = globalThis.Blob;
     let nextID = 1;
     let nextKey = 1;
 
@@ -139,11 +141,69 @@ function createHarness(options = {}) {
         },
         hash: value => sha256Hex(value, { crypto: webcrypto }),
         renderHTML: options.renderHTML,
+        createBlob: options.createBlob
+            || ((parts, blobOptions) => new BlobType(parts, blobOptions)),
         now: () => '2026-08-04T00:00:00.000Z',
     });
 
     return { items, files, importedContentTypes, parent, pdf, store };
 }
+
+test('creates image attachments through an injected Blob factory', async () => {
+    const BlobType = globalThis.Blob;
+    const blobCalls = [];
+    const { parent, pdf, store } = createHarness({
+        createBlob: (parts, options) => {
+            blobCalls.push({ parts, options });
+            return new BlobType(parts, options);
+        },
+    });
+    const originalBlob = globalThis.Blob;
+    try {
+        globalThis.Blob = undefined;
+        await store.saveSnapshot({
+            pdfItem: pdf,
+            parentItem: parent,
+            markdown: '![Figure](figure.png)',
+            assets: [{
+                path: 'figure.png',
+                mimeType: 'image/png',
+                data: new Uint8Array([1, 2, 3]),
+            }],
+            sourceMap: [],
+            cacheKey: 'a'.repeat(64),
+            parserProfile: 'mineru-v1',
+        });
+    }
+    finally {
+        globalThis.Blob = originalBlob;
+    }
+
+    assert.equal(blobCalls.length, 1);
+    assert.equal(blobCalls[0].options.type, 'image/png');
+    assert.deepEqual(blobCalls[0].parts[0], new Uint8Array([1, 2, 3]));
+});
+
+test('uses the Zotero main window Blob constructor before the plugin global', () => {
+    const BlobType = globalThis.Blob;
+    const factory = createZoteroBlobFactory({
+        zotero: {
+            getMainWindow: () => ({ Blob: BlobType }),
+        },
+        globalObject: {},
+    });
+    const originalBlob = globalThis.Blob;
+    try {
+        globalThis.Blob = undefined;
+        const blob = factory([new Uint8Array([4, 5])], {
+            type: 'image/jpeg',
+        });
+        assert.equal(blob.type, 'image/jpeg');
+    }
+    finally {
+        globalThis.Blob = originalBlob;
+    }
+});
 
 test('saves a portable snapshot and synced source attachments under the parent item', async () => {
     const { importedContentTypes, parent, pdf, store } = createHarness();
@@ -175,6 +235,28 @@ test('saves a portable snapshot and synced source attachments under the parent i
     assert.equal(saved.markdown, markdown);
     assert.deepEqual(saved.sourceMap, []);
     assert.deepEqual(importedContentTypes, ['text/markdown', 'application/json']);
+});
+
+test('recognizes a saved snapshot after Zotero wraps the note HTML', async () => {
+    const { parent, pdf, store } = createHarness();
+    const result = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown: '# Paper',
+        assets: [],
+        sourceMap: [],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+    const persistedNote = result.note.getNote();
+    result.note.setNote(
+        `<div class="zotero-note znv9">${persistedNote}</div>`
+    );
+
+    assert.equal(store.isSavedMarkdownNote(result.note), true);
+    const saved = await store.read(result.note);
+    assert.equal(saved.sourceAvailable, true);
+    assert.equal(saved.markdown, '# Paper');
 });
 
 test('falls back cleanly when Zotero has not downloaded a saved attachment', async () => {

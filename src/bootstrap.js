@@ -18,6 +18,7 @@ import {
 } from './core/saved-markdown-open-resolver.js';
 import { MINERU_PARSER_PROFILE_ID } from './mineru/parser-profile.js';
 import {
+    createZoteroBlobFactory,
     createZoteroSavedMarkdownStore,
 } from './platform/zotero-saved-markdown-store.js';
 import {
@@ -142,6 +143,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
             zotero: Zotero,
             readFile: path => IOUtils.read(path),
             writeTemporaryFile: writeZoteroTemporaryFile,
+            createBlob: createZoteroBlobFactory({
+                zotero: Zotero,
+                services: typeof Services === 'undefined' ? null : Services,
+            }),
             preparingNoteText: runtimeTranslate('viewer.snapshotPreparing'),
             now: () => new Date().toISOString(),
         });

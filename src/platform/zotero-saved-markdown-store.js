@@ -35,6 +35,7 @@ export class ZoteroSavedMarkdownStore {
         zotero,
         readFile,
         writeTemporaryFile,
+        createBlob,
         hash = sha256Hex,
         renderHTML = renderZoteroNoteHTML,
         preparingNoteText = '',
@@ -49,12 +50,16 @@ export class ZoteroSavedMarkdownStore {
         if (typeof writeTemporaryFile !== 'function') {
             throw new TypeError('A temporary file writer is required');
         }
+        if (typeof createBlob !== 'function') {
+            throw new TypeError('A Blob factory is required');
+        }
         if (typeof now !== 'function') {
             throw new TypeError('A saved Markdown clock is required');
         }
         this.zotero = zotero;
         this.readFile = readFile;
         this.writeTemporaryFile = writeTemporaryFile;
+        this.createBlob = createBlob;
         this.hash = hash;
         this.renderHTML = renderHTML;
         this.preparingNoteText = String(preparingNoteText || '');
@@ -516,10 +521,7 @@ export class ZoteroSavedMarkdownStore {
     }
 
     async #importImageAttachment(note, asset) {
-        if (typeof Blob !== 'function') {
-            throw new Error('The Zotero runtime cannot create image attachments');
-        }
-        const blob = new Blob([asset.data], { type: asset.mimeType });
+        const blob = this.createBlob([asset.data], { type: asset.mimeType });
         const imported = await this.zotero.Attachments.importEmbeddedImage({
             blob,
             parentItemID: note.id,
@@ -585,6 +587,30 @@ export class ZoteroSavedMarkdownStore {
 
 export function createZoteroSavedMarkdownStore(options) {
     return new ZoteroSavedMarkdownStore(options);
+}
+
+export function createZoteroBlobFactory({
+    zotero,
+    services = null,
+    globalObject = globalThis,
+} = {}) {
+    return (parts, options) => {
+        let mainWindow = null;
+        try {
+            mainWindow = zotero?.getMainWindow?.() || null;
+        }
+        catch {
+            mainWindow = null;
+        }
+        const hiddenDOMWindow = services?.appShell?.hiddenDOMWindow || null;
+        const BlobType = [mainWindow, hiddenDOMWindow, globalObject]
+            .map(window => window?.Blob)
+            .find(candidate => typeof candidate === 'function');
+        if (!BlobType) {
+            throw new Error('The Zotero runtime cannot create image attachments');
+        }
+        return new BlobType(parts, options);
+    };
 }
 
 function requiredItemKey(item, label) {

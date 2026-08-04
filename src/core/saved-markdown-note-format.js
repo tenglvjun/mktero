@@ -12,6 +12,8 @@ const ITEM_KEY = /^[A-Za-z0-9_-]{1,128}$/;
 const ASSET_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[^\u0000-\u001F\u007F]{1,1024}$/;
 const MIME_TYPE = /^image\/[A-Za-z0-9.+-]+$/;
 const ROOT_PATTERN = /^\s*<div\b([^>]*)>([\s\S]*)<\/div>\s*$/i;
+const ZOTERO_NOTE_CLASS = /(?:^|\s)zotero-note(?:\s|$)/i;
+const ZOTERO_NOTE_VERSION_CLASS = /(?:^|\s)znv\d+(?:\s|$)/i;
 
 export function createSavedMarkdownManifest({
     sourcePDFKey,
@@ -100,9 +102,16 @@ export function parseSavedMarkdownNote(noteHTML) {
         throw new Error('Saved Markdown note HTML exceeds the size limit');
     }
 
-    const match = ROOT_PATTERN.exec(noteHTML);
-    if (!match) throw new Error('Saved Markdown note root is missing');
-    const attributes = parseAttributes(match[1]);
+    const root = parseNoteRoot(noteHTML);
+    if (!root) throw new Error('Saved Markdown note root is missing');
+    let markedRoot = root;
+    let attributes = parseAttributes(markedRoot.attributes);
+    if (attributes['data-mktero-kind'] !== SAVED_MARKDOWN_NOTE_KIND
+        && isZoteroNoteWrapper(attributes)) {
+        markedRoot = parseNoteRoot(root.bodyHTML);
+        if (!markedRoot) throw new Error('Saved Markdown note root is missing');
+        attributes = parseAttributes(markedRoot.attributes);
+    }
     if (attributes['data-mktero-kind'] !== SAVED_MARKDOWN_NOTE_KIND) {
         throw new Error('This is not a Mktero saved Markdown note');
     }
@@ -130,9 +139,24 @@ export function parseSavedMarkdownNote(noteHTML) {
         kind: SAVED_MARKDOWN_NOTE_KIND,
         schemaVersion: manifest.schemaVersion,
         manifest,
-        bodyHTML: match[2],
+        bodyHTML: markedRoot.bodyHTML,
         noteHTML,
     };
+}
+
+function parseNoteRoot(noteHTML) {
+    const match = ROOT_PATTERN.exec(noteHTML);
+    if (!match) return null;
+    return {
+        attributes: match[1],
+        bodyHTML: match[2],
+    };
+}
+
+function isZoteroNoteWrapper(attributes) {
+    const className = attributes.class || '';
+    return ZOTERO_NOTE_CLASS.test(className)
+        && ZOTERO_NOTE_VERSION_CLASS.test(className);
 }
 
 function validateManifest(manifest) {
