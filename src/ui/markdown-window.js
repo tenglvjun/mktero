@@ -631,7 +631,7 @@ class MarkdownTabView {
         });
         toggle.appendChild(createLucideIcon(
             this.document,
-            LUCIDE_ICONS.messageSquarePlus,
+            LUCIDE_ICONS.moreHorizontal,
             {
                 className: 'markdown-reader-action-icon',
                 size: 18,

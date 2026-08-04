@@ -334,6 +334,11 @@ test('opens the quarter-circle actions and reports snapshot save state', async (
     const menu = shadow.querySelector('#mktero-document-action-menu');
     const save = shadow.querySelector('#mktero-save-snapshot');
 
+    assert.equal(
+        toggle.querySelector('svg')?.getAttribute('data-lucide'),
+        'more-horizontal'
+    );
+
     toggle.click();
     assert.equal(toggle.getAttribute('aria-expanded'), 'true');
     assert.equal(menu.getAttribute('aria-hidden'), 'false');
