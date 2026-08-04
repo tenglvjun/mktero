@@ -37,7 +37,8 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
   将解析图片作为 Note 的嵌入图片附件保存，并将原始
   source.md、source-map.json 作为当前文献条目的附件保存，并通过 Zotero relation 关联到
   专用 Note。识别 manifest 保存在 Zotero 会保留的标准链接中。这些内容由 Zotero 正常
-  同步；其他 Zotero Note 不会被扫描或修改。没有所属文献条目的独立 PDF 不能保存快照。
+  同步；公式会保存为 Zotero 原生数学节点，双击 Note 时由 Zotero 自己渲染。其他 Zotero
+  Note 不会被扫描或修改。没有所属文献条目的独立 PDF 不能保存快照。
 - 在安装 Mktero 的桌面端，右键 Mktero 专用 Note 会优先读取匹配的本地缓存或同步的
   source.md，因此继续使用 Markdown 阅读器、来源跳转和标注功能；如果源附件未下载或
   不可用，则显示同步到 Note 中的 HTML 快照。没有安装 Mktero 的 Zotero 客户端可以直接

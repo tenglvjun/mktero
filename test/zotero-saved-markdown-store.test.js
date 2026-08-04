@@ -363,7 +363,15 @@ test('rejects a regular item that is not the PDF parent', async () => {
 
 test('saves a portable snapshot and synced source attachments under the parent item', async () => {
     const { importedContentTypes, parent, pdf, store } = createHarness();
-    const markdown = '# Paper\n\n![Figure](images/figure.png)';
+    const markdown = [
+        '# Paper',
+        '',
+        'Authors $^{1,2,3\\dagger}$',
+        '',
+        '![Figure](images/figure.png)',
+        '',
+        '$$x^2 + y^2$$',
+    ].join('\n');
     const result = await store.saveSnapshot({
         pdfItem: pdf,
         parentItem: parent,
@@ -384,6 +392,18 @@ test('saves a portable snapshot and synced source attachments under the parent i
     assert.equal(parsed.manifest.assetBasePath, 'result');
     assert.equal(parsed.manifest.assets.length, 1);
     assert.match(parsed.bodyHTML, /data-attachment-key="/);
+    assert.match(
+        parsed.bodyHTML,
+        /<span class="math">\$\^\{1,2,3\\dagger\}\$<\/span>/
+    );
+    assert.match(
+        parsed.bodyHTML,
+        /<pre class="math">\$\$x\^2 \+ y\^2\$\$<\/pre>/
+    );
+    assert.doesNotMatch(
+        parsed.bodyHTML,
+        /<math\b|<annotation\b|class="katex"/i
+    );
 
     const saved = await store.read(result.note);
     assert.equal(saved.sourceAvailable, true);

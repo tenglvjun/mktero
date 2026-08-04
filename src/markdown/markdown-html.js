@@ -312,10 +312,7 @@ function renderCaptionMathSource(source, mathBudget, target = 'mktero') {
 }
 
 function renderCaptionMath(source, mathBudget, target = 'mktero') {
-    const rendered = renderMathML(source, false, mathBudget);
-    return target === 'zotero-note'
-        ? rendered
-        : `<span class="math-inline">${rendered}</span>`;
+    return renderMath(source, false, mathBudget, target);
 }
 
 function renderTableCaption(caption) {
@@ -401,11 +398,7 @@ function createMathBlockExtension(mathBudget, target = 'mktero') {
     return {
         name: 'mkteroMathBlock',
         renderer(token) {
-            const math = renderMathML(token.text, true, mathBudget);
-            if (target === 'zotero-note') {
-                return `<p class="math math-display">${math}</p>\n`;
-            }
-            return `<div class="math math-display">${math}</div>\n`;
+            return renderMath(token.text, true, mathBudget, target) + '\n';
         },
     };
 }
@@ -414,9 +407,7 @@ function createMathInlineExtension(mathBudget, target = 'mktero') {
     return {
         name: 'mkteroMathInline',
         renderer(token) {
-            const math = renderMathML(token.text, false, mathBudget);
-            if (target === 'zotero-note') return math;
-            return `<span class="math-inline">${math}</span>`;
+            return renderMath(token.text, false, mathBudget, target);
         },
     };
 }
@@ -925,31 +916,69 @@ function createMathRenderBudget() {
     };
 }
 
-function renderMathML(source, displayMode, mathBudget) {
+function renderMath(source, displayMode, mathBudget, target = 'mktero') {
     const normalizedSource = String(source).trim();
-    if (UNSAFE_MATH_COMMAND.test(normalizedSource)) {
-        return renderMathFallback(normalizedSource);
-    }
-    if (!mathBudget.claimSource(normalizedSource)) {
-        return renderMathFallback(normalizedSource);
+    if (UNSAFE_MATH_COMMAND.test(normalizedSource)
+        || !mathBudget.claimSource(normalizedSource)) {
+        return wrapMathFallback(normalizedSource, displayMode, target);
     }
     try {
-        const rendered = katex.renderToString(normalizedSource, {
-            displayMode,
-            output: 'mathml',
-            throwOnError: false,
-            strict: 'ignore',
-            trust: false,
-            maxExpand: 100,
-            maxSize: 100,
-        });
-        return mathBudget.claimOutput(rendered)
+        const rendered = target === 'zotero-note'
+            ? renderZoteroNoteMath(normalizedSource, displayMode)
+            : wrapMkteroMath(
+                renderMathML(normalizedSource, displayMode),
+                displayMode
+            );
+        return rendered && mathBudget.claimOutput(rendered)
             ? rendered
-            : renderMathFallback(normalizedSource);
+            : wrapMathFallback(normalizedSource, displayMode, target);
     }
     catch {
-        return renderMathFallback(normalizedSource);
+        return wrapMathFallback(normalizedSource, displayMode, target);
     }
+}
+
+function renderMathML(source, displayMode, options = {}) {
+    return katex.renderToString(source, {
+        displayMode,
+        output: 'mathml',
+        throwOnError: false,
+        strict: 'ignore',
+        trust: false,
+        maxExpand: 100,
+        maxSize: 100,
+        ...options,
+    });
+}
+
+function renderZoteroNoteMath(source, displayMode) {
+    const bounded = renderMathML(source, displayMode, {
+        throwOnError: true,
+    });
+    const unbounded = renderMathML(source, displayMode, {
+        throwOnError: true,
+        maxSize: Infinity,
+    });
+    if (bounded !== unbounded) return null;
+
+    const delimiter = displayMode ? '$$' : '$';
+    const tagName = displayMode ? 'pre' : 'span';
+    return `<${tagName} class="math">${delimiter}`
+        + escapeHTML(source)
+        + `${delimiter}</${tagName}>`;
+}
+
+function wrapMkteroMath(rendered, displayMode) {
+    return displayMode
+        ? `<div class="math math-display">${rendered}</div>`
+        : `<span class="math-inline">${rendered}</span>`;
+}
+
+function wrapMathFallback(source, displayMode, target) {
+    const fallback = renderMathFallback(source);
+    return target === 'zotero-note'
+        ? fallback
+        : wrapMkteroMath(fallback, displayMode);
 }
 
 function renderMathFallback(source) {
@@ -1045,10 +1074,7 @@ function renderRawTableInlineMath(value, mathBudget, target) {
     let sourceIndex = 0;
     for (const match of matches) {
         output += escapeHTMLText(source.slice(sourceIndex, match.start));
-        const rendered = renderMathML(match.text, false, mathBudget);
-        output += target === 'zotero-note'
-            ? rendered
-            : `<span class="math-inline">${rendered}</span>`;
+        output += renderMath(match.text, false, mathBudget, target);
         sourceIndex = match.end;
     }
     output += escapeHTMLText(source.slice(sourceIndex));
