@@ -103,6 +103,33 @@ test('rejects a different cached hash and then uses synchronized source', async 
     assert.equal(result.sourceItemID, 42);
 });
 
+test('uses synchronized source without reading cache for a recovered snapshot', async () => {
+    const markdown = '# Recovered';
+    const manifest = await manifestFor(markdown, { cacheKey: null });
+    const resolver = new SavedMarkdownOpenResolver({
+        store: {
+            read: async () => savedNote(markdown, { manifest }),
+        },
+        cache: {
+            get: async () => assert.fail(
+                'a recovered snapshot has no cache key to read'
+            ),
+        },
+        resolveSourceItem: async () => ({
+            id: 42,
+            isPDFAttachment: () => true,
+        }),
+        hash,
+    });
+
+    const result = await resolver.resolve(900);
+
+    assert.equal(result.markdown, markdown);
+    assert.equal(result.cacheHit, false);
+    assert.equal(result.cacheKey, null);
+    assert.equal(result.sourceItemID, 42);
+});
+
 test('falls back to the synced HTML snapshot when source attachments are missing', async () => {
     const markdown = '# Source';
     const manifest = await manifestFor(markdown, {

@@ -33,9 +33,12 @@ test('serializes and parses a marked saved Markdown note', () => {
         manifest,
     });
 
-    assert.match(html, new RegExp(`data-mktero-kind="${SAVED_MARKDOWN_NOTE_KIND}"`));
     assert.match(html, /data-schema-version="9"/);
-    assert.match(html, /data-mktero-source-pdf-key="PDFKEY1"/);
+    assert.match(
+        html,
+        /href="zotero:\/\/mktero\/saved-markdown\?manifest=/
+    );
+    assert.match(html, />Mktero Markdown Snapshot<\/a>/);
     assert.match(html, /<h1>Paper<\/h1>/);
     assert.equal(isSavedMarkdownNote(html), true);
 
@@ -44,6 +47,23 @@ test('serializes and parses a marked saved Markdown note', () => {
     assert.equal(parsed.manifest.sourcePDFKey, 'PDFKEY1');
     assert.equal(parsed.manifest.sourceAttachmentKey, 'SOURCE01');
     assert.deepEqual(parsed.manifest.assets, manifest.assets);
+});
+
+test('parses a snapshot after Zotero strips custom root attributes', () => {
+    const serialized = serializeSavedMarkdownNote({
+        bodyHTML: '<h1>Paper</h1><p>Safe content</p>',
+        manifest,
+    });
+    const normalized = [
+        '<div class="zotero-note znv1">',
+        serialized.replace(/^<div\b[^>]*>/i, '<div data-schema-version="9">'),
+        '</div>',
+    ].join('');
+
+    assert.equal(isSavedMarkdownNote(normalized), true);
+    const parsed = parseSavedMarkdownNote(normalized);
+    assert.equal(parsed.manifest.sourcePDFKey, 'PDFKEY1');
+    assert.equal(parsed.bodyHTML, '<h1>Paper</h1><p>Safe content</p>');
 });
 
 test('does not classify ordinary Zotero note HTML as a Mktero note', () => {
@@ -58,17 +78,19 @@ test('rejects unsafe and incomplete saved note metadata', () => {
         bodyHTML: '<p>Text</p>',
         manifest,
     });
-    const unsafe = html.replace('PDFKEY1', 'PDF&quot; onerror=&quot;alert(1)');
+    const unsafe = replaceManifestMarker(html, {
+        ...manifest,
+        sourcePDFKey: 'PDF" onerror="alert(1)',
+    });
     assert.equal(isSavedMarkdownNote(unsafe), false);
     assert.throws(
         () => parseSavedMarkdownNote(unsafe),
         /metadata|saved Markdown/i
     );
 
-    const missingHash = html.replace(
-        / data-mktero-markdown-hash="[^"]*"/,
-        ''
-    );
+    const missingHashManifest = { ...manifest };
+    delete missingHashManifest.markdownHash;
+    const missingHash = replaceManifestMarker(html, missingHashManifest);
     assert.throws(() => parseSavedMarkdownNote(missingHash), /hash/i);
 });
 
@@ -76,3 +98,8 @@ test('exports stable internal attachment titles', () => {
     assert.equal(SOURCE_MARKDOWN_ATTACHMENT_TITLE, 'Mktero source.md');
     assert.equal(SOURCE_MAP_ATTACHMENT_TITLE, 'Mktero source-map.json');
 });
+
+function replaceManifestMarker(html, replacement) {
+    const encoded = encodeURIComponent(JSON.stringify(replacement));
+    return html.replace(/(?<=\?manifest=)[^"]+/, encoded);
+}

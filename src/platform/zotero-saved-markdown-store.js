@@ -1,5 +1,8 @@
 import {
+    SAVED_MARKDOWN_NOTE_KIND,
+    SAVED_MARKDOWN_NOTE_SCHEMA_VERSION,
     createSavedMarkdownManifest,
+    extractZoteroNoteBody,
     isSavedMarkdownNote,
     parseSavedMarkdownNote,
     serializeSavedMarkdownNote,
@@ -79,14 +82,18 @@ export class ZoteroSavedMarkdownStore {
             : String(sourceLibraryKey);
         for (const child of await this.#childItems(parentItem.getNotes())) {
             if (!child?.isNote?.()) continue;
-            let parsed;
+            let manifest;
             try {
-                parsed = parseSavedMarkdownNote(child.getNote?.() || '');
+                manifest = parseSavedMarkdownNote(
+                    child.getNote?.() || ''
+                ).manifest;
             }
             catch {
-                continue;
+                const recovered = await this.#recoverSavedNoteHeader(child)
+                    .catch(() => null);
+                if (!recovered) continue;
+                manifest = recovered.manifest;
             }
-            const manifest = parsed.manifest;
             if (manifest.sourcePDFKey !== expectedPDFKey) continue;
             if (expectedLibraryKey !== null
                 && String(manifest.sourceLibraryKey || '') !== expectedLibraryKey) {
@@ -98,23 +105,29 @@ export class ZoteroSavedMarkdownStore {
     }
 
     isSavedMarkdownNote(item) {
-        return Boolean(item?.isNote?.()
-            && isSavedMarkdownNote(item.getNote?.() || ''));
+        if (!item?.isNote?.()) return false;
+        if (isSavedMarkdownNote(item.getNote?.() || '')) return true;
+        return Boolean(this.#linkedSourceAttachmentsSync(item));
     }
 
     async readManifest(noteItemOrID) {
         const note = await this.#resolveItem(noteItemOrID);
-        if (!this.isSavedMarkdownNote(note)) {
+        try {
+            const parsed = parseSavedMarkdownNote(note.getNote?.() || '');
+            return {
+                note,
+                noteID: note.id,
+                manifest: parsed.manifest,
+                noteHTML: parsed.noteHTML,
+                bodyHTML: parsed.bodyHTML,
+                recovered: false,
+            };
+        }
+        catch {
+            const recovered = await this.#recoverSavedNoteHeader(note);
+            if (recovered) return recovered;
             throw new Error('This Zotero note is not a Mktero saved Markdown note');
         }
-        const parsed = parseSavedMarkdownNote(note.getNote());
-        return {
-            note,
-            noteID: note.id,
-            manifest: parsed.manifest,
-            noteHTML: parsed.noteHTML,
-            bodyHTML: parsed.bodyHTML,
-        };
     }
 
     async read(noteItemOrID) {
@@ -122,10 +135,10 @@ export class ZoteroSavedMarkdownStore {
         const {
             note,
             noteID,
-            manifest,
             noteHTML,
             bodyHTML,
         } = header;
+        let manifest = header.manifest;
         const parent = await this.#resolveParent(note);
         const [noteAttachments, parentAttachments] = await Promise.all([
             this.#childItems(note.getAttachments?.() || []),
@@ -139,18 +152,20 @@ export class ZoteroSavedMarkdownStore {
                 .map(attachment => [String(attachment.key), attachment])
         );
 
-        const sourceAttachment = this.#ownedSourceAttachment(
-            attachments.get(manifest.sourceAttachmentKey),
-            SOURCE_MARKDOWN_ATTACHMENT_TITLE,
-            note,
-            parent
-        );
-        const sourceMapAttachment = this.#ownedSourceAttachment(
-            attachments.get(manifest.sourceMapAttachmentKey),
-            SOURCE_MAP_ATTACHMENT_TITLE,
-            note,
-            parent
-        );
+        const sourceAttachment = header.sourceAttachment
+            || this.#ownedSourceAttachment(
+                attachments.get(manifest.sourceAttachmentKey),
+                SOURCE_MARKDOWN_ATTACHMENT_TITLE,
+                note,
+                parent
+            );
+        const sourceMapAttachment = header.sourceMapAttachment
+            || this.#ownedSourceAttachment(
+                attachments.get(manifest.sourceMapAttachmentKey),
+                SOURCE_MAP_ATTACHMENT_TITLE,
+                note,
+                parent
+            );
         const markdown = sourceAttachment
             ? await this.#readUTF8Attachment(sourceAttachment, MAX_SOURCE_MARKDOWN_BYTES)
             : null;
@@ -163,10 +178,29 @@ export class ZoteroSavedMarkdownStore {
         const sourceHash = markdown === null
             ? null
             : await this.hash(new TextEncoder().encode(markdown));
-        const sourceAvailable = sourceHash === manifest.markdownHash;
+
+        const snapshotHash = await this.hash(
+            new TextEncoder().encode(bodyHTML)
+        );
+        let recoveredAssets = null;
+        if (header.recovered) {
+            recoveredAssets = this.#recoverSnapshotAssets({
+                markdown,
+                bodyHTML,
+                noteAttachments,
+            });
+            manifest = {
+                ...manifest,
+                markdownHash: sourceHash,
+                assets: recoveredAssets.assets,
+                snapshotHTMLHash: snapshotHash,
+            };
+        }
+        const sourceAvailable = markdown !== null
+            && (header.recovered || sourceHash === manifest.markdownHash);
 
         const assets = [];
-        let assetsComplete = true;
+        let assetsComplete = recoveredAssets?.complete ?? true;
         let totalAssetBytes = 0;
         for (const asset of manifest.assets) {
             const attachment = attachments.get(asset.attachmentKey);
@@ -190,9 +224,6 @@ export class ZoteroSavedMarkdownStore {
             });
         }
 
-        const snapshotHash = await this.hash(
-            new TextEncoder().encode(bodyHTML)
-        );
         return {
             note,
             noteID,
@@ -203,7 +234,8 @@ export class ZoteroSavedMarkdownStore {
             sourceMap,
             sourceAvailable,
             snapshotAvailable: Boolean(bodyHTML.trim()),
-            snapshotModified: snapshotHash !== manifest.snapshotHTMLHash,
+            snapshotModified: !header.recovered
+                && snapshotHash !== manifest.snapshotHTMLHash,
             assets,
             assetsComplete,
             sourceAttachment,
@@ -272,6 +304,7 @@ export class ZoteroSavedMarkdownStore {
             const attachments = await this.#importSnapshotAttachments(
                 note,
                 parent,
+                pdf,
                 prepared,
                 temporaryFiles,
                 createdAttachments
@@ -355,6 +388,178 @@ export class ZoteroSavedMarkdownStore {
         if (pdf.parentItem) return pdf.parentItem;
         if (!pdf.parentID) return pdf;
         return this.#resolveItem(pdf.parentID);
+    }
+
+    #linkedSourceAttachmentsSync(note) {
+        try {
+            const parent = note.parentItem
+                || this.zotero.Items.get?.(note.parentID);
+            if (!parent?.isRegularItem?.()) return null;
+            const values = [
+                ...(note.getAttachments?.() || []),
+                ...(parent.getAttachments?.() || []),
+            ];
+            const attachments = values
+                .map(value => value && typeof value === 'object'
+                    ? value
+                    : this.zotero.Items.get?.(value))
+                .filter(Boolean);
+            return this.#sourceAttachmentPair(note, parent, attachments);
+        }
+        catch {
+            return null;
+        }
+    }
+
+    async #recoverSavedNoteHeader(note) {
+        if (!note?.isNote?.()) return null;
+        const parent = await this.#resolveParent(note);
+        if (!parent?.isRegularItem?.()) return null;
+        const [noteAttachments, parentAttachments] = await Promise.all([
+            this.#childItems(note.getAttachments?.() || []),
+            this.#childItems(parent.getAttachments?.() || []),
+        ]);
+        const pair = this.#sourceAttachmentPair(
+            note,
+            parent,
+            [...noteAttachments, ...parentAttachments]
+        );
+        if (!pair) return null;
+        const sourcePDF = this.#recoverSourcePDF(
+            pair,
+            parentAttachments.filter(item => item?.isPDFAttachment?.())
+        );
+        if (!sourcePDF) {
+            throw new Error('The saved Markdown source PDF is ambiguous');
+        }
+        const noteHTML = note.getNote?.() || '';
+        const bodyHTML = extractZoteroNoteBody(noteHTML);
+        return {
+            note,
+            noteID: note.id,
+            manifest: {
+                schemaVersion: SAVED_MARKDOWN_NOTE_SCHEMA_VERSION,
+                kind: SAVED_MARKDOWN_NOTE_KIND,
+                sourcePDFKey: requiredItemKey(sourcePDF, 'PDF'),
+                sourceParentKey: parent.key ? String(parent.key) : null,
+                sourceLibraryKey: sourcePDF.libraryID === undefined
+                    || sourcePDF.libraryID === null
+                    ? null
+                    : String(sourcePDF.libraryID),
+                cacheKey: null,
+                markdownHash: null,
+                parserProfile: 'mktero-recovered-v1',
+                sourceAttachmentKey: requiredItemKey(
+                    pair.sourceAttachment,
+                    'source attachment'
+                ),
+                sourceMapAttachmentKey: requiredItemKey(
+                    pair.sourceMapAttachment,
+                    'source map attachment'
+                ),
+                assetBasePath: '',
+                assets: [],
+                snapshotHTMLHash: null,
+                createdAt: String(note.dateAdded || this.now()),
+            },
+            noteHTML,
+            bodyHTML,
+            recovered: true,
+            sourceAttachment: pair.sourceAttachment,
+            sourceMapAttachment: pair.sourceMapAttachment,
+        };
+    }
+
+    #sourceAttachmentPair(note, parent, attachments) {
+        const sourceAttachment = attachments.find(attachment => (
+            this.#ownedSourceAttachment(
+                attachment,
+                SOURCE_MARKDOWN_ATTACHMENT_TITLE,
+                note,
+                parent
+            )
+        )) || null;
+        const sourceMapAttachment = attachments.find(attachment => (
+            this.#ownedSourceAttachment(
+                attachment,
+                SOURCE_MAP_ATTACHMENT_TITLE,
+                note,
+                parent
+            )
+        )) || null;
+        return sourceAttachment && sourceMapAttachment
+            ? { sourceAttachment, sourceMapAttachment }
+            : null;
+    }
+
+    #recoverSourcePDF(pair, pdfItems) {
+        const related = pdfItems.filter(pdf => (
+            this.#hasRelatedItem(pair.sourceAttachment, pdf)
+            && this.#hasRelatedItem(pair.sourceMapAttachment, pdf)
+        ));
+        if (related.length === 1) return related[0];
+        return pdfItems.length === 1 ? pdfItems[0] : null;
+    }
+
+    #hasRelatedItem(attachment, item) {
+        try {
+            const relation = this.#sourceAttachmentRelation(item);
+            return Boolean(attachment.hasRelation?.(
+                relation.predicate,
+                relation.object
+            ));
+        }
+        catch {
+            return false;
+        }
+    }
+
+    #recoverSnapshotAssets({ markdown, bodyHTML, noteAttachments }) {
+        const attachmentKeys = extractSnapshotImageAttachmentKeys(bodyHTML);
+        if (typeof markdown !== 'string') {
+            return { assets: [], complete: attachmentKeys.length === 0 };
+        }
+        const hrefs = [];
+        try {
+            this.renderHTML(markdown, {
+                resolveImageAttachmentKey: href => {
+                    const index = hrefs.length;
+                    hrefs.push(href);
+                    return attachmentKeys[index] || null;
+                },
+            });
+        }
+        catch {
+            return { assets: [], complete: false };
+        }
+
+        const attachments = new Map(noteAttachments.map(attachment => (
+            [String(attachment.key || ''), attachment]
+        )));
+        const assets = [];
+        const seenPaths = new Set();
+        let complete = hrefs.length === attachmentKeys.length;
+        for (let index = 0; index < Math.min(
+            hrefs.length,
+            attachmentKeys.length
+        ); index++) {
+            const attachmentKey = attachmentKeys[index];
+            const attachment = attachments.get(attachmentKey);
+            const path = recoverAssetPath(hrefs[index]);
+            const mimeType = String(
+                attachment?.attachmentContentType || ''
+            );
+            if (!attachment
+                || !path
+                || !/^image\/[A-Za-z0-9.+-]+$/.test(mimeType)) {
+                complete = false;
+                continue;
+            }
+            if (seenPaths.has(path)) continue;
+            seenPaths.add(path);
+            assets.push({ path, attachmentKey, mimeType });
+        }
+        return { assets, complete };
     }
 
     async #createNote(parent) {
@@ -461,6 +666,7 @@ export class ZoteroSavedMarkdownStore {
     async #importSnapshotAttachments(
         note,
         parent,
+        pdf,
         prepared,
         temporaryFiles,
         createdAttachments
@@ -468,6 +674,7 @@ export class ZoteroSavedMarkdownStore {
         const sourceAttachment = await this.#importTextAttachment(
             note,
             parent,
+            pdf,
             SOURCE_MARKDOWN_ATTACHMENT_TITLE,
             'mktero-source',
             prepared.markdown,
@@ -478,6 +685,7 @@ export class ZoteroSavedMarkdownStore {
         const sourceMapAttachment = await this.#importTextAttachment(
             note,
             parent,
+            pdf,
             SOURCE_MAP_ATTACHMENT_TITLE,
             'mktero-source-map',
             prepared.sourceMapJSON,
@@ -561,6 +769,7 @@ export class ZoteroSavedMarkdownStore {
     async #importTextAttachment(
         note,
         parent,
+        pdf,
         title,
         fileBaseName,
         text,
@@ -584,11 +793,13 @@ export class ZoteroSavedMarkdownStore {
         });
         const attachment = await this.#normalizeImportedItem(imported);
         createdAttachments.push(attachment);
-        const relation = this.#sourceAttachmentRelation(note);
         if (typeof attachment.addRelation !== 'function') {
             throw new Error('The Zotero source attachment relation is unavailable');
         }
-        attachment.addRelation(relation.predicate, relation.object);
+        for (const item of [note, pdf]) {
+            const relation = this.#sourceAttachmentRelation(item);
+            attachment.addRelation(relation.predicate, relation.object);
+        }
         attachment.setField?.('title', title);
         await attachment.saveTx?.();
         return attachment;
@@ -713,6 +924,38 @@ function normalizeAssets(assets) {
         seen.add(path);
         return { path, mimeType, data };
     });
+}
+
+function extractSnapshotImageAttachmentKeys(bodyHTML) {
+    const keys = [];
+    const pattern = /<img\b[^>]*\bdata-attachment-key\s*=\s*(?:"([A-Za-z0-9_-]{1,128})"|'([A-Za-z0-9_-]{1,128})')[^>]*>/gi;
+    for (const match of String(bodyHTML || '').matchAll(pattern)) {
+        keys.push(match[1] || match[2]);
+        if (keys.length > MAX_ASSETS) break;
+    }
+    return keys;
+}
+
+function recoverAssetPath(href) {
+    const source = String(href || '').split(/[?#]/, 1)[0];
+    if (!source
+        || /^[a-z][a-z0-9+.-]*:/i.test(source)
+        || source.startsWith('/')) {
+        return null;
+    }
+    let decoded;
+    try {
+        decoded = decodeURIComponent(source);
+    }
+    catch {
+        return null;
+    }
+    try {
+        return normalizeAssetPath(decoded);
+    }
+    catch {
+        return null;
+    }
 }
 
 function normalizeAssetPath(path) {

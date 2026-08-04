@@ -14,6 +14,9 @@ const MIME_TYPE = /^image\/[A-Za-z0-9.+-]+$/;
 const ROOT_PATTERN = /^\s*<div\b([^>]*)>([\s\S]*)<\/div>\s*$/i;
 const ZOTERO_NOTE_CLASS = /(?:^|\s)zotero-note(?:\s|$)/i;
 const ZOTERO_NOTE_VERSION_CLASS = /(?:^|\s)znv\d+(?:\s|$)/i;
+const MANIFEST_MARKER_PREFIX = 'zotero://mktero/saved-markdown?manifest=';
+const MANIFEST_MARKER_PATTERN = /^\s*<p\b[^>]*>\s*<a\b([^>]*)>[\s\S]*?<\/a>\s*<\/p>([\s\S]*)$/i;
+const MANIFEST_MARKER_LABEL = 'Mktero Markdown Snapshot';
 
 export function createSavedMarkdownManifest({
     sourcePDFKey,
@@ -56,28 +59,12 @@ export function serializeSavedMarkdownNote({ bodyHTML, manifest }) {
     validateManifest(manifest);
     validateBodyHTML(bodyHTML);
 
-    const attributes = [
-        ['data-schema-version', ZOTERO_NOTE_SCHEMA_VERSION],
-        ['data-mktero-kind', SAVED_MARKDOWN_NOTE_KIND],
-        ['data-mktero-schema', SAVED_MARKDOWN_NOTE_SCHEMA_VERSION],
-        ['data-mktero-source-pdf-key', manifest.sourcePDFKey],
-        ['data-mktero-source-parent-key', manifest.sourceParentKey],
-        ['data-mktero-source-library-key', manifest.sourceLibraryKey],
-        ['data-mktero-cache-key', manifest.cacheKey],
-        ['data-mktero-markdown-hash', manifest.markdownHash],
-        ['data-mktero-parser-profile', manifest.parserProfile],
-        ['data-mktero-source-attachment-key', manifest.sourceAttachmentKey],
-        ['data-mktero-source-map-key', manifest.sourceMapAttachmentKey],
-        ['data-mktero-asset-base-path', manifest.assetBasePath],
-        ['data-mktero-snapshot-html-hash', manifest.snapshotHTMLHash],
-        ['data-mktero-created-at', manifest.createdAt],
-        ['data-mktero-assets', encodeURIComponent(JSON.stringify(manifest.assets))],
-    ]
-        .filter(([, value]) => value !== null && value !== undefined && value !== '')
-        .map(([name, value]) => `${name}="${escapeAttribute(value)}"`)
-        .join(' ');
-
-    const noteHTML = `<div ${attributes}>${bodyHTML}</div>`;
+    const markerURL = MANIFEST_MARKER_PREFIX
+        + encodeURIComponent(JSON.stringify(manifest));
+    const marker = '<p><a href="' + escapeAttribute(markerURL) + '">'
+        + MANIFEST_MARKER_LABEL + '</a></p>';
+    const noteHTML = `<div data-schema-version="${ZOTERO_NOTE_SCHEMA_VERSION}">`
+        + marker + bodyHTML + '</div>';
     if (new TextEncoder().encode(noteHTML).length > MAX_NOTE_HTML_BYTES) {
         throw new Error('Saved Markdown note HTML exceeds the size limit');
     }
@@ -92,6 +79,26 @@ export function isSavedMarkdownNote(noteHTML) {
     catch {
         return false;
     }
+}
+
+export function extractZoteroNoteBody(noteHTML) {
+    if (typeof noteHTML !== 'string') {
+        throw new TypeError('Zotero note HTML must be a string');
+    }
+    if (new TextEncoder().encode(noteHTML).length > MAX_NOTE_HTML_BYTES) {
+        throw new Error('Saved Markdown note HTML exceeds the size limit');
+    }
+    const root = parseNoteRoot(noteHTML);
+    if (!root) throw new Error('Zotero note root is missing');
+    const attributes = parseAttributes(root.attributes);
+    if (!isZoteroNoteWrapper(attributes)) return root.bodyHTML;
+
+    const inner = parseNoteRoot(root.bodyHTML);
+    if (!inner) return root.bodyHTML;
+    const innerAttributes = parseAttributes(inner.attributes);
+    return innerAttributes['data-schema-version']
+        ? inner.bodyHTML
+        : root.bodyHTML;
 }
 
 export function parseSavedMarkdownNote(noteHTML) {
@@ -112,15 +119,49 @@ export function parseSavedMarkdownNote(noteHTML) {
         if (!markedRoot) throw new Error('Saved Markdown note root is missing');
         attributes = parseAttributes(markedRoot.attributes);
     }
+    const marker = parseManifestMarker(markedRoot.bodyHTML);
+    const manifest = marker
+        ? marker.manifest
+        : parseLegacyManifest(attributes);
+
+    return {
+        kind: SAVED_MARKDOWN_NOTE_KIND,
+        schemaVersion: manifest.schemaVersion,
+        manifest,
+        bodyHTML: marker?.bodyHTML ?? markedRoot.bodyHTML,
+        noteHTML,
+    };
+}
+
+function parseManifestMarker(bodyHTML) {
+    const match = MANIFEST_MARKER_PATTERN.exec(bodyHTML);
+    if (!match) return null;
+    const href = parseAttributes(match[1]).href || '';
+    if (!href.startsWith(MANIFEST_MARKER_PREFIX)) return null;
+    let parsed;
+    try {
+        parsed = JSON.parse(decodeURIComponent(
+            href.slice(MANIFEST_MARKER_PREFIX.length)
+        ));
+    }
+    catch {
+        throw new Error('Saved Markdown manifest marker is invalid');
+    }
+    return {
+        manifest: createSavedMarkdownManifest(parsed),
+        bodyHTML: match[2],
+    };
+}
+
+function parseLegacyManifest(attributes) {
     if (attributes['data-mktero-kind'] !== SAVED_MARKDOWN_NOTE_KIND) {
         throw new Error('This is not a Mktero saved Markdown note');
     }
-
     const assets = parseJSONAttribute(
         attributes['data-mktero-assets'],
         'saved Markdown assets'
     );
-    const manifest = createSavedMarkdownManifest({
+    return createSavedMarkdownManifest({
         sourcePDFKey: attributes['data-mktero-source-pdf-key'],
         sourceParentKey: attributes['data-mktero-source-parent-key'] || null,
         sourceLibraryKey: attributes['data-mktero-source-library-key'] || null,
@@ -134,14 +175,6 @@ export function parseSavedMarkdownNote(noteHTML) {
         snapshotHTMLHash: attributes['data-mktero-snapshot-html-hash'],
         createdAt: attributes['data-mktero-created-at'],
     });
-
-    return {
-        kind: SAVED_MARKDOWN_NOTE_KIND,
-        schemaVersion: manifest.schemaVersion,
-        manifest,
-        bodyHTML: markedRoot.bodyHTML,
-        noteHTML,
-    };
 }
 
 function parseNoteRoot(noteHTML) {

@@ -91,6 +91,7 @@ export class SavedMarkdownOpenResolver {
 
     async #readMatchingCache(saved) {
         if (!this.cache?.get
+            || !saved.manifest.cacheKey
             || (this.parserProfile
                 && saved.manifest.parserProfile !== this.parserProfile)) {
             return null;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import {
     parseSavedMarkdownNote,
+    serializeSavedMarkdownNote,
 } from '../src/core/saved-markdown-note-format.js';
 import { sha256Hex } from '../src/core/sha256.js';
 import {
@@ -146,6 +147,7 @@ function createHarness(options = {}) {
             async importEmbeddedImage({ blob, parentItemID }) {
                 const attachment = new Item('embedded-image');
                 attachment.parentID = parentItemID;
+                attachment.attachmentContentType = blob.type;
                 attachment.filePath = 'image:' + attachment.key;
                 files.set(
                     attachment.filePath,
@@ -171,6 +173,7 @@ function createHarness(options = {}) {
     pdf.libraryID = 1;
     pdf.parentID = parent.id;
     pdf.parentItem = parent;
+    parent.attachments.push(pdf.id);
 
     const store = new ZoteroSavedMarkdownStore({
         zotero,
@@ -198,6 +201,14 @@ function createHarness(options = {}) {
         return attachment;
     };
     const createRegularItem = () => new Item('regular');
+    const createPDFAttachment = parentItem => {
+        const attachment = new Item('pdf');
+        attachment.libraryID = parentItem.libraryID;
+        attachment.parentID = parentItem.id;
+        attachment.parentItem = parentItem;
+        parentItem.attachments.push(attachment.id);
+        return attachment;
+    };
 
     return {
         items,
@@ -206,6 +217,7 @@ function createHarness(options = {}) {
         parent,
         pdf,
         store,
+        createPDFAttachment,
         createRegularItem,
         createUserAttachment,
     };
@@ -285,12 +297,20 @@ test('saves source files when Zotero restricts ordinary attachments to regular i
     assert.equal(saved.sourceAvailable, true);
     assert.equal(saved.sourceAttachment.parentID, parent.id);
     assert.equal(saved.sourceMapAttachment.parentID, parent.id);
+    assert.equal(
+        saved.sourceAttachment.hasRelation(
+            'dc:relation',
+            'zotero://item/' + pdf.key
+        ),
+        true
+    );
 });
 
 test('rejects a standalone PDF before creating snapshot items or files', async () => {
     const { files, items, parent, pdf, store } = createHarness();
     pdf.parentID = null;
     pdf.parentItem = null;
+    parent.attachments = [];
 
     await assert.rejects(
         () => store.saveSnapshot({
@@ -393,6 +413,178 @@ test('recognizes a saved snapshot after Zotero wraps the note HTML', async () =>
     const saved = await store.read(result.note);
     assert.equal(saved.sourceAvailable, true);
     assert.equal(saved.markdown, '# Paper');
+});
+
+test('recovers a Zotero-normalized snapshot after custom metadata is stripped', async () => {
+    const { parent, pdf, store } = createHarness();
+    const markdown = '# Paper\n\n![Figure](figure.png)';
+    const result = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown,
+        assets: [{
+            path: 'figure.png',
+            mimeType: 'image/png',
+            data: new Uint8Array([1, 2, 3]),
+        }],
+        sourceMap: [],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+    result.note.setNote([
+        '<div class="zotero-note znv1"><div data-schema-version="9">',
+        result.bodyHTML,
+        '</div></div>',
+    ].join(''));
+
+    assert.equal(store.isSavedMarkdownNote(result.note), true);
+    const saved = await store.read(result.note);
+    assert.equal(saved.manifest.sourcePDFKey, pdf.key);
+    assert.equal(saved.sourceAvailable, true);
+    assert.equal(saved.markdown, markdown);
+    assert.equal(saved.assetsComplete, true);
+    assert.deepEqual(
+        saved.assets.map(asset => asset.path),
+        ['figure.png']
+    );
+    assert.equal(saved.snapshotModified, false);
+});
+
+test('updates a recovered snapshot instead of creating a duplicate note', async () => {
+    const { items, parent, pdf, store } = createHarness();
+    const first = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown: '![Figure](figure.png)',
+        assets: [{
+            path: 'figure.png',
+            mimeType: 'image/png',
+            data: new Uint8Array([1, 2, 3]),
+        }],
+        sourceMap: [],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+    const oldAttachmentIDs = [
+        ...parent.attachments.filter(id => id !== pdf.id),
+        ...first.note.attachments,
+    ];
+    first.note.setNote([
+        '<div class="zotero-note znv1"><div data-schema-version="9">',
+        first.bodyHTML,
+        '</div></div>',
+    ].join(''));
+
+    const replacement = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown: '# Replacement',
+        assets: [],
+        sourceMap: [],
+        cacheKey: 'b'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+
+    assert.equal(replacement.note.id, first.note.id);
+    assert.deepEqual(parent.notes, [first.note.id]);
+    assert.equal(oldAttachmentIDs.every(id => !items.has(id)), true);
+    assert.equal(parent.attachments.length, 3);
+    assert.deepEqual(first.note.attachments, []);
+});
+
+test('uses source relations to recover a snapshot under a multi-PDF item', async () => {
+    const {
+        createPDFAttachment,
+        parent,
+        pdf,
+        store,
+    } = createHarness();
+    createPDFAttachment(parent);
+    const result = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown: '# Paper',
+        assets: [],
+        sourceMap: [],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+    result.note.setNote([
+        '<div class="zotero-note znv1"><div data-schema-version="9">',
+        result.bodyHTML,
+        '</div></div>',
+    ].join(''));
+
+    const saved = await store.read(result.note);
+
+    assert.equal(saved.manifest.sourcePDFKey, pdf.key);
+    assert.equal(saved.sourceAvailable, true);
+});
+
+test('rejects ambiguous legacy recovery under a multi-PDF item', async () => {
+    const {
+        createPDFAttachment,
+        parent,
+        pdf,
+        store,
+    } = createHarness();
+    const result = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown: '# Paper',
+        assets: [],
+        sourceMap: [],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+    const saved = await store.read(result.note);
+    for (const attachment of [
+        saved.sourceAttachment,
+        saved.sourceMapAttachment,
+    ]) {
+        attachment.relations.get('dc:relation')
+            ?.delete('zotero://item/' + pdf.key);
+    }
+    createPDFAttachment(parent);
+    result.note.setNote([
+        '<div class="zotero-note znv1"><div data-schema-version="9">',
+        result.bodyHTML,
+        '</div></div>',
+    ].join(''));
+
+    await assert.rejects(
+        () => store.read(result.note),
+        /source PDF is ambiguous/
+    );
+});
+
+test('marks recovered image mappings incomplete when the snapshot lost an image', async () => {
+    const { parent, pdf, store } = createHarness();
+    const result = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown: '![Figure](figure.png)',
+        assets: [{
+            path: 'figure.png',
+            mimeType: 'image/png',
+            data: new Uint8Array([1, 2, 3]),
+        }],
+        sourceMap: [],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+    result.note.setNote([
+        '<div class="zotero-note znv1">',
+        '<div data-schema-version="9"><p>Snapshot without image</p></div>',
+        '</div>',
+    ].join(''));
+
+    const saved = await store.read(result.note);
+
+    assert.equal(saved.sourceAvailable, true);
+    assert.equal(saved.assetsComplete, false);
+    assert.deepEqual(saved.assets, []);
+    assert.equal(saved.snapshotAvailable, true);
 });
 
 test('falls back cleanly when Zotero has not downloaded a saved attachment', async () => {
@@ -499,7 +691,7 @@ test('rolls back the note and imported attachments when snapshot rendering fails
 
     assert.deepEqual(parent.notes, []);
     assert.equal(items.has(concurrentAttachment.id), true);
-    assert.deepEqual(parent.attachments, [concurrentAttachment.id]);
+    assert.deepEqual(parent.attachments, [pdf.id, concurrentAttachment.id]);
     assert.equal(items.size, 3);
 });
 
@@ -522,7 +714,7 @@ test('rolls back an imported source file when its metadata save fails', async ()
     );
 
     assert.deepEqual(parent.notes, []);
-    assert.deepEqual(parent.attachments, []);
+    assert.deepEqual(parent.attachments, [pdf.id]);
     assert.equal(items.size, 2);
 });
 
@@ -549,7 +741,7 @@ test('rolls back an imported image when its metadata save fails', async () => {
     );
 
     assert.deepEqual(parent.notes, []);
-    assert.deepEqual(parent.attachments, []);
+    assert.deepEqual(parent.attachments, [pdf.id]);
     assert.equal(items.size, 2);
 });
 
@@ -571,7 +763,9 @@ test('deletes only the marked note and its synchronized source files', async () 
         cacheKey: 'a'.repeat(64),
         parserProfile: 'mineru-v1',
     });
-    const sourceIDs = parent.attachments.filter(id => id !== userAttachment.id);
+    const sourceIDs = parent.attachments.filter(id => (
+        id !== pdf.id && id !== userAttachment.id
+    ));
 
     await store.deleteSavedNote(result.note);
 
@@ -600,10 +794,13 @@ test('does not delete a user attachment named by a tampered note manifest', asyn
     const saved = await store.read(result.note);
     const userAttachment = createUserAttachment(parent);
     userAttachment.setField('title', 'Mktero source.md');
-    result.note.setNote(result.note.getNote().replace(
-        `data-mktero-source-attachment-key="${saved.sourceAttachment.key}"`,
-        `data-mktero-source-attachment-key="${userAttachment.key}"`
-    ));
+    result.note.setNote(serializeSavedMarkdownNote({
+        bodyHTML: saved.bodyHTML,
+        manifest: {
+            ...saved.manifest,
+            sourceAttachmentKey: userAttachment.key,
+        },
+    }));
 
     await store.deleteSavedNote(result.note);
 
@@ -650,5 +847,29 @@ test('refuses to treat an ordinary Zotero note as a saved Markdown note', async 
     await assert.rejects(
         () => store.deleteSavedNote(ordinary),
         /Refusing to delete an ordinary Zotero note/
+    );
+});
+
+test('does not confuse a sibling note with a saved snapshot', async () => {
+    const { parent, pdf, store } = createHarness();
+    const result = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown: '# Paper',
+        assets: [],
+        sourceMap: [],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+    const ordinary = new result.note.constructor('note');
+    ordinary.parentID = parent.id;
+    ordinary.parentItem = parent;
+    ordinary.setNote('<div><p>Ordinary sibling</p></div>');
+    await ordinary.saveTx();
+
+    assert.equal(store.isSavedMarkdownNote(ordinary), false);
+    await assert.rejects(
+        () => store.read(ordinary),
+        /not a Mktero saved Markdown note/
     );
 });

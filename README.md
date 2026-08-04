@@ -33,10 +33,11 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
   原结果。
 - Markdown 阅读器右下角提供一个总操作按钮，展开为四分之一圆菜单，包含“重新解析”和
   “保存快照”。“保存快照”会在当前 PDF 所属 Zotero 条目下创建一个 Mktero 专用 Note，
-  将便携 HTML 保存在 Note 中，将解析图片作为 Note 的嵌入图片附件保存，并将原始
+  Note 在文库中显示为 `Mktero Markdown Snapshot`。Mktero 将便携 HTML 保存在 Note 中，
+  将解析图片作为 Note 的嵌入图片附件保存，并将原始
   source.md、source-map.json 作为当前文献条目的附件保存，并通过 Zotero relation 关联到
-  专用 Note。这些内容由 Zotero 正常同步；其他 Zotero Note 不会被扫描或修改。没有所属
-  文献条目的独立 PDF 不能保存快照。
+  专用 Note。识别 manifest 保存在 Zotero 会保留的标准链接中。这些内容由 Zotero 正常
+  同步；其他 Zotero Note 不会被扫描或修改。没有所属文献条目的独立 PDF 不能保存快照。
 - 在安装 Mktero 的桌面端，右键 Mktero 专用 Note 会优先读取匹配的本地缓存或同步的
   source.md，因此继续使用 Markdown 阅读器、来源跳转和标注功能；如果源附件未下载或
   不可用，则显示同步到 Note 中的 HTML 快照。没有安装 Mktero 的 Zotero 客户端可以直接
@@ -144,9 +145,9 @@ API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不�
 5. 需要忽略缓存并重新解析时，点击 Markdown 内容区域右下角的刷新按钮。该操作会再次上传
    PDF，并可能消耗转换服务额度。
 6. 需要把结果同步到其他 Zotero 设备时，点击右下角总操作按钮并选择“保存快照”。在
-   Zotero 文库中展开当前条目即可看到 Mktero 专用 Note；其他设备等待 Zotero 同步完成后，
-   可以直接打开该 Note。桌面端若源 Markdown 附件可用，会优先按 Markdown 打开；移动端或
-   未安装 Mktero 的设备会使用 Note 自带的 HTML 快照。
+   Zotero 文库中展开当前条目即可看到名为 `Mktero Markdown Snapshot` 的专用 Note；其他
+   设备等待 Zotero 同步完成后，可以直接打开该 Note。桌面端若源 Markdown 附件可用，会
+   优先按 Markdown 打开；移动端或未安装 Mktero 的设备会使用 Note 自带的 HTML 快照。
 
 Mktero 标签页不会写入 Zotero 会话状态；关闭 Zotero 后不会自动恢复这些标签页。关闭标签页
 或 Zotero 会停止当前的本地查询，但不会远程取消已完成上传的 MinerU 任务。以后再次主动打开
@@ -185,6 +186,10 @@ Mktero Markdown 缓存。每次转换或从缓存打开文档时都会重新读�
 Zotero Note、Note 的嵌入图片附件以及当前文献条目的 Mktero 源文件附件保存，未加密，
 具体同步行为受 Zotero 同步设置、存储配额和附件同步状态影响。若用户直接编辑了 Mktero
 专用 Note，Mktero 会把它视为冲突并拒绝静默覆盖。
+
+Mktero 0.2.5 初始版本创建的快照可能已被 Zotero 清除自定义 HTML 标记。新版会通过
+source.md、source-map.json 与 Note 的 relation 自动识别和恢复这些快照，无需删除 Note
+或重新保存；恢复后再次保存会写入 Zotero 可保留的新 manifest 链接。
 
 在 Markdown 中新建的高亮和笔记会先保存在当前 Zotero 配置文件的
 `mktero-annotations/v1` 目录中。对应 PDF 已打开时会立即尝试写入 Zotero 标注；否则记录

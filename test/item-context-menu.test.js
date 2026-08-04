@@ -188,10 +188,14 @@ test('shows the action for a saved Mktero note but not an ordinary note', async 
     const saved = {
         id: 71,
         isNote: () => true,
-        getNote: () => serializeSavedMarkdownNote({
-            bodyHTML: '<h1>Saved</h1>',
-            manifest,
-        }),
+        getNote: () => [
+            '<div class="zotero-note znv1">',
+            serializeSavedMarkdownNote({
+                bodyHTML: '<h1>Saved</h1>',
+                manifest,
+            }),
+            '</div>',
+        ].join(''),
     };
     const harness = createMenuHarness([ordinary]);
     const opened = [];
@@ -218,6 +222,41 @@ test('shows the action for a saved Mktero note but not an ordinary note', async 
     menuItem.dispatchEvent(new harness.document.defaultView.Event('command'));
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(opened, [71]);
+});
+
+test('uses store recognition for a legacy snapshot stripped by Zotero', async () => {
+    const recovered = {
+        id: 72,
+        isNote: () => true,
+        getNote: () => [
+            '<div class="zotero-note znv1">',
+            '<div data-schema-version="9"><h1>Saved</h1></div>',
+            '</div>',
+        ].join(''),
+    };
+    const harness = createMenuHarness([recovered]);
+    const opened = [];
+    registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: () => assert.fail('a recovered note must use the saved flow'),
+        onOpenSavedNote: id => opened.push(id),
+        isSavedMarkdownNote: item => item === recovered,
+        onError: assert.fail,
+    });
+
+    showMenu(harness.document);
+    const menuItem = harness.document.querySelector('#mktero-read-as-markdown');
+    assert.equal(menuItem.hidden, false);
+    assert.equal(
+        menuItem.getAttribute('label'),
+        'Open saved Markdown with Mktero'
+    );
+
+    menuItem.dispatchEvent(new harness.document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(opened, [72]);
 });
 
 test('keeps context-menu registrations isolated across Zotero windows', async () => {
