@@ -226,6 +226,17 @@ test('exposes and refreshes the reparse action on the tab model', async () => {
     assert.equal(second.model.cacheKey, null);
 });
 
+test('closes another Mktero tab for the same source PDF', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const pdf = presenter.open(42, { sourceItemID: 42 });
+    const savedNote = presenter.open(900, { sourceItemID: 42 });
+
+    assert.equal(presenter.get(42), null);
+    assert.equal(presenter.get(900).closed, false);
+});
+
 test('exposes and refreshes PDF annotation actions on the tab model', async () => {
     const mainWindow = createMainWindow();
     const harness = createViewHarness();

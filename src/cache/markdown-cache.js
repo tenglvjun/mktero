@@ -4,6 +4,7 @@ import {
     isValidSourceLocation,
     isValidSourceMapEntry,
 } from '../core/markdown-source-map.js';
+import { sha256Hex } from '../core/sha256.js';
 
 const CACHE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'entry.json';
@@ -38,14 +39,7 @@ export async function createMinerUCacheKey(fileData, {
     return sha256Hex(descriptor, { crypto });
 }
 
-export async function sha256Hex(value, { crypto = globalThis.crypto } = {}) {
-    if (!crypto?.subtle?.digest) {
-        throw new Error('SHA-256 is unavailable in this runtime');
-    }
-    const bytes = toUint8Array(value, 'SHA-256 input');
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-    return [...digest].map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
+export { sha256Hex };
 
 export class MarkdownCache {
     constructor({

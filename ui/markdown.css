@@ -509,11 +509,22 @@ main {
     z-index: 4;
     right: 16px;
     bottom: 16px;
-    display: flex;
-    align-items: center;
+    width: 40px;
+    height: 40px;
+}
+
+.markdown-reader-action-menu {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 104px;
+    height: 104px;
+    pointer-events: none;
 }
 
 .markdown-reader-action {
+    position: absolute;
+    inset: 0;
     display: grid;
     width: 40px;
     height: 40px;
@@ -526,6 +537,54 @@ main {
     cursor: pointer;
     font: inherit;
     place-items: center;
+}
+
+.markdown-reader-action-menu .markdown-reader-action {
+    inset: auto;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(0, 0) scale(0.7);
+    transition:
+        opacity 160ms ease,
+        transform 180ms ease;
+}
+
+.markdown-reader-actions.is-open .markdown-reader-action-menu {
+    pointer-events: auto;
+}
+
+.markdown-reader-actions.is-open
+    .markdown-reader-action-menu .markdown-reader-action {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.markdown-reader-actions.is-open
+    .markdown-reader-action-menu .markdown-reader-action:first-child {
+    top: 8px;
+    left: 64px;
+    transform: scale(1);
+}
+
+.markdown-reader-actions.is-open
+    .markdown-reader-action-menu .markdown-reader-action:last-child {
+    top: 16px;
+    left: 16px;
+    transform: scale(1);
+}
+
+.markdown-reader-action-menu .markdown-reader-action:first-child {
+    top: 8px;
+    left: 64px;
+}
+
+.markdown-reader-action-menu .markdown-reader-action:last-child {
+    top: 16px;
+    left: 16px;
+}
+
+.markdown-reader-action--primary {
+    z-index: 2;
 }
 
 .markdown-reader-action:hover:not(:disabled) {
@@ -546,6 +605,63 @@ main {
 
 .markdown-reader-action.is-reparsing .markdown-reader-action-icon {
     animation: mktero-spin 0.85s linear infinite;
+}
+
+.markdown-reader-action.is-saving .markdown-reader-action-icon {
+    animation: mktero-spin 0.85s linear infinite;
+}
+
+.markdown-reader-action-status {
+    position: absolute;
+    right: 0;
+    bottom: 48px;
+    width: max-content;
+    max-width: min(320px, calc(100vw - 32px));
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 14%);
+    color: var(--muted);
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.markdown-snapshot-host {
+    width: min(960px, calc(100% - 48px));
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    margin: 0 auto;
+    padding: 28px 0 64px;
+    overflow: auto;
+    color: var(--text);
+    line-height: 1.55;
+}
+
+.markdown-snapshot-host:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.markdown-snapshot-host img {
+    max-width: 100%;
+    height: auto;
+}
+
+.markdown-snapshot-host pre {
+    overflow: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .markdown-reader-action-menu .markdown-reader-action {
+        transition: none;
+    }
+
+    .markdown-reader-action.is-reparsing .markdown-reader-action-icon,
+    .markdown-reader-action.is-saving .markdown-reader-action-icon {
+        animation: none;
+    }
 }
 
 .markdown-editor-host {

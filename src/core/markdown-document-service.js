@@ -3,6 +3,9 @@ import {
     renderPlainText,
     renderStructuredDocument,
 } from '../markdown/structured-renderer.js';
+import {
+    createEmptyAnnotationOverlay,
+} from './markdown-annotation-overlay.js';
 import { mergeAnnotationOverlays } from './markdown-local-annotations.js';
 
 export class MarkdownDocumentService {
@@ -10,6 +13,7 @@ export class MarkdownDocumentService {
         extractor,
         annotationOverlay = null,
         localAnnotations = null,
+        savedResolver = null,
     }) {
         if (!extractor) {
             throw new TypeError('A document extractor is required');
@@ -17,6 +21,7 @@ export class MarkdownDocumentService {
         this.extractor = extractor;
         this.annotationOverlay = annotationOverlay;
         this.localAnnotations = localAnnotations;
+        this.savedResolver = savedResolver;
         this.inFlight = new Map();
     }
 
@@ -129,10 +134,42 @@ export class MarkdownDocumentService {
             warnings,
         };
     }
+
+    async openSaved(noteID) {
+        if (!this.savedResolver?.resolve) {
+            throw new Error('Saved Markdown notes are unavailable');
+        }
+        const resolved = await this.savedResolver.resolve(noteID);
+        if (resolved.renderMode !== 'markdown'
+            || !resolved.sourceItemID) {
+            return {
+                ...resolved,
+                annotationOverlay: createEmptyAnnotationOverlay(),
+            };
+        }
+        const annotationResult = await this.resolveAnnotations(
+            resolved.sourceItemID,
+            resolved.markdown,
+            {
+                retryLocalAnnotations: true,
+                sourceMap: resolved.sourceMap,
+            },
+        );
+        return {
+            ...resolved,
+            annotationOverlay: annotationResult.annotationOverlay
+                || createEmptyAnnotationOverlay(),
+            warnings: [
+                ...(resolved.warnings || []),
+                ...annotationResult.warnings,
+            ],
+        };
+    }
 }
 
-export function createMarkdownDocumentService({ zotero }) {
+export function createMarkdownDocumentService({ zotero, savedResolver = null }) {
     return new MarkdownDocumentService({
         extractor: new ZoteroDocumentExtractor(zotero),
+        savedResolver,
     });
 }

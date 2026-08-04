@@ -27,9 +27,11 @@ export class MarkdownTabPresenter {
         this.ensureSessionStateFilter();
     }
 
-    open(itemID, {
+    open(documentID, {
+        sourceItemID = documentID,
         onClose,
         onReparse,
+        onSaveSnapshot,
         onChangeAnnotationColor,
         onUpdateAnnotationComment,
         onDeleteAnnotation,
@@ -49,10 +51,22 @@ export class MarkdownTabPresenter {
         }
         this.ensureTabIconStyle(owner.document);
 
-        const existing = this.presentations.get(itemID);
+        const existing = this.presentations.get(documentID);
         if (existing) {
+            if (sourceItemID !== null && sourceItemID !== undefined) {
+                existing.model.itemID = sourceItemID;
+                existing.model.sourceItemID = sourceItemID;
+                this.closeForSourceItem(sourceItemID, {
+                    exceptDocumentID: documentID,
+                });
+            }
             if (onClose) existing.onClose = onClose;
-            if (onReparse) existing.model.onReparse = onReparse;
+            if (onReparse !== undefined) {
+                existing.model.onReparse = onReparse;
+            }
+            if (onSaveSnapshot !== undefined) {
+                existing.model.onSaveSnapshot = onSaveSnapshot;
+            }
             if (onChangeAnnotationColor) {
                 existing.model.onChangeAnnotationColor = onChangeAnnotationColor;
             }
@@ -93,9 +107,11 @@ export class MarkdownTabPresenter {
         }
 
         const model = createInitialModel(
-            itemID,
+            documentID,
+            sourceItemID,
             {
                 onReparse,
+                onSaveSnapshot,
                 onChangeAnnotationColor,
                 onUpdateAnnotationComment,
                 onDeleteAnnotation,
@@ -117,6 +133,9 @@ export class MarkdownTabPresenter {
             localization: this.localization,
         });
         view.render(model);
+        this.closeForSourceItem(sourceItemID, {
+            exceptDocumentID: documentID,
+        });
         let presentation;
         let tabID;
         try {
@@ -124,7 +143,9 @@ export class MarkdownTabPresenter {
                 type: TAB_TYPE,
                 title: model.title,
                 data: {
-                    mkteroItemID: itemID,
+                    mkteroItemID: documentID,
+                    mkteroDocumentID: documentID,
+                    mkteroSourceItemID: sourceItemID,
                     icon: TAB_ICON,
                 },
                 select: true,
@@ -132,8 +153,8 @@ export class MarkdownTabPresenter {
                 onClose: () => {
                     if (presentation) presentation.closed = true;
                     presentation?.view.destroy?.();
-                    if (this.presentations.get(itemID)?.tabID === tabID) {
-                        this.presentations.delete(itemID);
+                    if (this.presentations.get(documentID)?.tabID === tabID) {
+                        this.presentations.delete(documentID);
                     }
                     try {
                         presentation?.onClose?.();
@@ -160,15 +181,15 @@ export class MarkdownTabPresenter {
             closed: false,
             onClose,
         };
-        this.presentations.set(itemID, presentation);
+        this.presentations.set(documentID, presentation);
 
-        this.debug(`Opened inline Markdown view for item ${itemID}`);
+        this.debug('Opened inline Markdown view for document ' + documentID);
 
         return { ...presentation, created: true };
     }
 
     update(presentation, changes) {
-        const current = this.presentations.get(presentation.model.itemID);
+        const current = this.presentations.get(presentation.model.documentID);
         if (!current || current.tabID !== presentation.tabID || current.closed) return;
 
         Object.assign(current.model, changes);
@@ -178,8 +199,33 @@ export class MarkdownTabPresenter {
         current.view.render(current.model);
     }
 
-    get(itemID) {
-        return this.presentations.get(itemID) || null;
+    get(documentID) {
+        return this.presentations.get(documentID) || null;
+    }
+
+    getForSourceItem(sourceItemID) {
+        if (sourceItemID === null || sourceItemID === undefined) return null;
+        const sourceKey = String(sourceItemID);
+        return [...this.presentations.values()].find(presentation => (
+            String(presentation.model.sourceItemID) === sourceKey
+        )) || null;
+    }
+
+    closeForSourceItem(sourceItemID, { exceptDocumentID = null } = {}) {
+        if (sourceItemID === null || sourceItemID === undefined) return;
+        const sourceKey = String(sourceItemID);
+        const exceptKey = exceptDocumentID === null
+            || exceptDocumentID === undefined
+            ? null
+            : String(exceptDocumentID);
+        for (const presentation of [...this.presentations.values()]) {
+            if (String(presentation.model.sourceItemID) !== sourceKey
+                || String(presentation.model.documentID) === exceptKey
+                || presentation.closed) {
+                continue;
+            }
+            presentation.tabs.close?.(presentation.tabID);
+        }
     }
 
     list() {
@@ -267,9 +313,16 @@ function isMkteroSessionTab(tab) {
     return tab?.type === TAB_TYPE && tab.data?.mkteroItemID !== undefined;
 }
 
-function createInitialModel(itemID, actions, translate) {
+function createInitialModel(
+    documentID,
+    sourceItemID,
+    actions,
+    translate
+) {
     return {
-        itemID,
+        itemID: sourceItemID,
+        documentID,
+        sourceItemID,
         title: translate('loading.convertingTitle'),
         status: 'loading',
         progress: 0,
@@ -277,6 +330,7 @@ function createInitialModel(itemID, actions, translate) {
         assets: [],
         assetBasePath: '',
         sourceKind: null,
+        renderMode: 'markdown',
         cacheHit: false,
         cacheKey: null,
         sourceMap: [],
@@ -285,6 +339,9 @@ function createInitialModel(itemID, actions, translate) {
         resumingTask: false,
         warnings: [],
         error: '',
+        snapshotHTML: '',
+        snapshotAssets: [],
+        snapshotModified: false,
         ...actions,
     };
 }

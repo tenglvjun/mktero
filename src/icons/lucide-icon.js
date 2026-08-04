@@ -10,6 +10,7 @@ import {
     MessageSquarePlus,
     MessageSquareText,
     RefreshCw,
+    Save,
     Trash2,
     TriangleAlert,
     X,
@@ -74,6 +75,10 @@ export const LUCIDE_ICONS = Object.freeze({
     refreshCw: Object.freeze({
         name: 'refresh-cw',
         nodes: RefreshCw,
+    }),
+    save: Object.freeze({
+        name: 'save',
+        nodes: Save,
     }),
     trash2: Object.freeze({
         name: 'trash-2',

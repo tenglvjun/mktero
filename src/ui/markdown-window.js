@@ -102,6 +102,11 @@ class MarkdownTabView {
         this.model = model;
         this.renderedAssets = undefined;
         this.assetURLs = new Map();
+        this.renderedSnapshotHTML = undefined;
+        this.renderedSnapshotAssets = undefined;
+        this.snapshotURLs = new Map();
+        this.documentActionBusy = null;
+        this.documentActionsOpen = false;
         this.listeners = [];
         this.sidePanels = Object.fromEntries(
             Object.entries(SIDE_PANEL_CONFIG).map(([name, config]) => [
@@ -188,7 +193,7 @@ class MarkdownTabView {
         elements.warning.hidden = !model.warnings?.length;
         elements.warning.textContent = model.warnings?.join(' ') || '';
         this.syncContentVisibility(showContent);
-        this.syncReparseAction(model, loadingView);
+        this.syncDocumentActions(model, loadingView);
 
         if (loadingView.visible) {
             elements.loadingTitle.textContent = loadingView.title;
@@ -210,6 +215,16 @@ class MarkdownTabView {
         }
 
         if (model.status === 'ready') {
+            if (model.renderMode === 'html') {
+                elements.editorHost.hidden = true;
+                elements.snapshotHost.hidden = false;
+                this.syncSnapshot();
+                this.syncOutline('');
+                this.syncNotes(createEmptyAnnotationOverlay(), 0);
+                return;
+            }
+            elements.editorHost.hidden = false;
+            elements.snapshotHost.hidden = true;
             const markdown = model.markdown || '';
             const annotationOverlay = model.annotationOverlay
                 || createEmptyAnnotationOverlay();
@@ -234,6 +249,7 @@ class MarkdownTabView {
         this.listeners = [];
         this.editor?.destroy();
         this.revokeAssetURLs();
+        this.revokeSnapshotURLs();
         this.root.remove?.();
     }
 
@@ -492,12 +508,23 @@ class MarkdownTabView {
             id: 'mktero-editor',
             class: 'markdown-editor-host',
         });
+        const snapshotHost = this.createElement('div', {
+            id: 'mktero-snapshot',
+            class: 'markdown-snapshot-host',
+            tabindex: '0',
+        });
+        snapshotHost.hidden = true;
         const documentActions = this.createDocumentActions();
         const editorSection = this.createElement('section', {
             class: 'markdown-editor',
             'aria-label': this.t('viewer.readOnly'),
         });
-        appendChildren(editorSection, documentActions.toolbar, editorHost);
+        appendChildren(
+            editorSection,
+            documentActions.toolbar,
+            editorHost,
+            snapshotHost
+        );
         const outlineTitle = this.createElement(
             'h2',
             { class: 'markdown-outline-title' },
@@ -581,16 +608,44 @@ class MarkdownTabView {
             notesResizer: notesControls.resizer,
             notesToggle: notesControls.toggle,
             editorHost,
+            snapshotHost,
             editorActions: documentActions.toolbar,
             editorSection,
+            actionToggle: documentActions.toggle,
+            actionMenu: documentActions.menu,
             reparse: documentActions.reparse,
+            saveSnapshot: documentActions.saveSnapshot,
+            actionStatus: documentActions.status,
         };
     }
 
     createDocumentActions() {
+        const toggle = this.createElement('button', {
+            id: 'mktero-document-actions',
+            class: 'markdown-reader-action markdown-reader-action--primary',
+            type: 'button',
+            'aria-expanded': 'false',
+            'aria-controls': 'mktero-document-action-menu',
+            'aria-label': this.t('viewer.documentActionsToggle'),
+            title: this.t('viewer.documentActionsToggle'),
+        });
+        toggle.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.messageSquarePlus,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        const menu = this.createElement('div', {
+            id: 'mktero-document-action-menu',
+            class: 'markdown-reader-action-menu',
+            role: 'group',
+            'aria-hidden': 'true',
+        });
         const reparse = this.createElement('button', {
             id: 'mktero-reparse',
-            class: 'markdown-reader-action',
+            class: 'markdown-reader-action markdown-reader-action--child',
             type: 'button',
             'aria-label': this.t('viewer.reparse'),
             title: this.t('viewer.reparse'),
@@ -603,13 +658,43 @@ class MarkdownTabView {
                 size: 18,
             }
         ));
+        const saveSnapshot = this.createElement('button', {
+            id: 'mktero-save-snapshot',
+            class: 'markdown-reader-action markdown-reader-action--child',
+            type: 'button',
+            'aria-label': this.t('viewer.saveSnapshot'),
+            title: this.t('viewer.saveSnapshot'),
+        });
+        saveSnapshot.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.save,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        menu.appendChild(reparse);
+        menu.appendChild(saveSnapshot);
+        const status = this.createElement('span', {
+            class: 'markdown-reader-action-status',
+            'aria-live': 'polite',
+            'aria-atomic': 'true',
+        });
+        status.hidden = true;
         const editorActions = this.createElement('div', {
             class: 'markdown-reader-actions',
             role: 'toolbar',
             'aria-label': this.t('viewer.documentActions'),
         });
-        editorActions.appendChild(reparse);
-        return { toolbar: editorActions, reparse };
+        appendChildren(editorActions, menu, toggle, status);
+        return {
+            toolbar: editorActions,
+            toggle,
+            menu,
+            reparse,
+            saveSnapshot,
+            status,
+        };
     }
 
     createSidePanelEdge(name) {
@@ -655,24 +740,36 @@ class MarkdownTabView {
     }
 
     bindActions() {
+        this.listen(this.elements.actionToggle, 'click', () => {
+            if (this.elements.actionToggle.disabled) return;
+            this.setDocumentActionsOpen(!this.documentActionsOpen);
+        });
         this.listen(this.elements.reparse, 'click', () => {
-            if (this.elements.reparse.disabled
-                || typeof this.model.onReparse !== 'function') {
-                return;
+            this.runDocumentAction('reparse', 'onReparse');
+        });
+        this.listen(this.elements.saveSnapshot, 'click', () => {
+            this.runDocumentAction('saveSnapshot', 'onSaveSnapshot');
+        });
+        this.listen(this.ownerWindow, 'keydown', event => {
+            if (event.key === 'Escape' && this.documentActionsOpen) {
+                event.preventDefault();
+                this.setDocumentActionsOpen(false);
+                this.elements.actionToggle.focus?.();
             }
-            this.elements.reparse.disabled = true;
-            try {
-                Promise.resolve(this.model.onReparse())
-                    .catch(error => this.zotero?.logError?.(error))
-                    .finally(() => this.syncReparseAction(
-                        this.model,
-                        createLoadingPresentation(this.model, this.t)
-                    ));
+        });
+        this.listen(this.ownerWindow, 'click', event => {
+            const path = event.composedPath?.() || [];
+            if (!path.includes(this.elements.editorActions)) {
+                this.setDocumentActionsOpen(false);
             }
-            catch (error) {
-                this.zotero?.logError?.(error);
-                this.elements.reparse.disabled = false;
-            }
+        });
+        this.listen(this.elements.snapshotHost, 'click', event => {
+            const link = event.target?.closest?.('a');
+            if (!link || !this.elements.snapshotHost.contains(link)) return;
+            const href = link.getAttribute('href');
+            if (!href) return;
+            event.preventDefault();
+            this.openLink(href);
         });
         this.listen(this.elements.outlineList, 'click', event => {
             const button = event.target?.closest?.('.markdown-outline-link');
@@ -720,6 +817,64 @@ class MarkdownTabView {
             this.finishSidePanelResize('outline');
             this.finishSidePanelResize('notes');
         });
+    }
+
+    runDocumentAction(kind, callbackName) {
+        const button = kind === 'reparse'
+            ? this.elements.reparse
+            : this.elements.saveSnapshot;
+        if (button.disabled
+            || this.documentActionBusy
+            || typeof this.model[callbackName] !== 'function') {
+            return;
+        }
+        this.documentActionBusy = kind;
+        if (kind === 'saveSnapshot') {
+            this.elements.actionStatus.textContent = this.t(
+                'viewer.snapshotSaving'
+            );
+            this.elements.actionStatus.hidden = false;
+        }
+        this.setDocumentActionsOpen(false);
+        this.syncDocumentActions(
+            this.model,
+            createLoadingPresentation(this.model, this.t)
+        );
+        let operation;
+        try {
+            operation = this.model[callbackName]();
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+            this.documentActionBusy = null;
+            this.syncDocumentActions(
+                this.model,
+                createLoadingPresentation(this.model, this.t)
+            );
+            return;
+        }
+        Promise.resolve(operation)
+            .then(() => {
+                if (kind === 'saveSnapshot') {
+                    this.elements.actionStatus.textContent
+                        = this.t('viewer.snapshotSaved');
+                }
+            })
+            .catch(error => {
+                this.zotero?.logError?.(error);
+                if (kind === 'saveSnapshot') {
+                    this.elements.actionStatus.textContent = this.t(
+                        'viewer.snapshotSaveFailed'
+                    );
+                }
+            })
+            .finally(() => {
+                this.documentActionBusy = null;
+                this.syncDocumentActions(
+                    this.model,
+                    createLoadingPresentation(this.model, this.t)
+                );
+            });
     }
 
     runNoteButtonAction(button, action) {
@@ -770,8 +925,24 @@ class MarkdownTabView {
             'aria-label',
             this.t('viewer.documentActions')
         );
+        this.elements.actionToggle.setAttribute(
+            'aria-label',
+            this.t('viewer.documentActionsToggle')
+        );
+        this.elements.actionToggle.setAttribute(
+            'title',
+            this.t('viewer.documentActionsToggle')
+        );
         this.elements.reparse.setAttribute('aria-label', this.t('viewer.reparse'));
         this.elements.reparse.setAttribute('title', this.t('viewer.reparse'));
+        this.elements.saveSnapshot.setAttribute(
+            'aria-label',
+            this.t('viewer.saveSnapshot')
+        );
+        this.elements.saveSnapshot.setAttribute(
+            'title',
+            this.t('viewer.saveSnapshot')
+        );
         this.elements.outline.setAttribute('aria-label', this.t('viewer.outline'));
         this.elements.outlineTitle.textContent = this.t('viewer.outlineTitle');
         this.elements.outlineList.querySelector('.markdown-outline-empty')
@@ -784,13 +955,52 @@ class MarkdownTabView {
         this.syncSidePanelControlLabels('notes');
     }
 
-    syncReparseAction(model, loadingView) {
-        const available = typeof model.onReparse === 'function';
+    syncDocumentActions(model, loadingView) {
+        const reparseAvailable = typeof model.onReparse === 'function';
+        const saveAvailable = typeof model.onSaveSnapshot === 'function'
+            && model.renderMode !== 'html';
+        const available = reparseAvailable || saveAvailable;
         const reparsing = loadingView.visible && loadingView.preserveContent;
         this.elements.editorActions.hidden = !available;
-        this.elements.reparse.disabled = !available || loadingView.visible;
+        this.elements.reparse.hidden = !reparseAvailable;
+        this.elements.saveSnapshot.hidden = !saveAvailable;
+        this.elements.reparse.disabled = !reparseAvailable
+            || loadingView.visible
+            || Boolean(this.documentActionBusy);
+        this.elements.saveSnapshot.disabled = !saveAvailable
+            || loadingView.visible
+            || Boolean(this.documentActionBusy);
+        this.elements.actionToggle.disabled = !available
+            || Boolean(this.documentActionBusy);
         this.elements.reparse.setAttribute('aria-busy', String(reparsing));
         this.elements.reparse.classList.toggle('is-reparsing', reparsing);
+        const saving = this.documentActionBusy === 'saveSnapshot';
+        this.elements.saveSnapshot.setAttribute('aria-busy', String(saving));
+        this.elements.saveSnapshot.classList.toggle('is-saving', saving);
+        if (!available) this.documentActionsOpen = false;
+        this.syncDocumentActionMenuState(this.documentActionsOpen && available);
+    }
+
+    syncReparseAction(model, loadingView) {
+        this.syncDocumentActions(model, loadingView);
+    }
+
+    setDocumentActionsOpen(open) {
+        this.documentActionsOpen = Boolean(open);
+        const available = !this.elements.editorActions.hidden;
+        this.syncDocumentActionMenuState(this.documentActionsOpen && available);
+    }
+
+    syncDocumentActionMenuState(visible) {
+        this.elements.actionToggle.setAttribute(
+            'aria-expanded',
+            String(visible)
+        );
+        this.elements.actionMenu.setAttribute('aria-hidden', String(!visible));
+        const menuTabIndex = visible ? '0' : '-1';
+        this.elements.reparse.setAttribute('tabindex', menuTabIndex);
+        this.elements.saveSnapshot.setAttribute('tabindex', menuTabIndex);
+        this.elements.editorActions.classList.toggle('is-open', visible);
     }
 
     syncSidePanelControlLabels(name) {
@@ -1169,6 +1379,39 @@ class MarkdownTabView {
         this.renderedAssets = undefined;
     }
 
+    syncSnapshot() {
+        const elements = this.elements;
+        if (this.renderedSnapshotHTML === this.model.snapshotHTML
+            && this.renderedSnapshotAssets === this.model.snapshotAssets) {
+            return;
+        }
+        this.revokeSnapshotURLs();
+        this.renderedSnapshotHTML = this.model.snapshotHTML || '';
+        this.renderedSnapshotAssets = this.model.snapshotAssets;
+        const URLAPI = this.ownerWindow.URL || globalThis.URL;
+        const BlobType = this.ownerWindow.Blob || globalThis.Blob;
+        for (const asset of this.model.snapshotAssets || []) {
+            if (!asset?.attachmentKey || !asset?.mimeType || !asset?.data) continue;
+            const url = URLAPI.createObjectURL(new BlobType(
+                [asset.data],
+                { type: asset.mimeType }
+            ));
+            this.snapshotURLs.set(String(asset.attachmentKey), url);
+        }
+        const template = this.createElement('template');
+        template.innerHTML = this.model.snapshotHTML || '';
+        sanitizeSnapshotFragment(template.content, this.snapshotURLs);
+        elements.snapshotHost.replaceChildren(...template.content.childNodes);
+    }
+
+    revokeSnapshotURLs() {
+        const URLAPI = this.ownerWindow.URL || globalThis.URL;
+        for (const url of this.snapshotURLs.values()) URLAPI.revokeObjectURL(url);
+        this.snapshotURLs = new Map();
+        this.renderedSnapshotHTML = undefined;
+        this.renderedSnapshotAssets = undefined;
+    }
+
     resolveImageURL(source) {
         const path = String(source || '').split(/[?#]/, 1)[0];
         if (!path || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('/')) {
@@ -1320,4 +1563,54 @@ function resolveZipPath(basePath, relativePath) {
 
 function normalizeZipPath(path) {
     return resolveZipPath('', String(path).replace(/\\/g, '/'));
+}
+
+function sanitizeSnapshotFragment(fragment, snapshotURLs) {
+    for (const element of fragment.querySelectorAll?.(
+        'script,iframe,object,embed,form,style,svg,base,meta,link,video,audio,source,track'
+    ) || []) {
+        element.remove();
+    }
+    for (const element of fragment.querySelectorAll?.('*') || []) {
+        for (const attribute of [...element.attributes || []]) {
+            const name = attribute.name.toLowerCase();
+            const value = attribute.value;
+            if (name.startsWith('on')) {
+                element.removeAttribute(attribute.name);
+                continue;
+            }
+            if (name === 'style'
+                || name === 'srcset'
+                || name === 'formaction'
+                || name === 'poster'
+                || name === 'xlink:href') {
+                element.removeAttribute(attribute.name);
+                continue;
+            }
+            if (name === 'href' && !isSafeSnapshotLinkURL(value)) {
+                element.removeAttribute(attribute.name);
+                continue;
+            }
+            if (name === 'src') {
+                element.removeAttribute(attribute.name);
+            }
+        }
+        if (element.localName?.toLowerCase() === 'img') {
+            const attachmentKey = element.getAttribute('data-attachment-key');
+            const imageURL = snapshotURLs.get(String(attachmentKey || ''));
+            if (imageURL) {
+                element.setAttribute('src', imageURL);
+            }
+            else if (attachmentKey) {
+                element.removeAttribute('src');
+            }
+        }
+    }
+}
+
+function isSafeSnapshotLinkURL(value) {
+    const source = String(value || '').trim();
+    return /^https?:\/\//i.test(source)
+        || /^zotero:\/\//i.test(source)
+        || source.startsWith('#');
 }

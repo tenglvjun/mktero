@@ -31,6 +31,14 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
 - 可通过 Markdown 内容区域右下角的刷新按钮重新解析当前 PDF；操作提示会明确说明 PDF
   将再次上传，并可能消耗转换服务额度。重新解析期间保留当前内容，新结果失败时继续显示
   原结果。
+- Markdown 阅读器右下角提供一个总操作按钮，展开为四分之一圆菜单，包含“重新解析”和
+  “保存快照”。“保存快照”会在当前 PDF 所属 Zotero 条目下创建一个 Mktero 专用 Note，
+  将便携 HTML、原始 source.md、source-map.json 和解析图片作为 Note 子附件保存。保存
+  后的 Note 及其子附件由 Zotero 正常同步；其他 Zotero Note 不会被扫描或修改。
+- 在安装 Mktero 的桌面端，右键 Mktero 专用 Note 会优先读取匹配的本地缓存或同步的
+  source.md，因此继续使用 Markdown 阅读器、来源跳转和标注功能；如果源附件未下载或
+  不可用，则显示同步到 Note 中的 HTML 快照。没有安装 Mktero 的 Zotero 客户端可以直接
+  使用 Note 的便携 HTML 快照阅读。
 - 以 CodeMirror 6 只读视图行内渲染标题、段落、强调、列表、任务列表、引用、代码、
   GFM/HTML 表格、MinerU 算法块、无底色 KaTeX 公式、图片及学术图表标题，并渲染图片
   标题中的行内 LaTeX；共享图题的多子图会把 MinerU 重复提取的坐标轴标签居中保留在
@@ -133,6 +141,10 @@ API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不�
    Notes 或外部 Markdown 工具。
 5. 需要忽略缓存并重新解析时，点击 Markdown 内容区域右下角的刷新按钮。该操作会再次上传
    PDF，并可能消耗转换服务额度。
+6. 需要把结果同步到其他 Zotero 设备时，点击右下角总操作按钮并选择“保存快照”。在
+   Zotero 文库中展开当前条目即可看到 Mktero 专用 Note；其他设备等待 Zotero 同步完成后，
+   可以直接打开该 Note。桌面端若源 Markdown 附件可用，会优先按 Markdown 打开；移动端或
+   未安装 Mktero 的设备会使用 Note 自带的 HTML 快照。
 
 Mktero 标签页不会写入 Zotero 会话状态；关闭 Zotero 后不会自动恢复这些标签页。关闭标签页
 或 Zotero 会停止当前的本地查询，但不会远程取消已完成上传的 MinerU 任务。以后再次主动打开
@@ -165,6 +177,11 @@ Mktero Markdown 缓存。每次转换或从缓存打开文档时都会重新读�
 
 “复制并附带来源”只在本机读取当前 Zotero 条目的标题、附件 key 和 PDF 页码，并把结果
 写入系统剪贴板；不会因此上传 PDF、Markdown、文献元数据或剪贴板内容。
+
+保存快照时，Mktero 不会同步 PDF、MinerU 原始压缩包、API Token 或 API 响应。同步内容
+仅包括 Mktero 专用 Note、便携 HTML、原始 Markdown、来源映射 JSON 和解析图片。它们作为
+Zotero Note 及子附件保存，未加密，具体同步行为受 Zotero 同步设置、存储配额和附件同步
+状态影响。若用户直接编辑了 Mktero 专用 Note，Mktero 会把它视为冲突并拒绝静默覆盖。
 
 在 Markdown 中新建的高亮和笔记会先保存在当前 Zotero 配置文件的
 `mktero-annotations/v1` 目录中。对应 PDF 已打开时会立即尝试写入 Zotero 标注；否则记录
@@ -203,6 +220,8 @@ Mktero Markdown 缓存。每次转换或从缓存打开文档时都会重新读�
   坐标。多页块会生成多个页面链接；图片只复制图题，不导出图片文件。当前不提供自定义
   复制模板、作者年份或 Better BibTeX citekey。
 - Markdown 图片只能引用当前 MinerU 结果中的本地图片，不会从外部地址加载图片。
+- 普通 Zotero Note 不会被识别为 Mktero Note；保存快照时只会更新由 Mktero 自己创建且
+  未被用户修改的专用 Note。
 - 可打开的链接协议限定为 `http`、`https`、`zotero` 和当前文档片段。
 - 原始 HTML 默认转义；MinerU 表格只允许经过清理的有限标签与属性。
 - 单个结果压缩包、Markdown、图片及公式渲染均设置了本地资源上限，超限时会停止处理。
@@ -250,8 +269,10 @@ XPI 中的文件顺序和时间戳固定；相同源码与依赖连续构建会�
 
 ```text
 src/bootstrap.js   Zotero 生命周期与依赖装配
+src/core/          文档服务、来源映射、快照格式与来源优先级
 src/mineru/        MinerU API、解析配置和结果解包
 src/cache/         Markdown 与图片缓存
+src/platform/      Zotero 附件与快照 Note 适配器
 src/icons/         Lucide 图标定义与跨 Zotero 窗口的 SVG 创建器
 src/i18n/          英文、简体中文消息与 Zotero 语言匹配逻辑
 src/markdown/      Markdown 规范化、分析和安全渲染

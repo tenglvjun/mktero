@@ -14,7 +14,10 @@ export function createAnnotationOverlayRefresher({ presenter, service }) {
             if (!active) return;
             const presentations = itemIDs
                 ? [...new Set(itemIDs)]
-                    .map(itemID => presenter.get(itemID))
+                    .map(itemID => (
+                        presenter.get(itemID)
+                        || presenter.getForSourceItem?.(itemID)
+                    ))
                     .filter(Boolean)
                 : presenter.list();
             await Promise.all(presentations.map(refreshPresentation));
@@ -27,9 +30,13 @@ export function createAnnotationOverlayRefresher({ presenter, service }) {
 
     async function refreshPresentation(presentation) {
         if (presentation.closed || presentation.model.status !== 'ready') return;
-        const { itemID, markdown, sourceMap } = presentation.model;
+        if (presentation.model.renderMode === 'html') return;
+        const itemID = presentation.model.sourceItemID
+            ?? presentation.model.itemID;
+        const documentID = presentation.model.documentID ?? itemID;
+        const { markdown, sourceMap } = presentation.model;
         const generation = Symbol('annotation-refresh');
-        generations.set(itemID, generation);
+        generations.set(documentID, generation);
         let result;
         try {
             result = await service.resolveAnnotations(itemID, markdown, {
@@ -37,14 +44,15 @@ export function createAnnotationOverlayRefresher({ presenter, service }) {
             });
         }
         catch (error) {
-            if (generations.get(itemID) === generation) {
-                generations.delete(itemID);
+            if (generations.get(documentID) === generation) {
+                generations.delete(documentID);
             }
             throw error;
         }
-        if (!active || generations.get(itemID) !== generation) return;
-        generations.delete(itemID);
-        const current = presenter.get(itemID);
+        if (!active || generations.get(documentID) !== generation) return;
+        generations.delete(documentID);
+        const current = presenter.get(documentID)
+            || presenter.getForSourceItem?.(itemID);
         if (!current
             || current !== presentation
             || current.closed

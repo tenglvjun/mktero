@@ -1,4 +1,5 @@
 import { translateEnglish } from '../i18n/localization.js';
+import { isSavedMarkdownNote as isMarkedSavedMarkdownNote } from '../core/saved-markdown-note-format.js';
 
 const ITEM_MENU_ID = 'zotero-itemmenu';
 const MENU_ITEM_ID = 'mktero-read-as-markdown';
@@ -8,6 +9,8 @@ export function registerItemContextMenu({
     window,
     rootURI,
     onOpen,
+    onOpenSavedNote = null,
+    isSavedMarkdownNote = defaultIsSavedMarkdownNote,
     onError,
     translate = translateEnglish,
 }) {
@@ -27,13 +30,32 @@ export function registerItemContextMenu({
 
     const handlePopupShowing = event => {
         if (event.target !== menu) return;
-        menuItem.hidden = !resolveSelectedPDF(zotero, window);
+        const selected = resolveSelectedItem(
+            zotero,
+            window,
+            isSavedMarkdownNote
+        );
+        menuItem.hidden = !selected
+            || (selected.kind === 'saved-markdown-note'
+                && typeof onOpenSavedNote !== 'function');
+        menuItem.setAttribute(
+            'label',
+            translate(selected?.kind === 'saved-markdown-note'
+                ? 'menu.openSavedMarkdown'
+                : 'menu.readAsMarkdown')
+        );
     };
     const handleCommand = () => {
-        const item = resolveSelectedPDF(zotero, window);
-        if (!item) return;
+        const selected = resolveSelectedItem(
+            zotero,
+            window,
+            isSavedMarkdownNote
+        );
+        if (!selected) return;
         Promise.resolve()
-            .then(() => onOpen(item.id))
+            .then(() => selected.kind === 'saved-markdown-note'
+                ? onOpenSavedNote?.(selected.item.id)
+                : onOpen(selected.item.id))
             .catch(onError);
     };
 
@@ -51,17 +73,27 @@ export function registerItemContextMenu({
     };
 }
 
-function resolveSelectedPDF(zotero, window) {
+function resolveSelectedItem(zotero, window, isSavedMarkdownNote) {
     const selectedItems = window?.ZoteroPane?.getSelectedItems?.();
     if (!Array.isArray(selectedItems) || selectedItems.length !== 1) return null;
 
     const item = selectedItems[0];
-    if (item?.isPDFAttachment?.()) return item;
+    if (isSavedMarkdownNote(item)) {
+        return { kind: 'saved-markdown-note', item };
+    }
+    if (item?.isPDFAttachment?.()) return { kind: 'pdf', item };
     if (!item?.isRegularItem?.()) return null;
 
     for (const attachmentID of item.getAttachments?.() || []) {
         const attachment = zotero?.Items?.get?.(attachmentID);
-        if (attachment?.isPDFAttachment?.()) return attachment;
+        if (attachment?.isPDFAttachment?.()) {
+            return { kind: 'pdf', item: attachment };
+        }
     }
     return null;
+}
+
+function defaultIsSavedMarkdownNote(item) {
+    return Boolean(item?.isNote?.()
+        && isMarkedSavedMarkdownNote(item.getNote?.() || ''));
 }

@@ -247,6 +247,21 @@ test('anchors the document action in the Markdown lower-right corner', () => {
     assert.match(action, /box-shadow:/);
     assert.match(action, /place-items:\s*center/);
 
+    const menuAction = ruleBody(
+        '.markdown-reader-action-menu .markdown-reader-action'
+    );
+    assert.match(menuAction, /inset:\s*auto/);
+    const menuReparse = ruleBody(
+        '.markdown-reader-action-menu .markdown-reader-action:first-child'
+    );
+    assert.match(menuReparse, /top:\s*8px/);
+    assert.match(menuReparse, /left:\s*64px/);
+    const menuSave = ruleBody(
+        '.markdown-reader-action-menu .markdown-reader-action:last-child'
+    );
+    assert.match(menuSave, /top:\s*16px/);
+    assert.match(menuSave, /left:\s*16px/);
+
     const reparsing = ruleBody(
         '.markdown-reader-action.is-reparsing .markdown-reader-action-icon'
     );

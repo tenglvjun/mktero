@@ -101,6 +101,15 @@ function dispatchKeyboardEvent(target, key) {
     target.dispatchEvent(event);
 }
 
+function dispatchWindowKeyboardEvent(window, key) {
+    const event = new window.Event('keydown', {
+        bubbles: true,
+        cancelable: true,
+    });
+    Object.defineProperty(event, 'key', { value: key });
+    window.dispatchEvent(event);
+}
+
 test('shows Markdown without editing controls', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -303,6 +312,119 @@ test('reparses the current PDF from an accessible icon action', async () => {
     await Promise.resolve();
 
     view.destroy();
+});
+
+test('opens the quarter-circle actions and reports snapshot save state', async () => {
+    let saveCalls = 0;
+    let finishSave;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onSaveSnapshot: () => {
+            saveCalls++;
+            return new Promise(resolve => {
+                finishSave = resolve;
+            });
+        },
+    });
+    const { document, view, shadow } = createView(model);
+    const toggle = shadow.querySelector('#mktero-document-actions');
+    const menu = shadow.querySelector('#mktero-document-action-menu');
+    const save = shadow.querySelector('#mktero-save-snapshot');
+
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(menu.getAttribute('aria-hidden'), 'false');
+    assert.equal(shadow.querySelector('.markdown-reader-actions').classList.contains(
+        'is-open'
+    ), true);
+    assert.equal(save.getAttribute('tabindex'), '0');
+
+    dispatchWindowKeyboardEvent(document.defaultView, 'Escape');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(menu.getAttribute('aria-hidden'), 'true');
+    assert.equal(save.getAttribute('tabindex'), '-1');
+
+    toggle.click();
+    save.click();
+    assert.equal(saveCalls, 1);
+    assert.equal(save.disabled, true);
+    assert.equal(toggle.disabled, true);
+    assert.equal(
+        shadow.querySelector('.markdown-reader-action-status').textContent,
+        'Saving Zotero snapshot…'
+    );
+
+    finishSave();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(save.disabled, false);
+    assert.equal(toggle.disabled, false);
+    assert.equal(
+        shadow.querySelector('.markdown-reader-action-status').textContent,
+        'Zotero snapshot saved'
+    );
+    view.destroy();
+});
+
+test('renders a saved HTML snapshot without exposing PDF actions or editing controls', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        renderMode: 'html',
+        markdown: '',
+        snapshotHTML: '<h1>Portable</h1><p>Read only.</p>',
+        snapshotAssets: [],
+        onReparse: null,
+        onSaveSnapshot: null,
+    }));
+
+    try {
+        assert.equal(shadow.querySelector('#mktero-editor').hidden, true);
+        assert.equal(shadow.querySelector('#mktero-snapshot').hidden, false);
+        assert.match(
+            shadow.querySelector('#mktero-snapshot').textContent,
+            /Portable/
+        );
+        assert.equal(shadow.querySelector('.markdown-reader-actions').hidden, true);
+        assert.equal(shadow.querySelector('#mktero-reparse').hidden, true);
+        assert.equal(shadow.querySelector('#mktero-save-snapshot').hidden, true);
+        assert.equal(shadow.querySelector('.cm-content').textContent, '');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('sanitizes a modified snapshot before mounting it in the Zotero chrome', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        renderMode: 'html',
+        snapshotHTML: '<script>window.pwned = true</script>'
+            + '<img src="https://evil.example/image.png" onerror="alert(1)">'
+            + '<a href="javascript:alert(1)">unsafe</a>'
+            + '<a href="https://example.com">safe</a>',
+        snapshotAssets: [],
+        onReparse: null,
+        onSaveSnapshot: null,
+    }));
+
+    try {
+        const snapshot = shadow.querySelector('#mktero-snapshot');
+        assert.equal(snapshot.querySelector('script'), null);
+        assert.equal(snapshot.querySelector('img').getAttribute('src'), null);
+        assert.equal(snapshot.querySelector('img').hasAttribute('onerror'), false);
+        assert.equal(snapshot.querySelectorAll('a')[0].getAttribute('href'), null);
+        assert.equal(
+            snapshot.querySelectorAll('a')[1].getAttribute('href'),
+            'https://example.com'
+        );
+    }
+    finally {
+        view.destroy();
+    }
 });
 
 test('updates the visible annotation after Zotero saves a new color', async () => {

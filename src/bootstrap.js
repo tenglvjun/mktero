@@ -13,6 +13,16 @@ import {
     createZoteroMarkdownAnnotationStore,
 } from './cache/markdown-annotation-store.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
+import {
+    createSavedMarkdownOpenResolver,
+} from './core/saved-markdown-open-resolver.js';
+import { MINERU_PARSER_PROFILE_ID } from './mineru/parser-profile.js';
+import {
+    createZoteroSavedMarkdownStore,
+} from './platform/zotero-saved-markdown-store.js';
+import {
+    resolveZoteroSavedMarkdownSourceItem,
+} from './platform/zotero-saved-markdown-source.js';
 import { MarkdownAnnotationOverlay } from './core/markdown-annotation-overlay.js';
 import { MarkdownLocalAnnotations } from './core/markdown-local-annotations.js';
 import {
@@ -74,6 +84,8 @@ const runtime = {
     service: null,
     presenter: null,
     cache: null,
+    savedMarkdownStore: null,
+    savedMarkdownResolver: null,
     rootURI: null,
     preferencePaneID: null,
     localization: null,
@@ -125,6 +137,24 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.cache = cache;
+    if (Zotero.Attachments && Zotero.Item) {
+        runtime.savedMarkdownStore = createZoteroSavedMarkdownStore({
+            zotero: Zotero,
+            readFile: path => IOUtils.read(path),
+            writeTemporaryFile: writeZoteroTemporaryFile,
+            preparingNoteText: runtimeTranslate('viewer.snapshotPreparing'),
+            now: () => new Date().toISOString(),
+        });
+        runtime.savedMarkdownResolver = createSavedMarkdownOpenResolver({
+            store: runtime.savedMarkdownStore,
+            cache,
+            parserProfile: MINERU_PARSER_PROFILE_ID,
+            resolveSourceItem: manifest => (
+                resolveZoteroSavedMarkdownSourceItem(Zotero, manifest)
+            ),
+            onCacheError: error => Zotero.logError?.(error),
+        });
+    }
     const annotationOverlay = new MarkdownAnnotationOverlay({
         extractor: new ZoteroAnnotationExtractor(Zotero),
         onError: error => Zotero.logError?.(error),
@@ -171,6 +201,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }),
         annotationOverlay,
         localAnnotations,
+        savedResolver: runtime.savedMarkdownResolver,
     });
     runtime.annotationOverlayRefresher = createAnnotationOverlayRefresher({
         presenter,
@@ -220,6 +251,8 @@ globalThis.shutdown = function shutdown() {
     runtime.presenter = null;
     runtime.service = null;
     runtime.cache = null;
+    runtime.savedMarkdownStore = null;
+    runtime.savedMarkdownResolver = null;
     runtime.rootURI = null;
     runtime.localization = null;
     runtime.annotationActions = null;
@@ -247,8 +280,10 @@ async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
 
 async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
     const presentation = runtime.presenter.open(itemID, {
+        sourceItemID: itemID,
         onClose: () => abortConversion(itemID),
         onReparse: () => openItemAsMarkdown(itemID, { forceRefresh: true }),
+        onSaveSnapshot: () => saveSnapshotForItem(itemID),
         onChangeAnnotationColor: (annotationID, color) => (
             runAnnotationAction('changeColor', itemID, annotationID, color)
         ),
@@ -368,6 +403,159 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
     }
 }
 
+async function openSavedMarkdownNote(noteID) {
+    if (!runtime.savedMarkdownStore?.readManifest) {
+        throw new Error('Saved Markdown notes are unavailable');
+    }
+    const header = await runtime.savedMarkdownStore.readManifest(noteID);
+    if (!header?.manifest) {
+        throw new Error('The selected note is not a Mktero saved Markdown note');
+    }
+    let sourceItem = null;
+    try {
+        sourceItem = await resolveZoteroSavedMarkdownSourceItem(
+            Zotero,
+            header.manifest
+        );
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+    }
+    const presentation = runtime.presenter.open(noteID, {
+        sourceItemID: sourceItem?.id ?? null,
+        ...createSavedMarkdownActions(noteID, sourceItem),
+    });
+    try {
+        const result = localizeConversionResult(
+            await runtime.service.openSaved(noteID),
+            runtimeTranslate
+        );
+        runtime.presenter.update(presentation, {
+            ...result,
+            itemID: result.sourceItemID,
+            documentID: noteID,
+            status: 'ready',
+            progress: 100,
+            preserveContent: false,
+            resumingTask: false,
+            error: '',
+        });
+    }
+    catch (error) {
+        if (presentation.created || presentation.model.status !== 'ready') {
+            runtime.presenter.update(presentation, {
+                status: 'error',
+                error: localizeConversionError(error, runtimeTranslate),
+                progress: 0,
+                preserveContent: false,
+                resumingTask: false,
+            });
+        }
+        throw error;
+    }
+    return runtime.presenter.get(noteID);
+}
+
+function createSavedMarkdownActions(noteID, sourceItem) {
+    const withSource = callback => (...args) => {
+        const sourceItemID = runtime.presenter?.get(noteID)?.model?.sourceItemID
+            ?? sourceItem?.id
+            ?? null;
+        if (!sourceItemID) throw new Error('The source PDF is unavailable');
+        return callback(sourceItemID, ...args);
+    };
+    return {
+        onClose: () => {},
+        onReparse: sourceItem
+            ? () => openItemAsMarkdown(sourceItem.id, { forceRefresh: true })
+            : null,
+        onSaveSnapshot: sourceItem
+            ? () => saveSnapshotForSavedNote(noteID, sourceItem.id)
+            : null,
+        onOpenAnnotationInPDF: withSource((itemID, annotationID) => (
+            runAnnotationAction('openInPDF', itemID, annotationID)
+        )),
+        onOpenSourceInPDF: withSource((itemID, location) => (
+            openSourceInPDF(itemID, location)
+        )),
+        onCopySourcedMarkdown: withSource((itemID, target) => (
+            copySourcedMarkdown(itemID, target)
+        )),
+        onChangeAnnotationColor: withSource((itemID, annotationID, color) => (
+            runAnnotationAction('changeColor', itemID, annotationID, color)
+        )),
+        onUpdateAnnotationComment: withSource((itemID, annotationID, comment) => (
+            runAnnotationAction('updateComment', itemID, annotationID, comment)
+        )),
+        onDeleteAnnotation: withSource((itemID, annotationID) => (
+            runAnnotationAction('deleteAnnotation', itemID, annotationID)
+        )),
+        onCreateMarkdownAnnotation: withSource((itemID, draft) => (
+            runMarkdownAnnotationAction('create', itemID, draft)
+        )),
+        onUpdateMarkdownAnnotation: withSource((itemID, annotationID, changes) => (
+            runMarkdownAnnotationAction(
+                'update',
+                itemID,
+                annotationID,
+                changes
+            )
+        )),
+        onDeleteMarkdownAnnotation: withSource((itemID, annotationID) => (
+            runMarkdownAnnotationAction('delete', itemID, annotationID)
+        )),
+        onRetryMarkdownAnnotationSynchronization: withSource(
+            (itemID, annotationID) => (
+                runMarkdownAnnotationAction(
+                    'retrySynchronization',
+                    itemID,
+                    annotationID
+                )
+            )
+        ),
+    };
+}
+
+async function saveSnapshotForItem(itemID) {
+    const presentation = runtime.presenter?.get(itemID);
+    return saveSnapshotForModel(itemID, presentation?.model);
+}
+
+async function saveSnapshotForSavedNote(noteID, sourceItemID) {
+    const presentation = runtime.presenter?.get(noteID);
+    return saveSnapshotForModel(sourceItemID, presentation?.model);
+}
+
+async function saveSnapshotForModel(pdfItemOrID, model) {
+    if (model?.status !== 'ready' || model.renderMode === 'html') {
+        throw new Error('The Markdown document is unavailable');
+    }
+    if (!runtime.savedMarkdownStore?.saveSnapshot) {
+        throw new Error('Saved Markdown notes are unavailable');
+    }
+    const pdfItem = pdfItemOrID && typeof pdfItemOrID === 'object'
+        ? pdfItemOrID
+        : await Zotero.Items.getAsync(pdfItemOrID);
+    let cacheKey = model.cacheKey;
+    if (!cacheKey) {
+        const filePath = await pdfItem?.getFilePathAsync?.();
+        if (!filePath) throw new Error('The local PDF file is unavailable');
+        cacheKey = await createMinerUCacheKey(await IOUtils.read(filePath));
+    }
+    const result = await runtime.savedMarkdownStore.saveSnapshot({
+        pdfItem,
+        parentItem: pdfItem.parentItem || null,
+        markdown: model.markdown,
+        assets: model.assets,
+        assetBasePath: model.assetBasePath,
+        sourceMap: model.sourceMap,
+        cacheKey,
+        parserProfile: MINERU_PARSER_PROFILE_ID,
+    });
+    Zotero.debug('Mktero: saved Markdown snapshot for item ' + pdfItem.id);
+    return result;
+}
+
 async function runAnnotationAction(action, ...args) {
     try {
         const handler = runtime.annotationActions?.[action];
@@ -398,7 +586,9 @@ async function openSourceInPDF(itemID, location) {
 
 async function copySourcedMarkdown(itemID, target) {
     try {
-        const model = runtime.presenter?.get(itemID)?.model;
+        const presentation = runtime.presenter?.get(itemID)
+            || runtime.presenter?.getForSourceItem?.(itemID);
+        const model = presentation?.model;
         if (model?.status !== 'ready') {
             throw new Error('The Markdown document is unavailable');
         }
@@ -485,6 +675,10 @@ function registerMainWindowContextMenu(window) {
         window,
         rootURI: runtime.rootURI,
         onOpen: openItemAsMarkdown,
+        onOpenSavedNote: openSavedMarkdownNote,
+        isSavedMarkdownNote: item => (
+            runtime.savedMarkdownStore?.isSavedMarkdownNote(item) || false
+        ),
         onError: handleOpenError,
         translate: runtimeTranslate,
     });
@@ -515,6 +709,46 @@ function createZoteroAbortController() {
         zotero: Zotero,
         services: typeof Services === 'undefined' ? null : Services,
     });
+}
+
+async function writeZoteroTemporaryFile({ name, data }) {
+    const tempRoot = PathUtils.tempDir
+        || PathUtils.join(Zotero.Profile.dir, 'mktero-temp');
+    const randomID = globalThis.crypto?.randomUUID?.()
+        || String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+    const directory = PathUtils.join(tempRoot, 'mktero-note-' + randomID);
+    const filePath = PathUtils.join(directory, String(name));
+    await IOUtils.makeDirectory(tempRoot, { ignoreExisting: true });
+    await IOUtils.makeDirectory(directory, { ignoreExisting: false });
+    try {
+        await IOUtils.write(filePath, data);
+    }
+    catch (error) {
+        await IOUtils.remove(directory, {
+            recursive: true,
+            ignoreAbsent: true,
+        }).catch(() => {});
+        throw error;
+    }
+    return {
+        path: filePath,
+        file: zoteroFileFromPath(filePath),
+        cleanup: () => IOUtils.remove(directory, {
+            recursive: true,
+            ignoreAbsent: true,
+        }),
+    };
+}
+
+function zoteroFileFromPath(path) {
+    if (Zotero.File?.pathToFile) return Zotero.File.pathToFile(path);
+    if (typeof Components !== 'undefined') {
+        const file = Components.classes['@mozilla.org/file/local;1']
+            .createInstance(Components.interfaces.nsIFile);
+        file.initWithPath(path);
+        return file;
+    }
+    return path;
 }
 
 function registerReaderToolbarAction() {

@@ -24,6 +24,7 @@ const ERROR_CODE_KEYS = new Map([
     ['MINERU_INVALID_RESPONSE', 'error.invalidResponse'],
     ['MINERU_ARCHIVE_TOO_LARGE', 'error.resultTooLarge'],
     ['MINERU_TASK_NOT_FOUND', 'error.taskUnavailable'],
+    ['MKTERO_SAVED_NOTE_CONFLICT', 'error.snapshotConflict'],
 ]);
 
 const WARNING_MESSAGE_KEYS = new Map([
@@ -50,6 +51,18 @@ const WARNING_MESSAGE_KEYS = new Map([
     [
         'Some local Markdown annotations could not be synchronized to the PDF.',
         'warning.localAnnotationsSyncFailed',
+    ],
+    [
+        'The synced Markdown source is unavailable; showing the HTML snapshot.',
+        'warning.syncedMarkdownUnavailable',
+    ],
+    [
+        'Some synced Markdown images are unavailable.',
+        'warning.syncedImagesUnavailable',
+    ],
+    [
+        'The Zotero snapshot was modified outside Mktero.',
+        'warning.snapshotModified',
     ],
 ]);
 

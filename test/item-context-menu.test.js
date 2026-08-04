@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { translateMessage } from '../src/i18n/localization.js';
+import {
+    createSavedMarkdownManifest,
+    serializeSavedMarkdownNote,
+} from '../src/core/saved-markdown-note-format.js';
 import { registerItemContextMenu } from '../src/ui/item-context-menu.js';
 
 function createMenuHarness(selectedItems = []) {
@@ -102,7 +106,7 @@ test('opens a directly selected PDF attachment', async () => {
 test('hides the action unless exactly one item resolves to a PDF', () => {
     const parentWithoutPDF = regularItem(10, [99]);
     const harness = createMenuHarness([parentWithoutPDF]);
-    registerItemContextMenu({
+    const disposeSecond = registerItemContextMenu({
         zotero: {
             Items: {
                 get: () => ({ id: 99, isPDFAttachment: () => false }),
@@ -161,4 +165,93 @@ test('localizes the item menu action', () => {
             .getAttribute('label'),
         '使用 Mktero 阅读 Markdown'
     );
+});
+
+test('shows the action for a saved Mktero note but not an ordinary note', async () => {
+    const ordinary = {
+        id: 70,
+        isNote: () => true,
+        getNote: () => '<div><p>Ordinary</p></div>',
+    };
+    const manifest = createSavedMarkdownManifest({
+        sourcePDFKey: 'PDF00001',
+        sourceLibraryKey: '1',
+        cacheKey: 'a'.repeat(64),
+        markdownHash: 'b'.repeat(64),
+        parserProfile: 'mineru-v1',
+        sourceAttachmentKey: 'SOURCE01',
+        sourceMapAttachmentKey: 'MAP00001',
+        assets: [],
+        snapshotHTMLHash: 'c'.repeat(64),
+        createdAt: '2026-08-04T00:00:00.000Z',
+    });
+    const saved = {
+        id: 71,
+        isNote: () => true,
+        getNote: () => serializeSavedMarkdownNote({
+            bodyHTML: '<h1>Saved</h1>',
+            manifest,
+        }),
+    };
+    const harness = createMenuHarness([ordinary]);
+    const opened = [];
+    registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: () => assert.fail('ordinary note must not open'),
+        onOpenSavedNote: id => opened.push(id),
+        onError: assert.fail,
+    });
+
+    showMenu(harness.document);
+    const menuItem = harness.document.querySelector('#mktero-read-as-markdown');
+    assert.equal(menuItem.hidden, true);
+
+    harness.select([saved]);
+    showMenu(harness.document);
+    assert.equal(menuItem.hidden, false);
+    assert.equal(
+        menuItem.getAttribute('label'),
+        'Open saved Markdown with Mktero'
+    );
+    menuItem.dispatchEvent(new harness.document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(opened, [71]);
+});
+
+test('keeps context-menu registrations isolated across Zotero windows', async () => {
+    const first = createMenuHarness([pdfItem(41)]);
+    const second = createMenuHarness([pdfItem(42)]);
+    const opened = [];
+    const disposeFirst = registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: first.window,
+        rootURI: 'resource://mktero/',
+        onOpen: id => opened.push(id),
+        onError: assert.fail,
+    });
+    const disposeSecond = registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: second.window,
+        rootURI: 'resource://mktero/',
+        onOpen: id => opened.push(id),
+        onError: assert.fail,
+    });
+
+    showMenu(first.document);
+    showMenu(second.document);
+    first.document.querySelector('#mktero-read-as-markdown').dispatchEvent(
+        new first.document.defaultView.Event('command')
+    );
+    second.document.querySelector('#mktero-read-as-markdown').dispatchEvent(
+        new second.document.defaultView.Event('command')
+    );
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(opened, [41, 42]);
+    disposeFirst();
+    assert.equal(first.document.querySelector('#mktero-read-as-markdown'), null);
+    assert.ok(second.document.querySelector('#mktero-read-as-markdown'));
+    disposeSecond();
 });
