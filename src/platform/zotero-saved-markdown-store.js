@@ -44,6 +44,10 @@ export class ZoteroSavedMarkdownStore {
         if (!zotero?.Items || !zotero?.Attachments) {
             throw new TypeError('A Zotero item and attachment API is required');
         }
+        if (!zotero.Relations?.relatedItemPredicate
+            || typeof zotero.URI?.getItemURI !== 'function') {
+            throw new TypeError('A Zotero item relation API is required');
+        }
         if (typeof readFile !== 'function') {
             throw new TypeError('A binary file reader is required');
         }
@@ -122,15 +126,31 @@ export class ZoteroSavedMarkdownStore {
             noteHTML,
             bodyHTML,
         } = header;
+        const parent = await this.#resolveParent(note);
+        const [noteAttachments, parentAttachments] = await Promise.all([
+            this.#childItems(note.getAttachments?.() || []),
+            parent && parent !== note
+                ? this.#childItems(parent.getAttachments?.() || [])
+                : [],
+        ]);
         const attachments = new Map(
-            (await this.#childItems(note.getAttachments?.() || []))
+            [...noteAttachments, ...parentAttachments]
                 .filter(attachment => attachment?.key)
                 .map(attachment => [String(attachment.key), attachment])
         );
 
-        const sourceAttachment = attachments.get(manifest.sourceAttachmentKey) || null;
-        const sourceMapAttachment
-            = attachments.get(manifest.sourceMapAttachmentKey) || null;
+        const sourceAttachment = this.#ownedSourceAttachment(
+            attachments.get(manifest.sourceAttachmentKey),
+            SOURCE_MARKDOWN_ATTACHMENT_TITLE,
+            note,
+            parent
+        );
+        const sourceMapAttachment = this.#ownedSourceAttachment(
+            attachments.get(manifest.sourceMapAttachmentKey),
+            SOURCE_MAP_ATTACHMENT_TITLE,
+            note,
+            parent
+        );
         const markdown = sourceAttachment
             ? await this.#readUTF8Attachment(sourceAttachment, MAX_SOURCE_MARKDOWN_BYTES)
             : null;
@@ -211,10 +231,14 @@ export class ZoteroSavedMarkdownStore {
         if (!Array.isArray(sourceMap)) {
             throw new TypeError('Saved Markdown source map must be an array');
         }
+        const actualParent = await this.#resolveParent(pdf);
         const parent = parentItem
             ? await this.#resolveItem(parentItem)
-            : await this.#resolveParent(pdf);
-        if (!parent?.id) {
+            : actualParent;
+        if (!actualParent?.id
+            || !actualParent.isRegularItem?.()
+            || !parent?.id
+            || String(parent.id) !== String(actualParent.id)) {
             throw new Error('The PDF parent item is unavailable');
         }
         const sourcePDFKey = requiredItemKey(pdf, 'PDF');
@@ -242,15 +266,12 @@ export class ZoteroSavedMarkdownStore {
             sourceMap,
         });
         const note = existing || await this.#createNote(parent);
-        const originalAttachmentKeys = new Set(
-            (await this.#childItems(note.getAttachments?.() || []))
-                .map(attachment => String(attachment.key || ''))
-        );
         const createdAttachments = [];
         const temporaryFiles = [];
         try {
             const attachments = await this.#importSnapshotAttachments(
                 note,
+                parent,
                 prepared,
                 temporaryFiles,
                 createdAttachments
@@ -296,7 +317,6 @@ export class ZoteroSavedMarkdownStore {
                 existing,
                 previous,
                 createdAttachments,
-                originalAttachmentKeys,
             });
             throw error;
         }
@@ -312,7 +332,15 @@ export class ZoteroSavedMarkdownStore {
         if (!this.isSavedMarkdownNote(note)) {
             throw new Error('Refusing to delete an ordinary Zotero note');
         }
-        await note.eraseTx();
+        const saved = await this.read(note);
+        await saved.note.eraseTx();
+        await this.#eraseAttachments([
+            saved.sourceAttachment,
+            saved.sourceMapAttachment,
+        ].filter(attachment => (
+            attachment
+            && String(attachment.parentID || '') !== String(saved.note.id)
+        )), { suppressErrors: false });
     }
 
     async #resolveItem(itemOrID) {
@@ -378,6 +406,40 @@ export class ZoteroSavedMarkdownStore {
         return new TextDecoder().decode(data);
     }
 
+    #ownedSourceAttachment(attachment, expectedTitle, note, parent) {
+        if (!attachment) return null;
+        try {
+            if (String(attachment.getField?.('title') || '') !== expectedTitle) {
+                return null;
+            }
+            const attachmentParentID = String(attachment.parentID || '');
+            if (attachmentParentID === String(note?.id || '')) {
+                return attachment;
+            }
+            if (attachmentParentID !== String(parent?.id || '')) {
+                return null;
+            }
+            const relation = this.#sourceAttachmentRelation(note);
+            return attachment.hasRelation?.(relation.predicate, relation.object)
+                ? attachment
+                : null;
+        }
+        catch {
+            return null;
+        }
+    }
+
+    #sourceAttachmentRelation(note) {
+        const predicate = String(
+            this.zotero.Relations.relatedItemPredicate || ''
+        );
+        const object = String(this.zotero.URI.getItemURI(note) || '');
+        if (!predicate || !object) {
+            throw new Error('The Zotero source attachment relation is unavailable');
+        }
+        return { predicate, object };
+    }
+
     async #prepareSnapshot({ markdown, assets, assetBasePath, sourceMap }) {
         const normalizedAssets = normalizeAssets(assets);
         const sourceMapJSON = JSON.stringify(sourceMap);
@@ -398,33 +460,39 @@ export class ZoteroSavedMarkdownStore {
 
     async #importSnapshotAttachments(
         note,
+        parent,
         prepared,
         temporaryFiles,
         createdAttachments
     ) {
         const sourceAttachment = await this.#importTextAttachment(
             note,
+            parent,
             SOURCE_MARKDOWN_ATTACHMENT_TITLE,
             'mktero-source',
             prepared.markdown,
             temporaryFiles,
-            'text/markdown'
+            'text/markdown',
+            createdAttachments
         );
-        createdAttachments.push(sourceAttachment);
         const sourceMapAttachment = await this.#importTextAttachment(
             note,
+            parent,
             SOURCE_MAP_ATTACHMENT_TITLE,
             'mktero-source-map',
             prepared.sourceMapJSON,
             temporaryFiles,
-            'application/json'
+            'application/json',
+            createdAttachments
         );
-        createdAttachments.push(sourceMapAttachment);
 
         const assetAttachments = [];
         for (const asset of prepared.normalizedAssets) {
-            const attachment = await this.#importImageAttachment(note, asset);
-            createdAttachments.push(attachment);
+            const attachment = await this.#importImageAttachment(
+                note,
+                asset,
+                createdAttachments
+            );
             assetAttachments.push({
                 ...asset,
                 attachmentKey: requiredItemKey(attachment, 'image attachment'),
@@ -474,10 +542,8 @@ export class ZoteroSavedMarkdownStore {
         existing,
         previous,
         createdAttachments,
-        originalAttachmentKeys,
     }) {
         await this.#eraseAttachments(createdAttachments);
-        await this.#eraseNewAttachments(note, originalAttachmentKeys);
         if (existing && previous) {
             try {
                 existing.setNote(previous.noteHTML);
@@ -494,11 +560,13 @@ export class ZoteroSavedMarkdownStore {
 
     async #importTextAttachment(
         note,
+        parent,
         title,
         fileBaseName,
         text,
         temporaryFiles,
-        contentType
+        contentType,
+        createdAttachments
     ) {
         const data = new TextEncoder().encode(text);
         const temporary = await this.writeTemporaryFile({
@@ -508,25 +576,32 @@ export class ZoteroSavedMarkdownStore {
         temporaryFiles.push(temporary);
         const imported = await this.zotero.Attachments.importFromFile({
             file: temporary.file || temporary.path,
-            parentItemID: note.id,
+            parentItemID: parent.id,
             title,
             contentType,
             charset: 'utf-8',
             fileBaseName,
         });
         const attachment = await this.#normalizeImportedItem(imported);
+        createdAttachments.push(attachment);
+        const relation = this.#sourceAttachmentRelation(note);
+        if (typeof attachment.addRelation !== 'function') {
+            throw new Error('The Zotero source attachment relation is unavailable');
+        }
+        attachment.addRelation(relation.predicate, relation.object);
         attachment.setField?.('title', title);
         await attachment.saveTx?.();
         return attachment;
     }
 
-    async #importImageAttachment(note, asset) {
+    async #importImageAttachment(note, asset, createdAttachments) {
         const blob = this.createBlob([asset.data], { type: asset.mimeType });
         const imported = await this.zotero.Attachments.importEmbeddedImage({
             blob,
             parentItemID: note.id,
         });
         const attachment = await this.#normalizeImportedItem(imported);
+        createdAttachments.push(attachment);
         attachment.setField?.('title', INTERNAL_IMAGE_PREFIX + asset.path);
         await attachment.saveTx?.();
         return attachment;
@@ -550,9 +625,12 @@ export class ZoteroSavedMarkdownStore {
             previous.manifest.sourceMapAttachmentKey,
             ...previous.manifest.assets.map(asset => asset.attachmentKey),
         ]);
-        for (const attachment of await this.#childItems(
-            previous.note.getAttachments?.() || []
-        )) {
+        const previousAttachments = [
+            previous.sourceAttachment,
+            previous.sourceMapAttachment,
+            ...await this.#childItems(previous.note.getAttachments?.() || []),
+        ].filter(Boolean);
+        for (const attachment of previousAttachments) {
             if (!oldKeys.has(String(attachment.key))
                 || keepKeys.has(String(attachment.key))) {
                 continue;
@@ -566,23 +644,17 @@ export class ZoteroSavedMarkdownStore {
         }
     }
 
-    async #eraseAttachments(attachments) {
-        await Promise.all(attachments.map(async attachment => {
-            try {
+    async #eraseAttachments(attachments, { suppressErrors = true } = {}) {
+        const results = await Promise.allSettled(
+            attachments.map(async attachment => {
                 await attachment?.eraseTx?.();
-            }
-            catch {
-                // Rollback is best effort after a failed Zotero transaction.
-            }
-        }));
+            })
+        );
+        if (suppressErrors) return;
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure) throw failure.reason;
     }
 
-    async #eraseNewAttachments(note, originalKeys) {
-        const current = await this.#childItems(note?.getAttachments?.() || []);
-        await this.#eraseAttachments(current.filter(attachment => (
-            !originalKeys.has(String(attachment.key || ''))
-        )));
-    }
 }
 
 export function createZoteroSavedMarkdownStore(options) {
