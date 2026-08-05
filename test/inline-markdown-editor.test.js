@@ -4156,6 +4156,27 @@ test('observes editor resizes through the owning Zotero window', () => {
     assert.equal(observedEditorScroller, true);
 });
 
+test('reports the first visible Markdown offset to the owning reader', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const offsets = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '# Paper\n\nOriginal text.',
+        onViewportChange: offset => offsets.push(offset),
+    });
+
+    editor.setMarkdown('# Updated\n\nUpdated text.');
+
+    editor.destroy();
+    dom.window.close();
+
+    assert.ok(offsets.length > 0);
+    assert.equal(offsets.at(-1), 0);
+});
+
 test('observes editor visibility through the owning Zotero window', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

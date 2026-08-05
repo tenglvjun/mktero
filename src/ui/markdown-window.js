@@ -24,6 +24,10 @@ const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
     ? __MKTERO_MARKDOWN_STYLES__
     : null;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
+const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
+    outline: 820,
+    notes: 1120,
+});
 const SIDE_PANEL_CONFIG = Object.freeze({
     outline: Object.freeze({
         elementKey: 'outline',
@@ -107,6 +111,7 @@ class MarkdownTabView {
         this.snapshotURLs = new Map();
         this.documentActionBusy = null;
         this.documentActionsOpen = false;
+        this.activeNavigationOffset = 0;
         this.listeners = [];
         this.sidePanels = Object.fromEntries(
             Object.entries(SIDE_PANEL_CONFIG).map(([name, config]) => [
@@ -118,6 +123,12 @@ class MarkdownTabView {
                     resize: null,
                 },
             ])
+        );
+        this.responsivePanels = Object.fromEntries(
+            Object.keys(SIDE_PANEL_CONFIG).map(name => [name, {
+                autoCollapsed: false,
+                userOverride: false,
+            }])
         );
 
         this.host = this.createElement('div', {
@@ -166,6 +177,7 @@ class MarkdownTabView {
                 this.openAnnotationInPDF(annotationID)
             ),
             onSourceNavigationError: error => this.zotero?.logError?.(error),
+            onViewportChange: offset => this.syncActiveNavigation(offset),
             localization: this.localization,
         });
         this.syncOutline('');
@@ -525,11 +537,20 @@ class MarkdownTabView {
             editorHost,
             snapshotHost
         );
-        const outlineTitle = this.createElement(
-            'h2',
-            { class: 'markdown-outline-title' },
+        const outlineTitle = this.createElement('h2', {
+            class: 'markdown-outline-title',
+        });
+        outlineTitle.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.fileText,
+            { className: 'markdown-panel-title-icon', size: 16 }
+        ));
+        const outlineTitleLabel = this.createElement(
+            'span',
+            { class: 'markdown-panel-title-label' },
             this.t('viewer.outlineTitle')
         );
+        outlineTitle.appendChild(outlineTitleLabel);
         const outlineList = this.createElement('ol', {
             class: 'markdown-outline-list',
         });
@@ -545,11 +566,20 @@ class MarkdownTabView {
         );
         const outlineControls = this.createSidePanelEdge('outline');
 
-        const notesTitle = this.createElement(
-            'h2',
-            { class: 'markdown-notes-title' },
+        const notesTitle = this.createElement('h2', {
+            class: 'markdown-notes-title',
+        });
+        notesTitle.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.messageSquareText,
+            { className: 'markdown-panel-title-icon', size: 16 }
+        ));
+        const notesTitleLabel = this.createElement(
+            'span',
+            { class: 'markdown-panel-title-label' },
             this.t('viewer.notesTitle')
         );
+        notesTitle.appendChild(notesTitleLabel);
         const notesList = this.createElement('ol', {
             class: 'markdown-notes-list',
         });
@@ -599,11 +629,13 @@ class MarkdownTabView {
             workspace,
             outline,
             outlineTitle,
+            outlineTitleLabel,
             outlineList,
             outlineResizer: outlineControls.resizer,
             outlineToggle: outlineControls.toggle,
             notes,
             notesTitle,
+            notesTitleLabel,
             notesList,
             notesResizer: notesControls.resizer,
             notesToggle: notesControls.toggle,
@@ -614,7 +646,9 @@ class MarkdownTabView {
             actionToggle: documentActions.toggle,
             actionMenu: documentActions.menu,
             reparse: documentActions.reparse,
+            reparseLabel: documentActions.reparseLabel,
             saveSnapshot: documentActions.saveSnapshot,
+            saveSnapshotLabel: documentActions.saveSnapshotLabel,
             actionStatus: documentActions.status,
         };
     }
@@ -626,6 +660,7 @@ class MarkdownTabView {
             type: 'button',
             'aria-expanded': 'false',
             'aria-controls': 'mktero-document-action-menu',
+            'aria-haspopup': 'menu',
             'aria-label': this.t('viewer.documentActionsToggle'),
             title: this.t('viewer.documentActionsToggle'),
         });
@@ -640,13 +675,14 @@ class MarkdownTabView {
         const menu = this.createElement('div', {
             id: 'mktero-document-action-menu',
             class: 'markdown-reader-action-menu',
-            role: 'group',
+            role: 'menu',
             'aria-hidden': 'true',
         });
         const reparse = this.createElement('button', {
             id: 'mktero-reparse',
             class: 'markdown-reader-action markdown-reader-action--child',
             type: 'button',
+            role: 'menuitem',
             'aria-label': this.t('viewer.reparse'),
             title: this.t('viewer.reparse'),
         });
@@ -658,10 +694,17 @@ class MarkdownTabView {
                 size: 18,
             }
         ));
+        const reparseLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-action-label' },
+            this.t('viewer.reparseShort')
+        );
+        reparse.appendChild(reparseLabel);
         const saveSnapshot = this.createElement('button', {
             id: 'mktero-save-snapshot',
             class: 'markdown-reader-action markdown-reader-action--child',
             type: 'button',
+            role: 'menuitem',
             'aria-label': this.t('viewer.saveSnapshot'),
             title: this.t('viewer.saveSnapshot'),
         });
@@ -673,6 +716,12 @@ class MarkdownTabView {
                 size: 18,
             }
         ));
+        const saveSnapshotLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-action-label' },
+            this.t('viewer.saveSnapshotShort')
+        );
+        saveSnapshot.appendChild(saveSnapshotLabel);
         menu.appendChild(reparse);
         menu.appendChild(saveSnapshot);
         const status = this.createElement('span', {
@@ -692,7 +741,9 @@ class MarkdownTabView {
             toggle,
             menu,
             reparse,
+            reparseLabel,
             saveSnapshot,
+            saveSnapshotLabel,
             status,
         };
     }
@@ -775,7 +826,10 @@ class MarkdownTabView {
             const button = event.target?.closest?.('.markdown-outline-link');
             if (!button || !this.elements.outlineList.contains(button)) return;
             const offset = Number(button.getAttribute('data-offset'));
-            if (Number.isFinite(offset)) this.editor.scrollToOffset?.(offset);
+            if (Number.isFinite(offset)) {
+                this.syncActiveNavigation(offset);
+                this.editor.scrollToOffset?.(offset);
+            }
         });
         this.listen(this.elements.notesList, 'click', event => {
             const openPDF = event.target?.closest?.(
@@ -805,10 +859,16 @@ class MarkdownTabView {
                 return;
             }
             const offset = Number(button.getAttribute('data-offset'));
-            if (Number.isFinite(offset)) this.editor.scrollToOffset?.(offset);
+            if (Number.isFinite(offset)) {
+                this.syncActiveNavigation(offset);
+                this.editor.scrollToOffset?.(offset);
+            }
         });
         this.bindSidePanelActions('outline');
         this.bindSidePanelActions('notes');
+        this.listen(this.ownerWindow, 'resize', () => {
+            this.syncResponsiveSidePanels();
+        });
         this.listen(this.ownerWindow, 'mousemove', event => {
             this.resizeSidePanel('outline', event);
             this.resizeSidePanel('notes', event);
@@ -817,6 +877,7 @@ class MarkdownTabView {
             this.finishSidePanelResize('outline');
             this.finishSidePanelResize('notes');
         });
+        this.syncResponsiveSidePanels();
     }
 
     runDocumentAction(kind, callbackName) {
@@ -891,11 +952,15 @@ class MarkdownTabView {
         const panel = this.sidePanels[name];
         const { resizer, toggle } = this.sidePanelElements(name);
         this.listen(toggle, 'click', () => {
-            this.setSidePanelVisibility(name, !panel.visible);
+            this.setSidePanelVisibility(name, !panel.visible, {
+                source: 'user',
+            });
         });
         this.listen(resizer, 'dblclick', event => {
             event.preventDefault();
-            this.setSidePanelVisibility(name, !panel.visible);
+            this.setSidePanelVisibility(name, !panel.visible, {
+                source: 'user',
+            });
         });
         this.listen(resizer, 'mousedown', event => {
             this.startSidePanelResize(name, event);
@@ -943,12 +1008,20 @@ class MarkdownTabView {
             'title',
             this.t('viewer.saveSnapshot')
         );
+        this.elements.reparseLabel.textContent = this.t(
+            'viewer.reparseShort'
+        );
+        this.elements.saveSnapshotLabel.textContent = this.t(
+            'viewer.saveSnapshotShort'
+        );
         this.elements.outline.setAttribute('aria-label', this.t('viewer.outline'));
-        this.elements.outlineTitle.textContent = this.t('viewer.outlineTitle');
+        this.elements.outlineTitleLabel.textContent = this.t(
+            'viewer.outlineTitle'
+        );
         this.elements.outlineList.querySelector('.markdown-outline-empty')
             ?.replaceChildren(this.t('viewer.outlineEmpty'));
         this.elements.notes.setAttribute('aria-label', this.t('viewer.notes'));
-        this.elements.notesTitle.textContent = this.t('viewer.notesTitle');
+        this.elements.notesTitleLabel.textContent = this.t('viewer.notesTitle');
         this.elements.notesList.querySelector('.markdown-notes-empty')
             ?.replaceChildren(this.t('viewer.notesEmpty'));
         this.syncSidePanelControlLabels('outline');
@@ -1066,10 +1139,17 @@ class MarkdownTabView {
         resizer.setAttribute('aria-valuenow', String(nextWidth));
     }
 
-    setSidePanelVisibility(name, visible) {
+    setSidePanelVisibility(name, visible, { source = 'user' } = {}) {
         const panel = this.sidePanels[name];
         const { element, resizer, toggle } = this.sidePanelElements(name);
         this.finishSidePanelResize(name);
+        if (source === 'user') {
+            const responsive = this.responsivePanels[name];
+            responsive.autoCollapsed = false;
+            const breakpoint = RESPONSIVE_SIDE_PANEL_BREAKPOINTS[name];
+            responsive.userOverride = Number.isFinite(breakpoint)
+                && Number(this.ownerWindow.innerWidth) <= breakpoint;
+        }
         panel.visible = visible;
         element.hidden = !visible;
         resizer.classList.toggle(
@@ -1083,11 +1163,43 @@ class MarkdownTabView {
         this.syncSidePanelControlLabels(name);
     }
 
+    syncResponsiveSidePanels() {
+        const viewportWidth = Number(this.ownerWindow.innerWidth);
+        if (!Number.isFinite(viewportWidth)) return;
+
+        for (const name of Object.keys(RESPONSIVE_SIDE_PANEL_BREAKPOINTS)) {
+            const panel = this.sidePanels[name];
+            const responsive = this.responsivePanels[name];
+            const shouldCollapse = viewportWidth
+                <= RESPONSIVE_SIDE_PANEL_BREAKPOINTS[name];
+            if (!shouldCollapse) {
+                const restorePanel = responsive.autoCollapsed
+                    && !panel.visible;
+                responsive.autoCollapsed = false;
+                responsive.userOverride = false;
+                if (restorePanel) {
+                    this.setSidePanelVisibility(name, true, {
+                        source: 'responsive',
+                    });
+                }
+                continue;
+            }
+            if (responsive.userOverride || responsive.autoCollapsed) continue;
+            if (!panel.visible) continue;
+            responsive.autoCollapsed = true;
+            this.setSidePanelVisibility(name, false, {
+                source: 'responsive',
+            });
+        }
+    }
+
     handleSidePanelResizeKey(name, event) {
         const panel = this.sidePanels[name];
         if (['Enter', ' '].includes(event.key)) {
             event.preventDefault();
-            this.setSidePanelVisibility(name, !panel.visible);
+            this.setSidePanelVisibility(name, !panel.visible, {
+                source: 'user',
+            });
             return;
         }
         if (!panel.visible) return;
@@ -1130,6 +1242,7 @@ class MarkdownTabView {
                 { class: 'markdown-outline-empty' },
                 this.t('viewer.outlineEmpty')
             ));
+            this.syncActiveNavigation(this.activeNavigationOffset);
             return;
         }
         for (const heading of headings) {
@@ -1151,6 +1264,7 @@ class MarkdownTabView {
             item.appendChild(button);
             list.appendChild(item);
         }
+        this.syncActiveNavigation(this.activeNavigationOffset);
     }
 
     syncNotes(annotationOverlay, markdownLength) {
@@ -1163,6 +1277,7 @@ class MarkdownTabView {
                 { class: 'markdown-notes-empty' },
                 this.t('viewer.notesEmpty')
             ));
+            this.syncActiveNavigation(this.activeNavigationOffset);
             return;
         }
 
@@ -1172,6 +1287,43 @@ class MarkdownTabView {
                 matched,
                 markdownLength
             ));
+        }
+        this.syncActiveNavigation(this.activeNavigationOffset);
+    }
+
+    syncActiveNavigation(offset = 0) {
+        const requestedOffset = Number(offset);
+        this.activeNavigationOffset = Number.isFinite(requestedOffset)
+            ? Math.max(0, Math.trunc(requestedOffset))
+            : 0;
+        const activeOutline = findActiveNavigationItem(
+            [...this.elements.outlineList.querySelectorAll(
+                '.markdown-outline-link[data-offset]'
+            )],
+            this.activeNavigationOffset
+        );
+        for (const link of this.elements.outlineList.querySelectorAll(
+            '.markdown-outline-link'
+        )) {
+            const active = link === activeOutline;
+            link.classList.toggle('is-active', active);
+            if (active) link.setAttribute('aria-current', 'location');
+            else link.removeAttribute('aria-current');
+        }
+
+        const activeNote = findActiveNavigationItem(
+            [...this.elements.notesList.querySelectorAll(
+                '.markdown-note-link[data-offset]'
+            )],
+            this.activeNavigationOffset
+        );
+        for (const link of this.elements.notesList.querySelectorAll(
+            '.markdown-note-link'
+        )) {
+            const active = link === activeNote;
+            link.classList.toggle('is-active', active);
+            if (active) link.setAttribute('aria-current', 'location');
+            else link.removeAttribute('aria-current');
         }
     }
 
@@ -1242,6 +1394,9 @@ class MarkdownTabView {
                 : 'markdown-note-link is-note-unavailable',
             type: 'button',
             'data-annotation-id': String(annotation.id || ''),
+            style: `--mktero-annotation-color: ${safeAnnotationColor(
+                annotation.color
+            )};`,
         };
         if (!canJump) {
             attributes.disabled = 'disabled';
@@ -1428,6 +1583,22 @@ class MarkdownTabView {
             resolveZipPath(this.model.assetBasePath || '', decodedPath)
         ) || null;
     }
+}
+
+function findActiveNavigationItem(elements, offset) {
+    let active = null;
+    let activeOffset = -1;
+    for (const element of elements) {
+        const itemOffset = Number(element.getAttribute('data-offset'));
+        if (!Number.isFinite(itemOffset)
+            || itemOffset > offset
+            || itemOffset < activeOffset) {
+            continue;
+        }
+        active = element;
+        activeOffset = itemOffset;
+    }
+    return active;
 }
 
 function orderedAnnotationEntries(annotationOverlay) {

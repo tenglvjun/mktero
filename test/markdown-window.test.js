@@ -314,7 +314,7 @@ test('reparses the current PDF from an accessible icon action', async () => {
     view.destroy();
 });
 
-test('opens the quarter-circle actions and reports snapshot save state', async () => {
+test('opens the document action menu and reports snapshot save state', async () => {
     let saveCalls = 0;
     let finishSave;
     const model = createModel({
@@ -332,12 +332,19 @@ test('opens the quarter-circle actions and reports snapshot save state', async (
     const { document, view, shadow } = createView(model);
     const toggle = shadow.querySelector('#mktero-document-actions');
     const menu = shadow.querySelector('#mktero-document-action-menu');
+    const reparse = shadow.querySelector('#mktero-reparse');
     const save = shadow.querySelector('#mktero-save-snapshot');
 
     assert.equal(
         toggle.querySelector('svg')?.getAttribute('data-lucide'),
         'more-horizontal'
     );
+    assert.equal(toggle.getAttribute('aria-haspopup'), 'menu');
+    assert.equal(menu.getAttribute('role'), 'menu');
+    assert.equal(reparse.textContent, 'Reparse PDF');
+    assert.equal(save.textContent, 'Save snapshot');
+    assert.equal(reparse.getAttribute('role'), 'menuitem');
+    assert.equal(save.getAttribute('role'), 'menuitem');
 
     toggle.click();
     assert.equal(toggle.getAttribute('aria-expanded'), 'true');
@@ -851,6 +858,102 @@ test('resizes and toggles PDF notes from the right edge', () => {
             cancelable: true,
         }));
         assert.equal(notes.hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('collapses side panels responsively and restores automatic changes', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview\n\n## Methods',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow(window) {
+            Object.defineProperty(window, 'innerWidth', {
+                configurable: true,
+                value: 800,
+                writable: true,
+            });
+        },
+    });
+    const outline = shadow.querySelector('#mktero-outline');
+    const notes = shadow.querySelector('#mktero-notes');
+    const outlineToggle = shadow.querySelector('#mktero-outline-toggle');
+    const notesToggle = shadow.querySelector('#mktero-notes-toggle');
+
+    try {
+        assert.equal(outline.hidden, true);
+        assert.equal(notes.hidden, true);
+        assert.equal(outlineToggle.getAttribute('aria-label'), 'Expand outline');
+        assert.equal(notesToggle.getAttribute('aria-label'), 'Expand notes');
+
+        outlineToggle.click();
+        assert.equal(outline.hidden, false);
+        assert.equal(outlineToggle.getAttribute('aria-label'), 'Collapse outline');
+
+        document.defaultView.dispatchEvent(new document.defaultView.Event('resize'));
+        assert.equal(outline.hidden, false);
+
+        document.defaultView.innerWidth = 900;
+        document.defaultView.dispatchEvent(new document.defaultView.Event('resize'));
+        assert.equal(outline.hidden, false);
+        assert.equal(notes.hidden, true);
+
+        document.defaultView.innerWidth = 1200;
+        document.defaultView.dispatchEvent(new document.defaultView.Event('resize'));
+        assert.equal(outline.hidden, false);
+        assert.equal(notes.hidden, false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('tracks the active outline and note while the editor viewport changes', () => {
+    const markdown = '# Overview\n\nIntro.\n\n## Methods\n\nMethod text.';
+    let editorOptions;
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Method text.',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '1',
+                ranges: [{ from: markdown.indexOf('Method text.'), to: markdown.length }],
+            }],
+            unmatched: [],
+        },
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return createTestInlineEditor(options);
+        },
+    });
+    const outlineLinks = [...shadow.querySelectorAll('.markdown-outline-link')];
+    const noteLink = shadow.querySelector('.markdown-note-link');
+
+    try {
+        assert.equal(outlineLinks[0].classList.contains('is-active'), true);
+        assert.equal(outlineLinks[0].getAttribute('aria-current'), 'location');
+        assert.equal(outlineLinks[1].classList.contains('is-active'), false);
+        assert.equal(noteLink.classList.contains('is-active'), false);
+
+        editorOptions.onViewportChange(markdown.indexOf('Method text.'));
+
+        assert.equal(outlineLinks[0].classList.contains('is-active'), false);
+        assert.equal(outlineLinks[1].classList.contains('is-active'), true);
+        assert.equal(outlineLinks[1].getAttribute('aria-current'), 'location');
+        assert.equal(noteLink.classList.contains('is-active'), true);
+        assert.equal(noteLink.getAttribute('aria-current'), 'location');
     }
     finally {
         view.destroy();

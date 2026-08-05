@@ -96,6 +96,7 @@ export function createInlineMarkdownEditor({
     openSourceLocation,
     openAnnotationInPDF,
     onSourceNavigationError,
+    onViewportChange,
     localization = createLocalization(),
 }) {
     const t = localization.t.bind(localization);
@@ -213,6 +214,13 @@ export function createInlineMarkdownEditor({
                 EditorState.readOnly.of(true),
                 keymap.of(searchKeymap),
                 EditorView.lineWrapping,
+                EditorView.updateListener.of(update => {
+                    if (update.viewportChanged
+                        || update.geometryChanged
+                        || update.docChanged) {
+                        onViewportChange?.(update.view.viewport.from);
+                    }
+                }),
             ],
         });
         const root = parent.getRootNode?.();

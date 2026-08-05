@@ -26,10 +26,10 @@ test('article layout outranks the CodeMirror adopted base theme', () => {
     const content = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-content'
     );
-    assert.match(content, /width:\s*calc\(100% - 120px\)/);
-    assert.match(content, /max-width:\s*960px/);
+    assert.match(content, /width:\s*calc\(100% - 48px\)/);
+    assert.match(content, /max-width:\s*var\(--reader-width\)/);
     assert.match(content, /flex:\s*0 0 auto/);
-    assert.match(content, /padding:\s*32px 0 72px/);
+    assert.match(content, /padding:\s*76px 0 80px/);
 
     const line = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-line'
@@ -40,7 +40,7 @@ test('article layout outranks the CodeMirror adopted base theme', () => {
         '.markdown-editor-host > .cm-editor .cm-mktero-heading'
     );
     assert.match(heading, /font-weight:\s*700/);
-    assert.match(heading, /line-height:\s*1\.3/);
+    assert.match(heading, /line-height:\s*1\.25/);
 });
 
 test('wide Markdown tables scroll inside the aligned reading column', () => {
@@ -54,7 +54,7 @@ test('wide Markdown tables scroll inside the aligned reading column', () => {
     assert.match(tableFrame, /overflow-y:\s*hidden/);
     assert.match(tableFrame, /overscroll-behavior-x:\s*contain/);
     assert.match(tableFrame, /scrollbar-width:\s*thin/);
-    assert.match(tableFrame, /border-radius:\s*8px/);
+    assert.match(tableFrame, /border-radius:\s*var\(--radius-md\)/);
 
     const tables = ruleBody([
         '.markdown-editor-host > .cm-editor .cm-mktero-table table,',
@@ -97,12 +97,12 @@ test('styles academic figure captions as distinct labels', () => {
     const caption = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure figcaption'
     );
-    assert.match(caption, /padding:\s*8px 10px/);
+    assert.match(caption, /padding:\s*0 12px/);
     assert.doesNotMatch(caption, /border-left/);
-    assert.match(caption, /border-radius:\s*4px/);
+    assert.doesNotMatch(caption, /border-radius/);
     assert.doesNotMatch(caption, /background\s*:/);
-    assert.match(caption, /font-family:\s*ui-sans-serif/);
-    assert.match(caption, /font-size:\s*12px/);
+    assert.match(caption, /font-family:\s*var\(--ui-font\)/);
+    assert.match(caption, /font-size:\s*12\.5px/);
     assert.match(caption, /letter-spacing:\s*0/);
     assert.match(caption, /text-align:\s*center/);
 
@@ -119,9 +119,9 @@ test('styles academic table captions above tables without a background', () => {
         '.markdown-editor-host > .cm-editor .cm-mktero-html-block table caption',
     ].join('\n'));
     assert.match(caption, /caption-side:\s*top/);
-    assert.match(caption, /padding:\s*8px 10px/);
+    assert.match(caption, /padding:\s*10px 12px/);
     assert.match(caption, /color:\s*var\(--muted\)/);
-    assert.match(caption, /font-size:\s*12px/);
+    assert.match(caption, /font-size:\s*12\.5px/);
     assert.match(caption, /letter-spacing:\s*0/);
     assert.match(caption, /text-align:\s*center/);
     assert.doesNotMatch(caption, /background\s*:/);
@@ -196,7 +196,7 @@ test('lays out a responsive scrollable outline beside the editor', () => {
     const outlineLink = ruleBody('.markdown-outline-link');
     assert.match(
         outlineLink,
-        /padding-left:\s*calc\(8px \+ var\(--outline-indent, 0px\)\)/
+        /padding-left:\s*calc\(10px \+ var\(--outline-indent, 0px\)\)/
     );
 
     assert.match(
@@ -227,40 +227,34 @@ test('styles a responsive PDF notes panel beside the editor', () => {
     assert.match(comment, /overflow-wrap:\s*anywhere/);
 });
 
-test('anchors the document action in the Markdown lower-right corner', () => {
+test('styles the document action as a compact reader toolbar', () => {
     const editor = ruleBody('.markdown-editor');
     assert.match(editor, /position:\s*relative/);
 
     const actions = ruleBody('.markdown-reader-actions');
     assert.match(actions, /position:\s*absolute/);
     assert.match(actions, /right:\s*16px/);
-    assert.match(actions, /bottom:\s*16px/);
+    assert.match(actions, /top:\s*14px/);
     assert.match(actions, /z-index:\s*4/);
-    assert.doesNotMatch(actions, /min-height/);
-    assert.doesNotMatch(actions, /border-bottom/);
+    assert.match(actions, /display:\s*flex/);
+    assert.match(actions, /backdrop-filter:\s*blur\(10px\)/);
 
     const action = ruleBody('.markdown-reader-action');
-    assert.match(action, /width:\s*40px/);
-    assert.match(action, /height:\s*40px/);
-    assert.match(action, /border-radius:\s*50%/);
-    assert.match(action, /background:\s*var\(--surface\)/);
-    assert.match(action, /box-shadow:/);
-    assert.match(action, /place-items:\s*center/);
+    assert.match(action, /width:\s*34px/);
+    assert.match(action, /height:\s*34px/);
+    assert.match(action, /border-radius:\s*var\(--radius-sm\)/);
+    assert.match(action, /align-items:\s*center/);
 
+    const menu = ruleBody('.markdown-reader-action-menu');
+    assert.match(menu, /top:\s*calc\(100% \+ 8px\)/);
+    assert.match(menu, /width:\s*220px/);
+    assert.match(menu, /max-width:\s*min\(220px, calc\(100vw - 20px\)\)/);
+    assert.match(menu, /box-shadow:\s*var\(--shadow-popover\)/);
     const menuAction = ruleBody(
         '.markdown-reader-action-menu .markdown-reader-action'
     );
-    assert.match(menuAction, /inset:\s*auto/);
-    const menuReparse = ruleBody(
-        '.markdown-reader-action-menu .markdown-reader-action:first-child'
-    );
-    assert.match(menuReparse, /top:\s*8px/);
-    assert.match(menuReparse, /left:\s*64px/);
-    const menuSave = ruleBody(
-        '.markdown-reader-action-menu .markdown-reader-action:last-child'
-    );
-    assert.match(menuSave, /top:\s*16px/);
-    assert.match(menuSave, /left:\s*16px/);
+    assert.match(menuAction, /width:\s*100%/);
+    assert.match(menuAction, /justify-content:\s*flex-start/);
 
     const reparsing = ruleBody(
         '.markdown-reader-action.is-reparsing .markdown-reader-action-icon'
@@ -272,14 +266,14 @@ test('styles citation popups and temporary reference highlights', () => {
     const citation = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-citation'
     );
-    assert.match(citation, /color:\s*var\(--accent\)/);
+    assert.match(citation, /color:\s*var\(--accent-strong\)/);
     assert.match(citation, /cursor:\s*pointer/);
 
     const popup = ruleBody('.mktero-citation-popup');
     assert.match(popup, /position:\s*fixed/);
     assert.match(popup, /max-width:\s*min\(460px, calc\(100vw - 24px\)\)/);
     assert.match(popup, /z-index:\s*900/);
-    assert.match(popup, /--citation-popup-surface:\s*var\(--surface\)/);
+    assert.match(popup, /--citation-popup-surface:\s*var\(--surface-raised\)/);
     assert.match(popup, /--citation-popup-text:\s*var\(--text\)/);
     assert.match(popup, /--citation-popup-border:\s*var\(--border\)/);
     assert.match(
@@ -341,7 +335,7 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
     );
     assert.match(
         highlight,
-        /background:\s*color-mix\([\s\S]*?var\(--mktero-annotation-color\) 32%[\s\S]*?transparent/
+        /background:\s*color-mix\([\s\S]*?var\(--mktero-annotation-color\) 24%[\s\S]*?transparent/
     );
 
     const underline = ruleBody(
@@ -374,7 +368,7 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
     const popup = ruleBody('.mktero-annotation-popup');
     assert.match(popup, /position:\s*fixed/);
     assert.match(popup, /z-index:\s*900/);
-    assert.match(popup, /background:\s*var\(--surface\)/);
+    assert.match(popup, /background:\s*var\(--surface-raised\)/);
 
     const actionsPopup = ruleBody('.mktero-annotation-popup--actions');
     assert.match(actionsPopup, /width:\s*max-content/);
@@ -466,7 +460,7 @@ test('styles table references, previews, and target highlights', () => {
             '.markdown-editor-host > .cm-editor .cm-mktero-figure-reference',
         ].join('\n')
     );
-    assert.match(reference, /color:\s*var\(--accent\)/);
+    assert.match(reference, /color:\s*var\(--accent-strong\)/);
     assert.match(reference, /cursor:\s*pointer/);
 
     const popupShell = ruleBody([
@@ -479,7 +473,7 @@ test('styles table references, previews, and target highlights', () => {
     assert.match(popupShell, /z-index:\s*900/);
     assert.match(
         popupShell,
-        /--reference-preview-surface:\s*var\(--surface\)/
+        /--reference-preview-surface:\s*var\(--surface-raised\)/
     );
     assert.match(popupShell, /--reference-preview-text:\s*var\(--text\)/);
     assert.match(popupShell, /--reference-preview-muted:\s*var\(--muted\)/);
@@ -493,7 +487,7 @@ test('styles table references, previews, and target highlights', () => {
     assert.match(popup, /width:\s*min\(700px, calc\(100vw - 48px\)\)/);
 
     const content = ruleBody('.mktero-table-preview-content');
-    assert.match(content, /padding:\s*10px/);
+    assert.match(content, /padding:\s*12px/);
 
     const viewport = ruleBody('.mktero-table-preview-viewport');
     assert.match(viewport, /max-height:\s*min\(390px, calc\(100vh - 144px\)\)/);
@@ -512,14 +506,14 @@ test('styles figure references, previews, and target highlights', () => {
             '.markdown-editor-host > .cm-editor .cm-mktero-figure-reference',
         ].join('\n')
     );
-    assert.match(reference, /color:\s*var\(--accent\)/);
+    assert.match(reference, /color:\s*var\(--accent-strong\)/);
     assert.match(reference, /cursor:\s*pointer/);
 
     const popup = ruleBody('.mktero-figure-preview-popup');
     assert.match(popup, /width:\s*min\(620px, calc\(100vw - 48px\)\)/);
 
     const content = ruleBody('.mktero-figure-preview-content');
-    assert.match(content, /padding:\s*10px/);
+    assert.match(content, /padding:\s*12px/);
 
     const viewport = ruleBody('.mktero-figure-preview-viewport');
     assert.match(viewport, /max-height:\s*min\(440px, calc\(100vh - 144px\)\)/);
