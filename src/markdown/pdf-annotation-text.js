@@ -13,6 +13,8 @@ const SENTENCE_END = /[.!?。！？]/u;
 const RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}])(\s*)(<=|>=|!=|[=<>≤≥≠])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
 const SIGNED_NUMBER_WHITESPACE_PATTERN = /[+\-−±](\s+)(?=\d)/gu;
 const DEGREE_SYMBOL_WHITESPACE_PATTERN = /([\p{N})\]}])(\s+)(?=°)/gu;
+const DEGREE_SYMBOL_UNIT_WHITESPACE_PATTERN = /°(\s+)(?=\p{L})/gu;
+const LATEX_TEXT_UNIT_PATTERN = /(?<!\\)\\mathrm\{([A-Za-z]{1,32})\}/gu;
 const LATEX_SYMBOL_REPLACEMENTS = [
     { pattern: /(?<![\\;])(?:\\;)?\^\{\\circ\}/gu, text: '°' },
     { pattern: /(?<!\\)\\pm(?![A-Za-z])/gu, text: '±' },
@@ -226,6 +228,18 @@ function markLatexSymbols(text, ignoredOffsets, replacements) {
             );
         }
     }
+    for (const match of text.matchAll(LATEX_TEXT_UNIT_PATTERN)) {
+        replacements.set(match.index, {
+            from: match.index,
+            to: match.index + match[0].length,
+            text: match[1],
+        });
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + 1,
+            match[0].length - 1
+        );
+    }
 }
 
 function markMathematicalWhitespace(text, ignoredOffsets) {
@@ -254,6 +268,15 @@ function markMathematicalWhitespace(text, ignoredOffsets) {
             ignoredOffsets,
             match.index + match[1].length,
             match[2].length
+        );
+    }
+    for (const match of text.matchAll(
+        DEGREE_SYMBOL_UNIT_WHITESPACE_PATTERN
+    )) {
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + 1,
+            match[1].length
         );
     }
 }

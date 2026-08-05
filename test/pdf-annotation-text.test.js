@@ -21,8 +21,28 @@ test('normalizes mathematical operator whitespace while preserving source ranges
     assert.equal(normalizePdfAnnotationText('well - being'), 'well - being');
 });
 
+test('normalizes PDF.js spacing around degree units while preserving source ranges', () => {
+    const markdown = 'Basal body temperature increases by 0.3 °C.';
+    const pdf = 'Basal body temperature increases by 0.3   ° C.';
+    const markdownIndex = createPdfAnnotationTextIndex(markdown);
+    const pdfIndex = createPdfAnnotationTextIndex(pdf);
+
+    assert.equal(pdfIndex.text, markdownIndex.text);
+    assert.equal(
+        pdfIndex.text,
+        'Basal body temperature increases by 0.3°C.'
+    );
+
+    const target = '0.3°C';
+    const range = pdfIndex.sourceRange(
+        pdfIndex.text.indexOf(target),
+        target.length
+    );
+    assert.equal(pdf.slice(range.from, range.to), '0.3   ° C');
+});
+
 test('normalizes MinerU LaTeX symbols while preserving source ranges', () => {
-    const markdown = 'Difference 0.30\\;^{\\circ}C; window \\pm2.';
+    const markdown = 'Difference 0.30\\;^{\\circ}\\mathrm{C}; window \\pm2.';
     const pdf = 'Difference 0.30 °C; window ± 2.';
     const markdownIndex = createPdfAnnotationTextIndex(markdown);
     const pdfIndex = createPdfAnnotationTextIndex(pdf);
@@ -42,7 +62,7 @@ test('normalizes MinerU LaTeX symbols while preserving source ranges', () => {
     );
     assert.equal(
         markdown.slice(markdownDegreeRange.from, markdownDegreeRange.to),
-        '0.30\\;^{\\circ}C'
+        '0.30\\;^{\\circ}\\mathrm{C}'
     );
     assert.equal(
         pdf.slice(pdfDegreeRange.from, pdfDegreeRange.to),
@@ -59,6 +79,24 @@ test('normalizes MinerU LaTeX symbols while preserving source ranges', () => {
         '\\pm2'
     );
     assert.equal(normalizePdfAnnotationText('\\pmod2'), '\\pmod2');
+});
+
+test('normalizes LaTeX temperature units from saved Markdown annotations', () => {
+    const markdown = 'Temperature increased by 0.3^{\\circ}\\mathrm{C}.';
+    const pdf = 'Temperature increased by 0.3 °C.';
+    const markdownIndex = createPdfAnnotationTextIndex(markdown);
+    const pdfIndex = createPdfAnnotationTextIndex(pdf);
+
+    assert.equal(markdownIndex.text, 'Temperature increased by 0.3°C.');
+    assert.equal(markdownIndex.text, pdfIndex.text);
+    const range = markdownIndex.sourceRange(
+        markdownIndex.text.indexOf('0.3°C'),
+        '0.3°C'.length
+    );
+    assert.equal(
+        markdown.slice(range.from, range.to),
+        '0.3^{\\circ}\\mathrm{C}'
+    );
 });
 
 test('leaves escaped, malformed, and oversized LaTeX-like input unchanged', () => {

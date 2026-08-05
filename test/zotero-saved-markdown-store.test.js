@@ -413,6 +413,31 @@ test('saves a portable snapshot and synced source attachments under the parent i
     assert.deepEqual(importedContentTypes, ['text/markdown', 'application/json']);
 });
 
+test('does not let an invalid source map block a portable snapshot', async () => {
+    const { parent, pdf, store } = createHarness();
+    const markdown = 'Results from the menstrual-cycle study.';
+    const result = await store.saveSnapshot({
+        pdfItem: pdf,
+        parentItem: parent,
+        markdown,
+        assets: [],
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length + 1,
+            locations: [{ pageIndex: 0, bbox: [0, 0, 100, 100] }],
+        }],
+        cacheKey: 'a'.repeat(64),
+        parserProfile: 'mineru-v1',
+    });
+
+    const saved = await store.read(result.note);
+
+    assert.equal(saved.sourceAvailable, true);
+    assert.deepEqual(saved.sourceMap, []);
+    assert.match(saved.markdown, /menstrual-cycle/);
+});
+
 test('recognizes a saved snapshot after Zotero wraps the note HTML', async () => {
     const { parent, pdf, store } = createHarness();
     const result = await store.saveSnapshot({

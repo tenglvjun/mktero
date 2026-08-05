@@ -647,11 +647,7 @@ export class ZoteroSavedMarkdownStore {
 
     async #prepareSnapshot({ markdown, assets, assetBasePath, sourceMap }) {
         const normalizedAssets = normalizeAssets(assets);
-        const sourceMapJSON = JSON.stringify(sourceMap);
-        if (new TextEncoder().encode(sourceMapJSON).length > MAX_SOURCE_MAP_BYTES) {
-            throw new Error('Saved Markdown source map exceeds the size limit');
-        }
-        validateSourceMap(sourceMap, markdown.length);
+        const sourceMapJSON = serializeSourceMapJSON(sourceMap, markdown.length);
         return {
             markdown,
             normalizedAssets,
@@ -1042,10 +1038,18 @@ function parseSourceMap(sourceMapJSON, markdownLength) {
     return sourceMap;
 }
 
-function validateSourceMap(sourceMap, markdownLength) {
-    if (sourceMap.length > MAX_SOURCE_MAP_ENTRIES
-        || sourceMap.some(entry => !isValidSourceMapEntry(entry, markdownLength))) {
-        throw new Error('Saved Markdown source map is invalid');
+function serializeSourceMapJSON(sourceMap, markdownLength) {
+    try {
+        const validEntries = sourceMap.length > MAX_SOURCE_MAP_ENTRIES
+            ? []
+            : sourceMap.filter(entry => isValidSourceMapEntry(entry, markdownLength));
+        const serialized = JSON.stringify(validEntries);
+        return new TextEncoder().encode(serialized).length > MAX_SOURCE_MAP_BYTES
+            ? '[]'
+            : serialized;
+    }
+    catch {
+        return '[]';
     }
 }
 

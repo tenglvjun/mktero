@@ -764,6 +764,36 @@ test('locates MinerU LaTeX and statistical text in the PDF', async () => {
     assert.equal(result.savedJSON.text, STATISTICAL_MARKDOWN_PASSAGE);
 });
 
+test('locates PDF.js text with spaces around a degree unit', async () => {
+    const markdownPassage = 'basal body temperature increases by 0.3 °C';
+    const pdfPassage = 'basal body temperature increases by 0.3   ° C';
+    const result = await createAnnotationWithNormalizedPDFSearch(
+        markdownPassage,
+        pdfPassage
+    );
+
+    assert.equal(result.created.id, 'SYNC0001');
+    assert.deepEqual(result.queries, [markdownPassage, pdfPassage]);
+    assert.equal(result.savedJSON.text, markdownPassage);
+});
+
+test('locates saved Markdown LaTeX temperature text in the PDF', async () => {
+    const markdownPassage = 'Luteinizing hormones (LH) surge when a female '
+        + 'individual is ovulating and basal body temperature increases by '
+        + '0.3^{\\circ}\\mathrm{C}';
+    const pdfPassage = 'Luteinizing hormones (LH) surge when a female '
+        + 'individual is ovulating and basal body temperature increases by '
+        + '0.3 °C';
+    const result = await createAnnotationWithNormalizedPDFSearch(
+        markdownPassage,
+        pdfPassage
+    );
+
+    assert.equal(result.created.id, 'SYNC0001');
+    assert.deepEqual(result.queries, [markdownPassage, pdfPassage]);
+    assert.equal(result.savedJSON.text, markdownPassage);
+});
+
 test('locates the menstrual-cycle abstract across PDF.js nonbreaking hyphens', async () => {
     for (const {
         markdownPassage,

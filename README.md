@@ -42,8 +42,10 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
   将解析图片作为 Note 的嵌入图片附件保存，并将原始
   source.md、source-map.json 作为当前文献条目的附件保存，并通过 Zotero relation 关联到
   专用 Note。识别 manifest 保存在 Zotero 会保留的标准链接中。这些内容由 Zotero 正常
-  同步；公式会保存为 Zotero 原生数学节点，双击 Note 时由 Zotero 自己渲染。其他 Zotero
-  Note 不会被扫描或修改。没有所属文献条目的独立 PDF 不能保存快照。
+  同步；公式会保存为 Zotero 原生数学节点，双击 Note 时由 Zotero 自己渲染。来源映射
+  异常时仍会保存 Markdown 和 HTML 快照，但该快照不能跳转回 PDF 原文。保存成功或失败
+  的提示会短暂显示并自动消失，关闭标签页时也会清理提示状态。其他 Zotero Note 不会被
+  扫描或修改。没有所属文献条目的独立 PDF 不能保存快照。
 - 在安装 Mktero 的桌面端，右键 Mktero 专用 Note 会优先读取匹配的本地缓存或同步的
   source.md，因此继续使用 Markdown 阅读器、来源跳转和标注功能；如果源附件未下载或
   不可用，则显示同步到 Note 中的 HTML 快照。没有安装 Mktero 的 Zotero 客户端可以直接
@@ -77,7 +79,9 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
 - 在 Markdown 正文和渲染后的表格、图题等内容中显示 Zotero PDF 高亮与下划线标注，
   保留标注颜色；匹配时会分别处理普通 Markdown 转义标点与行内公式中的 LaTeX 命令，
   并兼容 PDF 与 MinerU 之间的智能引号、连字符、数字引用、句末脚注上标、商标上标、
-  统计运算符空格以及常见温度和正负号 LaTeX 格式差异；鼠标在划词上短暂停留或用键盘
+  统计运算符空格、度数单位周围的 PDF 文本层空格、温度单位的 `\\mathrm` LaTeX 包装以及
+  常见温度和正负号 LaTeX 格式差异；
+  鼠标在划词上短暂停留或用键盘
   聚焦时可更改颜色或删除对应 Zotero 标注，点击划词可新增或编辑评论；带评论的标注会在
   起始左上角显示笔记图标，点击或用键盘激活图标可继续修改评论。
 - 在普通 Markdown 正文中拖动划词后显示紧凑操作条，可选择颜色立即保存 Markdown 高亮，

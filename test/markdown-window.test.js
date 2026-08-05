@@ -380,6 +380,80 @@ test('opens the document action menu and reports snapshot save state', async () 
     view.destroy();
 });
 
+test('clears a failed snapshot save status after reporting the error', async () => {
+    let rejectSave;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onSaveSnapshot: () => new Promise((resolve, reject) => {
+            rejectSave = reject;
+        }),
+    });
+    const { view, shadow } = createView(model);
+    const timers = [];
+    const clearCalls = [];
+    view.ownerWindow.setTimeout = (callback, delay) => {
+        const timer = { callback, delay };
+        timers.push(timer);
+        return timer;
+    };
+    view.ownerWindow.clearTimeout = timer => clearCalls.push(timer);
+
+    const toggle = shadow.querySelector('#mktero-document-actions');
+    const save = shadow.querySelector('#mktero-save-snapshot');
+    toggle.click();
+    save.click();
+    rejectSave(new Error('snapshot save failed'));
+    await new Promise(resolve => setImmediate(resolve));
+
+    const status = shadow.querySelector('.markdown-reader-action-status');
+    assert.equal(status.hidden, false);
+    assert.equal(status.textContent, 'The Zotero snapshot could not be saved.');
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].delay > 0, true);
+
+    timers[0].callback();
+    assert.equal(status.hidden, true);
+    assert.equal(status.textContent, '');
+
+    view.destroy();
+    assert.deepEqual(clearCalls, []);
+});
+
+test('cancels a pending snapshot status dismissal when the view is destroyed', async () => {
+    let rejectSave;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onSaveSnapshot: () => new Promise((resolve, reject) => {
+            rejectSave = reject;
+        }),
+    });
+    const { view, shadow } = createView(model);
+    const timers = [];
+    const clearCalls = [];
+    view.ownerWindow.setTimeout = (callback, delay) => {
+        const timer = { callback, delay };
+        timers.push(timer);
+        return timer;
+    };
+    view.ownerWindow.clearTimeout = timer => clearCalls.push(timer);
+
+    shadow.querySelector('#mktero-document-actions').click();
+    shadow.querySelector('#mktero-save-snapshot').click();
+    rejectSave(new Error('snapshot save failed'));
+    await new Promise(resolve => setImmediate(resolve));
+
+    view.destroy();
+
+    assert.equal(timers.length, 1);
+    assert.deepEqual(clearCalls, [timers[0]]);
+});
+
 test('renders a saved HTML snapshot without exposing PDF actions or editing controls', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',

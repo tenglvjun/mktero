@@ -23,6 +23,7 @@ const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
     ? __MKTERO_MARKDOWN_STYLES__
     : null;
+const DOCUMENT_ACTION_STATUS_TIMEOUT_MS = 5_000;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
     outline: 820,
@@ -110,6 +111,7 @@ class MarkdownTabView {
         this.renderedSnapshotAssets = undefined;
         this.snapshotURLs = new Map();
         this.documentActionBusy = null;
+        this.actionStatusTimer = null;
         this.documentActionsOpen = false;
         this.activeNavigationOffset = 0;
         this.listeners = [];
@@ -255,6 +257,7 @@ class MarkdownTabView {
     }
 
     destroy() {
+        this.clearDocumentActionStatus();
         for (const { element, type, listener } of this.listeners) {
             element.removeEventListener(type, listener);
         }
@@ -891,10 +894,7 @@ class MarkdownTabView {
         }
         this.documentActionBusy = kind;
         if (kind === 'saveSnapshot') {
-            this.elements.actionStatus.textContent = this.t(
-                'viewer.snapshotSaving'
-            );
-            this.elements.actionStatus.hidden = false;
+            this.setDocumentActionStatus('viewer.snapshotSaving');
         }
         this.setDocumentActionsOpen(false);
         this.syncDocumentActions(
@@ -907,6 +907,12 @@ class MarkdownTabView {
         }
         catch (error) {
             this.zotero?.logError?.(error);
+            if (kind === 'saveSnapshot') {
+                this.setDocumentActionStatus(
+                    'viewer.snapshotSaveFailed',
+                    { dismissAfter: true }
+                );
+            }
             this.documentActionBusy = null;
             this.syncDocumentActions(
                 this.model,
@@ -917,15 +923,18 @@ class MarkdownTabView {
         Promise.resolve(operation)
             .then(() => {
                 if (kind === 'saveSnapshot') {
-                    this.elements.actionStatus.textContent
-                        = this.t('viewer.snapshotSaved');
+                    this.setDocumentActionStatus(
+                        'viewer.snapshotSaved',
+                        { dismissAfter: true }
+                    );
                 }
             })
             .catch(error => {
                 this.zotero?.logError?.(error);
                 if (kind === 'saveSnapshot') {
-                    this.elements.actionStatus.textContent = this.t(
-                        'viewer.snapshotSaveFailed'
+                    this.setDocumentActionStatus(
+                        'viewer.snapshotSaveFailed',
+                        { dismissAfter: true }
                     );
                 }
             })
@@ -936,6 +945,30 @@ class MarkdownTabView {
                     createLoadingPresentation(this.model, this.t)
                 );
             });
+    }
+
+    setDocumentActionStatus(key, { dismissAfter = false } = {}) {
+        this.clearDocumentActionStatus();
+        this.elements.actionStatus.textContent = this.t(key);
+        this.elements.actionStatus.hidden = false;
+        if (!dismissAfter || typeof this.ownerWindow.setTimeout !== 'function') {
+            return;
+        }
+        this.actionStatusTimer = this.ownerWindow.setTimeout(() => {
+            this.actionStatusTimer = null;
+            this.elements.actionStatus.textContent = '';
+            this.elements.actionStatus.hidden = true;
+        }, DOCUMENT_ACTION_STATUS_TIMEOUT_MS);
+    }
+
+    clearDocumentActionStatus() {
+        if (this.actionStatusTimer !== null) {
+            this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
+            this.actionStatusTimer = null;
+        }
+        if (!this.elements?.actionStatus) return;
+        this.elements.actionStatus.textContent = '';
+        this.elements.actionStatus.hidden = true;
     }
 
     runNoteButtonAction(button, action) {
