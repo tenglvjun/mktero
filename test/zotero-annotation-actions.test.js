@@ -25,6 +25,23 @@ const STATISTICAL_MARKDOWN_PASSAGE = 'temperature 0.30\\;^{\\circ}C '
 const STATISTICAL_PDF_PASSAGE = 'temperature 0.30 °C (p < 0.001) and '
     + 'correlation (r = 0.563, p < 0.001); window ± 2 to ± 4; ovulation '
     + 'from − 3 to + 2';
+const MENSTRUAL_METHODS_PASSAGE = 'We used linear mixed models to assess '
+    + 'changes in physiological parameters and developed probability function '
+    + 'estimation models to predict the fertile window and menses with '
+    + 'machine learning.';
+const MENSTRUAL_RESULTS_PASSAGE = 'Based on BBT and HR, we developed '
+    + 'algorithms that predicted the fertile window with an accuracy of '
+    + '87.46%, sensitivity of 69.30%, specificity of 92.00%, and AUC of '
+    + '0.8993 and menses with an accuracy of 89.60%, sensitivity of 70.70%, '
+    + 'and specificity of 94.30%, and AUC of 0.7849 among regular '
+    + 'menstruators.';
+const MENSTRUAL_METHODS_PDF_PASSAGE = MENSTRUAL_METHODS_PASSAGE
+    .replace('parameters', 'param\u2011\neters')
+    .replace('machine learning', 'machine\nlearning');
+const MENSTRUAL_RESULTS_PDF_PASSAGE = MENSTRUAL_RESULTS_PASSAGE.replace(
+    'menstruators',
+    'menstrua\u2011\ntors'
+);
 
 test('creates a Zotero PDF highlight from located Markdown text', async () => {
     const selectedText = 'The sound of stress recovery: an exploratory study '
@@ -745,6 +762,37 @@ test('locates MinerU LaTeX and statistical text in the PDF', async () => {
         STATISTICAL_PDF_PASSAGE,
     ]);
     assert.equal(result.savedJSON.text, STATISTICAL_MARKDOWN_PASSAGE);
+});
+
+test('locates the menstrual-cycle abstract across PDF.js nonbreaking hyphens', async () => {
+    for (const {
+        markdownPassage,
+        pdfPassage,
+        pdfPageIndexHint,
+    } of [
+        {
+            markdownPassage: MENSTRUAL_METHODS_PASSAGE + '\n',
+            pdfPassage: MENSTRUAL_METHODS_PDF_PASSAGE,
+        },
+        {
+            markdownPassage: MENSTRUAL_RESULTS_PASSAGE,
+            pdfPassage: MENSTRUAL_RESULTS_PDF_PASSAGE,
+            pdfPageIndexHint: 0,
+        },
+    ]) {
+        const result = await createAnnotationWithPDFJSNormalizedSearch(
+            markdownPassage,
+            pdfPassage,
+            pdfPageIndexHint
+        );
+
+        assert.equal(result.created.id, 'SYNC0001');
+        assert.deepEqual(result.queries, [
+            markdownPassage,
+            normalizePDFJSFindText(pdfPassage).replaceAll('\u2010', '\u2011'),
+        ]);
+        assert.equal(result.savedJSON.text, markdownPassage);
+    }
 });
 
 test('clones find states into the Zotero reader realm', async () => {
@@ -1621,6 +1669,77 @@ async function createAnnotationWithNormalizedPDFSearch(
         color: '#a28ae5',
     });
     return { created, queries, savedJSON };
+}
+
+async function createAnnotationWithPDFJSNormalizedSearch(
+    markdownPassage,
+    pdfPassage,
+    pdfPageIndexHint
+) {
+    const queries = [];
+    let savedJSON;
+    const pageContent = normalizePDFJSFindText(pdfPassage);
+    const view = {
+        _findState: { active: false, query: '', result: null },
+        initializedPromise: Promise.resolve(),
+        setFindState(state) {
+            if (!state.active) {
+                this._findState = state;
+                return;
+            }
+            queries.push(state.query);
+            markSearchComplete(this, state.query);
+            this._findController._pageContents = [pageContent];
+            this._findState = {
+                ...state,
+                result: pageContent.includes(
+                    normalizePDFJSFindText(state.query)
+                )
+                    ? {
+                        total: 1,
+                        annotation: locatedAnnotation(pdfPassage),
+                    }
+                    : { total: 0 },
+            };
+        },
+    };
+    let clock = 0;
+    const zotero = createZoteroForAnnotationCreation({
+        view,
+        async saveFromJSON(_attachment, json) {
+            savedJSON = json;
+            return { key: json.key };
+        },
+    });
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => clock,
+        async delay(milliseconds) {
+            clock += milliseconds;
+        },
+        searchTimeout: 1_000,
+    });
+    const created = await actions.createFromText(42, {
+        text: markdownPassage,
+        comment: '',
+        color: '#a28ae5',
+        ...(pdfPageIndexHint === undefined ? {} : { pdfPageIndexHint }),
+    });
+    return { created, queries, savedJSON };
+}
+
+function normalizePDFJSFindText(text) {
+    // Zotero's PDF.js normalizer handles these alternatives in one pass.
+    // In particular, a U+2011 replacement is not processed again as U+2010.
+    return String(text).normalize('NFD').replace(
+        /(\u2010)|(\u2011)|(\p{Ll}-\n(?=\p{Ll})|\p{Lu}-\n(?=\p{L}))|(\S-\n)|(\n)/gu,
+        (match, hyphen, nonbreakingHyphen, brokenWord, dashEOL, newline) => {
+            if (hyphen) return '-';
+            if (nonbreakingHyphen) return '\u2010';
+            if (brokenWord || dashEOL) return match.slice(0, -2);
+            if (newline) return ' ';
+            return match;
+        }
+    );
 }
 
 function createZoteroForAnnotationCreation({ view, saveFromJSON }) {

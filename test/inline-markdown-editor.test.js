@@ -3796,6 +3796,75 @@ test('does not offer a partial annotation across rendered boundaries', () => {
     dom.window.close();
 });
 
+test('creates a highlight immediately after an existing abstract highlight', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const existingText = 'Based on BBT and HR, we developed algorithms that '
+        + 'predicted the fertile window with an accuracy of 87.46%, '
+        + 'sensitivity of 69.30%, specificity of 92.00%, and AUC of 0.8993 '
+        + 'and menses with an accuracy of 89.60%, sensitivity of 70.70%, and '
+        + 'specificity of 94.30%, and AUC of 0.7849 among regular '
+        + 'menstruators.';
+    const selectedText = 'For irregular menstruators, the accuracy, '
+        + 'sensitivity, specificity and AUC were 72.51%, 21.00%, 82.90%, '
+        + 'and 0.5808 respectively, for fertile window prediction and '
+        + '75.90%, 36.30%, 84.40%, and 0.6759 for menses prediction.';
+    const markdown = `${existingText} ${selectedText}`;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-irregular' };
+        },
+    });
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'PDF0001',
+                source: 'zotero',
+                type: 'highlight',
+                text: existingText,
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '1',
+                ranges: [{ from: 0, to: existingText.length }],
+            }],
+            unmatched: [],
+        },
+    });
+    const line = document.querySelector('.cm-line');
+    const selectedNode = textNodeContaining(line, selectedText);
+    const range = document.createRange();
+    range.selectNodeContents(selectedNode);
+    document.getSelection().addRange(range);
+
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    const colorButton = document.querySelector('[data-color="#ffd400"]');
+    assert.ok(colorButton);
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const from = markdown.indexOf(selectedText);
+    assert.equal(created.text, selectedText);
+    assert.deepEqual(created.ranges, [{
+        from,
+        to: from + selectedText.length,
+    }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('creates a local highlight from the selected Markdown text', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

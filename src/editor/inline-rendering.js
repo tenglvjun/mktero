@@ -922,8 +922,8 @@ export function selectedMarkdownAnnotation(view) {
         || !selectionNodeInEditor(view, range.endContainer)) {
         return null;
     }
-    const text = selection.toString();
-    if (!text.trim()) return null;
+    const selectedText = selection.toString();
+    if (!selectedText.trim()) return null;
     const renderedStart = renderedSelectionContainer(
         range.startContainer,
         view
@@ -931,7 +931,7 @@ export function selectedMarkdownAnnotation(view) {
     const renderedEnd = renderedSelectionContainer(range.endContainer, view);
     if (renderedStart || renderedEnd) {
         return renderedStart && renderedStart === renderedEnd
-            ? selectedRenderedMarkdownAnnotation(view, range, text)
+            ? selectedRenderedMarkdownAnnotation(view, range, selectedText)
             : null;
     }
     const renderedIntersections = intersectingRenderedContent(view, range);
@@ -939,8 +939,14 @@ export function selectedMarkdownAnnotation(view) {
     try {
         const first = view.posAtDOM(range.startContainer, range.startOffset);
         const second = view.posAtDOM(range.endContainer, range.endOffset);
-        const from = Math.min(first, second);
-        const to = Math.max(first, second);
+        const selectionFrom = Math.min(first, second);
+        const selectionTo = Math.max(first, second);
+        const leadingWhitespace = selectedText.length
+            - selectedText.trimStart().length;
+        const trailingWhitespace = selectedText.length
+            - selectedText.trimEnd().length;
+        const from = selectionFrom + leadingWhitespace;
+        const to = selectionTo - trailingWhitespace;
         if (to <= from) return null;
         if (renderedIntersections.length) {
             return selectedInlineMathAnnotation(
@@ -950,6 +956,7 @@ export function selectedMarkdownAnnotation(view) {
                 to
             );
         }
+        const text = selectedText.trim();
         if (text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
         return { text, ranges: [{ from, to }] };
     }

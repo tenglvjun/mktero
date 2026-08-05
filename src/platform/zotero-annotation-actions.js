@@ -408,11 +408,13 @@ async function findPDFTextSearchResult(view, reader, text, options) {
         if (fallback.ambiguous) throw ambiguousPDFTextError();
         if (fallback.query) {
             usedNormalizedQuery = true;
-            activeQuery = fallback.query;
+            activeQuery = normalizePDFSearchQueryForZotero(
+                fallback.query
+            );
             result = requirePDFTextSearchResult(await runPDFTextSearch(
                 view,
                 reader,
-                fallback.query,
+                activeQuery,
                 options
             ));
         }
@@ -561,6 +563,15 @@ function findNormalizedPDFSearchQuery(view, text, tracker = null) {
         }
     }
     return { query, ambiguous: false, unavailable: false };
+}
+
+function normalizePDFSearchQueryForZotero(query) {
+    // PDF.js processes character replacements in one pass. A U+2011 in PDF
+    // page text becomes U+2010 through NFKC, while a U+2010 in a new search
+    // query takes an earlier branch and becomes an ASCII hyphen. Re-encode
+    // the fallback as U+2011 so its next PDF.js pass produces the page's
+    // existing U+2010 instead.
+    return String(query).replaceAll('\u2010', '\u2011');
 }
 
 function findNormalizedTextOnPDFPage(page, text, target) {
