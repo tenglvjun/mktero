@@ -182,6 +182,9 @@ export function createInlineMarkdownEditor({
                 for (const popup of interactionPopups) popup.close();
             }
             view.requestMeasure();
+            if (event.type === 'scroll' && event.target === view.scrollDOM) {
+                onViewportChange?.(editorViewportOffset(view));
+            }
             if (event.type === 'scroll'
                 && typeof ownerWindow.IntersectionObserver !== 'function') {
                 view.measure();
@@ -218,7 +221,7 @@ export function createInlineMarkdownEditor({
                     if (update.viewportChanged
                         || update.geometryChanged
                         || update.docChanged) {
-                        onViewportChange?.(update.view.viewport.from);
+                        onViewportChange?.(editorViewportOffset(update.view));
                     }
                 }),
             ],
@@ -359,6 +362,20 @@ export function createInlineMarkdownEditor({
             }
         },
     };
+}
+
+function editorViewportOffset(editorView) {
+    const scrollTop = Number(editorView.scrollDOM?.scrollTop);
+    if (!Number.isFinite(scrollTop)
+        || typeof editorView.lineBlockAtHeight !== 'function') {
+        return editorView.viewport.from;
+    }
+    try {
+        return editorView.lineBlockAtHeight(Math.max(0, scrollTop + 8)).from;
+    }
+    catch {
+        return editorView.viewport.from;
+    }
 }
 
 function createSourcedEvidence(markdown, sourceMap, target) {

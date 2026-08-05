@@ -4168,13 +4168,20 @@ test('reports the first visible Markdown offset to the owning reader', () => {
         onViewportChange: offset => offsets.push(offset),
     });
 
-    editor.setMarkdown('# Updated\n\nUpdated text.');
+    const updatedMarkdown = '# Updated\n\nUpdated text.';
+    editor.setMarkdown(updatedMarkdown);
+    const scroller = document.querySelector('.cm-scroller');
+    scroller.scrollTop = 12;
+    scroller.dispatchEvent(new dom.window.Event('scroll', {
+        bubbles: true,
+    }));
 
     editor.destroy();
     dom.window.close();
 
     assert.ok(offsets.length > 0);
-    assert.equal(offsets.at(-1), 0);
+    assert.ok(offsets.at(-1) > 0);
+    assert.ok(offsets.at(-1) < updatedMarkdown.length);
 });
 
 test('observes editor visibility through the owning Zotero window', () => {

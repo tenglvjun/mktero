@@ -912,6 +912,54 @@ test('collapses side panels responsively and restores automatic changes', () => 
     }
 });
 
+test('isolates responsive panels across windows and cleans up resize listeners', () => {
+    const first = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# First',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow(window) {
+            Object.defineProperty(window, 'innerWidth', {
+                configurable: true,
+                value: 800,
+                writable: true,
+            });
+        },
+    });
+    const second = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Second',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow(window) {
+            Object.defineProperty(window, 'innerWidth', {
+                configurable: true,
+                value: 1200,
+                writable: true,
+            });
+        },
+    });
+
+    try {
+        assert.equal(first.shadow.querySelector('#mktero-outline').hidden, true);
+        assert.equal(first.shadow.querySelector('#mktero-notes').hidden, true);
+        assert.equal(second.shadow.querySelector('#mktero-outline').hidden, false);
+        assert.equal(second.shadow.querySelector('#mktero-notes').hidden, false);
+    }
+    finally {
+        first.view.destroy();
+        first.document.defaultView.innerWidth = 1200;
+        first.document.defaultView.dispatchEvent(
+            new first.document.defaultView.Event('resize')
+        );
+        assert.equal(first.shadow.querySelector('#mktero-outline').hidden, true);
+        assert.equal(first.shadow.querySelector('#mktero-notes').hidden, true);
+        second.view.destroy();
+    }
+});
+
 test('tracks the active outline and note while the editor viewport changes', () => {
     const markdown = '# Overview\n\nIntro.\n\n## Methods\n\nMethod text.';
     let editorOptions;

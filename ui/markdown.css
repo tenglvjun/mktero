@@ -816,6 +816,14 @@ main {
     font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.markdown-snapshot-host pre code {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    font: inherit;
+}
+
 .markdown-snapshot-host figure {
     margin: 28px 0 32px;
     text-align: center;
@@ -1232,7 +1240,7 @@ main {
     left: var(--anchored-popup-arrow-left, 50%);
     width: 10px;
     height: 10px;
-    background: var(--surface);
+    background: var(--surface-raised);
     border: solid var(--border);
     border-width: 0 1px 1px 0;
     content: "";

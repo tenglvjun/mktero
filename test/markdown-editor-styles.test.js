@@ -381,6 +381,9 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
         /width:\s*min\(360px, calc\(100vw - 24px\)\)/
     );
 
+    const popupArrow = ruleBody('.mktero-annotation-popup::after');
+    assert.match(popupArrow, /background:\s*var\(--surface-raised\)/);
+
     const noteInput = ruleBody('.mktero-annotation-note-input');
     assert.match(noteInput, /width:\s*100%/);
     assert.match(noteInput, /min-height:\s*82px/);
@@ -451,6 +454,17 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
     assert.match(noteSeparator, /width:\s*1px/);
     assert.match(noteSeparator, /top:\s*3px/);
     assert.match(noteSeparator, /bottom:\s*3px/);
+});
+
+test('keeps snapshot code blocks from inheriting inline code chrome', () => {
+    const inlineCode = ruleBody('.markdown-snapshot-host code');
+    assert.match(inlineCode, /border:\s*1px solid var\(--border-subtle\)/);
+
+    const blockCode = ruleBody('.markdown-snapshot-host pre code');
+    assert.match(blockCode, /padding:\s*0/);
+    assert.match(blockCode, /border:\s*0/);
+    assert.match(blockCode, /background:\s*transparent/);
+    assert.match(blockCode, /font:\s*inherit/);
 });
 
 test('styles table references, previews, and target highlights', () => {
