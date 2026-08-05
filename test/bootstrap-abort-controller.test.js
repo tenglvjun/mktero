@@ -18,6 +18,7 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
     };
     const alerts = [];
     const debugLogs = [];
+    const actionsTagsEvents = [];
     let toolbarHandler;
     let resolveOpenedPreferences;
     const openedPreferences = new Promise(resolve => {
@@ -44,6 +45,15 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
                 getDisplayTitle: () => 'Paper',
                 getFilePathAsync: async () => '/tmp/paper.pdf',
             }),
+        },
+        ActionsTags: {
+            api: {
+                actionManager: {
+                    async dispatchActionByEvent(event, args) {
+                        actionsTagsEvents.push({ event, args });
+                    },
+                },
+            },
         },
         PreferencePanes: {
             register: async options => options.id,
@@ -111,6 +121,7 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
     assert.equal(await openedPreferences, 'mktero-preferences');
     assert.ok(debugLogs.some(message => message.includes('conversion started for item 42')));
     assert.ok(debugLogs.some(message => message.includes('conversion failed for item 42')));
+    assert.deepEqual(actionsTagsEvents, []);
 });
 
 function createMainWindow(AbortController, alerts) {

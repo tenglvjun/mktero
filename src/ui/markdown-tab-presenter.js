@@ -9,6 +9,12 @@ const TAB_ICON = 'markdown';
 const TAB_ICON_STYLE_ID = 'mktero-markdown-tab-icon-style';
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
+export const MARKDOWN_TAB_CLOSE_REASONS = Object.freeze({
+    USER: 'user',
+    REPLACEMENT: 'replacement',
+    SHUTDOWN: 'shutdown',
+});
+
 export class MarkdownTabPresenter {
     constructor({
         zotero,
@@ -151,13 +157,19 @@ export class MarkdownTabPresenter {
                 select: true,
                 preventJumpback: true,
                 onClose: () => {
-                    if (presentation) presentation.closed = true;
+                    if (presentation?.closed) return;
+                    const reason = presentation?.closeReason
+                        || MARKDOWN_TAB_CLOSE_REASONS.USER;
+                    if (presentation) {
+                        presentation.closed = true;
+                        presentation.closeReason = null;
+                    }
                     presentation?.view.destroy?.();
                     if (this.presentations.get(documentID)?.tabID === tabID) {
                         this.presentations.delete(documentID);
                     }
                     try {
-                        presentation?.onClose?.();
+                        presentation?.onClose?.({ reason });
                     }
                     catch (error) {
                         this.zotero.logError?.(error);
@@ -179,6 +191,7 @@ export class MarkdownTabPresenter {
             view,
             model,
             closed: false,
+            closeReason: null,
             onClose,
         };
         this.presentations.set(documentID, presentation);
@@ -211,7 +224,10 @@ export class MarkdownTabPresenter {
         )) || null;
     }
 
-    closeForSourceItem(sourceItemID, { exceptDocumentID = null } = {}) {
+    closeForSourceItem(sourceItemID, {
+        exceptDocumentID = null,
+        reason = MARKDOWN_TAB_CLOSE_REASONS.REPLACEMENT,
+    } = {}) {
         if (sourceItemID === null || sourceItemID === undefined) return;
         const sourceKey = String(sourceItemID);
         const exceptKey = exceptDocumentID === null
@@ -224,7 +240,7 @@ export class MarkdownTabPresenter {
                 || presentation.closed) {
                 continue;
             }
-            presentation.tabs.close?.(presentation.tabID);
+            this.closePresentation(presentation, reason);
         }
     }
 
@@ -232,18 +248,24 @@ export class MarkdownTabPresenter {
         return [...this.presentations.values()];
     }
 
-    closeAll() {
+    closeAll({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) {
         for (const presentation of [...this.presentations.values()]) {
-            if (!presentation.closed) presentation.tabs.close?.(presentation.tabID);
+            this.closePresentation(presentation, reason);
         }
         this.presentations.clear();
     }
 
     dispose() {
-        this.closeAll();
+        this.closeAll({ reason: MARKDOWN_TAB_CLOSE_REASONS.SHUTDOWN });
         this.restoreSessionStateFilter();
         this.tabIconStyle?.remove?.();
         this.tabIconStyle = null;
+    }
+
+    closePresentation(presentation, reason) {
+        if (!presentation || presentation.closed) return;
+        presentation.closeReason = reason;
+        presentation.tabs.close?.(presentation.tabID);
     }
 
     ensureTabIconStyle(document) {

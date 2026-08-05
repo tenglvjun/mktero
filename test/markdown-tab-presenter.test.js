@@ -377,6 +377,44 @@ test('updates, destroys, and closes the owned Markdown tab', () => {
     assert.deepEqual(mainWindow.closed, [presentation.tabID]);
 });
 
+test('reports a user close reason once', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const closeReasons = [];
+    const presenter = createPresenter(mainWindow, harness);
+    presenter.open(42, {
+        onClose: ({ reason }) => closeReasons.push(reason),
+    });
+
+    mainWindow.added[0].options.onClose();
+    mainWindow.added[0].options.onClose();
+
+    assert.equal(presenter.get(42), null);
+    assert.deepEqual(closeReasons, ['user']);
+});
+
+test('classifies replacement and shutdown closes separately', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const closeReasons = [];
+    const presenter = createPresenter(mainWindow, harness);
+
+    presenter.open(42, {
+        sourceItemID: 42,
+        onClose: ({ reason }) => closeReasons.push(['pdf', reason]),
+    });
+    presenter.open(900, {
+        sourceItemID: 42,
+        onClose: ({ reason }) => closeReasons.push(['note', reason]),
+    });
+    presenter.dispose();
+
+    assert.deepEqual(closeReasons, [
+        ['pdf', 'replacement'],
+        ['note', 'shutdown'],
+    ]);
+});
+
 test('ignores conversion updates after the Markdown tab is closed', () => {
     const mainWindow = createMainWindow();
     const harness = createViewHarness();

@@ -49,6 +49,9 @@ import {
     createZoteroAnnotationActions,
 } from './platform/zotero-annotation-actions.js';
 import {
+    createZoteroActionsTagsBridge,
+} from './platform/zotero-actions-tags.js';
+import {
     createZoteroSourceNavigation,
 } from './platform/zotero-source-navigation.js';
 import { createZoteroClipboard } from './platform/zotero-clipboard.js';
@@ -68,7 +71,10 @@ import {
 } from './ui/provider-neutral-copy.js';
 import { registerItemContextMenu } from './ui/item-context-menu.js';
 import { registerReaderToolbar } from './ui/reader-toolbar.js';
-import { MarkdownTabPresenter } from './ui/markdown-tab-presenter.js';
+import {
+    MARKDOWN_TAB_CLOSE_REASONS,
+    MarkdownTabPresenter,
+} from './ui/markdown-tab-presenter.js';
 import {
     createAnnotationOverlayRefresher,
 } from './ui/annotation-overlay-refresher.js';
@@ -91,6 +97,7 @@ const runtime = {
     preferencePaneID: null,
     localization: null,
     annotationActions: null,
+    actionsTags: null,
     sourceNavigation: null,
     clipboard: null,
     evidenceReference: null,
@@ -115,6 +122,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.localization = localization;
     runtime.annotationActions = createZoteroAnnotationActions(Zotero);
+    runtime.actionsTags = createZoteroActionsTagsBridge({
+        zotero: Zotero,
+        onError: error => Zotero.logError?.(error),
+    });
     runtime.sourceNavigation = createZoteroSourceNavigation(Zotero);
     runtime.clipboard = createZoteroClipboard(
         typeof Components === 'undefined' ? null : Components
@@ -248,6 +259,7 @@ globalThis.shutdown = function shutdown() {
     runtime.annotationOverlayRefresher?.dispose();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();
+    runtime.actionsTags?.dispose();
     runtime.presenter?.dispose();
     if (runtime.preferencePaneID) {
         Zotero.PreferencePanes.unregister?.(runtime.preferencePaneID);
@@ -261,6 +273,7 @@ globalThis.shutdown = function shutdown() {
     runtime.rootURI = null;
     runtime.localization = null;
     runtime.annotationActions = null;
+    runtime.actionsTags = null;
     runtime.sourceNavigation = null;
     runtime.clipboard = null;
     runtime.evidenceReference = null;
@@ -280,14 +293,30 @@ globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
 };
 
 async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
-    return openItemAsMarkdown(reader.itemID, { forceRefresh });
+    return openItemAsMarkdown(reader.itemID, {
+        forceRefresh,
+        entryPoint: 'reader-toolbar',
+    });
 }
 
-async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
+async function openItemAsMarkdown(itemID, {
+    forceRefresh = false,
+    entryPoint = 'item-menu',
+} = {}) {
     const presentation = runtime.presenter.open(itemID, {
         sourceItemID: itemID,
-        onClose: () => abortConversion(itemID),
-        onReparse: () => openItemAsMarkdown(itemID, { forceRefresh: true }),
+        onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
+            abortConversion(itemID);
+            void runtime.actionsTags?.closeMarkdownSession({
+                sessionID: itemID,
+                sourceItemID: itemID,
+                reason,
+            });
+        },
+        onReparse: () => openItemAsMarkdown(itemID, {
+            forceRefresh: true,
+            entryPoint,
+        }),
         onSaveSnapshot: () => saveSnapshotForItem(itemID),
         onChangeAnnotationColor: (annotationID, color) => (
             runAnnotationAction('changeColor', itemID, annotationID, color)
@@ -325,6 +354,13 @@ async function openItemAsMarkdown(itemID, { forceRefresh = false } = {}) {
             )
         ),
     });
+    if (presentation.created) {
+        void runtime.actionsTags?.openMarkdownSession({
+            sessionID: itemID,
+            sourceItemID: itemID,
+            entryPoint,
+        });
+    }
     if (!presentation.created
         && presentation.model.status !== 'error'
         && !forceRefresh) return;

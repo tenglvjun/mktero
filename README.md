@@ -24,6 +24,11 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
 - 从 PDF 阅读器工具栏的文件图标按钮打开当前附件。
 - 在文库中右键单个 PDF 或带有 PDF 附件的条目，通过
   `Read as Markdown with Mktero` 打开；普通条目会使用找到的第一个 PDF 附件。
+- 如果同时安装了 Actions & Tags for Zotero，从文库菜单直接打开且当前没有原生 PDF
+  阅读器时，Mktero 会按一次 `openFile` 规则处理；用户主动关闭 Mktero 标签页时按一次
+  `closeTab` 规则处理。从已有 PDF 阅读器工具栏进入 Mktero 不会重复触发原生阅读动作，
+  Zotero 或 Mktero 关闭时的清理也不会触发关闭规则。未安装 Actions & Tags 时此兼容行为
+  不生效。
 - 使用 MinerU VLM 模型执行 OCR，并启用公式和表格识别。
 - 在转换标签页中显示排队、上传、解析和下载进度；关闭标签页只会停止本地等待。PDF
   已完成上传时，MinerU 任务可以继续执行，再次打开相同 PDF 会显示正在恢复上次转换，
