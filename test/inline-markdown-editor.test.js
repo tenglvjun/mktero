@@ -4271,6 +4271,244 @@ test('creates a highlight immediately after an existing abstract highlight', asy
     dom.window.close();
 });
 
+test('clamps a paragraph-end selection mapped into the next block', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const existingText = 'Based on BBT and HR, the algorithms worked among '
+        + 'regular menstruators.';
+    const selectedText = 'For irregular menstruators, the accuracy, '
+        + 'sensitivity, specificity and AUC were 72.51%, 21.00%, 82.90%, '
+        + 'and 0.5808 respectively, for fertile window prediction and '
+        + '75.90%, 36.30%, 84.40%, and 0.6759 for menses prediction.';
+    const conclusion = 'Conclusions: By combining BBT and HR we obtained '
+        + 'relatively ideal predictions.';
+    const markdown = `${existingText} ${selectedText}\n\n${conclusion}`;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-irregular' };
+        },
+    });
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'PDF0001',
+                source: 'zotero',
+                type: 'highlight',
+                text: existingText,
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '1',
+                ranges: [{ from: 0, to: existingText.length }],
+            }],
+            unmatched: [],
+        },
+    });
+    const lines = [...document.querySelectorAll('.cm-line')];
+    const targetLine = lines.find(line => line.textContent.includes(selectedText));
+    const conclusionLine = lines.find(line => line.textContent.includes(conclusion));
+    const selectedNode = textNodeContaining(targetLine, selectedText);
+    const conclusionNode = textNodeContaining(conclusionLine, conclusion);
+    const range = document.createRange();
+    range.setStart(selectedNode, 0);
+    range.setEnd(conclusionNode, conclusion.indexOf('relatively ideal'));
+    range.getClientRects = () => [{
+        top: 428,
+        right: 1120,
+        bottom: 456,
+        left: 404,
+        width: 716,
+        height: 28,
+    }, {
+        top: 468,
+        right: 760,
+        bottom: 496,
+        left: 404,
+        width: 356,
+        height: 28,
+    }];
+    targetLine.getBoundingClientRect = () => ({
+        top: 400,
+        right: 1120,
+        bottom: 456,
+        left: 300,
+        width: 820,
+        height: 56,
+    });
+    document.getSelection().addRange(range);
+
+    targetLine.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 1118,
+        clientY: 452,
+    }));
+    const colorButton = document.querySelector('[data-color="#ffd400"]');
+    assert.ok(colorButton);
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const from = markdown.indexOf(selectedText);
+    assert.equal(created.text, selectedText);
+    assert.deepEqual(created.ranges, [{
+        from,
+        to: from + selectedText.length,
+    }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('preserves an intentional selection released in the next block', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'First selected paragraph.\n\nSecond selected paragraph.';
+    let created;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-cross-paragraph' };
+        },
+    });
+    const lines = [...document.querySelectorAll('.cm-line')];
+    const firstNode = textNodeContaining(lines[0], 'First selected');
+    const secondNode = textNodeContaining(lines[2], 'Second selected');
+    const secondEnd = 'Second selected'.length;
+    const range = document.createRange();
+    range.setStart(firstNode, 0);
+    range.setEnd(secondNode, secondEnd);
+    range.getClientRects = () => [{
+        top: 400,
+        right: 620,
+        bottom: 428,
+        left: 300,
+        width: 320,
+        height: 28,
+    }, {
+        top: 468,
+        right: 540,
+        bottom: 496,
+        left: 300,
+        width: 240,
+        height: 28,
+    }];
+    lines[2].getBoundingClientRect = () => ({
+        top: 468,
+        right: 800,
+        bottom: 496,
+        left: 300,
+        width: 500,
+        height: 28,
+    });
+    document.getSelection().addRange(range);
+
+    lines[2].dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 530,
+        clientY: 482,
+    }));
+    const colorButton = document.querySelector('[data-color="#ffd400"]');
+    assert.ok(colorButton);
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(created.ranges, [{
+        from: 0,
+        to: markdown.indexOf('Second selected') + secondEnd,
+    }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('clamps a backward selection mapped into the previous block', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const previous = 'Previous paragraph should not be selected.';
+    const selectedText = 'For irregular menstruators, select this paragraph.';
+    const markdown = `${previous}\n\n${selectedText}`;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-backward' };
+        },
+    });
+    const lines = [...document.querySelectorAll('.cm-line')];
+    const previousNode = textNodeContaining(lines[0], previous);
+    const selectedNode = textNodeContaining(lines[2], selectedText);
+    const selection = document.getSelection();
+    selection.setBaseAndExtent(
+        selectedNode,
+        selectedText.length,
+        previousNode,
+        previous.indexOf('should')
+    );
+    const range = selection.getRangeAt(0);
+    range.getClientRects = () => [{
+        top: 400,
+        right: 650,
+        bottom: 428,
+        left: 380,
+        width: 270,
+        height: 28,
+    }, {
+        top: 468,
+        right: 760,
+        bottom: 496,
+        left: 300,
+        width: 460,
+        height: 28,
+    }];
+    lines[2].getBoundingClientRect = () => ({
+        top: 468,
+        right: 800,
+        bottom: 496,
+        left: 300,
+        width: 500,
+        height: 28,
+    });
+
+    lines[2].dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        clientX: 302,
+        clientY: 482,
+    }));
+    const colorButton = document.querySelector('[data-color="#ffd400"]');
+    assert.ok(colorButton);
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const from = markdown.indexOf(selectedText);
+    assert.equal(created.text, selectedText);
+    assert.deepEqual(created.ranges, [{
+        from,
+        to: from + selectedText.length,
+    }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('creates a local highlight from the selected Markdown text', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

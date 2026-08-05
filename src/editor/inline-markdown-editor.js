@@ -247,6 +247,8 @@ export function createInlineMarkdownEditor({
             return;
         }
         activateDOMGlobals(ownerWindow);
+        const domSelection = ownerWindow.document.getSelection?.();
+        clampSelectionFocusToPointerLine(view, domSelection, event);
         const selection = selectedMarkdownAnnotation(view);
         if (!selection) return;
         const copyTarget = { kind: 'selection', ...selection };
@@ -260,7 +262,7 @@ export function createInlineMarkdownEditor({
         }
         annotationPopup.openSelection({
             anchor: selectionAnchor(
-                ownerWindow.document.getSelection?.(),
+                domSelection,
                 event.target,
                 event
             ),
@@ -461,6 +463,91 @@ function selectionSourceLocation(sourceMap, target, documentLength) {
         pageIndex: location.pageIndex,
         bbox: [...location.bbox],
     } : null;
+}
+
+function clampSelectionFocusToPointerLine(view, selection, pointer) {
+    if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
+        return;
+    }
+    const pointerLine = editorLineContaining(view, pointer?.target);
+    const focusLine = editorLineContaining(view, selection.focusNode);
+    if (!pointerLine || !focusLine || pointerLine === focusLine) return;
+    const range = selection.getRangeAt(0);
+    if (!pointerTouchesRect(pointer, pointerLine.getBoundingClientRect?.())
+        || !Array.from(range.getClientRects?.() || []).some(rect => (
+            pointerTouchesRect(pointer, rect, 8)
+        ))) {
+        return;
+    }
+    try {
+        const anchorPosition = view.posAtDOM(
+            selection.anchorNode,
+            selection.anchorOffset
+        );
+        const focusPosition = view.posAtDOM(
+            selection.focusNode,
+            selection.focusOffset
+        );
+        const lineFrom = view.posAtDOM(pointerLine, 0);
+        const lineTo = view.posAtDOM(
+            pointerLine,
+            pointerLine.childNodes.length
+        );
+        const forward = anchorPosition < focusPosition;
+        if ((forward && (focusPosition <= lineTo || anchorPosition > lineTo))
+            || (!forward
+                && (focusPosition >= lineFrom || anchorPosition < lineFrom))) {
+            return;
+        }
+        setSelectionFocus(
+            selection,
+            pointerLine,
+            forward ? pointerLine.childNodes.length : 0,
+            forward
+        );
+    }
+    catch {
+        // Stale CodeMirror DOM is ignored; the regular selection path can retry.
+    }
+}
+
+function editorLineContaining(view, node) {
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    const line = element?.closest?.('.cm-line');
+    return line && view.dom.contains(line) ? line : null;
+}
+
+function pointerTouchesRect(pointer, rect, tolerance = 0) {
+    const clientX = Number(pointer?.clientX);
+    const clientY = Number(pointer?.clientY);
+    return Number.isFinite(clientX)
+        && Number.isFinite(clientY)
+        && rect?.width > 0
+        && rect?.height > 0
+        && clientX >= rect.left - tolerance
+        && clientX <= rect.right + tolerance
+        && clientY >= rect.top - tolerance
+        && clientY <= rect.bottom + tolerance;
+}
+
+function setSelectionFocus(selection, node, offset, forward) {
+    const anchorNode = selection.anchorNode;
+    const anchorOffset = selection.anchorOffset;
+    if (typeof selection.setBaseAndExtent === 'function') {
+        selection.setBaseAndExtent(anchorNode, anchorOffset, node, offset);
+        return;
+    }
+    const range = node.ownerDocument.createRange();
+    if (forward) {
+        range.setStart(anchorNode, anchorOffset);
+        range.setEnd(node, offset);
+    }
+    else {
+        range.setStart(node, offset);
+        range.setEnd(anchorNode, anchorOffset);
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
 }
 
 function createTimedTargetHighlight({
