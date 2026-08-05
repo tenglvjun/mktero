@@ -259,8 +259,8 @@ class MarkdownTabView {
 
     destroy() {
         this.clearDocumentActionStatus();
-        for (const { element, type, listener } of this.listeners) {
-            element.removeEventListener(type, listener);
+        for (const { element, type, listener, options } of this.listeners) {
+            element.removeEventListener(type, listener, options);
         }
         this.listeners = [];
         this.editor?.destroy();
@@ -903,6 +903,30 @@ class MarkdownTabView {
             cancelSidePanelResizes,
             { capture: true }
         );
+        this.listen(
+            this.elements.workspace,
+            'scroll',
+            cancelSidePanelResizes,
+            { capture: true }
+        );
+        this.listen(
+            this.elements.workspace,
+            'wheel',
+            cancelSidePanelResizes,
+            { capture: true }
+        );
+        this.listen(
+            this.document,
+            'scroll',
+            cancelSidePanelResizes,
+            { capture: true }
+        );
+        this.listen(
+            this.document,
+            'wheel',
+            cancelSidePanelResizes,
+            { capture: true }
+        );
         this.syncResponsiveSidePanels();
     }
 
@@ -1167,6 +1191,15 @@ class MarkdownTabView {
     resizeSidePanel(name, event) {
         const panel = this.sidePanels[name];
         if (!panel.resize || !Number.isFinite(event.clientX)) return;
+        if (Number.isFinite(event.buttons) && event.buttons !== 1) {
+            this.cancelSidePanelResize(name);
+            return;
+        }
+        if (panel.resize.pointerStartY !== null
+            && !Number.isFinite(event.clientY)) {
+            this.cancelSidePanelResize(name);
+            return;
+        }
         const deltaX = event.clientX - panel.resize.pointerStartX;
         const deltaY = panel.resize.pointerStartY === null
             || !Number.isFinite(event.clientY)
