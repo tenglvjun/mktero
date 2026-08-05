@@ -59,11 +59,14 @@ function createView(model = createModel(), zotero = {}, options = {}) {
 function createTestInlineEditor({ document, parent, initialMarkdown }) {
     const editor = document.createElement('div');
     editor.className = 'cm-editor';
+    const scroller = document.createElement('div');
+    scroller.className = 'cm-scroller';
     const content = document.createElement('div');
     content.className = 'cm-content';
     content.setAttribute('contenteditable', 'false');
     content.textContent = initialMarkdown;
-    editor.appendChild(content);
+    scroller.appendChild(content);
+    editor.appendChild(scroller);
     parent.appendChild(editor);
     return {
         getMarkdown: () => content.textContent,
@@ -79,7 +82,7 @@ function createTestInlineEditor({ document, parent, initialMarkdown }) {
     };
 }
 
-function dispatchMouseEvent(target, type, clientX) {
+function dispatchMouseEvent(target, type, clientX, clientY = 0) {
     const ownerWindow = target.ownerDocument?.defaultView || target;
     const event = new ownerWindow.Event(type, {
         bubbles: true,
@@ -88,6 +91,7 @@ function dispatchMouseEvent(target, type, clientX) {
     Object.defineProperties(event, {
         button: { value: 0 },
         clientX: { value: clientX },
+        clientY: { value: clientY },
     });
     target.dispatchEvent(event);
 }
@@ -932,6 +936,93 @@ test('resizes and toggles PDF notes from the right edge', () => {
             cancelable: true,
         }));
         assert.equal(notes.hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('does not resize PDF notes during a vertical scrollbar drag', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Annotated text',
+        sourceKind: 'markdown',
+    }));
+    const notes = shadow.querySelector('#mktero-notes');
+    const resizer = shadow.querySelector('#mktero-notes-resizer');
+
+    try {
+        dispatchMouseEvent(resizer, 'mousedown', 1000, 300);
+        dispatchMouseEvent(document.defaultView, 'mousemove', 1014, 420);
+        dispatchMouseEvent(document.defaultView, 'mouseup', 1014, 420);
+
+        assert.equal(resizer.getAttribute('aria-valuenow'), '300');
+        assert.equal(
+            notes.style.getPropertyValue('--notes-width'),
+            '300px'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('cancels a notes resize when a gesture becomes vertical', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Annotated text',
+        sourceKind: 'markdown',
+    }));
+    const notes = shadow.querySelector('#mktero-notes');
+    const resizer = shadow.querySelector('#mktero-notes-resizer');
+
+    try {
+        dispatchMouseEvent(resizer, 'mousedown', 1000, 300);
+        dispatchMouseEvent(document.defaultView, 'mousemove', 1010, 300);
+        dispatchMouseEvent(document.defaultView, 'mousemove', 1012, 420);
+        dispatchMouseEvent(document.defaultView, 'mouseup', 1012, 420);
+
+        assert.equal(resizer.getAttribute('aria-valuenow'), '300');
+        assert.equal(
+            notes.style.getPropertyValue('--notes-width'),
+            '300px'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('cancels an accidental notes resize when the editor starts scrolling', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Annotated text',
+        sourceKind: 'markdown',
+    }));
+    const notes = shadow.querySelector('#mktero-notes');
+    const resizer = shadow.querySelector('#mktero-notes-resizer');
+    const scroller = shadow.querySelector('.cm-scroller');
+
+    try {
+        dispatchMouseEvent(resizer, 'mousedown', 1000, 300);
+        dispatchMouseEvent(document.defaultView, 'mousemove', 1010, 300);
+        assert.equal(
+            notes.style.getPropertyValue('--notes-width'),
+            '290px'
+        );
+
+        scroller.dispatchEvent(new document.defaultView.Event('scroll'));
+        dispatchMouseEvent(document.defaultView, 'mousemove', 1080, 300);
+        dispatchMouseEvent(document.defaultView, 'mouseup', 1080, 300);
+
+        assert.equal(resizer.getAttribute('aria-valuenow'), '300');
+        assert.equal(
+            notes.style.getPropertyValue('--notes-width'),
+            '300px'
+        );
     }
     finally {
         view.destroy();

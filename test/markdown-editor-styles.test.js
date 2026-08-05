@@ -187,6 +187,10 @@ test('lays out a responsive scrollable outline beside the editor', () => {
     assert.match(resizer, /inset:\s*0/);
     assert.match(resizer, /cursor:\s*col-resize/);
 
+    const notesResizer = ruleBody('.markdown-notes-resizer');
+    assert.match(notesResizer, /inset-inline-start:\s*4px/);
+    assert.match(notesResizer, /inset-inline-end:\s*0/);
+
     const resizing = ruleBody('.markdown-workspace.is-resizing-outline');
     assert.match(resizing, /user-select:\s*none/);
 

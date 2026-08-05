@@ -25,6 +25,7 @@ const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
     : null;
 const DOCUMENT_ACTION_STATUS_TIMEOUT_MS = 5_000;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
+const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
     outline: 820,
     notes: 1120,
@@ -880,6 +881,28 @@ class MarkdownTabView {
             this.finishSidePanelResize('outline');
             this.finishSidePanelResize('notes');
         });
+        const cancelSidePanelResizes = () => {
+            this.cancelSidePanelResize('outline');
+            this.cancelSidePanelResize('notes');
+        };
+        const editorScroller = this.elements.editorHost.querySelector(
+            '.cm-scroller'
+        );
+        if (editorScroller) {
+            this.listen(editorScroller, 'scroll', cancelSidePanelResizes);
+        }
+        this.listen(
+            this.elements.editorHost,
+            'scroll',
+            cancelSidePanelResizes,
+            { capture: true }
+        );
+        this.listen(
+            this.elements.editorHost,
+            'wheel',
+            cancelSidePanelResizes,
+            { capture: true }
+        );
         this.syncResponsiveSidePanels();
     }
 
@@ -1003,9 +1026,9 @@ class MarkdownTabView {
         });
     }
 
-    listen(element, type, listener) {
-        element.addEventListener(type, listener);
-        this.listeners.push({ element, type, listener });
+    listen(element, type, listener, options) {
+        element.addEventListener(type, listener, options);
+        this.listeners.push({ element, type, listener, options });
     }
 
     syncContentVisibility(visible) {
@@ -1131,17 +1154,43 @@ class MarkdownTabView {
             || this.elements.workspace.hidden) {
             return;
         }
-        event.preventDefault();
         panel.resize = {
             pointerStartX: event.clientX,
+            pointerStartY: Number.isFinite(event.clientY)
+                ? event.clientY
+                : null,
             widthAtStart: panel.width,
+            active: false,
         };
-        this.elements.workspace.classList.add(panel.resizeClass);
     }
 
     resizeSidePanel(name, event) {
         const panel = this.sidePanels[name];
         if (!panel.resize || !Number.isFinite(event.clientX)) return;
+        const deltaX = event.clientX - panel.resize.pointerStartX;
+        const deltaY = panel.resize.pointerStartY === null
+            || !Number.isFinite(event.clientY)
+            ? 0
+            : event.clientY - panel.resize.pointerStartY;
+        const horizontalDistance = Math.abs(deltaX);
+        const verticalDistance = Math.abs(deltaY);
+        if (panel.resize.pointerStartY !== null
+            && horizontalDistance <= verticalDistance) {
+            if (panel.resize.active) {
+                this.setSidePanelWidth(name, panel.resize.widthAtStart);
+            }
+            this.finishSidePanelResize(name);
+            return;
+        }
+        if (!panel.resize.active) {
+            if (Math.max(horizontalDistance, verticalDistance)
+                < SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE) {
+                return;
+            }
+            panel.resize.active = true;
+            event.preventDefault();
+            this.elements.workspace.classList.add(panel.resizeClass);
+        }
         this.setSidePanelWidth(
             name,
             panel.resize.widthAtStart
@@ -1155,6 +1204,14 @@ class MarkdownTabView {
         if (!panel.resize) return;
         panel.resize = null;
         this.elements.workspace.classList.remove(panel.resizeClass);
+    }
+
+    cancelSidePanelResize(name) {
+        const panel = this.sidePanels[name];
+        if (panel.resize?.active) {
+            this.setSidePanelWidth(name, panel.resize.widthAtStart);
+        }
+        this.finishSidePanelResize(name);
     }
 
     setSidePanelWidth(name, width) {

@@ -140,6 +140,12 @@ main {
     touch-action: none;
 }
 
+.markdown-notes-resizer {
+    inset-block: 0;
+    inset-inline-start: 4px;
+    inset-inline-end: 0;
+}
+
 .markdown-side-panel-resizer::before {
     position: absolute;
     inset: 0 2px;
