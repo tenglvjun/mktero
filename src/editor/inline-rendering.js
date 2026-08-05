@@ -317,24 +317,34 @@ export function createInlineRenderingExtension({
         renderingField,
         Prec.highest(EditorView.domEventHandlers({
             mouseover(event, view) {
+                if (selectionActionsLocked(context)) return false;
                 referenceInteraction(event, view, context)?.open();
                 return false;
             },
             mouseout(event, view) {
+                if (selectionActionsLocked(context)) return false;
                 const interaction = referenceInteraction(event, view, context);
                 if (!interaction
                     || interaction.element.contains(event.relatedTarget)
                     || interaction.popup?.contains(event.relatedTarget)) {
                     return false;
                 }
+                if (interaction.cancelOpen?.()) return false;
                 interaction.popup?.scheduleClose();
                 return false;
             },
             focusin(event, view) {
-                referenceInteraction(event, view, context)?.open();
+                const interaction = referenceInteraction(event, view, context);
+                if (interaction?.openImmediately) {
+                    interaction.openImmediately();
+                }
+                else {
+                    interaction?.open();
+                }
                 return false;
             },
             focusout(event, view) {
+                if (selectionActionsLocked(context)) return false;
                 referenceInteraction(event, view, context)
                     ?.popup?.scheduleClose();
                 return false;
@@ -878,7 +888,20 @@ function referenceInteraction(event, view, context) {
         return {
             element: annotation,
             popup: context.annotationPopup,
-            open: () => openActions(false),
+            open() {
+                context.annotationPopup?.scheduleOpenActions?.({
+                    anchor: annotation,
+                    annotation: target,
+                    beforeOpen: () => closeReferencePopupsExcept(
+                        context,
+                        context.annotationPopup
+                    ),
+                });
+            },
+            cancelOpen: () => (
+                context.annotationPopup?.cancelScheduledOpen?.(annotation)
+            ),
+            openImmediately: () => openActions(false),
             focusPopup: () => openActions(true),
             activate: openNote,
             allowTextSelection: true,
@@ -1081,9 +1104,10 @@ function selectionNodeInEditor(view, node) {
     return Boolean(element && view.dom.contains(element));
 }
 
-export function selectionAnchor(selection, fallback) {
+export function selectionAnchor(selection, fallback, pointer) {
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    const rect = firstVisibleSelectionRect(range, fallback)
+    const rect = pointerSelectionRect(range, pointer)
+        || firstVisibleSelectionRect(range, fallback)
         || fallback?.getBoundingClientRect?.()
         || emptyRect();
     const snapshot = {
@@ -1095,6 +1119,31 @@ export function selectionAnchor(selection, fallback) {
         height: rect.height,
     };
     return { getBoundingClientRect: () => snapshot };
+}
+
+function pointerSelectionRect(range, pointer) {
+    const clientX = Number(pointer?.clientX);
+    const clientY = Number(pointer?.clientY);
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    const tolerance = 8;
+    const rect = Array.from(range?.getClientRects?.() || []).find(candidate => (
+        candidate.width > 0
+        && candidate.height > 0
+        && clientX >= candidate.left - tolerance
+        && clientX <= candidate.right + tolerance
+        && clientY >= candidate.top - tolerance
+        && clientY <= candidate.bottom + tolerance
+    ));
+    if (!rect) return null;
+    const anchorX = Math.max(rect.left, Math.min(rect.right, clientX));
+    return {
+        top: rect.top,
+        right: anchorX,
+        bottom: rect.bottom,
+        left: anchorX,
+        width: 0,
+        height: rect.height,
+    };
 }
 
 function firstVisibleSelectionRect(range, fallback) {
@@ -1158,6 +1207,10 @@ function closeReferencePopupsExcept(context, retainedPopup) {
     for (const popup of referencePopups(context)) {
         if (popup !== retainedPopup) popup?.close();
     }
+}
+
+function selectionActionsLocked(context) {
+    return Boolean(context.annotationPopup?.isSelectionOpen?.());
 }
 
 function previewReferenceTypes(context) {

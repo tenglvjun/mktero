@@ -14,6 +14,7 @@ import {
 } from './pdf-annotations.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+const ANNOTATION_HOVER_OPEN_DELAY_MS = 220;
 const ANNOTATION_ERROR_KEYS = new Map([
     ['MKTERO_PDF_TEXT_NOT_FOUND', 'annotation.pdfTextNotFound'],
     ['MKTERO_PDF_TEXT_AMBIGUOUS', 'annotation.pdfTextAmbiguous'],
@@ -33,15 +34,43 @@ export function createAnnotationPopup(parent, {
     onSourceNavigationError,
 } = {}) {
     const t = localization.t.bind(localization);
+    const ownerWindow = parent.ownerDocument.defaultView;
     const anchoredPopup = createAnchoredPopup(parent, {
         className: 'mktero-annotation-popup',
         idPrefix: 'mktero-annotation-popup',
     });
+    let selectionLocked = false;
+    let hoverOpenTimer = null;
+    let hoverOpenAnchor = null;
+
+    const cancelScheduledOpen = anchor => {
+        if (hoverOpenTimer === null
+            || (anchor && hoverOpenAnchor !== anchor)) {
+            return false;
+        }
+        ownerWindow.clearTimeout(hoverOpenTimer);
+        hoverOpenTimer = null;
+        hoverOpenAnchor = null;
+        return true;
+    };
+    const isSelectionOpen = () => (
+        selectionLocked && anchoredPopup.isOpen()
+    );
+
+    const close = () => {
+        cancelScheduledOpen();
+        selectionLocked = false;
+        anchoredPopup.close();
+    };
+    const openPopup = (options, { lockSelection = false } = {}) => {
+        anchoredPopup.open(options);
+        selectionLocked = lockSelection && anchoredPopup.isOpen();
+    };
 
     const openNote = ({ anchor, annotation }) => {
         if (!annotation) return;
-        anchoredPopup.close();
-        anchoredPopup.open({
+        close();
+        openPopup({
             anchor,
             label: t('annotation.noteEditor'),
             popupClassName: 'mktero-annotation-popup--note-editor',
@@ -62,8 +91,8 @@ export function createAnnotationPopup(parent, {
     };
     const openDraftNote = ({ anchor, annotation }) => {
         if (!annotation) return;
-        anchoredPopup.close();
-        anchoredPopup.open({
+        close();
+        openPopup({
             anchor,
             label: t('annotation.noteEditor'),
             popupClassName: 'mktero-annotation-popup--note-editor',
@@ -90,6 +119,7 @@ export function createAnnotationPopup(parent, {
         canCopySource = false,
     }) => {
         if (!selection) return;
+        cancelScheduledOpen();
         const annotation = {
             ...selection,
             source: 'markdown',
@@ -97,10 +127,11 @@ export function createAnnotationPopup(parent, {
             comment: '',
             color: '#ffd400',
         };
-        anchoredPopup.open({
+        openPopup({
             anchor,
             label: t('annotation.selectionActions'),
             popupClassName: 'mktero-annotation-popup--actions',
+            dismissOnMouseLeave: false,
             renderContent({ document, close, reposition }) {
                 return createMarkdownSelectionActions(document, annotation, t, {
                     createMarkdownAnnotation,
@@ -125,11 +156,12 @@ export function createAnnotationPopup(parent, {
                     reposition,
                 });
             },
-        });
+        }, { lockSelection: true });
     };
     const openActions = ({ anchor, annotation, focus = false }) => {
         if (!annotation) return;
-        anchoredPopup.open({
+        cancelScheduledOpen();
+        openPopup({
             anchor,
             label: t('annotation.actions'),
             popupClassName: 'mktero-annotation-popup--actions',
@@ -159,17 +191,34 @@ export function createAnnotationPopup(parent, {
                 : undefined,
         });
     };
+    const scheduleOpenActions = ({ anchor, annotation, beforeOpen }) => {
+        if (!anchor || !annotation || isSelectionOpen()) return;
+        if (hoverOpenTimer !== null && hoverOpenAnchor === anchor) return;
+        cancelScheduledOpen();
+        hoverOpenAnchor = anchor;
+        hoverOpenTimer = ownerWindow.setTimeout(() => {
+            hoverOpenTimer = null;
+            hoverOpenAnchor = null;
+            if (isSelectionOpen() || !anchor.isConnected) return;
+            beforeOpen?.();
+            openActions({ anchor, annotation });
+        }, ANNOTATION_HOVER_OPEN_DELAY_MS);
+    };
 
     return {
         open: openNote,
         openNote,
         openSelection,
         openActions,
-        close: anchoredPopup.close,
+        scheduleOpenActions,
+        cancelScheduledOpen,
+        close,
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
+        isOpen: anchoredPopup.isOpen,
+        isSelectionOpen,
         contains: anchoredPopup.contains,
-        destroy: anchoredPopup.destroy,
+        destroy: close,
     };
 }
 

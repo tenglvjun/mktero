@@ -49,6 +49,7 @@ export function createAnchoredPopup(parent, {
         renderContent,
         focusContent,
         popupClassName,
+        dismissOnMouseLeave = true,
     }) => {
         if (!nextAnchor || typeof renderContent !== 'function') return;
         if (ignoredOpenAnchor === nextAnchor) {
@@ -76,7 +77,9 @@ export function createAnchoredPopup(parent, {
         }
         popup.appendChild(content);
         popup.addEventListener('mouseenter', cancelClose);
-        popup.addEventListener('mouseleave', scheduleClose);
+        if (dismissOnMouseLeave) {
+            popup.addEventListener('mouseleave', scheduleClose);
+        }
         popup.addEventListener('focusin', cancelClose);
         popup.addEventListener('focusout', event => {
             if (!popup?.contains(event.relatedTarget)) scheduleClose();
@@ -106,6 +109,9 @@ export function createAnchoredPopup(parent, {
         close,
         scheduleClose,
         cancelClose,
+        isOpen() {
+            return Boolean(popup);
+        },
         contains(element) {
             return Boolean(element && popup?.contains(element));
         },

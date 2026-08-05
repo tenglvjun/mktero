@@ -261,7 +261,8 @@ export function createInlineMarkdownEditor({
         annotationPopup.openSelection({
             anchor: selectionAnchor(
                 ownerWindow.document.getSelection?.(),
-                event.target
+                event.target,
+                event
             ),
             selection,
             copyTarget,
@@ -274,11 +275,32 @@ export function createInlineMarkdownEditor({
         });
     };
     const closeSelectionActions = event => {
-        if (event.button === 0 && !annotationPopup.contains(event.target)) {
+        const targetsPopup = annotationPopup.contains(event.target)
+            || event.composedPath?.().some(target => (
+                target?.nodeType && annotationPopup.contains(target)
+            ));
+        if (event.button === 0 && !targetsPopup) {
             annotationPopup.close();
         }
     };
-    parent.addEventListener('mousedown', closeSelectionActions, true);
+    ownerWindow.document.addEventListener(
+        'mousedown',
+        closeSelectionActions,
+        true
+    );
+    const closeSelectionActionsOnEscape = event => {
+        if (event.key !== 'Escape' || !annotationPopup.isSelectionOpen()) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        annotationPopup.close();
+    };
+    ownerWindow.document.addEventListener(
+        'keydown',
+        closeSelectionActionsOnEscape,
+        true
+    );
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
     let currentSourceMap = [];
     const setDocument = ({ markdown, annotationOverlay, sourceMap }) => {
@@ -342,9 +364,14 @@ export function createInlineMarkdownEditor({
                     feature.highlight.cancel();
                     feature.popup.destroy();
                 }
-                parent.removeEventListener(
+                ownerWindow.document.removeEventListener(
                     'mousedown',
                     closeSelectionActions,
+                    true
+                );
+                ownerWindow.document.removeEventListener(
+                    'keydown',
+                    closeSelectionActionsOnEscape,
                     true
                 );
                 parent.removeEventListener(
