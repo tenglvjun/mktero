@@ -215,7 +215,6 @@ export function createAnnotationPopup(parent, {
         close,
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
-        isOpen: anchoredPopup.isOpen,
         isSelectionOpen,
         contains: anchoredPopup.contains,
         destroy: close,

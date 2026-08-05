@@ -1123,16 +1123,10 @@ export function selectionAnchor(selection, fallback, pointer) {
 
 function pointerSelectionRect(range, pointer) {
     const clientX = Number(pointer?.clientX);
-    const clientY = Number(pointer?.clientY);
-    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    if (!Number.isFinite(clientX)) return null;
     const tolerance = 8;
     const rect = Array.from(range?.getClientRects?.() || []).find(candidate => (
-        candidate.width > 0
-        && candidate.height > 0
-        && clientX >= candidate.left - tolerance
-        && clientX <= candidate.right + tolerance
-        && clientY >= candidate.top - tolerance
-        && clientY <= candidate.bottom + tolerance
+        pointerTouchesRect(pointer, candidate, tolerance)
     ));
     if (!rect) return null;
     const anchorX = Math.max(rect.left, Math.min(rect.right, clientX));
@@ -1144,6 +1138,19 @@ function pointerSelectionRect(range, pointer) {
         width: 0,
         height: rect.height,
     };
+}
+
+export function pointerTouchesRect(pointer, rect, tolerance = 0) {
+    const clientX = Number(pointer?.clientX);
+    const clientY = Number(pointer?.clientY);
+    return Number.isFinite(clientX)
+        && Number.isFinite(clientY)
+        && rect?.width > 0
+        && rect?.height > 0
+        && clientX >= rect.left - tolerance
+        && clientX <= rect.right + tolerance
+        && clientY >= rect.top - tolerance
+        && clientY <= rect.bottom + tolerance;
 }
 
 function firstVisibleSelectionRect(range, fallback) {

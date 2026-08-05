@@ -26,6 +26,57 @@ function textNodeContaining(element, text) {
     return null;
 }
 
+function createAnnotationSelectionEditor(initialMarkdown, annotationID) {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let created;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown,
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: annotationID };
+        },
+    });
+    return {
+        dom,
+        document,
+        editor,
+        createdAnnotation: () => created,
+    };
+}
+
+function rectangle(top, right, bottom, left) {
+    return {
+        top,
+        right,
+        bottom,
+        left,
+        width: right - left,
+        height: bottom - top,
+    };
+}
+
+function setSelectionGeometry(range, pointerLine, rectangles, lineRect) {
+    range.getClientRects = () => rectangles;
+    pointerLine.getBoundingClientRect = () => lineRect;
+}
+
+async function createHighlightFromSelection(document, pointerLine, pointer) {
+    pointerLine.dispatchEvent(new document.defaultView.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+        ...pointer,
+    }));
+    const colorButton = document.querySelector('[data-color="#ffd400"]');
+    assert.ok(colorButton);
+    colorButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+}
+
 test('keeps Markdown as the source of truth in a read-only surface', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -4272,10 +4323,6 @@ test('creates a highlight immediately after an existing abstract highlight', asy
 });
 
 test('clamps a paragraph-end selection mapped into the next block', async () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
     const existingText = 'Based on BBT and HR, the algorithms worked among '
         + 'regular menstruators.';
     const selectedText = 'For irregular menstruators, the accuracy, '
@@ -4285,15 +4332,12 @@ test('clamps a paragraph-end selection mapped into the next block', async () => 
     const conclusion = 'Conclusions: By combining BBT and HR we obtained '
         + 'relatively ideal predictions.';
     const markdown = `${existingText} ${selectedText}\n\n${conclusion}`;
-    let created;
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: '',
-        async createMarkdownAnnotation(annotation) {
-            created = annotation;
-            return { ...annotation, id: 'mktero-local-irregular' };
-        },
-    });
+    const {
+        dom,
+        document,
+        editor,
+        createdAnnotation,
+    } = createAnnotationSelectionEditor('', 'mktero-local-irregular');
     editor.setDocument({
         markdown,
         annotationOverlay: {
@@ -4318,43 +4362,18 @@ test('clamps a paragraph-end selection mapped into the next block', async () => 
     const range = document.createRange();
     range.setStart(selectedNode, 0);
     range.setEnd(conclusionNode, conclusion.indexOf('relatively ideal'));
-    range.getClientRects = () => [{
-        top: 428,
-        right: 1120,
-        bottom: 456,
-        left: 404,
-        width: 716,
-        height: 28,
-    }, {
-        top: 468,
-        right: 760,
-        bottom: 496,
-        left: 404,
-        width: 356,
-        height: 28,
-    }];
-    targetLine.getBoundingClientRect = () => ({
-        top: 400,
-        right: 1120,
-        bottom: 456,
-        left: 300,
-        width: 820,
-        height: 56,
-    });
+    setSelectionGeometry(range, targetLine, [
+        rectangle(428, 1120, 456, 404),
+        rectangle(468, 760, 496, 404),
+    ], rectangle(400, 1120, 456, 300));
     document.getSelection().addRange(range);
 
-    targetLine.dispatchEvent(new dom.window.MouseEvent('mouseup', {
-        bubbles: true,
-        button: 0,
+    await createHighlightFromSelection(document, targetLine, {
         clientX: 1118,
         clientY: 452,
-    }));
-    const colorButton = document.querySelector('[data-color="#ffd400"]');
-    assert.ok(colorButton);
-    colorButton.click();
-    await Promise.resolve();
-    await Promise.resolve();
+    });
 
+    const created = createdAnnotation();
     const from = markdown.indexOf(selectedText);
     assert.equal(created.text, selectedText);
     assert.deepEqual(created.ranges, [{
@@ -4367,20 +4386,16 @@ test('clamps a paragraph-end selection mapped into the next block', async () => 
 });
 
 test('preserves an intentional selection released in the next block', async () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
     const markdown = 'First selected paragraph.\n\nSecond selected paragraph.';
-    let created;
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: markdown,
-        async createMarkdownAnnotation(annotation) {
-            created = annotation;
-            return { ...annotation, id: 'mktero-local-cross-paragraph' };
-        },
-    });
+    const {
+        dom,
+        document,
+        editor,
+        createdAnnotation,
+    } = createAnnotationSelectionEditor(
+        markdown,
+        'mktero-local-cross-paragraph'
+    );
     const lines = [...document.querySelectorAll('.cm-line')];
     const firstNode = textNodeContaining(lines[0], 'First selected');
     const secondNode = textNodeContaining(lines[2], 'Second selected');
@@ -4388,43 +4403,18 @@ test('preserves an intentional selection released in the next block', async () =
     const range = document.createRange();
     range.setStart(firstNode, 0);
     range.setEnd(secondNode, secondEnd);
-    range.getClientRects = () => [{
-        top: 400,
-        right: 620,
-        bottom: 428,
-        left: 300,
-        width: 320,
-        height: 28,
-    }, {
-        top: 468,
-        right: 540,
-        bottom: 496,
-        left: 300,
-        width: 240,
-        height: 28,
-    }];
-    lines[2].getBoundingClientRect = () => ({
-        top: 468,
-        right: 800,
-        bottom: 496,
-        left: 300,
-        width: 500,
-        height: 28,
-    });
+    setSelectionGeometry(range, lines[2], [
+        rectangle(400, 620, 428, 300),
+        rectangle(468, 540, 496, 300),
+    ], rectangle(468, 800, 496, 300));
     document.getSelection().addRange(range);
 
-    lines[2].dispatchEvent(new dom.window.MouseEvent('mouseup', {
-        bubbles: true,
-        button: 0,
+    await createHighlightFromSelection(document, lines[2], {
         clientX: 530,
         clientY: 482,
-    }));
-    const colorButton = document.querySelector('[data-color="#ffd400"]');
-    assert.ok(colorButton);
-    colorButton.click();
-    await Promise.resolve();
-    await Promise.resolve();
+    });
 
+    const created = createdAnnotation();
     assert.deepEqual(created.ranges, [{
         from: 0,
         to: markdown.indexOf('Second selected') + secondEnd,
@@ -4435,22 +4425,15 @@ test('preserves an intentional selection released in the next block', async () =
 });
 
 test('clamps a backward selection mapped into the previous block', async () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
     const previous = 'Previous paragraph should not be selected.';
     const selectedText = 'For irregular menstruators, select this paragraph.';
     const markdown = `${previous}\n\n${selectedText}`;
-    let created;
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: markdown,
-        async createMarkdownAnnotation(annotation) {
-            created = annotation;
-            return { ...annotation, id: 'mktero-local-backward' };
-        },
-    });
+    const {
+        dom,
+        document,
+        editor,
+        createdAnnotation,
+    } = createAnnotationSelectionEditor(markdown, 'mktero-local-backward');
     const lines = [...document.querySelectorAll('.cm-line')];
     const previousNode = textNodeContaining(lines[0], previous);
     const selectedNode = textNodeContaining(lines[2], selectedText);
@@ -4462,42 +4445,17 @@ test('clamps a backward selection mapped into the previous block', async () => {
         previous.indexOf('should')
     );
     const range = selection.getRangeAt(0);
-    range.getClientRects = () => [{
-        top: 400,
-        right: 650,
-        bottom: 428,
-        left: 380,
-        width: 270,
-        height: 28,
-    }, {
-        top: 468,
-        right: 760,
-        bottom: 496,
-        left: 300,
-        width: 460,
-        height: 28,
-    }];
-    lines[2].getBoundingClientRect = () => ({
-        top: 468,
-        right: 800,
-        bottom: 496,
-        left: 300,
-        width: 500,
-        height: 28,
-    });
+    setSelectionGeometry(range, lines[2], [
+        rectangle(400, 650, 428, 380),
+        rectangle(468, 760, 496, 300),
+    ], rectangle(468, 800, 496, 300));
 
-    lines[2].dispatchEvent(new dom.window.MouseEvent('mouseup', {
-        bubbles: true,
-        button: 0,
+    await createHighlightFromSelection(document, lines[2], {
         clientX: 302,
         clientY: 482,
-    }));
-    const colorButton = document.querySelector('[data-color="#ffd400"]');
-    assert.ok(colorButton);
-    colorButton.click();
-    await Promise.resolve();
-    await Promise.resolve();
+    });
 
+    const created = createdAnnotation();
     const from = markdown.indexOf(selectedText);
     assert.equal(created.text, selectedText);
     assert.deepEqual(created.ranges, [{

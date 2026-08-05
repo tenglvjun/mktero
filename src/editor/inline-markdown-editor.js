@@ -14,6 +14,7 @@ import { createLocalization } from '../i18n/localization.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
     createInlineRenderingExtension,
+    pointerTouchesRect,
     refreshInlineRendering,
     selectedMarkdownAnnotation,
     selectionAnchor,
@@ -515,19 +516,6 @@ function editorLineContaining(view, node) {
     const element = node?.nodeType === 1 ? node : node?.parentElement;
     const line = element?.closest?.('.cm-line');
     return line && view.dom.contains(line) ? line : null;
-}
-
-function pointerTouchesRect(pointer, rect, tolerance = 0) {
-    const clientX = Number(pointer?.clientX);
-    const clientY = Number(pointer?.clientY);
-    return Number.isFinite(clientX)
-        && Number.isFinite(clientY)
-        && rect?.width > 0
-        && rect?.height > 0
-        && clientX >= rect.left - tolerance
-        && clientX <= rect.right + tolerance
-        && clientY >= rect.top - tolerance
-        && clientY <= rect.bottom + tolerance;
 }
 
 function setSelectionFocus(selection, node, offset, forward) {
