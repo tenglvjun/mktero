@@ -3531,6 +3531,76 @@ test('closes selection actions when clicking outside the editor', () => {
     dom.window.close();
 });
 
+test('keeps shadow selection actions open on a retargeted popup press', () => {
+    const dom = new JSDOM(
+        '<!doctype html><button id="outside">Outside</button><div id="host"></div>',
+        {
+            pretendToBeVisual: true,
+        }
+    );
+    const { document } = dom.window;
+    const host = document.querySelector('#host');
+    const shadow = host.attachShadow({ mode: 'open' });
+    const parent = document.createElement('div');
+    shadow.appendChild(parent);
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent,
+        initialMarkdown: 'Select this Markdown text.',
+    });
+    const line = shadow.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    const originalGetSelection = document.getSelection;
+    document.getSelection = () => ({
+        anchorNode: range.startContainer,
+        anchorOffset: range.startOffset,
+        collapse() {},
+        extend() {},
+        focusNode: range.endContainer,
+        focusOffset: range.endOffset,
+        getRangeAt: () => range,
+        isCollapsed: false,
+        removeAllRanges() {},
+        rangeCount: 1,
+        toString: () => range.toString(),
+    });
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        composed: true,
+        button: 0,
+    }));
+    assert.ok(shadow.querySelector('.mktero-markdown-selection-actions'));
+
+    const press = new dom.window.MouseEvent('mousedown', {
+        bubbles: true,
+        composed: true,
+        button: 0,
+    });
+    Object.defineProperty(press, 'composedPath', {
+        value: () => [host, document, dom.window],
+    });
+    shadow.querySelector('.mktero-annotation-color-button')
+        .dispatchEvent(press);
+
+    assert.ok(shadow.querySelector('.mktero-markdown-selection-actions'));
+
+    document.querySelector('#outside').dispatchEvent(
+        new dom.window.MouseEvent('mousedown', {
+            bubbles: true,
+            button: 0,
+        })
+    );
+    assert.equal(
+        shadow.querySelector('.mktero-markdown-selection-actions'),
+        null
+    );
+
+    document.getSelection = originalGetSelection;
+    editor.destroy();
+    dom.window.close();
+});
+
 test('closes unfocused selection actions with Escape', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

@@ -283,11 +283,28 @@ export function createInlineMarkdownEditor({
             annotationPopup.close();
         }
     };
-    ownerWindow.document.addEventListener(
+    const interactionRoot = parent.getRootNode?.() || ownerWindow.document;
+    const closeSelectionActionsOutsideRoot = event => {
+        if (event.button !== 0) return;
+        const eventPath = event.composedPath?.() || [];
+        if (eventPath.includes(interactionRoot)
+            || event.target === interactionRoot.host) {
+            return;
+        }
+        annotationPopup.close();
+    };
+    interactionRoot.addEventListener(
         'mousedown',
         closeSelectionActions,
         true
     );
+    if (interactionRoot !== ownerWindow.document) {
+        ownerWindow.document.addEventListener(
+            'mousedown',
+            closeSelectionActionsOutsideRoot,
+            true
+        );
+    }
     const closeSelectionActionsOnEscape = event => {
         if (event.key !== 'Escape' || !annotationPopup.isSelectionOpen()) {
             return;
@@ -364,11 +381,18 @@ export function createInlineMarkdownEditor({
                     feature.highlight.cancel();
                     feature.popup.destroy();
                 }
-                ownerWindow.document.removeEventListener(
+                interactionRoot.removeEventListener(
                     'mousedown',
                     closeSelectionActions,
                     true
                 );
+                if (interactionRoot !== ownerWindow.document) {
+                    ownerWindow.document.removeEventListener(
+                        'mousedown',
+                        closeSelectionActionsOutsideRoot,
+                        true
+                    );
+                }
                 ownerWindow.document.removeEventListener(
                     'keydown',
                     closeSelectionActionsOnEscape,
