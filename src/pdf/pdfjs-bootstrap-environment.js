@@ -3,6 +3,7 @@ const windowAbortController = mainWindow?.AbortController;
 const windowAbortSignal = mainWindow?.AbortSignal;
 const windowDOMMatrix = mainWindow?.DOMMatrix;
 const windowDOMException = mainWindow?.DOMException;
+const windowStructuredClone = mainWindow?.structuredClone;
 
 // PDF.js constructs this browser primitive while its module loads, even when
 // Mktero only uses getTextContent in Zotero's DOM-free bootstrap sandbox.
@@ -31,4 +32,9 @@ if (typeof globalThis.AbortController !== 'function'
 if (typeof globalThis.AbortSignal !== 'function'
     && typeof windowAbortSignal === 'function') {
     globalThis.AbortSignal = windowAbortSignal;
+}
+
+if (typeof globalThis.structuredClone !== 'function'
+    && typeof windowStructuredClone === 'function') {
+    globalThis.structuredClone = windowStructuredClone.bind(mainWindow);
 }
