@@ -55,13 +55,22 @@ test('article layout outranks the CodeMirror adopted base theme', () => {
     assert.match(heading, /line-height:\s*1\.25/);
 });
 
-test('styles the reader font selector in the document action menu', () => {
-    const select = ruleBody('.markdown-reader-font-select');
+test('styles the reader font picker as part of the document action menu', () => {
+    const picker = ruleBody('.markdown-reader-font-picker');
+    const trigger = ruleBody('.markdown-reader-font-select');
+    const options = ruleBody('.markdown-reader-font-options');
+    const option = ruleBody('.markdown-reader-font-option');
 
-    assert.match(select, /width:\s*136px/);
-    assert.match(select, /height:\s*28px/);
-    assert.match(select, /border:\s*1px\s+solid\s+var\(--border\)/);
-    assert.match(select, /cursor:\s*pointer/);
+    assert.match(picker, /width:\s*136px/);
+    assert.match(picker, /display:\s*grid/);
+    assert.match(trigger, /display:\s*flex/);
+    assert.match(trigger, /height:\s*30px/);
+    assert.match(trigger, /border:\s*1px\s+solid\s+var\(--border\)/);
+    assert.match(trigger, /cursor:\s*pointer/);
+    assert.match(options, /display:\s*grid/);
+    assert.match(options, /background:\s*color-mix/);
+    assert.match(option, /grid-template-columns:\s*14px\s+minmax\(0,\s*1fr\)/);
+    assert.match(option, /cursor:\s*pointer/);
 });
 
 test('wide Markdown tables scroll inside the aligned reading column', () => {

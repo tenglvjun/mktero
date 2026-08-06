@@ -1,5 +1,6 @@
 import {
     Check,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
     Clock,
@@ -36,6 +37,10 @@ export const LUCIDE_ICONS = Object.freeze({
     check: Object.freeze({
         name: 'check',
         nodes: Check,
+    }),
+    chevronDown: Object.freeze({
+        name: 'chevron-down',
+        nodes: ChevronDown,
     }),
     chevronLeft: Object.freeze({
         name: 'chevron-left',

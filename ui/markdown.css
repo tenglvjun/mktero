@@ -685,6 +685,14 @@ main {
     margin-bottom: 3px;
 }
 
+.markdown-reader-font-family {
+    align-items: flex-start;
+}
+
+.markdown-reader-font-family > .markdown-reader-font-label {
+    padding-top: 8px;
+}
+
 .markdown-reader-font-label {
     color: var(--text);
     font-size: 12.5px;
@@ -747,16 +755,20 @@ main {
 }
 
 .markdown-reader-font-select {
+    display: flex;
     min-width: 0;
-    width: 136px;
-    height: 28px;
-    padding: 0 6px;
+    width: 100%;
+    height: 30px;
+    padding: 0 8px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-raised);
     color: var(--text);
     cursor: pointer;
     font: 12px/1 var(--ui-font);
+    align-items: center;
+    justify-content: space-between;
+    text-align: left;
 }
 
 .markdown-reader-font-select:hover,
@@ -764,6 +776,90 @@ main {
     border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
     outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
     outline-offset: 1px;
+}
+
+.markdown-reader-font-picker {
+    display: grid;
+    flex: 0 0 136px;
+    width: 136px;
+    gap: 4px;
+}
+
+.markdown-reader-font-current {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.markdown-reader-font-chevron {
+    flex: 0 0 auto;
+    color: var(--muted);
+    transition: transform 140ms ease;
+}
+
+.markdown-reader-font-select[aria-expanded='true']
+    .markdown-reader-font-chevron {
+    transform: rotate(180deg);
+}
+
+.markdown-reader-font-options {
+    display: grid;
+    gap: 2px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--surface-raised) 92%, var(--surface));
+}
+
+.markdown-reader-font-options[hidden] {
+    display: none;
+}
+
+.markdown-reader-font-option {
+    display: grid;
+    width: 100%;
+    min-height: 28px;
+    padding: 0 7px 0 5px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font: 12px/1.2 var(--ui-font);
+    align-items: center;
+    gap: 6px;
+    grid-template-columns: 14px minmax(0, 1fr);
+    text-align: left;
+}
+
+.markdown-reader-font-option:hover,
+.markdown-reader-font-option:focus-visible {
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface-raised));
+    outline: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+    outline-offset: -1px;
+}
+
+.markdown-reader-font-option[aria-selected='true'] {
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.markdown-reader-font-option-check {
+    opacity: 0;
+}
+
+.markdown-reader-font-option[aria-selected='true']
+    .markdown-reader-font-option-check {
+    opacity: 1;
+}
+
+.markdown-reader-font-option-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .markdown-reader-actions.is-open .markdown-reader-action-menu {
@@ -2243,6 +2339,7 @@ main {
 @media (prefers-reduced-motion: reduce) {
     .loading-spinner { animation-duration: 2s; }
     .markdown-reader-action-menu,
+    .markdown-reader-font-chevron,
     .markdown-outline-link,
     .markdown-note-link {
         transition: none;
