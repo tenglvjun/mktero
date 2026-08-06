@@ -20,6 +20,10 @@ test('uses a readable default size and measure for long-form Markdown', () => {
     assert.match(host, /--reader-width:\s*68ch/);
     assert.match(host, /--reader-font-size:\s*18px/);
     assert.match(host, /--reader-line-height:\s*1\.72/);
+    assert.match(
+        host,
+        /--reader-font:\s*Georgia,\s*Cambria,\s*"Times New Roman",\s*serif/
+    );
 });
 
 test('article layout outranks the CodeMirror adopted base theme', () => {

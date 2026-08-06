@@ -16,7 +16,7 @@
     --reader-font-size: 18px;
     --reader-line-height: 1.72;
     --ui-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --reader-font: ui-serif, Georgia, Cambria, "Times New Roman", "Songti SC", "STSong", serif;
+    --reader-font: Georgia, Cambria, "Times New Roman", serif;
     --radius-sm: 6px;
     --radius-md: 9px;
     --radius-lg: 12px;
