@@ -67,7 +67,7 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
 - 对具有可靠来源映射的文本选区，可从划词笔记菜单复制带论文标题、PDF 物理页码和
   Zotero 回链的 Markdown。选中内容以安全引用块复制；普通复制行为保持不变。
 - 自动生成 Markdown 目录。目录支持点击跳转、拖动调整宽度，也可通过按钮或双击边缘收起。
-- Markdown 正文默认使用适合长文阅读的字号与行宽（正文列约 64ch），英文正文优先使用 Georgia、Cambria 或
+- Markdown 正文默认使用适合长文阅读的字号与行宽（不同字体保持相同的正文列宽），英文正文优先使用 Georgia、Cambria 或
   Times New Roman 等衬线字体；可在左上角“更多”菜单中使用字体选择器切换字体，使用
   `A− / A+` 调整 16–22 px 字号。选择会保存在当前 Zotero 配置文件中，并同步应用到已打开
   的 Mktero 标签页；也可在 `设置 -> Mktero -> Markdown 阅读` 中调整。

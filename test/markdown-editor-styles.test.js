@@ -14,10 +14,10 @@ function ruleBody(selector) {
     return match[1];
 }
 
-test('uses a readable default size and measure for long-form Markdown', () => {
+test('uses a font-independent readable measure for long-form Markdown', () => {
     const host = ruleBody(':host');
 
-    assert.match(host, /--reader-width:\s*64ch/);
+    assert.match(host, /--reader-width:\s*40em/);
     assert.match(host, /--reader-font-size:\s*18px/);
     assert.match(host, /--reader-line-height:\s*1\.72/);
     assert.match(
