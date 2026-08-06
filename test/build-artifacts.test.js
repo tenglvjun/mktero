@@ -87,6 +87,33 @@ test('builds reproducible release assets and Zotero update metadata', async () =
     });
 });
 
+test('loads the packaged Zotero bootstrap without window-only PDF globals', async () => {
+    await buildProject();
+    const lifecycleNames = [
+        'install',
+        'startup',
+        'shutdown',
+        'uninstall',
+        'onMainWindowLoad',
+        'onMainWindowUnload',
+    ];
+    const script = `
+        await import('./build/package/bootstrap.js');
+        const missing = ${JSON.stringify(lifecycleNames)}.filter(
+            name => typeof globalThis[name] !== 'function'
+        );
+        if (missing.length) {
+            throw new Error('Missing Zotero lifecycle globals: ' + missing.join(', '));
+        }
+    `;
+
+    await execFileAsync(process.execPath, [
+        '--input-type=module',
+        '--eval',
+        script,
+    ], { cwd: projectRoot });
+});
+
 async function buildProject() {
     await execFileAsync(process.execPath, ['scripts/build.mjs'], {
         cwd: projectRoot,

@@ -1,3 +1,4 @@
+import './pdfjs-bootstrap-environment.js';
 import {
     getDocument,
     GlobalWorkerOptions,
