@@ -474,20 +474,35 @@ test('selects and persists the reader font from the document action menu', () =>
         toggle.click();
         assert.equal(toggle.getAttribute('aria-expanded'), 'true');
 
+        const ownerWindow = select.ownerDocument.defaultView;
+        select.dispatchEvent(new ownerWindow.Event('mousedown', {
+            bubbles: true,
+        }));
+        const openingClick = new ownerWindow.Event('click', {
+            bubbles: true,
+        });
+        Object.defineProperty(openingClick, 'composedPath', {
+            value: () => [
+                select,
+                shadow.querySelector('.markdown-reader-actions'),
+            ],
+        });
+        ownerWindow.dispatchEvent(openingClick);
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
         for (const option of options) option.removeAttribute('selected');
         select.querySelector('option[value="cambria"]')
             .setAttribute('selected', 'selected');
         select.dispatchEvent(
-            new select.ownerDocument.defaultView.Event('change')
+            new ownerWindow.Event('change')
         );
-        const nativeFontClick = new select.ownerDocument.defaultView.Event(
+        const nativeFontClick = new ownerWindow.Event(
             'click',
             { bubbles: true }
         );
         Object.defineProperty(nativeFontClick, 'composedPath', {
             value: () => [],
         });
-        select.dispatchEvent(nativeFontClick);
+        ownerWindow.dispatchEvent(nativeFontClick);
 
         assert.deepEqual(persistedFonts, ['cambria']);
         assert.equal(
@@ -504,6 +519,78 @@ test('selects and persists the reader font from the document action menu', () =>
                 .getAttribute('aria-expanded'),
             'true'
         );
+
+        const outsideClick = new ownerWindow.Event('click', {
+            bubbles: true,
+        });
+        Object.defineProperty(outsideClick, 'composedPath', {
+            value: () => [],
+        });
+        ownerWindow.dispatchEvent(outsideClick);
+        assert.equal(
+            shadow.querySelector('#mktero-document-actions')
+                .getAttribute('aria-expanded'),
+            'false'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('clears the reader font selection guard when the view is destroyed', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }));
+    const timers = [];
+    const clearCalls = [];
+    view.ownerWindow.setTimeout = (callback, delay) => {
+        const timer = { callback, delay };
+        timers.push(timer);
+        return timer;
+    };
+    view.ownerWindow.clearTimeout = timer => clearCalls.push(timer);
+
+    const toggle = shadow.querySelector('#mktero-document-actions');
+    const select = shadow.querySelector('#mktero-reader-font-family');
+    toggle.click();
+    select.dispatchEvent(new view.ownerWindow.Event('mousedown', {
+        bubbles: true,
+    }));
+
+    assert.equal(timers.length, 1);
+    view.destroy();
+
+    assert.deepEqual(clearCalls, [timers[0]]);
+});
+
+test('closes the font menu on an ordinary outside click after cancellation', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }));
+
+    try {
+        const ownerWindow = document.defaultView;
+        const toggle = shadow.querySelector('#mktero-document-actions');
+        const select = shadow.querySelector('#mktero-reader-font-family');
+        const outside = document.createElement('div');
+        document.body.appendChild(outside);
+
+        toggle.click();
+        select.dispatchEvent(new ownerWindow.Event('mousedown', {
+            bubbles: true,
+        }));
+        outside.dispatchEvent(new ownerWindow.Event('click', {
+            bubbles: true,
+        }));
+
+        assert.equal(toggle.getAttribute('aria-expanded'), 'false');
     }
     finally {
         view.destroy();

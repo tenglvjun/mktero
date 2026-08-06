@@ -34,6 +34,8 @@ const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
     ? __MKTERO_MARKDOWN_STYLES__
     : null;
 const DOCUMENT_ACTION_STATUS_TIMEOUT_MS = 5_000;
+const READER_FONT_SELECTION_OPEN_TIMEOUT_MS = 30_000;
+const READER_FONT_SELECTION_RELEASE_TIMEOUT_MS = 1_000;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
@@ -140,6 +142,8 @@ class MarkdownTabView {
         this.documentActionBusy = null;
         this.actionStatusTimer = null;
         this.documentActionsOpen = false;
+        this.readerFontSelectionGuardPhase = null;
+        this.readerFontSelectionGuardTimer = null;
         this.activeNavigationOffset = 0;
         this.listeners = [];
         this.sidePanels = Object.fromEntries(
@@ -286,6 +290,7 @@ class MarkdownTabView {
     }
 
     destroy() {
+        this.clearReaderFontSelectionGuard();
         this.clearDocumentActionStatus();
         for (const { element, type, listener, options } of this.listeners) {
             element.removeEventListener(type, listener, options);
@@ -926,11 +931,22 @@ class MarkdownTabView {
             const selected = event.target?.value
                 || event.target?.querySelector?.('option[selected]')
                     ?.getAttribute('value');
+            this.markReaderFontSelectionChanged();
             this.changeReaderFont(selected);
         });
-        this.listen(this.elements.readerFontFamily, 'click', event => {
-            event.stopPropagation();
-        });
+        const armReaderFontSelectionGuard = () => {
+            this.armReaderFontSelectionGuard();
+        };
+        this.listen(
+            this.elements.readerFontSelect,
+            'pointerdown',
+            armReaderFontSelectionGuard
+        );
+        this.listen(
+            this.elements.readerFontSelect,
+            'mousedown',
+            armReaderFontSelectionGuard
+        );
         this.listen(this.ownerWindow, 'keydown', event => {
             if (event.key === 'Escape' && this.documentActionsOpen) {
                 event.preventDefault();
@@ -940,7 +956,17 @@ class MarkdownTabView {
         });
         this.listen(this.ownerWindow, 'click', event => {
             const path = event.composedPath?.() || [];
-            if (!path.includes(this.elements.editorActions)) {
+            const insideActions = path.includes(this.elements.editorActions);
+            if (this.readerFontSelectionGuardPhase) {
+                if (insideActions) return;
+                const nativeRelease = this.isReaderFontNativeRelease(
+                    event,
+                    path
+                );
+                this.clearReaderFontSelectionGuard();
+                if (nativeRelease) return;
+            }
+            if (!insideActions) {
                 this.setDocumentActionsOpen(false);
             }
         });
@@ -1184,6 +1210,51 @@ class MarkdownTabView {
             = this.readerFontSize >= MAX_READER_FONT_SIZE;
     }
 
+    armReaderFontSelectionGuard() {
+        if (!this.documentActionsOpen) return;
+        if (this.readerFontSelectionGuardPhase) return;
+        this.clearReaderFontSelectionGuard();
+        this.readerFontSelectionGuardPhase = 'opening';
+        this.startReaderFontSelectionGuardTimer(
+            READER_FONT_SELECTION_OPEN_TIMEOUT_MS
+        );
+    }
+
+    markReaderFontSelectionChanged() {
+        if (this.readerFontSelectionGuardPhase !== 'opening') return;
+        this.clearReaderFontSelectionGuard();
+        this.readerFontSelectionGuardPhase = 'changed';
+        this.startReaderFontSelectionGuardTimer(
+            READER_FONT_SELECTION_RELEASE_TIMEOUT_MS
+        );
+    }
+
+    startReaderFontSelectionGuardTimer(timeout) {
+        if (typeof this.ownerWindow.setTimeout !== 'function') return;
+        this.readerFontSelectionGuardTimer = this.ownerWindow.setTimeout(() => {
+            this.readerFontSelectionGuardPhase = null;
+            this.readerFontSelectionGuardTimer = null;
+        }, timeout);
+    }
+
+    isReaderFontNativeRelease(event, path) {
+        if (event.target === this.ownerWindow || event.target === this.document) {
+            return true;
+        }
+        if (path.length === 0) return true;
+        return path.every(node => (
+            node === this.ownerWindow || node === this.document
+        ));
+    }
+
+    clearReaderFontSelectionGuard() {
+        this.readerFontSelectionGuardPhase = null;
+        if (this.readerFontSelectionGuardTimer !== null) {
+            this.ownerWindow.clearTimeout?.(this.readerFontSelectionGuardTimer);
+            this.readerFontSelectionGuardTimer = null;
+        }
+    }
+
     clearDocumentActionStatus() {
         if (this.actionStatusTimer !== null) {
             this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
@@ -1365,7 +1436,10 @@ class MarkdownTabView {
         const saving = this.documentActionBusy === 'saveSnapshot';
         this.elements.saveSnapshot.setAttribute('aria-busy', String(saving));
         this.elements.saveSnapshot.classList.toggle('is-saving', saving);
-        if (!available) this.documentActionsOpen = false;
+        if (!available) {
+            this.documentActionsOpen = false;
+            this.clearReaderFontSelectionGuard();
+        }
         this.syncDocumentActionMenuState(this.documentActionsOpen && available);
     }
 
@@ -1375,6 +1449,9 @@ class MarkdownTabView {
 
     setDocumentActionsOpen(open) {
         this.documentActionsOpen = Boolean(open);
+        if (!this.documentActionsOpen) {
+            this.clearReaderFontSelectionGuard();
+        }
         const available = !this.elements.editorActions.hidden;
         this.syncDocumentActionMenuState(this.documentActionsOpen && available);
     }
