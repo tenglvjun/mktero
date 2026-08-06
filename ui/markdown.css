@@ -12,9 +12,9 @@
     --accent-strong: #2854ab;
     --accent-contrast: #ffffff;
     --editor-background: var(--reader-background);
-    --reader-width: 820px;
-    --reader-font-size: clamp(15.5px, 0.92vw, 17px);
-    --reader-line-height: 1.76;
+    --reader-width: 68ch;
+    --reader-font-size: 18px;
+    --reader-line-height: 1.72;
     --ui-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --reader-font: ui-serif, Georgia, Cambria, "Times New Roman", "Songti SC", "STSong", serif;
     --radius-sm: 6px;
@@ -608,7 +608,7 @@ main {
     position: absolute;
     z-index: 4;
     top: 14px;
-    right: 16px;
+    left: 16px;
     display: flex;
     width: auto;
     height: auto;
@@ -624,7 +624,7 @@ main {
 .markdown-reader-action-menu {
     position: absolute;
     top: calc(100% + 8px);
-    right: 0;
+    left: 0;
     display: grid;
     width: 220px;
     max-width: min(220px, calc(100vw - 20px));
@@ -638,7 +638,7 @@ main {
     pointer-events: none;
     opacity: 0;
     transform: translateY(-5px) scale(0.98);
-    transform-origin: top right;
+    transform-origin: top left;
     transition:
         opacity 140ms ease,
         transform 160ms ease,
@@ -668,6 +668,78 @@ main {
     border-color: transparent;
     color: var(--text);
     justify-content: flex-start;
+}
+
+.markdown-reader-font-size {
+    display: flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 5px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 3px;
+}
+
+.markdown-reader-font-label {
+    color: var(--text);
+    font-size: 12.5px;
+    font-weight: 550;
+}
+
+.markdown-reader-font-controls {
+    display: inline-grid;
+    align-items: center;
+    grid-template-columns: 30px 42px 30px;
+}
+
+.markdown-reader-font-button {
+    display: inline-grid;
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font: 600 12px/1 var(--ui-font);
+    place-items: center;
+}
+
+.markdown-reader-font-button:first-child {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.markdown-reader-font-button:last-child {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.markdown-reader-font-button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    color: var(--accent);
+}
+
+.markdown-reader-font-button:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.markdown-reader-font-button:disabled {
+    cursor: default;
+    opacity: 0.4;
+}
+
+.markdown-reader-font-value {
+    display: inline-grid;
+    height: 28px;
+    border-block: 1px solid var(--border);
+    color: var(--muted);
+    font: 11px/1 var(--ui-font);
+    font-variant-numeric: tabular-nums;
+    place-items: center;
 }
 
 .markdown-reader-actions.is-open .markdown-reader-action-menu {
@@ -721,7 +793,7 @@ main {
 
 .markdown-reader-action-status {
     position: absolute;
-    right: 0;
+    left: 0;
     top: calc(100% + 8px);
     width: max-content;
     max-width: min(320px, calc(100vw - 32px));
@@ -2130,7 +2202,7 @@ main {
 
     .markdown-reader-actions {
         top: 10px;
-        right: 10px;
+        left: 10px;
     }
 }
 

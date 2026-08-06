@@ -92,6 +92,55 @@ test('restores cache controls when clearing the cache fails', async () => {
     assert.equal(status.attributes['aria-busy'], 'false');
 });
 
+test('configures the Markdown reader font size from preferences', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <input id="mktero-reader-font-size" type="range" min="16" max="22">
+            <output id="mktero-reader-font-size-value"></output>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const writes = [];
+    const zotero = {
+        Prefs: {
+            get: key => key === 'extensions.mktero.readerFontSize' ? 20 : null,
+            set: (key, value, global) => writes.push({ key, value, global }),
+        },
+        logError: assert.fail,
+    };
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero,
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const input = dom.window.document.getElementById('mktero-reader-font-size');
+    const value = dom.window.document.getElementById(
+        'mktero-reader-font-size-value'
+    );
+    assert.equal(input.value, '20');
+    assert.equal(value.textContent, '20 px');
+
+    input.value = '22';
+    input.dispatchEvent(new dom.window.Event('input'));
+    assert.deepEqual(writes, [{
+        key: 'extensions.mktero.readerFontSize',
+        value: 22,
+        global: true,
+    }]);
+    assert.equal(value.textContent, '22 px');
+
+    controller.destroy();
+    input.value = '21';
+    input.dispatchEvent(new dom.window.Event('input'));
+    assert.equal(writes.length, 1);
+});
+
 test('localizes preferences from Zotero without storing a language choice', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">

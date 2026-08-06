@@ -72,8 +72,12 @@ function createViewHarness() {
                 root,
                 renderCalls,
                 destroyCalls: 0,
+                readerFontSizeCalls: [],
                 render(model) {
                     renderCalls.push({ ...model });
+                },
+                setReaderFontSize(size) {
+                    this.readerFontSizeCalls.push(size);
                 },
                 destroy() {
                     this.destroyCalls++;
@@ -172,6 +176,97 @@ test('renders model updates immediately without a browser load boundary or watch
         presentation.view.renderCalls.at(-1).markdown,
         '# Loaded without waiting'
     );
+});
+
+test('persists reader font size changes across Markdown tabs and sessions', () => {
+    const mainWindow = createMainWindow();
+    const stored = new Map([['extensions.mktero.readerFontSize', 20]]);
+    let preferenceObserver;
+    const unregisteredObservers = [];
+    const zoteroOverrides = {
+        Prefs: {
+            get: key => stored.get(key),
+            set: (key, value) => {
+                stored.set(key, value);
+                preferenceObserver?.(value);
+            },
+            registerObserver(key, observer, global) {
+                assert.equal(key, 'extensions.mktero.readerFontSize');
+                assert.equal(global, true);
+                preferenceObserver = observer;
+                return 'reader-font-observer';
+            },
+            unregisterObserver: observer => unregisteredObservers.push(observer),
+        },
+    };
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness, zoteroOverrides);
+
+    presenter.open(42);
+    presenter.open(43);
+    assert.equal(harness.calls[0].readerFontSize, 20);
+    assert.equal(harness.calls[1].readerFontSize, 20);
+
+    harness.calls[0].onReaderFontSizeChange(21);
+
+    assert.equal(stored.get('extensions.mktero.readerFontSize'), 21);
+    assert.deepEqual(harness.views[0].readerFontSizeCalls, [21]);
+    assert.deepEqual(harness.views[1].readerFontSizeCalls, [21]);
+
+    stored.set('extensions.mktero.readerFontSize', 22);
+    preferenceObserver(22);
+    assert.deepEqual(harness.views[0].readerFontSizeCalls, [21, 22]);
+    assert.deepEqual(harness.views[1].readerFontSizeCalls, [21, 22]);
+
+    presenter.dispose();
+    assert.deepEqual(unregisteredObservers, ['reader-font-observer']);
+    const nextHarness = createViewHarness();
+    const nextPresenter = createPresenter(
+        createMainWindow(),
+        nextHarness,
+        zoteroOverrides
+    );
+    nextPresenter.open(44);
+
+    assert.equal(nextHarness.calls[0].readerFontSize, 22);
+    nextPresenter.dispose();
+});
+
+test('synchronizes reader font size across Zotero windows and cleans up', () => {
+    const firstWindow = createMainWindow({ id: 'first-document' });
+    const secondWindow = createMainWindow({ id: 'second-document' });
+    let activeWindow = firstWindow;
+    let preferenceObserver;
+    const unregisteredObservers = [];
+    const harness = createViewHarness();
+    const presenter = createPresenter(firstWindow, harness, {
+        getMainWindow: () => activeWindow,
+        Prefs: {
+            get: () => 18,
+            registerObserver(_key, observer) {
+                preferenceObserver = observer;
+                return 'multi-window-reader-font-observer';
+            },
+            unregisterObserver: observer => unregisteredObservers.push(observer),
+        },
+    });
+
+    const first = presenter.open(42);
+    activeWindow = secondWindow;
+    const second = presenter.open(43);
+
+    assert.equal(harness.calls[0].document, firstWindow.document);
+    assert.equal(harness.calls[1].document, secondWindow.document);
+    preferenceObserver(20);
+    assert.deepEqual(first.view.readerFontSizeCalls, [20]);
+    assert.deepEqual(second.view.readerFontSizeCalls, [20]);
+
+    presenter.dispose();
+    assert.deepEqual(firstWindow.closed, [first.tabID]);
+    assert.deepEqual(secondWindow.closed, [second.tabID]);
+    assert.deepEqual(unregisteredObservers, [
+        'multi-window-reader-font-observer',
+    ]);
 });
 
 test('does not create a Zotero tab when the inline view cannot be initialized', () => {

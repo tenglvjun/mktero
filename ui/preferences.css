@@ -138,6 +138,28 @@
     position: relative;
 }
 
+.mktero-reader-font-control {
+    display: flex;
+    width: min(42%, 340px);
+    flex: 0 1 340px;
+    align-items: center;
+    gap: 12px;
+}
+
+.mktero-reader-font-control input {
+    min-width: 120px;
+    flex: 1 1 auto;
+    accent-color: AccentColor;
+}
+
+.mktero-reader-font-control output {
+    min-width: 42px;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+}
+
 .mktero-switch-input {
     position: absolute;
     z-index: 1;
@@ -214,6 +236,17 @@
     .mktero-field-control {
         flex-basis: auto;
         width: 100%;
+    }
+
+    .mktero-reader-font-row {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .mktero-reader-font-control {
+        width: 100%;
+        flex-basis: auto;
     }
 }
 

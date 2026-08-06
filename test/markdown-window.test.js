@@ -51,6 +51,8 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         stylesheetText: options.stylesheetText ?? MARKDOWN_STYLES,
         editorFactory: options.editorFactory ?? createTestInlineEditor,
         localization: options.localization,
+        readerFontSize: options.readerFontSize,
+        onReaderFontSizeChange: options.onReaderFontSizeChange,
     });
     view.render(model);
     return { document, view, shadow: view.host.shadowRoot };
@@ -387,6 +389,55 @@ test('opens the document action menu and reports snapshot save state', async () 
     view.destroy();
 });
 
+test('adjusts the persisted reader font size from the document action menu', () => {
+    const persistedSizes = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }), {}, {
+        readerFontSize: 18,
+        onReaderFontSizeChange: size => persistedSizes.push(size),
+    });
+
+    try {
+        const toggle = shadow.querySelector('#mktero-document-actions');
+        const decrease = shadow.querySelector('#mktero-reader-font-decrease');
+        const increase = shadow.querySelector('#mktero-reader-font-increase');
+        const value = shadow.querySelector('#mktero-reader-font-value');
+        const group = shadow.querySelector('.markdown-reader-font-size');
+
+        assert.equal(group.getAttribute('aria-label'), 'Text size');
+        assert.equal(decrease.textContent, 'A−');
+        assert.equal(increase.textContent, 'A+');
+        assert.equal(value.textContent, '18 px');
+        assert.equal(view.host.style.getPropertyValue('--reader-font-size'), '18px');
+
+        toggle.click();
+        increase.click();
+        increase.click();
+        increase.click();
+        increase.click();
+
+        assert.deepEqual(persistedSizes, [19, 20, 21, 22]);
+        assert.equal(value.textContent, '22 px');
+        assert.equal(view.host.style.getPropertyValue('--reader-font-size'), '22px');
+        assert.equal(increase.disabled, true);
+        assert.equal(decrease.disabled, false);
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+
+        decrease.click();
+        assert.equal(value.textContent, '21 px');
+        assert.equal(increase.disabled, false);
+        assert.equal(decrease.getAttribute('tabindex'), '0');
+        assert.equal(increase.getAttribute('tabindex'), '0');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('clears a failed snapshot save status after reporting the error', async () => {
     let rejectSave;
     const model = createModel({
@@ -480,7 +531,8 @@ test('renders a saved HTML snapshot without exposing PDF actions or editing cont
             shadow.querySelector('#mktero-snapshot').textContent,
             /Portable/
         );
-        assert.equal(shadow.querySelector('.markdown-reader-actions').hidden, true);
+        assert.equal(shadow.querySelector('.markdown-reader-actions').hidden, false);
+        assert.equal(shadow.querySelector('.markdown-reader-font-size').hidden, false);
         assert.equal(shadow.querySelector('#mktero-reparse').hidden, true);
         assert.equal(shadow.querySelector('#mktero-save-snapshot').hidden, true);
         assert.equal(shadow.querySelector('.cm-content').textContent, '');

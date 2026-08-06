@@ -8,6 +8,12 @@ import {
 } from '../core/markdown-annotation-overlay.js';
 import { resolvePDFPageIndexHint } from '../core/markdown-source-map.js';
 import {
+    MARKDOWN_READER_FONT_SIZE_DEFAULT as DEFAULT_READER_FONT_SIZE,
+    MARKDOWN_READER_FONT_SIZE_MAX as MAX_READER_FONT_SIZE,
+    MARKDOWN_READER_FONT_SIZE_MIN as MIN_READER_FONT_SIZE,
+    normalizeMarkdownReaderFontSize,
+} from '../config/reader-preferences.js';
+import {
     accessibleAnnotationText,
     comparePdfAnnotations,
 } from '../core/pdf-annotation.js';
@@ -73,6 +79,8 @@ export function createMarkdownTabView({
     stylesheetText = BUNDLED_MARKDOWN_STYLES,
     editorFactory = createInlineMarkdownEditor,
     localization = createLocalization(),
+    readerFontSize = DEFAULT_READER_FONT_SIZE,
+    onReaderFontSizeChange = null,
 }) {
     return new MarkdownTabView({
         document,
@@ -81,6 +89,8 @@ export function createMarkdownTabView({
         stylesheetText,
         editorFactory,
         localization,
+        readerFontSize,
+        onReaderFontSizeChange,
     });
 }
 
@@ -92,6 +102,8 @@ class MarkdownTabView {
         stylesheetText,
         editorFactory,
         localization,
+        readerFontSize,
+        onReaderFontSizeChange,
     }) {
         this.localization = localization;
         this.t = localization.t.bind(localization);
@@ -106,6 +118,8 @@ class MarkdownTabView {
         this.ownerWindow = document.defaultView || globalThis;
         this.zotero = zotero;
         this.model = model;
+        this.readerFontSize = normalizeMarkdownReaderFontSize(readerFontSize);
+        this.onReaderFontSizeChange = onReaderFontSizeChange;
         this.renderedAssets = undefined;
         this.assetURLs = new Map();
         this.renderedSnapshotHTML = undefined;
@@ -156,6 +170,7 @@ class MarkdownTabView {
         this.mount.appendChild(this.createStylesheet(stylesheetText));
         this.elements = this.createContent();
         this.mount.appendChild(this.elements.view);
+        this.setReaderFontSize(this.readerFontSize);
         this.editor = editorFactory({
             document: this.document,
             parent: this.elements.editorHost,
@@ -653,6 +668,11 @@ class MarkdownTabView {
             reparseLabel: documentActions.reparseLabel,
             saveSnapshot: documentActions.saveSnapshot,
             saveSnapshotLabel: documentActions.saveSnapshotLabel,
+            readerFontSize: documentActions.readerFontSize,
+            readerFontLabel: documentActions.readerFontLabel,
+            readerFontDecrease: documentActions.readerFontDecrease,
+            readerFontIncrease: documentActions.readerFontIncrease,
+            readerFontValue: documentActions.readerFontValue,
             actionStatus: documentActions.status,
         };
     }
@@ -682,6 +702,48 @@ class MarkdownTabView {
             role: 'menu',
             'aria-hidden': 'true',
         });
+        const readerFontLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-font-label' },
+            this.t('viewer.textSize')
+        );
+        const readerFontDecrease = this.createElement('button', {
+            id: 'mktero-reader-font-decrease',
+            class: 'markdown-reader-font-button',
+            type: 'button',
+            role: 'menuitem',
+            'aria-label': this.t('viewer.textSizeDecrease'),
+            title: this.t('viewer.textSizeDecrease'),
+        }, 'A−');
+        const readerFontValue = this.createElement('output', {
+            id: 'mktero-reader-font-value',
+            class: 'markdown-reader-font-value',
+            'aria-live': 'polite',
+            'aria-atomic': 'true',
+        });
+        const readerFontIncrease = this.createElement('button', {
+            id: 'mktero-reader-font-increase',
+            class: 'markdown-reader-font-button',
+            type: 'button',
+            role: 'menuitem',
+            'aria-label': this.t('viewer.textSizeIncrease'),
+            title: this.t('viewer.textSizeIncrease'),
+        }, 'A+');
+        const readerFontControls = this.createElement('span', {
+            class: 'markdown-reader-font-controls',
+        });
+        appendChildren(
+            readerFontControls,
+            readerFontDecrease,
+            readerFontValue,
+            readerFontIncrease
+        );
+        const readerFontSize = this.createElement('div', {
+            class: 'markdown-reader-font-size',
+            role: 'group',
+            'aria-label': this.t('viewer.textSize'),
+        });
+        appendChildren(readerFontSize, readerFontLabel, readerFontControls);
         const reparse = this.createElement('button', {
             id: 'mktero-reparse',
             class: 'markdown-reader-action markdown-reader-action--child',
@@ -726,6 +788,7 @@ class MarkdownTabView {
             this.t('viewer.saveSnapshotShort')
         );
         saveSnapshot.appendChild(saveSnapshotLabel);
+        menu.appendChild(readerFontSize);
         menu.appendChild(reparse);
         menu.appendChild(saveSnapshot);
         const status = this.createElement('span', {
@@ -748,6 +811,11 @@ class MarkdownTabView {
             reparseLabel,
             saveSnapshot,
             saveSnapshotLabel,
+            readerFontSize,
+            readerFontLabel,
+            readerFontDecrease,
+            readerFontIncrease,
+            readerFontValue,
             status,
         };
     }
@@ -804,6 +872,12 @@ class MarkdownTabView {
         });
         this.listen(this.elements.saveSnapshot, 'click', () => {
             this.runDocumentAction('saveSnapshot', 'onSaveSnapshot');
+        });
+        this.listen(this.elements.readerFontDecrease, 'click', () => {
+            this.changeReaderFontSize(-1);
+        });
+        this.listen(this.elements.readerFontIncrease, 'click', () => {
+            this.changeReaderFontSize(1);
         });
         this.listen(this.ownerWindow, 'keydown', event => {
             if (event.key === 'Escape' && this.documentActionsOpen) {
@@ -1008,6 +1082,37 @@ class MarkdownTabView {
         }, DOCUMENT_ACTION_STATUS_TIMEOUT_MS);
     }
 
+    changeReaderFontSize(delta) {
+        const nextSize = normalizeMarkdownReaderFontSize(
+            this.readerFontSize + delta
+        );
+        if (nextSize === this.readerFontSize) return;
+        this.setReaderFontSize(nextSize);
+        try {
+            this.onReaderFontSizeChange?.(nextSize);
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
+    }
+
+    setReaderFontSize(size) {
+        this.readerFontSize = normalizeMarkdownReaderFontSize(size);
+        this.host.style.setProperty(
+            '--reader-font-size',
+            `${this.readerFontSize}px`
+        );
+        if (!this.elements) return;
+        this.elements.readerFontValue.textContent = this.t(
+            'viewer.textSizeValue',
+            { size: this.readerFontSize }
+        );
+        this.elements.readerFontDecrease.disabled
+            = this.readerFontSize <= MIN_READER_FONT_SIZE;
+        this.elements.readerFontIncrease.disabled
+            = this.readerFontSize >= MAX_READER_FONT_SIZE;
+    }
+
     clearDocumentActionStatus() {
         if (this.actionStatusTimer !== null) {
             this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
@@ -1094,6 +1199,28 @@ class MarkdownTabView {
         this.elements.saveSnapshotLabel.textContent = this.t(
             'viewer.saveSnapshotShort'
         );
+        this.elements.readerFontSize.setAttribute(
+            'aria-label',
+            this.t('viewer.textSize')
+        );
+        this.elements.readerFontLabel.textContent = this.t('viewer.textSize');
+        this.elements.readerFontDecrease.setAttribute(
+            'aria-label',
+            this.t('viewer.textSizeDecrease')
+        );
+        this.elements.readerFontDecrease.setAttribute(
+            'title',
+            this.t('viewer.textSizeDecrease')
+        );
+        this.elements.readerFontIncrease.setAttribute(
+            'aria-label',
+            this.t('viewer.textSizeIncrease')
+        );
+        this.elements.readerFontIncrease.setAttribute(
+            'title',
+            this.t('viewer.textSizeIncrease')
+        );
+        this.setReaderFontSize(this.readerFontSize);
         this.elements.outline.setAttribute('aria-label', this.t('viewer.outline'));
         this.elements.outlineTitleLabel.textContent = this.t(
             'viewer.outlineTitle'
@@ -1112,11 +1239,16 @@ class MarkdownTabView {
         const reparseAvailable = typeof model.onReparse === 'function';
         const saveAvailable = typeof model.onSaveSnapshot === 'function'
             && model.renderMode !== 'html';
-        const available = reparseAvailable || saveAvailable;
+        const readerControlsAvailable = model.status === 'ready'
+            || loadingView.preserveContent;
+        const available = reparseAvailable
+            || saveAvailable
+            || readerControlsAvailable;
         const reparsing = loadingView.visible && loadingView.preserveContent;
         this.elements.editorActions.hidden = !available;
         this.elements.reparse.hidden = !reparseAvailable;
         this.elements.saveSnapshot.hidden = !saveAvailable;
+        this.elements.readerFontSize.hidden = !readerControlsAvailable;
         this.elements.reparse.disabled = !reparseAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
@@ -1153,6 +1285,8 @@ class MarkdownTabView {
         const menuTabIndex = visible ? '0' : '-1';
         this.elements.reparse.setAttribute('tabindex', menuTabIndex);
         this.elements.saveSnapshot.setAttribute('tabindex', menuTabIndex);
+        this.elements.readerFontDecrease.setAttribute('tabindex', menuTabIndex);
+        this.elements.readerFontIncrease.setAttribute('tabindex', menuTabIndex);
         this.elements.editorActions.classList.toggle('is-open', visible);
     }
 

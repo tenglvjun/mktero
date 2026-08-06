@@ -34,6 +34,39 @@
         </html:div>
     </groupbox>
 
+    <groupbox id="mktero-reader-section"
+              class="mktero-preferences-section"
+              aria-labelledby="mktero-reader-title">
+        <html:div class="mktero-section-heading">
+            <html:h2 id="mktero-reader-title"
+                     data-i18n="preferences.reader.title"></html:h2>
+            <html:p data-i18n="preferences.reader.description"></html:p>
+        </html:div>
+
+        <html:div class="mktero-settings-card">
+            <html:div class="mktero-setting-row mktero-reader-font-row">
+                <html:span class="mktero-setting-copy">
+                    <html:label for="mktero-reader-font-size"><html:strong data-i18n="preferences.reader.fontSizeLabel"></html:strong></html:label>
+                    <html:small id="mktero-reader-font-size-help"
+                                data-i18n="preferences.reader.fontSizeHelp"></html:small>
+                </html:span>
+                <html:span class="mktero-reader-font-control">
+                    <html:input id="mktero-reader-font-size"
+                                type="range"
+                                min="16"
+                                max="22"
+                                step="1"
+                                value="18"
+                                preference="extensions.mktero.readerFontSize"
+                                aria-describedby="mktero-reader-font-size-help mktero-reader-font-size-value" />
+                    <html:output id="mktero-reader-font-size-value"
+                                 for="mktero-reader-font-size"
+                                 aria-live="polite">18 px</html:output>
+                </html:span>
+            </html:div>
+        </html:div>
+    </groupbox>
+
     <groupbox id="mktero-cache-section"
               class="mktero-preferences-section"
               aria-labelledby="mktero-cache-title">

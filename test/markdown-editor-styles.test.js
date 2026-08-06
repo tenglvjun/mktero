@@ -14,6 +14,14 @@ function ruleBody(selector) {
     return match[1];
 }
 
+test('uses a readable default size and measure for long-form Markdown', () => {
+    const host = ruleBody(':host');
+
+    assert.match(host, /--reader-width:\s*68ch/);
+    assert.match(host, /--reader-font-size:\s*18px/);
+    assert.match(host, /--reader-line-height:\s*1\.72/);
+});
+
 test('article layout outranks the CodeMirror adopted base theme', () => {
     const scroller = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-scroller'
@@ -237,7 +245,7 @@ test('styles the document action as a compact reader toolbar', () => {
 
     const actions = ruleBody('.markdown-reader-actions');
     assert.match(actions, /position:\s*absolute/);
-    assert.match(actions, /right:\s*16px/);
+    assert.match(actions, /left:\s*16px/);
     assert.match(actions, /top:\s*14px/);
     assert.match(actions, /z-index:\s*4/);
     assert.match(actions, /display:\s*flex/);
@@ -251,6 +259,7 @@ test('styles the document action as a compact reader toolbar', () => {
 
     const menu = ruleBody('.markdown-reader-action-menu');
     assert.match(menu, /top:\s*calc\(100% \+ 8px\)/);
+    assert.match(menu, /left:\s*0/);
     assert.match(menu, /width:\s*220px/);
     assert.match(menu, /max-width:\s*min\(220px, calc\(100vw - 20px\)\)/);
     assert.match(menu, /box-shadow:\s*var\(--shadow-popover\)/);

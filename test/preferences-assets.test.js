@@ -23,11 +23,14 @@ test('ships MinerU token, cache preferences, and localized Markdown UI assets', 
 
     assert.match(prefs, /pref\("extensions\.mktero\.mineruApiKey", ""\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.cacheEnabled", true\)/);
+    assert.match(prefs, /pref\("extensions\.mktero\.readerFontSize", 18\)/);
     assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
     assert.doesNotMatch(pane, /id="mktero-language"/);
     assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
     assert.match(pane, /preference="extensions\.mktero\.mineruApiKey"/);
     assert.match(pane, /preference="extensions\.mktero\.cacheEnabled"/);
+    assert.match(pane, /preference="extensions\.mktero\.readerFontSize"/);
+    assert.match(pane, /id="mktero-reader-font-size-value"/);
     assert.match(pane, /id="mktero-clear-cache"/);
     assert.doesNotMatch(pane, /onload=/);
     assert.match(script, /registerPreferencesPaneLoader/);
@@ -72,8 +75,8 @@ test('presents every preference group as one cohesive settings card', async () =
         readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
     ]);
 
-    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 2);
-    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 2);
+    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 3);
     assert.match(
         pane,
         /id="mktero-mineru-api-key"[\s\S]*aria-describedby="mktero-token-help mktero-token-storage-note"/
