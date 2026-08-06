@@ -98,6 +98,7 @@ test('loads the packaged Zotero bootstrap without window-only PDF globals', asyn
         'onMainWindowUnload',
     ];
     const script = `
+        delete globalThis.DOMException;
         await import('./build/package/bootstrap.js');
         const missing = ${JSON.stringify(lifecycleNames)}.filter(
             name => typeof globalThis[name] !== 'function'
