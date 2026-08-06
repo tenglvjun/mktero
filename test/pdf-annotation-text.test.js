@@ -21,6 +21,30 @@ test('normalizes mathematical operator whitespace while preserving source ranges
     assert.equal(normalizePdfAnnotationText('well - being'), 'well - being');
 });
 
+test('normalizes signed-number spacing after opening delimiters', () => {
+    const source = 'Limits ( \t± 2 days), range [ + 3 ], set { − 4 }.';
+    const index = createPdfAnnotationTextIndex(source);
+    const normalized = 'Limits (±2 days), range [+3 ], set {-4 }.';
+
+    assert.equal(index.text, normalized);
+    const target = '(±2 days)';
+    const range = index.sourceRange(
+        normalized.indexOf(target),
+        target.length
+    );
+    assert.equal(source.slice(range.from, range.to), '( \t± 2 days)');
+    assert.equal(normalizePdfAnnotationText('( ± value)'), '( ± value)');
+    assert.equal(normalizePdfAnnotationText('( example)'), '( example)');
+});
+
+test('handles repeated oversized signed-number spacing', () => {
+    const fragment = `( ${' '.repeat(256)}± ${' '.repeat(256)}2)`;
+    const source = Array(512).fill(fragment).join(' ');
+    const expected = Array(512).fill('(±2)').join(' ');
+
+    assert.equal(normalizePdfAnnotationText(source), expected);
+});
+
 test('normalizes PDF.js spacing around degree units while preserving source ranges', () => {
     const markdown = 'Basal body temperature increases by 0.3 °C.';
     const pdf = 'Basal body temperature increases by 0.3   ° C.';

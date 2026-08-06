@@ -11,6 +11,7 @@ const TRADEMARK_SUPERSCRIPT = /\$\^\{([®©™])\}\$/gu;
 const SENTENCE_FOOTNOTE_SUPERSCRIPT = /\$\^\{([0-9]{1,4})\}\$/gu;
 const SENTENCE_END = /[.!?。！？]/u;
 const RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}])(\s*)(<=|>=|!=|[=<>≤≥≠])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
+const OPENING_DELIMITER_SIGNED_NUMBER_WHITESPACE_PATTERN = /[([{](\s+)(?=[+\-−±]\s*\d)/gu;
 const SIGNED_NUMBER_WHITESPACE_PATTERN = /[+\-−±](\s+)(?=\d)/gu;
 const DEGREE_SYMBOL_WHITESPACE_PATTERN = /([\p{N})\]}])(\s+)(?=°)/gu;
 const DEGREE_SYMBOL_UNIT_WHITESPACE_PATTERN = /°(\s+)(?=\p{L})/gu;
@@ -254,6 +255,15 @@ function markMathematicalWhitespace(text, ignoredOffsets) {
             ignoredOffsets,
             match.index + leftLength + match[2].length + match[3].length,
             match[4].length
+        );
+    }
+    for (const match of text.matchAll(
+        OPENING_DELIMITER_SIGNED_NUMBER_WHITESPACE_PATTERN
+    )) {
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + 1,
+            match[1].length
         );
     }
     for (const match of text.matchAll(SIGNED_NUMBER_WHITESPACE_PATTERN)) {

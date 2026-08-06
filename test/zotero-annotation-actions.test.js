@@ -42,6 +42,20 @@ const MENSTRUAL_RESULTS_PDF_PASSAGE = MENSTRUAL_RESULTS_PASSAGE.replace(
     'menstruators',
     'menstrua\u2011\ntors'
 );
+const WRIST_OVULATION_MARKDOWN_PASSAGE = 'A total of 61 study participants '
+    + 'contributing 205 cycles and 6081 real-life cycles from 3268 bracelet '
+    + 'users were included in the analysis. The mean error in identifying '
+    + 'ovulation with the wrist-worn medical device retrospective algorithm '
+    + 'in the clinical study was 0.31 days (95% CI −0.13 to 0.75). The '
+    + 'retrospective algorithm identified 75.4% of fertile days, and the '
+    + 'prospective algorithm identified 73.8% of fertile days correctly '
+    + 'within the pre-specified equivalence limits ( ± 2 days). The quality '
+    + 'of the retrospective algorithm in the clinical study could be '
+    + 'confirmed by real-world data.';
+const WRIST_OVULATION_PDF_PASSAGE = WRIST_OVULATION_MARKDOWN_PASSAGE.replace(
+    '( ± 2 days)',
+    '(±2 days)'
+);
 
 test('creates a Zotero PDF highlight from located Markdown text', async () => {
     const selectedText = 'The sound of stress recovery: an exploratory study '
@@ -775,6 +789,20 @@ test('locates PDF.js text with spaces around a degree unit', async () => {
     assert.equal(result.created.id, 'SYNC0001');
     assert.deepEqual(result.queries, [markdownPassage, pdfPassage]);
     assert.equal(result.savedJSON.text, markdownPassage);
+});
+
+test('locates the wrist ovulation result despite spacing inside parentheses', async () => {
+    const result = await createAnnotationWithNormalizedPDFSearch(
+        WRIST_OVULATION_MARKDOWN_PASSAGE,
+        WRIST_OVULATION_PDF_PASSAGE
+    );
+
+    assert.equal(result.created.id, 'SYNC0001');
+    assert.deepEqual(result.queries, [
+        WRIST_OVULATION_MARKDOWN_PASSAGE,
+        WRIST_OVULATION_PDF_PASSAGE,
+    ]);
+    assert.equal(result.savedJSON.text, WRIST_OVULATION_MARKDOWN_PASSAGE);
 });
 
 test('locates saved Markdown LaTeX temperature text in the PDF', async () => {
