@@ -2,12 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('extracts PDF text when AbortController only exists on the Zotero window', async () => {
+test('extracts PDF text when abort globals only exist on the Zotero window', async () => {
+    await fetch('data:text/plain,ready');
     const NativeAbortController = globalThis.AbortController;
+    const NativeAbortSignal = globalThis.AbortSignal;
     const previousZotero = globalThis.Zotero;
     delete globalThis.AbortController;
+    delete globalThis.AbortSignal;
     globalThis.Zotero = {
-        getMainWindow: () => ({ AbortController: NativeAbortController }),
+        getMainWindow: () => ({
+            AbortController: NativeAbortController,
+            AbortSignal: NativeAbortSignal,
+        }),
     };
 
     try {
@@ -35,6 +41,7 @@ test('extracts PDF text when AbortController only exists on the Zotero window', 
     }
     finally {
         globalThis.AbortController = NativeAbortController;
+        globalThis.AbortSignal = NativeAbortSignal;
         if (previousZotero === undefined) delete globalThis.Zotero;
         else globalThis.Zotero = previousZotero;
     }

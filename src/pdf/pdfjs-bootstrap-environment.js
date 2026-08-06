@@ -1,5 +1,6 @@
 const mainWindow = globalThis.Zotero?.getMainWindow?.();
 const windowAbortController = mainWindow?.AbortController;
+const windowAbortSignal = mainWindow?.AbortSignal;
 const windowDOMMatrix = mainWindow?.DOMMatrix;
 const windowDOMException = mainWindow?.DOMException;
 
@@ -25,4 +26,9 @@ if (typeof globalThis.DOMException !== 'function') {
 if (typeof globalThis.AbortController !== 'function'
     && typeof windowAbortController === 'function') {
     globalThis.AbortController = windowAbortController;
+}
+
+if (typeof globalThis.AbortSignal !== 'function'
+    && typeof windowAbortSignal === 'function') {
+    globalThis.AbortSignal = windowAbortSignal;
 }
