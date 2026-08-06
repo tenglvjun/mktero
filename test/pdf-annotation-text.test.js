@@ -22,9 +22,11 @@ test('normalizes mathematical operator whitespace while preserving source ranges
 });
 
 test('normalizes signed-number spacing after opening delimiters', () => {
-    const source = 'Limits ( \t± 2 days), range [ + 3 ], set { − 4 }.';
+    const source = 'Limits ( \t± 2 days), range [ + 3 ], set { − 4 }, '
+        + 'LaTeX ( \\pm 5 days).';
     const index = createPdfAnnotationTextIndex(source);
-    const normalized = 'Limits (±2 days), range [+3 ], set {-4 }.';
+    const normalized = 'Limits (±2 days), range [+3 ], set {-4 }, '
+        + 'LaTeX (±5 days).';
 
     assert.equal(index.text, normalized);
     const target = '(±2 days)';
@@ -35,6 +37,7 @@ test('normalizes signed-number spacing after opening delimiters', () => {
     assert.equal(source.slice(range.from, range.to), '( \t± 2 days)');
     assert.equal(normalizePdfAnnotationText('( ± value)'), '( ± value)');
     assert.equal(normalizePdfAnnotationText('( example)'), '( example)');
+    assert.equal(normalizePdfAnnotationText('( \\pm value)'), '( ± value)');
 });
 
 test('handles repeated oversized signed-number spacing', () => {
@@ -124,7 +127,8 @@ test('normalizes LaTeX temperature units from saved Markdown annotations', () =>
 });
 
 test('leaves escaped, malformed, and oversized LaTeX-like input unchanged', () => {
-    const fragment = '\\\\pm2 0.30\\\\;^{\\circ}C \\pmod2 \\pmatrix '
+    const fragment = '\\\\pm 2 ( \\\\pm 3) 0.30\\\\;^{\\circ}C '
+        + '\\pmod2 \\pmatrix '
         + '\\input{secret} 0.30\\;^{\\cir';
     const source = Array(1_000).fill(fragment).join(' ');
 

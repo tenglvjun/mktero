@@ -14,7 +14,7 @@ const MAX_PAGE_TEXT_LENGTH = 1_000_000;
 const MAX_TOTAL_TEXT_LENGTH = 10_000_000;
 const MAX_TEXT_ITEMS = 250_000;
 
-export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v2`;
+export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v3`;
 
 export function createPDFJSTextEngine({
     workerSrc = '',
@@ -45,8 +45,10 @@ export function createPDFJSTextEngine({
             if (!active) throw indexUnavailableError();
             validatePDFData(fileData);
             throwIfAborted(signal);
+            const pdfData = Uint8Array.from(fileData);
+            throwIfAborted(signal);
             const loadingTask = loadDocument({
-                data: fileData.slice(),
+                data: pdfData,
                 cMapUrl: cMapUrl || undefined,
                 cMapPacked: true,
                 standardFontDataUrl: standardFontDataUrl || undefined,
@@ -281,7 +283,9 @@ function normalizePageLabel(value, pageIndex) {
 }
 
 function validatePDFData(fileData) {
-    if (!(fileData instanceof Uint8Array)
+    if (!ArrayBuffer.isView(fileData)
+        || fileData.BYTES_PER_ELEMENT !== 1
+        || fileData.length !== fileData.byteLength
         || !fileData.length
         || fileData.length > MAX_PDF_BYTES) {
         throw new TypeError('PDF data is unavailable or exceeds the safety limit');

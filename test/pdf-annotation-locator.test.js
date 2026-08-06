@@ -13,6 +13,8 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
     PDFAnnotationLocator,
     createPDFTextIndexCacheKey,
@@ -67,6 +69,38 @@ test('rejects malformed PDF bytes through the real PDF.js engine', async () => {
         error => error instanceof Error
     );
     await engine.dispose();
+});
+
+test('extracts PDF bytes returned from another JavaScript realm', async () => {
+    const localData = new Uint8Array(await readFile(
+        new URL('./fixtures/offline-annotation.pdf', import.meta.url)
+    ));
+    const originalData = Uint8Array.from(localData);
+    const fileData = runInNewContext(
+        'new Uint8Array(source.buffer, source.byteOffset, source.byteLength)',
+        { source: localData }
+    );
+    let forwardedData = null;
+    const engine = createTestPDFEngine({
+        loadDocument: options => {
+            forwardedData = options.data;
+            return getDocument(options);
+        },
+    });
+
+    try {
+        const index = await engine.extract(fileData);
+
+        assert.equal(fileData instanceof Uint8Array, false);
+        assert.equal(ArrayBuffer.isView(fileData), true);
+        assert.equal(forwardedData instanceof Uint8Array, true);
+        assert.notEqual(forwardedData.buffer, fileData.buffer);
+        assert.deepEqual(Array.from(fileData), Array.from(originalData));
+        assert.equal(index.pages[0].rawText, 'Ovulation limits (±2 days)');
+    }
+    finally {
+        await engine.dispose();
+    }
 });
 
 test('saves a Zotero highlight without opening the PDF reader', async () => {
@@ -629,6 +663,22 @@ test('matches PDF whitespace, signed numbers, dehyphenation, and CJK text', asyn
 
     assert.equal(located.position.pageIndex, 0);
     assert.equal(located.position.rects.length, 2);
+    locator.dispose();
+});
+
+test('matches a LaTeX signed number against a compact PDF symbol', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('equivalence limits (±2 days).'),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'equivalence limits ( \\pm 2 days).',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
     locator.dispose();
 });
 
