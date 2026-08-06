@@ -928,6 +928,9 @@ class MarkdownTabView {
                     ?.getAttribute('value');
             this.changeReaderFont(selected);
         });
+        this.listen(this.elements.readerFontFamily, 'click', event => {
+            event.stopPropagation();
+        });
         this.listen(this.ownerWindow, 'keydown', event => {
             if (event.key === 'Escape' && this.documentActionsOpen) {
                 event.preventDefault();

@@ -454,6 +454,7 @@ test('selects and persists the reader font from the document action menu', () =>
 
     try {
         const select = shadow.querySelector('#mktero-reader-font-family');
+        const toggle = shadow.querySelector('#mktero-document-actions');
         const options = [...select.querySelectorAll('option')];
 
         assert.equal(select.getAttribute('aria-label'), 'Text font');
@@ -470,6 +471,8 @@ test('selects and persists the reader font from the document action menu', () =>
                 .hasAttribute('selected'),
             true
         );
+        toggle.click();
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
 
         for (const option of options) option.removeAttribute('selected');
         select.querySelector('option[value="cambria"]')
@@ -477,6 +480,14 @@ test('selects and persists the reader font from the document action menu', () =>
         select.dispatchEvent(
             new select.ownerDocument.defaultView.Event('change')
         );
+        const nativeFontClick = new select.ownerDocument.defaultView.Event(
+            'click',
+            { bubbles: true }
+        );
+        Object.defineProperty(nativeFontClick, 'composedPath', {
+            value: () => [],
+        });
+        select.dispatchEvent(nativeFontClick);
 
         assert.deepEqual(persistedFonts, ['cambria']);
         assert.equal(
@@ -487,6 +498,11 @@ test('selects and persists the reader font from the document action menu', () =>
             select.querySelector('option[value="cambria"]')
                 .hasAttribute('selected'),
             true
+        );
+        assert.equal(
+            shadow.querySelector('#mktero-document-actions')
+                .getAttribute('aria-expanded'),
+            'true'
         );
     }
     finally {
