@@ -97,6 +97,10 @@ test('configures the Markdown reader font size from preferences', async () => {
         <section id="mktero-preferences-pane">
             <input id="mktero-reader-font-size" type="range" min="16" max="22">
             <output id="mktero-reader-font-size-value"></output>
+            <select id="mktero-reader-font-family">
+                <option value="georgia">Georgia</option>
+                <option value="cambria">Cambria</option>
+            </select>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
         </section>
@@ -135,10 +139,29 @@ test('configures the Markdown reader font size from preferences', async () => {
     }]);
     assert.equal(value.textContent, '22 px');
 
+    const font = dom.window.document.getElementById('mktero-reader-font-family');
+    assert.equal(font.value, 'georgia');
+    font.value = 'cambria';
+    font.dispatchEvent(new dom.window.Event('change'));
+    assert.deepEqual(writes, [
+        {
+            key: 'extensions.mktero.readerFontSize',
+            value: 22,
+            global: true,
+        },
+        {
+            key: 'extensions.mktero.readerFont',
+            value: 'cambria',
+            global: true,
+        },
+    ]);
+
     controller.destroy();
     input.value = '21';
     input.dispatchEvent(new dom.window.Event('input'));
-    assert.equal(writes.length, 1);
+    font.value = 'georgia';
+    font.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(writes.length, 2);
 });
 
 test('localizes preferences from Zotero without storing a language choice', async () => {

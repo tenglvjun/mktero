@@ -55,6 +55,15 @@ test('article layout outranks the CodeMirror adopted base theme', () => {
     assert.match(heading, /line-height:\s*1\.25/);
 });
 
+test('styles the reader font selector in the document action menu', () => {
+    const select = ruleBody('.markdown-reader-font-select');
+
+    assert.match(select, /width:\s*136px/);
+    assert.match(select, /height:\s*28px/);
+    assert.match(select, /border:\s*1px\s+solid\s+var\(--border\)/);
+    assert.match(select, /cursor:\s*pointer/);
+});
+
 test('wide Markdown tables scroll inside the aligned reading column', () => {
     const tableFrame = ruleBody([
         '.markdown-editor-host > .cm-editor .cm-mktero-table,',

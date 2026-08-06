@@ -24,12 +24,15 @@ test('ships MinerU token, cache preferences, and localized Markdown UI assets', 
     assert.match(prefs, /pref\("extensions\.mktero\.mineruApiKey", ""\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.cacheEnabled", true\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.readerFontSize", 18\)/);
+    assert.match(prefs, /pref\("extensions\.mktero\.readerFont", "georgia"\)/);
     assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
     assert.doesNotMatch(pane, /id="mktero-language"/);
     assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
     assert.match(pane, /preference="extensions\.mktero\.mineruApiKey"/);
     assert.match(pane, /preference="extensions\.mktero\.cacheEnabled"/);
     assert.match(pane, /preference="extensions\.mktero\.readerFontSize"/);
+    assert.match(pane, /preference="extensions\.mktero\.readerFont"/);
+    assert.match(pane, /id="mktero-reader-font-family"/);
     assert.match(pane, /id="mktero-reader-font-size-value"/);
     assert.match(pane, /id="mktero-clear-cache"/);
     assert.doesNotMatch(pane, /onload=/);

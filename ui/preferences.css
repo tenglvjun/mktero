@@ -146,10 +146,21 @@
     gap: 12px;
 }
 
-.mktero-reader-font-control input {
+.mktero-reader-font-control input,
+.mktero-reader-font-control select {
     min-width: 120px;
     flex: 1 1 auto;
     accent-color: AccentColor;
+}
+
+.mktero-reader-font-control select {
+    min-height: 28px;
+    padding: 3px 8px;
+    border: 1px solid var(--fill-secondary, rgba(90, 90, 90, 0.35));
+    border-radius: 4px;
+    background: var(--background, transparent);
+    color: inherit;
+    font: inherit;
 }
 
 .mktero-reader-font-control output {

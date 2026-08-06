@@ -51,7 +51,9 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         stylesheetText: options.stylesheetText ?? MARKDOWN_STYLES,
         editorFactory: options.editorFactory ?? createTestInlineEditor,
         localization: options.localization,
+        readerFont: options.readerFont,
         readerFontSize: options.readerFontSize,
+        onReaderFontChange: options.onReaderFontChange,
         onReaderFontSizeChange: options.onReaderFontSizeChange,
     });
     view.render(model);
@@ -432,6 +434,60 @@ test('adjusts the persisted reader font size from the document action menu', () 
         assert.equal(increase.disabled, false);
         assert.equal(decrease.getAttribute('tabindex'), '0');
         assert.equal(increase.getAttribute('tabindex'), '0');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('selects and persists the reader font from the document action menu', () => {
+    const persistedFonts = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }), {}, {
+        readerFont: 'georgia',
+        onReaderFontChange: font => persistedFonts.push(font),
+    });
+
+    try {
+        const select = shadow.querySelector('#mktero-reader-font-family');
+        const options = [...select.querySelectorAll('option')];
+
+        assert.equal(select.getAttribute('aria-label'), 'Text font');
+        assert.deepEqual(
+            options.map(option => option.getAttribute('value')),
+            ['georgia', 'cambria', 'times-new-roman', 'system-serif']
+        );
+        assert.equal(
+            shadow.host.style.getPropertyValue('--reader-font'),
+            'Georgia, Cambria, "Times New Roman", serif'
+        );
+        assert.equal(
+            select.querySelector('option[value="georgia"]')
+                .hasAttribute('selected'),
+            true
+        );
+
+        for (const option of options) option.removeAttribute('selected');
+        select.querySelector('option[value="cambria"]')
+            .setAttribute('selected', 'selected');
+        select.dispatchEvent(
+            new select.ownerDocument.defaultView.Event('change')
+        );
+
+        assert.deepEqual(persistedFonts, ['cambria']);
+        assert.equal(
+            shadow.host.style.getPropertyValue('--reader-font'),
+            'Cambria, Georgia, "Times New Roman", serif'
+        );
+        assert.equal(
+            select.querySelector('option[value="cambria"]')
+                .hasAttribute('selected'),
+            true
+        );
     }
     finally {
         view.destroy();
@@ -1879,6 +1935,16 @@ test('localizes the Markdown viewer chrome from the Zotero locale', () => {
     assert.equal(
         shadow.querySelector('#mktero-reparse').getAttribute('title'),
         '重新解析 PDF。这会再次上传 PDF，并可能消耗转换服务额度。'
+    );
+    assert.equal(
+        shadow.querySelector('#mktero-reader-font-family')
+            .getAttribute('aria-label'),
+        '正文字体'
+    );
+    assert.deepEqual(
+        [...shadow.querySelectorAll('#mktero-reader-font-family option')]
+            .map(option => option.textContent),
+        ['Georgia', 'Cambria', 'Times New Roman', '系统衬线']
     );
 
     view.destroy();

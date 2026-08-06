@@ -670,13 +670,17 @@ main {
     justify-content: flex-start;
 }
 
-.markdown-reader-font-size {
+.markdown-reader-font-size,
+.markdown-reader-font-family {
     display: flex;
     min-height: 40px;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     padding: 4px 5px 8px;
+}
+
+.markdown-reader-font-size {
     border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 3px;
 }
@@ -740,6 +744,26 @@ main {
     font: 11px/1 var(--ui-font);
     font-variant-numeric: tabular-nums;
     place-items: center;
+}
+
+.markdown-reader-font-select {
+    min-width: 0;
+    width: 136px;
+    height: 28px;
+    padding: 0 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    color: var(--text);
+    cursor: pointer;
+    font: 12px/1 var(--ui-font);
+}
+
+.markdown-reader-font-select:hover,
+.markdown-reader-font-select:focus-visible {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    outline-offset: 1px;
 }
 
 .markdown-reader-actions.is-open .markdown-reader-action-menu {

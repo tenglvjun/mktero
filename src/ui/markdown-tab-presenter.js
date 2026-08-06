@@ -2,9 +2,13 @@ import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
 import {
+    getMarkdownReaderFont,
     getMarkdownReaderFontSize,
+    normalizeMarkdownReaderFont,
     normalizeMarkdownReaderFontSize,
+    observeMarkdownReaderFont,
     observeMarkdownReaderFontSize,
+    setMarkdownReaderFont,
     setMarkdownReaderFontSize,
 } from '../config/reader-preferences.js';
 import { createLocalization } from '../i18n/localization.js';
@@ -32,8 +36,13 @@ export class MarkdownTabPresenter {
         this.rootURI = rootURI;
         this.createView = createView;
         this.localization = localization;
+        this.readerFont = getMarkdownReaderFont(zotero);
         this.readerFontSize = getMarkdownReaderFontSize(zotero);
         this.presentations = new Map();
+        this.disposeReaderFontObserver = observeMarkdownReaderFont(
+            zotero,
+            font => this.applyReaderFont(font)
+        );
         this.disposeReaderFontSizeObserver = observeMarkdownReaderFontSize(
             zotero,
             size => this.applyReaderFontSize(size)
@@ -148,7 +157,9 @@ export class MarkdownTabPresenter {
             model,
             zotero: this.zotero,
             localization: this.localization,
+            readerFont: this.readerFont,
             readerFontSize: this.readerFontSize,
+            onReaderFontChange: font => this.updateReaderFont(font),
             onReaderFontSizeChange: size => this.updateReaderFontSize(size),
         });
         view.render(model);
@@ -241,6 +252,27 @@ export class MarkdownTabPresenter {
         return normalized;
     }
 
+    updateReaderFont(font) {
+        const normalized = normalizeMarkdownReaderFont(font);
+        try {
+            setMarkdownReaderFont(this.zotero, normalized);
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+        }
+        this.applyReaderFont(normalized);
+        return normalized;
+    }
+
+    applyReaderFont(font) {
+        const normalized = normalizeMarkdownReaderFont(font);
+        if (normalized === this.readerFont) return;
+        this.readerFont = normalized;
+        for (const presentation of this.presentations.values()) {
+            presentation.view.setReaderFont?.(normalized);
+        }
+    }
+
     applyReaderFontSize(size) {
         const normalized = normalizeMarkdownReaderFontSize(size);
         if (normalized === this.readerFontSize) return;
@@ -290,6 +322,8 @@ export class MarkdownTabPresenter {
     }
 
     dispose() {
+        this.disposeReaderFontObserver?.();
+        this.disposeReaderFontObserver = null;
         this.disposeReaderFontSizeObserver?.();
         this.disposeReaderFontSizeObserver = null;
         this.closeAll({ reason: MARKDOWN_TAB_CLOSE_REASONS.SHUTDOWN });

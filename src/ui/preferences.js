@@ -1,7 +1,9 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
 import { getZoteroLocale } from '../config/mineru-preferences.js';
 import {
+    getMarkdownReaderFont,
     getMarkdownReaderFontSize,
+    setMarkdownReaderFont,
     setMarkdownReaderFontSize,
 } from '../config/reader-preferences.js';
 import {
@@ -67,6 +69,9 @@ export function createPreferencesController({
     const readerFontSizeValue = document.getElementById(
         'mktero-reader-font-size-value'
     );
+    const readerFontInput = document.getElementById(
+        'mktero-reader-font-family'
+    );
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
 
@@ -90,6 +95,20 @@ export function createPreferencesController({
         readerFontSizeInput.value = String(size);
         readerFontSizeValue.textContent = t('viewer.textSizeValue', { size });
         readerFontSizeInput.addEventListener('input', updateReaderFontSize);
+    }
+
+    function updateReaderFont() {
+        if (!readerFontInput) return;
+        readerFontInput.value = setMarkdownReaderFont(
+            zotero,
+            readerFontInput.value
+        );
+    }
+
+    function initializeReaderFont() {
+        if (!readerFontInput) return;
+        readerFontInput.value = getMarkdownReaderFont(zotero);
+        readerFontInput.addEventListener('change', updateReaderFont);
     }
 
     async function refresh() {
@@ -130,6 +149,7 @@ export function createPreferencesController({
             initialized = true;
             clearButton.addEventListener('click', clear);
             localize();
+            initializeReaderFont();
             initializeReaderFontSize();
             await refresh();
         },
@@ -141,6 +161,7 @@ export function createPreferencesController({
                 'input',
                 updateReaderFontSize
             );
+            readerFontInput?.removeEventListener('change', updateReaderFont);
         },
     };
 }
