@@ -388,6 +388,124 @@ test('keeps the settings action beside previous content after a token reparse fa
     }
 });
 
+test('shows non-fatal warnings as auto-dismissed toasts without reflowing content', () => {
+    const timers = [];
+    const clearCalls = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Cached paper',
+        warnings: ['Some local Markdown annotations could not be synchronized.'],
+    });
+    const { view, shadow } = createView(model, {}, {
+        configureWindow(window) {
+            window.setTimeout = (callback, delay) => {
+                const timer = { callback, delay };
+                timers.push(timer);
+                return timer;
+            };
+            window.clearTimeout = timer => clearCalls.push(timer);
+        },
+    });
+
+    try {
+        const warning = shadow.querySelector('#mktero-warning');
+        assert.equal(warning.hidden, false);
+        assert.equal(timers.length, 1);
+        assert.equal(timers[0].delay, 5_000);
+        assert.equal(shadow.querySelector('.markdown-workspace').hidden, false);
+
+        timers[0].callback();
+        assert.equal(warning.hidden, true);
+
+        view.render(model);
+        assert.equal(warning.hidden, true);
+        assert.equal(timers.length, 1);
+
+        view.render({
+            ...model,
+            warnings: ['A new warning appeared.'],
+        });
+        assert.equal(warning.hidden, false);
+        assert.equal(timers.length, 2);
+    }
+    finally {
+        view.destroy();
+    }
+
+    assert.deepEqual(clearCalls, [timers[1]]);
+});
+
+test('isolates warning toast timers across Zotero windows', () => {
+    const timers = [[], []];
+    const clearCalls = [[], []];
+    const createWarningView = index => createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Cached paper',
+        warnings: [`Warning ${index}`],
+    }), {}, {
+        configureWindow(window) {
+            window.setTimeout = (callback, delay) => {
+                const timer = { callback, delay };
+                timers[index].push(timer);
+                return timer;
+            };
+            window.clearTimeout = timer => clearCalls[index].push(timer);
+        },
+    });
+    const first = createWarningView(0);
+    const second = createWarningView(1);
+
+    try {
+        assert.equal(first.shadow.querySelector('#mktero-warning').hidden, false);
+        assert.equal(second.shadow.querySelector('#mktero-warning').hidden, false);
+        assert.equal(timers[0].length, 1);
+        assert.equal(timers[1].length, 1);
+
+        timers[0][0].callback();
+
+        assert.equal(first.shadow.querySelector('#mktero-warning').hidden, true);
+        assert.equal(second.shadow.querySelector('#mktero-warning').hidden, false);
+    }
+    finally {
+        first.view.destroy();
+        second.view.destroy();
+    }
+
+    assert.deepEqual(clearCalls[0], []);
+    assert.deepEqual(clearCalls[1], [timers[1][0]]);
+});
+
+test('keeps actionable warning toasts available for settings recovery', () => {
+    const timers = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Cached paper',
+        warnings: ['The API Token is invalid.'],
+        warningAction: 'open-settings',
+        onOpenSettings: () => {},
+    }), {}, {
+        configureWindow(window) {
+            window.setTimeout = (callback, delay) => {
+                const timer = { callback, delay };
+                timers.push(timer);
+                return timer;
+            };
+        },
+    });
+
+    try {
+        assert.equal(shadow.querySelector('#mktero-warning').hidden, false);
+        assert.equal(shadow.querySelector('#mktero-warning-settings').hidden, false);
+        assert.equal(timers.length, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('opens the document action popover and reports snapshot save state', async () => {
     let saveCalls = 0;
     let finishSave;

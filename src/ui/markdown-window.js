@@ -40,6 +40,7 @@ const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
     ? __MKTERO_MARKDOWN_STYLES__
     : null;
 const DOCUMENT_ACTION_STATUS_TIMEOUT_MS = 5_000;
+const WARNING_TOAST_TIMEOUT_MS = 5_000;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
@@ -148,6 +149,8 @@ class MarkdownTabView {
         this.snapshotURLs = new Map();
         this.documentActionBusy = null;
         this.actionStatusTimer = null;
+        this.warningToastSignature = null;
+        this.warningToastTimer = null;
         this.responsiveResizeObserver = null;
         this.documentActionsOpen = false;
         this.readerFontOptionsOpen = false;
@@ -244,8 +247,9 @@ class MarkdownTabView {
         elements.content.setAttribute('aria-busy', String(loadingView.visible));
         elements.error.hidden = model.status !== 'error';
         elements.errorMessage.textContent = model.error || '';
-        elements.warning.hidden = !model.warnings?.length;
-        elements.warningMessage.textContent = model.warnings?.join(' ') || '';
+        this.syncWarningToast(model.warnings, {
+            persistent: Boolean(model.warningAction),
+        });
         this.syncContentVisibility(showContent);
         this.syncDocumentActions(model, loadingView);
         this.syncErrorActions(model);
@@ -324,6 +328,7 @@ class MarkdownTabView {
 
     destroy() {
         this.clearDocumentActionStatus();
+        this.clearWarningToast();
         for (const { element, type, listener, options } of this.listeners) {
             element.removeEventListener(type, listener, options);
         }
@@ -515,6 +520,9 @@ class MarkdownTabView {
         const warning = this.createElement('div', {
             id: 'mktero-warning',
             class: 'message warning',
+            role: 'status',
+            'aria-live': 'polite',
+            'aria-atomic': 'true',
         });
         warning.hidden = true;
         const warningMessage = this.createElement('p', {
@@ -1494,6 +1502,17 @@ class MarkdownTabView {
         this.elements.actionStatus.hidden = true;
     }
 
+    clearWarningToast() {
+        if (this.warningToastTimer !== null) {
+            this.ownerWindow.clearTimeout?.(this.warningToastTimer);
+            this.warningToastTimer = null;
+        }
+        this.warningToastSignature = null;
+        if (!this.elements?.warning) return;
+        this.elements.warning.hidden = true;
+        this.elements.warningMessage.textContent = '';
+    }
+
     changeReaderFont(font) {
         const normalized = normalizeMarkdownReaderFont(font);
         if (normalized === this.readerFont) return;
@@ -1740,6 +1759,30 @@ class MarkdownTabView {
         this.elements.warningSettings.hidden = !settingsAvailable;
         this.elements.warningSettings.disabled = !settingsAvailable
             || Boolean(this.documentActionBusy);
+    }
+
+    syncWarningToast(warnings, { persistent = false } = {}) {
+        const message = Array.isArray(warnings)
+            ? warnings.filter(Boolean).join(' ')
+            : '';
+        if (!message) {
+            this.clearWarningToast();
+            return;
+        }
+        const signature = `${persistent ? 'persistent' : 'transient'}:${message}`;
+        if (signature === this.warningToastSignature) return;
+
+        this.clearWarningToast();
+        this.warningToastSignature = signature;
+        this.elements.warningMessage.textContent = message;
+        this.elements.warning.hidden = false;
+        if (persistent) return;
+        if (typeof this.ownerWindow.setTimeout !== 'function') return;
+        this.warningToastTimer = this.ownerWindow.setTimeout(() => {
+            if (this.warningToastSignature !== signature) return;
+            this.warningToastTimer = null;
+            this.elements.warning.hidden = true;
+        }, WARNING_TOAST_TIMEOUT_MS);
     }
 
     syncReparseAction(model, loadingView) {

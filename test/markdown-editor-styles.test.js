@@ -26,6 +26,20 @@ test('uses a font-independent readable measure for long-form Markdown', () => {
     );
 });
 
+test('renders conversion notices as compact overlay toasts', () => {
+    const view = ruleBody('.mktero-tab-view');
+    assert.match(view, /position:\s*relative/);
+
+    const message = ruleBody('.message');
+    assert.match(message, /position:\s*absolute/);
+    assert.match(message, /top:\s*12px/);
+    assert.match(message, /left:\s*50%/);
+    assert.match(message, /width:\s*fit-content/);
+    assert.match(message, /max-width:\s*min\(680px, calc\(100% - 32px\)\)/);
+    assert.match(message, /transform:\s*translateX\(-50%\)/);
+    assert.match(message, /z-index:\s*20/);
+});
+
 test('article layout outranks the CodeMirror adopted base theme', () => {
     const scroller = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-scroller'
