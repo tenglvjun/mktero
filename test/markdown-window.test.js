@@ -440,7 +440,7 @@ test('adjusts the persisted reader font size from the document action menu', () 
     }
 });
 
-test('selects and persists the reader font from the document action menu', () => {
+test('keeps the menu open through native font clicks and persists the font', () => {
     const persistedFonts = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -482,10 +482,7 @@ test('selects and persists the reader font from the document action menu', () =>
             bubbles: true,
         });
         Object.defineProperty(openingClick, 'composedPath', {
-            value: () => [
-                select,
-                shadow.querySelector('.markdown-reader-actions'),
-            ],
+            value: () => [],
         });
         ownerWindow.dispatchEvent(openingClick);
         assert.equal(toggle.getAttribute('aria-expanded'), 'true');
@@ -520,13 +517,12 @@ test('selects and persists the reader font from the document action menu', () =>
             'true'
         );
 
-        const outsideClick = new ownerWindow.Event('click', {
+        const outside = select.ownerDocument.createElement('div');
+        select.ownerDocument.body.appendChild(outside);
+        const outsidePress = new ownerWindow.Event('mousedown', {
             bubbles: true,
         });
-        Object.defineProperty(outsideClick, 'composedPath', {
-            value: () => [],
-        });
-        ownerWindow.dispatchEvent(outsideClick);
+        outside.dispatchEvent(outsidePress);
         assert.equal(
             shadow.querySelector('#mktero-document-actions')
                 .getAttribute('aria-expanded'),
@@ -538,36 +534,7 @@ test('selects and persists the reader font from the document action menu', () =>
     }
 });
 
-test('clears the reader font selection guard when the view is destroyed', () => {
-    const { view, shadow } = createView(createModel({
-        status: 'ready',
-        progress: 100,
-        markdown: '# Paper\n\nReadable text.',
-        sourceKind: 'markdown',
-    }));
-    const timers = [];
-    const clearCalls = [];
-    view.ownerWindow.setTimeout = (callback, delay) => {
-        const timer = { callback, delay };
-        timers.push(timer);
-        return timer;
-    };
-    view.ownerWindow.clearTimeout = timer => clearCalls.push(timer);
-
-    const toggle = shadow.querySelector('#mktero-document-actions');
-    const select = shadow.querySelector('#mktero-reader-font-family');
-    toggle.click();
-    select.dispatchEvent(new view.ownerWindow.Event('mousedown', {
-        bubbles: true,
-    }));
-
-    assert.equal(timers.length, 1);
-    view.destroy();
-
-    assert.deepEqual(clearCalls, [timers[0]]);
-});
-
-test('closes the font menu on an ordinary outside click after cancellation', () => {
+test('closes the font menu on an outside press after native cancellation', () => {
     const { document, view, shadow } = createView(createModel({
         status: 'ready',
         progress: 100,
@@ -586,7 +553,7 @@ test('closes the font menu on an ordinary outside click after cancellation', () 
         select.dispatchEvent(new ownerWindow.Event('mousedown', {
             bubbles: true,
         }));
-        outside.dispatchEvent(new ownerWindow.Event('click', {
+        outside.dispatchEvent(new ownerWindow.Event('pointerdown', {
             bubbles: true,
         }));
 
@@ -595,6 +562,31 @@ test('closes the font menu on an ordinary outside click after cancellation', () 
     finally {
         view.destroy();
     }
+});
+
+test('removes document action outside-press listeners when destroyed', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }));
+    const ownerWindow = document.defaultView;
+    const toggle = shadow.querySelector('#mktero-document-actions');
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    view.destroy();
+
+    outside.dispatchEvent(new ownerWindow.Event('pointerdown', {
+        bubbles: true,
+    }));
+    outside.dispatchEvent(new ownerWindow.Event('mousedown', {
+        bubbles: true,
+    }));
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
 });
 
 test('clears a failed snapshot save status after reporting the error', async () => {
