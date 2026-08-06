@@ -14,9 +14,11 @@ export class MinerUDocumentExtractor {
         conversion,
         getApiKey,
         readFile,
+        preparePDFIndex = null,
         createCacheKey = null,
         isCacheEnabled = () => false,
         onCacheError = error => zotero.logError?.(error),
+        onPDFIndexError = error => zotero.logError?.(error),
     }) {
         if (!zotero) throw new TypeError('A Zotero runtime is required');
         if (!conversion?.convert) {
@@ -28,9 +30,11 @@ export class MinerUDocumentExtractor {
         this.conversion = conversion;
         this.getApiKey = getApiKey;
         this.readFile = readFile;
+        this.preparePDFIndex = preparePDFIndex;
         this.createCacheKey = createCacheKey;
         this.isCacheEnabled = isCacheEnabled;
         this.onCacheError = onCacheError;
+        this.onPDFIndexError = onPDFIndexError;
     }
 
     async extract(itemID, { onProgress, signal, forceRefresh = false } = {}) {
@@ -47,6 +51,7 @@ export class MinerUDocumentExtractor {
 
         const fileData = await this.readFile(filePath);
         throwIfAborted(signal);
+        this.#preparePDFIndex(itemID, fileData, signal);
         const title = item.parentItem?.getDisplayTitle?.()
             || item.getDisplayTitle?.()
             || 'Untitled PDF';
@@ -100,6 +105,28 @@ export class MinerUDocumentExtractor {
         }
         catch {
             // Cache diagnostics must not make PDF conversion fail.
+        }
+    }
+
+    #preparePDFIndex(itemID, fileData, signal) {
+        if (typeof this.preparePDFIndex !== 'function') return;
+        try {
+            Promise.resolve(this.preparePDFIndex(itemID, {
+                fileData,
+                signal,
+            })).catch(error => this.#reportPDFIndexError(error));
+        }
+        catch (error) {
+            this.#reportPDFIndexError(error);
+        }
+    }
+
+    #reportPDFIndexError(error) {
+        try {
+            this.onPDFIndexError(error);
+        }
+        catch {
+            // PDF index diagnostics must not make conversion fail.
         }
     }
 }

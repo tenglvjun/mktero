@@ -502,6 +502,42 @@ test('keeps a local highlight when PDF synchronization fails', async () => {
     assert.deepEqual(errors, ['PDF text not found']);
 });
 
+test('reports an unavailable local PDF index without exposing details', async () => {
+    const local = {
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    };
+    const store = createMemoryStore([local]);
+    let createCalls = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation() {
+            createCalls++;
+            const error = new Error('private attachment path');
+            error.code = 'MKTERO_PDF_INDEX_UNAVAILABLE';
+            throw error;
+        },
+    });
+
+    await annotations.resolve(42, 'Selected text');
+    await waitFor(() => createCalls === 1);
+    const result = await annotations.resolve(42, 'Selected text');
+
+    assert.deepEqual(result.matched[0].synchronization, {
+        status: 'failed',
+        reason: 'pdf-index-unavailable',
+    });
+    assert.doesNotMatch(
+        JSON.stringify(result.matched[0]),
+        /private attachment path/
+    );
+});
+
 test('retries a failed PDF synchronization when explicitly requested', async () => {
     const local = {
         id: 'mktero-local-1',

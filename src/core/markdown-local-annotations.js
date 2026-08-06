@@ -19,6 +19,7 @@ const MAX_TOTAL_SOURCE_RANGE_LENGTH = 8 * 1024 * 1024;
 const MAX_SOURCE_MAP_PAGE_HINT_WORK = 10_000_000;
 const LOCAL_ANNOTATION_ID = /^mktero-[a-z0-9-]{1,128}$/i;
 const SYNCHRONIZATION_FAILURE_REASONS = new Map([
+    ['MKTERO_PDF_INDEX_UNAVAILABLE', 'pdf-index-unavailable'],
     ['MKTERO_PDF_TEXT_NOT_FOUND', 'text-not-found'],
     ['MKTERO_PDF_TEXT_AMBIGUOUS', 'text-ambiguous'],
     ['MKTERO_PDF_READER_UNAVAILABLE', 'reader-unavailable'],

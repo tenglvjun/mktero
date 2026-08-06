@@ -2524,6 +2524,8 @@ function annotationUnavailableLabelKey(annotation) {
 
 function synchronizationFailureLabelKey(reason) {
     switch (reason) {
+        case 'pdf-index-unavailable':
+            return 'annotation.syncFailed.pdfIndexUnavailable';
         case 'text-not-found':
             return 'annotation.syncFailed.textNotFound';
         case 'text-ambiguous':

@@ -40,6 +40,8 @@ test('ships MinerU token, cache preferences, and localized Markdown UI assets', 
     const visiblePreferenceText = pane.replace(/<[^>]+>/g, ' ');
     assert.doesNotMatch(visiblePreferenceText, /mineru/i);
     assert.match(script, /createZoteroMarkdownCache/);
+    assert.match(script, /createZoteroPDFTextIndexCache/);
+    assert.match(script, /createCombinedLocalCache/);
     assert.doesNotMatch(script, /setMkteroLanguagePreference/);
     assert.match(bootstrap, /new MinerUClient/);
     assert.doesNotMatch(bootstrap, /observeMkteroLanguagePreference/);

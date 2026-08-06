@@ -3,14 +3,39 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import * as preferencesUI from '../src/ui/preferences.js';
 
-const { createPreferencesController, formatCacheStats } = preferencesUI;
+const {
+    createCombinedLocalCache,
+    createPreferencesController,
+    formatCacheStats,
+} = preferencesUI;
 
 test('formats cache statistics for the preferences pane', () => {
-    assert.equal(formatCacheStats({ entries: 0, sizeBytes: 0 }), 'No cached documents');
+    assert.equal(
+        formatCacheStats({ entries: 0, sizeBytes: 0 }),
+        'No local cache entries'
+    );
     assert.equal(
         formatCacheStats({ entries: 2, sizeBytes: 1536 }),
-        '2 cached documents, 1.5 KB'
+        '2 local cache entries, 1.5 KB'
     );
+});
+
+test('combines Markdown and PDF index cache usage and clears both', async () => {
+    const cleared = [];
+    const cache = createCombinedLocalCache([{
+        getStats: async () => ({ entries: 2, sizeBytes: 1536 }),
+        clear: async () => { cleared.push('markdown'); },
+    }, {
+        getStats: async () => ({ entries: 3, sizeBytes: 2560 }),
+        clear: async () => { cleared.push('pdf-index'); },
+    }]);
+
+    assert.deepEqual(await cache.getStats(), {
+        entries: 5,
+        sizeBytes: 4096,
+    });
+    await cache.clear();
+    assert.deepEqual(cleared.sort(), ['markdown', 'pdf-index']);
 });
 
 test('loads cache usage and clears it from the preferences pane', async () => {
@@ -47,7 +72,7 @@ test('loads cache usage and clears it from the preferences pane', async () => {
     });
 
     await controller.init();
-    assert.equal(status.textContent, '2 cached documents, 1.5 KB');
+    assert.equal(status.textContent, '2 local cache entries, 1.5 KB');
     assert.equal(status.attributes['aria-busy'], 'false');
 
     const clearing = button.listener();
@@ -59,7 +84,7 @@ test('loads cache usage and clears it from the preferences pane', async () => {
     finishClear();
     await clearing;
     assert.equal(button.disabled, false);
-    assert.equal(status.textContent, 'No cached documents');
+    assert.equal(status.textContent, 'No local cache entries');
     assert.equal(status.attributes['aria-busy'], 'false');
 });
 
@@ -194,7 +219,7 @@ test('localizes preferences from Zotero without storing a language choice', asyn
     assert.equal(document.querySelector('h2').textContent, 'PDF 转换');
     assert.equal(
         document.getElementById('mktero-cache-status').textContent,
-        '2 个缓存文档，1.5 KB'
+        '2 个本地缓存条目，1.5 KB'
     );
 
     controller.destroy();

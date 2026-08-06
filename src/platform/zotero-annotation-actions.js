@@ -47,6 +47,8 @@ export function createZoteroAnnotationActions(zotero, {
         },
         async createFromText(itemID, draft, context = null) {
             const reader = context?.reader || null;
+            const signal = context?.signal;
+            throwIfAborted(signal);
             const text = String(draft?.text || '');
             const comment = String(draft?.comment || '');
             const color = String(draft?.color || '').toLowerCase();
@@ -71,7 +73,9 @@ export function createZoteroAnnotationActions(zotero, {
             const locatedText = await textLocator(itemID, text, {
                 reader,
                 pdfPageIndexHint,
+                signal,
             });
+            throwIfAborted(signal);
             if (!locatedText) return { deferred: true };
             const located = validateLocatedText(locatedText);
             const json = {
@@ -88,6 +92,7 @@ export function createZoteroAnnotationActions(zotero, {
                 attachment,
                 json
             );
+            throwIfAborted(signal);
             if (existing) {
                 await updateMatchingAnnotation(zotero, existing, json);
                 return normalizeCreatedAnnotation(existing, {
@@ -98,6 +103,7 @@ export function createZoteroAnnotationActions(zotero, {
             json.key = zotero.DataObjectUtilities.generateKey();
             let saved;
             await withNotifierQueue(zotero, async notifierQueue => {
+                throwIfAborted(signal);
                 saved = await zotero.Annotations.saveFromJSON(
                     attachment,
                     json,
@@ -288,12 +294,12 @@ function parseAnnotationPosition(value, fallback) {
     }
 }
 
-function createZoteroPDFTextLocator(zotero, {
-    cloneIntoReader,
-    delay,
-    now,
-    searchTimeout,
-}) {
+export function createZoteroPDFTextLocator(zotero, {
+    cloneIntoReader = defaultCloneIntoReader,
+    delay = defaultDelay,
+    now = () => Date.now(),
+    searchTimeout = 15_000,
+} = {}) {
     return async (itemID, text, {
         reader: openedReader = null,
         pdfPageIndexHint = null,
@@ -906,6 +912,14 @@ function annotationSyncError(code, message) {
 
 function defaultDelay(milliseconds) {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function throwIfAborted(signal) {
+    if (!signal?.aborted) return;
+    if (signal.reason) throw signal.reason;
+    const error = new Error('The operation was aborted');
+    error.name = 'AbortError';
+    throw error;
 }
 
 async function saveAnnotationField(zotero, annotation, field, value) {

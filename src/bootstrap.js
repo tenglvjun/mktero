@@ -10,6 +10,9 @@ import {
     createZoteroMarkdownCache,
 } from './cache/markdown-cache.js';
 import {
+    createZoteroPDFTextIndexCache,
+} from './cache/pdf-text-index-cache.js';
+import {
     createZoteroMarkdownAnnotationStore,
 } from './cache/markdown-annotation-store.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
@@ -47,7 +50,18 @@ import {
 import { createRuntimeAbortController } from './platform/abort-controller.js';
 import {
     createZoteroAnnotationActions,
+    createZoteroPDFTextLocator,
 } from './platform/zotero-annotation-actions.js';
+import { PDFAnnotationLocator } from './pdf/pdf-annotation-locator.js';
+import {
+    PDFIndexOperationTracker,
+} from './pdf/pdf-index-operation-tracker.js';
+import { createPDFJSTextEngine } from './pdf/pdfjs-text-engine.js';
+import { sha256Hex } from './core/sha256.js';
+import {
+    createZoteroPDFFileLoader,
+    createZoteroTextMeasurer,
+} from './platform/zotero-pdf-index-adapters.js';
 import {
     createZoteroActionsTagsBridge,
 } from './platform/zotero-actions-tags.js';
@@ -91,6 +105,8 @@ const runtime = {
     service: null,
     presenter: null,
     cache: null,
+    pdfTextIndexCache: null,
+    pdfAnnotationLocator: null,
     savedMarkdownStore: null,
     savedMarkdownResolver: null,
     rootURI: null,
@@ -106,7 +122,7 @@ const runtime = {
     localAnnotations: null,
     disposeToolbar: null,
     contextMenus: new Map(),
-    controllers: new Map(),
+    pdfIndexOperations: new PDFIndexOperationTracker(),
 };
 
 globalThis.install = async function install() {};
@@ -121,7 +137,6 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ),
     });
     runtime.localization = localization;
-    runtime.annotationActions = createZoteroAnnotationActions(Zotero);
     runtime.actionsTags = createZoteroActionsTagsBridge({
         zotero: Zotero,
         onError: error => Zotero.logError?.(error),
@@ -149,6 +164,37 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.cache = cache;
+    const pdfTextIndexCache = createZoteroPDFTextIndexCache({
+        zotero: Zotero,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+    });
+    runtime.pdfTextIndexCache = pdfTextIndexCache;
+    const readerTextLocator = createZoteroPDFTextLocator(Zotero);
+    const pdfAnnotationLocator = new PDFAnnotationLocator({
+        engine: createPDFJSTextEngine({
+            workerSrc: `${rootURI}pdf.worker.mjs`,
+            cMapUrl: `${rootURI}pdfjs/cmaps/`,
+            standardFontDataUrl: `${rootURI}pdfjs/standard_fonts/`,
+            wasmUrl: `${rootURI}pdfjs/wasm/`,
+        }),
+        cache: pdfTextIndexCache,
+        createAbortController: createZoteroAbortController,
+        createSourceHash: fileData => sha256Hex(fileData),
+        loadFile: createZoteroPDFFileLoader(
+            Zotero,
+            path => IOUtils.read(path)
+        ),
+        measureText: createZoteroTextMeasurer(Zotero),
+        readerLocator: readerTextLocator,
+        onError: error => Zotero.logError?.(error),
+    });
+    runtime.pdfAnnotationLocator = pdfAnnotationLocator;
+    runtime.annotationActions = createZoteroAnnotationActions(Zotero, {
+        locateText: (itemID, text, options) => (
+            pdfAnnotationLocator.locate(itemID, text, options)
+        ),
+    });
     if (Zotero.Attachments && Zotero.Item) {
         runtime.savedMarkdownStore = createZoteroSavedMarkdownStore({
             zotero: Zotero,
@@ -213,6 +259,12 @@ globalThis.startup = async function startup({ id, rootURI }) {
             conversion,
             getApiKey: () => getMinerUApiKey(Zotero),
             readFile: path => IOUtils.read(path),
+            preparePDFIndex: (itemID, options) => trackPDFIndexTask(
+                runtime.pdfIndexOperations,
+                itemID,
+                options,
+                pdfAnnotationLocator
+            ),
             createCacheKey: fileData => createMinerUCacheKey(fileData),
             isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         }),
@@ -235,6 +287,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }
     );
     cache.prune().catch(error => Zotero.logError(error));
+    pdfTextIndexCache.prune().catch(error => Zotero.logError(error));
     pendingTasks.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
     const preferencePaneID = await registerMinerUPreferencesPane({
@@ -258,6 +311,7 @@ globalThis.shutdown = function shutdown() {
     abortAllConversions();
     runtime.disposeAnnotationObserver?.();
     runtime.localAnnotations?.dispose();
+    runtime.pdfAnnotationLocator?.dispose();
     runtime.annotationOverlayRefresher?.dispose();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();
@@ -270,6 +324,8 @@ globalThis.shutdown = function shutdown() {
     runtime.presenter = null;
     runtime.service = null;
     runtime.cache = null;
+    runtime.pdfTextIndexCache = null;
+    runtime.pdfAnnotationLocator = null;
     runtime.savedMarkdownStore = null;
     runtime.savedMarkdownResolver = null;
     runtime.rootURI = null;
@@ -373,7 +429,7 @@ async function openItemAsMarkdown(itemID, {
         : null;
     abortConversion(itemID);
     const controller = createZoteroAbortController();
-    runtime.controllers.set(itemID, controller);
+    runtime.pdfIndexOperations.start(itemID, controller);
     Zotero.debug(
         `Mktero: conversion started for item ${itemID} `
         + `(force refresh: ${forceRefresh})`
@@ -445,9 +501,7 @@ async function openItemAsMarkdown(itemID, {
         );
     }
     finally {
-        if (runtime.controllers.get(itemID) === controller) {
-            runtime.controllers.delete(itemID);
-        }
+        runtime.pdfIndexOperations.finish(itemID, controller);
     }
 }
 
@@ -703,17 +757,16 @@ function conversionProgressLog(progress, resumingTask = false) {
 }
 
 function abortConversion(itemID) {
-    const controller = runtime.controllers.get(itemID);
-    if (!controller) return;
-    runtime.controllers.delete(itemID);
-    controller.abort();
+    runtime.pdfIndexOperations.abort(itemID);
 }
 
 function abortAllConversions() {
-    for (const controller of runtime.controllers.values()) {
-        controller.abort();
-    }
-    runtime.controllers.clear();
+    runtime.pdfIndexOperations.abortAll();
+}
+
+function trackPDFIndexTask(tracker, itemID, options, locator) {
+    const task = locator.prepare(itemID, options);
+    return tracker.track(itemID, options.signal, task);
 }
 
 function registerMainWindowContextMenu(window) {

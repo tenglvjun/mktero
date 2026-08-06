@@ -31,7 +31,7 @@ test('creates a fixed localization from the Zotero locale', () => {
             count: 2,
             size: '1.5 KB',
         }),
-        '2 cached documents, 1.5 KB'
+        '2 local cache entries, 1.5 KB'
     );
 
     assert.equal(chinese.language, LANGUAGE_SIMPLIFIED_CHINESE);
@@ -40,7 +40,7 @@ test('creates a fixed localization from the Zotero locale', () => {
             count: 2,
             size: '1.5 KB',
         }),
-        '2 个缓存文档，1.5 KB'
+        '2 个本地缓存条目，1.5 KB'
     );
     assert.equal(chinese.t('missing.message'), 'missing.message');
     assert.equal(chinese.t('annotation.noteEditor'), '编辑笔记');
@@ -56,6 +56,10 @@ test('localizes Markdown annotation synchronization status', () => {
         english.t('annotation.syncFailed.textAmbiguous'),
         'Multiple PDF matches'
     );
+    assert.equal(
+        english.t('annotation.syncFailed.pdfIndexUnavailable'),
+        'Local PDF index unavailable'
+    );
     assert.equal(chinese.t('annotation.syncPending'), '等待同步到 Zotero');
     assert.equal(english.t('annotation.openInPDF'), 'View in PDF');
     assert.equal(chinese.t('annotation.openInPDF'), '在 PDF 中查看');
@@ -70,5 +74,9 @@ test('localizes Markdown annotation synchronization status', () => {
     assert.equal(
         chinese.t('annotation.syncFailed.textAmbiguous'),
         'PDF 中存在多处匹配'
+    );
+    assert.equal(
+        chinese.t('annotation.syncFailed.pdfIndexUnavailable'),
+        '本地 PDF 索引不可用'
     );
 });

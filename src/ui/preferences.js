@@ -1,4 +1,7 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
+import {
+    createZoteroPDFTextIndexCache,
+} from '../cache/pdf-text-index-cache.js';
 import { getZoteroLocale } from '../config/mineru-preferences.js';
 import {
     getMarkdownReaderFont,
@@ -174,6 +177,33 @@ export function localizePreferencesDocument(document, localization) {
         ?.setAttribute('lang', localization.language);
 }
 
+export function createCombinedLocalCache(caches) {
+    const stores = Array.from(caches || []);
+    if (!stores.length || stores.some(cache => (
+        typeof cache?.getStats !== 'function'
+        || typeof cache?.clear !== 'function'
+    ))) {
+        throw new TypeError('Local cache stores are required');
+    }
+    return {
+        async getStats() {
+            const statistics = await Promise.all(
+                stores.map(cache => cache.getStats())
+            );
+            return statistics.reduce((combined, current) => {
+                validateCacheStats(current);
+                return {
+                    entries: combined.entries + current.entries,
+                    sizeBytes: combined.sizeBytes + current.sizeBytes,
+                };
+            }, { entries: 0, sizeBytes: 0 });
+        },
+        async clear() {
+            await Promise.all(stores.map(cache => cache.clear()));
+        },
+    };
+}
+
 export function formatCacheStats({ entries, sizeBytes }, translate = translateEnglish) {
     if (!entries) return translate('preferences.cache.stats.none');
     return translate(
@@ -201,16 +231,32 @@ function trimDecimal(value) {
     return value.toFixed(1).replace(/\.0$/, '');
 }
 
+function validateCacheStats(value) {
+    if (!Number.isSafeInteger(value?.entries)
+        || value.entries < 0
+        || !Number.isSafeInteger(value?.sizeBytes)
+        || value.sizeBytes < 0) {
+        throw new Error('Invalid local cache statistics');
+    }
+}
+
 globalThis.MkteroPreferences = {
     async init(event) {
         const document = event.target?.ownerDocument
             || event.currentTarget?.ownerDocument
             || globalThis.document;
-        const cache = createZoteroMarkdownCache({
-            zotero: Zotero,
-            ioUtils: IOUtils,
-            pathUtils: PathUtils,
-        });
+        const cache = createCombinedLocalCache([
+            createZoteroMarkdownCache({
+                zotero: Zotero,
+                ioUtils: IOUtils,
+                pathUtils: PathUtils,
+            }),
+            createZoteroPDFTextIndexCache({
+                zotero: Zotero,
+                ioUtils: IOUtils,
+                pathUtils: PathUtils,
+            }),
+        ]);
         const controller = createPreferencesController({ document, zotero: Zotero, cache });
         await controller.init();
         return () => controller.destroy();

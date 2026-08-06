@@ -2234,6 +2234,41 @@ test('shows local annotation synchronization status and retries failures', async
     }
 });
 
+test('shows when the local PDF index is unavailable', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Selected text',
+        annotationOverlay: {
+            matched: [{
+                id: 'mktero-failed-1',
+                source: 'markdown',
+                type: 'highlight',
+                text: 'Selected text',
+                comment: '',
+                color: '#ffd400',
+                ranges: [{ from: 0, to: 13 }],
+                synchronization: {
+                    status: 'failed',
+                    reason: 'pdf-index-unavailable',
+                },
+            }],
+            unmatched: [],
+        },
+        sourceKind: 'markdown',
+    }));
+
+    try {
+        assert.match(
+            shadow.querySelector('.markdown-note-sync--failed').textContent,
+            /Local PDF index unavailable/
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('shows a live Markdown outline and scrolls to the selected heading', () => {
     const markdown = '# Overview\n\n## Methods\n\n### Results';
     const scrolledOffsets = [];

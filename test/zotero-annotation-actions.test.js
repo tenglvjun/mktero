@@ -173,6 +173,44 @@ test('rejects an invalid PDF page hint before locating text', async () => {
     assert.equal(locateCalls, 0);
 });
 
+test('does not save a located annotation after synchronization is aborted', async () => {
+    const controller = new AbortController();
+    let saveCalls = 0;
+    const attachment = {
+        id: 42,
+        isPDFAttachment: () => true,
+    };
+    const actions = createZoteroAnnotationActions({
+        Items: { get: () => attachment },
+        DataObjectUtilities: { generateKey: () => 'ABORT001' },
+        Annotations: {
+            async saveFromJSON() {
+                saveCalls++;
+            },
+        },
+        Notifier: {
+            Queue: class Queue {},
+            async commit() {},
+        },
+    }, {
+        async locateText(_itemID, text, options) {
+            assert.equal(options.signal, controller.signal);
+            controller.abort();
+            return locatedAnnotation(text);
+        },
+    });
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text: 'Selected text',
+            comment: '',
+            color: '#ffd400',
+        }, { signal: controller.signal }),
+        error => error?.name === 'AbortError'
+    );
+    assert.equal(saveCalls, 0);
+});
+
 test('opens a Zotero PDF reader at the selected annotation', async () => {
     const attachment = {
         id: 42,

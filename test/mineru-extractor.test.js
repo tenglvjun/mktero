@@ -64,6 +64,44 @@ test('reads the current Zotero PDF and delegates conversion', async () => {
     assert.deepEqual(progress, [50]);
 });
 
+test('prepares the offline PDF index in parallel with MinerU conversion', async () => {
+    const fileData = new Uint8Array([1, 2, 3]);
+    const controller = new AbortController();
+    let indexStarted = false;
+    let finishIndex;
+    const indexFinished = new Promise(resolve => { finishIndex = resolve; });
+    const extractor = new MinerUDocumentExtractor({
+        zotero: { Items: { getAsync: async () => createPDFItem() } },
+        conversion: {
+            async convert() {
+                assert.equal(indexStarted, true);
+                return {
+                    result: { markdown: '# Indexed result' },
+                    origin: 'fresh',
+                    warnings: [],
+                };
+            },
+        },
+        getApiKey: () => 'configured-token',
+        readFile: async () => fileData,
+        preparePDFIndex(itemID, options) {
+            assert.equal(itemID, 42);
+            assert.equal(options.fileData, fileData);
+            assert.equal(options.signal, controller.signal);
+            indexStarted = true;
+            return indexFinished;
+        },
+    });
+
+    const result = await extractor.extract(42, {
+        signal: controller.signal,
+    });
+
+    assert.equal(result.markdown, '# Indexed result');
+    finishIndex();
+    await indexFinished;
+});
+
 test('requires a configured MinerU API token after a cache miss', async () => {
     const extractor = new MinerUDocumentExtractor({
         zotero: { Items: { getAsync: async () => createPDFItem() } },
