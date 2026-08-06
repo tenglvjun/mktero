@@ -30,6 +30,24 @@ import {
     createZoteroAnnotationActions,
 } from '../src/platform/zotero-annotation-actions.js';
 
+test('extracts PDF text without loading a packaged fake-worker URL', async () => {
+    const fileData = new Uint8Array(await readFile(
+        new URL('./fixtures/offline-annotation.pdf', import.meta.url)
+    ));
+    const engine = createTestPDFEngine({
+        workerSrc: 'jar:file:///tmp/mktero.xpi!/pdf.worker.mjs',
+    });
+
+    try {
+        const index = await engine.extract(fileData);
+
+        assert.equal(index.pages[0].rawText, 'Ovulation limits (±2 days)');
+    }
+    finally {
+        await engine.dispose();
+    }
+});
+
 test('locates PDF text without an open Zotero reader', async () => {
     const fileData = new Uint8Array(await readFile(
         new URL('./fixtures/offline-annotation.pdf', import.meta.url)

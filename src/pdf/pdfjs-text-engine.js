@@ -5,6 +5,9 @@ import {
     version as PDFJS_VERSION,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
+    WorkerMessageHandler,
+} from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+import {
     createDehyphenatedPdfAnnotationTextIndex,
 } from '../markdown/pdf-annotation-text.js';
 
@@ -15,6 +18,10 @@ const MAX_TOTAL_TEXT_LENGTH = 10_000_000;
 const MAX_TEXT_ITEMS = 250_000;
 
 export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v3`;
+
+// Zotero's DOM-free plugin sandbox cannot dynamically import the packaged
+// worker URL when PDF.js falls back to its in-process worker implementation.
+globalThis.pdfjsWorker = { WorkerMessageHandler };
 
 export function createPDFJSTextEngine({
     workerSrc = '',
