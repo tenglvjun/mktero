@@ -23,7 +23,8 @@ export function createTablePreviewPopup(parent, {
                     return createPreviewContent(
                         document,
                         target,
-                        resolveImageURL
+                        resolveImageURL,
+                        t
                     );
                 },
             });
@@ -36,7 +37,7 @@ export function createTablePreviewPopup(parent, {
     };
 }
 
-function createPreviewContent(document, target, resolveImageURL) {
+function createPreviewContent(document, target, resolveImageURL, translate) {
     const content = document.createElement('div');
     content.className = 'mktero-table-preview-content';
     const caption = document.createElement('div');
@@ -44,7 +45,13 @@ function createPreviewContent(document, target, resolveImageURL) {
     caption.textContent = target.caption;
     const viewport = document.createElement('div');
     viewport.className = 'mktero-table-preview-viewport';
-    appendRenderedMarkdown(viewport, target.table.source, resolveImageURL);
+    appendRenderedMarkdown(
+        viewport,
+        target.table.source,
+        resolveImageURL,
+        false,
+        translate
+    );
     content.append(caption, viewport);
     return content;
 }

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { translateMessage } from '../src/i18n/localization.js';
 import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
 
 test('renders the Markdown subset used by the PDF converter', () => {
@@ -32,6 +33,23 @@ test('renders the Markdown subset used by the PDF converter', () => {
     assert.match(html, /<math[^>]+display="block"/);
     assert.match(html, /<msup>/);
     assert.doesNotMatch(html, /<div class="math"><code>/);
+});
+
+test('localizes generated page markers and missing image labels', () => {
+    const translate = (key, variables) => translateMessage(
+        'zh-CN',
+        key,
+        variables
+    );
+    const html = renderMarkdownHTML([
+        '<!-- zotero-page: 2 -->',
+        '',
+        '![](missing.png)',
+    ].join('\n'), { translate });
+
+    assert.match(html, /第 2 页/);
+    assert.match(html, /class="missing-image">图片<\/span>/);
+    assert.doesNotMatch(html, />Page 2</);
 });
 
 test('renders MinerU inline LaTeX footnote markers as MathML', () => {

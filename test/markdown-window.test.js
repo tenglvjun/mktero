@@ -27,7 +27,10 @@ function createModel(changes = {}) {
         preserveContent: false,
         warnings: [],
         error: '',
+        errorAction: null,
+        warningAction: null,
         onReparse: null,
+        onOpenSettings: null,
         ...changes,
     };
 }
@@ -323,6 +326,66 @@ test('reparses the current PDF from an accessible icon action', async () => {
     await Promise.resolve();
 
     view.destroy();
+});
+
+test('keeps conversion recovery actions visible when the first conversion fails', async () => {
+    const calls = [];
+    const model = createModel({
+        status: 'error',
+        error: 'The conversion service could not be reached.',
+        errorAction: 'open-settings',
+        onReparse: () => calls.push('retry'),
+        onOpenSettings: () => calls.push('settings'),
+    });
+    const { view, shadow } = createView(model);
+    const error = shadow.querySelector('#mktero-error');
+    const retry = shadow.querySelector('#mktero-error-retry');
+    const settings = shadow.querySelector('#mktero-error-settings');
+
+    assert.equal(error.hidden, false);
+    assert.equal(shadow.querySelector('.markdown-workspace').hidden, true);
+    assert.equal(retry.hidden, false);
+    assert.equal(settings.hidden, false);
+    assert.equal(retry.getAttribute('aria-label'), 'Retry PDF conversion');
+    assert.equal(settings.getAttribute('aria-label'), 'Open Mktero settings');
+
+    retry.click();
+    assert.deepEqual(calls, ['retry']);
+    assert.equal(retry.disabled, true);
+
+    await new Promise(resolve => setImmediate(resolve));
+    view.render(model);
+    settings.click();
+    assert.deepEqual(calls, ['retry', 'settings']);
+
+    view.destroy();
+});
+
+test('keeps the settings action beside previous content after a token reparse failure', () => {
+    const calls = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Cached paper',
+        warnings: ['Reparse failed: API Token is invalid.'],
+        warningAction: 'open-settings',
+        onOpenSettings: () => calls.push('settings'),
+    }));
+
+    try {
+        const settings = shadow.querySelector('#mktero-warning-settings');
+        assert.equal(shadow.querySelector('#mktero-error').hidden, true);
+        assert.equal(shadow.querySelector('#mktero-warning').hidden, false);
+        assert.equal(settings.hidden, false);
+        assert.equal(settings.getAttribute('aria-label'), 'Open Mktero settings');
+
+        settings.click();
+
+        assert.deepEqual(calls, ['settings']);
+    }
+    finally {
+        view.destroy();
+    }
 });
 
 test('opens the document action popover and reports snapshot save state', async () => {
@@ -1581,6 +1644,53 @@ test('isolates responsive panels across windows and cleans up resize listeners',
     }
 });
 
+test('uses the measured Markdown container width for responsive panels', () => {
+    let resizeObserverCallback;
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow(window) {
+            Object.defineProperty(window, 'innerWidth', {
+                configurable: true,
+                value: 1400,
+                writable: true,
+            });
+            window.ResizeObserver = class ResizeObserver {
+                constructor(callback) {
+                    resizeObserverCallback = callback;
+                }
+
+                observe() {}
+
+                disconnect() {}
+            };
+        },
+    });
+    const outline = shadow.querySelector('#mktero-outline');
+    const notes = shadow.querySelector('#mktero-notes');
+
+    try {
+        assert.equal(outline.hidden, false);
+        assert.equal(notes.hidden, false);
+
+        resizeObserverCallback([{ contentRect: { width: 800 } }]);
+        assert.equal(outline.hidden, true);
+        assert.equal(notes.hidden, true);
+
+        resizeObserverCallback([{ contentRect: { width: 900 } }]);
+        assert.equal(outline.hidden, false);
+        assert.equal(notes.hidden, true);
+    }
+    finally {
+        view.destroy();
+        assert.equal(typeof resizeObserverCallback, 'function');
+        document.defaultView.close?.();
+    }
+});
+
 test('tracks the active outline and note while the editor viewport changes', () => {
     const markdown = '# Overview\n\nIntro.\n\n## Methods\n\nMethod text.';
     let editorOptions;
@@ -1627,6 +1737,77 @@ test('tracks the active outline and note while the editor viewport changes', () 
     finally {
         view.destroy();
     }
+});
+
+test('restores the current Markdown position after a reparse replaces the document', () => {
+    const initialMarkdown = [
+        '# Overview',
+        '',
+        'Original overview.',
+        '',
+        '# Methods',
+        '',
+        'Original methods.',
+    ].join('\n');
+    const replacementMarkdown = [
+        '# Overview',
+        '',
+        'Added overview context.',
+        '',
+        '# Methods',
+        '',
+        'New methods.',
+        '',
+        '## Results',
+    ].join('\n');
+    const scrolledOffsets = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: initialMarkdown,
+        sourceKind: 'markdown',
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => scrolledOffsets.push(offset);
+            return editor;
+        },
+    });
+
+    const activeOffset = initialMarkdown.indexOf('Original methods.');
+    editorOptions.onViewportChange(activeOffset);
+    view.render({
+        ...model,
+        status: 'loading',
+        progress: 30,
+        preserveContent: true,
+    });
+    view.render({
+        ...model,
+        status: 'ready',
+        progress: 100,
+        markdown: replacementMarkdown,
+        sourceKind: 'markdown',
+    });
+
+    assert.deepEqual(scrolledOffsets, [replacementMarkdown.indexOf('New methods.')]);
+
+    view.render({
+        ...model,
+        status: 'ready',
+        progress: 100,
+        markdown: replacementMarkdown,
+        sourceKind: 'markdown',
+        annotationOverlay: {
+            matched: [{ id: 'updated' }],
+            unmatched: [],
+        },
+    });
+    assert.deepEqual(scrolledOffsets, [replacementMarkdown.indexOf('New methods.')]);
+    view.destroy();
 });
 
 test('shows PDF notes safely and jumps matched notes to Markdown', () => {
@@ -1727,7 +1908,7 @@ test('shows PDF notes safely and jumps matched notes to Markdown', () => {
         updated[0].dispatchEvent(new document.defaultView.Event('click', {
             bubbles: true,
         }));
-        assert.deepEqual(scrolledOffsets, [12, 0]);
+        assert.deepEqual(scrolledOffsets, [12, 12, 0]);
     }
     finally {
         view.destroy();
@@ -2179,6 +2360,60 @@ test('ignores an empty Markdown fragment without treating it as a CSS selector',
 
     assert.doesNotThrow(() => openLink('#'));
     view.destroy();
+});
+
+test('scrolls Markdown fragment links through the heading index', () => {
+    const markdown = '# Overview\n\n## Methods and Results';
+    const scrolledOffsets = [];
+    let openLink;
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            openLink = options.openLink;
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => scrolledOffsets.push(offset);
+            return editor;
+        },
+    });
+
+    openLink('#methods-and-results');
+
+    assert.deepEqual(scrolledOffsets, [markdown.indexOf('## Methods')]);
+    view.destroy();
+});
+
+test('adds fragment targets to saved HTML snapshot headings', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        renderMode: 'html',
+        snapshotHTML: '<h1>Methods and Results</h1>'
+            + '<h2>Methods and Results</h2>',
+        snapshotAssets: [],
+        onReparse: null,
+        onSaveSnapshot: null,
+    }));
+    const headings = [...shadow.querySelectorAll('#mktero-snapshot h1, #mktero-snapshot h2')];
+    const scrolled = [];
+    for (const heading of headings) {
+        heading.scrollIntoView = () => scrolled.push(heading.id);
+    }
+
+    try {
+        assert.deepEqual(headings.map(heading => heading.id), [
+            'methods-and-results',
+            'methods-and-results-1',
+        ]);
+        view.openLink?.('#methods-and-results-1');
+        assert.deepEqual(scrolled, ['methods-and-results-1']);
+    }
+    finally {
+        view.destroy();
+    }
 });
 
 test('creates and revokes Blob URLs for cached MinerU images', () => {

@@ -7,6 +7,7 @@ import {
     createEmptyAnnotationOverlay,
 } from './markdown-annotation-overlay.js';
 import { mergeAnnotationOverlays } from './markdown-local-annotations.js';
+import { translateEnglish } from '../i18n/localization.js';
 
 export class MarkdownDocumentService {
     constructor({
@@ -14,6 +15,7 @@ export class MarkdownDocumentService {
         annotationOverlay = null,
         localAnnotations = null,
         savedResolver = null,
+        translate = translateEnglish,
     }) {
         if (!extractor) {
             throw new TypeError('A document extractor is required');
@@ -22,6 +24,7 @@ export class MarkdownDocumentService {
         this.annotationOverlay = annotationOverlay;
         this.localAnnotations = localAnnotations;
         this.savedResolver = savedResolver;
+        this.translate = translate;
         this.inFlight = new Map();
     }
 
@@ -47,7 +50,9 @@ export class MarkdownDocumentService {
         const markdown = extracted.kind === 'markdown'
             ? extracted.markdown
             : extracted.kind === 'structured'
-                ? renderStructuredDocument(extracted.document)
+                ? renderStructuredDocument(extracted.document, {
+                    translate: this.translate,
+                })
                 : renderPlainText(extracted.text);
         if (!markdown.trim() && !extracted.userEdited) {
             throw new Error('The PDF contains no extractable text; OCR may be required');
@@ -167,9 +172,14 @@ export class MarkdownDocumentService {
     }
 }
 
-export function createMarkdownDocumentService({ zotero, savedResolver = null }) {
+export function createMarkdownDocumentService({
+    zotero,
+    savedResolver = null,
+    translate = translateEnglish,
+}) {
     return new MarkdownDocumentService({
         extractor: new ZoteroDocumentExtractor(zotero),
         savedResolver,
+        translate,
     });
 }

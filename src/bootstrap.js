@@ -159,6 +159,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
                 services: typeof Services === 'undefined' ? null : Services,
             }),
             preparingNoteText: runtimeTranslate('viewer.snapshotPreparing'),
+            translate: runtimeTranslate,
             now: () => new Date().toISOString(),
         });
         runtime.savedMarkdownResolver = createSavedMarkdownOpenResolver({
@@ -218,6 +219,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         annotationOverlay,
         localAnnotations,
         savedResolver: runtime.savedMarkdownResolver,
+        translate: runtimeTranslate,
     });
     runtime.annotationOverlayRefresher = createAnnotationOverlayRefresher({
         presenter,
@@ -317,6 +319,7 @@ async function openItemAsMarkdown(itemID, {
             forceRefresh: true,
             entryPoint,
         }),
+        onOpenSettings: () => openMinerUPreferences(Zotero),
         onSaveSnapshot: () => saveSnapshotForItem(itemID),
         onChangeAnnotationColor: (annotationID, color) => (
             runAnnotationAction('changeColor', itemID, annotationID, color)
@@ -424,8 +427,9 @@ async function openItemAsMarkdown(itemID, {
             `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
         );
         Zotero.logError(error);
-        if (error instanceof MinerUConfigurationError
-            || error?.code === 'MINERU_API_KEY_INVALID') {
+        const opensSettings = error instanceof MinerUConfigurationError
+            || error?.code === 'MINERU_API_KEY_INVALID';
+        if (opensSettings) {
             openMinerUPreferences(Zotero);
         }
         runtime.presenter?.update(
@@ -433,7 +437,10 @@ async function openItemAsMarkdown(itemID, {
             createConversionFailureChanges(
                 userFacingError(error),
                 previousResult,
-                runtimeTranslate
+                runtimeTranslate,
+                {
+                    errorAction: opensSettings ? 'open-settings' : null,
+                }
             )
         );
     }

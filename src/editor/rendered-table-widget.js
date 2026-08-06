@@ -57,7 +57,13 @@ export class RenderedTableWidget extends WidgetType {
         container.dataset.markdownTo = String(
             this.annotationSourceFrom + this.annotationSource.length
         );
-        appendRenderedMarkdown(container, this.source, this.resolveImageURL);
+        appendRenderedMarkdown(
+            container,
+            this.source,
+            this.resolveImageURL,
+            false,
+            this.translate
+        );
         const table = container.querySelector('table');
         if (table && this.caption) {
             table.prepend(createTableCaption(document, this.caption));

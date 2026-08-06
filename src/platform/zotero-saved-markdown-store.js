@@ -16,6 +16,7 @@ import {
 import { sha256Hex } from '../core/sha256.js';
 import { toUint8Array } from '../mineru/binary.js';
 import { renderZoteroNoteHTML } from '../markdown/zotero-note-html-renderer.js';
+import { translateEnglish } from '../i18n/localization.js';
 
 const MAX_SOURCE_MARKDOWN_BYTES = 50 * 1024 * 1024;
 const MAX_SOURCE_MAP_BYTES = 20 * 1024 * 1024;
@@ -41,6 +42,7 @@ export class ZoteroSavedMarkdownStore {
         createBlob,
         hash = sha256Hex,
         renderHTML = renderZoteroNoteHTML,
+        translate = translateEnglish,
         preparingNoteText = '',
         now,
     }) {
@@ -69,6 +71,7 @@ export class ZoteroSavedMarkdownStore {
         this.createBlob = createBlob;
         this.hash = hash;
         this.renderHTML = renderHTML;
+        this.translate = translate;
         this.preparingNoteText = String(preparingNoteText || '');
         this.now = now;
     }
@@ -317,6 +320,7 @@ export class ZoteroSavedMarkdownStore {
                         attachments.assetAttachments
                     )
                 ),
+                translate: this.translate,
             });
             const snapshotHTMLHash = await this.hash(
                 new TextEncoder().encode(bodyHTML)
@@ -527,6 +531,7 @@ export class ZoteroSavedMarkdownStore {
                     hrefs.push(href);
                     return attachmentKeys[index] || null;
                 },
+                translate: this.translate,
             });
         }
         catch {

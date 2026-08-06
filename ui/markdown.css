@@ -15,6 +15,14 @@
     --reader-width: 40em;
     --reader-font-size: 18px;
     --reader-line-height: 1.72;
+    --reader-caption-font-size: calc(var(--reader-font-size) * 0.82);
+    --reader-caption-line-height: 1.5;
+    --reader-code-font-size: calc(var(--reader-font-size) * 0.82);
+    --reader-code-line-height: 1.6;
+    --reader-table-font-size: calc(var(--reader-font-size) * 0.86);
+    --reader-table-line-height: 1.45;
+    --reader-panel-label-font-size: calc(var(--reader-font-size) * 0.82);
+    --reader-page-marker-font-size: calc(var(--reader-font-size) * 0.72);
     --ui-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --reader-font: Georgia, Cambria, "Times New Roman", serif;
     --radius-sm: 6px;
@@ -69,6 +77,7 @@
     color: var(--text);
     background: var(--background);
     font-family: var(--ui-font);
+    container: mktero-view / inline-size;
 }
 
 #mktero-progress {
@@ -94,6 +103,55 @@
 
 .warning { color: var(--warning); }
 .error { color: var(--error); }
+
+.message-body {
+    margin: 0;
+}
+
+.message-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.message-action {
+    display: inline-flex;
+    min-height: 28px;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 9px;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, currentColor 7%, var(--surface-raised));
+    color: inherit;
+    cursor: pointer;
+    font: 600 12px/1.2 var(--ui-font);
+}
+
+.message-action--primary {
+    border-color: color-mix(in srgb, var(--accent) 48%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+    color: var(--accent-strong);
+}
+
+.message-action:hover:not(:disabled) {
+    background: color-mix(in srgb, currentColor 13%, var(--surface-raised));
+}
+
+.message-action:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+    outline-offset: 2px;
+}
+
+.message-action:disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+
+.message-action-icon {
+    flex: 0 0 auto;
+}
 
 main {
     display: flex;
@@ -1002,7 +1060,7 @@ main {
     border-radius: 5px;
     background: color-mix(in srgb, var(--surface) 76%, var(--reader-background));
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.88em;
+    font-size: var(--reader-code-font-size);
 }
 
 .markdown-snapshot-host pre {
@@ -1011,7 +1069,9 @@ main {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--surface) 72%, var(--reader-background));
-    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--reader-code-font-size);
+    line-height: var(--reader-code-line-height);
 }
 
 .markdown-snapshot-host pre code {
@@ -1039,9 +1099,9 @@ main {
 .markdown-snapshot-host figcaption {
     margin: 12px auto 0;
     color: var(--muted);
-    font-family: var(--ui-font);
-    font-size: 12.5px;
-    line-height: 1.5;
+    font-family: var(--reader-font);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
 }
 
 .markdown-snapshot-host table {
@@ -1052,9 +1112,9 @@ main {
     border-collapse: separate;
     border-spacing: 0;
     overflow: hidden;
-    font-family: var(--ui-font);
-    font-size: 13px;
-    line-height: 1.45;
+    font-family: var(--reader-font);
+    font-size: var(--reader-table-font-size);
+    line-height: var(--reader-table-line-height);
 }
 
 .markdown-snapshot-host th,
@@ -1261,7 +1321,7 @@ main {
     border-radius: 5px;
     background: color-mix(in srgb, var(--surface) 76%, var(--reader-background));
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.88em;
+    font-size: var(--reader-code-font-size);
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-link,
@@ -1886,6 +1946,8 @@ main {
 .mktero-table-preview-caption {
     padding: 0 1px 9px;
     color: var(--reference-preview-muted);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
     font-weight: 650;
 }
 
@@ -1901,6 +1963,9 @@ main {
     border-collapse: collapse;
     color: var(--reference-preview-text);
     background: var(--reference-preview-surface);
+    font-family: var(--reader-font);
+    font-size: var(--reader-table-font-size);
+    line-height: var(--reader-table-line-height);
 }
 
 .mktero-table-preview-viewport th,
@@ -1981,8 +2046,8 @@ main {
     max-width: 100%;
     margin: 5px auto 0;
     color: var(--reference-preview-text);
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: var(--reader-panel-label-font-size);
+    line-height: var(--reader-caption-line-height);
     text-align: center;
 }
 
@@ -1993,7 +2058,8 @@ main {
 .mktero-figure-preview-viewport figcaption {
     margin: 9px 2px 0;
     color: var(--reference-preview-muted);
-    line-height: 1.5;
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
     text-align: left;
 }
 
@@ -2130,8 +2196,9 @@ main {
     max-width: 100%;
     margin: 6px auto 0;
     color: var(--text);
-    font-size: 13px;
-    line-height: 1.4;
+    font-family: var(--reader-font);
+    font-size: var(--reader-panel-label-font-size);
+    line-height: var(--reader-caption-line-height);
     text-align: center;
 }
 
@@ -2144,9 +2211,9 @@ main {
     margin: 12px auto 0;
     padding: 0 12px;
     color: var(--muted);
-    font-family: var(--ui-font);
-    font-size: 12.5px;
-    line-height: 1.5;
+    font-family: var(--reader-font);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
     letter-spacing: 0;
     text-align: center;
     user-select: text;
@@ -2178,7 +2245,9 @@ main {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--surface) 72%, var(--reader-background));
-    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--reader-code-font-size);
+    line-height: var(--reader-code-line-height);
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-divider hr {
@@ -2213,9 +2282,9 @@ main {
     max-width: none;
     table-layout: auto;
     border-collapse: collapse;
-    font-family: var(--ui-font);
-    font-size: 13px;
-    line-height: 1.45;
+    font-family: var(--reader-font);
+    font-size: var(--reader-table-font-size);
+    line-height: var(--reader-table-line-height);
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-table table caption,
@@ -2223,9 +2292,9 @@ main {
     caption-side: top;
     padding: 10px 12px;
     color: var(--muted);
-    font-family: var(--ui-font);
-    font-size: 12.5px;
-    line-height: 1.5;
+    font-family: var(--reader-font);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
     letter-spacing: 0;
     text-align: center;
 }
@@ -2297,18 +2366,22 @@ main {
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--surface) 50%, transparent);
     color: var(--muted);
-    font: 13px var(--ui-font);
+    font-family: var(--reader-font);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
 }
 
 .page-marker {
     display: block;
     margin: 28px 0 12px;
     color: var(--muted);
-    font: 11px ui-sans-serif, system-ui, sans-serif;
+    font-family: var(--ui-font);
+    font-size: var(--reader-page-marker-font-size);
+    line-height: 1.4;
     text-transform: uppercase;
 }
 
-@media (max-width: 720px) {
+@container mktero-view (max-width: 720px) {
     .loading-state { margin-top: 32px; padding: 20px; }
     .markdown-editor-host > .cm-editor .cm-content {
         width: calc(100% - 32px);
@@ -2326,13 +2399,13 @@ main {
     }
 }
 
-@media (max-width: 760px) {
+@container mktero-view (max-width: 760px) {
     .markdown-outline {
-        flex-basis: min(var(--outline-width, 256px), 42vw);
+        flex-basis: min(var(--outline-width, 256px), 42cqi);
     }
 
     .markdown-notes {
-        flex-basis: min(var(--notes-width, 300px), 32vw);
+        flex-basis: min(var(--notes-width, 300px), 32cqi);
     }
 }
 

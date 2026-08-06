@@ -1,3 +1,5 @@
+import { translateEnglish } from '../i18n/localization.js';
+
 const DEFAULT_HEADING_LEVEL = 2;
 
 /**
@@ -7,7 +9,10 @@ const DEFAULT_HEADING_LEVEL = 2;
  * content is untrusted input, so source text is escaped and raw HTML is never
  * copied into the output.
  */
-export function renderStructuredDocument(document) {
+export function renderStructuredDocument(
+    document,
+    { translate = translateEnglish } = {}
+) {
     if (!document || !Array.isArray(document.content)) {
         throw new TypeError('A structured document with a content array is required');
     }
@@ -24,6 +29,7 @@ export function renderStructuredDocument(document) {
         output.push(renderBlock(block, {
             path: [index],
             outlineLevels,
+            translate,
         }));
     });
 
@@ -70,13 +76,14 @@ function renderBlock(block, context) {
         case 'math':
             return renderMathBlock(block.content);
         case 'image': {
-            const alt = renderInline(block.content) || 'Figure';
-            return `**Figure:** ${alt}\n\n`;
+            const alt = renderInline(block.content)
+                || context.translate('markdown.figure');
+            return `**${context.translate('markdown.figure')}:** ${alt}\n\n`;
         }
         case 'caption':
             return `*${renderInline(block.content)}*\n\n`;
         case 'note':
-            return `> **Note:** ${renderInline(block.content)}\n\n`;
+            return `> **${context.translate('markdown.note')}:** ${renderInline(block.content)}\n\n`;
         case 'preformatted':
             return renderFencedCode(block.content);
         default:

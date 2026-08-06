@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { translateMessage } from '../src/i18n/localization.js';
 import {
     renderPlainText,
     renderStructuredDocument,
@@ -85,6 +86,26 @@ test('renders structured blocks as readable Markdown', () => {
         '$$',
         'x^2 + y^2 = z^2',
         '$$',
+    ].join('\n'));
+});
+
+test('localizes generated structured figure and note labels', () => {
+    const document = {
+        content: [
+            { type: 'image', content: [{ text: '流程图' }] },
+            { type: 'note', content: [{ text: '需要复核' }] },
+        ],
+    };
+    const translate = (key, variables) => translateMessage(
+        'zh-CN',
+        key,
+        variables
+    );
+
+    assert.equal(renderStructuredDocument(document, { translate }), [
+        '**图:** 流程图',
+        '',
+        '> **备注:** 需要复核',
     ].join('\n'));
 });
 

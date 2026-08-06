@@ -104,7 +104,8 @@ class RenderedMarkdownWidget extends WidgetType {
             container,
             this.source,
             this.resolveImageURL,
-            inline
+            inline,
+            this.translate
         );
         installRenderedCitations(container, this.citations);
         if (['math', 'math-display'].includes(this.display)) {

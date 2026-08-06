@@ -57,6 +57,7 @@ export class MarkdownTabPresenter {
         sourceItemID = documentID,
         onClose,
         onReparse,
+        onOpenSettings,
         onSaveSnapshot,
         onChangeAnnotationColor,
         onUpdateAnnotationComment,
@@ -89,6 +90,9 @@ export class MarkdownTabPresenter {
             if (onClose) existing.onClose = onClose;
             if (onReparse !== undefined) {
                 existing.model.onReparse = onReparse;
+            }
+            if (onOpenSettings !== undefined) {
+                existing.model.onOpenSettings = onOpenSettings;
             }
             if (onSaveSnapshot !== undefined) {
                 existing.model.onSaveSnapshot = onSaveSnapshot;
@@ -137,6 +141,7 @@ export class MarkdownTabPresenter {
             sourceItemID,
             {
                 onReparse,
+                onOpenSettings,
                 onSaveSnapshot,
                 onChangeAnnotationColor,
                 onUpdateAnnotationComment,
@@ -431,6 +436,8 @@ function createInitialModel(
         resumingTask: false,
         warnings: [],
         error: '',
+        errorAction: null,
+        warningAction: null,
         snapshotHTML: '',
         snapshotAssets: [],
         snapshotModified: false,

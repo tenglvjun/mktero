@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractMarkdownOutline } from '../src/markdown/markdown-outline.js';
+import {
+    createMarkdownFragmentIndex,
+    createMarkdownReadingPositionAnchor,
+    extractMarkdownOutline,
+    resolveMarkdownReadingPosition,
+} from '../src/markdown/markdown-outline.js';
 
 test('extracts visible Markdown headings and their source offsets', () => {
     const markdown = [
@@ -53,5 +58,70 @@ test('preserves visible angle-bracket text in outline labels', () => {
             'FTP ftp://example.com/a',
             'Left Right',
         ]
+    );
+});
+
+test('creates stable Markdown fragment targets for headings and duplicates', () => {
+    const markdown = [
+        '# Methods and Results',
+        '',
+        '## Methods and Results',
+        '',
+        '### 中文 标题！',
+    ].join('\n');
+    const index = createMarkdownFragmentIndex(markdown);
+
+    assert.deepEqual([...index.entries()], [
+        ['methods-and-results', markdown.indexOf('# Methods')],
+        ['methods-and-results-1', markdown.indexOf('## Methods')],
+        ['中文-标题', markdown.indexOf('### 中文')],
+    ]);
+});
+
+test('uses safe, collision-free fragment fallbacks for boundary headings', () => {
+    const markdown = [
+        '# heading-1',
+        '',
+        '# !!!',
+        '',
+        '# <script>alert(1)</script>',
+    ].join('\n');
+    const index = createMarkdownFragmentIndex(markdown);
+
+    assert.deepEqual([...index.keys()], [
+        'heading-1',
+        'heading-1-1',
+        'alert1',
+    ]);
+    assert.doesNotMatch([...index.keys()].join(' '), /script|</i);
+});
+
+test('anchors restored reading position to the matching section after reparse', () => {
+    const previous = [
+        '# Overview',
+        '',
+        'Original overview.',
+        '',
+        '# Methods',
+        '',
+        'Original methods.',
+    ].join('\n');
+    const updated = [
+        '# Overview',
+        '',
+        'Added overview context.',
+        '',
+        '# Methods',
+        '',
+        'Updated methods.',
+    ].join('\n');
+    const anchor = createMarkdownReadingPositionAnchor(
+        previous,
+        previous.indexOf('Original methods.')
+    );
+
+    assert.equal(
+        resolveMarkdownReadingPosition(updated, anchor),
+        updated.indexOf('Updated methods.')
     );
 });

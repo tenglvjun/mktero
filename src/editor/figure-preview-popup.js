@@ -24,7 +24,8 @@ export function createFigurePreviewPopup(parent, {
                         document,
                         target,
                         resolveImageURL,
-                        reposition
+                        reposition,
+                        t
                     );
                 },
             });
@@ -41,13 +42,20 @@ function createPreviewContent(
     document,
     target,
     resolveImageURL,
-    reposition
+    reposition,
+    translate
 ) {
     const content = document.createElement('div');
     content.className = 'mktero-figure-preview-content';
     const viewport = document.createElement('div');
     viewport.className = 'mktero-figure-preview-viewport';
-    appendRenderedMarkdown(viewport, target.figure.source, resolveImageURL);
+    appendRenderedMarkdown(
+        viewport,
+        target.figure.source,
+        resolveImageURL,
+        false,
+        translate
+    );
     for (const image of viewport.querySelectorAll('img')) {
         image.addEventListener('load', reposition, { once: true });
     }

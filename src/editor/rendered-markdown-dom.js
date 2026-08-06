@@ -5,10 +5,14 @@ export function appendRenderedMarkdown(
     container,
     source,
     resolveImageURL,
-    unwrapParagraph = false
+    unwrapParagraph = false,
+    translate = translateEnglish
 ) {
     const document = container.ownerDocument;
-    const html = renderMarkdownHTML(source, { resolveImageURL });
+    const html = renderMarkdownHTML(source, {
+        resolveImageURL,
+        translate,
+    });
     const DOMParserType = document.defaultView.DOMParser;
     const parsed = new DOMParserType().parseFromString(
         `<!doctype html><html><body>${html}</body></html>`,

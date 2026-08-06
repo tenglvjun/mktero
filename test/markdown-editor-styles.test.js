@@ -94,7 +94,7 @@ test('wide Markdown tables scroll inside the aligned reading column', () => {
     assert.match(tables, /min-width:\s*100%/);
     assert.match(tables, /max-width:\s*none/);
     assert.match(tables, /table-layout:\s*auto/);
-    assert.match(tables, /font-size:\s*13px/);
+    assert.match(tables, /font-size:\s*var\(--reader-table-font-size\)/);
 
     const cells = ruleBody([
         '.markdown-editor-host > .cm-editor .cm-mktero-table th,',
@@ -131,8 +131,8 @@ test('styles academic figure captions as distinct labels', () => {
     assert.doesNotMatch(caption, /border-left/);
     assert.doesNotMatch(caption, /border-radius/);
     assert.doesNotMatch(caption, /background\s*:/);
-    assert.match(caption, /font-family:\s*var\(--ui-font\)/);
-    assert.match(caption, /font-size:\s*12\.5px/);
+    assert.match(caption, /font-family:\s*var\(--reader-font\)/);
+    assert.match(caption, /font-size:\s*var\(--reader-caption-font-size\)/);
     assert.match(caption, /letter-spacing:\s*0/);
     assert.match(caption, /text-align:\s*center/);
 
@@ -151,7 +151,7 @@ test('styles academic table captions above tables without a background', () => {
     assert.match(caption, /caption-side:\s*top/);
     assert.match(caption, /padding:\s*10px 12px/);
     assert.match(caption, /color:\s*var\(--muted\)/);
-    assert.match(caption, /font-size:\s*12\.5px/);
+    assert.match(caption, /font-size:\s*var\(--reader-caption-font-size\)/);
     assert.match(caption, /letter-spacing:\s*0/);
     assert.match(caption, /text-align:\s*center/);
     assert.doesNotMatch(caption, /background\s*:/);
@@ -235,7 +235,7 @@ test('lays out a responsive scrollable outline beside the editor', () => {
 
     assert.match(
         MARKDOWN_STYLES,
-        /@media\s*\(max-width:\s*760px\)[\s\S]*\.markdown-outline\s*\{[^}]*flex-basis:\s*min\(var\(--outline-width, 256px\), 42vw\)/
+        /@container\s+mktero-view\s*\(max-width:\s*760px\)[\s\S]*\.markdown-outline\s*\{[^}]*flex-basis:\s*min\(var\(--outline-width, 256px\), 42cqi\)/
     );
 });
 
@@ -494,6 +494,7 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
 test('keeps snapshot code blocks from inheriting inline code chrome', () => {
     const inlineCode = ruleBody('.markdown-snapshot-host code');
     assert.match(inlineCode, /border:\s*1px solid var\(--border-subtle\)/);
+    assert.match(inlineCode, /font-size:\s*var\(--reader-code-font-size\)/);
 
     const blockCode = ruleBody('.markdown-snapshot-host pre code');
     assert.match(blockCode, /padding:\s*0/);
@@ -576,6 +577,7 @@ test('styles figure references, previews, and target highlights', () => {
         '.mktero-figure-preview-viewport .mktero-figure-panel-label'
     );
     assert.match(panelLabel, /text-align:\s*center/);
+    assert.match(panelLabel, /font-size:\s*var\(--reader-panel-label-font-size\)/);
 
     const highlight = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-figure-target-highlight'

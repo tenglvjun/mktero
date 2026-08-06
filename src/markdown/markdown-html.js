@@ -1,5 +1,6 @@
 import { Marked } from 'marked';
 import katex from 'katex';
+import { translateEnglish } from '../i18n/localization.js';
 import {
     findMinerUAlgorithmGroups,
     stripMinerUAlgorithmWrappers,
@@ -46,6 +47,7 @@ export function renderMarkdownHTML(
         resolveImageURL = () => null,
         resolveImageAttachmentKey = null,
         target = 'mktero',
+        translate = translateEnglish,
     } = {}
 ) {
     if (typeof markdown !== 'string') {
@@ -56,6 +58,7 @@ export function renderMarkdownHTML(
     const renderer = createSafeRenderer(resolveImageURL, mathBudget, {
         resolveImageAttachmentKey,
         target,
+        translate,
     });
     const parser = new Marked({
         gfm: true,
@@ -75,6 +78,7 @@ export function renderMarkdownHTML(
         resolveImageAttachmentKey,
         mathBudget,
         target,
+        translate,
     );
     if (figureGroupHTML) return figureGroupHTML;
     return renderParsedMarkdown(stripMinerUAlgorithmWrappers(markdown), parser);
@@ -107,13 +111,18 @@ function renderParsedMarkdown(markdown, parser) {
 function createSafeRenderer(
     resolveImageURL,
     mathBudget,
-    { resolveImageAttachmentKey = null, target = 'mktero' } = {}
+    {
+        resolveImageAttachmentKey = null,
+        target = 'mktero',
+        translate = translateEnglish,
+    } = {}
 ) {
     return {
         html({ text }) {
             const page = text.trim().match(/^<!--\s*zotero-page:\s*(.*?)\s*-->$/);
             if (page) {
-                return `<span class="page-marker" data-page="${escapeAttribute(page[1])}">Page ${escapeHTML(page[1])}</span>`;
+                return `<span class="page-marker" data-page="${escapeAttribute(page[1])}">`
+                    + `${escapeHTML(translate('markdown.page', { page: page[1] }))}</span>`;
             }
             const table = sanitizeRawHTMLTable(text, mathBudget, target);
             if (table) return table;
@@ -144,7 +153,8 @@ function createSafeRenderer(
             return renderImageToken(
                 token,
                 resolveImageURL,
-                resolveImageAttachmentKey
+                resolveImageAttachmentKey,
+                translate
             );
         },
     };
@@ -157,6 +167,7 @@ function renderStandaloneAcademicFigureGroup(
     resolveImageAttachmentKey,
     mathBudget,
     target,
+    translate,
 ) {
     const groups = findAcademicFigureGroups(markdown);
     if (groups.length !== 1) return null;
@@ -192,7 +203,8 @@ function renderStandaloneAcademicFigureGroup(
         resolveImageURL,
         mathBudget,
         resolveImageAttachmentKey,
-        target
+        target,
+        translate,
     )).join('');
     const panelHTML = horizontal
         ? `<div class="mktero-figure-panels-horizontal">${renderedPanels}</div>`
@@ -208,12 +220,14 @@ function renderFigurePanel(
     resolveImageURL,
     mathBudget,
     resolveImageAttachmentKey,
-    target
+    target,
+    translate
 ) {
     const image = renderImageToken(
         panel.imageToken,
         resolveImageURL,
-        resolveImageAttachmentKey
+        resolveImageAttachmentKey,
+        translate
     );
     if (!panel.panelLabel) return image;
     const before = panel.panelLabelPosition === 'before';
@@ -232,7 +246,8 @@ function renderFigurePanel(
 function renderImageToken(
     { href, title, text, tokens },
     resolveImageURL,
-    resolveImageAttachmentKey = null
+    resolveImageAttachmentKey = null,
+    translate = translateEnglish
 ) {
     const alt = imageTokenDescription({ text, tokens });
     const attachmentKey = resolveImageAttachmentKey?.(href);
@@ -245,7 +260,9 @@ function renderImageToken(
     }
     const resolved = resolveImageURL(href);
     if (!resolved || !String(resolved).startsWith('blob:')) {
-        return `<span class="missing-image">${escapeHTML(alt || 'Image')}</span>`;
+        return `<span class="missing-image">${escapeHTML(
+            alt || translate('image.fallbackAlt')
+        )}</span>`;
     }
     const titleAttribute = title
         ? ` title="${escapeAttribute(title)}"`

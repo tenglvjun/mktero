@@ -1,12 +1,17 @@
 import { renderMarkdownHTML } from './markdown-html.js';
+import { translateEnglish } from '../i18n/localization.js';
 
 export function renderZoteroNoteHTML(
     markdown,
-    { resolveImageAttachmentKey = () => null } = {}
+    {
+        resolveImageAttachmentKey = () => null,
+        translate = translateEnglish,
+    } = {}
 ) {
     const rendered = renderMarkdownHTML(markdown, {
         target: 'zotero-note',
         resolveImageAttachmentKey,
+        translate,
     });
     return normalizeZoteroNoteHTML(rendered);
 }

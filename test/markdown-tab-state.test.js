@@ -87,6 +87,7 @@ test('restores the previous result with a warning when reparse fails', () => {
     assert.equal(failure.cacheHit, true);
     assert.equal(failure.preserveContent, false);
     assert.equal(failure.resumingTask, false);
+    assert.equal(failure.warningAction, null);
     assert.deepEqual(failure.warnings, [
         'Existing warning.',
         'Reparse failed: MinerU is unavailable',
@@ -106,12 +107,16 @@ test('uses the normal empty and error states without a previous result', () => {
         annotationOverlay: { matched: [], unmatched: [] },
         warnings: [],
         error: '',
+        errorAction: null,
+        warningAction: null,
         preserveContent: false,
         resumingTask: false,
     });
     assert.deepEqual(createConversionFailureChanges('Conversion failed', null), {
         status: 'error',
         error: 'Conversion failed',
+        errorAction: null,
+        warningAction: null,
         preserveContent: false,
         resumingTask: false,
     });
@@ -135,6 +140,8 @@ test('clears figures when a successful reparse has no assets', () => {
         progress: 100,
         preserveContent: false,
         resumingTask: false,
+        errorAction: null,
+        warningAction: null,
     });
 });
 
@@ -154,5 +161,14 @@ test('localizes reparse loading and failure states', () => {
     assert.deepEqual(
         createConversionFailureChanges('服务不可用', snapshot, translate).warnings,
         ['重新解析失败：服务不可用']
+    );
+    assert.equal(
+        createConversionFailureChanges(
+            'Token 无效',
+            snapshot,
+            translate,
+            { errorAction: 'open-settings' }
+        ).warningAction,
+        'open-settings'
     );
 });

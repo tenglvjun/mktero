@@ -37,6 +37,8 @@ export function createConversionLoadingChanges(
             status: 'loading',
             progress: 0,
             error: '',
+            errorAction: null,
+            warningAction: null,
             preserveContent: true,
             resumingTask: false,
         };
@@ -53,6 +55,8 @@ export function createConversionLoadingChanges(
         annotationOverlay: createEmptyAnnotationOverlay(),
         warnings: [],
         error: '',
+        errorAction: null,
+        warningAction: null,
         preserveContent: false,
         resumingTask: false,
     };
@@ -78,13 +82,16 @@ export function createConversionReadyChanges(result) {
         progress: 100,
         preserveContent: false,
         resumingTask: false,
+        errorAction: null,
+        warningAction: null,
     };
 }
 
 export function createConversionFailureChanges(
     message,
     previousResult,
-    translate = translateEnglish
+    translate = translateEnglish,
+    { errorAction = null } = {}
 ) {
     if (previousResult) {
         return {
@@ -96,6 +103,8 @@ export function createConversionFailureChanges(
                 translate('tab.reparseFailed', { message }),
             ],
             error: '',
+            errorAction: null,
+            warningAction: errorAction,
             preserveContent: false,
             resumingTask: false,
         };
@@ -103,6 +112,8 @@ export function createConversionFailureChanges(
     return {
         status: 'error',
         error: message,
+        errorAction,
+        warningAction: null,
         preserveContent: false,
         resumingTask: false,
     };

@@ -22,7 +22,13 @@ import {
     comparePdfAnnotations,
 } from '../core/pdf-annotation.js';
 import { createLocalization } from '../i18n/localization.js';
-import { extractMarkdownOutline } from '../markdown/markdown-outline.js';
+import {
+    createMarkdownFragmentID,
+    createMarkdownFragmentIndex,
+    createMarkdownReadingPositionAnchor,
+    extractMarkdownOutline,
+    resolveMarkdownReadingPosition,
+} from '../markdown/markdown-outline.js';
 import {
     createLucideIcon,
     LUCIDE_ICONS,
@@ -134,11 +140,15 @@ class MarkdownTabView {
         this.onReaderFontSizeChange = onReaderFontSizeChange;
         this.renderedAssets = undefined;
         this.assetURLs = new Map();
+        this.renderedMarkdown = undefined;
+        this.renderedRenderMode = null;
+        this.fragmentIndex = new Map();
         this.renderedSnapshotHTML = undefined;
         this.renderedSnapshotAssets = undefined;
         this.snapshotURLs = new Map();
         this.documentActionBusy = null;
         this.actionStatusTimer = null;
+        this.responsiveResizeObserver = null;
         this.documentActionsOpen = false;
         this.readerFontOptionsOpen = false;
         this.activeNavigationOffset = 0;
@@ -233,11 +243,13 @@ class MarkdownTabView {
         );
         elements.content.setAttribute('aria-busy', String(loadingView.visible));
         elements.error.hidden = model.status !== 'error';
-        elements.error.textContent = model.error || '';
+        elements.errorMessage.textContent = model.error || '';
         elements.warning.hidden = !model.warnings?.length;
-        elements.warning.textContent = model.warnings?.join(' ') || '';
+        elements.warningMessage.textContent = model.warnings?.join(' ') || '';
         this.syncContentVisibility(showContent);
         this.syncDocumentActions(model, loadingView);
+        this.syncErrorActions(model);
+        this.syncWarningActions(model);
 
         if (loadingView.visible) {
             elements.loadingTitle.textContent = loadingView.title;
@@ -252,6 +264,9 @@ class MarkdownTabView {
                     annotationOverlay: createEmptyAnnotationOverlay(),
                     sourceMap: [],
                 });
+                this.renderedMarkdown = '';
+                this.renderedRenderMode = 'markdown';
+                this.fragmentIndex = new Map();
                 this.syncOutline('');
                 this.syncNotes(createEmptyAnnotationOverlay(), 0);
             }
@@ -262,6 +277,9 @@ class MarkdownTabView {
             if (model.renderMode === 'html') {
                 elements.editorHost.hidden = true;
                 elements.snapshotHost.hidden = false;
+                this.renderedMarkdown = undefined;
+                this.renderedRenderMode = 'html';
+                this.fragmentIndex = new Map();
                 this.syncSnapshot();
                 this.syncOutline('');
                 this.syncNotes(createEmptyAnnotationOverlay(), 0);
@@ -270,6 +288,16 @@ class MarkdownTabView {
             elements.editorHost.hidden = false;
             elements.snapshotHost.hidden = true;
             const markdown = model.markdown || '';
+            const documentChanged = this.renderedRenderMode !== 'markdown'
+                || this.renderedMarkdown !== markdown;
+            const restoreAnchor = documentChanged
+                && this.renderedMarkdown !== undefined
+                && this.activeNavigationOffset > 0
+                ? createMarkdownReadingPositionAnchor(
+                    this.renderedMarkdown,
+                    this.activeNavigationOffset
+                )
+                : null;
             const annotationOverlay = model.annotationOverlay
                 || createEmptyAnnotationOverlay();
             const assetsChanged = this.syncAssetURLs();
@@ -278,9 +306,17 @@ class MarkdownTabView {
                 annotationOverlay,
                 sourceMap: Array.isArray(model.sourceMap) ? model.sourceMap : [],
             });
+            this.renderedMarkdown = markdown;
+            this.renderedRenderMode = 'markdown';
+            this.fragmentIndex = createMarkdownFragmentIndex(markdown);
             this.syncOutline(markdown);
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
+            if (restoreAnchor) {
+                this.restoreReadingPosition(
+                    resolveMarkdownReadingPosition(markdown, restoreAnchor)
+                );
+            }
             return;
         }
 
@@ -292,6 +328,8 @@ class MarkdownTabView {
             element.removeEventListener(type, listener, options);
         }
         this.listeners = [];
+        this.responsiveResizeObserver?.disconnect?.();
+        this.responsiveResizeObserver = null;
         this.editor?.destroy();
         this.revokeAssetURLs();
         this.revokeSnapshotURLs();
@@ -479,11 +517,64 @@ class MarkdownTabView {
             class: 'message warning',
         });
         warning.hidden = true;
+        const warningMessage = this.createElement('p', {
+            class: 'message-body',
+        });
+        const warningActions = this.createElement('div', {
+            class: 'message-actions',
+        });
+        const warningSettings = this.createElement('button', {
+            id: 'mktero-warning-settings',
+            class: 'message-action',
+            type: 'button',
+            'aria-label': this.t('viewer.openSettings'),
+            title: this.t('viewer.openSettings'),
+        }, this.t('viewer.openSettings'));
+        warningSettings.hidden = true;
+        appendChildren(warningActions, warningSettings);
+        appendChildren(warning, warningMessage, warningActions);
         const error = this.createElement('div', {
             id: 'mktero-error',
             class: 'message error',
+            role: 'alert',
+            'aria-live': 'assertive',
         });
         error.hidden = true;
+        const errorMessage = this.createElement('p', {
+            class: 'message-body',
+        });
+        const errorActions = this.createElement('div', {
+            class: 'message-actions',
+        });
+        const errorRetry = this.createElement('button', {
+            id: 'mktero-error-retry',
+            class: 'message-action message-action--primary',
+            type: 'button',
+            'aria-label': this.t('viewer.retryConversion'),
+            title: this.t('viewer.retryConversion'),
+        });
+        errorRetry.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.refreshCw,
+            {
+                className: 'message-action-icon',
+                size: 15,
+            }
+        ));
+        errorRetry.appendChild(this.createElement(
+            'span',
+            { class: 'message-action-label' },
+            this.t('viewer.retryConversion')
+        ));
+        const errorSettings = this.createElement('button', {
+            id: 'mktero-error-settings',
+            class: 'message-action',
+            type: 'button',
+            'aria-label': this.t('viewer.openSettings'),
+            title: this.t('viewer.openSettings'),
+        }, this.t('viewer.openSettings'));
+        appendChildren(errorActions, errorRetry, errorSettings);
+        appendChildren(error, errorMessage, errorActions);
         const spinner = createLucideIcon(
             this.document,
             LUCIDE_ICONS.loaderCircle,
@@ -650,7 +741,12 @@ class MarkdownTabView {
             view,
             progress,
             warning,
+            warningMessage,
+            warningSettings,
             error,
+            errorMessage,
+            errorRetry,
+            errorSettings,
             content,
             loading,
             loadingTitle,
@@ -970,6 +1066,15 @@ class MarkdownTabView {
         this.listen(this.elements.reparse, 'click', () => {
             this.runDocumentAction('reparse', 'onReparse');
         });
+        this.listen(this.elements.errorRetry, 'click', () => {
+            this.runDocumentAction('retry', 'onReparse');
+        });
+        this.listen(this.elements.errorSettings, 'click', () => {
+            this.runDocumentAction('openSettings', 'onOpenSettings');
+        });
+        this.listen(this.elements.warningSettings, 'click', () => {
+            this.runDocumentAction('openWarningSettings', 'onOpenSettings');
+        });
         this.listen(this.elements.saveSnapshot, 'click', () => {
             this.runDocumentAction('saveSnapshot', 'onSaveSnapshot');
         });
@@ -1092,6 +1197,16 @@ class MarkdownTabView {
         this.listen(this.ownerWindow, 'resize', () => {
             this.syncResponsiveSidePanels();
         });
+        const ResizeObserverType = this.ownerWindow.ResizeObserver
+            || globalThis.ResizeObserver;
+        if (typeof ResizeObserverType === 'function') {
+            this.responsiveResizeObserver = new ResizeObserverType(entries => {
+                const entry = entries.find(item => item.target === this.host)
+                    || entries[0];
+                this.syncResponsiveSidePanels(entry?.contentRect?.width);
+            });
+            this.responsiveResizeObserver.observe(this.host);
+        }
         this.listen(this.ownerWindow, 'mousemove', event => {
             this.resizeSidePanel('outline', event);
             this.resizeSidePanel('notes', event);
@@ -1150,10 +1265,14 @@ class MarkdownTabView {
     }
 
     runDocumentAction(kind, callbackName) {
-        const button = kind === 'reparse'
-            ? this.elements.reparse
-            : this.elements.saveSnapshot;
-        if (button.disabled
+        const button = {
+            reparse: this.elements.reparse,
+            retry: this.elements.errorRetry,
+            openSettings: this.elements.errorSettings,
+            openWarningSettings: this.elements.warningSettings,
+            saveSnapshot: this.elements.saveSnapshot,
+        }[kind];
+        if (!button || button.disabled
             || this.documentActionBusy
             || typeof this.model[callbackName] !== 'function') {
             return;
@@ -1467,6 +1586,34 @@ class MarkdownTabView {
         this.elements.saveSnapshotLabel.textContent = this.t(
             'viewer.saveSnapshotShort'
         );
+        this.elements.errorRetry.setAttribute(
+            'aria-label',
+            this.t('viewer.retryConversion')
+        );
+        this.elements.errorRetry.setAttribute(
+            'title',
+            this.t('viewer.retryConversion')
+        );
+        this.elements.errorRetry.querySelector('.message-action-label')
+            .replaceChildren(this.t('viewer.retryConversion'));
+        this.elements.errorSettings.textContent = this.t('viewer.openSettings');
+        this.elements.errorSettings.setAttribute(
+            'aria-label',
+            this.t('viewer.openSettings')
+        );
+        this.elements.errorSettings.setAttribute(
+            'title',
+            this.t('viewer.openSettings')
+        );
+        this.elements.warningSettings.textContent = this.t('viewer.openSettings');
+        this.elements.warningSettings.setAttribute(
+            'aria-label',
+            this.t('viewer.openSettings')
+        );
+        this.elements.warningSettings.setAttribute(
+            'title',
+            this.t('viewer.openSettings')
+        );
         this.elements.readerFontSize.setAttribute(
             'aria-label',
             this.t('viewer.textSize')
@@ -1567,6 +1714,32 @@ class MarkdownTabView {
             this.documentActionsOpen = false;
         }
         this.syncDocumentActionMenuState(this.documentActionsOpen && available);
+        this.syncErrorActions(model);
+        this.syncWarningActions(model);
+    }
+
+    syncErrorActions(model) {
+        const errorVisible = model.status === 'error';
+        const retryAvailable = errorVisible
+            && typeof model.onReparse === 'function';
+        const settingsAvailable = errorVisible
+            && model.errorAction === 'open-settings'
+            && typeof model.onOpenSettings === 'function';
+        this.elements.errorRetry.hidden = !retryAvailable;
+        this.elements.errorSettings.hidden = !settingsAvailable;
+        this.elements.errorRetry.disabled = !retryAvailable
+            || Boolean(this.documentActionBusy);
+        this.elements.errorSettings.disabled = !settingsAvailable
+            || Boolean(this.documentActionBusy);
+    }
+
+    syncWarningActions(model) {
+        const settingsAvailable = model.status === 'ready'
+            && model.warningAction === 'open-settings'
+            && typeof model.onOpenSettings === 'function';
+        this.elements.warningSettings.hidden = !settingsAvailable;
+        this.elements.warningSettings.disabled = !settingsAvailable
+            || Boolean(this.documentActionBusy);
     }
 
     syncReparseAction(model, loadingView) {
@@ -1709,8 +1882,9 @@ class MarkdownTabView {
             const responsive = this.responsivePanels[name];
             responsive.autoCollapsed = false;
             const breakpoint = RESPONSIVE_SIDE_PANEL_BREAKPOINTS[name];
+            const containerWidth = this.responsiveSidePanelWidth();
             responsive.userOverride = Number.isFinite(breakpoint)
-                && Number(this.ownerWindow.innerWidth) <= breakpoint;
+                && containerWidth <= breakpoint;
         }
         panel.visible = visible;
         element.hidden = !visible;
@@ -1725,14 +1899,14 @@ class MarkdownTabView {
         this.syncSidePanelControlLabels(name);
     }
 
-    syncResponsiveSidePanels() {
-        const viewportWidth = Number(this.ownerWindow.innerWidth);
-        if (!Number.isFinite(viewportWidth)) return;
+    syncResponsiveSidePanels(measuredWidth = null) {
+        const containerWidth = this.responsiveSidePanelWidth(measuredWidth);
+        if (!Number.isFinite(containerWidth)) return;
 
         for (const name of Object.keys(RESPONSIVE_SIDE_PANEL_BREAKPOINTS)) {
             const panel = this.sidePanels[name];
             const responsive = this.responsivePanels[name];
-            const shouldCollapse = viewportWidth
+            const shouldCollapse = containerWidth
                 <= RESPONSIVE_SIDE_PANEL_BREAKPOINTS[name];
             if (!shouldCollapse) {
                 const restorePanel = responsive.autoCollapsed
@@ -1753,6 +1927,20 @@ class MarkdownTabView {
                 source: 'responsive',
             });
         }
+    }
+
+    responsiveSidePanelWidth(measuredWidth = null) {
+        const candidates = [
+            measuredWidth,
+            this.host.getBoundingClientRect?.()?.width,
+            this.host.clientWidth,
+            this.elements.workspace.getBoundingClientRect?.()?.width,
+            this.elements.workspace.clientWidth,
+            this.ownerWindow.innerWidth,
+        ];
+        return candidates
+            .map(value => Number(value))
+            .find(value => Number.isFinite(value) && value > 0);
     }
 
     handleSidePanelResizeKey(name, event) {
@@ -1887,6 +2075,14 @@ class MarkdownTabView {
             if (active) link.setAttribute('aria-current', 'location');
             else link.removeAttribute('aria-current');
         }
+    }
+
+    restoreReadingPosition(offset) {
+        const requestedOffset = Number(offset);
+        if (!Number.isFinite(requestedOffset)) return;
+        const normalizedOffset = Math.max(0, Math.trunc(requestedOffset));
+        this.syncActiveNavigation(normalizedOffset);
+        this.editor.scrollToOffset?.(normalizedOffset);
     }
 
     createNoteItem(annotation, matched, markdownLength) {
@@ -2068,7 +2264,26 @@ class MarkdownTabView {
         catch {
             id = fragment;
         }
-        this.mount.getElementById?.(id)?.scrollIntoView?.();
+        const element = this.mount.getElementById?.(id);
+        if (element) {
+            element.scrollIntoView?.();
+            return;
+        }
+        const normalizedID = id.toLowerCase();
+        const snapshotElement = [...(
+            this.elements.snapshotHost.querySelectorAll?.('[id]') || []
+        )].find(element => (
+            element.getAttribute('id')?.toLowerCase() === normalizedID
+        ));
+        if (snapshotElement) {
+            snapshotElement.scrollIntoView?.();
+            return;
+        }
+        const offset = this.fragmentIndex.has(id)
+            ? this.fragmentIndex.get(id)
+            : this.fragmentIndex.get(normalizedID);
+        if (!Number.isFinite(offset)) return;
+        this.restoreReadingPosition(offset);
     }
 
     syncAssetURLs() {
@@ -2119,6 +2334,35 @@ class MarkdownTabView {
         template.innerHTML = this.model.snapshotHTML || '';
         sanitizeSnapshotFragment(template.content, this.snapshotURLs);
         elements.snapshotHost.replaceChildren(...template.content.childNodes);
+        this.syncSnapshotFragmentTargets();
+    }
+
+    syncSnapshotFragmentTargets() {
+        const headings = [...this.elements.snapshotHost.querySelectorAll(
+            'h1, h2, h3, h4, h5, h6'
+        )];
+        const usedIDs = new Set(
+            [...this.elements.snapshotHost.querySelectorAll('[id]')]
+                .map(element => element.getAttribute('id'))
+                .filter(Boolean)
+        );
+        let fragmentIndex = 0;
+        for (const heading of headings) {
+            if (!heading.textContent?.trim()) continue;
+            if (heading.getAttribute('id')) {
+                fragmentIndex++;
+                continue;
+            }
+            heading.setAttribute(
+                'id',
+                createMarkdownFragmentID(
+                    heading.textContent,
+                    fragmentIndex,
+                    usedIDs
+                )
+            );
+            fragmentIndex++;
+        }
     }
 
     revokeSnapshotURLs() {
