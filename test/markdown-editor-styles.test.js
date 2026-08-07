@@ -8,22 +8,48 @@ const MARKDOWN_STYLES = readFileSync(
 );
 
 function ruleBody(selector) {
-    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = MARKDOWN_STYLES.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
-    assert.ok(match, `Missing CSS rule: ${selector}`);
-    return match[1];
+    return ruleBodies(selector)[0];
 }
 
-test('uses a font-independent readable measure for long-form Markdown', () => {
+function ruleBodies(selector) {
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = [...MARKDOWN_STYLES.matchAll(
+        new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, 'g')
+    )];
+    assert.ok(matches.length, `Missing CSS rule: ${selector}`);
+    return matches.map(match => match[1]);
+}
+
+function lastRuleBody(selector) {
+    return ruleBodies(selector).at(-1);
+}
+
+test('uses balanced typography for long-form Markdown', () => {
     const host = ruleBody(':host');
 
-    assert.match(host, /--reader-width:\s*40em/);
+    assert.match(host, /--reader-width:\s*38em/);
     assert.match(host, /--reader-font-size:\s*18px/);
-    assert.match(host, /--reader-line-height:\s*1\.72/);
+    assert.match(host, /--reader-line-height:\s*1\.64/);
+    assert.match(host, /--reader-text:\s*#2c3238/);
     assert.match(
         host,
-        /--reader-font:\s*Georgia,\s*Cambria,\s*"Times New Roman",\s*serif/
+        /--reader-font:\s*ui-serif,\s*"Iowan Old Style",\s*Charter,\s*"Bitstream Charter",\s*Georgia,\s*serif/
     );
+
+    const editor = lastRuleBody('.markdown-editor-host > .cm-editor');
+    assert.match(editor, /color:\s*var\(--reader-text\)/);
+
+    const snapshot = ruleBody('.markdown-snapshot-host');
+    assert.match(snapshot, /color:\s*var\(--reader-text\)/);
+
+    const sharedTypography = ruleBody([
+        '.markdown-snapshot-host,',
+        '.markdown-editor-host > .cm-editor',
+    ].join('\n'));
+    assert.match(sharedTypography, /font-weight:\s*400/);
+    assert.match(sharedTypography, /font-kerning:\s*normal/);
+    assert.match(sharedTypography, /font-optical-sizing:\s*auto/);
+    assert.doesNotMatch(MARKDOWN_STYLES, /text-rendering:\s*optimizeLegibility/);
 });
 
 test('renders conversion notices as compact overlay toasts', () => {

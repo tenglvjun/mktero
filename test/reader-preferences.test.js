@@ -101,6 +101,6 @@ test('normalizes and persists the Markdown reader font family', () => {
     );
     assert.equal(
         getMarkdownReaderFontFamily('invalid'),
-        'Georgia, Cambria, "Times New Roman", serif'
+        'ui-serif, "Iowan Old Style", Charter, "Bitstream Charter", Georgia, serif'
     );
 });

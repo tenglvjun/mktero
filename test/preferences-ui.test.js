@@ -123,6 +123,7 @@ test('configures the Markdown reader font size from preferences', async () => {
             <input id="mktero-reader-font-size" type="range" min="16" max="22">
             <output id="mktero-reader-font-size-value"></output>
             <select id="mktero-reader-font-family">
+                <option value="system-serif">System serif</option>
                 <option value="georgia">Georgia</option>
                 <option value="cambria">Cambria</option>
             </select>
@@ -165,7 +166,7 @@ test('configures the Markdown reader font size from preferences', async () => {
     assert.equal(value.textContent, '22 px');
 
     const font = dom.window.document.getElementById('mktero-reader-font-family');
-    assert.equal(font.value, 'georgia');
+    assert.equal(font.value, 'system-serif');
     font.value = 'cambria';
     font.dispatchEvent(new dom.window.Event('change'));
     assert.deepEqual(writes, [

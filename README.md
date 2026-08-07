@@ -69,8 +69,8 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
 - 对具有可靠来源映射的文本选区，可从划词笔记菜单复制带论文标题、PDF 物理页码和
   Zotero 回链的 Markdown。选中内容以安全引用块复制；普通复制行为保持不变。
 - 自动生成 Markdown 目录。目录支持点击跳转、拖动调整宽度，也可通过按钮或双击边缘收起。
-- Markdown 正文默认使用适合长文阅读的字号与行宽（不同字体保持相同的正文列宽），英文正文优先使用 Georgia、Cambria 或
-  Times New Roman 等衬线字体；可在左上角“更多”菜单中使用字体选择器切换字体，使用
+- Markdown 正文默认使用系统衬线字体，并采用更紧凑的行宽、行高和较轻的正文色，减少长段落的视觉偏斜与下坠感；
+  可在左上角“更多”菜单中切换为 Georgia、Cambria 或 Times New Roman，使用
   `A− / A+` 调整 16–22 px 字号。
   字号会按比例应用到正文、表格、图题、代码和相关阅读标记。选择会保存在当前 Zotero
   配置文件中，并同步应用到已打开的 Mktero 标签页；也可在 `设置 -> Mktero -> Markdown 阅读` 中调整。
@@ -142,7 +142,7 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |
 | API Token | 空 | 缓存未命中时必填，用于调用 MinerU API |
-| Body text font | Georgia, Cambria, Times New Roman, serif | 可切换 Georgia、Cambria、Times New Roman 或系统衬线字体；缺少字体时由系统选择衬线字体 |
+| Body text font | 系统衬线字体 | 优先使用系统阅读字体，可切换 Georgia、Cambria 或 Times New Roman；缺少字体时回退到 Georgia 或系统衬线字体 |
 | Body text size | 18 px | Markdown 正文与已保存快照的阅读字号，可在 16–22 px 间调整 |
 | Reuse conversion results | 开启 | 复用相同 PDF 内容和解析配置对应的本地结果；关闭后仍会恢复已上传但未完成的任务 |
 

@@ -652,7 +652,7 @@ test('selects a font from the styled picker without closing the menu', () => {
         assert.equal(listbox.hidden, true);
         assert.deepEqual(
             options.map(option => option.getAttribute('data-reader-font')),
-            ['georgia', 'cambria', 'times-new-roman', 'system-serif']
+            ['system-serif', 'georgia', 'cambria', 'times-new-roman']
         );
         assert.equal(
             shadow.host.style.getPropertyValue('--reader-font'),
@@ -2462,14 +2462,14 @@ test('localizes the Markdown viewer chrome from the Zotero locale', () => {
     assert.equal(
         shadow.querySelector('#mktero-reader-font-family')
             .getAttribute('aria-label'),
-        '正文字体: Georgia'
+        '正文字体: 系统衬线'
     );
     assert.deepEqual(
         [...shadow.querySelectorAll(
             '#mktero-reader-font-options .markdown-reader-font-option-label'
         )]
             .map(option => option.textContent),
-        ['Georgia', 'Cambria', 'Times New Roman', '系统衬线']
+        ['系统衬线', 'Georgia', 'Cambria', 'Times New Roman']
     );
 
     view.destroy();

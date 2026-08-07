@@ -4,8 +4,13 @@ export const MARKDOWN_READER_FONT_SIZE_DEFAULT = 18;
 export const MARKDOWN_READER_FONT_SIZE_MIN = 16;
 export const MARKDOWN_READER_FONT_SIZE_MAX = 22;
 export const MARKDOWN_READER_FONT_PREF = 'extensions.mktero.readerFont';
-export const MARKDOWN_READER_FONT_DEFAULT = 'georgia';
+export const MARKDOWN_READER_FONT_DEFAULT = 'system-serif';
 export const MARKDOWN_READER_FONT_OPTIONS = Object.freeze([
+    Object.freeze({
+        value: 'system-serif',
+        labelKey: 'viewer.fontSystemSerif',
+        family: 'ui-serif, "Iowan Old Style", Charter, "Bitstream Charter", Georgia, serif',
+    }),
     Object.freeze({
         value: 'georgia',
         labelKey: 'viewer.fontGeorgia',
@@ -20,11 +25,6 @@ export const MARKDOWN_READER_FONT_OPTIONS = Object.freeze([
         value: 'times-new-roman',
         labelKey: 'viewer.fontTimesNewRoman',
         family: '"Times New Roman", Georgia, Cambria, serif',
-    }),
-    Object.freeze({
-        value: 'system-serif',
-        labelKey: 'viewer.fontSystemSerif',
-        family: 'serif',
     }),
 ]);
 
