@@ -62,10 +62,14 @@ function analyzeFrontMatter(markdown, bodyEnd) {
         ?? Math.min(bodyEnd, 5000);
     const definition = parseAffiliations(markdown, frontMatterEnd);
     if (!definition.affiliations.length) {
+        const inferredBodyFrom = findImplicitBodyStart(
+            markdown,
+            frontMatterEnd
+        );
         return {
             affiliations: [],
             citations: [],
-            bodyFrom: detectedBodyFrom ?? 0,
+            bodyFrom: inferredBodyFrom ?? detectedBodyFrom ?? 0,
         };
     }
 
@@ -105,6 +109,41 @@ function findAuthorAreaStart(markdown, authorAreaEnd) {
         return from;
     }
     return 0;
+}
+
+function findImplicitBodyStart(markdown, frontMatterEnd) {
+    const [paragraph] = paragraphRanges(markdown, {
+        from: findAuthorAreaStart(markdown, frontMatterEnd),
+        to: frontMatterEnd,
+    });
+    if (!paragraph) return null;
+    const markers = findSuperscriptMarkers(
+        markdown,
+        paragraph.from,
+        paragraph.to,
+        { includeLikelyExponents: true }
+    );
+    const hasBylineMarkers = markers.length > 0 && markers.every(marker => (
+        /^\s*\d+(?:\s*[,;，；]\s*\d+)*\s*$/.test(marker.value)
+    ));
+    return hasBylineMarkers
+        && paragraphLooksLikeByline(markdown, paragraph, markers)
+        ? paragraph.to
+        : paragraph.from;
+}
+
+function paragraphLooksLikeByline(markdown, paragraph, markers) {
+    const parts = [];
+    let from = paragraph.from;
+    for (const marker of markers) {
+        parts.push(markdown.slice(from, marker.markup.wrapperFrom));
+        from = marker.markup.wrapperTo;
+    }
+    parts.push(markdown.slice(from, paragraph.to));
+    const words = plainReferenceText(parts.join(' ')).match(/\p{L}+/gu) || [];
+    return words.length > 0 && words.every(word => (
+        word.length <= 3 || /^\p{Lu}/u.test(word)
+    ));
 }
 
 function findMainContentStart(markdown, bodyEnd) {
@@ -750,9 +789,11 @@ function superscriptIsLikelyExponent(body, from, value) {
     if (!/^\s*\d+\s*$/.test(value)) return false;
     const preceding = body.slice(0, from);
     if (/\d[ \t]*$/u.test(preceding)) return true;
-    const base = /([\p{L}_][\p{L}\p{N}_]*)[ \t]*$/u
-        .exec(preceding)?.[1] || '';
-    return base.length > 0 && base.length <= 2;
+    const baseMatch = /([\p{L}_][\p{L}\p{N}_]*)([ \t]*)$/u.exec(preceding);
+    if (!baseMatch) return false;
+    const base = baseMatch[1];
+    const spacing = baseMatch[2];
+    return base.length === 1 || (base.length === 2 && !spacing);
 }
 
 function numericCitationsInContainer(match, offset, byNumber) {

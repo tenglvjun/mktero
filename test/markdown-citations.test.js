@@ -116,6 +116,154 @@ test('maps LaTeX superscript citation numbers and ranges to references', () => {
     );
 });
 
+test('keeps citations in an unheaded introduction after an author byline', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Alice Author $^{1,2}$ & Bob Author $^{2}$',
+        '',
+        'The abstract summarizes the paper without citations.',
+        '',
+        'The unheaded introduction cites prior work $^{1-3}$.',
+        '',
+        '## Results',
+        '',
+        'The results cite the third study $^{3}$.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+        '[3] Gamma G. Third paper. 2022.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            targetIds: citation.referenceIds,
+        })),
+        [
+            {
+                label: '1-3',
+                targetIds: ['number:1', 'number:2', 'number:3'],
+            },
+            { label: '3', targetIds: ['number:3'] },
+        ]
+    );
+});
+
+test('does not map a punctuated author byline as references', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Alice Author $^{1}$ & Bob Author $^{2}$.',
+        '',
+        'The unheaded introduction cites $^{1}$ and $^{2}$.',
+        '',
+        '## Results',
+        '',
+        'Results text.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => (
+            markdown.slice(citation.from, citation.to)
+        )),
+        ['1', '2']
+    );
+});
+
+test('keeps citations when an unheaded introduction follows the title', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'The introduction cites prior work $^{1}$.',
+        '',
+        '## Results',
+        '',
+        'The results cite the second study $^{2}$.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => (
+            markdown.slice(citation.from, citation.to)
+        )),
+        ['1', '2']
+    );
+});
+
+test('does not let malformed front matter hide unheaded citations', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Alice $^{1<img src=x onerror=alert(1)>}$',
+        '',
+        'The introduction cites prior work $^{1}$.',
+        '',
+        '## Results',
+        '',
+        'The results cite the second study $^{2}$.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => (
+            markdown.slice(citation.from, citation.to)
+        )),
+        ['1', '2']
+    );
+});
+
+test('maps spaced superscript citations after short prose words', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'The apps measure bleeding period and so on $^{2}$.',
+        'The results of $^{3}$ support the conclusion.',
+        'Surface area remains m $^{2}$ and cm$^{2}$.',
+        '',
+        '## References',
+        '',
+        '[2] Beta B. Second paper. 2021.',
+        '[3] Gamma G. Third paper. 2022.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: '2', targetIds: ['number:2'] },
+            { label: '3', targetIds: ['number:3'] },
+        ]
+    );
+});
+
 test('maps Unicode superscript citations without treating exponents as references', () => {
     const markdown = [
         '# Paper',
