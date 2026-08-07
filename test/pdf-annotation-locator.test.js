@@ -69,7 +69,7 @@ test('locates PDF text without an open Zotero reader', async () => {
 
     assert.equal(located.text, selectedText);
     assert.equal(located.pageLabel, '1');
-    assert.match(located.sortIndex, /^00000\|/);
+    assert.equal(located.sortIndex, '00000|000000|00081');
     assert.equal(located.position.pageIndex, 0);
     assert.equal(located.position.rects.length, 1);
     assertRectCloseTo(

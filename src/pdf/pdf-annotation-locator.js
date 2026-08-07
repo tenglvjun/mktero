@@ -284,7 +284,11 @@ function locateInIndex(index, text, {
     return {
         text: selectedText,
         pageLabel: match.page.pageLabel,
-        sortIndex: createSortIndex(match.page.pageIndex, rects[0]),
+        sortIndex: createSortIndex(
+            match.page,
+            sourceRange.from,
+            rects[0]
+        ),
         position: {
             pageIndex: match.page.pageIndex,
             rects,
@@ -441,12 +445,23 @@ function mergeLineRects(rects) {
     return merged;
 }
 
-function createSortIndex(pageIndex, rect) {
-    const page = String(pageIndex).padStart(5, '0');
-    const y = String(Math.max(0, Math.round(1_000_000 - rect[3])))
-        .padStart(7, '0');
-    const x = String(Math.max(0, Math.round(rect[0]))).padStart(7, '0');
-    return `${page}|${y}|${x}`;
+function createSortIndex(page, sourceOffset, rect) {
+    const pageIndex = formatSortIndexPart(page.pageIndex, 5);
+    const offset = formatSortIndexPart(sourceOffset, 6);
+    const top = formatSortIndexPart(
+        page.viewport.height - rect[3],
+        5
+    );
+    return `${pageIndex}|${offset}|${top}`;
+}
+
+function formatSortIndexPart(value, width) {
+    const maximum = (10 ** width) - 1;
+    const integer = Math.min(
+        maximum,
+        Math.max(0, Math.floor(value))
+    );
+    return String(integer).padStart(width, '0');
 }
 
 function defaultMeasureText({ text }) {
