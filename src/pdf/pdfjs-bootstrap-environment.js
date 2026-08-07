@@ -3,6 +3,7 @@ const windowAbortController = mainWindow?.AbortController;
 const windowAbortSignal = mainWindow?.AbortSignal;
 const windowDOMMatrix = mainWindow?.DOMMatrix;
 const windowDOMException = mainWindow?.DOMException;
+const windowReadableStream = mainWindow?.ReadableStream;
 const windowStructuredClone = mainWindow?.structuredClone;
 
 // PDF.js constructs this browser primitive while its module loads, even when
@@ -32,6 +33,11 @@ if (typeof globalThis.AbortController !== 'function'
 if (typeof globalThis.AbortSignal !== 'function'
     && typeof windowAbortSignal === 'function') {
     globalThis.AbortSignal = windowAbortSignal;
+}
+
+if (typeof globalThis.ReadableStream !== 'function'
+    && typeof windowReadableStream === 'function') {
+    globalThis.ReadableStream = windowReadableStream;
 }
 
 if (typeof globalThis.structuredClone !== 'function'

@@ -6,15 +6,18 @@ test('extracts PDF text when worker globals only exist on the Zotero window', as
     await fetch('data:text/plain,ready');
     const NativeAbortController = globalThis.AbortController;
     const NativeAbortSignal = globalThis.AbortSignal;
+    const NativeReadableStream = globalThis.ReadableStream;
     const nativeStructuredClone = globalThis.structuredClone;
     const previousZotero = globalThis.Zotero;
     delete globalThis.AbortController;
     delete globalThis.AbortSignal;
+    delete globalThis.ReadableStream;
     delete globalThis.structuredClone;
     globalThis.Zotero = {
         getMainWindow: () => ({
             AbortController: NativeAbortController,
             AbortSignal: NativeAbortSignal,
+            ReadableStream: NativeReadableStream,
             structuredClone: nativeStructuredClone,
         }),
     };
@@ -45,6 +48,7 @@ test('extracts PDF text when worker globals only exist on the Zotero window', as
     finally {
         globalThis.AbortController = NativeAbortController;
         globalThis.AbortSignal = NativeAbortSignal;
+        globalThis.ReadableStream = NativeReadableStream;
         globalThis.structuredClone = nativeStructuredClone;
         if (previousZotero === undefined) delete globalThis.Zotero;
         else globalThis.Zotero = previousZotero;
