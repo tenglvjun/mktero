@@ -23,6 +23,11 @@ import {
     setReferenceHighlight,
     setTableHighlight,
 } from './inline-rendering.js';
+import {
+    createEmptyTranslationOverlay,
+    createTranslationOverlayExtension,
+    setTranslationOverlay,
+} from './translation-overlay.js';
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
 import { createAnnotationPopup } from './annotation-popup.js';
@@ -214,6 +219,7 @@ export function createInlineMarkdownEditor({
                         referenceFeatures.figure.highlight.activate,
                     translate: t,
                 }),
+                createTranslationOverlayExtension(),
                 EditorView.editable.of(false),
                 EditorState.readOnly.of(true),
                 keymap.of(searchKeymap),
@@ -244,6 +250,9 @@ export function createInlineMarkdownEditor({
     }
     const openSelectedMarkdownActions = event => {
         if (event.button !== 0) return;
+        if (event.target?.closest?.('.cm-mktero-translation')) {
+            return;
+        }
         if (interactionPopups.some(popup => popup.contains(event.target))) {
             return;
         }
@@ -323,7 +332,12 @@ export function createInlineMarkdownEditor({
     );
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
     let currentSourceMap = [];
-    const setDocument = ({ markdown, annotationOverlay, sourceMap }) => {
+    const setDocument = ({
+        markdown,
+        annotationOverlay,
+        sourceMap,
+        translationOverlay,
+    }) => {
         activateDOMGlobals(ownerWindow);
         for (const feature of referenceFeatureList) {
             feature.popup.close();
@@ -336,6 +350,9 @@ export function createInlineMarkdownEditor({
             ...referenceFeatureList.map(feature => feature.effect.of(null)),
             setAnnotationOverlay.of(
                 annotationOverlay || createEmptyAnnotationOverlay()
+            ),
+            setTranslationOverlay.of(
+                translationOverlay || createEmptyTranslationOverlay()
             ),
         ];
         if (value === view.state.doc.toString()) {
@@ -356,6 +373,7 @@ export function createInlineMarkdownEditor({
             setDocument({
                 markdown,
                 annotationOverlay: createEmptyAnnotationOverlay(),
+                translationOverlay: createEmptyTranslationOverlay(),
             });
         },
         focus() {

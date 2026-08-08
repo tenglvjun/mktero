@@ -34,6 +34,142 @@
         </html:div>
     </groupbox>
 
+    <groupbox id="mktero-translation-section"
+              class="mktero-preferences-section"
+              aria-labelledby="mktero-translation-title">
+        <html:div class="mktero-section-heading">
+            <html:h2 id="mktero-translation-title"
+                     data-i18n="preferences.translation.title"></html:h2>
+            <html:p data-i18n="preferences.translation.description"></html:p>
+        </html:div>
+
+        <html:div class="mktero-settings-card">
+            <html:div class="mktero-setting-row mktero-field-row">
+                <html:span class="mktero-setting-copy">
+                    <html:label for="mktero-translation-target-language"><html:strong data-i18n="preferences.translation.targetLanguage"></html:strong></html:label>
+                    <html:small data-i18n="preferences.translation.targetLanguageHelp"></html:small>
+                </html:span>
+                <html:span class="mktero-field-control">
+                    <html:input id="mktero-translation-target-language"
+                                type="text"
+                                maxlength="64"
+                                autocomplete="off"
+                                spellcheck="false" />
+                </html:span>
+            </html:div>
+
+            <html:div class="mktero-setting-row mktero-field-row mktero-prompt-row">
+                <html:span class="mktero-setting-copy">
+                    <html:label for="mktero-translation-system-prompt"><html:strong data-i18n="preferences.translation.systemPrompt"></html:strong></html:label>
+                    <html:small data-i18n="preferences.translation.systemPromptHelp"></html:small>
+                </html:span>
+                <html:span class="mktero-field-control mktero-prompt-control">
+                    <html:textarea id="mktero-translation-system-prompt"
+                                   rows="5"
+                                   maxlength="20000"
+                                   spellcheck="true"></html:textarea>
+                    <html:button id="mktero-translation-prompt-reset"
+                                 type="button"
+                                 data-i18n="preferences.translation.resetPrompt"></html:button>
+                </html:span>
+            </html:div>
+
+            <html:div class="mktero-setting-row mktero-field-row">
+                <html:span class="mktero-setting-copy">
+                    <html:label for="mktero-translation-active-service"><html:strong data-i18n="preferences.translation.activeService"></html:strong></html:label>
+                    <html:small data-i18n="preferences.translation.activeServiceHelp"></html:small>
+                </html:span>
+                <html:span class="mktero-field-control">
+                    <html:select id="mktero-translation-active-service"></html:select>
+                </html:span>
+            </html:div>
+
+            <html:div class="mktero-translation-service-editor">
+                <html:div class="mktero-translation-service-sidebar">
+                    <html:label for="mktero-translation-service-list"><html:strong data-i18n="preferences.translation.services"></html:strong></html:label>
+                    <html:select id="mktero-translation-service-list"
+                                 size="6"></html:select>
+                    <html:div class="mktero-translation-service-buttons">
+                        <html:button id="mktero-translation-service-new"
+                                     type="button"
+                                     data-i18n="preferences.translation.newService"></html:button>
+                        <html:button id="mktero-translation-service-delete"
+                                     type="button"
+                                     data-i18n="preferences.translation.deleteService"></html:button>
+                    </html:div>
+                </html:div>
+
+                <html:div class="mktero-translation-service-form">
+                    <html:label for="mktero-translation-service-name" data-i18n="preferences.translation.serviceName"></html:label>
+                    <html:input id="mktero-translation-service-name" type="text" maxlength="100" autocomplete="off" />
+                    <html:label for="mktero-translation-api-url" data-i18n="preferences.translation.apiURL"></html:label>
+                    <html:input id="mktero-translation-api-url" type="url" maxlength="2048" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />
+                    <html:label for="mktero-translation-api-key" data-i18n="preferences.translation.apiKey"></html:label>
+                    <html:input id="mktero-translation-api-key" type="password" maxlength="8192" autocomplete="off" spellcheck="false" />
+                    <html:label for="mktero-translation-model" data-i18n="preferences.translation.model"></html:label>
+                    <html:input id="mktero-translation-model" type="text" maxlength="200" autocomplete="off" spellcheck="false" />
+
+                    <html:div class="mktero-translation-service-limits">
+                        <html:span>
+                            <html:label for="mktero-translation-qps" data-i18n="preferences.translation.qps"></html:label>
+                            <html:input id="mktero-translation-qps" type="number" min="0.1" max="100" step="0.1" />
+                        </html:span>
+                        <html:span>
+                            <html:label for="mktero-translation-max-paragraphs" data-i18n="preferences.translation.maxParagraphs"></html:label>
+                            <html:input id="mktero-translation-max-paragraphs" type="number" min="1" max="50" step="1" />
+                        </html:span>
+                        <html:span>
+                            <html:label for="mktero-translation-max-characters" data-i18n="preferences.translation.maxCharacters"></html:label>
+                            <html:input id="mktero-translation-max-characters" type="number" min="500" max="50000" step="100" />
+                        </html:span>
+                        <html:span>
+                            <html:label for="mktero-translation-temperature" data-i18n="preferences.translation.temperature"></html:label>
+                            <html:input id="mktero-translation-temperature" type="number" min="0" max="2" step="0.1" />
+                        </html:span>
+                    </html:div>
+
+                    <html:div class="mktero-translation-service-footer">
+                        <html:span id="mktero-translation-service-status"
+                                   class="mktero-field-message"
+                                   role="status"
+                                   aria-live="polite"></html:span>
+                        <html:button id="mktero-translation-service-save"
+                                     type="button"
+                                     data-i18n="preferences.translation.saveService"></html:button>
+                    </html:div>
+                </html:div>
+            </html:div>
+
+            <html:div class="mktero-setting-row mktero-translation-developer-row">
+                <html:span class="mktero-setting-copy">
+                    <html:label for="mktero-translation-developer-mode"><html:strong data-i18n="preferences.translation.developerMode"></html:strong></html:label>
+                    <html:small data-i18n="preferences.translation.developerModeHelp"></html:small>
+                </html:span>
+                <html:span class="mktero-field-control mktero-checkbox-control">
+                    <html:input id="mktero-translation-developer-mode" type="checkbox" />
+                </html:span>
+            </html:div>
+
+            <html:div id="mktero-translation-developer-controls"
+                      class="mktero-translation-developer-controls"
+                      hidden="true">
+                <html:button id="mktero-translation-copy-failure-log"
+                             type="button"
+                             data-i18n="preferences.translation.copyFailureLog"></html:button>
+                <html:button id="mktero-translation-clear-failure-log"
+                             type="button"
+                             data-i18n="preferences.translation.clearFailureLog"></html:button>
+                <html:span id="mktero-translation-developer-status"
+                           class="mktero-field-message"
+                           role="status"
+                           aria-live="polite"></html:span>
+            </html:div>
+
+            <html:small class="mktero-card-note"
+                        data-i18n="preferences.translation.storageNote"></html:small>
+        </html:div>
+    </groupbox>
+
     <groupbox id="mktero-reader-section"
               class="mktero-preferences-section"
               aria-labelledby="mktero-reader-title">

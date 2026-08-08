@@ -95,7 +95,9 @@
     width: min(48%, 460px);
 }
 
-.mktero-field-control input {
+.mktero-field-control input,
+.mktero-field-control textarea,
+.mktero-field-control select {
     box-sizing: border-box;
     width: 100%;
     min-height: 34px;
@@ -107,11 +109,15 @@
     font: inherit;
 }
 
-.mktero-field-control input:hover {
+.mktero-field-control input:hover,
+.mktero-field-control textarea:hover,
+.mktero-field-control select:hover {
     border-color: rgba(90, 90, 90, 0.55);
 }
 
-.mktero-field-control input:focus {
+.mktero-field-control input:focus,
+.mktero-field-control textarea:focus,
+.mktero-field-control select:focus {
     border-color: AccentColor;
     outline: 2px solid color-mix(in srgb, AccentColor 28%, transparent);
     outline-offset: 0;
@@ -237,7 +243,135 @@
     background: color-mix(in srgb, currentColor 3%, transparent);
 }
 
+.mktero-prompt-row {
+    align-items: flex-start;
+}
+
+.mktero-prompt-control textarea {
+    resize: vertical;
+    min-height: 110px;
+}
+
+.mktero-prompt-control button {
+    justify-self: end;
+}
+
+.mktero-translation-service-editor {
+    display: grid;
+    gap: 18px;
+    padding: 16px;
+    border-top: 1px solid var(--material-border, rgba(127, 127, 127, 0.22));
+    grid-template-columns: minmax(180px, 0.75fr) minmax(300px, 2fr);
+}
+
+.mktero-translation-service-sidebar,
+.mktero-translation-service-form {
+    display: grid;
+    align-content: start;
+    gap: 7px;
+    min-width: 0;
+}
+
+.mktero-translation-service-sidebar select {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 170px;
+}
+
+.mktero-translation-service-buttons,
+.mktero-translation-service-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.mktero-translation-service-form > input,
+.mktero-translation-service-sidebar select,
+.mktero-translation-service-limits input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 32px;
+    padding: 4px 8px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.38));
+    border-radius: 6px;
+    background: Field;
+    color: FieldText;
+    font: inherit;
+}
+
+.mktero-translation-service-form label,
+.mktero-translation-service-sidebar label,
+.mktero-translation-service-limits label {
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.mktero-translation-service-limits {
+    display: grid;
+    gap: 10px;
+    margin-top: 7px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mktero-translation-service-limits > span {
+    display: grid;
+    gap: 5px;
+}
+
+.mktero-translation-service-footer {
+    margin-top: 9px;
+}
+
+.mktero-translation-developer-row {
+    border-top: 1px solid var(--material-border, rgba(127, 127, 127, 0.22));
+}
+
+.mktero-checkbox-control {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.mktero-checkbox-control input[type='checkbox'] {
+    width: auto;
+    min-height: auto;
+}
+
+.mktero-translation-developer-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--material-border, rgba(127, 127, 127, 0.22));
+}
+
+.mktero-translation-developer-controls[hidden] {
+    display: none;
+}
+
+#mktero-translation-developer-status {
+    margin-inline-start: auto;
+}
+
+#mktero-translation-developer-status[data-status='error'] {
+    color: #b42318;
+}
+
+#mktero-translation-service-status[data-status='error'] {
+    color: #b42318;
+}
+
+#mktero-translation-service-status[data-status='success'] {
+    color: #237a3b;
+}
+
 @media (max-width: 720px) {
+    .mktero-translation-service-editor {
+        grid-template-columns: 1fr;
+    }
+
     .mktero-field-row {
         align-items: stretch;
         flex-direction: column;
@@ -262,6 +396,10 @@
 }
 
 @media (max-width: 480px) {
+    .mktero-translation-service-limits {
+        grid-template-columns: 1fr;
+    }
+
     .mktero-setting-row {
         gap: 16px;
         padding: 12px;

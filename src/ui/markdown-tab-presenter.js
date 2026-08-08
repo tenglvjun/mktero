@@ -12,6 +12,9 @@ import {
     setMarkdownReaderFontSize,
 } from '../config/reader-preferences.js';
 import { createLocalization } from '../i18n/localization.js';
+import {
+    createEmptyTranslationState,
+} from '../translation/academic-translation-service.js';
 import { createMarkdownTabView } from './markdown-window.js';
 
 const TAB_TYPE = 'mktero';
@@ -59,6 +62,11 @@ export class MarkdownTabPresenter {
         onReparse,
         onOpenSettings,
         onSaveSnapshot,
+        onStartTranslation,
+        onCancelTranslation,
+        onToggleTranslation,
+        onContinueTranslation,
+        onRetranslate,
         onChangeAnnotationColor,
         onUpdateAnnotationComment,
         onDeleteAnnotation,
@@ -96,6 +104,21 @@ export class MarkdownTabPresenter {
             }
             if (onSaveSnapshot !== undefined) {
                 existing.model.onSaveSnapshot = onSaveSnapshot;
+            }
+            if (onStartTranslation !== undefined) {
+                existing.model.onStartTranslation = onStartTranslation;
+            }
+            if (onCancelTranslation !== undefined) {
+                existing.model.onCancelTranslation = onCancelTranslation;
+            }
+            if (onToggleTranslation !== undefined) {
+                existing.model.onToggleTranslation = onToggleTranslation;
+            }
+            if (onContinueTranslation !== undefined) {
+                existing.model.onContinueTranslation = onContinueTranslation;
+            }
+            if (onRetranslate !== undefined) {
+                existing.model.onRetranslate = onRetranslate;
             }
             if (onChangeAnnotationColor) {
                 existing.model.onChangeAnnotationColor = onChangeAnnotationColor;
@@ -145,6 +168,11 @@ export class MarkdownTabPresenter {
                 onSaveSnapshot,
                 onChangeAnnotationColor,
                 onUpdateAnnotationComment,
+                onStartTranslation,
+                onCancelTranslation,
+                onToggleTranslation,
+                onContinueTranslation,
+                onRetranslate,
                 onDeleteAnnotation,
                 onOpenAnnotationInPDF,
                 onOpenSourceInPDF,
@@ -435,6 +463,7 @@ function createInitialModel(
         preserveContent: false,
         resumingTask: false,
         warnings: [],
+        translation: createEmptyTranslationState(),
         error: '',
         errorAction: null,
         warningAction: null,

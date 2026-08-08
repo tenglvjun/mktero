@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 const MARKDOWN_STYLES = readFileSync(
     new URL('../ui/markdown.css', import.meta.url),
     'utf8'
-);
+).replace(/\r\n/g, '\n');
 
 function ruleBody(selector) {
     return ruleBodies(selector)[0];
@@ -161,6 +161,27 @@ test('keeps inline math inside the prose line box', () => {
     );
     assert.doesNotMatch(displayMath, /line-height/);
     assert.doesNotMatch(displayMath, /background\s*:/);
+});
+
+test('keeps translated selections visible and styles translated math', () => {
+    const selection = ruleBody([
+        '.markdown-editor-host > .cm-editor .cm-mktero-translation::selection,',
+        '.markdown-editor-host > .cm-editor .cm-mktero-translation ::selection',
+    ].join('\n'));
+    assert.match(selection, /color:\s*HighlightText/);
+    assert.match(selection, /background-color:\s*Highlight/);
+
+    const math = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-translation .math-inline'
+    );
+    assert.match(math, /display:\s*inline-block/);
+    assert.match(math, /vertical-align:\s*-0\.1em/);
+    assert.match(math, /user-select:\s*text/);
+
+    const mathElement = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-translation math'
+    );
+    assert.match(mathElement, /user-select:\s*text/);
 });
 
 test('styles academic figure captions as distinct labels', () => {

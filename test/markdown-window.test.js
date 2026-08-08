@@ -194,6 +194,11 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         markdown: 'Important result.',
         annotationOverlay,
         sourceMap,
+        translationOverlay: {
+            visible: false,
+            targetLanguage: '',
+            segments: [],
+        },
     }]);
     view.destroy();
 });
@@ -2644,5 +2649,87 @@ test('refreshes inline rendering when cached image assets change', () => {
         assets: [{ ...firstAssets[0], data: new Uint8Array([2]) }],
     });
     assert.equal(refreshes, 2);
+    view.destroy();
+});
+
+test('starts, cancels, toggles, continues, and retranslates from reader actions', () => {
+    const calls = {
+        start: 0,
+        cancel: 0,
+        toggle: 0,
+        continue: 0,
+        retranslate: 0,
+    };
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'English paragraph.',
+        renderMode: 'markdown',
+        translation: {
+            visible: true,
+            status: 'idle',
+            completed: 0,
+            failed: 0,
+            total: 0,
+            segments: [],
+        },
+        onStartTranslation: () => { calls.start++; },
+        onCancelTranslation: () => { calls.cancel++; },
+        onToggleTranslation: () => { calls.toggle++; },
+        onContinueTranslation: () => { calls.continue++; },
+        onRetranslate: () => { calls.retranslate++; },
+    });
+    const { view, shadow } = createView(model);
+    const button = shadow.querySelector('#mktero-translate');
+
+    assert.equal(button.hidden, false);
+    assert.equal(button.getAttribute('title'), 'Translate document');
+    button.click();
+    assert.equal(calls.start, 1);
+
+    model.translation = {
+        ...model.translation,
+        status: 'translating',
+        total: 2,
+    };
+    view.render(model);
+    assert.equal(button.getAttribute('title'), 'Cancel translation');
+    assert.equal(button.getAttribute('aria-busy'), 'true');
+    button.click();
+    assert.equal(calls.cancel, 1);
+
+    model.translation = {
+        ...model.translation,
+        status: 'complete',
+        completed: 2,
+        total: 2,
+        segments: [{ id: 'segment-000001', text: '译文', anchor: 18 }],
+    };
+    view.render(model);
+    assert.equal(button.getAttribute('title'), 'Hide translations');
+    assert.equal(button.getAttribute('aria-pressed'), 'true');
+    button.click();
+    assert.equal(calls.toggle, 1);
+
+    model.translation = {
+        ...model.translation,
+        status: 'partial',
+        completed: 1,
+        failed: 1,
+        total: 2,
+    };
+    view.render(model);
+    const continueButton = shadow.querySelector('#mktero-translation-continue');
+    const retranslate = shadow.querySelector('#mktero-translation-retranslate');
+    assert.equal(continueButton.hidden, false);
+    assert.equal(retranslate.hidden, false);
+    continueButton.click();
+    retranslate.click();
+    assert.equal(calls.continue, 1);
+    assert.equal(calls.retranslate, 1);
+
+    model.status = 'loading';
+    view.render(model);
+    assert.equal(button.hidden, true);
     view.destroy();
 });

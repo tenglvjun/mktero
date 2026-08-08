@@ -28,6 +28,12 @@ test('ships MinerU token, cache preferences, and localized Markdown UI assets', 
         prefs,
         /pref\("extensions\.mktero\.readerFont", "system-serif"\)/
     );
+    assert.match(prefs, /extensions\.mktero\.translationServices/);
+    assert.match(prefs, /extensions\.mktero\.activeTranslationServiceId/);
+    assert.match(prefs, /extensions\.mktero\.translationTargetLanguage/);
+    assert.match(prefs, /extensions\.mktero\.translationSystemPrompt/);
+    assert.match(prefs, /extensions\.mktero\.translationDeveloperMode/);
+    assert.match(prefs, /extensions\.mktero\.translationFailureLog/);
     assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
     assert.doesNotMatch(pane, /id="mktero-language"/);
     assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
@@ -37,6 +43,11 @@ test('ships MinerU token, cache preferences, and localized Markdown UI assets', 
     assert.match(pane, /preference="extensions\.mktero\.readerFont"/);
     assert.match(pane, /id="mktero-reader-font-family"/);
     assert.match(pane, /id="mktero-reader-font-size-value"/);
+    assert.match(pane, /id="mktero-translation-service-list"/);
+    assert.match(pane, /id="mktero-translation-api-key" type="password"/);
+    assert.match(pane, /id="mktero-translation-developer-mode"/);
+    assert.match(pane, /id="mktero-translation-copy-failure-log"/);
+    assert.match(pane, /id="mktero-translation-developer-controls"/);
     assert.match(pane, /id="mktero-clear-cache"/);
     assert.doesNotMatch(pane, /onload=/);
     assert.match(script, /registerPreferencesPaneLoader/);
@@ -44,11 +55,14 @@ test('ships MinerU token, cache preferences, and localized Markdown UI assets', 
     assert.doesNotMatch(visiblePreferenceText, /mineru/i);
     assert.match(script, /createZoteroMarkdownCache/);
     assert.match(script, /createZoteroPDFTextIndexCache/);
+    assert.match(script, /createZoteroTranslationCache/);
     assert.match(script, /createCombinedLocalCache/);
     assert.doesNotMatch(script, /setMkteroLanguagePreference/);
     assert.match(bootstrap, /new MinerUClient/);
+    assert.match(bootstrap, /new OpenAITranslationClient/);
     assert.doesNotMatch(bootstrap, /observeMkteroLanguagePreference/);
     assert.match(markdownView, /createInlineMarkdownEditor/);
+    assert.match(markdownView, /'mktero-translate'/);
     assert.doesNotMatch(markdownView, /'mktero-show-source'/);
     assert.match(markdownView, /'mktero-reparse'/);
     assert.match(markdownView, /__MKTERO_MARKDOWN_STYLES__/);
@@ -83,8 +97,8 @@ test('presents every preference group as one cohesive settings card', async () =
         readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
     ]);
 
-    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
-    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 4);
+    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 4);
     assert.match(
         pane,
         /id="mktero-mineru-api-key"[\s\S]*aria-describedby="mktero-token-help mktero-token-storage-note"/

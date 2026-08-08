@@ -2,13 +2,36 @@ import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
 import {
     createZoteroPDFTextIndexCache,
 } from '../cache/pdf-text-index-cache.js';
+import {
+    createZoteroTranslationCache,
+} from '../cache/translation-cache.js';
 import { getZoteroLocale } from '../config/mineru-preferences.js';
+import { createZoteroClipboard } from '../platform/zotero-clipboard.js';
 import {
     getMarkdownReaderFont,
     getMarkdownReaderFontSize,
     setMarkdownReaderFont,
     setMarkdownReaderFontSize,
 } from '../config/reader-preferences.js';
+import {
+    clearTranslationFailureLogs,
+    formatTranslationFailureLogs,
+    createTranslationServiceID,
+    DEFAULT_TRANSLATION_SERVICE_LIMITS,
+    DEFAULT_TRANSLATION_SYSTEM_PROMPT,
+    getActiveTranslationServiceID,
+    getTranslationDeveloperMode,
+    getTranslationFailureLogs,
+    getTranslationServices,
+    getTranslationSystemPrompt,
+    getTranslationTargetLanguage,
+    normalizeTranslationService,
+    setActiveTranslationServiceID,
+    setTranslationServices,
+    setTranslationSystemPrompt,
+    setTranslationTargetLanguage,
+    setTranslationDeveloperMode,
+} from '../config/translation-preferences.js';
 import {
     createLocalization,
     translateEnglish,
@@ -59,6 +82,7 @@ export function createPreferencesController({
     document,
     zotero,
     cache,
+    clipboard = null,
     services = typeof Services === 'undefined' ? null : Services,
     localization = createLocalization({
         zoteroLocale: getZoteroLocale(zotero, services),
@@ -75,9 +99,36 @@ export function createPreferencesController({
     const readerFontInput = document.getElementById(
         'mktero-reader-font-family'
     );
+    const translation = Object.fromEntries(Object.entries({
+        targetLanguage: 'mktero-translation-target-language',
+        systemPrompt: 'mktero-translation-system-prompt',
+        resetPrompt: 'mktero-translation-prompt-reset',
+        activeService: 'mktero-translation-active-service',
+        serviceList: 'mktero-translation-service-list',
+        newService: 'mktero-translation-service-new',
+        deleteService: 'mktero-translation-service-delete',
+        saveService: 'mktero-translation-service-save',
+        serviceStatus: 'mktero-translation-service-status',
+        name: 'mktero-translation-service-name',
+        apiURL: 'mktero-translation-api-url',
+        apiKey: 'mktero-translation-api-key',
+        model: 'mktero-translation-model',
+        qps: 'mktero-translation-qps',
+        maxParagraphs: 'mktero-translation-max-paragraphs',
+        maxCharacters: 'mktero-translation-max-characters',
+        temperature: 'mktero-translation-temperature',
+        developerMode: 'mktero-translation-developer-mode',
+        developerControls: 'mktero-translation-developer-controls',
+        copyFailureLog: 'mktero-translation-copy-failure-log',
+        clearFailureLog: 'mktero-translation-clear-failure-log',
+        developerStatus: 'mktero-translation-developer-status',
+    }).map(([key, id]) => [key, document.getElementById(id)]));
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
 
+    let translationServices = [];
+    let editingTranslationServiceID = null;
+    const translationListeners = [];
     function localize() {
         localizePreferencesDocument(document, localization);
     }
@@ -112,6 +163,301 @@ export function createPreferencesController({
         if (!readerFontInput) return;
         readerFontInput.value = getMarkdownReaderFont(zotero);
         readerFontInput.addEventListener('change', updateReaderFont);
+    }
+
+    function initializeTranslationSettings() {
+        if (!translation.serviceList) return;
+        translationServices = getTranslationServices(zotero);
+        translation.targetLanguage.value = getTranslationTargetLanguage(zotero);
+        translation.systemPrompt.value = getTranslationSystemPrompt(zotero);
+        renderTranslationServices();
+        if (translation.developerMode) {
+            translation.developerMode.checked = getTranslationDeveloperMode(zotero);
+            refreshTranslationDeveloperControls();
+            listenTranslation(translation.developerMode, 'change', () => {
+                setTranslationDeveloperMode(
+                    zotero,
+                    translation.developerMode.checked
+                );
+                refreshTranslationDeveloperControls();
+            });
+            listenTranslation(translation.copyFailureLog, 'click', () => {
+                void copyTranslationFailureLog();
+            });
+            listenTranslation(translation.clearFailureLog, 'click', () => {
+                clearTranslationFailureLogs(zotero);
+                refreshTranslationDeveloperControls();
+                setTranslationDeveloperStatus(
+                    'preferences.translation.developerLogCleared'
+                );
+            });
+        }
+        listenTranslation(translation.targetLanguage, 'change', () => {
+            try {
+                translation.targetLanguage.value = setTranslationTargetLanguage(
+                    zotero,
+                    translation.targetLanguage.value
+                );
+                setTranslationStatus('preferences.translation.settingsSaved');
+            }
+            catch (error) {
+                showTranslationError(error);
+            }
+        });
+        listenTranslation(translation.systemPrompt, 'change', () => {
+            try {
+                translation.systemPrompt.value = setTranslationSystemPrompt(
+                    zotero,
+                    translation.systemPrompt.value
+                );
+                setTranslationStatus('preferences.translation.settingsSaved');
+            }
+            catch (error) {
+                showTranslationError(error);
+            }
+        });
+        listenTranslation(translation.resetPrompt, 'click', () => {
+            translation.systemPrompt.value = setTranslationSystemPrompt(
+                zotero,
+                DEFAULT_TRANSLATION_SYSTEM_PROMPT
+            );
+            setTranslationStatus('preferences.translation.promptReset');
+        });
+        listenTranslation(translation.activeService, 'change', () => {
+            try {
+                setActiveTranslationServiceID(
+                    zotero,
+                    translation.activeService.value
+                );
+                setTranslationStatus('preferences.translation.settingsSaved');
+            }
+            catch (error) {
+                showTranslationError(error);
+            }
+        });
+        listenTranslation(translation.serviceList, 'change', () => {
+            loadTranslationService(translation.serviceList.value);
+        });
+        listenTranslation(translation.newService, 'click', () => {
+            editingTranslationServiceID = null;
+            translation.serviceList.value = '';
+            fillTranslationServiceForm(null);
+            setTranslationStatus('');
+        });
+        listenTranslation(translation.deleteService, 'click', () => {
+            deleteSelectedTranslationService();
+        });
+        listenTranslation(translation.saveService, 'click', () => {
+            saveEditedTranslationService();
+        });
+    }
+
+    function renderTranslationServices(preferredID = null) {
+        const activeID = getActiveTranslationServiceID(zotero);
+        translation.activeService.replaceChildren(createPreferenceOption(
+            '',
+            t('preferences.translation.noActiveService')
+        ));
+        translation.serviceList.replaceChildren();
+        for (const service of translationServices) {
+            translation.activeService.appendChild(createPreferenceOption(
+                service.id,
+                service.name
+            ));
+            translation.serviceList.appendChild(createPreferenceOption(
+                service.id,
+                service.name
+            ));
+        }
+        translation.activeService.value = translationServices.some(service => (
+            service.id === activeID
+        )) ? activeID : '';
+        const selectedID = [
+            preferredID,
+            editingTranslationServiceID,
+            translationServices[0]?.id,
+        ].find(id => translationServices.some(service => service.id === id));
+        if (selectedID) {
+            translation.serviceList.value = selectedID;
+            loadTranslationService(selectedID);
+        }
+        else {
+            editingTranslationServiceID = null;
+            fillTranslationServiceForm(null);
+        }
+        translation.deleteService.disabled = !editingTranslationServiceID;
+    }
+
+    function loadTranslationService(serviceID) {
+        const service = translationServices.find(candidate => (
+            candidate.id === serviceID
+        )) || null;
+        editingTranslationServiceID = service?.id || null;
+        fillTranslationServiceForm(service);
+        translation.deleteService.disabled = !service;
+        setTranslationStatus('');
+    }
+
+    function fillTranslationServiceForm(service) {
+        const defaults = DEFAULT_TRANSLATION_SERVICE_LIMITS;
+        translation.name.value = service?.name || '';
+        translation.apiURL.value = service?.apiURL || '';
+        translation.apiKey.value = service?.apiKey || '';
+        translation.model.value = service?.model || '';
+        translation.qps.value = String(
+            service?.maxRequestsPerSecond ?? defaults.maxRequestsPerSecond
+        );
+        translation.maxParagraphs.value = String(
+            service?.maxParagraphsPerRequest
+                ?? defaults.maxParagraphsPerRequest
+        );
+        translation.maxCharacters.value = String(
+            service?.maxCharactersPerRequest
+                ?? defaults.maxCharactersPerRequest
+        );
+        translation.temperature.value = String(
+            service?.temperature ?? defaults.temperature
+        );
+    }
+
+    function saveEditedTranslationService() {
+        try {
+            const id = editingTranslationServiceID
+                || createTranslationServiceID();
+            const service = normalizeTranslationService({
+                id,
+                name: translation.name.value,
+                apiURL: translation.apiURL.value,
+                apiKey: translation.apiKey.value,
+                model: translation.model.value,
+                maxRequestsPerSecond: translation.qps.value,
+                maxParagraphsPerRequest: translation.maxParagraphs.value,
+                maxCharactersPerRequest: translation.maxCharacters.value,
+                temperature: translation.temperature.value,
+            }, { requireID: true });
+            const index = translationServices.findIndex(candidate => (
+                candidate.id === id
+            ));
+            if (index >= 0) translationServices[index] = service;
+            else translationServices.push(service);
+            translationServices = setTranslationServices(
+                zotero,
+                translationServices
+            );
+            if (!getActiveTranslationServiceID(zotero)) {
+                setActiveTranslationServiceID(zotero, id);
+            }
+            editingTranslationServiceID = id;
+            renderTranslationServices(id);
+            setTranslationStatus('preferences.translation.serviceSaved');
+        }
+        catch (error) {
+            showTranslationError(error);
+        }
+    }
+
+    function deleteSelectedTranslationService() {
+        if (!editingTranslationServiceID) return;
+        try {
+            const deletedID = editingTranslationServiceID;
+            translationServices = setTranslationServices(
+                zotero,
+                translationServices.filter(service => service.id !== deletedID)
+            );
+            if (getActiveTranslationServiceID(zotero) === deletedID) {
+                setActiveTranslationServiceID(
+                    zotero,
+                    translationServices[0]?.id || ''
+                );
+            }
+            editingTranslationServiceID = null;
+            renderTranslationServices();
+            setTranslationStatus('preferences.translation.serviceDeleted');
+        }
+        catch (error) {
+            showTranslationError(error);
+        }
+    }
+
+    function createPreferenceOption(value, label) {
+        const option = document.createElementNS(
+            'http://www.w3.org/1999/xhtml',
+            'option'
+        );
+        option.value = value;
+        option.textContent = label;
+        return option;
+    }
+
+    function listenTranslation(element, type, listener) {
+        element?.addEventListener(type, listener);
+        if (element) translationListeners.push({ element, type, listener });
+    }
+
+    function refreshTranslationDeveloperControls() {
+        if (!translation.developerMode) return;
+        const enabled = getTranslationDeveloperMode(zotero);
+        const logCount = getTranslationFailureLogs(zotero).length;
+        translation.developerMode.checked = enabled;
+        if (translation.developerControls) {
+            translation.developerControls.hidden = !enabled;
+        }
+        if (translation.copyFailureLog) {
+            translation.copyFailureLog.disabled = !enabled
+                || !logCount
+                || typeof clipboard?.writeText !== 'function';
+        }
+        if (translation.clearFailureLog) {
+            translation.clearFailureLog.disabled = !enabled || !logCount;
+        }
+        setTranslationDeveloperStatus(enabled
+            ? logCount
+                ? 'preferences.translation.developerLogAvailable'
+                : 'preferences.translation.developerLogEmpty'
+            : '');
+    }
+
+    async function copyTranslationFailureLog() {
+        if (!getTranslationFailureLogs(zotero).length) {
+            setTranslationDeveloperStatus(
+                'preferences.translation.developerLogEmpty'
+            );
+            return;
+        }
+        try {
+            await clipboard?.writeText(formatTranslationFailureLogs(zotero));
+            setTranslationDeveloperStatus(
+                'preferences.translation.developerLogCopied'
+            );
+        }
+        catch (error) {
+            zotero.logError?.(error);
+            setTranslationDeveloperStatus(
+                'preferences.translation.developerLogCopyFailed',
+                'error'
+            );
+        }
+    }
+
+    function setTranslationDeveloperStatus(key, status = 'success') {
+        if (!translation.developerStatus) return;
+        translation.developerStatus.textContent = key ? t(key) : '';
+        if (key) translation.developerStatus.setAttribute('data-status', status);
+        else translation.developerStatus.removeAttribute('data-status');
+    }
+
+    function setTranslationStatus(key, status = 'success') {
+        translation.serviceStatus.textContent = key ? t(key) : '';
+        if (key) translation.serviceStatus.setAttribute('data-status', status);
+        else translation.serviceStatus.removeAttribute('data-status');
+    }
+
+    function showTranslationError(error) {
+        zotero.logError?.(error);
+        const prefix = t('preferences.translation.invalidService');
+        translation.serviceStatus.textContent = `${prefix} ${error.message || ''}`
+            .trim();
+        translation.serviceStatus.setAttribute('data-status', 'error');
     }
 
     async function refresh() {
@@ -152,6 +498,7 @@ export function createPreferencesController({
             initialized = true;
             clearButton.addEventListener('click', clear);
             localize();
+            initializeTranslationSettings();
             initializeReaderFont();
             initializeReaderFontSize();
             await refresh();
@@ -165,6 +512,10 @@ export function createPreferencesController({
                 updateReaderFontSize
             );
             readerFontInput?.removeEventListener('change', updateReaderFont);
+            for (const { element, type, listener } of translationListeners) {
+                element.removeEventListener(type, listener);
+            }
+            translationListeners.length = 0;
         },
     };
 }
@@ -256,8 +607,18 @@ globalThis.MkteroPreferences = {
                 ioUtils: IOUtils,
                 pathUtils: PathUtils,
             }),
+            createZoteroTranslationCache({
+                zotero: Zotero,
+                ioUtils: IOUtils,
+                pathUtils: PathUtils,
+            }),
         ]);
-        const controller = createPreferencesController({ document, zotero: Zotero, cache });
+        const controller = createPreferencesController({
+            document,
+            zotero: Zotero,
+            cache,
+            clipboard: createZoteroClipboard(Components),
+        });
         await controller.init();
         return () => controller.destroy();
     },

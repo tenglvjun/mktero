@@ -6,9 +6,22 @@ import {
     registerMinerUPreferencesPane,
 } from './config/mineru-preferences.js';
 import {
+    appendTranslationFailureLog,
+    getTranslationConfiguration,
+    TranslationConfigurationError,
+} from './config/translation-preferences.js';
+import {
     createMinerUCacheKey,
     createZoteroMarkdownCache,
 } from './cache/markdown-cache.js';
+import {
+    createZoteroTranslationCache,
+} from './cache/translation-cache.js';
+import { OpenAITranslationClient } from './translation/openai-translation-client.js';
+import {
+    AcademicTranslationService,
+    createEmptyTranslationState,
+} from './translation/academic-translation-service.js';
 import {
     createZoteroPDFTextIndexCache,
 } from './cache/pdf-text-index-cache.js';
@@ -105,6 +118,9 @@ const runtime = {
     service: null,
     presenter: null,
     cache: null,
+    translationCache: null,
+    translationService: null,
+    translationOperations: new Map(),
     pdfTextIndexCache: null,
     pdfAnnotationLocator: null,
     savedMarkdownStore: null,
@@ -164,6 +180,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.cache = cache;
+    const translationCache = createZoteroTranslationCache({
+        zotero: Zotero,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+    });
+    runtime.translationCache = translationCache;
+    runtime.translationService = new AcademicTranslationService({
+        client: new OpenAITranslationClient({
+            createAbortController: createZoteroAbortController,
+        }),
+        cache: translationCache,
+        onCacheError: error => Zotero.logError?.(error),
+    });
     const pdfTextIndexCache = createZoteroPDFTextIndexCache({
         zotero: Zotero,
         ioUtils: IOUtils,
@@ -287,6 +316,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }
     );
     cache.prune().catch(error => Zotero.logError(error));
+    translationCache.prune().catch(error => Zotero.logError(error));
     pdfTextIndexCache.prune().catch(error => Zotero.logError(error));
     pendingTasks.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
@@ -308,6 +338,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
 };
 
 globalThis.shutdown = function shutdown() {
+    abortAllTranslations();
     abortAllConversions();
     runtime.disposeAnnotationObserver?.();
     runtime.localAnnotations?.dispose();
@@ -324,6 +355,8 @@ globalThis.shutdown = function shutdown() {
     runtime.presenter = null;
     runtime.service = null;
     runtime.cache = null;
+    runtime.translationCache = null;
+    runtime.translationService = null;
     runtime.pdfTextIndexCache = null;
     runtime.pdfAnnotationLocator = null;
     runtime.savedMarkdownStore = null;
@@ -365,6 +398,7 @@ async function openItemAsMarkdown(itemID, {
         sourceItemID: itemID,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
             abortConversion(itemID);
+            abortTranslation(itemID);
             void runtime.actionsTags?.closeMarkdownSession({
                 sessionID: itemID,
                 sourceItemID: itemID,
@@ -377,6 +411,7 @@ async function openItemAsMarkdown(itemID, {
         }),
         onOpenSettings: () => openMinerUPreferences(Zotero),
         onSaveSnapshot: () => saveSnapshotForItem(itemID),
+        ...createTranslationActions(itemID),
         onChangeAnnotationColor: (annotationID, color) => (
             runAnnotationAction('changeColor', itemID, annotationID, color)
         ),
@@ -424,6 +459,7 @@ async function openItemAsMarkdown(itemID, {
         && presentation.model.status !== 'error'
         && !forceRefresh) return;
 
+    if (forceRefresh) abortTranslation(itemID);
     const previousResult = forceRefresh
         ? snapshotReadyResult(presentation.model)
         : null;
@@ -434,10 +470,12 @@ async function openItemAsMarkdown(itemID, {
         `Mktero: conversion started for item ${itemID} `
         + `(force refresh: ${forceRefresh})`
     );
-    runtime.presenter.update(
-        presentation,
-        createConversionLoadingChanges(previousResult, runtimeTranslate)
-    );
+    runtime.presenter.update(presentation, {
+        ...createConversionLoadingChanges(previousResult, runtimeTranslate),
+        ...(forceRefresh ? {
+            translation: createEmptyTranslationState(),
+        } : {}),
+    });
 
     let lastLoggedProgress = null;
     try {
@@ -567,7 +605,8 @@ function createSavedMarkdownActions(noteID, sourceItem) {
         return callback(sourceItemID, ...args);
     };
     return {
-        onClose: () => {},
+        onClose: () => abortTranslation(noteID),
+        ...createTranslationActions(noteID),
         onReparse: sourceItem
             ? () => openItemAsMarkdown(sourceItem.id, { forceRefresh: true })
             : null,
@@ -616,6 +655,197 @@ function createSavedMarkdownActions(noteID, sourceItem) {
             )
         ),
     };
+}
+
+function createTranslationActions(documentID) {
+    return {
+        onStartTranslation: () => startDocumentTranslation(documentID),
+        onCancelTranslation: () => cancelDocumentTranslation(documentID),
+        onToggleTranslation: () => toggleDocumentTranslation(documentID),
+        onContinueTranslation: () => startDocumentTranslation(documentID),
+        onRetranslate: () => startDocumentTranslation(documentID, {
+            force: true,
+        }),
+    };
+}
+
+async function startDocumentTranslation(documentID, { force = false } = {}) {
+    const presentation = runtime.presenter?.get(documentID);
+    const model = presentation?.model;
+    if (!presentation
+        || model?.status !== 'ready'
+        || model?.renderMode !== 'markdown'
+        || !runtime.translationService) {
+        return;
+    }
+
+    abortTranslation(documentID);
+    const controller = createZoteroAbortController();
+    const operationKey = String(documentID);
+    runtime.translationOperations.set(operationKey, controller);
+    runtime.presenter.update(presentation, {
+        translation: {
+            ...(model.translation || createEmptyTranslationState()),
+            visible: true,
+            status: 'loading-cache',
+            error: '',
+            errorCode: null,
+        },
+    });
+    Zotero.debug(`Mktero: translation started for document ${documentID}`);
+
+    let configuration = null;
+    try {
+        configuration = getTranslationConfiguration(Zotero);
+        const completedTranslation = await runtime.translationService.translate({
+            markdown: model.markdown,
+            documentTitle: model.title,
+            configuration,
+            force,
+            signal: controller.signal,
+            onUpdate(translation) {
+                if (runtime.translationOperations.get(operationKey)
+                    !== controller) {
+                    return;
+                }
+                runtime.presenter?.update(presentation, { translation });
+            },
+        });
+        const current = runtime.presenter?.get(documentID)?.model?.translation
+            || completedTranslation;
+        if (current.failed > 0) {
+            recordTranslationFailure(documentID, configuration, {
+                outcome: 'partial',
+                errorCode: 'TRANSLATION_PARTIAL',
+                completed: current.completed,
+                failed: current.failed,
+                total: current.total,
+                failureCodes: current.failureCodes,
+            });
+        }
+        Zotero.debug(
+            `Mktero: translation finished for document ${documentID} `
+            + `(${current?.completed || 0}/${current?.total || 0})`
+        );
+    }
+    catch (error) {
+        if (controller.signal.aborted) return;
+        Zotero.logError?.(error);
+        const errorCode = error?.code || 'TRANSLATION_FAILED';
+        const needsConfiguration = error instanceof TranslationConfigurationError
+            || [
+                'TRANSLATION_SERVICE_REQUIRED',
+                'TRANSLATION_INSECURE_TRANSPORT',
+                'TRANSLATION_AUTHENTICATION_FAILED',
+            ].includes(errorCode);
+        if (needsConfiguration) {
+            void openMinerUPreferences(Zotero);
+        }
+        const message = errorCode === 'TRANSLATION_AUTHENTICATION_FAILED'
+            ? runtimeTranslate('viewer.translation.authenticationFailed')
+            : needsConfiguration
+                ? runtimeTranslate('viewer.translation.serviceRequired')
+                : runtimeTranslate('viewer.translation.failed', {
+                    message: String(error?.message || 'Unknown error'),
+                });
+        const current = runtime.presenter?.get(documentID)?.model?.translation
+            || createEmptyTranslationState();
+        recordTranslationFailure(documentID, configuration, {
+            outcome: 'error',
+            errorCode,
+            httpStatus: error?.status,
+            completed: current.completed,
+            failed: current.failed,
+            total: current.total,
+            failureCodes: current.failureCodes,
+        });
+        runtime.presenter?.update(presentation, {
+            translation: {
+                ...current,
+                visible: true,
+                status: 'error',
+                error: message,
+                errorCode,
+            },
+        });
+    }
+    finally {
+        if (runtime.translationOperations.get(operationKey) === controller) {
+            runtime.translationOperations.delete(operationKey);
+        }
+    }
+}
+
+function recordTranslationFailure(documentID, configuration, details) {
+    try {
+        appendTranslationFailureLog(Zotero, {
+            documentID,
+            service: configuration?.service || null,
+            ...details,
+        });
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+    }
+}
+
+function cancelDocumentTranslation(documentID) {
+    const presentation = runtime.presenter?.get(documentID);
+    const translation = presentation?.model?.translation;
+    abortTranslation(documentID);
+    if (!presentation || !translation) return;
+    const status = translation.total > 0
+        && translation.completed === translation.total
+        ? 'complete'
+        : translation.completed > 0 || translation.failed > 0
+            ? 'partial'
+            : 'idle';
+    runtime.presenter.update(presentation, {
+        translation: {
+            ...translation,
+            status,
+            error: '',
+            errorCode: null,
+        },
+    });
+}
+
+function toggleDocumentTranslation(documentID) {
+    const presentation = runtime.presenter?.get(documentID);
+    const translation = presentation?.model?.translation;
+    if (!presentation || !translation?.segments?.length) return;
+    runtime.presenter.update(presentation, {
+        translation: {
+            ...translation,
+            visible: !translation.visible,
+        },
+    });
+}
+
+function abortTranslation(documentID) {
+    const operationKey = String(documentID);
+    const controller = runtime.translationOperations.get(operationKey);
+    if (!controller) return;
+    runtime.translationOperations.delete(operationKey);
+    try {
+        controller.abort();
+    }
+    catch {
+        // Ignore abort failures during tab and extension cleanup.
+    }
+}
+
+function abortAllTranslations() {
+    const controllers = [...runtime.translationOperations.values()];
+    runtime.translationOperations.clear();
+    for (const controller of controllers) {
+        try {
+            controller.abort();
+        }
+        catch {
+            // Ignore abort failures during extension cleanup.
+        }
+    }
 }
 
 async function saveSnapshotForItem(itemID) {

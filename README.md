@@ -108,6 +108,11 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
   标为存在多处匹配；即使该标注未能匹配到 Markdown，也可以回到 PDF 核对。右侧笔记面板
   与左侧目录均可拖动调宽、通过按钮或双击分隔线展开和收起。
 - 按 PDF 内容与解析配置缓存 Markdown 和图片；未变化的 PDF 可直接从本地缓存打开。
+- Markdown 阅读器工具栏提供沉浸式翻译按钮。译文以独立块显示在对应英文标题、段落、
+  列表项、引用和图表标题之后，不修改原始 Markdown、目录、搜索、标注位置或 PDF
+  来源映射；翻译过程中可取消，之后可继续，完成后可切换双语显示或重新翻译。
+- 翻译服务使用 OpenAI Chat Completions 兼容协议，支持多个服务的新增、编辑、删除和
+  启用，并可配置 API 地址、API Key、模型、QPS、单批段落数、单批字符数和 temperature。
 - 支持英文和简体中文界面；自动跟随 Zotero 的显示语言，其他语言回退为英文。
 - 阅读器操作、侧栏、图片预览、加载状态和笔记标记统一使用 Lucide SVG 图标。
 - 在扩展、设置、右键菜单和 Markdown 标签页中统一使用 Mktero SVG Logo。
@@ -147,8 +152,12 @@ Zotero 本地 PDF -> MinerU VLM 解析 -> full.md、content_list.json 与图片 
 | Body text font | 系统衬线字体 | 优先使用系统阅读字体，可切换 Georgia、Cambria 或 Times New Roman；缺少字体时回退到 Georgia 或系统衬线字体 |
 | Body text size | 18 px | Markdown 正文与已保存快照的阅读字号，可在 16–22 px 间调整 |
 | Reuse conversion results | 开启 | 复用相同 PDF 内容和解析配置对应的本地结果；关闭后仍会恢复已上传但未完成的任务 |
+| Translation target language | zh-CN | 沉浸式翻译的目标语言 |
+| Translation system prompt | 学术论文翻译提示词 | 可编辑的专业翻译要求；结构化输出和安全协议由 Mktero 追加且不可编辑 |
+| Translation services | 空 | OpenAI Chat Completions 兼容服务列表；本地服务可以不填写 API Key |
 
-API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不会加密。
+MinerU API Token、翻译服务 API Key、服务配置和系统提示词会作为普通首选项保存在
+当前 Zotero 配置文件中，不会加密。API Key 输入框使用密码掩码，但这不等于加密存储。
 
 ## 使用方法
 
@@ -170,9 +179,14 @@ API Token 会作为普通首选项保存在当前 Zotero 配置文件中，不�
    划词工具栏复制并附带来源。粘贴结果使用普通 Markdown，可用于 Zotero Note、Better
    Notes 或外部 Markdown 工具。需要调整阅读字号时，打开左上角“更多”菜单并使用
    `A− / A+`。
-5. 需要忽略缓存并重新解析时，点击 Markdown 阅读器左上角的操作菜单，选择“重新解析”。
+5. 需要双语阅读时，先在设置中新增并启用翻译服务，再点击阅读器工具栏的翻译按钮。
+   Mktero 会逐批显示译文；再次点击可取消。取消或部分失败后可从“更多”菜单继续，
+   完成后点击按钮切换译文显示；译文中的受保护行内公式会继续使用 KaTeX 渲染，学术
+   `Fig.`/`Figure` 图注与 `Table` 表注会作为独立段落显示译文。“重新翻译全文”会忽略当前
+   翻译缓存。
+6. 需要忽略缓存并重新解析时，点击 Markdown 阅读器左上角的操作菜单，选择“重新解析”。
    该操作会再次上传 PDF，并可能消耗转换服务额度。
-6. 需要把结果同步到其他 Zotero 设备时，点击左上角总操作按钮并选择“保存快照”。在
+7. 需要把结果同步到其他 Zotero 设备时，点击左上角总操作按钮并选择“保存快照”。在
    Zotero 文库中展开当前条目即可看到名为 `Mktero Markdown Snapshot` 的专用 Note；其他
    设备等待 Zotero 同步完成后，可以直接打开该 Note。桌面端若源 Markdown 附件可用，会
    优先按 Markdown 打开；移动端或未安装 Mktero 的设备会使用 Note 自带的 HTML 快照。
@@ -184,17 +198,21 @@ Mktero 标签页不会写入 Zotero 会话状态；关闭 Zotero 后不会自动
 
 ## 缓存与隐私
 
-转换结果和 PDF 文本索引分别位于当前 Zotero 配置文件的 `mktero-cache/v1` 与
-`mktero-pdf-index/v1` 目录：
+转换结果、PDF 文本索引和译文分别位于当前 Zotero 配置文件的 `mktero-cache/v1`、
+`mktero-pdf-index/v1` 与 `mktero-translation-cache/v1` 目录：
 
 - Markdown 缓存键由 PDF 内容的 SHA-256 和 MinerU 解析配置共同生成；PDF 索引缓存键还
   包含 PDF.js 与索引格式版本，PDF 内容或解析行为变化后会自动重建。
 - Markdown 缓存默认最多保留 100 份文档、占用 512 MiB；PDF 索引默认最多保留 100 份、
   占用 256 MiB，单份索引不超过 128 MiB。超过限制时优先清理最久未访问的结果。
-- 两类缓存连续 30 天未访问都会过期，并在插件启动或读取缓存时清理。
-- 可在 `设置 -> Mktero -> Local cache` 查看两类缓存的合计占用并同时清空。
+- 译文缓存默认最多保留 100 份文档、占用 128 MiB，单份不超过 32 MiB 或 20,000 个
+  段落。缓存键包含原 Markdown 哈希、协议与分段版本、规范化 API 地址、模型、
+  temperature、输出相关批处理限制、目标语言和组合提示词；不包含 API Key、服务显示名称
+  或 QPS。
+- 三类缓存连续 30 天未访问都会过期，并在插件启动或读取缓存时清理。
+- 可在 `设置 -> Mktero -> Local cache` 查看三类缓存的合计占用并同时清空。
 - 缓存中的 Markdown、图片、Markdown 到 PDF 的来源映射，以及 PDF.js 提取的文字与坐标
-  索引均未加密，只保存在本机，不通过 Zotero 同步。
+  索引和译文均未加密，只保存在本机，不通过 Zotero 同步。
 
 缓存未命中时，Mktero 会把完整 PDF 上传到 MinerU 进行解析。返回的图片仅用于当前
 Markdown 标签页和本地缓存，不会导入为 Zotero 附件。
@@ -205,6 +223,16 @@ SHA-256 键，只包含 MinerU `batchID`、Mktero 生成的 `dataID` 和上传�
 PDF 内容、文件名、本地路径、上传地址、下载地址或 API 原始响应。记录在本机未加密，最多
 保留 256 条，24 小时后过期；任务成功或确认无法恢复后会删除。任务恢复独立于已完成结果的
 缓存开关，即使关闭 `Reuse conversion results`，也不会因此重复提交仍可恢复的远程任务。
+
+启动翻译时，Mktero 会把论文标题、当前标题路径和待翻译的正文段落发送到用户启用的
+第三方翻译服务。代码块、原始 HTML、算法块、表格单元格、参考文献章节和行间公式不会
+发送；行内公式、行内代码、URL 和引用标记会先替换为必须原样返回的占位符。第三方服务的
+数据保留、训练使用、访问日志、计费和合规行为由该服务提供方决定，使用前应自行核对其
+隐私政策。Mktero 不会把 API Key、提示词、论文文本或 API 原始响应写入日志。
+
+带 API Key 的远程服务必须使用 HTTPS；HTTP 只允许无密钥请求，或把密钥发送到
+`localhost`、`127.0.0.0/8`、`::1` 等本机回环地址。API 地址不能包含用户名、密码
+或 fragment，可填写 `/v1` 基址或完整的 `/chat/completions` 地址。
 
 PDF 标注从当前 Zotero 文库的本地标注条目中读取，不会发送给 MinerU，也不会写入
 Mktero Markdown 缓存。PDF.js 索引也只在本机读取附件并提取文字和坐标，不会产生额外
@@ -217,7 +245,8 @@ Mktero Markdown 缓存。PDF.js 索引也只在本机读取附件并提取文字
 保存快照时，Mktero 不会同步 PDF、MinerU 原始压缩包、API Token 或 API 响应。同步内容
 仅包括 Mktero 专用 Note、便携 HTML、原始 Markdown、来源映射 JSON 和解析图片。它们作为
 Zotero Note、Note 的嵌入图片附件以及当前文献条目的 Mktero 源文件附件保存，未加密，
-具体同步行为受 Zotero 同步设置、存储配额和附件同步状态影响。若用户直接编辑了 Mktero
+具体同步行为受 Zotero 同步设置、存储配额和附件同步状态影响。沉浸式译文是阅读器覆盖层，
+不会写入原始 Markdown、便携 HTML 或“保存快照”内容，也不会通过快照同步。若用户直接编辑了 Mktero
 专用 Note，Mktero 会把它视为冲突并拒绝静默覆盖。
 
 Mktero 0.2.5 初始版本创建的快照可能已被 Zotero 清除自定义 HTML 标记。新版会通过
