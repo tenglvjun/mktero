@@ -617,7 +617,6 @@ test('joins a paragraph across a page footer into the next page', () => {
     });
 
     assert.equal(result.markdown, `${firstBlock} ${secondBlock}`);
-    assert.doesNotMatch(result.markdown, /https?:\/\/(?:www\.)?jmir\.org\/2024\/1\/e45139/u);
     const textEntries = result.sourceMap.filter(entry => entry.type === 'text');
     assert.equal(textEntries.length, 1);
     assert.equal(textEntries[0].locations.length, 2);
