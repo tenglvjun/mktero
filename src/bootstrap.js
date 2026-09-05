@@ -76,6 +76,7 @@ import {
     createEvidenceSnippet,
     formatEvidenceMarkdown,
 } from './markdown/markdown-evidence.js';
+import { selectExportMarkdown } from './markdown/export-markdown-selector.js';
 import {
     CONVERSION_PROGRESS,
     normalizeConversionProgress,
@@ -1770,7 +1771,7 @@ async function exportMarkdownForModel(model, { ownerWindow } = {}) {
     return runtime.markdownExporter.export({
         ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
         title: model.title,
-        markdown: model.markdown,
+        markdown: selectExportMarkdown(model),
         assets: model.assets,
         assetBasePath: model.assetBasePath,
     });

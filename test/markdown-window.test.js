@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
 import { createLocalization } from '../src/i18n/localization.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
+import { createEvidenceSnippet } from '../src/markdown/markdown-evidence.js';
+import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.js';
 
 const MARKDOWN_STYLES = readFileSync(
     new URL('../ui/markdown.css', import.meta.url),
@@ -1653,6 +1655,126 @@ test('keeps source annotations and evidence actions on bilingual source blocks',
         text: '\u8bd1\u6587',
         ranges: [{ from: 36, to: 38 }],
     }), /source/i);
+    view.destroy();
+});
+
+test('maps compare-view copy targets to source coordinates so evidence resolves through the real snippet chain', async () => {
+    let editorOptions;
+    let resolvedSnippet = null;
+    const sourceMap = [{
+        type: 'text',
+        markdownFrom: 9,
+        markdownTo: 28,
+        locations: [{ pageIndex: 2, bbox: [100, 200, 900, 300] }],
+    }];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nOriginal paragraph.',
+        sourceMap,
+        translationStatus: 'ready',
+        translationView: 'compare',
+        translatedMarkdown: '# 论文\n\n译文段落。',
+        comparisonMarkdown: [
+            '# Paper',
+            '',
+            '# 论文',
+            '',
+            'Original paragraph.',
+            '',
+            '译文段落。',
+        ].join('\n'),
+        translationBlockRanges: [{
+            id: 'translation-1-9-28-paragraph',
+            sourceFrom: 9,
+            sourceTo: 28,
+            translatedFrom: 6,
+            translatedTo: 11,
+            comparisonSourceFrom: 15,
+            comparisonSourceTo: 34,
+            comparisonTranslationFrom: 36,
+            comparisonTranslationTo: 41,
+        }],
+        onCopySourcedMarkdown: target => {
+            resolvedSnippet = createEvidenceSnippet({
+                markdown: model.markdown,
+                sourceMap: model.sourceMap,
+                target,
+            });
+            return resolvedSnippet;
+        },
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument() {},
+                setCorrectionState() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    await editorOptions.copySourcedMarkdown({
+        kind: 'selection',
+        text: 'Original',
+        ranges: [{ from: 15, to: 23 }],
+    });
+
+    assert.ok(resolvedSnippet, 'the real evidence chain was invoked');
+    assert.deepEqual(resolvedSnippet.pageIndexes, [2]);
+
+    assert.throws(() => createEvidenceSnippet({
+        markdown: model.markdown,
+        sourceMap: model.sourceMap,
+        target: {
+            kind: 'selection',
+            text: 'Original',
+            ranges: [{ from: 15, to: 23 }],
+        },
+    }), {
+        message: /source|Markdown range/i,
+    });
+
+    view.destroy();
+});
+
+test('exports the Markdown matching the active translation view through the real selector', async () => {
+    let editorOptions;
+    let exportedMarkdown = null;
+    const comparisonMarkdown = [
+        '# Paper',
+        '',
+        '# 论文',
+        '',
+        'Original paragraph.',
+        '',
+        '译文段落。',
+    ].join('\n');
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nOriginal paragraph.',
+        translatedMarkdown: '# 论文\n\n译文段落。',
+        comparisonMarkdown,
+        translationStatus: 'ready',
+        translationView: 'compare',
+        onExportMarkdown: () => {
+            exportedMarkdown = selectExportMarkdown(model);
+            return { status: 'success' };
+        },
+    });
+    const { view, shadow } = createView(model);
+    const toggle = shadow.querySelector('#mktero-document-actions');
+    const exportButton = shadow.querySelector('#mktero-export-markdown');
+
+    toggle.click();
+    exportButton.click();
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(exportedMarkdown, comparisonMarkdown);
+
     view.destroy();
 });
 
