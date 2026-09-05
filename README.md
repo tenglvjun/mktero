@@ -38,6 +38,9 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
   extracted figure. Both OCR providers restore multi-panel layouts from image
   coordinates; MinerU keeps its bbox-backed safety checks, while Mistral also
   supports a conservative fallback when coordinates are unavailable.
+- Mistral removes publisher mastheads, repeated page headers and footers, and
+  page numbers from OCR Markdown, joins safe same-page and cross-page column
+  continuations, and preserves matching text in the body.
 - Keep reliable page and region mappings so text, formulas, tables, and figures
   can jump back to their PDF source.
 - Preview citations, author affiliations, figures, and tables without losing

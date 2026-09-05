@@ -44,6 +44,12 @@ const BLOCK_TYPES = new Map([
     ['footer', 'footer'],
 ]);
 
+const MISTRAL_COLUMN_TOP_THRESHOLD = 240;
+const MISTRAL_COLUMN_BOTTOM_THRESHOLD = 760;
+const MISTRAL_MIN_COLUMN_GAP = 20;
+const MISTRAL_SENTENCE_END_PATTERN = /[.!?。！？]["'”’»)]*$/u;
+const MISTRAL_NON_PROSE_START_PATTERN = /^(?:#{1,6}(?:\s|$)|(?:[-+*]|\d+[.)])\s+|>\s|```|~~~|<|\|)/u;
+
 /**
  * Convert a Mistral OCR response into the document shape consumed by Mktero.
  * Mistral pages are deliberately kept in API reading order; MinerU's layout
@@ -115,7 +121,7 @@ export function normalizeMistralResult(response, options = {}) {
         }
     }
 
-    const markdownPages = pageRecords.map(page => {
+    const pageSources = pageRecords.map(page => {
         if (typeof page.markdown !== 'string') {
             throw invalidResult('Mistral page Markdown is invalid');
         }
@@ -136,10 +142,12 @@ export function normalizeMistralResult(response, options = {}) {
             pageAssets.get(page.index)
         );
         const interiorTextRecords = findImageInteriorTextRecords(records);
-        pageBlockRecords.set(page.index, {
+        const blockRecord = {
             records,
             interiorTextRecords,
-        });
+            chromeRecords: new Set(),
+        };
+        pageBlockRecords.set(page.index, blockRecord);
         let source = removeImageInteriorText(
             page.markdown.replace(/\r\n?/g, '\n').trim(),
             interiorTextRecords
@@ -154,16 +162,35 @@ export function normalizeMistralResult(response, options = {}) {
             }
         );
         source = rewriteMarkdownImages(source, pageAssets.get(page.index));
-        return normalizeMistralFigureLayouts(
-            source,
-            records
-                .map(record => record.normalized)
-                .filter(block => block?.type === 'image' || block?.type === 'chart')
-        );
+        return { page, source, records };
     });
-    const markdown = markdownPages
+    const repeatedChromeLines = findRepeatedPageChromeLines(pageSources);
+    const markdownPages = pageSources.map(({ page, source, records }) => {
+        const cleaned = removeMistralPageChrome(
+            source,
+            page.index,
+            records,
+            repeatedChromeLines
+        );
+        pageBlockRecords.get(page.index).chromeRecords = cleaned.chromeRecords;
+        return {
+            markdown: normalizeMistralFigureLayouts(
+                cleaned.markdown,
+                records
+                    .map(record => record.normalized)
+                    .filter(block => block?.type === 'image' || block?.type === 'chart')
+            ),
+            records,
+        };
+    });
+    const combinedMarkdown = markdownPages
+        .map(page => page.markdown)
         .filter(page => page.length > 0)
         .join('\n\n');
+    const markdown = normalizeMistralTextFlow(
+        combinedMarkdown,
+        markdownPages.flatMap(page => page.records)
+    );
     if (!markdown.trim()) throw invalidResult('Mistral result contains no Markdown');
     if (new TextEncoder().encode(markdown).length > limits.maxMarkdownBytes) {
         throw invalidResult('Mistral Markdown exceeds the configured resource limit');
@@ -176,7 +203,10 @@ export function normalizeMistralResult(response, options = {}) {
             if (contentList.length >= limits.maxBlocks) {
                 throw invalidResult('Mistral blocks exceed the configured resource limit');
             }
-            if (!record.normalized || blockRecords.interiorTextRecords.has(record)) {
+            if (!record.normalized
+                || blockRecords.interiorTextRecords.has(record)
+                || blockRecords.chromeRecords?.has(record)
+                || ['header', 'footer'].includes(record.normalized.type)) {
                 continue;
             }
             contentList.push(record.normalized);
@@ -462,6 +492,232 @@ function removeImageInteriorText(markdown, records) {
     }
     if (!matches.size) return markdown;
     return lines.filter((line, index) => !matches.has(index)).join('').trim();
+}
+
+function findRepeatedPageChromeLines(pageSources) {
+    const pagesByText = new Map();
+    for (const { page, source } of pageSources) {
+        const lines = source.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
+        const edgeIndexes = edgeLineIndexes(lines);
+        const seenOnPage = new Set();
+        for (const index of edgeIndexes) {
+            const text = comparableMarkdownText(lines[index]);
+            if (!text || !isLikelyPageChromeText(text)) continue;
+            seenOnPage.add(text);
+        }
+        for (const text of seenOnPage) {
+            const pages = pagesByText.get(text) || new Set();
+            pages.add(page.index);
+            pagesByText.set(text, pages);
+        }
+    }
+    return new Set([...pagesByText]
+        .filter(([, pages]) => pages.size >= 2)
+        .map(([text]) => text));
+}
+
+function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
+    const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
+    const edgeIndexes = edgeLineIndexes(lines);
+    const removableIndexes = new Set();
+    const lineIndexesByText = new Map();
+
+    for (const [index, line] of lines.entries()) {
+        const text = comparableMarkdownText(line);
+        if (!text) continue;
+        const indexes = lineIndexesByText.get(text) || [];
+        indexes.push(index);
+        lineIndexesByText.set(text, indexes);
+    }
+
+    for (const index of edgeIndexes) {
+        const text = comparableMarkdownText(lines[index]);
+        if (!text) continue;
+        if (isPageNumberText(text)
+            || repeatedLines.has(text)
+            || isPublicationHeaderText(text)
+            || isPublisherFooterText(text)) {
+            removableIndexes.add(index);
+        }
+    }
+
+    if (pageIndex === 0) {
+        for (const index of findPublisherMastheadIndexes(lines)) {
+            removableIndexes.add(index);
+        }
+    }
+
+    const chromeRecords = new Set();
+    for (const record of records) {
+        const block = record.normalized;
+        if (!block || !block.text) continue;
+        const blockLines = splitBlockTextLines(block.text);
+        const matchingIndexes = new Set(blockLines.flatMap(blockLine => (
+            lineIndexesByText.get(comparableMarkdownText(blockLine)) || []
+        )));
+        if (!matchingIndexes.size) continue;
+        const explicitChrome = ['header', 'footer'].includes(block.type)
+            && isPageEdgeBBox(block.bbox);
+        const chromeMatches = [...matchingIndexes].filter(index => (
+            edgeIndexes.has(index)
+            && (explicitChrome || removableIndexes.has(index))
+        ));
+        const implicitChrome = isPageEdgeBBox(block.bbox)
+            && chromeMatches.length > 0;
+        if (!explicitChrome && !implicitChrome) continue;
+        for (const index of chromeMatches) removableIndexes.add(index);
+        chromeRecords.add(record);
+    }
+
+    if (!removableIndexes.size) {
+        return { markdown, chromeRecords };
+    }
+    return {
+        markdown: lines
+            .filter((line, index) => !removableIndexes.has(index))
+            .join('')
+            .trim(),
+        chromeRecords,
+    };
+}
+
+function normalizeMistralTextFlow(markdown, records) {
+    const textBlocks = records
+        .map(record => record.normalized)
+        .filter(block => block?.type === 'text');
+    if (!markdown || textBlocks.length < 2) return markdown;
+
+    const sourceMap = createMarkdownSourceMap(markdown, textBlocks, {
+        includeMatchedTextRanges: true,
+    });
+    const entries = sourceMap
+        .filter(entry => entry.type === 'text' && entry.locations.length === 1)
+        .sort((left, right) => left.markdownFrom - right.markdownFrom);
+    const edits = [];
+
+    for (let index = 1; index < entries.length; index++) {
+        const previous = entries[index - 1];
+        const current = entries[index];
+        if (!isMistralColumnContinuation(markdown, previous, current)) continue;
+        edits.push({
+            from: previous.markdownTo,
+            to: current.markdownFrom,
+            replacement: ' ',
+        });
+    }
+    return applyMistralTextFlowEdits(markdown, edits);
+}
+
+function isMistralColumnContinuation(markdown, previous, current) {
+    const previousLocation = previous.locations[0];
+    const currentLocation = current.locations[0];
+    const samePage = previousLocation.pageIndex === currentLocation.pageIndex;
+    const nextPage = currentLocation.pageIndex === previousLocation.pageIndex + 1;
+    if (!samePage && !nextPage) return false;
+
+    const previousBox = previousLocation.bbox;
+    const currentBox = currentLocation.bbox;
+    if (!Array.isArray(previousBox) || previousBox.length !== 4
+        || !Array.isArray(currentBox) || currentBox.length !== 4) {
+        return false;
+    }
+    if (previousBox[3] < MISTRAL_COLUMN_BOTTOM_THRESHOLD
+        || currentBox[1] > MISTRAL_COLUMN_TOP_THRESHOLD) {
+        return false;
+    }
+    if (samePage && !areSeparateMistralColumns(previousBox, currentBox)) {
+        return false;
+    }
+
+    const between = markdown.slice(previous.markdownTo, current.markdownFrom);
+    if (!/^\s+$/u.test(between)) return false;
+
+    const previousText = markdown.slice(previous.markdownFrom, previous.markdownTo)
+        .trimEnd();
+    const currentText = markdown.slice(current.markdownFrom, current.markdownTo)
+        .trimStart();
+    if (!previousText || !currentText
+        || MISTRAL_NON_PROSE_START_PATTERN.test(currentText)) {
+        return false;
+    }
+    return !MISTRAL_SENTENCE_END_PATTERN.test(previousText)
+        || /^[\p{Ll}\p{Mn}\s\])},.;:]/u.test(currentText);
+}
+
+function areSeparateMistralColumns(previousBox, currentBox) {
+    const horizontalGap = previousBox[2] <= currentBox[0]
+        ? currentBox[0] - previousBox[2]
+        : currentBox[2] <= previousBox[0]
+            ? previousBox[0] - currentBox[2]
+            : 0;
+    return horizontalGap >= MISTRAL_MIN_COLUMN_GAP;
+}
+
+function applyMistralTextFlowEdits(markdown, edits) {
+    const sorted = [...edits].sort((left, right) => right.from - left.from);
+    let result = markdown;
+    let lastFrom = markdown.length + 1;
+    for (const edit of sorted) {
+        if (edit.to > lastFrom) continue;
+        result = result.slice(0, edit.from)
+            + edit.replacement
+            + result.slice(edit.to);
+        lastFrom = edit.from;
+    }
+    return result;
+}
+
+function edgeLineIndexes(lines) {
+    const nonEmpty = lines
+        .map((line, index) => line.trim() ? index : null)
+        .filter(index => index !== null);
+    return new Set([
+        ...nonEmpty.slice(0, 3),
+        ...nonEmpty.slice(-3),
+    ]);
+}
+
+function isPageEdgeBBox(bbox) {
+    return Array.isArray(bbox)
+        && bbox.length === 4
+        && (bbox[1] <= 180 || bbox[3] >= 820);
+}
+
+function isPageNumberText(text) {
+    return /^(?:page\s+)?\d+\s+of\s+\d+$/iu.test(text);
+}
+
+function isPublisherFooterText(text) {
+    return /(?:doi\.org\/10\.\d+|\/journal\/)/iu.test(text)
+        || /^https?:\/\/\S+\/(?:\d{4}\/\d+\/[a-z0-9-]+|journal\/\S*)$/iu.test(text)
+        || /\b(?:19|20)\d{2}\s*\|\s*vol\.\s*\d+\s*\|\s*[a-z0-9-]+\s*\|\s*p\.\s*\d+$/iu.test(text)
+        || /^\(page number not for citation purposes\)$/iu.test(text);
+}
+
+function isPublicationHeaderText(text) {
+    return /\b(?:19|20)\d{2}\b\s*,\s*\d+\s*,\s*\d+(?:\s|$)/u.test(text);
+}
+
+function isLikelyPageChromeText(text) {
+    if (isPageNumberText(text)) return true;
+    if (/^!?\[|^#{1,6}(?:\s|$)|^\|/u.test(text)) return false;
+    return isPublicationHeaderText(text)
+        || /(?:doi\.org|\/journal\/|^https?:\/\/)/iu.test(text);
+}
+
+function findPublisherMastheadIndexes(lines) {
+    const titleIndex = lines.findIndex(line => (
+        /^ {0,3}#{1,6}[ \t]+\S/u.test(line)
+    ));
+    if (titleIndex <= 0) return [];
+    const prefix = lines.slice(0, titleIndex)
+        .map(line => comparableMarkdownText(line).toLowerCase())
+        .filter(Boolean);
+    const hasMDPI = prefix.includes('mdpi');
+    const hasArticle = prefix.includes('article');
+    const hasJournal = prefix.includes('sensors');
+    if (!hasMDPI || (!hasArticle && !hasJournal)) return [];
+    return Array.from({ length: titleIndex }, (_, index) => index);
 }
 
 function splitBlockTextLines(text) {

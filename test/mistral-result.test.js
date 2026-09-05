@@ -351,6 +351,283 @@ test('removes OCR text that is contained inside a Mistral image bbox', () => {
     );
 });
 
+test('removes Mistral publisher mastheads and repeated page chrome', () => {
+    const result = normalizeMistralResult({
+        pages: [
+            page({
+                index: 0,
+                markdown: [
+                    '#',
+                    '',
+                    'sensors',
+                    '',
+                    'MDPI',
+                    '',
+                    'Article',
+                    '',
+                    '# Paper title',
+                    '',
+                    'Opening body paragraph.',
+                    '',
+                    'Sensors 2023, 23, 9730. https://doi.org/10.3390/s23249730',
+                    '',
+                    'https://www.mdpi.com/journal/sensors',
+                ].join('\n'),
+                blocks: [
+                    {
+                        type: 'heading',
+                        content: 'Paper title',
+                        bbox: [100, 100, 900, 180],
+                    },
+                    {
+                        type: 'text',
+                        content: 'Opening body paragraph.',
+                        bbox: [100, 250, 900, 350],
+                    },
+                    {
+                        type: 'footer',
+                        content: 'Sensors 2023, 23, 9730. https://doi.org/10.3390/s23249730',
+                        bbox: [100, 900, 900, 980],
+                    },
+                    {
+                        type: 'footer',
+                        content: 'https://www.mdpi.com/journal/sensors',
+                        bbox: [100, 900, 900, 980],
+                    },
+                ],
+            }),
+            page({
+                index: 1,
+                markdown: [
+                    'Sensors 2023, 23, 9730',
+                    '',
+                    '2 of 3',
+                    '',
+                    'Page two body.',
+                    '',
+                    'Sensors 2023, 23, 9730',
+                    '',
+                    'This is ordinary body text.',
+                    '',
+                    'More body text.',
+                    '',
+                    'Another body line.',
+                    '',
+                    'Yet another body line.',
+                    '',
+                    'RandomForestClassifier',
+                ].join('\n'),
+                blocks: [
+                    {
+                        type: 'text',
+                        content: 'Page two body.',
+                        bbox: [100, 300, 900, 400],
+                    },
+                    {
+                        type: 'text',
+                        content: 'RandomForestClassifier',
+                        bbox: [100, 700, 900, 760],
+                    },
+                ],
+            }),
+            page({
+                index: 2,
+                markdown: [
+                    'Sensors 2023, 23, 9730',
+                    '',
+                    '3 of 3',
+                    '',
+                    'Page three body.',
+                ].join('\n'),
+                blocks: [{
+                    type: 'text',
+                    content: 'Page three body.',
+                    bbox: [100, 300, 900, 400],
+                }],
+            }),
+        ],
+    });
+
+    assert.equal(
+        result.markdown,
+        '# Paper title\n\nOpening body paragraph.\n\n'
+            + 'Page two body.\n\nSensors 2023, 23, 9730\n\n'
+            + 'This is ordinary body text.\n\nMore body text.\n\n'
+            + 'Another body line.\n\nYet another body line.\n\n'
+            + 'RandomForestClassifier\n\nPage three body.'
+    );
+    assert.deepEqual(result.contentList.map(block => block.type), [
+        'heading',
+        'text',
+        'text',
+        'text',
+        'text',
+    ]);
+    assert.equal(result.sourceMap.some(entry => entry.type === 'footer'), false);
+    assert.equal(result.sourceMap.some(entry => (
+        result.markdown.slice(entry.markdownFrom, entry.markdownTo)
+            .includes('RandomForestClassifier')
+    )), true);
+});
+
+test('removes publisher footer links when Mistral omits footer blocks', () => {
+    const result = normalizeMistralResult({
+        pages: [
+            page({
+                index: 0,
+                markdown: [
+                    '# Paper title',
+                    '',
+                    'Body paragraph.',
+                    '',
+                    'Sensors 2023, 23, 9730. https://doi.org/10.3390/s23249730',
+                    '',
+                    'https://www.mdpi.com/journal/sensors',
+                ].join('\n'),
+            }),
+            page({
+                index: 1,
+                markdown: [
+                    'Sensors 2023, 23, 9730',
+                    '',
+                    '2 of 2',
+                    '',
+                    'Second page body.',
+                ].join('\n'),
+            }),
+        ],
+    });
+
+    assert.equal(
+        result.markdown,
+        '# Paper title\n\nBody paragraph.\n\nSecond page body.'
+    );
+});
+
+test('joins a paragraph that continues from the bottom of one column', () => {
+    const firstBlock = 'MT has emerged as a promising approach. '
+        + 'Studies showed improvements in stress coping, reduction in anxiety '
+        + 'symptoms, and enhancement of overall well-being (Fancourt et al. 2014; Witte';
+    const secondBlock = 'et al. 2022). The positive effects of music on stress '
+        + 'recovery have also been studied and published.';
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: `${firstBlock}\n\n${secondBlock}`,
+            blocks: [
+                {
+                    type: 'text',
+                    content: firstBlock,
+                    bbox: [72, 844, 488, 932],
+                },
+                {
+                    type: 'text',
+                    content: secondBlock,
+                    bbox: [509, 38, 927, 215],
+                },
+            ],
+        })],
+    });
+
+    assert.equal(result.markdown, `${firstBlock} ${secondBlock}`);
+    const textEntries = result.sourceMap.filter(entry => entry.type === 'text');
+    assert.equal(textEntries.length, 1);
+    assert.equal(textEntries[0].locations.length, 2);
+});
+
+test('keeps separate column paragraphs separated when the first one ends', () => {
+    const firstBlock = 'The first column paragraph ends here.';
+    const secondBlock = 'The next column paragraph starts here.';
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: `${firstBlock}\n\n${secondBlock}`,
+            blocks: [
+                {
+                    type: 'text',
+                    content: firstBlock,
+                    bbox: [72, 844, 488, 932],
+                },
+                {
+                    type: 'text',
+                    content: secondBlock,
+                    bbox: [509, 38, 927, 215],
+                },
+            ],
+        })],
+    });
+
+    assert.equal(result.markdown, `${firstBlock}\n\n${secondBlock}`);
+});
+
+test('joins a paragraph across a page footer into the next page', () => {
+    const firstBlock = '... biosensor* [tiab]) AND';
+    const secondBlock = '(wear* [tiab] OR worn [tiab])) AND ("menstruation" [MeSH Terms].';
+    const result = normalizeMistralResult({
+        pages: [
+            page({
+                index: 1,
+                markdown: [
+                    firstBlock,
+                    '',
+                    'https://www.jmir.org/2024/1/e45139',
+                    '',
+                    'J Med Internet Res 2024 | vol. 26 | e45139 | p. 2',
+                ].join('\n'),
+                blocks: [
+                    {
+                        type: 'text',
+                        content: firstBlock,
+                        bbox: [502, 806, 930, 922],
+                    },
+                ],
+            }),
+            page({
+                index: 2,
+                markdown: secondBlock,
+                blocks: [{
+                    type: 'text',
+                    content: secondBlock,
+                    bbox: [68, 84, 492, 198],
+                }],
+            }),
+        ],
+    });
+
+    assert.equal(result.markdown, `${firstBlock} ${secondBlock}`);
+    assert.equal(result.markdown.includes('jmir.org'), false);
+    const textEntries = result.sourceMap.filter(entry => entry.type === 'text');
+    assert.equal(textEntries.length, 1);
+    assert.equal(textEntries[0].locations.length, 2);
+});
+
+test('keeps separate paragraphs across a page boundary when the first ends', () => {
+    const firstBlock = 'The first page paragraph ends here.';
+    const secondBlock = 'The next page paragraph starts here.';
+    const result = normalizeMistralResult({
+        pages: [
+            page({
+                index: 1,
+                markdown: firstBlock,
+                blocks: [{
+                    type: 'text',
+                    content: firstBlock,
+                    bbox: [502, 806, 930, 922],
+                }],
+            }),
+            page({
+                index: 2,
+                markdown: secondBlock,
+                blocks: [{
+                    type: 'text',
+                    content: secondBlock,
+                    bbox: [68, 84, 492, 198],
+                }],
+            }),
+        ],
+    });
+
+    assert.equal(result.markdown, `${firstBlock}\n\n${secondBlock}`);
+});
+
 test('keeps Mistral prose when image or text bboxes are unavailable', () => {
     const result = normalizeMistralResult({
         pages: [page({
