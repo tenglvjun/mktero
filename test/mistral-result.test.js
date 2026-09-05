@@ -558,6 +558,30 @@ test('keeps separate column paragraphs separated when the first one ends', () =>
     assert.equal(result.markdown, `${firstBlock}\n\n${secondBlock}`);
 });
 
+test('does not join the bottom of a right column to the top of a left column', () => {
+    const firstBlock = 'Right column text remains unfinished';
+    const secondBlock = 'left column text begins independently';
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: `${firstBlock}\n\n${secondBlock}`,
+            blocks: [
+                {
+                    type: 'text',
+                    content: firstBlock,
+                    bbox: [520, 820, 930, 930],
+                },
+                {
+                    type: 'text',
+                    content: secondBlock,
+                    bbox: [70, 60, 480, 190],
+                },
+            ],
+        })],
+    });
+
+    assert.equal(result.markdown, `${firstBlock}\n\n${secondBlock}`);
+});
+
 test('joins a paragraph across a page footer into the next page', () => {
     const firstBlock = '... biosensor* [tiab]) AND';
     const secondBlock = '(wear* [tiab] OR worn [tiab])) AND ("menstruation" [MeSH Terms].';
@@ -626,6 +650,52 @@ test('keeps separate paragraphs across a page boundary when the first ends', () 
     });
 
     assert.equal(result.markdown, `${firstBlock}\n\n${secondBlock}`);
+});
+
+test('keeps publication-like reference text at a page edge', () => {
+    const reference = 'Smith J. Article title. https://doi.org/10.1000/example';
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: `## References\n\n${reference}`,
+            blocks: [{
+                type: 'references',
+                content: reference,
+                bbox: [70, 840, 930, 930],
+            }],
+        })],
+    });
+
+    assert.equal(result.markdown, `## References\n\n${reference}`);
+    assert.equal(result.contentList.some(block => block.type === 'reference'), true);
+});
+
+test('keeps an untyped DOI reference under a reference heading', () => {
+    const reference = 'Smith J. Article title. https://doi.org/10.1000/example';
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: `## References\n\n${reference}`,
+            blocks: [],
+        })],
+    });
+
+    assert.equal(result.markdown, `## References\n\n${reference}`);
+});
+
+test('keeps repeated references with duplicate block records', () => {
+    const reference = 'Smith J. Article title. https://doi.org/10.1000/example';
+    const markdown = [reference, reference, reference].join('\n\n');
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown,
+            blocks: Array.from({ length: 200 }, () => ({
+                type: 'references',
+                content: reference,
+                bbox: [70, 840, 930, 930],
+            })),
+        })],
+    });
+
+    assert.equal(result.markdown, markdown);
 });
 
 test('keeps Mistral prose when image or text bboxes are unavailable', () => {
@@ -1021,6 +1091,35 @@ test('rejects malformed pages, images, Markdown, and resource limits', () => {
     assert.throws(
         () => normalizeMistralResult({ pages: [page()] }, { maxMarkdownBytes: 1 }),
         error => error.code === 'MISTRAL_INVALID_RESULT'
+    );
+    assert.throws(
+        () => normalizeMistralResult({
+            pages: [page({ blocks: [null, null] })],
+        }, { maxBlocks: 1 }),
+        error => error.code === 'MISTRAL_INVALID_RESULT'
+            && /blocks exceed/u.test(error.message)
+    );
+    assert.throws(
+        () => normalizeMistralResult({
+            pages: [page({
+                markdown: 'Text inside image.\n\n![Figure](img-0.png)',
+                images: [{
+                    id: 'img-0.png',
+                    image_base64: 'data:image/png;base64,AQID',
+                }],
+                blocks: [{
+                    type: 'image',
+                    image_id: 'img-0.png',
+                    bbox: [100, 100, 900, 800],
+                }, {
+                    type: 'text',
+                    content: 'Text inside image.',
+                    bbox: [200, 200, 500, 300],
+                }],
+            })],
+        }, { maxBBoxChecks: 0 }),
+        error => error.code === 'MISTRAL_INVALID_RESULT'
+            && /layout matching exceeds/u.test(error.message)
     );
 });
 

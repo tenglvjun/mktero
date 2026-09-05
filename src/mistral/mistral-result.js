@@ -11,6 +11,7 @@ export const DEFAULT_MAX_MISTRAL_ASSETS = 2_000;
 export const DEFAULT_MAX_MISTRAL_ASSET_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_MAX_MISTRAL_TOTAL_ASSET_BYTES = 150 * 1024 * 1024;
 export const DEFAULT_MAX_MISTRAL_SOURCE_LOCATIONS = 100_000;
+export const DEFAULT_MAX_MISTRAL_BBOX_CHECKS = 2_000_000;
 
 const IMAGE_MIME_TYPES = new Map([
     ['png', 'image/png'],
@@ -68,6 +69,8 @@ export function normalizeMistralResult(response, options = {}) {
     const pageTables = new Map();
     const pageBlockRecords = new Map();
     const tableBudget = { count: 0, bytes: 0 };
+    const blockBudget = { count: 0 };
+    const bboxMatchBudget = { remaining: limits.maxBBoxChecks };
     const assets = [];
     let totalAssetBytes = 0;
 
@@ -125,6 +128,12 @@ export function normalizeMistralResult(response, options = {}) {
         if (typeof page.markdown !== 'string') {
             throw invalidResult('Mistral page Markdown is invalid');
         }
+        if (Array.isArray(page.blocks)) {
+            blockBudget.count += page.blocks.length;
+            if (blockBudget.count > limits.maxBlocks) {
+                throw invalidResult('Mistral blocks exceed the configured resource limit');
+            }
+        }
         const tables = normalizePageTables(page, warnings, limits, tableBudget);
         pageTables.set(page.index, tables);
         const dimensions = normalizeDimensions(page.dimensions);
@@ -141,7 +150,10 @@ export function normalizeMistralResult(response, options = {}) {
             dimensions,
             pageAssets.get(page.index)
         );
-        const interiorTextRecords = findImageInteriorTextRecords(records);
+        const interiorTextRecords = findImageInteriorTextRecords(
+            records,
+            bboxMatchBudget
+        );
         const blockRecord = {
             records,
             interiorTextRecords,
@@ -281,6 +293,10 @@ function normalizeLimits(options) {
         maxSourceLocations: boundedLimit(
             options.maxSourceLocations,
             DEFAULT_MAX_MISTRAL_SOURCE_LOCATIONS
+        ),
+        maxBBoxChecks: boundedLimit(
+            options.maxBBoxChecks,
+            DEFAULT_MAX_MISTRAL_BBOX_CHECKS
         ),
     };
 }
@@ -424,7 +440,7 @@ function appendImageMetadataRecords(records, page, dimensions, pageMap) {
     }
 }
 
-function findImageInteriorTextRecords(records) {
+function findImageInteriorTextRecords(records, matchBudget) {
     const imageBlocks = records
         .map(record => record.normalized)
         .filter(block => block?.type === 'image' || block?.type === 'chart');
@@ -435,10 +451,16 @@ function findImageInteriorTextRecords(records) {
         if (!block || !block.text || block.type === 'image' || block.type === 'chart') {
             return false;
         }
-        return imageBlocks.some(image => (
-            image.pageIndex === block.pageIndex
-            && isMostlyContainedBBox(block.bbox, image.bbox)
-        ));
+        return imageBlocks.some(image => {
+            if (image.pageIndex !== block.pageIndex) return false;
+            if (matchBudget.remaining <= 0) {
+                throw invalidResult(
+                    'Mistral layout matching exceeds the configured resource limit'
+                );
+            }
+            matchBudget.remaining--;
+            return isMostlyContainedBBox(block.bbox, image.bbox);
+        });
     }));
 }
 
@@ -470,20 +492,22 @@ function bboxIntersection(left, right) {
 function removeImageInteriorText(markdown, records) {
     if (!markdown || !records?.size) return markdown;
     const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
-    const candidates = [...records]
-        .flatMap(record => splitBlockTextLines(record.normalized?.text));
-    if (!candidates.length) return markdown;
+    const lineIndexesByText = new Map();
+    for (const [index, line] of lines.entries()) {
+        const text = comparableMarkdownText(line);
+        if (!text) continue;
+        const indexes = lineIndexesByText.get(text) || [];
+        indexes.push(index);
+        lineIndexesByText.set(text, indexes);
+    }
+    const candidates = new Set([...records]
+        .flatMap(record => splitBlockTextLines(record.normalized?.text))
+        .map(comparableMarkdownText)
+        .filter(Boolean));
 
     const matches = new Map();
     for (const candidate of candidates) {
-        const normalizedCandidate = comparableMarkdownText(candidate);
-        if (!normalizedCandidate) continue;
-        const matchingIndexes = [];
-        for (const [index, line] of lines.entries()) {
-            if (comparableMarkdownText(line) === normalizedCandidate) {
-                matchingIndexes.push(index);
-            }
-        }
+        const matchingIndexes = lineIndexesByText.get(candidate) || [];
         // A duplicated label is ambiguous without a text block range. Keep it
         // visible rather than risk removing ordinary prose elsewhere.
         if (matchingIndexes.length === 1) {
@@ -503,7 +527,7 @@ function findRepeatedPageChromeLines(pageSources) {
         for (const index of edgeIndexes) {
             const text = comparableMarkdownText(lines[index]);
             if (!text || !isLikelyPageChromeText(text)) continue;
-            seenOnPage.add(text);
+            for (const key of pageChromeKeys(text)) seenOnPage.add(key);
         }
         for (const text of seenOnPage) {
             const pages = pagesByText.get(text) || new Set();
@@ -520,23 +544,49 @@ function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
     const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
     const edgeIndexes = edgeLineIndexes(lines);
     const removableIndexes = new Set();
-    const lineIndexesByText = new Map();
-
-    for (const [index, line] of lines.entries()) {
-        const text = comparableMarkdownText(line);
-        if (!text) continue;
-        const indexes = lineIndexesByText.get(text) || [];
-        indexes.push(index);
-        lineIndexesByText.set(text, indexes);
+    const edgeTextByIndex = new Map([...edgeIndexes].map(index => (
+        [index, comparableMarkdownText(lines[index])]
+    )));
+    const referenceTexts = new Set();
+    for (const record of records) {
+        if (record.normalized?.type !== 'reference') continue;
+        for (const line of splitBlockTextLines(record.normalized.text)) {
+            referenceTexts.add(comparableMarkdownText(line));
+        }
+    }
+    const referenceIndexes = new Set([...edgeTextByIndex]
+        .filter(([, text]) => text && referenceTexts.has(text))
+        .map(([index]) => index));
+    const referenceHeadingIndex = lines.findIndex(line => (
+        /^ {0,3}#{1,6}[ \t]+(?:references|bibliography)\b/iu.test(line)
+    ));
+    if (referenceHeadingIndex >= 0) {
+        for (const index of edgeIndexes) {
+            if (index > referenceHeadingIndex) referenceIndexes.add(index);
+        }
     }
 
+    const hasRepeatedPublisherFooter = [...edgeIndexes].some(index => {
+        if (referenceIndexes.has(index)) return false;
+        const text = edgeTextByIndex.get(index);
+        return text
+            && isPublisherFooterText(text)
+            && pageChromeKeys(text).some(key => repeatedLines.has(key));
+    });
+    const publisherFooterKinds = new Set([...edgeIndexes]
+        .filter(index => !referenceIndexes.has(index))
+        .map(index => publisherFooterKind(edgeTextByIndex.get(index)))
+        .filter(Boolean));
+    const hasGroupedPublisherFooter = publisherFooterKinds.size >= 2;
+
     for (const index of edgeIndexes) {
-        const text = comparableMarkdownText(lines[index]);
+        if (referenceIndexes.has(index)) continue;
+        const text = edgeTextByIndex.get(index);
         if (!text) continue;
         if (isPageNumberText(text)
-            || repeatedLines.has(text)
-            || isPublicationHeaderText(text)
-            || isPublisherFooterText(text)) {
+            || pageChromeKeys(text).some(key => repeatedLines.has(key))
+            || ((hasRepeatedPublisherFooter || hasGroupedPublisherFooter)
+                && isPublisherFooterText(text))) {
             removableIndexes.add(index);
         }
     }
@@ -551,16 +601,17 @@ function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
     for (const record of records) {
         const block = record.normalized;
         if (!block || !block.text) continue;
-        const blockLines = splitBlockTextLines(block.text);
-        const matchingIndexes = new Set(blockLines.flatMap(blockLine => (
-            lineIndexesByText.get(comparableMarkdownText(blockLine)) || []
-        )));
-        if (!matchingIndexes.size) continue;
+        const blockTexts = new Set(splitBlockTextLines(block.text)
+            .map(comparableMarkdownText)
+            .filter(Boolean));
+        const matchingIndexes = [...edgeTextByIndex]
+            .filter(([, text]) => text && blockTexts.has(text))
+            .map(([index]) => index);
+        if (!matchingIndexes.length) continue;
         const explicitChrome = ['header', 'footer'].includes(block.type)
             && isPageEdgeBBox(block.bbox);
-        const chromeMatches = [...matchingIndexes].filter(index => (
-            edgeIndexes.has(index)
-            && (explicitChrome || removableIndexes.has(index))
+        const chromeMatches = matchingIndexes.filter(index => (
+            explicitChrome || removableIndexes.has(index)
         ));
         const implicitChrome = isPageEdgeBBox(block.bbox)
             && chromeMatches.length > 0;
@@ -625,7 +676,7 @@ function isMistralColumnContinuation(markdown, previous, current) {
         || currentBox[1] > MISTRAL_COLUMN_TOP_THRESHOLD) {
         return false;
     }
-    if (samePage && !areSeparateMistralColumns(previousBox, currentBox)) {
+    if (samePage && !areSequentialMistralColumns(previousBox, currentBox)) {
         return false;
     }
 
@@ -644,13 +695,9 @@ function isMistralColumnContinuation(markdown, previous, current) {
         || /^[\p{Ll}\p{Mn}\s\])},.;:]/u.test(currentText);
 }
 
-function areSeparateMistralColumns(previousBox, currentBox) {
-    const horizontalGap = previousBox[2] <= currentBox[0]
-        ? currentBox[0] - previousBox[2]
-        : currentBox[2] <= previousBox[0]
-            ? previousBox[0] - currentBox[2]
-            : 0;
-    return horizontalGap >= MISTRAL_MIN_COLUMN_GAP;
+function areSequentialMistralColumns(previousBox, currentBox) {
+    return previousBox[2] <= currentBox[0]
+        && currentBox[0] - previousBox[2] >= MISTRAL_MIN_COLUMN_GAP;
 }
 
 function applyMistralTextFlowEdits(markdown, edits) {
@@ -688,14 +735,35 @@ function isPageNumberText(text) {
 }
 
 function isPublisherFooterText(text) {
-    return /(?:doi\.org\/10\.\d+|\/journal\/)/iu.test(text)
-        || /^https?:\/\/\S+\/(?:\d{4}\/\d+\/[a-z0-9-]+|journal\/\S*)$/iu.test(text)
-        || /\b(?:19|20)\d{2}\s*\|\s*vol\.\s*\d+\s*\|\s*[a-z0-9-]+\s*\|\s*p\.\s*\d+$/iu.test(text)
-        || /^\(page number not for citation purposes\)$/iu.test(text);
+    return publisherFooterKind(text) !== null;
+}
+
+function publisherFooterKind(text) {
+    if (/(?:doi\.org\/10\.\d+)/iu.test(text)) return 'doi';
+    if (/\/journal\//iu.test(text)) return 'journal-url';
+    if (/^https?:\/\/\S+\/\d{4}\/\d+\/[a-z0-9-]+$/iu.test(text)) {
+        return 'article-url';
+    }
+    if (/\b(?:19|20)\d{2}\s*\|\s*vol\.\s*\d+\s*\|\s*[a-z0-9-]+\s*\|\s*p\.\s*\d+$/iu.test(text)) {
+        return 'volume';
+    }
+    if (/^\(page number not for citation purposes\)$/iu.test(text)) {
+        return 'citation-note';
+    }
+    return null;
 }
 
 function isPublicationHeaderText(text) {
     return /\b(?:19|20)\d{2}\b\s*,\s*\d+\s*,\s*\d+(?:\s|$)/u.test(text);
+}
+
+function pageChromeKeys(text) {
+    const keys = [text];
+    const publication = text.match(
+        /^.{1,80}?\b(?:19|20)\d{2}\b\s*,\s*\d+\s*,\s*\d+/u
+    )?.[0].replace(/[.\s]+$/u, '');
+    if (publication && publication !== text) keys.push(publication);
+    return keys;
 }
 
 function isLikelyPageChromeText(text) {

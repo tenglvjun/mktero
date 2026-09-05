@@ -153,11 +153,8 @@ function matchContentBlock(
             contentBlock.assetPath,
             syntaxRanges.image
         );
-        if (occurrences.offsets.length !== 1 || occurrences.truncated) return null;
-        const matchedRange = {
-            from: occurrences.offsets[0],
-            to: occurrences.offsets[0] + contentBlock.assetPath.length,
-        };
+        if (occurrences.ranges.length !== 1 || occurrences.truncated) return null;
+        const matchedRange = occurrences.ranges[0];
         return compatibleSyntaxRange(contentBlock.type, matchedRange, syntaxRanges)
             ? matchedRange
             : null;
@@ -199,7 +196,7 @@ function matchContentBlock(
 }
 
 function findImageAssetOccurrences(markdown, assetPath, imageRanges) {
-    const offsets = [];
+    const ranges = [];
     for (const range of imageRanges) {
         const source = markdown.slice(range.from, range.to);
         const match = MARKDOWN_IMAGE_DESTINATION_PATTERN.exec(source);
@@ -213,16 +210,28 @@ function findImageAssetOccurrences(markdown, assetPath, imageRanges) {
             .match(/^\s*/u)[0].length;
         const destinationStart = destinationOpen + 2 + whitespace
             + (match[1].startsWith('<') ? 1 : 0);
-        let offset = destination.indexOf(assetPath);
-        while (offset >= 0) {
-            offsets.push(range.from + destinationStart + offset);
-            if (offsets.length >= 2) {
-                return { offsets, truncated: true };
-            }
-            offset = destination.indexOf(assetPath, offset + 1);
+        if (destination !== assetPath
+            && decodeImageDestination(destination) !== assetPath) {
+            continue;
+        }
+        ranges.push({
+            from: range.from + destinationStart,
+            to: range.from + destinationStart + destination.length,
+        });
+        if (ranges.length >= 2) {
+            return { ranges, truncated: true };
         }
     }
-    return { offsets, truncated: false };
+    return { ranges, truncated: false };
+}
+
+function decodeImageDestination(destination) {
+    try {
+        return decodeURIComponent(destination);
+    }
+    catch {
+        return destination;
+    }
 }
 
 function normalizeTolerantText(value) {
