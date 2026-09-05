@@ -167,6 +167,24 @@ test('maps unique MinerU content to Markdown blocks and keeps merged locations',
     ]);
 });
 
+test('maps image destinations when the asset path is repeated in alt text', () => {
+    const markdown = '![images/figure.png](images/figure.png)';
+    assert.deepEqual(
+        createMarkdownSourceMap(markdown, [{
+            type: 'image',
+            assetPath: 'images/figure.png',
+            pageIndex: 3,
+            bbox: [80, 100, 920, 700],
+        }]),
+        [{
+            type: 'image',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 3, bbox: [80, 100, 920, 700] }],
+        }]
+    );
+});
+
 test('keeps matched text ranges for page-specific source navigation', () => {
     const first = 'The first mapped segment has enough words to identify it';
     const second = 'the second segment continues this same paragraph safely.';

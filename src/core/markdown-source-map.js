@@ -8,6 +8,7 @@ import {
 import { findDisplayMathMatches } from '../markdown/markdown-html.js';
 
 const MARKDOWN_PARSER = parser.configure(GFM);
+const MARKDOWN_IMAGE_DESTINATION_PATTERN = /^!\[[^\]\r\n]*\]\(\s*(<[^>\r\n]+>|[^)\s]+)(?:[^)]*)\)/u;
 const MIN_TEXT_MATCH_LENGTH = 12;
 const MATCH_BUDGET_EXHAUSTED = Symbol('match-budget-exhausted');
 export const DEFAULT_MAX_SOURCE_MAP_MARKDOWN_LENGTH = 4 * 1024 * 1024;
@@ -147,7 +148,11 @@ function matchContentBlock(
         if (!consumeMatchWork(matchBudget, markdown.length)) {
             return MATCH_BUDGET_EXHAUSTED;
         }
-        const occurrences = findTextOccurrences(markdown, contentBlock.assetPath, 2);
+        const occurrences = findImageAssetOccurrences(
+            markdown,
+            contentBlock.assetPath,
+            syntaxRanges.image
+        );
         if (occurrences.offsets.length !== 1 || occurrences.truncated) return null;
         const matchedRange = {
             from: occurrences.offsets[0],
@@ -191,6 +196,33 @@ function matchContentBlock(
     return compatibleSyntaxRange(contentBlock.type, matchedRange, syntaxRanges)
         ? matchedRange
         : null;
+}
+
+function findImageAssetOccurrences(markdown, assetPath, imageRanges) {
+    const offsets = [];
+    for (const range of imageRanges) {
+        const source = markdown.slice(range.from, range.to);
+        const match = MARKDOWN_IMAGE_DESTINATION_PATTERN.exec(source);
+        if (!match) continue;
+        const destination = match[1].startsWith('<')
+            ? match[1].slice(1, -1)
+            : match[1];
+        const destinationOpen = match[0].indexOf('](');
+        const whitespace = match[0]
+            .slice(destinationOpen + 2)
+            .match(/^\s*/u)[0].length;
+        const destinationStart = destinationOpen + 2 + whitespace
+            + (match[1].startsWith('<') ? 1 : 0);
+        let offset = destination.indexOf(assetPath);
+        while (offset >= 0) {
+            offsets.push(range.from + destinationStart + offset);
+            if (offsets.length >= 2) {
+                return { offsets, truncated: true };
+            }
+            offset = destination.indexOf(assetPath, offset + 1);
+        }
+    }
+    return { offsets, truncated: false };
 }
 
 function normalizeTolerantText(value) {

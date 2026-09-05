@@ -413,6 +413,13 @@ test('restores a Mistral figure grid from image block coordinates', () => {
     assert.equal(groups[0].layout, 'grid');
     assert.equal(groups[0].gridColumns, 3);
     assert.deepEqual(groups[0].gridRows, [3, 3, 1]);
+    assert.deepEqual(
+        result.sourceMap
+            .filter(entry => entry.type === 'image')
+            .map(entry => result.markdown.slice(entry.markdownFrom, entry.markdownTo))
+            .map(source => source.match(/\((img-[0-9]+\.png)\)/u)?.[1]),
+        ['img-0.png', 'img-1.png', 'img-2.png', 'img-3.png', 'img-4.png', 'img-5.png', 'img-6.png']
+    );
     const html = renderMarkdownHTML(result.markdown, {
         resolveImageURL: path => `blob:mktero-${path}`,
     });
