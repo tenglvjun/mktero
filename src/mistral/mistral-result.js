@@ -1,4 +1,5 @@
 import { createMarkdownSourceMap } from '../core/markdown-source-map.js';
+import { normalizeMistralMarkdown } from './markdown-normalizer.js';
 
 export const DEFAULT_MAX_MISTRAL_PAGES = 1_000;
 export const DEFAULT_MAX_MISTRAL_MARKDOWN_BYTES = 50 * 1024 * 1024;
@@ -33,6 +34,9 @@ const BLOCK_TYPES = new Map([
     ['code', 'code'],
     ['reference', 'reference'],
     ['bibliography', 'reference'],
+    ['references', 'reference'],
+    ['aside_text', 'text'],
+    ['signature', 'text'],
     ['header', 'header'],
     ['footer', 'footer'],
 ]);
@@ -52,6 +56,8 @@ export function normalizeMistralResult(response, options = {}) {
     const warnings = [];
     const usedPaths = new Set();
     const pageAssets = new Map();
+    const pageTables = new Map();
+    const tableBudget = { count: 0, bytes: 0 };
     const assets = [];
     let totalAssetBytes = 0;
 
@@ -109,7 +115,17 @@ export function normalizeMistralResult(response, options = {}) {
         if (typeof page.markdown !== 'string') {
             throw invalidResult('Mistral page Markdown is invalid');
         }
-        const source = page.markdown.replace(/\r\n?/g, '\n').trim();
+        const tables = normalizePageTables(page, warnings, limits, tableBudget);
+        pageTables.set(page.index, tables);
+        const source = normalizeMistralMarkdown(
+            page.markdown.replace(/\r\n?/g, '\n').trim(),
+            {
+                tables,
+                onMissingTable: reference => warnings.push(
+                    `Mistral table reference "${reference}" on page ${page.index} has no table content.`
+                ),
+            }
+        );
         return rewriteMarkdownImages(source, pageAssets.get(page.index));
     });
     const markdown = markdownPages
@@ -147,6 +163,7 @@ export function normalizeMistralResult(response, options = {}) {
                 page,
                 dimensions,
                 pageMap,
+                pageTables.get(page.index),
                 warnings
             );
             if (normalized) contentList.push(normalized);
@@ -239,7 +256,71 @@ function normalizeDimensions(dimensions) {
         : null;
 }
 
-function normalizeBlock(block, page, dimensions, pageMap, warnings) {
+function normalizePageTables(page, warnings, limits, budget) {
+    const tables = new Map();
+    const rawTables = page.tables;
+    if (rawTables === undefined) return tables;
+    if (!Array.isArray(rawTables)) {
+        warnings.push(`Mistral tables on page ${page.index} were skipped.`);
+        return tables;
+    }
+    for (const table of rawTables) {
+        budget.count++;
+        if (budget.count > limits.maxBlocks) {
+            throw invalidResult('Mistral tables exceed the configured resource limit');
+        }
+        if (!table || typeof table !== 'object' || Array.isArray(table)) {
+            warnings.push(`Mistral table on page ${page.index} was skipped.`);
+            continue;
+        }
+        const id = normalizeTableID(table.id);
+        if (!id) {
+            warnings.push(`Mistral table on page ${page.index} has an invalid ID.`);
+            continue;
+        }
+        const format = table.format ?? table.format_;
+        if (format !== undefined
+            && (typeof format !== 'string'
+                || format.trim().toLowerCase() !== 'markdown')) {
+            warnings.push(
+                `Mistral table "${table.id}" on page ${page.index}`
+                + ' has an unsupported format.'
+            );
+            continue;
+        }
+        if (typeof table.content !== 'string' || !table.content.trim()) {
+            warnings.push(`Mistral table "${table.id}" on page ${page.index} has no content.`);
+            continue;
+        }
+        if (tables.has(id)) {
+            warnings.push(
+                `Mistral page ${page.index} contains duplicate table ID`
+                + ` "${table.id}".`
+            );
+            continue;
+        }
+        const content = table.content.replace(/\r\n?/g, '\n').trim();
+        budget.bytes += new TextEncoder().encode(content).length;
+        if (budget.bytes > limits.maxMarkdownBytes) {
+            throw invalidResult(
+                'Mistral table content exceeds the configured resource limit'
+            );
+        }
+        tables.set(id, content);
+    }
+    return tables;
+}
+
+function normalizeTableID(value) {
+    if (typeof value !== 'string') return null;
+    const source = value.trim();
+    if (!source || !/^tbl-[^/\\?#]+(?:\.md)?$/iu.test(source)) return null;
+    const id = source.replace(/\.md$/iu, '');
+    if (!/^tbl-[^/\\?#]+$/iu.test(id) || /\.md$/iu.test(id)) return null;
+    return id.toLowerCase();
+}
+
+function normalizeBlock(block, page, dimensions, pageMap, tables, warnings) {
     if (!block || typeof block !== 'object' || Array.isArray(block)) {
         warnings.push(`Mistral block on page ${page.index} was skipped.`);
         return null;
@@ -255,7 +336,7 @@ function normalizeBlock(block, page, dimensions, pageMap, warnings) {
         return null;
     }
     const bbox = normalizeBBox(
-        block.bbox ?? block.bounding_box ?? block.boundingBox,
+        block.bbox ?? block.bounding_box ?? block.boundingBox ?? block,
         dimensions
     );
     if (!bbox) {
@@ -269,9 +350,9 @@ function normalizeBlock(block, page, dimensions, pageMap, warnings) {
     };
     if (type === 'image' || type === 'chart') {
         const imageReference = firstString(
-            block.content,
             block.image_id,
             block.imageId,
+            block.content,
             block.assetPath,
             block.text,
             block.id
@@ -284,17 +365,28 @@ function normalizeBlock(block, page, dimensions, pageMap, warnings) {
         normalized.assetPath = assetPath;
         return normalized;
     }
-    const text = blockText(block, type);
+    const text = normalizeMistralMarkdown(
+        blockText(block, type, tables),
+        { tables }
+    );
     if (typeof text === 'string' && text) normalized.text = text;
-    if (!normalized.text && !['header', 'footer'].includes(type)) {
+    const allowsEmptyText = ['header', 'footer'].includes(type)
+        || rawType === 'signature';
+    if (!normalized.text && !allowsEmptyText) {
         warnings.push(`Mistral block on page ${page.index} has no text.`);
         return null;
     }
     return normalized;
 }
 
-function blockText(block, type) {
-    const candidates = [block.content, block.text, block.latex];
+function blockText(block, type, tables) {
+    const candidates = [];
+    if (type === 'table') {
+        const tableID = firstString(block.table_id, block.tableId);
+        const tableContent = findTableContent(tables, tableID);
+        if (tableContent) candidates.push(tableContent);
+    }
+    candidates.push(block.content, block.text, block.latex);
     if (type === 'list' && Array.isArray(block.list_items)) {
         candidates.push(block.list_items
             .filter(item => typeof item === 'string')
@@ -304,6 +396,12 @@ function blockText(block, type) {
         candidates.push(block.markdown, block.table_markdown, block.tableMarkdown);
     }
     return candidates.find(value => typeof value === 'string' && value.trim()) || null;
+}
+
+function findTableContent(tables, tableID) {
+    if (!(tables instanceof Map)) return null;
+    const normalizedID = normalizeTableID(tableID);
+    return normalizedID ? tables.get(normalizedID) || null : null;
 }
 
 function firstString(...values) {
@@ -319,10 +417,24 @@ function normalizeBBox(value, dimensions) {
         [x1, y1, x2, y2] = value;
     }
     else if (value && typeof value === 'object') {
-        x1 = value.x1 ?? value.top_left_x ?? value.left ?? value.x;
-        y1 = value.y1 ?? value.top_left_y ?? value.top ?? value.y;
-        x2 = value.x2 ?? value.bottom_right_x ?? value.right;
-        y2 = value.y2 ?? value.bottom_right_y ?? value.bottom;
+        x1 = value.x1
+            ?? value.top_left_x
+            ?? value.topLeftX
+            ?? value.left
+            ?? value.x;
+        y1 = value.y1
+            ?? value.top_left_y
+            ?? value.topLeftY
+            ?? value.top
+            ?? value.y;
+        x2 = value.x2
+            ?? value.bottom_right_x
+            ?? value.bottomRightX
+            ?? value.right;
+        y2 = value.y2
+            ?? value.bottom_right_y
+            ?? value.bottomRightY
+            ?? value.bottom;
         if (x2 === undefined && Number.isFinite(value.width)) {
             x2 = Number(x1) + value.width;
         }

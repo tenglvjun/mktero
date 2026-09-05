@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { analyzeMarkdownCitations } from '../src/markdown/markdown-citations.js';
+import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
+import { findAcademicFigures } from '../src/markdown/markdown-figures.js';
+import { analyzeMarkdownFigureReferences } from '../src/markdown/markdown-figure-references.js';
 import { normalizeMistralResult } from '../src/mistral/mistral-result.js';
 
 function page(overrides = {}) {
@@ -70,6 +74,154 @@ test('orders pages, joins Markdown, decodes images, and normalizes block bboxes'
     assert.deepEqual(result.sourceMap.map(entry => entry.type), ['image', 'text']);
 });
 
+test('normalizes official Mistral top-level block coordinates and types', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: '# Title\n\nBody text.\n\n[1] Reference',
+            dimensions: { dpi: 200, width: 1000, height: 2000 },
+            blocks: [
+                {
+                    type: 'title',
+                    top_left_x: 100,
+                    top_left_y: 100,
+                    bottom_right_x: 900,
+                    bottom_right_y: 220,
+                    content: 'Title',
+                },
+                {
+                    type: 'text',
+                    top_left_x: 100,
+                    top_left_y: 300,
+                    bottom_right_x: 900,
+                    bottom_right_y: 500,
+                    content: 'Body text.',
+                },
+                {
+                    type: 'references',
+                    top_left_x: 100,
+                    top_left_y: 600,
+                    bottom_right_x: 900,
+                    bottom_right_y: 900,
+                    content: '[1] Reference',
+                },
+                {
+                    type: 'aside_text',
+                    top_left_x: 100,
+                    top_left_y: 950,
+                    bottom_right_x: 900,
+                    bottom_right_y: 1_100,
+                    content: 'Sidebar note',
+                },
+                {
+                    type: 'signature',
+                    top_left_x: 100,
+                    top_left_y: 1_150,
+                    bottom_right_x: 900,
+                    bottom_right_y: 1_300,
+                    content: '',
+                },
+            ],
+        })],
+    });
+
+    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(result.contentList.map(block => ({
+        type: block.type,
+        bbox: block.bbox,
+        text: block.text,
+    })), [
+        { type: 'heading', bbox: [100, 50, 900, 110], text: 'Title' },
+        { type: 'text', bbox: [100, 150, 900, 250], text: 'Body text.' },
+        { type: 'reference', bbox: [100, 300, 900, 450], text: '[1] Reference' },
+        { type: 'text', bbox: [100, 475, 900, 550], text: 'Sidebar note' },
+        { type: 'text', bbox: [100, 575, 900, 650], text: undefined },
+    ]);
+});
+
+test('uses the official image_id when image content is descriptive text', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: '![Figure](img-0.png)',
+            images: [{
+                id: 'img-0.png',
+                image_base64: 'data:image/png;base64,AQID',
+            }],
+            blocks: [{
+                type: 'image',
+                top_left_x: 100,
+                top_left_y: 100,
+                bottom_right_x: 900,
+                bottom_right_y: 900,
+                content: 'Figure 1',
+                image_id: 'img-0.png',
+            }],
+        })],
+    });
+
+    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(result.contentList, [{
+        type: 'image',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 900],
+        assetPath: 'img-0.png',
+    }]);
+});
+
+test('accepts camelCase coordinates from an SDK-normalized Mistral block', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: 'A sufficiently long paragraph for mapping.',
+            blocks: [{
+                type: 'text',
+                topLeftX: 100,
+                topLeftY: 200,
+                bottomRightX: 900,
+                bottomRightY: 400,
+                content: 'A sufficiently long paragraph for mapping.',
+            }],
+        })],
+    });
+
+    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(result.contentList[0].bbox, [100, 200, 900, 400]);
+});
+
+test('normalizes Mistral TeX-wrapped citations before building the source map', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                '# Paper',
+                '',
+                'Evidence \\( [1,2] \\) and author \\( ^{1} \\).',
+                '',
+                '## References',
+                '',
+                '[1] Alpha A. First paper. 2020.',
+                '[2] Beta B. Second paper. 2021.',
+            ].join('\n'),
+            blocks: [{
+                type: 'text',
+                content: 'Evidence \\( [1,2] \\) and author \\( ^{1} \\).',
+                bbox: [0, 0, 900, 900],
+            }],
+        })],
+    });
+
+    assert.match(result.markdown, /Evidence \$\[1,2\]\$ and author \$\^\{1\}\$\./);
+    assert.equal(result.contentList[0].text, result.markdown.split('\n')[2]);
+    const citations = analyzeMarkdownCitations(result.markdown).citations;
+    assert.deepEqual(
+        citations.slice(0, 2).map(citation => ({
+            label: result.markdown.slice(citation.from, citation.to),
+            referenceIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', referenceIds: ['number:1'] },
+            { label: '2', referenceIds: ['number:2'] },
+        ]
+    );
+});
+
 test('rewrites data and remote image destinations to local or empty paths', () => {
     const result = normalizeMistralResult({
         pages: [page({
@@ -94,6 +246,52 @@ test('rewrites data and remote image destinations to local or empty paths', () =
         pages: [page({ markdown: '![remote](https://example.com/figure.png)' })],
     });
     assert.equal(withoutAssets.markdown, '![remote]()');
+});
+
+test('normalizes Mistral filename-alt figures before figure analysis', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                'Ovulation',
+                '',
+                '![img-0.jpeg](img-0.jpeg)',
+                '',
+                'Figure 1. Presentation of the fertile window.',
+            ].join('\n'),
+            images: [{
+                id: 'img-0.jpeg',
+                image_base64: 'data:image/jpeg;base64,AQID',
+            }],
+        })],
+    });
+
+    assert.equal(
+        result.markdown,
+        [
+            'Ovulation',
+            '',
+            '![Figure 1. Presentation of the fertile window.](img-0.jpeg)',
+        ].join('\n')
+    );
+    assert.deepEqual(
+        findAcademicFigures(result.markdown).map(figure => figure.caption.text),
+        ['Figure 1. Presentation of the fertile window.']
+    );
+    const references = analyzeMarkdownFigureReferences([
+        result.markdown,
+        '',
+        'The fertile window is shown in Figure 1.',
+    ].join('\n'));
+    assert.deepEqual(
+        references.targets.map(target => target.label),
+        ['Figure 1.']
+    );
+    assert.equal(
+        renderMarkdownHTML(result.markdown, {
+            resolveImageURL: path => `blob:mktero-${path}`,
+        }).includes('<figure class="mktero-figure">'),
+        true
+    );
 });
 
 test('skips optional malformed blocks and keeps source locations bounded', () => {
@@ -170,4 +368,86 @@ test('supports object pixel boxes and table/equation block text', () => {
         { type: 'table', bbox: [100, 100, 900, 400], text: '| A | B |\n| - | - |\n| 1 | 2 |' },
         { type: 'equation', bbox: [100, 500, 900, 800], text: '$$x^2$$' },
     ]);
+});
+
+test('resolves page table content for Markdown and table blocks', () => {
+    const table = '| A | B |\n| - | - |\n| 1 | 2 |';
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: `Table 1. Values.\n\n[tbl-0.md](tbl-0.md)`,
+            tables: [{
+                id: 'tbl-0',
+                format: 'markdown',
+                content: table,
+            }],
+            blocks: [{
+                type: 'table',
+                table_id: 'tbl-0',
+                bbox: [100, 100, 900, 400],
+            }],
+        })],
+    });
+
+    assert.equal(result.markdown, `Table 1. Values.\n\n${table}`);
+    assert.deepEqual(result.warnings, []);
+    const html = renderMarkdownHTML(result.markdown);
+    assert.match(html, /<table>/u);
+    assert.doesNotMatch(html, /href="tbl-0\.md"/u);
+    assert.deepEqual(result.contentList, [{
+        type: 'table',
+        pageIndex: 0,
+        bbox: [100, 100, 900, 400],
+        text: table,
+    }]);
+});
+
+test('keeps unresolved table links and reports malformed page tables', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: '[tbl-0.md](tbl-0.md)',
+            tables: [
+                { id: '../tbl-0', content: '| unsafe |' },
+                { id: 'tbl-0', format: 'html', content: '<table></table>' },
+                { id: 'tbl-1', format: 'markdown', content: ' ' },
+            ],
+            blocks: [{
+                type: 'text',
+                content: 'Unmapped text block.',
+                bbox: [0, 0, 100, 100],
+            }],
+        })],
+    });
+
+    assert.equal(result.markdown, '[tbl-0.md](tbl-0.md)');
+    assert.equal(result.warnings.length, 4);
+    assert.match(result.warnings[0], /invalid ID/u);
+    assert.match(result.warnings[1], /unsupported format/u);
+    assert.match(result.warnings[2], /has no content/u);
+    assert.match(result.warnings[3], /has no table content/u);
+});
+
+test('bounds Mistral page table count and aggregate content', () => {
+    assert.throws(
+        () => normalizeMistralResult({
+            pages: [page({
+                tables: [
+                    { id: 'tbl-0', content: '| A |' },
+                    { id: 'tbl-1', content: '| B |' },
+                ],
+            })],
+        }, { maxBlocks: 1 }),
+        error => error.code === 'MISTRAL_INVALID_RESULT'
+            && /tables exceed/u.test(error.message)
+    );
+    assert.throws(
+        () => normalizeMistralResult({
+            pages: [page({
+                markdown: 'Body',
+                tables: [{ id: 'tbl-0', content: '| oversized |' }],
+                blocks: [],
+            })],
+        }, { maxMarkdownBytes: 8 }),
+        error => error.code === 'MISTRAL_INVALID_RESULT'
+            && /table content exceeds/u.test(error.message)
+    );
 });
