@@ -11,7 +11,7 @@ export const MISTRAL_PARSER_PROFILE_ID = JSON.stringify({
     provider: 'mistral',
     model: MISTRAL_OCR_MODEL_ID,
     request: MISTRAL_OCR_REQUEST_OPTIONS,
-    headerFooter: 'edge-filter-v3',
+    headerFooter: 'edge-filter-v4-expanded-publisher-residue',
     textFlow: 'same-and-cross-page-column-continuation-v3',
     resultAdapter: 'mistral-ocr-result-v10-bounded-image-filter-page-chrome-text-flow-figure-layouts',
     sourceMap: 'pixel-bbox-0-1000-v1',

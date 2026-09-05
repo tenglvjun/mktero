@@ -48,6 +48,19 @@ const BLOCK_TYPES = new Map([
 const MISTRAL_COLUMN_TOP_THRESHOLD = 240;
 const MISTRAL_COLUMN_BOTTOM_THRESHOLD = 760;
 const MISTRAL_MIN_COLUMN_GAP = 20;
+// Mistral can append conversion-engine labels after the publisher footer
+// (for example, "XSL·FO" and "RenderX"). Keep enough trailing lines in the
+// candidate window to cover the complete footer cluster without scanning body
+// text indiscriminately.
+const MISTRAL_PAGE_EDGE_WINDOW = 12;
+const UNAMBIGUOUS_PUBLISHER_FOOTER_KINDS = new Set([
+    'article-url',
+    'volume',
+    'citation-note',
+    'xsl-fo',
+    'renderx',
+    'publisher-masthead',
+]);
 const MISTRAL_SENTENCE_END_PATTERN = /[.!?。！？]["'”’»)]*$/u;
 const MISTRAL_NON_PROSE_START_PATTERN = /^(?:#{1,6}(?:\s|$)|(?:[-+*]|\d+[.)])\s+|>\s|```|~~~|<|\|)/u;
 
@@ -541,12 +554,69 @@ function findRepeatedPageChromeLines(pageSources) {
 }
 
 function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
+    const context = createPageChromeContext(markdown, records, repeatedLines);
+    const removableIndexes = findRemovablePageChromeIndexes(
+        context,
+        repeatedLines
+    );
+
+    if (pageIndex === 0) {
+        for (const index of findPublisherMastheadIndexes(context.lines)) {
+            removableIndexes.add(index);
+        }
+    }
+
+    const chromeRecords = findChromeRecords(
+        records,
+        context.edgeTextByIndex,
+        removableIndexes
+    );
+
+    if (!removableIndexes.size) return { markdown, chromeRecords };
+    return {
+        markdown: context.lines
+            .filter((line, index) => !removableIndexes.has(index))
+            .join('')
+            .replace(/\n{3,}/gu, '\n\n')
+            .trim(),
+        chromeRecords,
+    };
+}
+
+function createPageChromeContext(markdown, records, repeatedLines) {
     const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
     const edgeIndexes = edgeLineIndexes(lines);
-    const removableIndexes = new Set();
-    const edgeTextByIndex = new Map([...edgeIndexes].map(index => (
+    const footerEdgeIndexes = bottomEdgeLineIndexes(lines);
+    const candidateIndexes = new Set([...edgeIndexes, ...footerEdgeIndexes]);
+    const edgeTextByIndex = new Map([...candidateIndexes].map(index => (
         [index, comparableMarkdownText(lines[index])]
     )));
+    const referenceIndexes = findReferenceIndexes(
+        lines,
+        candidateIndexes,
+        footerEdgeIndexes,
+        edgeTextByIndex,
+        records,
+        repeatedLines,
+    );
+    return {
+        lines,
+        edgeIndexes,
+        footerEdgeIndexes,
+        candidateIndexes,
+        edgeTextByIndex,
+        referenceIndexes,
+    };
+}
+
+function findReferenceIndexes(
+    lines,
+    candidateIndexes,
+    footerEdgeIndexes,
+    edgeTextByIndex,
+    records,
+    repeatedLines
+) {
     const referenceTexts = new Set();
     for (const record of records) {
         if (record.normalized?.type !== 'reference') continue;
@@ -560,43 +630,74 @@ function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
     const referenceHeadingIndex = lines.findIndex(line => (
         /^ {0,3}#{1,6}[ \t]+(?:references|bibliography)\b/iu.test(line)
     ));
-    if (referenceHeadingIndex >= 0) {
-        for (const index of edgeIndexes) {
-            if (index > referenceHeadingIndex) referenceIndexes.add(index);
+    if (referenceHeadingIndex < 0) return referenceIndexes;
+    const hasRepeatedPublisherFooter = [...footerEdgeIndexes].some(index => {
+        const text = edgeTextByIndex.get(index);
+        return isUnambiguousPublisherFooterText(text)
+            && pageChromeKeys(text).some(key => repeatedLines.has(key));
+    });
+    const hasAdjacentVolumeFooter = [...footerEdgeIndexes].some(index => {
+        if (publisherFooterKind(edgeTextByIndex.get(index)) !== 'article-url') {
+            return false;
+        }
+        return [...footerEdgeIndexes].some(otherIndex => (
+            Math.abs(otherIndex - index) <= 4
+            && publisherFooterKind(edgeTextByIndex.get(otherIndex)) === 'volume'
+        ));
+    });
+    for (const index of candidateIndexes) {
+        const text = edgeTextByIndex.get(index);
+        const isPublisherFooter = isUnambiguousPublisherFooterText(text)
+            && (hasRepeatedPublisherFooter || hasAdjacentVolumeFooter);
+        if (index > referenceHeadingIndex
+            && !isPublisherFooter) {
+            referenceIndexes.add(index);
         }
     }
+    return referenceIndexes;
+}
 
-    const hasRepeatedPublisherFooter = [...edgeIndexes].some(index => {
+function findRemovablePageChromeIndexes(context, repeatedLines) {
+    const {
+        edgeIndexes,
+        footerEdgeIndexes,
+        candidateIndexes,
+        edgeTextByIndex,
+        referenceIndexes,
+    } = context;
+    const hasRepeatedPublisherFooter = [...footerEdgeIndexes].some(index => {
         if (referenceIndexes.has(index)) return false;
         const text = edgeTextByIndex.get(index);
         return text
             && isPublisherFooterText(text)
             && pageChromeKeys(text).some(key => repeatedLines.has(key));
     });
-    const publisherFooterKinds = new Set([...edgeIndexes]
+    const publisherFooterKinds = new Set([...footerEdgeIndexes]
         .filter(index => !referenceIndexes.has(index))
         .map(index => publisherFooterKind(edgeTextByIndex.get(index)))
         .filter(Boolean));
     const hasGroupedPublisherFooter = publisherFooterKinds.size >= 2;
-
-    for (const index of edgeIndexes) {
+    const removableIndexes = new Set();
+    for (const index of candidateIndexes) {
         if (referenceIndexes.has(index)) continue;
         const text = edgeTextByIndex.get(index);
         if (!text) continue;
+        const repeatedChrome = (
+            edgeIndexes.has(index)
+            || (footerEdgeIndexes.has(index) && isPublisherFooterText(text))
+        ) && pageChromeKeys(text).some(key => repeatedLines.has(key));
         if (isPageNumberText(text)
-            || pageChromeKeys(text).some(key => repeatedLines.has(key))
-            || ((hasRepeatedPublisherFooter || hasGroupedPublisherFooter)
+            || repeatedChrome
+            || (footerEdgeIndexes.has(index)
+                && (hasRepeatedPublisherFooter || hasGroupedPublisherFooter)
                 && isPublisherFooterText(text))) {
             removableIndexes.add(index);
         }
     }
+    return removableIndexes;
+}
 
-    if (pageIndex === 0) {
-        for (const index of findPublisherMastheadIndexes(lines)) {
-            removableIndexes.add(index);
-        }
-    }
-
+function findChromeRecords(records, edgeTextByIndex, removableIndexes) {
     const chromeRecords = new Set();
     for (const record of records) {
         const block = record.normalized;
@@ -619,17 +720,7 @@ function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
         for (const index of chromeMatches) removableIndexes.add(index);
         chromeRecords.add(record);
     }
-
-    if (!removableIndexes.size) {
-        return { markdown, chromeRecords };
-    }
-    return {
-        markdown: lines
-            .filter((line, index) => !removableIndexes.has(index))
-            .join('')
-            .trim(),
-        chromeRecords,
-    };
+    return chromeRecords;
 }
 
 function normalizeMistralTextFlow(markdown, records) {
@@ -715,13 +806,21 @@ function applyMistralTextFlowEdits(markdown, edits) {
 }
 
 function edgeLineIndexes(lines) {
-    const nonEmpty = lines
-        .map((line, index) => line.trim() ? index : null)
-        .filter(index => index !== null);
+    const nonEmpty = nonEmptyLineIndexes(lines);
     return new Set([
         ...nonEmpty.slice(0, 3),
         ...nonEmpty.slice(-3),
     ]);
+}
+
+function bottomEdgeLineIndexes(lines) {
+    return new Set(nonEmptyLineIndexes(lines).slice(-MISTRAL_PAGE_EDGE_WINDOW));
+}
+
+function nonEmptyLineIndexes(lines) {
+    return lines
+        .map((line, index) => line.trim() ? index : null)
+        .filter(index => index !== null);
 }
 
 function isPageEdgeBBox(bbox) {
@@ -738,17 +837,27 @@ function isPublisherFooterText(text) {
     return publisherFooterKind(text) !== null;
 }
 
+function isUnambiguousPublisherFooterText(text) {
+    return UNAMBIGUOUS_PUBLISHER_FOOTER_KINDS.has(publisherFooterKind(text));
+}
+
 function publisherFooterKind(text) {
     if (/(?:doi\.org\/10\.\d+)/iu.test(text)) return 'doi';
     if (/\/journal\//iu.test(text)) return 'journal-url';
     if (/^https?:\/\/\S+\/\d{4}\/\d+\/[a-z0-9-]+$/iu.test(text)) {
         return 'article-url';
     }
-    if (/\b(?:19|20)\d{2}\s*\|\s*vol\.\s*\d+\s*\|\s*[a-z0-9-]+\s*\|\s*p\.\s*\d+$/iu.test(text)) {
+    if (/\b(?:19|20)\d{2}\s*\|\s*vol\.\s*\d+\s*\|\s*[a-z0-9-]+\s*\|\s*p\.\s*\d+(?:https?:\/\/\S+)?$/iu.test(text)) {
         return 'volume';
     }
     if (/^\(page number not for citation purposes\)$/iu.test(text)) {
         return 'citation-note';
+    }
+    if (/^xsl[\s·•.-]*fo$/iu.test(text)) return 'xsl-fo';
+    if (/^renderx$/iu.test(text)) return 'renderx';
+    if (/\bet al(?:journal\b|[ \t]*[A-Z][A-Z .&'’-]{5,})/u.test(text)
+        && text.length <= 200) {
+        return 'publisher-masthead';
     }
     return null;
 }

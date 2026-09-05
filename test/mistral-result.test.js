@@ -504,6 +504,105 @@ test('removes publisher footer links when Mistral omits footer blocks', () => {
     );
 });
 
+test('removes a complete publisher footer when conversion residue follows it', () => {
+    const footer = index => [
+        'https://www.jmir.org/2024/1/e45139',
+        '',
+        `J Med Internet Res 2024 | vol. 26 | e45139 | p. ${index + 1}`,
+        '',
+        '(page number not for citation purposes)',
+        '',
+        'Lyzwinski et alJOURNAL OF MEDICAL INTERNET RESEARCH',
+        '',
+        'XSL·FO',
+        '',
+        'RenderX',
+    ];
+    const result = normalizeMistralResult({
+        pages: [0, 1].map(index => page({
+            index,
+            markdown: [
+                index === 0 ? '# Paper title' : 'Second page body.',
+                '',
+                index === 0 ? 'Body paragraph.' : 'More body.',
+                '',
+                ...footer(index),
+                '',
+                index === 0 ? '![Figure](img.png)' : 'End marker',
+            ].join('\n'),
+        })),
+    });
+
+    assert.equal(
+        result.markdown,
+        '# Paper title\n\nBody paragraph.\n\n![Figure]()\n\n'
+            + 'Second page body.\n\nMore body.\n\nEnd marker'
+    );
+    assert.doesNotMatch(result.markdown, /jmir\.org|XSL|RenderX|citation purposes/iu);
+});
+
+test('removes publisher markers at the twelfth non-empty edge line', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                '# Paper title',
+                'Body paragraph.',
+                ...Array.from({ length: 10 }, (_, index) => `Body line ${index + 1}.`),
+                'https://www.jmir.org/2024/1/e45139',
+                'J Med Internet Res 2024 | vol. 26 | e45139 | p. 1',
+            ].join('\n\n'),
+        })],
+    });
+
+    assert.doesNotMatch(result.markdown, /jmir\.org|J Med Internet Res 2024 \|/iu);
+    assert.match(result.markdown, /Body line 1\./u);
+});
+
+test('keeps publisher-looking prose outside the page edge window', () => {
+    const lines = [
+        '# Paper title',
+        'Body paragraph.',
+        'https://www.jmir.org/2024/1/e45139',
+        'XSL·FO',
+        'RenderX',
+        ...Array.from({ length: 18 }, (_, index) => `Additional body line ${index + 1}.`),
+    ];
+    const result = normalizeMistralResult({
+        pages: [page({ markdown: lines.join('\n\n') })],
+    });
+
+    assert.match(result.markdown, /https:\/\/www\.jmir\.org\/2024\/1\/e45139/u);
+    assert.match(result.markdown, /XSL·FO/u);
+    assert.match(result.markdown, /RenderX/u);
+});
+
+test('protects reference URLs that resemble a publisher footer', () => {
+    const referenceURL = 'https://example.org/2024/1/foo';
+    const result = normalizeMistralResult({
+        pages: [
+            page({
+                index: 0,
+                markdown: [
+                    '## References',
+                    referenceURL,
+                    'XSL·FO',
+                ].join('\n\n'),
+            }),
+            page({
+                index: 1,
+                markdown: [
+                    'Body paragraph.',
+                    'https://www.jmir.org/2024/1/e45139',
+                    'J Med Internet Res 2024 | vol. 26 | e45139 | p. 2',
+                ].join('\n\n'),
+            }),
+        ],
+    });
+
+    assert.match(result.markdown, new RegExp(referenceURL.replaceAll('.', '\\.'), 'u'));
+    assert.doesNotMatch(result.markdown, /www\.jmir\.org|J Med Internet Res 2024 \|/iu);
+});
+
 test('joins a paragraph that continues from the bottom of one column', () => {
     const firstBlock = 'MT has emerged as a promising approach. '
         + 'Studies showed improvements in stress coping, reduction in anxiety '
