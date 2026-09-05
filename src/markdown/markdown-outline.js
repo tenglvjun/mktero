@@ -112,7 +112,7 @@ function visibleHeadingText(headingSource, nodeName) {
     let text = headingSource;
     if (nodeName.startsWith('ATXHeading')) {
         text = text
-            .replace(/^ {0,3}#{1,6}[\t ]+/, '')
+            .replace(/^ {0,3}#{1,6}(?:[\t ]+|$)/, '')
             .replace(/[\t ]+#+[\t ]*$/, '');
     }
     else {

@@ -34,6 +34,13 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
 
 - Reflow OCR output, multi-column text, formulas, tables, figures, lists, and
   code into a continuous academic reading document.
+- Mistral uses image coordinates to suppress OCR text that belongs inside an
+  extracted figure. Both OCR providers restore multi-panel layouts from image
+  coordinates; MinerU keeps its bbox-backed safety checks, while Mistral also
+  supports a conservative fallback when coordinates are unavailable.
+- Mistral removes publisher mastheads, repeated page headers and footers, and
+  page numbers from OCR Markdown, joins safe same-page and cross-page column
+  continuations, and preserves matching text in the body.
 - Keep reliable page and region mappings so text, formulas, tables, and figures
   can jump back to their PDF source.
 - Preview citations, author affiliations, figures, and tables without losing
@@ -68,8 +75,8 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
 
 - Desktop Zotero `7.0` through `10.0.*`
 - A PDF attachment downloaded and available as a local file
-- A [MinerU API Token](https://mineru.net/apiManage/token) when MinerU is selected,
-  or a [Mistral API Key](https://console.mistral.ai/api-keys/) when Mistral is selected
+- An API key for the selected conversion provider: [MinerU](https://mineru.net/apiManage/token)
+  or [Mistral](https://console.mistral.ai/api-keys/)
 - Network access to the selected conversion API
 
 MinerU and Mistral control file-size, page-count, quota, and service-availability
@@ -96,8 +103,7 @@ Open `Settings -> Mktero` after installation.
 | Setting | Required | Purpose |
 | --- | --- | --- |
 | Conversion provider | Yes | Select MinerU or Mistral OCR 4.1 |
-| MinerU API Token | Required for a MinerU cache miss | Upload and convert PDFs with MinerU |
-| Mistral API Key | Required for a Mistral cache miss | Convert PDFs synchronously with Mistral OCR 4.1 |
+| API key | Required for a cache miss | Enter the key for the selected provider; use the adjacent manage link to create or update it |
 | AI features and provider settings | Optional | Translate Markdown through a hosted or loopback model service |
 | Translation language | Optional | Choose Simplified/Traditional Chinese, Japanese, Korean, Spanish, French, or Brazilian Portuguese |
 | Automatically translate Markdown selections | Optional, off by default | Translate a stable selection without an extra click; disabling it keeps the manual popup action |
