@@ -11,6 +11,10 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
         'same-page-horizontal-or-labeled-vertical-ab-v2'
     );
     assert.equal(
+        MINERU_SOURCE_MAP_OPTIONS.figureLayouts,
+        'same-page-image-group-layout-v1'
+    );
+    assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.textFlow,
         'cross-page-continuation-v1'
     );
@@ -581,6 +585,47 @@ test('marks already adjacent bbox-backed panels as horizontal', () => {
             + `![${caption}](images/panel-b.jpg)`
     );
     assert.equal(findAcademicFigureGroups(result.markdown)[0]?.layout, 'horizontal');
+});
+
+test('restores a MinerU multi-image grid from content-list coordinates', () => {
+    const boxes = [
+        [50, 100, 300, 300],
+        [350, 100, 600, 300],
+        [650, 100, 900, 300],
+        [50, 350, 300, 550],
+        [350, 350, 600, 550],
+        [650, 350, 900, 550],
+        [50, 600, 300, 800],
+    ];
+    const images = boxes.map((bbox, index) => ({
+        type: 'image',
+        assetPath: `images/mineru-${index}.png`,
+        pageIndex: 4,
+        bbox,
+    }));
+    const result = prepareMinerUResult({
+        markdown: [
+            ...images.map(image => `![](${image.assetPath})`),
+            '',
+            'Figure 4. Seven MinerU panels.',
+        ].join('\n\n'),
+        contentList: images,
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=3 rows=3,3,1 -->/u
+    );
+    const groups = findAcademicFigureGroups(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].layout, 'grid');
+    assert.equal(groups[0].gridColumns, 3);
+    assert.deepEqual(groups[0].gridRows, [3, 3, 1]);
+    const html = renderMarkdownHTML(result.markdown, {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+    assert.match(html, /mktero-figure-group-grid/u);
+    assert.match(html, /mktero-figure-panels-grid/u);
 });
 
 test('reassembles vertically stacked MinerU panels with leading A/B labels', () => {

@@ -3,6 +3,7 @@ import {
     normalizeMarkdownFigureCaptions,
     parseAcademicFigureCaption,
 } from '../markdown/markdown-figures.js';
+import { normalizeFigureLayouts } from '../markdown/figure-layout-normalizer.js';
 import { isNumericCitationContent } from '../markdown/text-normalization.js';
 
 const MARKDOWN_PARSER = markdownParser.configure(GFM);
@@ -32,6 +33,19 @@ export function normalizeMistralMarkdown(markdown, {
         onMissingTable
     );
     return normalizeMistralFigureCaptions(withTables);
+}
+
+export function normalizeMistralFigureLayouts(markdown, imageBlocks = []) {
+    return normalizeFigureLayouts(markdown, imageBlocks, {
+        allowFallback: true,
+    });
+}
+
+function nextNearbyLineIsImage(lines, index) {
+    let nextIndex = index + 1;
+    while (nextIndex < lines.length && !lines[nextIndex].trim()) nextIndex++;
+    return nextIndex < lines.length
+        && IMAGE_LINE_PATTERN.test(lines[nextIndex]);
 }
 
 /**
@@ -164,8 +178,16 @@ function normalizeMistralFigureCaptions(markdown) {
         if (!image || !looksLikeImageFilenameAlt(image[2], image[3])) {
             continue;
         }
-        if (hasNearbyAcademicCaption(lines, index, 1)
-            || hasNearbyAcademicCaption(lines, index, -1)) {
+        const followingCaption = hasNearbyAcademicCaption(lines, index, 1);
+        const precedingCaption = hasNearbyAcademicCaption(lines, index, -1);
+        // Leave a preceding caption in place when another image follows. The
+        // shared figure analyzer can then keep the caption attached to the
+        // complete panel group instead of making it look like a standalone
+        // first image.
+        if (precedingCaption && nextNearbyLineIsImage(lines, index)) {
+            continue;
+        }
+        if (followingCaption || precedingCaption) {
             replacements.set(index, `${image[1]}![](${image[3]}${image[4]})`
                 + lineEnding(line));
         }

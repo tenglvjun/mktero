@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeMistralMarkdown } from '../src/mistral/markdown-normalizer.js';
+import {
+    normalizeMistralFigureLayouts,
+    normalizeMistralMarkdown,
+} from '../src/mistral/markdown-normalizer.js';
 
 test('converts numeric citations wrapped in Mistral TeX parentheses', () => {
     assert.equal(
@@ -80,6 +83,25 @@ test('associates a filename-alt image with a preceding academic figure caption',
 test('preserves filename alt text without a nearby figure caption', () => {
     const markdown = '![img-0.jpeg](img-0.jpeg)';
     assert.equal(normalizeMistralMarkdown(markdown), markdown);
+});
+
+test('does not duplicate an existing legacy figure layout marker', () => {
+    const markdown = [
+        '<!-- mktero-mistral-figure-grid: columns=2 rows=2 -->',
+        '',
+        '![](img-0.png)',
+        '',
+        '![](img-1.png)',
+        '',
+        'Figure 1. Two panels.',
+    ].join('\n');
+    assert.equal(
+        normalizeMistralFigureLayouts(markdown, [
+            { assetPath: 'img-0.png', pageIndex: 0, bbox: [0, 0, 500, 500] },
+            { assetPath: 'img-1.png', pageIndex: 0, bbox: [500, 0, 1000, 500] },
+        ]),
+        markdown
+    );
 });
 
 test('does not associate remote or unsafe image destinations with captions', () => {

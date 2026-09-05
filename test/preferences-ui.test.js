@@ -221,26 +221,32 @@ test('configures the Markdown reader font size from preferences', async () => {
     assert.equal(writes.length, 2);
 });
 
-test('initializes the conversion provider without sharing credential fields', async () => {
+test('switches one conversion API key field with the selected provider', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
             <select id="mktero-conversion-provider">
                 <option value="mineru">MinerU</option>
                 <option value="mistral">Mistral OCR 4.1</option>
             </select>
-            <input id="mktero-mineru-api-key" value="mineru-secret">
-            <input id="mktero-mistral-api-key" value="mistral-secret">
+            <input id="mktero-api-key">
+            <a id="mktero-api-key-manage"></a>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
         </section>
     </body>`);
     const values = new Map([
         ['extensions.mktero.conversionProvider', 'mistral'],
+        ['extensions.mktero.mineruApiKey', 'mineru-secret'],
+        ['extensions.mktero.mistralApiKey', 'mistral-secret'],
     ]);
+    const writes = [];
     const controller = createPreferencesController({
         document: dom.window.document,
         zotero: {
-            Prefs: { get: key => values.get(key) },
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => writes.push({ key, value, global }),
+            },
             logError: assert.fail,
         },
         cache: {
@@ -255,14 +261,41 @@ test('initializes the conversion provider without sharing credential fields', as
         'mistral'
     );
     assert.equal(
-        dom.window.document.getElementById('mktero-mineru-api-key').value,
+        dom.window.document.getElementById('mktero-api-key').value,
+        'mistral-secret'
+    );
+    assert.equal(
+        dom.window.document.getElementById('mktero-api-key-manage').href,
+        'https://console.mistral.ai/api-keys/'
+    );
+
+    const provider = dom.window.document.getElementById(
+        'mktero-conversion-provider'
+    );
+    provider.value = 'mineru';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        dom.window.document.getElementById('mktero-api-key').value,
         'mineru-secret'
     );
     assert.equal(
-        dom.window.document.getElementById('mktero-mistral-api-key').value,
-        'mistral-secret'
+        dom.window.document.getElementById('mktero-api-key-manage').href,
+        'https://mineru.net/apiManage/token'
     );
+
+    const apiKey = dom.window.document.getElementById('mktero-api-key');
+    apiKey.value = 'updated-mineru-secret';
+    apiKey.dispatchEvent(new dom.window.Event('change'));
+    assert.deepEqual(writes, [{
+        key: 'extensions.mktero.mineruApiKey',
+        value: 'updated-mineru-secret',
+        global: true,
+    }]);
+
     controller.destroy();
+    provider.value = 'mistral';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(apiKey.value, 'updated-mineru-secret');
 });
 
 test('tests the current AI SDK settings without exposing the key', async () => {

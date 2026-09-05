@@ -294,6 +294,415 @@ test('normalizes Mistral filename-alt figures before figure analysis', () => {
     );
 });
 
+test('removes OCR text that is contained inside a Mistral image bbox', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                'Ovulation',
+                '',
+                'LH surge',
+                '',
+                'Body text outside the figure.',
+                '',
+                '![img-0.png](img-0.png)',
+            ].join('\n'),
+            images: [{
+                id: 'img-0.png',
+                image_base64: 'data:image/png;base64,AQID',
+            }],
+            blocks: [
+                {
+                    type: 'image',
+                    image_id: 'img-0.png',
+                    bbox: [100, 100, 900, 500],
+                },
+                {
+                    type: 'text',
+                    content: 'Ovulation',
+                    bbox: [180, 180, 420, 240],
+                },
+                {
+                    type: 'text',
+                    content: 'LH surge',
+                    bbox: [180, 260, 420, 320],
+                },
+                {
+                    type: 'text',
+                    content: 'Body text outside the figure.',
+                    bbox: [100, 600, 900, 700],
+                },
+            ],
+        })],
+    });
+
+    assert.equal(
+        result.markdown,
+        'Body text outside the figure.\n\n![img-0.png](img-0.png)'
+    );
+    assert.deepEqual(result.contentList.map(block => block.type), [
+        'image',
+        'text',
+    ]);
+    assert.equal(
+        result.sourceMap.some(entry => entry.markdownFrom >= 0
+            && result.markdown.slice(entry.markdownFrom, entry.markdownTo)
+                .includes('Ovulation')),
+        false
+    );
+});
+
+test('keeps Mistral prose when image or text bboxes are unavailable', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                'Ovulation',
+                '',
+                '![img-0.png](img-0.png)',
+            ].join('\n'),
+            images: [{
+                id: 'img-0.png',
+                image_base64: 'data:image/png;base64,AQID',
+            }],
+            blocks: [{
+                type: 'text',
+                content: 'Ovulation',
+            }],
+        })],
+    });
+
+    assert.match(result.markdown, /^Ovulation\n\n/u);
+});
+
+test('restores a Mistral figure grid from image block coordinates', () => {
+    const imageCount = 7;
+    const images = Array.from({ length: imageCount }, (_, index) => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+    }));
+    const boxes = [
+        [50, 100, 300, 300],
+        [350, 100, 600, 300],
+        [650, 100, 900, 300],
+        [50, 350, 300, 550],
+        [350, 350, 600, 550],
+        [650, 350, 900, 550],
+        [50, 600, 300, 800],
+    ];
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                ...images.map(image => `![${image.id}](${image.id})`),
+                '',
+                'Figure 4. Seven menstrual cycles.',
+            ].join('\n\n'),
+            images,
+            blocks: boxes.map((bbox, index) => ({
+                type: 'image',
+                image_id: `img-${index}.png`,
+                bbox,
+            })),
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=3 rows=3,3,1 -->/u
+    );
+    const groups = findAcademicFigures(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].layout, 'grid');
+    assert.equal(groups[0].gridColumns, 3);
+    assert.deepEqual(groups[0].gridRows, [3, 3, 1]);
+    const html = renderMarkdownHTML(result.markdown, {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+    assert.match(html, /mktero-figure-group-grid/u);
+    assert.match(html, /mktero-figure-panels-grid/u);
+    assert.match(html, /--mktero-figure-grid-columns:3/u);
+});
+
+test('uses official Mistral image metadata coordinates for figure grids', () => {
+    const boxes = [
+        [50, 100, 300, 300],
+        [350, 100, 600, 300],
+        [650, 100, 900, 300],
+        [50, 350, 300, 550],
+        [350, 350, 600, 550],
+        [650, 350, 900, 550],
+        [50, 600, 300, 800],
+    ];
+    const images = boxes.map((bbox, index) => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+        top_left_x: bbox[0],
+        top_left_y: bbox[1],
+        bottom_right_x: bbox[2],
+        bottom_right_y: bbox[3],
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                ...images.map(image => `![${image.id}](${image.id})`),
+                '',
+                'Figure 4. Seven menstrual cycles.',
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=3 rows=3,3,1 -->/u
+    );
+    assert.equal(
+        result.contentList.filter(block => block.type === 'image').length,
+        7
+    );
+});
+
+test('restores every multi-image figure shape, including a horizontal pair', () => {
+    const images = [0, 1].map(index => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+        bbox: [50 + index * 450, 100, 400 + index * 450, 450],
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                ...images.map(image => `![${image.id}](${image.id})`),
+                '',
+                'Figure 1. Two panels.',
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=2 rows=2 -->/u
+    );
+    const groups = findAcademicFigures(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].layout, 'horizontal');
+    assert.equal(groups[0].gridColumns, 2);
+});
+
+test('restores a full-width main panel above a multi-column panel grid', () => {
+    const boxes = [
+        [80, 80, 920, 360],
+        [80, 410, 480, 650],
+        [520, 410, 920, 650],
+        [80, 700, 480, 940],
+        [520, 700, 920, 940],
+    ];
+    const images = boxes.map((bbox, index) => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+        bbox,
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                ...images.map(image => `![${image.id}](${image.id})`),
+                '',
+                'Figure 2. A composite figure.',
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=2 rows=1,2,2 spans=2,1,1,1,1 -->/u
+    );
+    const groups = findAcademicFigures(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].layout, 'grid');
+    assert.deepEqual(groups[0].gridRows, [1, 2, 2]);
+    assert.deepEqual(groups[0].gridSpans, [2, 1, 1, 1, 1]);
+
+    const html = renderMarkdownHTML(result.markdown, {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+    assert.match(html, /grid-column:1 \/ -1/u);
+});
+
+test('uses a conservative grid fallback when Mistral omits image bboxes', () => {
+    const images = Array.from({ length: 9 }, (_, index) => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                ...images.map(image => `![${image.id}](${image.id})`),
+                '',
+                'Figure 3. Nine repeated panels.',
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=3 rows=3,3,3 -->/u
+    );
+    const groups = findAcademicFigures(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].layout, 'grid');
+    assert.deepEqual(groups[0].gridRows, [3, 3, 3]);
+});
+
+test('groups a vertically stacked figure without forcing its panels wider', () => {
+    const images = [0, 1, 2].map(index => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+        bbox: [300, 100 + index * 300, 700, 320 + index * 300],
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                ...images.map(image => `![${image.id}](${image.id})`),
+                '',
+                'Figure 4. Three vertically stacked panels.',
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=1 rows=1,1,1 -->/u
+    );
+    const groups = findAcademicFigures(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].layout, 'vertical');
+    const html = renderMarkdownHTML(result.markdown, {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+    assert.match(html, /mktero-figure-group-vertical/u);
+    assert.doesNotMatch(html, /mktero-figure-panels-grid/u);
+});
+
+test('does not merge an already captioned image with the following figure', () => {
+    const images = Array.from({ length: 10 }, (_, index) => ({
+        id: `img-${index}.jpeg`,
+        image_base64: 'data:image/jpeg;base64,AQID',
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                `![Figure 2. Histogram.](${images[0].id})`,
+                '',
+                ...images.slice(1).map(image => `![](${image.id})`),
+                '',
+                'Figure 3. Nine cycle panels.',
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /Figure 2\. Histogram\./u
+    );
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=3 rows=3,3,3 -->/u
+    );
+    const groups = findAcademicFigures(result.markdown);
+    assert.equal(groups.length, 2);
+    assert.equal(groups[0].caption.label, 'Figure 2.');
+    assert.equal(groups[1].caption.label, 'Figure 3.');
+});
+
+test('keeps leading and trailing captions on adjacent figures separate', () => {
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: 'Figure 2. First result.\n\n'
+                + '![img-0.png](img-0.png)\n\n'
+                + '![img-1.png](img-1.png)\n\n'
+                + 'Figure 3. Second result.',
+            images: [{
+                id: 'img-0.png',
+                image_base64: 'data:image/png;base64,AQID',
+            }, {
+                id: 'img-1.png',
+                image_base64: 'data:image/png;base64,AQID',
+            }],
+        })],
+    });
+
+    const figures = findAcademicFigures(result.markdown);
+    assert.equal(figures.length, 2);
+    assert.deepEqual(
+        figures.map(figure => ({
+            caption: figure.caption.label,
+            images: figure.images.length,
+        })),
+        [{ caption: 'Figure 2.', images: 1 }, { caption: 'Figure 3.', images: 1 }]
+    );
+    assert.doesNotMatch(result.markdown, /mktero-figure-layout/u);
+});
+
+test('keeps a preceding caption attached to the complete Mistral image group', () => {
+    const images = [0, 1, 2].map(index => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                'Figure 5. A caption before the panels.',
+                '',
+                ...images.map(image => `![${image.id}](${image.id})`),
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.match(
+        result.markdown,
+        /<!-- mktero-figure-layout: columns=3 rows=3 -->\nFigure 5\./u
+    );
+    const groups = findAcademicFigures(result.markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].caption.label, 'Figure 5.');
+    assert.equal(groups[0].layout, 'horizontal');
+});
+
+test('orders panels by their page coordinates when OCR emits column-major order', () => {
+    const boxesBySourceOrder = [
+        [50, 100, 300, 300],
+        [50, 350, 300, 550],
+        [50, 600, 300, 800],
+        [350, 100, 600, 300],
+        [350, 350, 600, 550],
+        [350, 600, 600, 800],
+    ];
+    const images = boxesBySourceOrder.map((bbox, index) => ({
+        id: `img-${index}.png`,
+        image_base64: 'data:image/png;base64,AQID',
+        bbox,
+    }));
+    const result = normalizeMistralResult({
+        pages: [page({
+            markdown: [
+                ...images.map(image => `![${image.id}](${image.id})`),
+                '',
+                'Figure 6. Six panels.',
+            ].join('\n\n'),
+            images,
+        })],
+    });
+
+    assert.deepEqual(
+        [...result.markdown.matchAll(/!\[[^\]]*\]\((img-[0-9]+\.png)\)/gu)]
+            .map(match => match[1]),
+        ['img-0.png', 'img-3.png', 'img-1.png', 'img-4.png', 'img-2.png', 'img-5.png']
+    );
+});
+
 test('skips optional malformed blocks and keeps source locations bounded', () => {
     const result = normalizeMistralResult({
         pages: [page({

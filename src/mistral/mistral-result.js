@@ -1,5 +1,8 @@
 import { createMarkdownSourceMap } from '../core/markdown-source-map.js';
-import { normalizeMistralMarkdown } from './markdown-normalizer.js';
+import {
+    normalizeMistralFigureLayouts,
+    normalizeMistralMarkdown,
+} from './markdown-normalizer.js';
 
 export const DEFAULT_MAX_MISTRAL_PAGES = 1_000;
 export const DEFAULT_MAX_MISTRAL_MARKDOWN_BYTES = 50 * 1024 * 1024;
@@ -57,6 +60,7 @@ export function normalizeMistralResult(response, options = {}) {
     const usedPaths = new Set();
     const pageAssets = new Map();
     const pageTables = new Map();
+    const pageBlockRecords = new Map();
     const tableBudget = { count: 0, bytes: 0 };
     const assets = [];
     let totalAssetBytes = 0;
@@ -117,8 +121,31 @@ export function normalizeMistralResult(response, options = {}) {
         }
         const tables = normalizePageTables(page, warnings, limits, tableBudget);
         pageTables.set(page.index, tables);
-        const source = normalizeMistralMarkdown(
+        const dimensions = normalizeDimensions(page.dimensions);
+        const records = normalizePageBlockRecords(
+            page,
+            dimensions,
+            pageAssets.get(page.index),
+            tables,
+            warnings
+        );
+        appendImageMetadataRecords(
+            records,
+            page,
+            dimensions,
+            pageAssets.get(page.index)
+        );
+        const interiorTextRecords = findImageInteriorTextRecords(records);
+        pageBlockRecords.set(page.index, {
+            records,
+            interiorTextRecords,
+        });
+        let source = removeImageInteriorText(
             page.markdown.replace(/\r\n?/g, '\n').trim(),
+            interiorTextRecords
+        );
+        source = normalizeMistralMarkdown(
+            source,
             {
                 tables,
                 onMissingTable: reference => warnings.push(
@@ -126,7 +153,13 @@ export function normalizeMistralResult(response, options = {}) {
                 ),
             }
         );
-        return rewriteMarkdownImages(source, pageAssets.get(page.index));
+        source = rewriteMarkdownImages(source, pageAssets.get(page.index));
+        return normalizeMistralFigureLayouts(
+            source,
+            records
+                .map(record => record.normalized)
+                .filter(block => block?.type === 'image' || block?.type === 'chart')
+        );
     });
     const markdown = markdownPages
         .filter(page => page.length > 0)
@@ -138,35 +171,15 @@ export function normalizeMistralResult(response, options = {}) {
 
     const contentList = [];
     for (const page of pageRecords) {
-        const dimensions = normalizeDimensions(page.dimensions);
-        const pageMap = pageAssets.get(page.index);
-        const blocks = page.blocks;
-        if (blocks !== undefined && !Array.isArray(blocks)) {
-            warnings.push(`Mistral blocks on page ${page.index} were skipped.`);
-            continue;
-        }
-        const rawBlocks = [...(blocks || [])];
-        // Some API responses expose tables separately from blocks. Include them
-        // only as a fallback so that a table can still be source-mapped.
-        if (!rawBlocks.length && Array.isArray(page.tables)) {
-            rawBlocks.push(...page.tables.map(table => ({
-                ...table,
-                type: table?.type || 'table',
-            })));
-        }
-        for (const block of rawBlocks) {
+        const blockRecords = pageBlockRecords.get(page.index);
+        for (const record of blockRecords?.records || []) {
             if (contentList.length >= limits.maxBlocks) {
                 throw invalidResult('Mistral blocks exceed the configured resource limit');
             }
-            const normalized = normalizeBlock(
-                block,
-                page,
-                dimensions,
-                pageMap,
-                pageTables.get(page.index),
-                warnings
-            );
-            if (normalized) contentList.push(normalized);
+            if (!record.normalized || blockRecords.interiorTextRecords.has(record)) {
+                continue;
+            }
+            contentList.push(record.normalized);
         }
     }
 
@@ -318,6 +331,160 @@ function normalizeTableID(value) {
     const id = source.replace(/\.md$/iu, '');
     if (!/^tbl-[^/\\?#]+$/iu.test(id) || /\.md$/iu.test(id)) return null;
     return id.toLowerCase();
+}
+
+function normalizePageBlockRecords(
+    page,
+    dimensions,
+    pageMap,
+    tables,
+    warnings
+) {
+    const blocks = page.blocks;
+    if (blocks !== undefined && !Array.isArray(blocks)) {
+        warnings.push(`Mistral blocks on page ${page.index} were skipped.`);
+        return [];
+    }
+    const rawBlocks = [...(blocks || [])];
+    // Some API responses expose tables separately from blocks. Include them
+    // only as a fallback so that a table can still be source-mapped.
+    if (!rawBlocks.length && Array.isArray(page.tables)) {
+        rawBlocks.push(...page.tables.map(table => ({
+            ...table,
+            type: table?.type || 'table',
+        })));
+    }
+    return rawBlocks.map(block => ({
+        normalized: normalizeBlock(
+            block,
+            page,
+            dimensions,
+            pageMap,
+            tables,
+            warnings
+        ),
+    }));
+}
+
+function appendImageMetadataRecords(records, page, dimensions, pageMap) {
+    if (!dimensions || !Array.isArray(page.images)) return;
+    const mappedAssets = new Set(records
+        .map(record => record.normalized)
+        .filter(block => block?.type === 'image' || block?.type === 'chart')
+        .map(block => block.assetPath));
+    for (const image of page.images) {
+        const assetPath = resolveAssetPath(image?.id, pageMap);
+        const bbox = normalizeBBox(
+            image?.bbox
+                ?? image?.bounding_box
+                ?? image?.boundingBox
+                ?? image,
+            dimensions
+        );
+        if (!assetPath || !bbox || mappedAssets.has(assetPath)) continue;
+        records.push({
+            normalized: {
+                type: 'image',
+                pageIndex: page.index,
+                bbox,
+                assetPath,
+            },
+        });
+        mappedAssets.add(assetPath);
+    }
+}
+
+function findImageInteriorTextRecords(records) {
+    const imageBlocks = records
+        .map(record => record.normalized)
+        .filter(block => block?.type === 'image' || block?.type === 'chart');
+    if (!imageBlocks.length) return new Set();
+
+    return new Set(records.filter(record => {
+        const block = record.normalized;
+        if (!block || !block.text || block.type === 'image' || block.type === 'chart') {
+            return false;
+        }
+        return imageBlocks.some(image => (
+            image.pageIndex === block.pageIndex
+            && isMostlyContainedBBox(block.bbox, image.bbox)
+        ));
+    }));
+}
+
+function isMostlyContainedBBox(inner, outer) {
+    const innerArea = bboxArea(inner);
+    if (!innerArea) return false;
+    const intersection = bboxIntersection(inner, outer);
+    if (!intersection) return false;
+    return bboxArea(intersection) / innerArea >= 0.8;
+}
+
+function bboxArea(bbox) {
+    return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]);
+}
+
+function bboxIntersection(left, right) {
+    const intersection = [
+        Math.max(left[0], right[0]),
+        Math.max(left[1], right[1]),
+        Math.min(left[2], right[2]),
+        Math.min(left[3], right[3]),
+    ];
+    return intersection[2] > intersection[0]
+        && intersection[3] > intersection[1]
+        ? intersection
+        : null;
+}
+
+function removeImageInteriorText(markdown, records) {
+    if (!markdown || !records?.size) return markdown;
+    const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
+    const candidates = [...records]
+        .flatMap(record => splitBlockTextLines(record.normalized?.text));
+    if (!candidates.length) return markdown;
+
+    const matches = new Map();
+    for (const candidate of candidates) {
+        const normalizedCandidate = comparableMarkdownText(candidate);
+        if (!normalizedCandidate) continue;
+        const matchingIndexes = [];
+        for (const [index, line] of lines.entries()) {
+            if (comparableMarkdownText(line) === normalizedCandidate) {
+                matchingIndexes.push(index);
+            }
+        }
+        // A duplicated label is ambiguous without a text block range. Keep it
+        // visible rather than risk removing ordinary prose elsewhere.
+        if (matchingIndexes.length === 1) {
+            matches.set(matchingIndexes[0], true);
+        }
+    }
+    if (!matches.size) return markdown;
+    return lines.filter((line, index) => !matches.has(index)).join('').trim();
+}
+
+function splitBlockTextLines(text) {
+    return String(text || '')
+        .split(/\r?\n/u)
+        .map(line => line.trim())
+        .filter(Boolean);
+}
+
+function comparableMarkdownText(value) {
+    let text = String(value || '').replace(/\r?\n$/, '').trim();
+    if (!text || /^!\[/u.test(text) || /^<!--/u.test(text)) return '';
+    text = text
+        .replace(/^ {0,3}#{1,6}[ \t]+/u, '')
+        .replace(/^ {0,3}(?:[-+*]|\d+[.)])[ \t]+/u, '')
+        .replace(/^ {0,3}>[ \t]?/u, '')
+        .replace(/\[([^\]\r\n]+)\]\([^)]*\)/gu, '$1')
+        .replace(/[*_~`]/gu, '');
+    return normalizeComparableText(text);
+}
+
+function normalizeComparableText(value) {
+    return String(value || '').normalize('NFKC').replace(/\s+/gu, ' ').trim();
 }
 
 function normalizeBlock(block, page, dimensions, pageMap, tables, warnings) {

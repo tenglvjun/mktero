@@ -36,6 +36,19 @@ test('returns an empty outline when the document has no headings', () => {
     assert.deepEqual(extractMarkdownOutline('Paragraph only.'), []);
 });
 
+test('ignores empty ATX heading markers in the outline', () => {
+    const markdown = [
+        '#',
+        '',
+        '## Valid heading',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => heading.text),
+        ['Valid heading']
+    );
+});
+
 test('preserves visible angle-bracket text in outline labels', () => {
     const markdown = [
         '# Visit <https://example.com>',
