@@ -5,6 +5,7 @@ import {
     findInlineMathMatches,
     renderMarkdownHTML,
 } from '../src/markdown/markdown-html.js';
+import { parseFigureLayoutMarker } from '../src/markdown/markdown-figures.js';
 
 test('renders the Markdown subset used by the PDF converter', () => {
     const markdown = [
@@ -579,6 +580,57 @@ test('renders consecutive image panels with one shared academic caption', () => 
             + ' Anxiety &amp; depression outcomes.'
             + '</figcaption>'
             + '</figure>\n'
+    );
+});
+
+test('renders a provider-marked figure grid without exposing its marker', () => {
+    const markdown = [
+        '<!-- mktero-figure-layout: columns=3 rows=3,3,1 -->',
+        '',
+        '![](images/panel-a.jpg)',
+        '',
+        '![](images/panel-b.jpg)',
+        '',
+        '![](images/panel-c.jpg)',
+        '',
+        '![](images/panel-d.jpg)',
+        '',
+        '![](images/panel-e.jpg)',
+        '',
+        '![](images/panel-f.jpg)',
+        '',
+        '![](images/panel-g.jpg)',
+        '',
+        'Figure 4. Seven menstrual cycles.',
+    ].join('\n');
+    const html = renderMarkdownHTML(markdown, {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+
+    assert.match(html, /mktero-figure-group-grid/u);
+    assert.match(html, /mktero-figure-panels-grid/u);
+    assert.match(html, /--mktero-figure-grid-columns:3/u);
+    assert.doesNotMatch(html, /mktero-figure-layout/u);
+    const legacyHTML = renderMarkdownHTML(
+        markdown.replace('mktero-figure-layout', 'mktero-mistral-figure-grid'),
+        { resolveImageURL: path => `blob:mktero-${path}` }
+    );
+    assert.match(legacyHTML, /mktero-figure-group-grid/u);
+    assert.doesNotMatch(legacyHTML, /mktero-mistral-figure-grid/u);
+});
+
+test('rejects figure layout markers whose row spans exceed the grid width', () => {
+    assert.equal(
+        parseFigureLayoutMarker(
+            '<!-- mktero-figure-layout: columns=2 rows=2,1 spans=2,2,2 -->'
+        ),
+        null
+    );
+    assert.deepEqual(
+        parseFigureLayoutMarker(
+            '<!-- mktero-figure-layout: columns=2 rows=2,1 spans=1,1,2 -->'
+        ),
+        { columns: 2, rows: [2, 1], spans: [1, 1, 2] }
     );
 });
 

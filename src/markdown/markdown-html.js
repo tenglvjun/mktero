@@ -9,6 +9,7 @@ import {
     findAcademicFigureGroups,
     findAcademicTableGroups,
     normalizeMisassignedAcademicCaptions,
+    parseFigureLayoutMarker,
     parseAcademicFigureCaption,
 } from './markdown-figures.js';
 import { isNumericCitationContent } from './text-normalization.js';
@@ -133,6 +134,7 @@ function createSafeRenderer(
                 return `<span class="page-marker" data-page="${escapeAttribute(page[1])}">`
                     + `${escapeHTML(translate('markdown.page', { page: page[1] }))}</span>`;
             }
+            if (parseFigureLayoutMarker(text)) return '';
             const table = sanitizeRawHTMLTable(text, mathBudget, target);
             if (table) return table;
             return escapeKnownInlineTags(escapeHTML(text));
@@ -202,22 +204,32 @@ function renderStandaloneAcademicFigureGroup(
 
     const horizontal = group.layout === 'horizontal';
     const vertical = group.layout === 'vertical';
+    const grid = group.layout === 'grid';
     const layoutClass = horizontal
         ? ' mktero-figure-group-horizontal'
         : vertical
             ? ' mktero-figure-group-vertical'
+            : grid
+                ? ' mktero-figure-group-grid'
             : '';
-    const renderedPanels = panels.map(panel => renderFigurePanel(
+    const renderedPanels = panels.map((panel, index) => renderFigurePanel(
         panel,
         resolveImageURL,
         mathBudget,
         resolveImageAttachmentKey,
         target,
         translate,
+        grid ? group.gridSpans?.[index] : null,
+        grid ? group.gridColumns : null,
     )).join('');
     const panelHTML = horizontal
         ? `<div class="mktero-figure-panels-horizontal">${renderedPanels}</div>`
-        : renderedPanels;
+        : grid
+            ? `<div class="mktero-figure-panels-grid"`
+                + ` style="--mktero-figure-grid-columns:${group.gridColumns}">`
+                + renderedPanels
+                + '</div>'
+            : renderedPanels;
     return `<figure class="mktero-figure mktero-figure-group${layoutClass}">`
         + panelHTML
         + renderFigureCaption(group.caption, mathBudget, null, target)
@@ -230,7 +242,9 @@ function renderFigurePanel(
     mathBudget,
     resolveImageAttachmentKey,
     target,
-    translate
+    translate,
+    gridColumnSpan = null,
+    gridColumns = null,
 ) {
     const image = renderImageToken(
         panel.imageToken,
@@ -238,14 +252,19 @@ function renderFigurePanel(
         resolveImageAttachmentKey,
         translate
     );
-    if (!panel.panelLabel) return image;
+    if (!panel.panelLabel && !gridColumnSpan) return image;
     const before = panel.panelLabelPosition === 'before';
+    const spanStyle = gridColumnSpan > 1
+        ? gridColumnSpan >= gridColumns
+            ? ' style="grid-column:1 / -1"'
+            : ` style="grid-column:span ${gridColumnSpan}"`
+        : '';
     const label = '<div class="mktero-figure-panel-label'
         + (before ? ' mktero-figure-panel-label-before' : '')
         + '">'
         + renderCaptionMathSource(panel.panelLabel, mathBudget, target)
         + '</div>';
-    return '<div class="mktero-figure-panel">'
+    return `<div class="mktero-figure-panel"${spanStyle}>`
         + (before ? label : '')
         + image
         + (before ? '' : label)

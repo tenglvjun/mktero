@@ -24,7 +24,16 @@ import {
     getZoteroLocale,
     PREFERENCE_CONTROL_LIMITS,
 } from '../config/mineru-preferences.js';
-import { getConversionProvider } from '../config/conversion-preferences.js';
+import {
+    CONVERSION_PROVIDER_MINERU,
+    CONVERSION_PROVIDER_MISTRAL,
+    MISTRAL_API_KEY_PREF,
+    MINERU_API_KEY_PREF,
+    getConversionProvider,
+    getMinerUApiKey,
+    getMistralApiKey,
+    normalizeConversionProvider,
+} from '../config/conversion-preferences.js';
 import {
     getMarkdownReaderFont,
     getMarkdownReaderFontSize,
@@ -102,6 +111,12 @@ export function createPreferencesController({
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
     );
+    const conversionApiKeyInput = document.getElementById(
+        'mktero-api-key'
+    );
+    const conversionApiKeyManage = document.getElementById(
+        'mktero-api-key-manage'
+    );
     const aiTestButton = document.getElementById('mktero-ai-test');
     const aiTestStatus = document.getElementById('mktero-ai-test-status');
     const aiProviderInput = document.getElementById('mktero-ai-provider');
@@ -152,9 +167,61 @@ export function createPreferencesController({
         readerFontInput.addEventListener('change', updateReaderFont);
     }
 
+    function getSelectedConversionProvider() {
+        return normalizeConversionProvider(
+            conversionProviderInput?.value || getConversionProvider(zotero)
+        );
+    }
+
+    function getConversionApiKeyConfig(provider) {
+        if (provider === CONVERSION_PROVIDER_MISTRAL) {
+            return {
+                preference: MISTRAL_API_KEY_PREF,
+                value: getMistralApiKey(zotero),
+                manageURL: 'https://console.mistral.ai/api-keys/',
+            };
+        }
+        return {
+            preference: MINERU_API_KEY_PREF,
+            value: getMinerUApiKey(zotero),
+            manageURL: 'https://mineru.net/apiManage/token',
+        };
+    }
+
+    function updateConversionApiKeyControl() {
+        if (!conversionApiKeyInput) return;
+        const config = getConversionApiKeyConfig(
+            getSelectedConversionProvider()
+        );
+        conversionApiKeyInput.value = config.value;
+        if (conversionApiKeyManage) {
+            conversionApiKeyManage.setAttribute('href', config.manageURL);
+        }
+    }
+
+    function saveConversionApiKey() {
+        if (!conversionApiKeyInput) return;
+        const config = getConversionApiKeyConfig(
+            getSelectedConversionProvider()
+        );
+        zotero?.Prefs?.set?.(config.preference, conversionApiKeyInput.value, true);
+    }
+
     function initializeConversionProvider() {
-        if (!conversionProviderInput) return;
+        if (!conversionProviderInput) {
+            updateConversionApiKeyControl();
+            return;
+        }
         conversionProviderInput.value = getConversionProvider(zotero);
+        updateConversionApiKeyControl();
+        conversionProviderInput.addEventListener(
+            'change',
+            updateConversionApiKeyControl
+        );
+        conversionApiKeyInput?.addEventListener(
+            'change',
+            saveConversionApiKey
+        );
     }
 
     function updateAIProtocolOptions({ persist = true } = {}) {
@@ -287,6 +354,14 @@ export function createPreferencesController({
             aiProviderInput?.removeEventListener(
                 'change',
                 updateAIProtocolOptions
+            );
+            conversionProviderInput?.removeEventListener(
+                'change',
+                updateConversionApiKeyControl
+            );
+            conversionApiKeyInput?.removeEventListener(
+                'change',
+                saveConversionApiKey
             );
             readerFontSizeInput?.removeEventListener(
                 'input',

@@ -362,6 +362,15 @@ test('separates panels inside a shared academic figure', () => {
         horizontalPanels,
         /grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(260px, 100%\), 1fr\)\)/
     );
+
+    const gridPanels = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-grid'
+    );
+    assert.match(gridPanels, /display:\s*grid/);
+    assert.match(
+        gridPanels,
+        /grid-template-columns:\s*repeat\(var\(--mktero-figure-grid-columns\), minmax\(0, 1fr\)\)/
+    );
 });
 
 test('lays out a responsive scrollable outline beside the editor', () => {

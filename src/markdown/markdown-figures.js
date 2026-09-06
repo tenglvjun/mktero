@@ -48,6 +48,47 @@ const MARKDOWN_HARD_BREAK_PATTERN = /[ \t]{2,}(?:\r?\n)?$/;
 // Both markers are Markdown hard breaks; the extra space records vertical layout.
 const MINERU_VERTICAL_PANEL_MARKER_SPACES = 3;
 const MAX_PANEL_LABEL_LENGTH = 80;
+const FIGURE_LAYOUT_MARKER_PATTERN = /^<!--\s*(?:mktero-figure-layout|mktero-mistral-figure-grid):\s*columns=(\d{1,2})\s+rows=([\d,]{1,80})(?:\s+spans=([\d,]{1,256}))?\s*-->$/iu;
+
+export function parseFigureLayoutMarker(value) {
+    const source = String(value || '').replace(/\r?\n$/, '').trim();
+    const match = FIGURE_LAYOUT_MARKER_PATTERN.exec(source);
+    if (!match) return null;
+    const columns = Number(match[1]);
+    const rows = match[2].split(',').map(Number);
+    const imageCount = rows.reduce((sum, row) => sum + row, 0);
+    const spans = match[3] ? match[3].split(',').map(Number) : null;
+    const spansFitRows = spans
+        ? rows.every((rowCount, rowIndex) => {
+            const offset = rows
+                .slice(0, rowIndex)
+                .reduce((sum, count) => sum + count, 0);
+            const usedColumns = spans
+                .slice(offset, offset + rowCount)
+                .reduce((sum, span) => sum + span, 0);
+            return usedColumns <= columns;
+        })
+        : true;
+    if (!Number.isInteger(columns)
+        || columns < 1
+        || columns > 16
+        || !rows.length
+        || rows.some(row => !Number.isInteger(row) || row < 1 || row > 16)
+        || rows.length > 16
+        || imageCount > 256
+        || (spans
+            && (spans.length !== imageCount
+                || spans.some(span => (
+                    !Number.isInteger(span) || span < 1 || span > columns
+                ))
+                || !spansFitRows))) {
+        return null;
+    }
+    return { columns, rows, spans };
+}
+
+// Kept as an API alias for cached Mistral Markdown and existing integrations.
+export const parseMistralFigureGridMarker = parseFigureLayoutMarker;
 
 export function parseAcademicFigureCaption(value) {
     const text = String(value || '').trim();
@@ -159,6 +200,56 @@ export function findAcademicFigureGroups(markdown) {
     for (let index = 0; index < lines.length; index++) {
         if (blockedLines.has(index)) continue;
 
+        const gridMarker = parseFigureLayoutMarker(lines[index].raw);
+        if (gridMarker) {
+            let imageStart = nextNonBlankLine(lines, index + 1);
+            const leadingCaption = imageStart < lines.length
+                && !blockedLines.has(imageStart)
+                ? parseCaptionLine(lines[imageStart].raw)
+                : null;
+            if (leadingCaption) {
+                imageStart = nextNonBlankLine(lines, imageStart + 1);
+            }
+            const images = collectNearbyImages(lines, imageStart, blockedLines);
+            const captionIndex = nextNonBlankLine(
+                lines,
+                (images.at(-1)?.index ?? lines.length - 1) + 1
+            );
+            const trailingCaption = captionIndex < lines.length
+                && !blockedLines.has(captionIndex)
+                ? parseCaptionLine(lines[captionIndex].raw)
+                : null;
+            const embeddedCaption = images.length
+                ? captionFromImageLine(lines[images.at(-1).index].raw)
+                : null;
+            const caption = leadingCaption || trailingCaption || embeddedCaption;
+            const imageCount = images.length;
+            if (caption
+                && imageCount === gridMarker.rows.reduce((sum, row) => sum + row, 0)
+                && gridMarker.columns === Math.max(...gridMarker.rows)
+                && imageCount > 1) {
+                const layout = gridMarker.columns === 1
+                    ? 'vertical'
+                    : gridMarker.rows.length === 1
+                        ? 'horizontal'
+                        : 'grid';
+                groups.push({
+                    from: lines[index].from,
+                    to: lines[trailingCaption ? captionIndex : images.at(-1).index].to,
+                    caption,
+                    images,
+                    layout,
+                    gridColumns: gridMarker.columns,
+                    gridRows: gridMarker.rows,
+                    ...(gridMarker.spans ? { gridSpans: gridMarker.spans } : {}),
+                });
+                index = trailingCaption
+                    ? captionIndex
+                    : images.at(-1).index;
+                continue;
+            }
+        }
+
         const reassigned = reassignedCaptionsByImage.get(index);
         if (reassigned) {
             groups.push({
@@ -205,6 +296,29 @@ export function findAcademicFigureGroups(markdown) {
         const caption = parseCaptionLine(lines[index].raw);
         if (caption) {
             const images = collectNearbyImages(lines, index + 1, blockedLines);
+            const trailingCaptionIndex = nearbyLineIndex(
+                lines,
+                images.at(-1)?.index + 1 || index + 1
+            );
+            const trailingCaption = trailingCaptionIndex < lines.length
+                ? parseCaptionLine(lines[trailingCaptionIndex].raw)
+                : null;
+            // When captions surround a run of images, treat the first image
+            // as the leading figure and let the next pass attach the rest to
+            // the trailing caption. This prevents adjacent figures from
+            // being merged into one shared-caption group.
+            if (trailingCaption
+                && images.length > 1
+                && !blockedLines.has(images[0].index)) {
+                groups.push({
+                    from: lines[index].from,
+                    to: lines[images[0].index].to,
+                    caption,
+                    images: [images[0]],
+                });
+                index = images[0].index;
+                continue;
+            }
             if (images.length > 1
                 || (images.length === 1
                     && isEmptyImageLine(lines[images[0].index].raw))) {
@@ -265,6 +379,14 @@ export function findAcademicFigureGroups(markdown) {
 
 function isEmptyImageLine(line) {
     return EMPTY_IMAGE_LINE_PATTERN.test(line || '');
+}
+
+function nextNonBlankLine(lines, index) {
+    let cursor = index;
+    while (cursor < lines.length && BLANK_LINE_PATTERN.test(lines[cursor].raw)) {
+        cursor++;
+    }
+    return cursor;
 }
 
 export function findAcademicFigures(markdown) {

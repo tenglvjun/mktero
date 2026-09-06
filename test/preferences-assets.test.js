@@ -61,12 +61,16 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
     assert.doesNotMatch(pane, /id="mktero-language"/);
     assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
-    assert.match(pane, /preference="extensions\.mktero\.mineruApiKey"/);
     assert.match(pane, /id="mktero-conversion-provider"[\s\S]*?preference="extensions\.mktero\.conversionProvider"/);
     assert.match(pane, /<html:option value="mineru" data-i18n="preferences\.conversion\.provider\.mineru"><\/html:option>/);
     assert.match(pane, /<html:option value="mistral" data-i18n="preferences\.conversion\.provider\.mistral"><\/html:option>/);
-    assert.match(pane, /id="mktero-mistral-api-key"[\s\S]*?preference="extensions\.mktero\.mistralApiKey"/);
-    assert.match(pane, /href="https:\/\/console\.mistral\.ai\/api-keys\/"/);
+    assert.equal((pane.match(/id="mktero-api-key"/g) || []).length, 1);
+    assert.doesNotMatch(pane, /mktero-mineru-api-key|mktero-mistral-api-key/);
+    assert.match(pane, /data-i18n="preferences\.conversion\.apiKeyLabel"/);
+    assert.match(pane, /data-i18n="preferences\.conversion\.apiKeyHelp"/);
+    assert.match(pane, /data-i18n="preferences\.conversion\.apiKeyStorage"/);
+    assert.match(pane, /data-i18n="preferences\.conversion\.apiKeyManage"/);
+    assert.match(script, /https:\/\/console\.mistral\.ai\/api-keys\//);
     assert.match(pane, /preference="extensions\.mktero\.cacheEnabled"/);
     assert.doesNotMatch(
         pane,
@@ -259,13 +263,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row"/g
         ) || []).length,
-        13
+        12
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-(?:field|reader-font)-control(?: [^"]+)?">/g
         ) || []).length,
-        13
+        12
     );
 });
 
@@ -317,7 +321,7 @@ test('presents every preference group as one cohesive settings card', async () =
     assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 4);
     assert.match(
         pane,
-        /id="mktero-mineru-api-key"[\s\S]*aria-describedby="mktero-token-help mktero-token-storage-note"/
+        /id="mktero-api-key"[\s\S]*aria-describedby="mktero-api-key-help mktero-api-key-storage"/
     );
     assert.match(
         pane,

@@ -54,6 +54,14 @@ test('creates a fixed localization from the Zotero locale', () => {
         localization.t('preferences.conversion.provider.mistral'),
         'Mistral OCR 4.1'
     );
+    assert.equal(
+        localization.t('preferences.conversion.apiKeyLabel'),
+        'API key'
+    );
+    assert.equal(
+        chinese.t('preferences.conversion.apiKeyLabel'),
+        'API key'
+    );
     assert.match(
         localization.t('preferences.conversion.privacyNote'),
         /selected provider receives the complete PDF.*API keys.*unencrypted/i

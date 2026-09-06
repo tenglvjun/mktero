@@ -167,6 +167,54 @@ test('maps unique MinerU content to Markdown blocks and keeps merged locations',
     ]);
 });
 
+test('maps image destinations when the asset path is repeated in alt text', () => {
+    const markdown = '![images/figure.png](images/figure.png)';
+    assert.deepEqual(
+        createMarkdownSourceMap(markdown, [{
+            type: 'image',
+            assetPath: 'images/figure.png',
+            pageIndex: 3,
+            bbox: [80, 100, 920, 700],
+        }]),
+        [{
+            type: 'image',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 3, bbox: [80, 100, 920, 700] }],
+        }]
+    );
+});
+
+test('matches complete decoded image destinations instead of path substrings', () => {
+    const markdown = [
+        '![](ba.png)',
+        '![](a.png)',
+        '![](<figures/figure%20one.png>)',
+    ].join('\n\n');
+    const sourceMap = createMarkdownSourceMap(markdown, [{
+        type: 'image',
+        assetPath: 'a.png',
+        pageIndex: 0,
+        bbox: [80, 100, 420, 400],
+    }, {
+        type: 'image',
+        assetPath: 'figures/figure one.png',
+        pageIndex: 1,
+        bbox: [100, 120, 900, 700],
+    }]);
+
+    assert.deepEqual(sourceMap.map(entry => ({
+        markdown: markdown.slice(entry.markdownFrom, entry.markdownTo),
+        pageIndex: entry.locations[0].pageIndex,
+    })), [
+        { markdown: '![](a.png)', pageIndex: 0 },
+        {
+            markdown: '![](<figures/figure%20one.png>)',
+            pageIndex: 1,
+        },
+    ]);
+});
+
 test('keeps matched text ranges for page-specific source navigation', () => {
     const first = 'The first mapped segment has enough words to identify it';
     const second = 'the second segment continues this same paragraph safely.';

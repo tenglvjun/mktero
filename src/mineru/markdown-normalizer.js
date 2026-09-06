@@ -1,4 +1,5 @@
 import { normalizeMarkdownFigureCaptions } from '../markdown/markdown-figures.js';
+import { normalizeFigureLayouts } from '../markdown/figure-layout-normalizer.js';
 
 const BLANK_LINE_SEPARATOR = /(\r?\n[ \t]*\r?\n(?:[ \t]*\r?\n)*)/;
 const BLOCK_START_PATTERN = /^(?: {0,3}(?:#{1,6}(?:[ \t]|$)|>|(?:[-+*]|\d+[.)])[ \t]+|```|~~~)| {4}\S|\t\S|<|\$\$|\\\[|\\begin\{|\[[^\]\n]+\]:)/;
@@ -42,6 +43,15 @@ export function normalizeMinerUMarkdown(markdown) {
         }
     }
     return output;
+}
+
+export function normalizeMinerUFigureLayouts(markdown, imageBlocks = []) {
+    return normalizeFigureLayouts(markdown, imageBlocks, {
+        // MinerU content_list locations are the evidence required for a
+        // layout change. Do not guess a grid when those locations are absent.
+        allowFallback: false,
+        skipExistingPanelLayout: true,
+    });
 }
 
 function normalizeOCRBulletLists(markdown) {

@@ -29,6 +29,7 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 ## 核心能力
 
 - 将 OCR 结果、双栏正文、公式、表格、图片、列表和代码重排成连续的论文阅读文档。
+- Mistral 会依据图片坐标隐藏图片内部的 OCR 文字；两个 OCR Provider 都会根据图片坐标恢复多面板图表的原始排列布局。MinerU 只在有 bbox 证据时重排；Mistral 在缺少坐标时还支持保守的布局兜底。
 - 保留可靠的页码和区域映射，使正文、公式、表格和图片可以跳回 PDF 来源。
 - 在不丢失当前位置的情况下预览引用、作者单位、图片和表格。
 - 在 Markdown 引用弹窗中检查文献是否存在于可访问的 Zotero 文库；用户可以选择可写的个人库或群组库，显式复制其他文库中的文献，针对只有标题的文献查看本地或在线元数据匹配，并导入缺失的元数据和公开 PDF。
@@ -46,7 +47,7 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 
 - 桌面版 Zotero `7.0` 至 `10.0.*`
 - 已下载并可在本机访问的 PDF 附件
-- 选择 MinerU 时需要 [MinerU API Token](https://mineru.net/apiManage/token)，选择 Mistral 时需要 [Mistral API Key](https://console.mistral.ai/api-keys/)
+- 需要所选转换服务的 API key：[MinerU](https://mineru.net/apiManage/token) 或 [Mistral](https://console.mistral.ai/api-keys/)
 - 能够访问所选转换 API 的网络环境
 
 文件大小、页数、账户额度和服务可用性由各服务控制，请以
@@ -70,8 +71,7 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 | 设置 | 是否必需 | 作用 |
 | --- | --- | --- |
 | 转换服务 | 必需 | 选择 MinerU 或 Mistral OCR 4.1 |
-| MinerU API Token | 选择 MinerU 且缓存未命中时必需 | 使用 MinerU 上传并转换 PDF |
-| Mistral API Key | 选择 Mistral 且缓存未命中时必需 | 使用 Mistral OCR 4.1 同步转换 PDF |
+| API key | 缓存未命中时必需 | 为所选服务填写 API key，可通过旁边的管理链接创建或更新 |
 | AI 功能和 Provider 设置 | 可选 | 通过托管或本地回环模型服务翻译 Markdown |
 | 翻译语言 | 可选 | 简体/繁体中文、日文、韩文、西班牙语、法语或巴西葡萄牙语 |
 | 自动翻译 Markdown 选区 | 可选，默认关闭 | 无需再次点击即可翻译稳定的选区；关闭后保留弹窗中的手动操作 |

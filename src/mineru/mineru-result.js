@@ -1,7 +1,10 @@
 import { createMarkdownSourceMap } from '../core/markdown-source-map.js';
 import { reassembleMinerUColumnFlow } from './column-flow-normalizer.js';
 import { reassembleMinerUFigurePanels } from './figure-panel-normalizer.js';
-import { normalizeMinerUMarkdown } from './markdown-normalizer.js';
+import {
+    normalizeMinerUFigureLayouts,
+    normalizeMinerUMarkdown,
+} from './markdown-normalizer.js';
 import { reassembleMinerUTextFlow } from './text-flow-normalizer.js';
 
 export function prepareMinerUResult(result) {
@@ -64,7 +67,21 @@ export function prepareMinerUResult(result) {
                     includeMatchedTextRanges: true,
                 })
                 : reassembledSourceMap;
-            markdown = finalMarkdown;
+            const figureLayoutMarkdown = normalizeMinerUFigureLayouts(
+                finalMarkdown,
+                contentList.filter(block => (
+                    block?.type === 'image' || block?.type === 'chart'
+                ))
+            );
+            const figureLayoutChanged = figureLayoutMarkdown !== finalMarkdown;
+            sourceMap = figureLayoutChanged
+                ? createMarkdownSourceMap(figureLayoutMarkdown, contentList, {
+                    includeMatchedTextRanges: textFlowChanged
+                        || columnFlowChanged
+                        || finalColumnFlowChanged,
+                })
+                : sourceMap;
+            markdown = figureLayoutMarkdown;
         }
         else {
             sourceMap = initialSourceMap;
