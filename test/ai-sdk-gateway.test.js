@@ -75,7 +75,7 @@ test('calls AI SDK generateText with bounded Mktero settings', async () => {
     assert.equal(request.model.provider, 'mktero-compatible.chat');
     assert.deepEqual(request.messages, [{ role: 'user', content: 'Test' }]);
     assert.equal(request.maxOutputTokens, 64);
-    assert.equal(request.reasoning, 'none');
+    assert.equal(request.reasoning, undefined);
     assert.equal(request.maxRetries, 0);
     assert.ok(request.abortSignal);
     assert.deepEqual(result, {
@@ -121,6 +121,25 @@ test('accepts a reasoning-only result only for connection probes', async () => {
         model: 'reasoning-model',
         usage: { inputTokens: null, outputTokens: 4, totalTokens: 7 },
     });
+    assert.equal(result.reasoningText, undefined);
+});
+
+test('keeps provider reasoning text out of generated translation text', async () => {
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        generate: async () => ({
+            text: 'Translated',
+            reasoningText: 'private reasoning',
+        }),
+    });
+
+    const result = await gateway.generateText({
+        settings: SETTINGS,
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.equal(result.text, 'Translated');
+    assert.equal(result.reasoningText, undefined);
 });
 
 test('rejects a connection probe when the provider returns no data', async () => {
@@ -482,11 +501,19 @@ test('falls back to provider reasoning when a model cannot disable it', async ()
     });
 
     const result = await gateway.generateText({
-        settings: SETTINGS,
+        settings: {
+            ...SETTINGS,
+            provider: 'openai',
+            protocol: 'openai-chat-completions',
+        },
         messages: [{ role: 'user', content: 'Test' }],
     });
     const repeated = await gateway.generateText({
-        settings: SETTINGS,
+        settings: {
+            ...SETTINGS,
+            provider: 'openai',
+            protocol: 'openai-chat-completions',
+        },
         messages: [{ role: 'user', content: 'Test again' }],
     });
 
@@ -540,11 +567,19 @@ test('falls back from a rejected reasoning-free stream before text starts', asyn
     });
 
     const result = await gateway.streamText({
-        settings: SETTINGS,
+        settings: {
+            ...SETTINGS,
+            provider: 'openai',
+            protocol: 'openai-chat-completions',
+        },
         messages: [{ role: 'user', content: 'Test' }],
     });
     const repeated = await gateway.streamText({
-        settings: SETTINGS,
+        settings: {
+            ...SETTINGS,
+            provider: 'openai',
+            protocol: 'openai-chat-completions',
+        },
         messages: [{ role: 'user', content: 'Test again' }],
     });
 
@@ -762,6 +797,65 @@ test('uses the OpenAI Chat Completions wire protocol through AI SDK Core', async
     }]);
     assert.equal(JSON.parse(request.init.body).reasoning_effort, 'high');
     assert.equal(result.text, 'Chat result');
+});
+
+test('omits reasoning_effort for custom Chat Completions when reasoning is off', async () => {
+    let request;
+    const gateway = new AISDKGateway({
+        fetch: async (url, init) => {
+            request = { url: String(url), init };
+            return jsonResponse({
+                id: 'chatcmpl-test',
+                object: 'chat.completion',
+                created: 1,
+                model: 'chat-model',
+                choices: [{
+                    index: 0,
+                    message: { role: 'assistant', content: 'Chat result' },
+                    finish_reason: 'stop',
+                }],
+            });
+        },
+    });
+
+    await gateway.generateText({
+        settings: SETTINGS,
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.equal(JSON.parse(request.init.body).reasoning_effort, undefined);
+});
+
+test('sends reasoning_effort none for OpenAI Chat Completions when reasoning is off', async () => {
+    let request;
+    const gateway = new AISDKGateway({
+        fetch: async (url, init) => {
+            request = { url: String(url), init };
+            return jsonResponse({
+                id: 'chatcmpl-test',
+                object: 'chat.completion',
+                created: 1,
+                model: 'chat-model',
+                choices: [{
+                    index: 0,
+                    message: { role: 'assistant', content: 'Chat result' },
+                    finish_reason: 'stop',
+                }],
+            });
+        },
+    });
+
+    await gateway.generateText({
+        settings: {
+            ...SETTINGS,
+            provider: 'openai',
+            protocol: 'openai-chat-completions',
+            reasoning: 'none',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.equal(JSON.parse(request.init.body).reasoning_effort, 'none');
 });
 
 test('finishes an OpenAI Chat stream when DONE does not close the connection', async () => {
@@ -1284,6 +1378,71 @@ test('aborts an AI SDK request when the Mktero timeout elapses', async () => {
     );
     assert.equal(receivedSignal.aborted, true);
 });
+
+test('sends x-opencode-session only for OpenCode Go requests', async () => {
+    const requests = [];
+    const gateway = new AISDKGateway({
+        fetch: async (url, init) => {
+            requests.push({ url: String(url), init });
+            return jsonResponse({
+                id: 'chatcmpl-test',
+                object: 'chat.completion',
+                created: 1,
+                model: 'chat-model',
+                choices: [{
+                    index: 0,
+                    message: { role: 'assistant', content: 'OK' },
+                    finish_reason: 'stop',
+                }],
+            });
+        },
+    });
+    const goSettings = {
+        ...SETTINGS,
+        apiBase: 'https://opencode.ai/zen/go/v1',
+    };
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+
+    await gateway.generateText({
+        settings: goSettings,
+        messages: [{ role: 'user', content: 'Test' }],
+        sessionId,
+    });
+    await gateway.generateText({
+        settings: goSettings,
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+    await gateway.generateText({
+        settings: goSettings,
+        messages: [{ role: 'user', content: 'Test' }],
+        sessionId: 'not a session',
+    });
+    await gateway.generateText({
+        settings: SETTINGS,
+        messages: [{ role: 'user', content: 'Test' }],
+        sessionId,
+    });
+    await gateway.generateText({
+        settings: {
+            ...SETTINGS,
+            apiBase: 'https://opencode.ai/zen/v1',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+        sessionId,
+    });
+
+    assert.equal(requests.length, 5);
+    assert.equal(sessionHeader(requests[0].init), sessionId);
+    assert.equal(sessionHeader(requests[1].init), null);
+    assert.equal(sessionHeader(requests[2].init), null);
+    assert.equal(sessionHeader(requests[3].init), null);
+    assert.equal(sessionHeader(requests[4].init), null);
+    assert.match(requests[0].url, /opencode\.ai\/zen\/go\/v1/);
+});
+
+function sessionHeader(init) {
+    return new Headers(init?.headers).get('x-opencode-session');
+}
 
 function jsonResponse(payload) {
     return new Response(JSON.stringify(payload), {

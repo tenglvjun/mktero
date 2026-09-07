@@ -188,7 +188,8 @@ groups the article into bounded Markdown batches, protects formulas, citations,
 links, code, images, and structural placeholders, and runs at most five
 requests concurrently. Choose `Original`, `Translation`, or `Bilingual` in
 the reader. Translations are cached independently by source content, provider,
-protocol, model, language, and prompt version, so partial work can resume.
+protocol, model, language, reasoning effort, and prompt version, so partial
+work can resume.
 When local Markdown corrections delete a block, translations for unchanged
 blocks remain available and the deleted block disappears from `Bilingual`
 reading. Earlier source versions are retained, so restoring a deleted block can
@@ -220,7 +221,11 @@ usage costs.
 Mktero includes adapters for OpenAI, Anthropic, Google Gemini, DeepSeek,
 Alibaba Cloud Model Studio, Moonshot/Kimi, MiniMax, and custom OpenAI-compatible
 or Open Responses services through Vercel AI SDK Core. Remote endpoints must
-use HTTPS; loopback services such as Ollama or LM Studio may use HTTP.
+use HTTPS; loopback services such as Ollama or LM Studio may use HTTP. Custom
+OpenCode Go bases such as `https://opencode.ai/zen/go/v1` also receive a
+per-conversation `x-opencode-session` header. Reasoning effort can be set to
+`none`, `low`, `medium`, `high`, or `xhigh`; reasoning output is not saved as
+translation text.
 
 ### Explore the citation graph
 

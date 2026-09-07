@@ -41,6 +41,7 @@ const DEFAULT_MAX_AI_RESPONSE_BYTES = 1024 * 1024;
 const MAX_AI_INPUT_BYTES = 4 * 1024 * 1024 + 256 * 1024;
 const MAX_AI_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_REASONING_FALLBACKS = 64;
+const MAX_SESSION_ID_LENGTH = 128;
 const LOCAL_PROVIDER_API_KEY = 'mktero-local';
 
 export class AISDKGateway {
@@ -81,6 +82,7 @@ export class AISDKGateway {
         settings,
         messages,
         signal,
+        sessionId,
         maxOutputTokens,
         maxInputBytes,
         maxResponseBytes,
@@ -110,7 +112,8 @@ export class AISDKGateway {
         try {
             const boundedFetch = createBoundedFetch(
                 this.fetch,
-                limits.response
+                limits.response,
+                providerSessionHeaders(configuration.apiBase, sessionId)
             );
             const outputTokens = normalizeOutputTokens(
                 maxOutputTokens,
@@ -173,6 +176,7 @@ export class AISDKGateway {
         settings,
         messages,
         signal,
+        sessionId,
         maxOutputTokens,
         onTextDelta,
         onStreamEvent,
@@ -203,7 +207,8 @@ export class AISDKGateway {
         try {
             const boundedFetch = createBoundedFetch(
                 this.fetch,
-                limits.response
+                limits.response,
+                providerSessionHeaders(configuration.apiBase, sessionId)
             );
             const outputTokens = normalizeOutputTokens(
                 maxOutputTokens,
@@ -526,6 +531,15 @@ function bindRuntimeMethod(runtimeWindow, method) {
 function reasoningRequestPolicy(configuration) {
     const reasoning = configuration.reasoning;
     if (reasoning === AI_PROVIDER_DEFAULT_REASONING) return { reasoning };
+    if (configuration.provider === AI_PROVIDER_CUSTOM
+        && reasoning === 'none'
+        && (
+            configuration.protocol === AI_PROTOCOL_OPENAI_CHAT
+            || configuration.protocol === AI_PROTOCOL_OPENAI_RESPONSES
+            || configuration.protocol === AI_PROTOCOL_OPEN_RESPONSES
+        )) {
+        return {};
+    }
     if (configuration.provider === AI_PROVIDER_MOONSHOT
         && reasoning === 'none') {
         return {
@@ -664,9 +678,9 @@ function validateMessages(messages, maxInputBytes) {
     };
 }
 
-function createBoundedFetch(fetch, maxResponseBytes) {
+function createBoundedFetch(fetch, maxResponseBytes, extraHeaders) {
     return async (input, init) => {
-        const response = await fetch(input, init);
+        const response = await fetch(input, withExtraHeaders(init, extraHeaders));
         const declaredLength = Number(response?.headers?.get?.('Content-Length'));
         if (Number.isFinite(declaredLength)
             && declaredLength > maxResponseBytes) {
@@ -715,6 +729,50 @@ function createBoundedFetch(fetch, maxResponseBytes) {
             headers: response.headers,
         });
     };
+}
+
+function withExtraHeaders(init, extraHeaders) {
+    if (!extraHeaders) return init;
+    const headers = new Headers(init?.headers);
+    for (const [name, value] of Object.entries(extraHeaders)) {
+        if (!headers.has(name)) headers.set(name, value);
+    }
+    return {
+        ...init,
+        headers,
+    };
+}
+
+function providerSessionHeaders(apiBase, sessionId) {
+    const id = normalizeSessionId(sessionId);
+    if (!id || !isOpenCodeGoURL(apiBase)) return undefined;
+    return { 'x-opencode-session': id };
+}
+
+function normalizeSessionId(value) {
+    if (typeof value !== 'string') return '';
+    const sessionId = value.trim();
+    if (!sessionId
+        || sessionId.length > MAX_SESSION_ID_LENGTH
+        || /[\s\u0000-\u001f\u007f]/.test(sessionId)) {
+        return '';
+    }
+    return sessionId;
+}
+
+function isOpenCodeGoURL(value) {
+    try {
+        const url = new URL(value);
+        const host = url.hostname.toLowerCase();
+        if (host !== 'opencode.ai' && !host.endsWith('.opencode.ai')) {
+            return false;
+        }
+        const path = url.pathname.replace(/\/+$/, '') || '/';
+        return path === '/zen/go' || path.startsWith('/zen/go/');
+    }
+    catch {
+        return false;
+    }
 }
 
 function isEventStream(response) {

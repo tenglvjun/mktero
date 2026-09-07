@@ -199,6 +199,24 @@
 
             <html:div class="mktero-setting-row mktero-field-row">
                 <html:div class="mktero-setting-copy">
+                    <html:label for="mktero-ai-reasoning"><html:strong data-i18n="preferences.ai.reasoningLabel"></html:strong></html:label>
+                    <html:small id="mktero-ai-reasoning-help" data-i18n="preferences.ai.reasoningHelp"></html:small>
+                </html:div>
+                <html:div class="mktero-field-control mktero-field-control-compact">
+                    <html:select id="mktero-ai-reasoning"
+                                 preference="extensions.mktero.aiReasoning"
+                                 aria-describedby="mktero-ai-reasoning-help">
+                        <html:option value="none" data-i18n="preferences.ai.reasoning.none"></html:option>
+                        <html:option value="low" data-i18n="preferences.ai.reasoning.low"></html:option>
+                        <html:option value="medium" data-i18n="preferences.ai.reasoning.medium"></html:option>
+                        <html:option value="high" data-i18n="preferences.ai.reasoning.high"></html:option>
+                        <html:option value="xhigh" data-i18n="preferences.ai.reasoning.xhigh"></html:option>
+                    </html:select>
+                </html:div>
+            </html:div>
+
+            <html:div class="mktero-setting-row mktero-field-row">
+                <html:div class="mktero-setting-copy">
                     <html:label for="mktero-ai-target-language"><html:strong data-i18n="preferences.ai.targetLanguageLabel"></html:strong></html:label>
                     <html:small data-i18n="preferences.ai.targetLanguageHelp"></html:small>
                 </html:div>

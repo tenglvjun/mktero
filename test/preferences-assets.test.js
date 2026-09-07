@@ -48,7 +48,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         prefs,
         /pref\("extensions\.mktero\.aiAutoTranslateSelection", false\)/
     );
-    assert.doesNotMatch(prefs, /extensions\.mktero\.aiReasoning/);
+    assert.match(prefs, /pref\("extensions\.mktero\.aiReasoning", "none"\)/);
     assert.doesNotMatch(prefs, /extensions\.mktero\.aiCacheEnabled/);
     assert.doesNotMatch(
         pane,
@@ -107,8 +107,11 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         pane,
         /id="mktero-ai-max-output-tokens"[\s\S]*?max="262144"/
     );
-    assert.doesNotMatch(pane, /extensions\.mktero\.aiReasoning/);
-    assert.doesNotMatch(pane, /mktero-ai-reasoning/);
+    assert.match(pane, /preference="extensions\.mktero\.aiReasoning"/);
+    assert.match(pane, /id="mktero-ai-reasoning"/);
+    assert.doesNotMatch(pane, /value="provider-default"/);
+    assert.match(pane, /<html:option value="none" data-i18n="preferences\.ai\.reasoning\.none"><\/html:option>/);
+    assert.match(pane, /<html:option value="xhigh" data-i18n="preferences\.ai\.reasoning\.xhigh"><\/html:option>/);
     assert.doesNotMatch(pane, /extensions\.mktero\.aiCacheEnabled/);
     assert.match(pane, /<html:option value="es-ES" data-i18n="preferences\.ai\.language\.esES"><\/html:option>/);
     assert.match(pane, /<html:option value="fr-FR" data-i18n="preferences\.ai\.language\.frFR"><\/html:option>/);
@@ -263,13 +266,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row"/g
         ) || []).length,
-        12
+        13
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-(?:field|reader-font)-control(?: [^"]+)?">/g
         ) || []).length,
-        12
+        13
     );
 });
 

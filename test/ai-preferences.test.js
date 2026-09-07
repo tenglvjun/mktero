@@ -7,6 +7,7 @@ import {
     AI_ENABLED_PREF,
     AI_MAX_OUTPUT_TOKENS_PREF,
     AI_MODEL_PREF,
+    AI_REASONING_PREF,
     AI_PROTOCOL_OPENAI_CHAT,
     AI_PROTOCOL_OPENAI_RESPONSES,
     AI_PROTOCOL_PREF,
@@ -31,6 +32,7 @@ test('reads and normalizes the configured AI settings', () => {
         [AI_API_KEY_PREF, ' secret-token '],
         [AI_AUTO_TRANSLATE_SELECTION_PREF, true],
         [AI_MODEL_PREF, ' example-chat '],
+        [AI_REASONING_PREF, 'high'],
         [AI_TARGET_LANGUAGE_PREF, 'zh-CN'],
         [AI_REQUEST_TIMEOUT_PREF, 45_000],
         [AI_MAX_OUTPUT_TOKENS_PREF, 3_000],
@@ -48,7 +50,7 @@ test('reads and normalizes the configured AI settings', () => {
         apiKey: 'secret-token',
         autoTranslateSelection: true,
         model: 'example-chat',
-        reasoning: 'none',
+        reasoning: 'high',
         targetLanguage: 'zh-CN',
         requestTimeoutMs: 45_000,
         maxOutputTokens: 3_000,
@@ -98,21 +100,22 @@ test('allows full-document timeout and output token budgets', () => {
     assert.equal(settings.maxOutputTokens, 262_144);
 });
 
-test('disables reasoning without reading the legacy preference', () => {
-    const reads = [];
-    const settings = getAISettings({
+test('reads reasoning effort and maps the legacy automatic value to off', () => {
+    assert.equal(getAISettings({
         Prefs: {
-            get(key) {
-                reads.push(key);
-                return key === 'extensions.mktero.aiReasoning'
-                    ? 'high'
-                    : undefined;
-            },
+            get: key => key === AI_REASONING_PREF ? 'high' : undefined,
         },
-    });
-
-    assert.equal(settings.reasoning, 'none');
-    assert.equal(reads.includes('extensions.mktero.aiReasoning'), false);
+    }).reasoning, 'high');
+    assert.equal(getAISettings({
+        Prefs: {
+            get: key => key === AI_REASONING_PREF
+                ? 'provider-default'
+                : undefined,
+        },
+    }).reasoning, 'none');
+    assert.equal(getAISettings({
+        Prefs: { get: () => undefined },
+    }).reasoning, 'none');
 });
 
 test('supports non-English targets and normalizes legacy English to Chinese', () => {

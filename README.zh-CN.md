@@ -114,7 +114,7 @@ AI 全文翻译需要用户主动触发，也不会重写原始 Markdown。Mkter
 
 如需查询术语或复杂句子，可以在 `Original` 或 `Bilingual` 的原文侧选中文本，使用选区弹窗工具栏末尾的翻译操作；加载、结果和错误只在需要时于下方紧凑展开。使用流式 Provider 时，译文会在请求期间逐步显示，并且仍可取消；非流式 Provider 会在翻译完成后一次性显示结果。翻译成功后可以重新翻译或复制纯文本译文。`自动翻译 Markdown 选区`默认关闭；开启后，选区稳定一小段时间会自动发起一次受控请求。`Translation`、`Bilingual` 的译文侧和已保存的 HTML 快照不提供划词翻译。选区译文只显示在弹窗中，不会修改 Markdown 或笔记，也不会写入全文翻译缓存。每次选区请求只会把选中文本和附近受限长度的原文上下文发送给配置的 AI Provider，可能产生 Provider 费用。
 
-译文会按照源内容、Provider、协议、模型、语言和提示词版本独立缓存。本地 Markdown 校对删除内容块后，其他未变内容块的译文会继续保留，已删除内容不再出现于 `Bilingual` 视图。修改已翻译内容块时，其他译文保持不变，该内容块会标记为待翻译，并提示是否仅重新翻译该内容块。Mktero 通过 Vercel AI SDK Core 支持 OpenAI、Anthropic、Google Gemini、DeepSeek、阿里云百炼、Moonshot/Kimi、MiniMax，以及自定义 OpenAI 兼容或 Open Responses 服务。远程地址必须使用 HTTPS；Ollama、LM Studio 等本地回环服务可以使用 HTTP。
+译文会按照源内容、Provider、协议、模型、语言、推理强度和提示词版本独立缓存。本地 Markdown 校对删除内容块后，其他未变内容块的译文会继续保留，已删除内容不再出现于 `Bilingual` 视图。修改已翻译内容块时，其他译文保持不变，该内容块会标记为待翻译，并提示是否仅重新翻译该内容块。Mktero 通过 Vercel AI SDK Core 支持 OpenAI、Anthropic、Google Gemini、DeepSeek、阿里云百炼、Moonshot/Kimi、MiniMax，以及自定义 OpenAI 兼容或 Open Responses 服务。远程地址必须使用 HTTPS；Ollama、LM Studio 等本地回环服务可以使用 HTTP。推理强度可选 `none`、`low`、`medium`、`high` 或 `xhigh`；推理过程不会作为译文保存。
 
 ### 浏览引用图谱
 

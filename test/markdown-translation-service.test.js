@@ -41,13 +41,78 @@ test('tests a valid connection before AI translation is enabled', async () => {
 
     assert.equal(result.text, 'OK');
     assert.equal(request.settings.enabled, true);
-    assert.equal(request.settings.reasoning, 'none');
+    assert.equal(request.settings.reasoning, 'xhigh');
     assert.equal(request.maxOutputTokens, 4);
     assert.equal(request.acceptNonTextResponse, true);
     assert.deepEqual(request.messages, [{
         role: 'user',
         content: 'hi',
     }]);
+});
+
+test('gives each connection test and selection its own session id', async () => {
+    const requests = [];
+    let nextSession = 0;
+    const service = new MarkdownTranslationService({
+        aiGateway: {
+            async generateText(request) {
+                requests.push(request);
+                return { text: 'OK', model: 'example-chat' };
+            },
+        },
+        getSettings: () => ({ ...SETTINGS, streaming: false }),
+        createSessionId: () => `session-${nextSession++}`,
+    });
+
+    await service.testConnection();
+    await service.translateSelection({ text: 'A sentence.' });
+    await service.translateSelection({ text: 'Another sentence.' });
+
+    assert.deepEqual(requests.map(request => request.sessionId), [
+        'session-0',
+        'session-1',
+        'session-2',
+    ]);
+});
+
+test('reuses one session id for every request in a document translation', async () => {
+    const sessionIds = [];
+    const service = new MarkdownTranslationService({
+        aiGateway: {
+            async generateText(request) {
+                sessionIds.push(request.sessionId);
+                return {
+                    text: translateBatchRequest(
+                        request.messages[1].content,
+                        sourceMarkdown => sourceMarkdown
+                            .replace('# One section', '# 一个章节')
+                            .replace(/Paragraph (\d+)\./g, '译文段落 $1。')
+                    ),
+                };
+            },
+        },
+        getSettings: () => ({ ...SETTINGS, streaming: false }),
+        createCacheKey: async () => null,
+        createSessionId: () => 'document-session',
+    });
+    const source = [
+        '# One section',
+        ...Array.from({ length: 17 }, (_, index) => [
+            '',
+            `Paragraph ${index}.`,
+        ]).flat(),
+    ].join('\n');
+
+    await service.translateDocument({
+        documentKey: 'a'.repeat(64),
+        markdown: source,
+    });
+
+    assert.deepEqual(sessionIds, [
+        'document-session',
+        'document-session',
+        'document-session',
+    ]);
 });
 
 test('translates a complete Markdown document in one provider request', async () => {
@@ -3065,6 +3130,28 @@ test('aborts every active section request when the document signal is canceled',
     await assert.rejects(translation, error => error?.name === 'AbortError');
     assert.equal(calls, 5);
     assert.equal(aborted, 5);
+});
+
+test('forwards reasoning effort to selection translation requests', async () => {
+    let request;
+    const service = new MarkdownTranslationService({
+        aiGateway: {
+            async generateText(value) {
+                request = value;
+                return { text: '译文', model: 'example-chat' };
+            },
+        },
+        getSettings: () => ({
+            ...SETTINGS,
+            streaming: false,
+            reasoning: 'medium',
+        }),
+    });
+
+    const result = await service.translateSelection({ text: 'A sentence.' });
+
+    assert.equal(result.text, '译文');
+    assert.equal(request.settings.reasoning, 'medium');
 });
 
 test('translates one bounded selection without using document cache', async () => {
