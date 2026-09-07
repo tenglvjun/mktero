@@ -3531,14 +3531,18 @@ main {
     display: block;
     max-width: 100%;
     height: auto;
-    margin: 24px auto;
+    margin: 10px auto;
     border-radius: var(--radius-md);
     box-shadow: 0 0 0 1px var(--border-subtle);
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-image + .cm-mktero-image img {
+    margin-top: 4px;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure {
     max-width: 100%;
-    margin: 24px 0 30px;
+    margin: 16px 0 18px;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure img {
