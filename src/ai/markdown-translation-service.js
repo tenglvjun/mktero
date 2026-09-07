@@ -1,5 +1,4 @@
 import {
-    AI_DEFAULT_REASONING,
     AI_TARGET_LANGUAGES,
     isSupportedAITargetLanguage,
     normalizeReasoning,
@@ -55,6 +54,7 @@ export class MarkdownTranslationService {
         getSettings,
         createCacheKey = defaultCreateCacheKey,
         createAbortController = createRuntimeAbortController,
+        createSessionId = createRandomSessionId,
         onCacheError = () => {},
     }) {
         if (typeof aiGateway?.generateText !== 'function') {
@@ -69,11 +69,15 @@ export class MarkdownTranslationService {
         if (typeof createAbortController !== 'function') {
             throw new TypeError('An AbortController factory is required');
         }
+        if (typeof createSessionId !== 'function') {
+            throw new TypeError('A session ID factory is required');
+        }
         this.aiGateway = aiGateway;
         this.cache = cache;
         this.getSettings = getSettings;
         this.createCacheKey = createCacheKey;
         this.createAbortController = createAbortController;
+        this.createSessionId = createSessionId;
         this.onCacheError = onCacheError;
     }
 
@@ -385,6 +389,7 @@ export class MarkdownTranslationService {
                 aiGateway: this.aiGateway,
                 settings,
                 batches,
+                sessionId: this.createSessionId(),
                 signal,
                 onProgress: reportProgress,
                 createAbortController: this.createAbortController,
@@ -509,6 +514,7 @@ export class MarkdownTranslationService {
         const request = {
             settings,
             messages,
+            sessionId: this.createSessionId(),
             signal,
             maxInputBytes: MAX_SELECTION_TRANSLATION_REQUEST_BYTES,
             maxResponseBytes: MAX_SELECTION_TRANSLATION_RESPONSE_BYTES,
@@ -739,7 +745,6 @@ export class MarkdownTranslationService {
         const connectionSettings = validateAISettings({
             ...settings,
             enabled: true,
-            reasoning: AI_DEFAULT_REASONING,
         });
         return this.aiGateway.generateText({
             settings: connectionSettings,
@@ -747,6 +752,7 @@ export class MarkdownTranslationService {
                 role: 'user',
                 content: 'hi',
             }],
+            sessionId: this.createSessionId(),
             maxOutputTokens: 4,
             acceptNonTextResponse: true,
             signal,
@@ -834,6 +840,7 @@ async function requestDocumentTranslationBatches({
     aiGateway,
     settings,
     batches,
+    sessionId,
     signal,
     onProgress,
     createAbortController,
@@ -882,6 +889,7 @@ async function requestDocumentTranslationBatches({
                     aiGateway,
                     settings,
                     batch,
+                    sessionId,
                     signal: controller.signal,
                     onProgress,
                 });
@@ -944,6 +952,7 @@ async function requestDocumentTranslationBatch({
     aiGateway,
     settings,
     batch,
+    sessionId,
     signal,
     onProgress,
 }) {
@@ -953,6 +962,7 @@ async function requestDocumentTranslationBatch({
     const request = {
         settings,
         messages: translationMessages(requestPayload, settings.targetLanguage),
+        sessionId,
         signal,
         onStreamEvent: event => {
             if (event?.type === 'reasoning-start'
@@ -1015,6 +1025,7 @@ async function requestDocumentTranslationBatch({
         aiGateway,
         settings,
         batch,
+        sessionId,
         failures: response.failures,
         signal,
         onProgress,
@@ -1049,6 +1060,7 @@ async function translateFailedBlocks({
     aiGateway,
     settings,
     batch,
+    sessionId,
     failures,
     signal,
     onProgress,
@@ -1067,6 +1079,7 @@ async function translateFailedBlocks({
             aiGateway,
             settings,
             block,
+            sessionId,
             initialFailure: failure,
             signal,
             onProgress,
@@ -1097,6 +1110,7 @@ async function translateBlockWithRetries({
     aiGateway,
     settings,
     block,
+    sessionId,
     initialFailure,
     signal,
     onProgress,
@@ -1112,6 +1126,7 @@ async function translateBlockWithRetries({
                 id: block.id,
                 sourceMarkdown: block.requestMarkdown,
             }]), settings.targetLanguage, failure.message),
+            sessionId,
             signal,
             maxInputBytes: MAX_DOCUMENT_REQUEST_BYTES,
             maxResponseBytes: MAX_DOCUMENT_PROVIDER_RESPONSE_BYTES,
@@ -1167,6 +1182,7 @@ async function translateBlockWithRetries({
             aiGateway,
             settings,
             block,
+            sessionId,
             previousFailure: failure.message,
             signal,
             onProgress,
@@ -1189,6 +1205,7 @@ async function translateProtectedTextSegments({
     aiGateway,
     settings,
     block,
+    sessionId,
     previousFailure,
     signal,
     onProgress,
@@ -1202,6 +1219,7 @@ async function translateProtectedTextSegments({
             settings.targetLanguage,
             previousFailure
         ),
+        sessionId,
         signal,
         maxInputBytes: MAX_DOCUMENT_REQUEST_BYTES,
         maxResponseBytes: MAX_DOCUMENT_PROVIDER_RESPONSE_BYTES,
@@ -1339,6 +1357,10 @@ function isRetryableTranslationError(error) {
 
 async function defaultCreateCacheKey(value) {
     return sha256Hex(new TextEncoder().encode(String(value)));
+}
+
+function createRandomSessionId() {
+    return crypto.randomUUID();
 }
 
 function byteLength(value) {

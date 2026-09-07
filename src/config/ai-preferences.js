@@ -4,6 +4,7 @@ export const AI_PROTOCOL_PREF = 'extensions.mktero.aiProtocol';
 export const AI_API_BASE_PREF = 'extensions.mktero.aiApiBase';
 export const AI_API_KEY_PREF = 'extensions.mktero.aiApiKey';
 export const AI_MODEL_PREF = 'extensions.mktero.aiModel';
+export const AI_REASONING_PREF = 'extensions.mktero.aiReasoning';
 export const AI_TARGET_LANGUAGE_PREF = 'extensions.mktero.aiTargetLanguage';
 export const AI_REQUEST_TIMEOUT_PREF = 'extensions.mktero.aiRequestTimeoutMs';
 export const AI_MAX_OUTPUT_TOKENS_PREF = 'extensions.mktero.aiMaxOutputTokens';
@@ -94,7 +95,7 @@ export function getAISettings(zotero) {
         ),
         apiKey: String(get(AI_API_KEY_PREF) || '').trim(),
         model: String(get(AI_MODEL_PREF) || '').trim(),
-        reasoning: AI_DEFAULT_REASONING,
+        reasoning: normalizeStoredReasoning(get(AI_REASONING_PREF)),
         targetLanguage: normalizeTargetLanguage(
             get(AI_TARGET_LANGUAGE_PREF)
         ),
@@ -243,6 +244,14 @@ export function normalizeReasoning(value) {
     return AI_REASONING_LEVELS.has(reasoning)
         ? reasoning
         : AI_DEFAULT_REASONING;
+}
+
+function normalizeStoredReasoning(value) {
+    const reasoning = String(value || '').trim();
+    if (reasoning === AI_PROVIDER_DEFAULT_REASONING) {
+        return AI_DEFAULT_REASONING;
+    }
+    return normalizeReasoning(reasoning);
 }
 
 function normalizeProvider(value) {

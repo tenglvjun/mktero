@@ -387,6 +387,7 @@ export function readAISettingsFromControls(document, zotero) {
         apiBase: value('mktero-ai-api-base') ?? settings.apiBase,
         apiKey: value('mktero-ai-api-key') ?? settings.apiKey,
         model: value('mktero-ai-model') ?? settings.model,
+        reasoning: value('mktero-ai-reasoning') ?? settings.reasoning,
         targetLanguage: value('mktero-ai-target-language')
             ?? settings.targetLanguage,
         requestTimeoutMs: value('mktero-ai-request-timeout')
