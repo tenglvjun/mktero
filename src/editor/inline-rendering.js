@@ -17,6 +17,7 @@ import { translateEnglish } from '../i18n/localization.js';
 import {
     findAcademicFigureGroups,
     findAcademicTableGroups,
+    findConsecutiveImagePacks,
 } from '../markdown/markdown-figures.js';
 import { analyzeMarkdownCitations } from '../markdown/markdown-citations.js';
 import {
@@ -894,17 +895,22 @@ function buildDecorations(state, context) {
         .filter(group => !rangesOverlapEditing(group, context));
     const figureGroups = findAcademicFigureGroups(state.doc.toString())
         .filter(group => !rangesOverlapEditing(group, context));
+    const imagePacks = findConsecutiveImagePacks(
+        state.doc.toString(),
+        figureGroups
+    ).filter(group => !rangesOverlapEditing(group, context));
+    const renderedFigureGroups = [...figureGroups, ...imagePacks];
     const tableGroups = findAcademicTableGroups(state.doc.toString())
         .filter(group => !rangesOverlapEditing(group, context));
     const renderedGroups = [
         ...algorithmGroups,
-        ...figureGroups,
+        ...renderedFigureGroups,
         ...tableGroups,
     ];
     for (const group of algorithmGroups) {
         decorations.push(renderedRange(group, state, 'algorithm', context));
     }
-    for (const group of figureGroups) {
+    for (const group of renderedFigureGroups) {
         decorations.push(renderedRange(group, state, 'image', context));
     }
     for (const group of tableGroups) {

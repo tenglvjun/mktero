@@ -5711,6 +5711,44 @@ test('renders EvoBrain model notation inside its figure caption', () => {
     dom.window.close();
 });
 
+test('packs consecutive uncaptioned images and isolated panel letters into one figure', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '![](images/a.png)',
+        '',
+        '',
+        '![](images/b.png)',
+        '',
+        'C',
+        '',
+        '![](images/c.png)',
+        '',
+        '![](images/d.png)',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: path => `blob:mktero-${path}`,
+        openLink: () => {},
+    });
+
+    const figure = document.querySelector('.mktero-figure-group-horizontal');
+    assert.equal(figure?.querySelectorAll('img').length, 4);
+    assert.equal(
+        figure?.querySelector('.mktero-figure-panel-label')?.textContent,
+        'C'
+    );
+    assert.equal(document.querySelectorAll('.cm-mktero-image').length, 1);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('renders one shared caption for consecutive MinerU figure panels', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

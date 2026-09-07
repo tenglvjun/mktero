@@ -48,6 +48,7 @@ const MARKDOWN_HARD_BREAK_PATTERN = /[ \t]{2,}(?:\r?\n)?$/;
 // Both markers are Markdown hard breaks; the extra space records vertical layout.
 const MINERU_VERTICAL_PANEL_MARKER_SPACES = 3;
 const MAX_PANEL_LABEL_LENGTH = 80;
+const ISOLATED_PANEL_LETTER_PATTERN = /^[A-Za-z]\.?$/u;
 const FIGURE_LAYOUT_MARKER_PATTERN = /^<!--\s*(?:mktero-figure-layout|mktero-mistral-figure-grid):\s*columns=(\d{1,2})\s+rows=([\d,]{1,80})(?:\s+spans=([\d,]{1,256}))?\s*-->$/iu;
 
 export function parseFigureLayoutMarker(value) {
@@ -375,6 +376,88 @@ export function findAcademicFigureGroups(markdown) {
     }
 
     return groups;
+}
+
+export function findConsecutiveImagePacks(markdown, occupiedRanges = []) {
+    const source = String(markdown || '');
+    const lines = markdownLineRecords(source);
+    const blockedLines = findBlockedLines(lines);
+    const packs = [];
+
+    for (let index = 0; index < lines.length; index++) {
+        if (blockedLines.has(index)
+            || occupiedRanges.some(range => rangeContainsLine(range, lines[index]))) {
+            continue;
+        }
+        if (!isMarkdownImageLine(lines[index].raw)
+            && !isIsolatedPanelLetter(lines[index].raw)) {
+            continue;
+        }
+        const images = collectPackedImages(lines, index, blockedLines);
+        if (images.length < 2) continue;
+        if (images.some(image => captionFromImageLine(lines[image.index].raw))) {
+            continue;
+        }
+        if (images.some(image => occupiedRanges.some(range => (
+            rangeContainsLine(range, lines[image.index])
+        )))) {
+            continue;
+        }
+        const fromIndex = Number.isInteger(images[0].labelIndex)
+            ? images[0].labelIndex
+            : images[0].index;
+        packs.push({
+            from: lines[fromIndex].from,
+            to: lines[images.at(-1).index].to,
+            caption: null,
+            images,
+            layout: 'horizontal',
+        });
+        index = images.at(-1).index;
+    }
+
+    return packs;
+}
+
+function collectPackedImages(lines, startIndex, blockedLines) {
+    const images = [];
+    let index = nextNonBlankLine(lines, startIndex);
+    let pendingLabel = null;
+    let pendingLabelIndex = null;
+    while (index < lines.length && !blockedLines.has(index)) {
+        if (isIsolatedPanelLetter(lines[index].raw)) {
+            pendingLabel = lines[index].text.trim();
+            pendingLabelIndex = index;
+            index = nextNonBlankLine(lines, index + 1);
+            continue;
+        }
+        if (!isMarkdownImageLine(lines[index].raw)) break;
+        images.push({
+            index,
+            source: lines[index].text.trim(),
+            ...(pendingLabel ? {
+                panelLabel: pendingLabel,
+                panelLabelPosition: 'before',
+                labelIndex: pendingLabelIndex,
+            } : {}),
+        });
+        pendingLabel = null;
+        pendingLabelIndex = null;
+        const nextIndex = nextNonBlankLine(lines, index + 1);
+        if (nextIndex < lines.length
+            && (isMarkdownImageLine(lines[nextIndex].raw)
+                || isIsolatedPanelLetter(lines[nextIndex].raw))) {
+            index = nextIndex;
+            continue;
+        }
+        break;
+    }
+    return images;
+}
+
+function isIsolatedPanelLetter(line) {
+    const text = String(line || '').replace(/\r?\n$/, '').trim();
+    return ISOLATED_PANEL_LETTER_PATTERN.test(text);
 }
 
 function isEmptyImageLine(line) {

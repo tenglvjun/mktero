@@ -295,7 +295,7 @@ test('keeps rendered figure spacing inside the CodeMirror block widget', () => {
     const figure = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure'
     );
-    assert.match(figure, /margin:\s*24px 0 30px/);
+    assert.match(figure, /margin:\s*16px 0 18px/);
 });
 
 test('styles academic figure captions as distinct labels', () => {

@@ -8,6 +8,7 @@ import {
 import {
     findAcademicFigureGroups,
     findAcademicTableGroups,
+    findConsecutiveImagePacks,
     normalizeMisassignedAcademicCaptions,
     parseFigureLayoutMarker,
     parseAcademicFigureCaption,
@@ -181,8 +182,11 @@ function renderStandaloneAcademicFigureGroup(
     translate,
 ) {
     const groups = findAcademicFigureGroups(markdown);
-    if (groups.length !== 1) return null;
-    const group = groups[0];
+    const packs = groups.length === 1
+        ? groups
+        : findConsecutiveImagePacks(markdown);
+    if (packs.length !== 1) return null;
+    const group = packs[0];
     if (markdown.slice(0, group.from).trim()
         || markdown.slice(group.to).trim()) {
         return null;
@@ -299,6 +303,7 @@ function renderImageToken(
 }
 
 function renderFigureCaption(caption, mathBudget, tokens = null, target = 'mktero') {
+    if (!caption?.label) return '';
     return '<figcaption>'
         + `<span class="mktero-figure-label">${escapeHTML(caption.label)}</span>`
         + ` ${renderFigureCaptionDescription(caption, mathBudget, tokens, target)}`

@@ -91,6 +91,31 @@ test('joins a MinerU paragraph split in the middle of a sentence', () => {
     );
 });
 
+test('joins a figure parenthetical split before an academic Methods locator', () => {
+    const markdown = 'Our intervention paradigm comprises three components: '
+        + 'evaluate whether a candidate direction can effectively correct the '
+        + 'model\'s answer within a bounded perturbation range (Fig. 4a,\n\n'
+        + 'Methods; extended explanation in Sec. S12). Smaller admissible '
+        + 'ranges indicate more precise directions.';
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown),
+        'Our intervention paradigm comprises three components: evaluate whether '
+            + 'a candidate direction can effectively correct the model\'s answer '
+            + 'within a bounded perturbation range (Fig. 4a, Methods; extended '
+            + 'explanation in Sec. S12). Smaller admissible ranges indicate more '
+            + 'precise directions.'
+    );
+});
+
+test('keeps a closed parenthetical separate from a following Methods paragraph', () => {
+    const markdown = 'A sufficiently detailed paragraph closes with a caveat '
+        + '(see Appendix A).\n\n'
+        + 'Methods were described independently in a follow-up document.';
+
+    assert.equal(normalizeMinerUMarkdown(markdown), markdown);
+});
+
 test('joins a citation year split from its preceding author name', () => {
     const markdown = 'Dental anxiety can stem from previous negative experiences '
         + '(Oosterink et al., 2008; van Houtem et al.,\n\n'
