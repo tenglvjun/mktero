@@ -111,15 +111,18 @@ function isBrokenProseBoundary(previousBlock, separator, nextBlock) {
     }
     const continuesLoadReaction = LOAD_REACTION_MODIFIERS_END_PATTERN.test(previous)
         && LOAD_REACTIONS_START_PATTERN.test(next);
-    const continuesCitationYear = previous.endsWith(',')
-        && hasUnclosedParenthetical(previous)
+    const continuesUnclosedParenthetical = previous.endsWith(',')
+        && hasUnclosedParenthetical(previous);
+    const continuesCitationYear = continuesUnclosedParenthetical
         && CITATION_YEAR_CONTINUATION_PATTERN.test(next);
     const continuesProse = PROSE_CONTINUATION_END_PATTERN.test(previous)
         || continuesLoadReaction
-        || continuesCitationYear
+        || continuesUnclosedParenthetical
         || (previous.endsWith(';')
             && SEMICOLON_SERIES_CONTINUATION_PATTERN.test(next));
-    if ((!/^\p{Ll}/u.test(next) && !continuesCitationYear)
+    if ((!/^\p{Ll}/u.test(next)
+            && !continuesCitationYear
+            && !continuesUnclosedParenthetical)
         || !continuesProse) {
         return false;
     }

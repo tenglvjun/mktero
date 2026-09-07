@@ -13,6 +13,7 @@ export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
     figurePanels: 'same-page-horizontal-or-labeled-vertical-ab-v2',
     figureLayouts: 'same-page-image-group-layout-v1',
     textFlow: 'cross-page-continuation-v1',
+    prose: 'unclosed-parenthetical-comma-v1',
     columns: 'same-page-two-column-reading-order-v3',
 });
 

@@ -19,6 +19,10 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
         'cross-page-continuation-v1'
     );
     assert.equal(
+        MINERU_SOURCE_MAP_OPTIONS.prose,
+        'unclosed-parenthetical-comma-v1'
+    );
+    assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.columns,
         'same-page-two-column-reading-order-v3'
     );
