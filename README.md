@@ -167,6 +167,8 @@ Cancel action leaves the document unchanged.
 ### Annotate from Markdown
 
 Existing Zotero text highlights and underlines are loaded when a document opens.
+Drag across headings or body text to select it, including headings and paragraph
+endings immediately below figures.
 Selecting Markdown text can create a local annotation immediately; Mktero then
 creates the corresponding Zotero annotation only when the local PDF text index
 can identify one reliable match. Repeated or ambiguous text remains local and

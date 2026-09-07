@@ -3432,6 +3432,10 @@ main {
     white-space: normal;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-image {
+    display: flow-root;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-rendered img[role="button"] {
     cursor: zoom-in;
 }
