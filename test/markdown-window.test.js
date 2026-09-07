@@ -153,6 +153,72 @@ test('shows Markdown without editing controls', () => {
     }
 });
 
+test('lists unique GitHub repositories from a floating reader button', async () => {
+    const launched = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: [
+            'Code: https://github.com/owner/repo',
+            'Pages: https://xzf-thu.github.io/VoiceMem/',
+            'Again: https://github.com/owner/repo/blob/main/src/app.js',
+        ].join('\n'),
+        sourceKind: 'markdown',
+        onOpenCitationGraph: () => {},
+    }), {
+        launchURL: href => launched.push(href),
+    });
+
+    try {
+        const button = shadow.querySelector('#mktero-github-repos');
+        const menu = shadow.querySelector('#mktero-github-repos-menu');
+        assert.equal(button.hidden, false);
+        assert.equal(
+            button.querySelector('[data-lucide]').dataset.lucide,
+            'github'
+        );
+        assert.ok(
+            button.classList.contains('markdown-github-repos-button--raised')
+        );
+        assert.equal(menu.hidden, true);
+
+        button.click();
+        assert.equal(menu.hidden, false);
+        assert.deepEqual(
+            [...menu.querySelectorAll('.markdown-github-repos-item')]
+                .map(item => item.textContent),
+            ['owner/repo', 'xzf-thu/VoiceMem']
+        );
+
+        menu.querySelector('.markdown-github-repos-item').click();
+        assert.deepEqual(launched, ['https://github.com/owner/repo']);
+        assert.equal(menu.hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('hides the GitHub repository button when the paper has none', async () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nNo repository.',
+        sourceKind: 'markdown',
+    }));
+
+    try {
+        assert.equal(shadow.querySelector('#mktero-github-repos').hidden, true);
+        assert.equal(
+            shadow.querySelector('#mktero-github-repos-menu').hidden,
+            true
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('shows the current-paper citation graph button in the reader', async () => {
     const opened = [];
     const { view, shadow } = createView(createModel({

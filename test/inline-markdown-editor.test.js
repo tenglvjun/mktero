@@ -4464,6 +4464,29 @@ test('opens all reference, autolink, and bare URL Markdown links', () => {
     dom.window.close();
 });
 
+test('leaves non-repository GitHub URLs as ordinary links', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Docs: https://github.com/owner/repo/wiki',
+        resolveImageURL: () => null,
+        openLink: () => {},
+    });
+
+    assert.equal(document.querySelector('.cm-mktero-github-link'), null);
+    assert.equal(
+        document.querySelector('.cm-mktero-link')?.textContent,
+        'https://github.com/owner/repo/wiki'
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('keeps statistical confidence intervals as plain text instead of links', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

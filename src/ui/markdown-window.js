@@ -35,6 +35,8 @@ import {
     comparePdfAnnotations,
 } from '../core/pdf-annotation.js';
 import { createLocalization } from '../i18n/localization.js';
+import { findGitHubRepositories } from '../markdown/github-repository-links.js';
+import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
 import {
     createMarkdownFragmentID,
     createMarkdownFragmentIndex,
@@ -248,6 +250,8 @@ class MarkdownTabView {
         this.navigationBackAvailable = false;
         this.responsiveResizeObserver = null;
         this.documentActionsOpen = false;
+        this.githubReposOpen = false;
+        this.githubRepositories = [];
         this.readerFontOptionsOpen = false;
         this.readerFontOptionsContext = '';
         this.translationLanguagesOpen = false;
@@ -1029,6 +1033,29 @@ class MarkdownTabView {
             LUCIDE_ICONS.network,
             { className: 'markdown-citation-graph-icon', size: 19 }
         ));
+        const githubReposButton = this.createElement('button', {
+            id: 'mktero-github-repos',
+            class: 'markdown-github-repos-button',
+            type: 'button',
+            'aria-label': this.t('viewer.openGitHubRepositories'),
+            title: this.t('viewer.openGitHubRepositories'),
+            'aria-haspopup': 'true',
+            'aria-expanded': 'false',
+            'aria-controls': 'mktero-github-repos-menu',
+        });
+        githubReposButton.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.github,
+            { className: 'markdown-github-repos-icon', size: 19 }
+        ));
+        githubReposButton.hidden = true;
+        const githubReposMenu = this.createElement('div', {
+            id: 'mktero-github-repos-menu',
+            class: 'markdown-github-repos-menu',
+            role: 'menu',
+            'aria-label': this.t('viewer.githubRepositories'),
+        });
+        githubReposMenu.hidden = true;
         const snapshotHost = this.createElement('div', {
             id: 'mktero-snapshot',
             class: 'markdown-snapshot-host',
@@ -1070,6 +1097,8 @@ class MarkdownTabView {
             documentActions.toolbar,
             readingLayout,
             citationGraphButton,
+            githubReposButton,
+            githubReposMenu,
             correctionUndo,
             snapshotHost
         );
@@ -1190,6 +1219,8 @@ class MarkdownTabView {
             correctionUndoButton,
             editorActions: documentActions.toolbar,
             citationGraphButton,
+            githubReposButton,
+            githubReposMenu,
             navigationBack: documentActions.navigationBack,
             editorSection,
             actionToggle: documentActions.toggle,
@@ -1880,6 +1911,18 @@ class MarkdownTabView {
         this.listen(this.elements.citationGraphButton, 'click', () => {
             this.openCitationGraph();
         });
+        this.listen(this.elements.githubReposButton, 'click', () => {
+            this.setGitHubReposOpen(!this.githubReposOpen);
+        });
+        this.listen(this.elements.githubReposMenu, 'click', event => {
+            const item = event.target?.closest?.('.markdown-github-repos-item');
+            if (!item || !this.elements.githubReposMenu.contains(item)) return;
+            const href = safeMarkdownLinkURL(
+                item.getAttribute('data-github-href') || ''
+            );
+            this.setGitHubReposOpen(false);
+            if (href) this.openLink(href);
+        });
         this.listen(this.elements.readerFontDecrease, 'click', () => {
             this.changeReaderFontSize(-1);
         });
@@ -1926,6 +1969,12 @@ class MarkdownTabView {
                 this.elements.readerFontTrigger.focus?.();
                 return;
             }
+            if (event.key === 'Escape' && this.githubReposOpen) {
+                event.preventDefault();
+                this.setGitHubReposOpen(false);
+                this.elements.githubReposButton.focus?.();
+                return;
+            }
             if (event.key === 'Escape' && this.documentActionsOpen) {
                 event.preventDefault();
                 this.setDocumentActionsOpen(false);
@@ -1935,7 +1984,8 @@ class MarkdownTabView {
         const closeDocumentActionsOnOutsidePress = event => {
             if (!this.documentActionsOpen
                 && !this.readerFontOptionsOpen
-                && !this.translationLanguagesOpen) return;
+                && !this.translationLanguagesOpen
+                && !this.githubReposOpen) return;
             const path = event.composedPath?.() || [];
             if (!path.includes(this.elements.translationView)) {
                 this.setTranslationLanguagesOpen(false);
@@ -1945,6 +1995,10 @@ class MarkdownTabView {
             }
             if (!path.includes(this.elements.editorActions)) {
                 this.setDocumentActionsOpen(false);
+            }
+            if (!path.includes(this.elements.githubReposButton)
+                && !path.includes(this.elements.githubReposMenu)) {
+                this.setGitHubReposOpen(false);
             }
         };
         this.listen(
@@ -3033,6 +3087,18 @@ class MarkdownTabView {
             'title',
             this.t('viewer.openCitationGraph')
         );
+        this.elements.githubReposButton.setAttribute(
+            'aria-label',
+            this.t('viewer.openGitHubRepositories')
+        );
+        this.elements.githubReposButton.setAttribute(
+            'title',
+            this.t('viewer.openGitHubRepositories')
+        );
+        this.elements.githubReposMenu.setAttribute(
+            'aria-label',
+            this.t('viewer.githubRepositories')
+        );
         this.elements.reparse.setAttribute('aria-label', this.t('viewer.reparse'));
         this.elements.reparse.setAttribute('title', this.t('viewer.reparse'));
         this.elements.saveSnapshot.setAttribute(
@@ -3285,6 +3351,7 @@ class MarkdownTabView {
         this.elements.citationGraphButton.hidden = !citationGraphAvailable;
         this.elements.citationGraphButton.disabled = !citationGraphAvailable
             || Boolean(this.documentActionBusy);
+        this.syncGitHubRepositories(model, citationGraphAvailable);
         this.elements.readerFontSize.hidden = !readerControlsAvailable;
         this.elements.readerFontFamily.hidden = !readerControlsAvailable;
         this.syncNavigationBack();
@@ -3759,6 +3826,61 @@ class MarkdownTabView {
         this.documentActionsOpen = Boolean(open);
         const available = !this.elements.actionToggle.hidden;
         this.syncDocumentActionMenuState(this.documentActionsOpen && available);
+        if (this.documentActionsOpen) this.setGitHubReposOpen(false);
+    }
+
+    syncGitHubRepositories(model, citationGraphAvailable) {
+        const repositories = model.status === 'ready'
+            ? findGitHubRepositories(model.markdown)
+            : [];
+        this.githubRepositories = repositories;
+        const available = repositories.length > 0;
+        this.elements.githubReposButton.hidden = !available;
+        this.elements.githubReposButton.classList.toggle(
+            'markdown-github-repos-button--raised',
+            available && citationGraphAvailable
+        );
+        this.elements.githubReposMenu.classList.toggle(
+            'markdown-github-repos-menu--raised',
+            available && citationGraphAvailable
+        );
+        if (!available) this.setGitHubReposOpen(false);
+        if (this.githubReposOpen) this.renderGitHubReposMenu();
+    }
+
+    setGitHubReposOpen(open) {
+        const available = !this.elements.githubReposButton.hidden
+            && this.githubRepositories.length > 0;
+        this.githubReposOpen = Boolean(open) && available;
+        this.elements.githubReposButton.setAttribute(
+            'aria-expanded',
+            String(this.githubReposOpen)
+        );
+        this.elements.githubReposMenu.hidden = !this.githubReposOpen;
+        if (this.githubReposOpen) {
+            this.documentActionsOpen = false;
+            this.syncDocumentActionMenuState(false);
+            this.setReaderFontOptionsOpen(false);
+            this.setTranslationLanguagesOpen(false);
+            this.renderGitHubReposMenu();
+        }
+    }
+
+    renderGitHubReposMenu() {
+        const menu = this.elements.githubReposMenu;
+        while (menu.firstChild) menu.removeChild(menu.firstChild);
+        for (const repository of this.githubRepositories) {
+            const item = this.createElement('button', {
+                class: 'markdown-github-repos-item',
+                type: 'button',
+                role: 'menuitem',
+                'data-github-href': repository.href,
+                'aria-label': this.t('link.githubRepository', {
+                    label: repository.label,
+                }),
+            }, repository.label);
+            menu.appendChild(item);
+        }
     }
 
     syncDocumentActionMenuState(visible) {

@@ -847,6 +847,76 @@ main {
     cursor: pointer;
 }
 
+.markdown-github-repos-button {
+    position: absolute;
+    z-index: 5;
+    inset-block-end: 18px;
+    inset-inline-end: 18px;
+    display: grid;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+    border-radius: 50%;
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+    box-shadow: var(--shadow-float);
+    cursor: pointer;
+}
+
+.markdown-github-repos-button--raised {
+    inset-block-end: 66px;
+}
+
+.markdown-github-repos-menu {
+    position: absolute;
+    z-index: 6;
+    inset-block-end: 66px;
+    inset-inline-end: 18px;
+    display: flex;
+    min-width: 11.5rem;
+    max-width: min(18rem, calc(100% - 36px));
+    max-height: min(16rem, calc(100% - 92px));
+    flex-direction: column;
+    overflow: auto;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
+    box-shadow: var(--shadow-float);
+}
+
+.markdown-github-repos-button--raised + .markdown-github-repos-menu,
+.markdown-github-repos-menu--raised {
+    inset-block-end: 114px;
+}
+
+.markdown-github-repos-item {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    color: var(--text);
+    background: transparent;
+    text-align: start;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.markdown-github-repos-item:hover,
+.markdown-github-repos-item:focus-visible {
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.markdown-github-repos-item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+    outline-offset: 1px;
+}
+
 .markdown-citation-graph-button:hover,
 .markdown-citation-graph-button:focus-visible {
     border-color: var(--accent);
@@ -854,7 +924,19 @@ main {
     background: var(--accent);
 }
 
+.markdown-github-repos-button:hover,
+.markdown-github-repos-button:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+    background: var(--accent);
+}
+
 .markdown-citation-graph-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+    outline-offset: 2px;
+}
+
+.markdown-github-repos-button:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
     outline-offset: 2px;
 }
