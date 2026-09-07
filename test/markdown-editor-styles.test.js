@@ -286,6 +286,18 @@ test('keeps inline math inside the prose line box', () => {
     assert.doesNotMatch(displayMath, /background\s*:/);
 });
 
+test('keeps rendered figure spacing inside the CodeMirror block widget', () => {
+    const image = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-image'
+    );
+    assert.match(image, /display:\s*flow-root/);
+
+    const figure = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure'
+    );
+    assert.match(figure, /margin:\s*24px 0 30px/);
+});
+
 test('styles academic figure captions as distinct labels', () => {
     const caption = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure figcaption'
