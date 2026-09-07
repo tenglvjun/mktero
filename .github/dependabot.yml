@@ -9,6 +9,11 @@ updates:
       time: '03:00'
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
+    ignore:
+      # 18.0.11 makes repeated unmatched \[ delimiters parse in quadratic time.
+      - dependency-name: marked
+        versions:
+          - '18.0.11'
     groups:
       production-minor-and-patch:
         dependency-type: production
