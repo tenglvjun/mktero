@@ -10,6 +10,7 @@ import {
     MarkdownAnnotationOverlay,
 } from '../src/core/markdown-annotation-overlay.js';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
+import { selectedMarkdownAnnotation } from '../src/editor/inline-rendering.js';
 import { createAnnotationPopup } from '../src/editor/annotation-popup.js';
 
 function enterTableCellEditing(cell, ownerWindow) {
@@ -7766,6 +7767,47 @@ test('clamps a backward selection mapped into the previous block', async () => {
         from,
         to: from + selectedText.length,
     }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('skips chrome when selecting Markdown across page chrome', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeRanges = [{ from: 5, to: 11 }];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({ markdown });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    const lines = [...document.querySelectorAll('.cm-line')];
+    const hello = textNodeContaining(lines[0], 'Hello');
+    const world = textNodeContaining(lines[4], 'World');
+    const range = document.createRange();
+    range.setStart(hello, hello.textContent.indexOf('Hello'));
+    range.setEnd(world, world.textContent.indexOf('World') + 'World'.length);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+
+    const selected = selectedMarkdownAnnotation(view, chromeRanges);
+    assert.deepEqual(selected.ranges, [
+        { from: 0, to: 5 },
+        { from: 11, to: 16 },
+    ]);
+    assert.equal(selected.text.includes('12'), false);
+    assert.equal(selected.text.replace(/\s+/gu, ''), 'HelloWorld');
+
+    const chromeNode = textNodeContaining(lines[2], '12');
+    const chromeRange = document.createRange();
+    chromeRange.selectNodeContents(chromeNode);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(chromeRange);
+    assert.equal(selectedMarkdownAnnotation(view, chromeRanges), null);
 
     editor.destroy();
     dom.window.close();

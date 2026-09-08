@@ -50,6 +50,10 @@ import {
     installRenderedAnnotations,
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
+import {
+    subtractChromeRanges,
+    visibleTextForRanges,
+} from '../markdown/chrome-ranges.js';
 import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
 import {
     findTextOccurrences,
@@ -1553,7 +1557,7 @@ function hasSelectedInteractionText(view, element) {
         || element.contains(selection.focusNode);
 }
 
-export function selectedMarkdownAnnotation(view) {
+export function selectedMarkdownAnnotation(view, chromeRanges = []) {
     const selection = view.dom.ownerDocument.getSelection?.();
     if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
         return null;
@@ -1572,7 +1576,12 @@ export function selectedMarkdownAnnotation(view) {
     const renderedEnd = renderedSelectionContainer(range.endContainer, view);
     if (renderedStart || renderedEnd) {
         return renderedStart && renderedStart === renderedEnd
-            ? selectedRenderedMarkdownAnnotation(view, range, selectedText)
+            ? selectedRenderedMarkdownAnnotation(
+                view,
+                range,
+                selectedText,
+                chromeRanges
+            )
             : null;
     }
     const renderedIntersections = intersectingRenderedContent(view, range);
@@ -1594,19 +1603,31 @@ export function selectedMarkdownAnnotation(view) {
                 view,
                 renderedIntersections,
                 from,
-                to
+                to,
+                chromeRanges
             );
         }
-        const text = selectedText.trim();
-        if (text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
-        return { text, ranges: [{ from, to }] };
+        return annotationSelectionWithoutChrome(view, from, to, chromeRanges);
     }
     catch {
         return null;
     }
 }
 
-function selectedRenderedMarkdownAnnotation(view, range, selectedText) {
+function annotationSelectionWithoutChrome(view, from, to, chromeRanges) {
+    const ranges = subtractChromeRanges({ from, to }, chromeRanges);
+    if (!ranges.length) return null;
+    const text = visibleTextForRanges(view.state.doc.toString(), ranges).trim();
+    if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
+    return { text, ranges };
+}
+
+function selectedRenderedMarkdownAnnotation(
+    view,
+    range,
+    selectedText,
+    chromeRanges = []
+) {
     const start = renderedSelectionContainer(range.startContainer, view);
     const end = renderedSelectionContainer(range.endContainer, view);
     if (!start || start !== end) return null;
@@ -1650,13 +1671,12 @@ function selectedRenderedMarkdownAnnotation(view, range, selectedText) {
         candidates.offsets[ordinal],
         text.length
     );
-    return {
-        text,
-        ranges: [{
-            from: sourceFrom + selectedRange.from,
-            to: sourceFrom + selectedRange.to,
-        }],
-    };
+    const ranges = subtractChromeRanges({
+        from: sourceFrom + selectedRange.from,
+        to: sourceFrom + selectedRange.to,
+    }, chromeRanges);
+    if (!ranges.length) return null;
+    return { text, ranges };
 }
 
 function renderedSelectionTextOffset(container, range, selectedText) {
@@ -1690,7 +1710,13 @@ function intersectingRenderedContent(view, range) {
     return intersections;
 }
 
-function selectedInlineMathAnnotation(view, containers, from, to) {
+function selectedInlineMathAnnotation(
+    view,
+    containers,
+    from,
+    to,
+    chromeRanges = []
+) {
     for (const container of containers) {
         const markdownFrom = Number(container.dataset.markdownFrom);
         const markdownTo = Number(container.dataset.markdownTo);
@@ -1707,7 +1733,9 @@ function selectedInlineMathAnnotation(view, containers, from, to) {
     ).text;
     const text = normalizeText(visible);
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
-    return { text, ranges: [{ from, to }] };
+    const ranges = subtractChromeRanges({ from, to }, chromeRanges);
+    if (!ranges.length) return null;
+    return { text, ranges };
 }
 
 function renderedSelectionContainer(node, view) {

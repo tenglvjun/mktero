@@ -765,7 +765,7 @@ class MarkdownTabView {
             || !String(sourceAnnotation.text || '').trim()
             || !markdownAnnotationRangeMatchesSource(
                 this.model.markdown,
-                sourceAnnotation.ranges?.[0],
+                sourceAnnotation.ranges,
                 sourceAnnotation.text
             )) {
             throw new Error('Markdown annotations require original text');
@@ -777,7 +777,8 @@ class MarkdownTabView {
         );
         const textQuote = createMarkdownAnnotationTextQuote(
             this.model.markdown,
-            sourceAnnotation.ranges[0]
+            sourceAnnotation.ranges,
+            this.model.chromeRanges
         );
         const draft = {
             ...sourceAnnotation,
