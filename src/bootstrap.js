@@ -1075,6 +1075,7 @@ async function translateDocument(documentID, {
             signal => service.translateDocument({
                 documentKey: String(presentation.model.cacheKey || ''),
                 markdown: presentation.model.markdown,
+                chromeRanges: presentation.model.chromeRanges,
                 signal,
                 targetLanguage,
                 retryBlockIDs,
@@ -1385,10 +1386,11 @@ async function resolveTranslationAfterRevision(snapshot, {
     let reconciled = null;
     if (previousTranslation && snapshot.markdown.trim()) {
         try {
-            reconciled = await runtime.translationService
+                reconciled = await runtime.translationService
                 ?.reconcileDocumentTranslation?.({
                     documentKey: String(snapshot.cacheKey || ''),
                     markdown: snapshot.markdown,
+                    chromeRanges: snapshot.chromeRanges,
                     existingTranslation: previousTranslation,
                     targetLanguage: previousTranslation.targetLanguage,
                 }) || null;
@@ -1457,10 +1459,11 @@ async function attachCachedDocumentTranslation(result, signal) {
     do {
         if (signal?.aborted) throw signal.reason || new Error('Aborted');
         targetLanguage = getAISettings(Zotero).targetLanguage;
-        variants = await runtime.translationService
+            variants = await runtime.translationService
             ?.listCachedDocumentTranslationVariants?.({
                 documentKey: result.cacheKey,
                 markdown: result.markdown,
+                chromeRanges: result.chromeRanges,
             });
         if (signal?.aborted) throw signal.reason || new Error('Aborted');
     } while (getAISettings(Zotero).targetLanguage !== targetLanguage);
@@ -1542,6 +1545,7 @@ async function activateCachedTranslationLanguage(
             documentKey,
             markdown,
             targetLanguage,
+            chromeRanges: presentation.model.chromeRanges,
         });
     const current = runtime.presenter?.get(documentID);
     if (current !== presentation

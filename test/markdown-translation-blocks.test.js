@@ -1150,3 +1150,22 @@ test('rejects incomplete or mismatched translation sets', () => {
         /structure/i
     );
 });
+
+test('marks a chrome-only paragraph as not translatable', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const blocks = collectMarkdownTranslationBlocks(markdown, {
+        chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+    });
+    const chromeBlock = blocks.find(block => block.markdown.trim() === '12');
+    assert.equal(chromeBlock?.translatable, false);
+    assert.equal(
+        blocks.find(block => block.markdown === 'Hello')?.translatable,
+        true
+    );
+    assert.equal(
+        blocks.find(block => block.markdown === 'World')?.translatable,
+        true
+    );
+});

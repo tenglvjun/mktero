@@ -26,6 +26,10 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
         MINERU_SOURCE_MAP_OPTIONS.columns,
         'same-page-two-column-reading-order-v3'
     );
+    assert.equal(
+        MINERU_SOURCE_MAP_OPTIONS.chrome,
+        'page-edge-repeated-v1'
+    );
 });
 
 test('reassembles side-by-side MinerU panels separated by upper-page prose', () => {
@@ -873,4 +877,91 @@ test('ignores malformed figure panel source geometry', () => {
 
     assert.equal(result.markdown, markdown);
     assert.equal(findAcademicFigureGroups(result.markdown).length, 0);
+});
+
+test('emits chromeRanges for repeated MinerU edge headers and page numbers', () => {
+    const result = prepareMinerUResult({
+        markdown: [
+            'Nature',
+            '',
+            'Opening body paragraph.',
+            '',
+            'Nature',
+            '',
+            '2',
+            '',
+            'Second page body paragraph.',
+        ].join('\n'),
+        contentList: [{
+            type: 'text',
+            text: 'Nature',
+            pageIndex: 0,
+            bbox: [100, 40, 900, 90],
+        }, {
+            type: 'text',
+            text: 'Opening body paragraph.',
+            pageIndex: 0,
+            bbox: [100, 200, 900, 300],
+        }, {
+            type: 'text',
+            text: 'Nature',
+            pageIndex: 1,
+            bbox: [100, 40, 900, 90],
+        }, {
+            type: 'text',
+            text: '2',
+            pageIndex: 1,
+            bbox: [100, 900, 900, 980],
+        }, {
+            type: 'text',
+            text: 'Second page body paragraph.',
+            pageIndex: 1,
+            bbox: [100, 200, 900, 300],
+        }],
+    });
+
+    assert.match(result.markdown, /Nature/);
+    assert.match(result.markdown, /Opening body paragraph/);
+    assert.equal(
+        result.chromeRanges.some(range => (
+            result.markdown.slice(range.from, range.to).includes('Nature')
+        )),
+        true
+    );
+    assert.equal(
+        result.chromeRanges.some(range => (
+            result.markdown.slice(range.from, range.to).trim() === '2'
+            || result.markdown.slice(range.from, range.to).includes('\n2\n')
+        )),
+        true
+    );
+    assert.equal(
+        result.sourceMap.some(entry => (
+            result.markdown.slice(entry.markdownFrom, entry.markdownTo).trim() === 'Nature'
+        )),
+        false
+    );
+});
+
+test('does not hide in-body MinerU page-number-like prose away from the page edge', () => {
+    const result = prepareMinerUResult({
+        markdown: 'See figure 2 for details in the methods section.',
+        contentList: [{
+            type: 'text',
+            text: 'See figure 2 for details in the methods section.',
+            pageIndex: 0,
+            bbox: [100, 400, 900, 500],
+        }],
+    });
+    assert.deepEqual(result.chromeRanges || [], []);
+});
+
+test('keeps stored MinerU chromeRanges when the document is user-edited', () => {
+    const result = prepareMinerUResult({
+        userEdited: true,
+        markdown: 'Nature',
+        chromeRanges: [{ from: 0, to: 6 }],
+    });
+    assert.deepEqual(result.chromeRanges, [{ from: 0, to: 6 }]);
+    assert.equal(result.markdown, 'Nature');
 });

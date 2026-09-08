@@ -38,6 +38,9 @@ import { createLocalization } from '../i18n/localization.js';
 import { findGitHubRepositories } from '../markdown/github-repository-links.js';
 import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
 import {
+    visibleDocumentChromeRanges,
+} from '../markdown/chrome-ranges.js';
+import {
     createMarkdownFragmentID,
     createMarkdownFragmentIndex,
     createMarkdownReadingPositionAnchor,
@@ -549,10 +552,22 @@ class MarkdownTabView {
                 'is-comparing',
                 comparisonView
             );
+            const sourceChromeRanges = visibleDocumentChromeRanges(
+                model.markdown || markdown,
+                model.chromeRanges
+            );
             this.editor.setDocument({
                 markdown,
                 annotationOverlay,
                 sourceMap,
+                chromeRanges: translatedView
+                    ? []
+                    : comparisonView
+                        ? mapChromeRangesToComparison(
+                            sourceChromeRanges,
+                            model.translationBlockRanges
+                        )
+                        : sourceChromeRanges,
                 sourceActionRanges: translatedView
                     ? []
                     : comparisonView
@@ -615,7 +630,8 @@ class MarkdownTabView {
             this.fragmentIndex = createMarkdownFragmentIndex(markdown);
             this.syncOutline(
                 comparisonView ? model.markdown || '' : markdown,
-                comparisonView ? model.comparisonSourceRanges : null
+                comparisonView ? model.comparisonSourceRanges : null,
+                translatedView ? [] : sourceChromeRanges
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
@@ -765,7 +781,7 @@ class MarkdownTabView {
             || !String(sourceAnnotation.text || '').trim()
             || !markdownAnnotationRangeMatchesSource(
                 this.model.markdown,
-                sourceAnnotation.ranges?.[0],
+                sourceAnnotation.ranges,
                 sourceAnnotation.text
             )) {
             throw new Error('Markdown annotations require original text');
@@ -777,7 +793,8 @@ class MarkdownTabView {
         );
         const textQuote = createMarkdownAnnotationTextQuote(
             this.model.markdown,
-            sourceAnnotation.ranges[0]
+            sourceAnnotation.ranges,
+            this.model.chromeRanges
         );
         const draft = {
             ...sourceAnnotation,
@@ -4120,10 +4137,10 @@ class MarkdownTabView {
         });
     }
 
-    syncOutline(markdown, sourceRanges = null) {
+    syncOutline(markdown, sourceRanges = null, chromeRanges = []) {
         const list = this.elements.outlineList;
         list.replaceChildren();
-        const headings = extractMarkdownOutline(markdown);
+        const headings = extractMarkdownOutline(markdown, chromeRanges);
         if (!headings.length) {
             list.appendChild(this.createElement(
                 'li',
@@ -4650,6 +4667,14 @@ function mapAnnotationOverlayToComparison(overlay, blockRanges) {
         }),
         unmatched: [...(source.unmatched || [])],
     };
+}
+
+function mapChromeRangesToComparison(chromeRanges, blockRanges) {
+    if (!Array.isArray(chromeRanges)) return [];
+    return chromeRanges.flatMap(range => {
+        const mapped = mapSourceRangeToComparison(range, blockRanges);
+        return mapped ? [mapped] : [];
+    });
 }
 
 function mapSourceMapToComparison(sourceMap, blockRanges) {

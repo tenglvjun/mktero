@@ -31,6 +31,7 @@ test('reads a PDF and delegates to synchronous Mistral conversion', async () => 
                         markdown: '# Mistral result',
                         assets: [{ path: 'figure.png', mimeType: 'image/png', data: [1] }],
                         sourceMap: [],
+                        chromeRanges: [{ from: 0, to: 2 }],
                         extractedPages: 2,
                         totalPages: 2,
                     },
@@ -64,6 +65,7 @@ test('reads a PDF and delegates to synchronous Mistral conversion', async () => 
     assert.equal(result.resumedTask, false);
     assert.equal(result.extractedPages, 2);
     assert.equal(result.totalPages, 2);
+    assert.deepEqual(result.chromeRanges, [{ from: 0, to: 2 }]);
     assert.deepEqual(result.assets, [{
         path: 'figure.png',
         mimeType: 'image/png',

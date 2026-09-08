@@ -1,4 +1,5 @@
 import { GFM, parser } from '@lezer/markdown';
+import { mapChromeRanges } from '../markdown/chrome-ranges.js';
 import {
     findDisplayMathMatches,
     findInlineMathMatches,
@@ -349,11 +350,17 @@ function materializeRevision(revision) {
         revision.base.sourceMap || [],
         transforms
     );
+    const chromeRanges = mapChromeRanges(
+        revision.base.chromeRanges || [],
+        transforms,
+        markdown.length
+    );
     return {
         itemID: revision.base.itemID,
         cacheKey: revision.base.cacheKey,
         markdown,
         sourceMap,
+        chromeRanges,
         assets: cloneAssets(revision.base.assets || []),
         assetBasePath: revision.base.assetBasePath || '',
         extractedPages: revision.base.extractedPages ?? null,
@@ -808,6 +815,9 @@ function validateBaseDocument(value) {
     if (value.sourceMap !== undefined && !Array.isArray(value.sourceMap)) {
         throw new TypeError('The base Markdown source map must be an array');
     }
+    if (value.chromeRanges !== undefined && !Array.isArray(value.chromeRanges)) {
+        throw new TypeError('The base Markdown chrome ranges must be an array');
+    }
 }
 
 function cloneRevision(revision) {
@@ -825,6 +835,10 @@ function cloneBaseDocument(document) {
         cacheKey: document.cacheKey,
         markdown: document.markdown,
         sourceMap: (document.sourceMap || []).map(entry => cloneSourceMapEntry(entry)),
+        chromeRanges: (document.chromeRanges || []).map(range => ({
+            from: range.from,
+            to: range.to,
+        })),
         assets: cloneAssets(document.assets || []),
         assetBasePath: String(document.assetBasePath || ''),
         extractedPages: document.extractedPages ?? null,

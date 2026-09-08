@@ -126,6 +126,7 @@ test('passes through Markdown produced by MinerU', async () => {
         markdownTo: 18,
         locations: [{ pageIndex: 0, bbox: [100, 120, 900, 220] }],
     }];
+    const chromeRanges = [{ from: 0, to: 2 }];
     const service = new MarkdownDocumentService({
         extractor: {
             extract: async () => ({
@@ -141,6 +142,7 @@ test('passes through Markdown produced by MinerU', async () => {
                 resumedTask: true,
                 cacheKey: 'a'.repeat(64),
                 sourceMap,
+                chromeRanges,
             }),
         },
     });
@@ -155,6 +157,7 @@ test('passes through Markdown produced by MinerU', async () => {
     assert.equal(result.resumedTask, true);
     assert.equal(result.cacheKey, 'a'.repeat(64));
     assert.equal(result.sourceMap, sourceMap);
+    assert.equal(result.chromeRanges, chromeRanges);
 });
 
 test('adds current Zotero PDF annotations without changing Markdown', async () => {

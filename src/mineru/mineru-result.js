@@ -5,6 +5,7 @@ import {
     normalizeMinerUFigureLayouts,
     normalizeMinerUMarkdown,
 } from './markdown-normalizer.js';
+import { detectMinerUPageChrome } from './page-chrome.js';
 import { reassembleMinerUTextFlow } from './text-flow-normalizer.js';
 
 export function prepareMinerUResult(result) {
@@ -87,9 +88,11 @@ export function prepareMinerUResult(result) {
             sourceMap = initialSourceMap;
         }
     }
+    const detected = detectMinerUPageChrome(markdown, contentList, sourceMap);
     return {
         ...prepared,
         markdown,
-        ...(sourceMap ? { sourceMap } : {}),
+        ...(detected.sourceMap ? { sourceMap: detected.sourceMap } : {}),
+        chromeRanges: detected.chromeRanges,
     };
 }

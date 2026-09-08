@@ -1,15 +1,22 @@
 import { GFM, parser as markdownParser } from '@lezer/markdown';
+import { normalizeChromeRanges } from './chrome-ranges.js';
 
 const OUTLINE_PARSER = markdownParser.configure(GFM);
 const HEADING_NODE = /^(?:ATXHeading|SetextHeading)([1-6])$/;
 
-export function extractMarkdownOutline(markdown) {
+export function extractMarkdownOutline(markdown, chromeRanges = []) {
     const source = String(markdown || '');
+    const hidden = normalizeChromeRanges(chromeRanges, source.length);
     const headings = [];
     OUTLINE_PARSER.parse(source).iterate({
         enter(node) {
             const match = HEADING_NODE.exec(node.name);
             if (!match) return;
+            if (hidden.some(range => (
+                range.from <= node.from && node.from < range.to
+            ))) {
+                return;
+            }
             const text = visibleHeadingText(
                 source.slice(node.from, node.to),
                 node.name
@@ -22,7 +29,66 @@ export function extractMarkdownOutline(markdown) {
             });
         },
     });
-    return headings;
+    return inferFlatNumberedOutlineLevels(headings);
+}
+
+const NUMBERED_HEADING_PATTERN = /^(\d+(?:\.\d+)*)(?:\.|\s|$)/;
+const LETTER_HEADING_PATTERN = /^([A-Z](?:\.\d+)*)\.(?:\s|$)/;
+const LETTER_SUBHEADING_PATTERN = /^([A-Z]\.\d+(?:\.\d+)*)(?:\s|$)/;
+const ROMAN_HEADING_PATTERN = /^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.(?:\s|$)/i;
+
+function inferFlatNumberedOutlineLevels(headings) {
+    if (headings.length < 2) return headings;
+    const groups = new Map();
+    for (const [index, heading] of headings.entries()) {
+        const indexes = groups.get(heading.level) || [];
+        indexes.push(index);
+        groups.set(heading.level, indexes);
+    }
+    const next = headings.map(heading => ({ ...heading }));
+    for (const indexes of groups.values()) {
+        if (indexes.length < 2) continue;
+        const scheme = outlineNumberingScheme(
+            indexes.map(index => headings[index].text)
+        );
+        const depths = indexes.map(index => (
+            numberedHeadingDepth(headings[index].text, scheme)
+        ));
+        if (new Set(depths.filter(Boolean)).size < 2) continue;
+        for (const [offset, index] of indexes.entries()) {
+            next[index] = {
+                ...next[index],
+                level: depths[offset] || 1,
+            };
+        }
+    }
+    return next;
+}
+
+function outlineNumberingScheme(texts) {
+    return texts.some(text => ROMAN_HEADING_PATTERN.test(String(text).trim()))
+        ? 'ieee'
+        : 'standard';
+}
+
+function numberedHeadingDepth(text, scheme = 'standard') {
+    const trimmed = String(text).trim();
+    if (ROMAN_HEADING_PATTERN.test(trimmed)) return 1;
+    if (scheme === 'ieee') {
+        const letter = LETTER_SUBHEADING_PATTERN.exec(trimmed)
+            || LETTER_HEADING_PATTERN.exec(trimmed);
+        if (!letter) return 0;
+        return clampOutlineLevel(1 + letter[1].split('.').length);
+    }
+    const match = LETTER_HEADING_PATTERN.exec(trimmed)
+        || LETTER_SUBHEADING_PATTERN.exec(trimmed)
+        || NUMBERED_HEADING_PATTERN.exec(trimmed);
+    if (!match) return 0;
+    return clampOutlineLevel(match[1].split('.').length);
+}
+
+function clampOutlineLevel(depth) {
+    return Math.min(6, Math.max(1, depth));
 }
 
 export function createMarkdownFragmentIndex(markdown) {

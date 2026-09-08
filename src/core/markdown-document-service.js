@@ -80,6 +80,9 @@ export class MarkdownDocumentService {
         if (Array.isArray(extracted.sourceMap)) {
             result.sourceMap = extracted.sourceMap;
         }
+        if (Array.isArray(extracted.chromeRanges)) {
+            result.chromeRanges = extracted.chromeRanges;
+        }
         if (extracted.assets?.length) {
             result.assets = extracted.assets;
             result.assetBasePath = extracted.assetBasePath || '';

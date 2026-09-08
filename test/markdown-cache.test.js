@@ -565,6 +565,67 @@ test('migrates and reads legacy single-translation metadata', async t => {
     assert.equal('translationFile' in migrated, false);
 });
 
+test('restores cached chromeRanges next to the source map', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+        now: () => 1_700_000_000_000,
+    };
+    const result = {
+        markdown: 'Hello\n\n12\n\nWorld',
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 5,
+            locations: [{ pageIndex: 0, bbox: [100, 200, 900, 260] }],
+        }],
+        chromeRanges: [{ from: 5, to: 11 }],
+    };
+    await new MarkdownCache(options).put(CACHE_KEY, result);
+    const restored = await new MarkdownCache(options).get(CACHE_KEY);
+    assert.deepEqual(restored.chromeRanges, [{ from: 5, to: 11 }]);
+    assert.equal(restored.markdown, result.markdown);
+});
+
+test('opens a cache entry when the chromeRanges sidecar is missing', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    };
+    await new MarkdownCache(options).put(CACHE_KEY, { markdown: '# Paper' });
+    const restored = await new MarkdownCache(options).get(CACHE_KEY);
+    assert.equal(restored.markdown, '# Paper');
+    assert.equal('chromeRanges' in restored, false);
+});
+
+test('keeps cached Markdown when chromeRanges bytes do not match', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    };
+    await new MarkdownCache(options).put(CACHE_KEY, {
+        markdown: 'Hello\n\n12\n\nWorld',
+        chromeRanges: [{ from: 5, to: 11 }],
+    });
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    const chromeFile = (await readdir(entryPath)).find(file => (
+        file.startsWith('chrome-ranges-')
+    ));
+    await writeFile(path.join(entryPath, chromeFile), ' '.repeat(1024));
+    const restored = await new MarkdownCache(options).get(CACHE_KEY);
+    assert.equal(restored.markdown, 'Hello\n\n12\n\nWorld');
+    assert.equal('chromeRanges' in restored, false);
+});
+
 test('reads a cache entry created before source maps were available', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));

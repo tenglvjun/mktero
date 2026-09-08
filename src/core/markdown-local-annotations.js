@@ -512,13 +512,12 @@ function resolveAnnotations(markdown, annotations) {
     let visibleIndex = null;
     let normalizedIndex = null;
     for (const annotation of annotations) {
-        const savedRange = annotation.ranges[0];
         if (markdownAnnotationRangeMatchesSource(
             markdown,
-            savedRange,
+            annotation.ranges,
             annotation.text
         )) {
-            matched.push(resolvedAnnotation(annotation, savedRange));
+            matched.push(resolvedAnnotation(annotation, annotation.ranges));
             continue;
         }
         visibleIndex ||= createVisibleMarkdownTextIndex(markdown);
@@ -573,20 +572,43 @@ function resolveAnnotations(markdown, annotations) {
     return { matched, unmatched };
 }
 
-export function markdownAnnotationRangeMatchesSource(markdown, range, text) {
+export function markdownAnnotationRangeMatchesSource(markdown, rangeOrRanges, text) {
     const source = String(markdown || '');
-    if (!validRange(range, source.length)) return false;
-    const visible = createVisibleMarkdownTextIndex(
-        source.slice(range.from, range.to)
-    ).text;
+    const ranges = Array.isArray(rangeOrRanges)
+        ? rangeOrRanges
+        : rangeOrRanges
+            ? [rangeOrRanges]
+            : [];
+    if (!ranges.length
+        || ranges.some(range => !validRange(range, source.length))) {
+        return false;
+    }
+    const visible = ranges.map(range => (
+        createVisibleMarkdownTextIndex(source.slice(range.from, range.to)).text
+    )).join('');
     return normalizeVisibleText(visible) === normalizeVisibleText(text);
 }
 
-export function createMarkdownAnnotationTextQuote(markdown, range) {
+export function createMarkdownAnnotationTextQuote(
+    markdown,
+    rangeOrRanges,
+    chromeRanges = []
+) {
     const source = String(markdown || '');
-    if (!validRange(range, source.length)) return null;
-    const visible = createVisibleMarkdownTextIndex(source);
-    return createTextQuoteFromVisibleIndex(range, visible);
+    const ranges = Array.isArray(rangeOrRanges)
+        ? rangeOrRanges
+        : rangeOrRanges
+            ? [rangeOrRanges]
+            : [];
+    if (!ranges.length
+        || ranges.some(range => !validRange(range, source.length))) {
+        return null;
+    }
+    const visible = createVisibleMarkdownTextIndex(source, chromeRanges);
+    return createTextQuoteFromVisibleIndex({
+        from: ranges[0].from,
+        to: ranges.at(-1).to,
+    }, visible);
 }
 
 function createTextQuoteFromVisibleIndex(range, visible) {
@@ -607,12 +629,16 @@ function createTextQuoteFromVisibleIndex(range, visible) {
     return textQuote;
 }
 
-function resolvedAnnotation(annotation, range) {
+function resolvedAnnotation(annotation, rangeOrRanges) {
+    const ranges = (Array.isArray(rangeOrRanges)
+        ? rangeOrRanges
+        : [rangeOrRanges]
+    ).map(range => ({ from: range.from, to: range.to }));
     return {
         ...annotation,
         matchKind: 'local',
-        ranges: [{ from: range.from, to: range.to }],
-        sortIndex: String(range.from).padStart(12, '0'),
+        ranges,
+        sortIndex: String(ranges[0].from).padStart(12, '0'),
         synchronization: { status: 'pending' },
     };
 }

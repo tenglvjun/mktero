@@ -1037,7 +1037,7 @@ function createMathRenderBudget() {
 }
 
 function renderMath(source, displayMode, mathBudget, target = 'mktero') {
-    const normalizedSource = String(source).trim();
+    const normalizedSource = normalizeOcrMathSource(String(source).trim());
     if (UNSAFE_MATH_COMMAND.test(normalizedSource)
         || !mathBudget.claimSource(normalizedSource)) {
         return wrapMathFallback(normalizedSource, displayMode, target);
@@ -1111,6 +1111,102 @@ export function safeMarkdownLinkURL(value) {
         return url.replace(/[\u0000-\u001F\u007F]/g, '');
     }
     return null;
+}
+
+const MATH_COMMAND_IN_TEXT = /\\(?:mathcal|mathrm|mathbf|mathbb|mathsf|mathit|frac|left|right|begin|end)\b/;
+
+function normalizeOcrMathSource(source) {
+    let normalized = unescapeMathHTMLEntities(source);
+    normalized = splitTextCommandsContainingMath(normalized);
+    normalized = restoreOcrTextSubscripts(normalized);
+    return collapseOcrTeXSpacing(normalized);
+}
+
+function splitTextCommandsContainingMath(source) {
+    let output = '';
+    let index = 0;
+    while (index < source.length) {
+        const start = source.indexOf('\\text', index);
+        if (start < 0) {
+            output += source.slice(index);
+            break;
+        }
+        output += source.slice(index, start);
+        const afterName = start + 5;
+        if (/[A-Za-z]/.test(source[afterName] || '')) {
+            output += source.slice(start, afterName);
+            index = afterName;
+            continue;
+        }
+        let brace = afterName;
+        while (brace < source.length && /[ \t]/.test(source[brace])) brace++;
+        if (source[brace] !== '{') {
+            output += source.slice(start, brace);
+            index = brace;
+            continue;
+        }
+        const group = readTeXGroup(source, brace);
+        if (!group) {
+            output += source.slice(start);
+            break;
+        }
+        if (!MATH_COMMAND_IN_TEXT.test(group.inner)) {
+            output += source.slice(start, group.end);
+            index = group.end;
+            continue;
+        }
+        const leading = group.inner.match(/^[^\\_^]+/)?.[0] || '';
+        if (leading) output += `\\text{${leading}}`;
+        output += group.inner.slice(leading.length);
+        index = group.end;
+    }
+    return output;
+}
+
+function readTeXGroup(source, openBrace) {
+    let depth = 1;
+    let index = openBrace + 1;
+    while (index < source.length && depth > 0) {
+        const character = source[index];
+        if (character === '\\') {
+            index += 2;
+            continue;
+        }
+        if (character === '{') depth++;
+        else if (character === '}') depth--;
+        index++;
+    }
+    if (depth !== 0) return null;
+    return {
+        inner: source.slice(openBrace + 1, index - 1),
+        end: index,
+    };
+}
+
+function restoreOcrTextSubscripts(source) {
+    return source
+        .replace(/_\s*\{text\s*\{([^}]*)\}\}/g, '_{\\text{$1}}')
+        .replace(/_\s*\{text\s*\{([^}]*)\}/g, '_{\\text{$1}');
+}
+
+function collapseOcrTeXSpacing(source) {
+    return source
+        .replace(/\\([A-Za-z]+)\s+\{/g, '\\$1{')
+        .replace(/_\s*\{/g, '_{')
+        .replace(/\^\s*\{/g, '^{')
+        .replace(/\\begin\{array\}\{([^}]+)\}/g, (_, columns) => (
+            `\\begin{array}{${columns.replace(/\s+/g, '')}}`
+        ));
+}
+
+function unescapeMathHTMLEntities(value) {
+    return String(value)
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, '\'')
+        .replace(/&apos;/g, '\'')
+        .replace(/&amp;/g, '&');
 }
 
 function escapeHTML(value) {

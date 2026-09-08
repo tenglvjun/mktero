@@ -9,7 +9,9 @@ import { JSDOM } from 'jsdom';
 import {
     MarkdownAnnotationOverlay,
 } from '../src/core/markdown-annotation-overlay.js';
+import { visibleDocumentChromeRanges } from '../src/markdown/chrome-ranges.js';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
+import { selectedMarkdownAnnotation } from '../src/editor/inline-rendering.js';
 import { createAnnotationPopup } from '../src/editor/annotation-popup.js';
 
 function enterTableCellEditing(cell, ownerWindow) {
@@ -7767,6 +7769,148 @@ test('clamps a backward selection mapped into the previous block', async () => {
         to: from + selectedText.length,
     }]);
 
+    editor.destroy();
+    dom.window.close();
+});
+
+test('skips chrome when selecting Markdown across page chrome', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeRanges = [{ from: 5, to: 11 }];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({ markdown });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    const lines = [...document.querySelectorAll('.cm-line')];
+    const hello = textNodeContaining(lines[0], 'Hello');
+    const world = textNodeContaining(lines[4], 'World');
+    const range = document.createRange();
+    range.setStart(hello, hello.textContent.indexOf('Hello'));
+    range.setEnd(world, world.textContent.indexOf('World') + 'World'.length);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+
+    const selected = selectedMarkdownAnnotation(view, chromeRanges);
+    assert.deepEqual(selected.ranges, [
+        { from: 0, to: 5 },
+        { from: 11, to: 16 },
+    ]);
+    assert.equal(selected.text.includes('12'), false);
+    assert.equal(selected.text.replace(/\s+/gu, ''), 'HelloWorld');
+
+    const chromeNode = textNodeContaining(lines[2], '12');
+    const chromeRange = document.createRange();
+    chromeRange.selectNodeContents(chromeNode);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(chromeRange);
+    assert.equal(selectedMarkdownAnnotation(view, chromeRanges), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('hides chromeRanges in the Markdown reader without changing source', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+    });
+    assert.equal(editor.getMarkdown(), markdown);
+    assert.equal(
+        renderedLineTexts(document).some(text => text.trim() === '12'),
+        false
+    );
+    assert.equal(
+        renderedLineTexts(document).some(text => text.includes('Hello')),
+        true
+    );
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps the paper title styled after hiding leading publisher chrome', () => {
+    const markdown = [
+        'Check for updates',
+        '',
+        'REVIEW ARTICLE OPEN',
+        '',
+        '# Systematic review and meta-analysis',
+        '',
+        'Han Li',
+    ].join('\n');
+    const titleFrom = markdown.indexOf('# Systematic');
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        chromeRanges: visibleDocumentChromeRanges(markdown, [
+            { from: 0, to: titleFrom + 2 },
+        ]),
+    });
+    const titleLine = [...document.querySelectorAll('.cm-line')].find(line => (
+        line.textContent.includes('Systematic review')
+    ));
+    assert.ok(titleLine?.className.includes('cm-mktero-heading-1'));
+    assert.equal(
+        renderedLineTexts(document).some(text => (
+            text.includes('Check for updates')
+        )),
+        false
+    );
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not paint annotation marks on hidden chrome', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'HelloWorld',
+                color: '#ffd400',
+                ranges: [{ from: 0, to: markdown.length }],
+            }],
+            unmatched: [],
+        },
+    });
+    const marks = [...document.querySelectorAll('.cm-mktero-pdf-annotation')];
+    assert.equal(marks.some(mark => mark.textContent.includes('12')), false);
+    assert.equal(marks.some(mark => mark.textContent.includes('Hello')), true);
     editor.destroy();
     dom.window.close();
 });

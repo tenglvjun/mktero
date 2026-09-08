@@ -50,6 +50,10 @@ import {
     installRenderedAnnotations,
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
+import {
+    subtractChromeRanges,
+    visibleTextForRanges,
+} from '../markdown/chrome-ranges.js';
 import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
 import {
     findTextOccurrences,
@@ -71,6 +75,7 @@ export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
 export const setAnnotationOverlay = StateEffect.define();
+export const setChromeRanges = StateEffect.define();
 export const setTranslationRanges = StateEffect.define();
 export const setTranslationFailures = StateEffect.define();
 export const setTranslationPairs = StateEffect.define();
@@ -591,6 +596,7 @@ export function createInlineRenderingExtension({
         highlightedTableID: null,
         highlightedFigureID: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
+        chromeRanges: [],
         translationRanges: [],
         translationFailures: [],
         translationPairs: [],
@@ -625,6 +631,7 @@ export function createInlineRenderingExtension({
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
             let annotationOverlayChanged = false;
+            let chromeRangesChanged = false;
             let translationRangesChanged = false;
             let translationFailuresChanged = false;
             let translationPairsChanged = false;
@@ -654,6 +661,12 @@ export function createInlineRenderingExtension({
                         )
                     );
                     annotationOverlayChanged = true;
+                }
+                else if (effect.is(setChromeRanges)) {
+                    context.chromeRanges = Array.isArray(effect.value)
+                        ? effect.value
+                        : [];
+                    chromeRangesChanged = true;
                 }
                 else if (effect.is(setTranslationRanges)) {
                     context.translationRanges = normalizeTranslationRanges(
@@ -706,6 +719,7 @@ export function createInlineRenderingExtension({
                 || tableHighlightChanged
                 || figureHighlightChanged
                 || annotationOverlayChanged
+                || chromeRangesChanged
                 || translationRangesChanged
                 || translationFailuresChanged
                 || translationPairsChanged
@@ -954,6 +968,7 @@ function buildDecorations(state, context) {
     decorateCitations(state, decorations, context);
     decorateTableReferences(state, decorations, context);
     decorateFigureReferences(state, decorations, context);
+    decorateChromeRanges(state, decorations, context);
     decoratePDFAnnotations(
         state,
         decorations,
@@ -1155,14 +1170,27 @@ function normalizeTranslationPairRange(from, to, documentLength) {
         : null;
 }
 
+function decorateChromeRanges(state, decorations, context) {
+    for (const range of context.chromeRanges || []) {
+        if (!validAnnotationRange(range, state.doc.length)) continue;
+        decorations.push(Decoration.replace({}).range(range.from, range.to));
+    }
+}
+
 function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
+    const chromeRanges = context.chromeRanges || [];
     for (const annotation of context.annotationOverlay?.matched || []) {
         const validRanges = (annotation.ranges || []).filter(range => (
             validAnnotationRange(range, state.doc.length)
         ));
-        const noteOffset = annotationStartOffset(validRanges);
-        for (const range of annotation.ranges || []) {
-            if (!validAnnotationRange(range, state.doc.length)) continue;
+        const visibleRanges = validRanges.flatMap(range => (
+            subtractChromeRanges(range, chromeRanges)
+        ));
+        let noteOffset = annotationStartOffset(validRanges);
+        if (offsetInsideChrome(noteOffset, chromeRanges)) {
+            noteOffset = visibleRanges[0]?.from ?? null;
+        }
+        for (const range of visibleRanges) {
             if (rangesOverlapEditing(range, context)) continue;
             if (renderedRanges.some(rendered => rangeContains(rendered, range))) {
                 continue;
@@ -1185,6 +1213,13 @@ function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
             }).range(noteOffset));
         }
     }
+}
+
+function offsetInsideChrome(offset, chromeRanges) {
+    return Number.isInteger(offset)
+        && (chromeRanges || []).some(range => (
+            range.from <= offset && offset < range.to
+        ));
 }
 
 function validAnnotationRange(range, documentLength) {
@@ -1553,7 +1588,7 @@ function hasSelectedInteractionText(view, element) {
         || element.contains(selection.focusNode);
 }
 
-export function selectedMarkdownAnnotation(view) {
+export function selectedMarkdownAnnotation(view, chromeRanges = []) {
     const selection = view.dom.ownerDocument.getSelection?.();
     if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
         return null;
@@ -1572,7 +1607,12 @@ export function selectedMarkdownAnnotation(view) {
     const renderedEnd = renderedSelectionContainer(range.endContainer, view);
     if (renderedStart || renderedEnd) {
         return renderedStart && renderedStart === renderedEnd
-            ? selectedRenderedMarkdownAnnotation(view, range, selectedText)
+            ? selectedRenderedMarkdownAnnotation(
+                view,
+                range,
+                selectedText,
+                chromeRanges
+            )
             : null;
     }
     const renderedIntersections = intersectingRenderedContent(view, range);
@@ -1594,19 +1634,31 @@ export function selectedMarkdownAnnotation(view) {
                 view,
                 renderedIntersections,
                 from,
-                to
+                to,
+                chromeRanges
             );
         }
-        const text = selectedText.trim();
-        if (text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
-        return { text, ranges: [{ from, to }] };
+        return annotationSelectionWithoutChrome(view, from, to, chromeRanges);
     }
     catch {
         return null;
     }
 }
 
-function selectedRenderedMarkdownAnnotation(view, range, selectedText) {
+function annotationSelectionWithoutChrome(view, from, to, chromeRanges) {
+    const ranges = subtractChromeRanges({ from, to }, chromeRanges);
+    if (!ranges.length) return null;
+    const text = visibleTextForRanges(view.state.doc.toString(), ranges).trim();
+    if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
+    return { text, ranges };
+}
+
+function selectedRenderedMarkdownAnnotation(
+    view,
+    range,
+    selectedText,
+    chromeRanges = []
+) {
     const start = renderedSelectionContainer(range.startContainer, view);
     const end = renderedSelectionContainer(range.endContainer, view);
     if (!start || start !== end) return null;
@@ -1650,13 +1702,12 @@ function selectedRenderedMarkdownAnnotation(view, range, selectedText) {
         candidates.offsets[ordinal],
         text.length
     );
-    return {
-        text,
-        ranges: [{
-            from: sourceFrom + selectedRange.from,
-            to: sourceFrom + selectedRange.to,
-        }],
-    };
+    const ranges = subtractChromeRanges({
+        from: sourceFrom + selectedRange.from,
+        to: sourceFrom + selectedRange.to,
+    }, chromeRanges);
+    if (!ranges.length) return null;
+    return { text, ranges };
 }
 
 function renderedSelectionTextOffset(container, range, selectedText) {
@@ -1690,7 +1741,13 @@ function intersectingRenderedContent(view, range) {
     return intersections;
 }
 
-function selectedInlineMathAnnotation(view, containers, from, to) {
+function selectedInlineMathAnnotation(
+    view,
+    containers,
+    from,
+    to,
+    chromeRanges = []
+) {
     for (const container of containers) {
         const markdownFrom = Number(container.dataset.markdownFrom);
         const markdownTo = Number(container.dataset.markdownTo);
@@ -1707,7 +1764,9 @@ function selectedInlineMathAnnotation(view, containers, from, to) {
     ).text;
     const text = normalizeText(visible);
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
-    return { text, ranges: [{ from, to }] };
+    const ranges = subtractChromeRanges({ from, to }, chromeRanges);
+    if (!ranges.length) return null;
+    return { text, ranges };
 }
 
 function renderedSelectionContainer(node, view) {

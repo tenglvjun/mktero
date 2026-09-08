@@ -4,6 +4,10 @@ import {
     isValidSourceLocation,
     isValidSourceMapEntry,
 } from '../core/markdown-source-map.js';
+import {
+    MAX_CHROME_RANGES_BYTES,
+    normalizeChromeRanges,
+} from '../markdown/chrome-ranges.js';
 import { sha256Hex } from '../core/sha256.js';
 
 const CACHE_SCHEMA_VERSION = 1;
@@ -66,6 +70,7 @@ export class MarkdownCache {
         maxSourceMapBytes = DEFAULT_MAX_SOURCE_MAP_BYTES,
         maxSourceLocations = DEFAULT_MAX_SOURCE_LOCATIONS,
         maxTranslationBytes = DEFAULT_MAX_TRANSLATION_BYTES,
+        maxChromeRangesBytes = MAX_CHROME_RANGES_BYTES,
     }) {
         if (!rootPath) throw new TypeError('A cache root path is required');
         if (!ioUtils) throw new TypeError('An IOUtils adapter is required');
@@ -80,6 +85,7 @@ export class MarkdownCache {
         this.maxSourceMapBytes = maxSourceMapBytes;
         this.maxSourceLocations = maxSourceLocations;
         this.maxTranslationBytes = maxTranslationBytes;
+        this.maxChromeRangesBytes = maxChromeRangesBytes;
         this.operationTail = Promise.resolve();
     }
 
@@ -95,7 +101,12 @@ export class MarkdownCache {
 
         try {
             let metadata = JSON.parse(await this.io.readUTF8(metadataPath));
-            validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
+            validateMetadata(
+                metadata,
+                cacheKey,
+                this.maxSourceMapBytes,
+                this.maxChromeRangesBytes
+            );
             metadata = await this.#repairInvalidTranslationMetadata(
                 entryPath,
                 metadataPath,
@@ -106,7 +117,7 @@ export class MarkdownCache {
                 return null;
             }
             const markdownFile = metadata.markdownFile || MARKDOWN_FILE;
-            const [markdown, assets, sourceMapJSON] = await Promise.all([
+            const [markdown, assets, sourceMapJSON, chromeRangesJSON] = await Promise.all([
                 this.io.readUTF8(this.path.join(entryPath, markdownFile)),
                 Promise.all(metadata.assets.map(async asset => {
                     const data = await this.io.read(
@@ -123,6 +134,9 @@ export class MarkdownCache {
                 })),
                 metadata.sourceMapFile
                     ? this.#readSourceMapJSON(entryPath, metadata)
+                    : null,
+                metadata.chromeRangesFile
+                    ? this.#readChromeRangesJSON(entryPath, metadata)
                     : null,
             ]);
             if (new TextEncoder().encode(markdown).length !== metadata.markdownBytes) {
@@ -141,6 +155,20 @@ export class MarkdownCache {
                     this.maxSourceLocations
                 );
             }
+            let chromeRanges;
+            if (chromeRangesJSON !== null) {
+                try {
+                    if (new TextEncoder().encode(chromeRangesJSON).length
+                        === metadata.chromeRangesBytes) {
+                        const normalized = normalizeChromeRanges(
+                            JSON.parse(chromeRangesJSON),
+                            markdown.length
+                        );
+                        if (normalized.length) chromeRanges = normalized;
+                    }
+                }
+                catch {}
+            }
             metadata.lastAccessedAt = this.now();
             await this.#writeMetadata(metadataPath, metadata).catch(() => {});
 
@@ -151,6 +179,7 @@ export class MarkdownCache {
                 extractedPages: metadata.extractedPages,
                 totalPages: metadata.totalPages,
                 ...(sourceMap ? { sourceMap } : {}),
+                ...(chromeRanges ? { chromeRanges } : {}),
                 ...(metadata.userEdited ? { userEdited: true } : {}),
             };
         }
@@ -187,7 +216,12 @@ export class MarkdownCache {
         let metadata;
         try {
             metadata = JSON.parse(await this.io.readUTF8(metadataPath));
-            validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
+            validateMetadata(
+                metadata,
+                cacheKey,
+                this.maxSourceMapBytes,
+                this.maxChromeRangesBytes
+            );
             metadata = await this.#repairInvalidTranslationMetadata(
                 entryPath,
                 metadataPath,
@@ -235,7 +269,12 @@ export class MarkdownCache {
         let metadata;
         try {
             metadata = JSON.parse(await this.io.readUTF8(metadataPath));
-            validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
+            validateMetadata(
+                metadata,
+                cacheKey,
+                this.maxSourceMapBytes,
+                this.maxChromeRangesBytes
+            );
             metadata = await this.#repairInvalidTranslationMetadata(
                 entryPath,
                 metadataPath,
@@ -394,6 +433,7 @@ export class MarkdownCache {
         const generation = createGenerationID(this.now());
         const markdownFile = `document-${generation}.md`;
         const sourceMapFile = `source-map-${generation}.json`;
+        const chromeRangesFile = `chrome-ranges-${generation}.json`;
         const writtenPaths = [];
         const temporaryPaths = [];
         const assets = [];
@@ -443,6 +483,29 @@ export class MarkdownCache {
                 });
                 writtenPaths.push(sourceMapPath);
             }
+            let chromeRangesBytes = 0;
+            let storedChromeRanges = false;
+            if (Array.isArray(result.chromeRanges)) {
+                const chromeRanges = normalizeChromeRanges(
+                    result.chromeRanges,
+                    result.markdown.length
+                );
+                if (chromeRanges.length) {
+                    const chromeRangesJSON = JSON.stringify(chromeRanges);
+                    chromeRangesBytes = new TextEncoder().encode(chromeRangesJSON).length;
+                    if (chromeRangesBytes > this.maxChromeRangesBytes) {
+                        throw new Error('Cached chrome ranges exceed the size limit');
+                    }
+                    const chromeRangesPath = this.path.join(entryPath, chromeRangesFile);
+                    const temporaryChromeRangesPath = `${chromeRangesPath}.tmp`;
+                    temporaryPaths.push(temporaryChromeRangesPath);
+                    await this.io.writeUTF8(chromeRangesPath, chromeRangesJSON, {
+                        tmpPath: temporaryChromeRangesPath,
+                    });
+                    writtenPaths.push(chromeRangesPath);
+                    storedChromeRanges = true;
+                }
+            }
             const metadata = {
                 schemaVersion: CACHE_SCHEMA_VERSION,
                 cacheKey,
@@ -453,13 +516,17 @@ export class MarkdownCache {
                 extractedPages: result.extractedPages ?? null,
                 totalPages: result.totalPages ?? null,
                 markdownBytes,
-                sizeBytes: markdownBytes + sourceMapBytes
+                sizeBytes: markdownBytes + sourceMapBytes + chromeRangesBytes
                     + assets.reduce((total, asset) => total + asset.size, 0),
                 assets,
             };
             if (Array.isArray(result.sourceMap)) {
                 metadata.sourceMapFile = sourceMapFile;
                 metadata.sourceMapBytes = sourceMapBytes;
+            }
+            if (storedChromeRanges) {
+                metadata.chromeRangesFile = chromeRangesFile;
+                metadata.chromeRangesBytes = chromeRangesBytes;
             }
             if (result.userEdited) metadata.userEdited = true;
             temporaryPaths.push(`${metadataPath}.tmp`);
@@ -498,7 +565,12 @@ export class MarkdownCache {
                 );
                 const cacheKey = this.path.filename(entryPath);
                 validateCacheKey(cacheKey);
-                validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
+                validateMetadata(
+                    metadata,
+                    cacheKey,
+                    this.maxSourceMapBytes,
+                    this.maxChromeRangesBytes
+                );
                 const repairedMetadata = await this.#repairInvalidTranslationMetadata(
                     entryPath,
                     this.path.join(entryPath, METADATA_FILE),
@@ -586,11 +658,32 @@ export class MarkdownCache {
         return this.io.readUTF8(filePath);
     }
 
+    async #readChromeRangesJSON(entryPath, metadata) {
+        try {
+            const filePath = this.path.join(entryPath, metadata.chromeRangesFile);
+            const fileInfo = await this.io.stat(filePath);
+            if (!Number.isSafeInteger(fileInfo?.size)
+                || fileInfo.size !== metadata.chromeRangesBytes
+                || fileInfo.size > this.maxChromeRangesBytes) {
+                return null;
+            }
+            return await this.io.readUTF8(filePath);
+        }
+        catch {
+            return null;
+        }
+    }
+
     async #readMetadata(entryPath, metadataPath, cacheKey) {
         if (!(await this.io.exists(metadataPath))) return null;
         try {
             const metadata = JSON.parse(await this.io.readUTF8(metadataPath));
-            validateMetadata(metadata, cacheKey, this.maxSourceMapBytes);
+            validateMetadata(
+                metadata,
+                cacheKey,
+                this.maxSourceMapBytes,
+                this.maxChromeRangesBytes
+            );
             return this.#repairInvalidTranslationMetadata(
                 entryPath,
                 metadataPath,
@@ -744,6 +837,9 @@ export class MarkdownCache {
             ...(metadata.sourceMapFile
                 ? [this.path.join(entryPath, metadata.sourceMapFile)]
                 : []),
+            ...(metadata.chromeRangesFile
+                ? [this.path.join(entryPath, metadata.chromeRangesFile)]
+                : []),
             ...(metadata.assets || []).map(asset => (
                 this.path.join(entryPath, 'assets', asset.file)
             )),
@@ -790,7 +886,8 @@ function validateCacheKey(cacheKey) {
 function validateMetadata(
     metadata,
     cacheKey,
-    maxSourceMapBytes
+    maxSourceMapBytes,
+    maxChromeRangesBytes
 ) {
     if (metadata?.schemaVersion !== CACHE_SCHEMA_VERSION
         || metadata.cacheKey !== cacheKey
@@ -809,6 +906,14 @@ function validateMetadata(
                 || metadata.sourceMapBytes > maxSourceMapBytes))
         || (metadata.sourceMapBytes !== undefined
             && metadata.sourceMapFile === undefined)
+        || (metadata.chromeRangesFile !== undefined
+            && !/^chrome-ranges-[a-z0-9-]+\.json$/.test(metadata.chromeRangesFile))
+        || (metadata.chromeRangesFile !== undefined
+            && (!Number.isSafeInteger(metadata.chromeRangesBytes)
+                || metadata.chromeRangesBytes < 0
+                || metadata.chromeRangesBytes > maxChromeRangesBytes))
+        || (metadata.chromeRangesBytes !== undefined
+            && metadata.chromeRangesFile === undefined)
         || typeof metadata.assetBasePath !== 'string'
         || (metadata.userEdited !== undefined
             && typeof metadata.userEdited !== 'boolean')
@@ -878,6 +983,7 @@ function translationFiles(metadata) {
 function cachedDocumentSize(metadata) {
     return metadata.markdownBytes
         + (metadata.sourceMapBytes || 0)
+        + (metadata.chromeRangesBytes || 0)
         + metadata.assets.reduce((total, asset) => total + asset.size, 0);
 }
 

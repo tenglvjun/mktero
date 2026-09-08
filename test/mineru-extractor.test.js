@@ -197,6 +197,7 @@ test('returns a persisted corrected revision before MinerU conversion', async ()
             locations: [{ pageIndex: 0, bbox: [100, 200, 900, 300] }],
             corrected: true,
         }],
+        chromeRanges: [{ from: 0, to: 2 }],
         extractedPages: 1,
         totalPages: 1,
     };
@@ -224,6 +225,7 @@ test('returns a persisted corrected revision before MinerU conversion', async ()
 
     assert.equal(result.markdown, revision.markdown);
     assert.deepEqual(result.sourceMap, revision.sourceMap);
+    assert.deepEqual(result.chromeRanges, revision.chromeRanges);
     assert.equal(result.cacheHit, true);
     assert.equal(result.userEdited, true);
     assert.equal(result.cacheKey, cacheKey);

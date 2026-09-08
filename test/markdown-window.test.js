@@ -1493,6 +1493,7 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         markdown: 'Important result.',
         annotationOverlay,
         sourceMap,
+        chromeRanges: [],
             sourceActionRanges: null,
             translationRanges: [],
             translationFailures: [],
@@ -1721,6 +1722,63 @@ test('keeps source annotations and evidence actions on bilingual source blocks',
         text: '\u8bd1\u6587',
         ranges: [{ from: 36, to: 38 }],
     }), /source/i);
+    view.destroy();
+});
+
+test('passes chromeRanges to the editor and quotes body text around them', async () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const created = [];
+    const updates = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 5,
+            locations: [{ pageIndex: 0, bbox: [100, 200, 900, 300] }],
+        }],
+        onCreateMarkdownAnnotation: annotation => {
+            created.push(annotation);
+            return {
+                ...annotation,
+                id: 'mktero-local-chrome',
+                source: 'markdown',
+                type: 'highlight',
+            };
+        },
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument(document) {
+                    updates.push(document);
+                },
+                setCorrectionState() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+    assert.deepEqual(
+        updates.at(-1).chromeRanges,
+        [{ from: chromeFrom, to: chromeTo }]
+    );
+    await editorOptions.createMarkdownAnnotation({
+        text: 'HelloWorld',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 5 }, { from: chromeTo, to: markdown.length }],
+    }, { side: 'source' });
+    assert.equal(created[0].text, 'HelloWorld');
+    assert.equal(created[0].textQuote?.prefix?.includes('12') || false, false);
+    assert.equal(created[0].textQuote?.suffix?.includes('12') || false, false);
     view.destroy();
 });
 

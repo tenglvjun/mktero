@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    createMarkdownAnnotationTextQuote,
     MarkdownLocalAnnotations,
+    markdownAnnotationRangeMatchesSource,
     mergeAnnotationOverlays,
 } from '../src/core/markdown-local-annotations.js';
 import {
@@ -1152,6 +1154,29 @@ test('reports an unreadable local annotation store without breaking conversion',
         warning: 'Local Markdown annotations could not be loaded.',
     });
     assert.deepEqual(errors, ['private filesystem detail']);
+});
+
+test('matches a split Markdown annotation that skipped chrome', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            markdown,
+            [{ from: 0, to: 5 }, { from: 11, to: 16 }],
+            'HelloWorld'
+        ),
+        true
+    );
+});
+
+test('builds a text quote that skips chrome between split ranges', () => {
+    const markdown = 'Alpha Hello\n\n12\n\nWorld Omega';
+    const quote = createMarkdownAnnotationTextQuote(
+        markdown,
+        [{ from: 6, to: 11 }, { from: 17, to: 22 }],
+        [{ from: 11, to: 17 }]
+    );
+    assert.equal(quote.prefix.includes('12'), false);
+    assert.equal(quote.suffix.includes('12'), false);
 });
 
 test('merges PDF and local annotations without changing either overlay', () => {
