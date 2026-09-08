@@ -11,9 +11,16 @@ import {
     createZoteroCitationGraphCache,
 } from '../cache/citation-graph-cache.js';
 import {
+    AI_API_BASE_PREF,
     AI_PROTOCOL_PREF,
+    AI_PROVIDER_CUSTOM,
+    AI_REQUEST_TIMEOUT_PREF,
+    aiRequestTimeoutMsFromSeconds,
+    aiRequestTimeoutSecondsFromMs,
+    defaultAIApiBaseForProvider,
     getAIProtocolsForProvider,
     getAISettings,
+    isReplaceableAIApiBase,
 } from '../config/ai-preferences.js';
 import { AISDKGateway } from '../ai/ai-sdk-gateway.js';
 import {
@@ -40,6 +47,10 @@ import {
     setMarkdownReaderFont,
     setMarkdownReaderFontSize,
 } from '../config/reader-preferences.js';
+import {
+    createLucideIcon,
+    LUCIDE_ICONS,
+} from '../icons/lucide-icon.js';
 import {
     createLocalization,
     translateEnglish,
@@ -95,6 +106,8 @@ export function createPreferencesController({
         zoteroLocale: getZoteroLocale(zotero, services),
     }),
     testAIConnection = null,
+    notifyAITestResult = null,
+    confirmClearCache = null,
     createAbortController = createRuntimeAbortController,
 }) {
     const status = document.getElementById('mktero-cache-status');
@@ -117,22 +130,92 @@ export function createPreferencesController({
     const conversionApiKeyManage = document.getElementById(
         'mktero-api-key-manage'
     );
+    const aiEnabledInput = document.getElementById('mktero-ai-enabled');
+    const aiSettings = document.getElementById('mktero-ai-settings');
     const aiTestButton = document.getElementById('mktero-ai-test');
-    const aiTestStatus = document.getElementById('mktero-ai-test-status');
     const aiProviderInput = document.getElementById('mktero-ai-provider');
     const aiProtocolInput = document.getElementById('mktero-ai-protocol');
+    const aiApiBaseInput = document.getElementById('mktero-ai-api-base');
+    const aiApiBaseRow = document.getElementById('mktero-ai-api-base-row');
+    const aiProtocolRow = document.getElementById('mktero-ai-protocol-row');
     const aiRequestTimeoutInput = document.getElementById(
         'mktero-ai-request-timeout'
     );
     const aiMaxOutputTokensInput = document.getElementById(
         'mktero-ai-max-output-tokens'
     );
+    const tabList = document.getElementById('mktero-pref-tablist');
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
     let aiTestController = null;
 
     function localize() {
         localizePreferencesDocument(document, localization);
+    }
+
+    function preferenceTabs() {
+        return [...(tabList?.querySelectorAll('[role="tab"]') || [])];
+    }
+
+    function selectPreferenceTab(tab, { focus = false } = {}) {
+        if (!tab || !tabList) return;
+        for (const candidate of preferenceTabs()) {
+            const selected = candidate === tab;
+            candidate.setAttribute(
+                'aria-selected',
+                selected ? 'true' : 'false'
+            );
+            candidate.tabIndex = selected ? 0 : -1;
+            const panel = document.getElementById(
+                candidate.getAttribute('aria-controls')
+            );
+            if (panel) panel.hidden = !selected;
+        }
+        if (focus) tab.focus?.();
+    }
+
+    function handlePreferenceTabClick(event) {
+        selectPreferenceTab(event.currentTarget);
+    }
+
+    function handlePreferenceTabKeydown(event) {
+        const tabs = preferenceTabs();
+        const index = tabs.indexOf(event.currentTarget);
+        if (index < 0) return;
+        let next = -1;
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+            next = (index + 1) % tabs.length;
+        } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+            next = (index - 1 + tabs.length) % tabs.length;
+        } else if (event.key === 'Home') {
+            next = 0;
+        } else if (event.key === 'End') {
+            next = tabs.length - 1;
+        }
+        if (next < 0) return;
+        event.preventDefault();
+        selectPreferenceTab(tabs[next], { focus: true });
+    }
+
+    function initializePreferenceTabs() {
+        if (!tabList) return;
+        tabList.setAttribute('aria-label', t('preferences.tabsLabel'));
+        for (const host of document.querySelectorAll('[data-tab-icon]')) {
+            const icon = LUCIDE_ICONS[host.getAttribute('data-tab-icon')];
+            if (!icon || host.querySelector('svg')) continue;
+            host.replaceChildren(createLucideIcon(document, icon, {
+                className: 'mktero-pref-tab-svg',
+                size: 14,
+            }));
+        }
+        for (const tab of preferenceTabs()) {
+            tab.addEventListener('click', handlePreferenceTabClick);
+            tab.addEventListener('keydown', handlePreferenceTabKeydown);
+        }
+        selectPreferenceTab(
+            tabList.querySelector('[role="tab"][aria-selected="true"]')
+            || preferenceTabs()[0]
+        );
     }
 
     function updateReaderFontSize() {
@@ -245,21 +328,91 @@ export function createPreferencesController({
         aiProtocolInput.disabled = protocols.length < 2;
     }
 
+    function updateAISettingsVisibility() {
+        if (!aiSettings) return;
+        aiSettings.hidden = aiEnabledInput?.checked !== true;
+    }
+
+    function updateAIApiBaseForProvider({ persist = true } = {}) {
+        if (!aiProviderInput || !aiApiBaseInput) return;
+        const provider = aiProviderInput.value;
+        const next = defaultAIApiBaseForProvider(provider);
+        if (next && isReplaceableAIApiBase(aiApiBaseInput.value)) {
+            aiApiBaseInput.value = next;
+            if (persist) {
+                zotero?.Prefs?.set?.(AI_API_BASE_PREF, next, true);
+            }
+        }
+        updateAICustomFieldVisibility();
+    }
+
+    function updateAICustomFieldVisibility() {
+        const custom = aiProviderInput?.value === AI_PROVIDER_CUSTOM;
+        if (aiApiBaseRow) aiApiBaseRow.hidden = !custom;
+        if (aiProtocolRow) aiProtocolRow.hidden = !custom;
+    }
+
+    function initializeAITestButton() {
+        if (!aiTestButton) return;
+        const label = t('preferences.ai.test');
+        aiTestButton.setAttribute('aria-label', label);
+        aiTestButton.setAttribute('title', label);
+        if (!aiTestButton.querySelector('svg')) {
+            aiTestButton.appendChild(createLucideIcon(
+                document,
+                LUCIDE_ICONS.zap,
+                { className: 'mktero-ai-test-svg', size: 16 }
+            ));
+        }
+    }
+
     function initializeAIProvider() {
-        if (!aiProviderInput || !aiProtocolInput) return;
         const settings = getAISettings(zotero);
+        if (aiEnabledInput) {
+            aiEnabledInput.checked = settings.enabled;
+            aiEnabledInput.addEventListener('change', updateAISettingsVisibility);
+        }
+        updateAISettingsVisibility();
+        initializeAITestButton();
+        if (!aiProviderInput || !aiProtocolInput) return;
         aiProviderInput.value = settings.provider;
         aiProtocolInput.value = settings.protocol;
         updateAIProtocolOptions({ persist: false });
-        aiProviderInput.addEventListener('change', updateAIProtocolOptions);
+        updateAICustomFieldVisibility();
+        aiProviderInput.addEventListener('change', handleAIProviderChange);
+    }
+
+    function handleAIProviderChange() {
+        updateAIProtocolOptions();
+        updateAIApiBaseForProvider();
+    }
+
+    function saveAIRequestTimeout() {
+        if (!aiRequestTimeoutInput) return;
+        const timeoutMs = aiRequestTimeoutMsFromSeconds(
+            aiRequestTimeoutInput.value
+        );
+        aiRequestTimeoutInput.value = String(
+            aiRequestTimeoutSecondsFromMs(timeoutMs)
+        );
+        zotero?.Prefs?.set?.(AI_REQUEST_TIMEOUT_PREF, timeoutMs, true);
+    }
+
+    function initializeAIRequestTimeout() {
+        if (!aiRequestTimeoutInput) return;
+        const timeoutMs = getAISettings(zotero).requestTimeoutMs;
+        aiRequestTimeoutInput.max = String(
+            aiRequestTimeoutSecondsFromMs(
+                PREFERENCE_CONTROL_LIMITS.aiRequestTimeoutMs
+            )
+        );
+        aiRequestTimeoutInput.value = String(
+            aiRequestTimeoutSecondsFromMs(timeoutMs)
+        );
+        aiRequestTimeoutInput.addEventListener('change', saveAIRequestTimeout);
     }
 
     function initializePreferenceControlLimits() {
-        if (aiRequestTimeoutInput) {
-            aiRequestTimeoutInput.max = String(
-                PREFERENCE_CONTROL_LIMITS.aiRequestTimeoutMs
-            );
-        }
         if (aiMaxOutputTokensInput) {
             aiMaxOutputTokensInput.max = String(
                 PREFERENCE_CONTROL_LIMITS.aiMaxOutputTokens
@@ -281,7 +434,24 @@ export function createPreferencesController({
         }
     }
 
+    async function confirmCacheClear() {
+        const title = t('preferences.cache.clearConfirmTitle');
+        const message = t('preferences.cache.clearConfirmMessage');
+        if (typeof confirmClearCache === 'function') {
+            return confirmClearCache({ title, message });
+        }
+        const win = document.defaultView;
+        if (services?.prompt?.confirm) {
+            return services.prompt.confirm(win, title, message);
+        }
+        if (typeof win?.confirm === 'function') {
+            return win.confirm(message);
+        }
+        return false;
+    }
+
     async function clear() {
+        if (!await confirmCacheClear()) return;
         clearButton.disabled = true;
         status.setAttribute('aria-busy', 'true');
         status.textContent = t('preferences.cache.clearing');
@@ -299,27 +469,40 @@ export function createPreferencesController({
         }
     }
 
+    function notifyAITest(message) {
+        const title = t('preferences.ai.test');
+        if (typeof notifyAITestResult === 'function') {
+            notifyAITestResult({ title, message });
+            return;
+        }
+        const win = document.defaultView;
+        if (services?.prompt?.alert) {
+            services.prompt.alert(win, title, message);
+            return;
+        }
+        win?.alert?.(message);
+    }
+
     async function testAI() {
         if (!aiTestButton || typeof testAIConnection !== 'function') return;
-        aiTestController?.abort?.();
+        if (aiTestController) return;
         aiTestController = createAbortController();
         const controller = aiTestController;
         aiTestButton.disabled = true;
-        if (aiTestStatus) aiTestStatus.textContent = t('preferences.ai.testing');
         try {
             await testAIConnection(
                 readAISettingsFromControls(document, zotero),
                 controller.signal
             );
-            if (aiTestController === controller && aiTestStatus) {
-                aiTestStatus.textContent = t('preferences.ai.testSuccess');
+            if (aiTestController === controller) {
+                notifyAITest(t('preferences.ai.testSuccess'));
             }
         }
         catch (error) {
             if (controller.signal?.aborted) return;
             zotero.logError?.(error);
-            if (aiTestController === controller && aiTestStatus) {
-                aiTestStatus.textContent = t(aiTestErrorKey(error));
+            if (aiTestController === controller) {
+                notifyAITest(t(aiTestErrorKey(error)));
             }
         }
         finally {
@@ -337,8 +520,10 @@ export function createPreferencesController({
             clearButton.addEventListener('click', clear);
             aiTestButton?.addEventListener('click', testAI);
             localize();
+            initializePreferenceTabs();
             initializeConversionProvider();
             initializeAIProvider();
+            initializeAIRequestTimeout();
             initializePreferenceControlLimits();
             initializeReaderFont();
             initializeReaderFontSize();
@@ -351,9 +536,17 @@ export function createPreferencesController({
             aiTestButton?.removeEventListener('click', testAI);
             aiTestController?.abort?.();
             aiTestController = null;
+            aiEnabledInput?.removeEventListener(
+                'change',
+                updateAISettingsVisibility
+            );
             aiProviderInput?.removeEventListener(
                 'change',
-                updateAIProtocolOptions
+                handleAIProviderChange
+            );
+            aiRequestTimeoutInput?.removeEventListener(
+                'change',
+                saveAIRequestTimeout
             );
             conversionProviderInput?.removeEventListener(
                 'change',
@@ -368,6 +561,10 @@ export function createPreferencesController({
                 updateReaderFontSize
             );
             readerFontInput?.removeEventListener('change', updateReaderFont);
+            for (const tab of preferenceTabs()) {
+                tab.removeEventListener('click', handlePreferenceTabClick);
+                tab.removeEventListener('keydown', handlePreferenceTabKeydown);
+            }
         },
     };
 }
@@ -390,8 +587,9 @@ export function readAISettingsFromControls(document, zotero) {
         reasoning: value('mktero-ai-reasoning') ?? settings.reasoning,
         targetLanguage: value('mktero-ai-target-language')
             ?? settings.targetLanguage,
-        requestTimeoutMs: value('mktero-ai-request-timeout')
-            ?? settings.requestTimeoutMs,
+        requestTimeoutMs: value('mktero-ai-request-timeout') == null
+            ? settings.requestTimeoutMs
+            : aiRequestTimeoutMsFromSeconds(value('mktero-ai-request-timeout')),
         maxOutputTokens: value('mktero-ai-max-output-tokens')
             ?? settings.maxOutputTokens,
         streaming: document.getElementById('mktero-ai-streaming')

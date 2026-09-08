@@ -17,10 +17,14 @@ import {
     AI_TARGET_LANGUAGES,
     AI_TARGET_LANGUAGE_PREF,
     getAISettings,
+    isReplaceableAIApiBase,
     isSupportedAITargetLanguage,
     normalizeAIBaseURL,
     observeAITargetLanguage,
     validateAISettings,
+    aiRequestTimeoutMsFromSeconds,
+    aiRequestTimeoutSecondsFromMs,
+    defaultAIApiBaseForProvider,
 } from '../src/config/ai-preferences.js';
 
 test('reads and normalizes the configured AI settings', () => {
@@ -313,4 +317,28 @@ test('rejects provider and protocol combinations that cannot be routed', () => {
         }),
         error => error?.code === 'AI_PROVIDER_UNSUPPORTED'
     );
+});
+
+test('fills known provider API bases and treats them as replaceable defaults', () => {
+    assert.equal(
+        defaultAIApiBaseForProvider('deepseek'),
+        'https://api.deepseek.com'
+    );
+    assert.equal(defaultAIApiBaseForProvider('custom'), '');
+    assert.equal(isReplaceableAIApiBase(''), true);
+    assert.equal(
+        isReplaceableAIApiBase('https://api.openai.com/v1/'),
+        true
+    );
+    assert.equal(
+        isReplaceableAIApiBase('https://api.example.com/v1'),
+        false
+    );
+});
+
+test('converts the AI request timeout between seconds and milliseconds', () => {
+    assert.equal(aiRequestTimeoutSecondsFromMs(600_000), 600);
+    assert.equal(aiRequestTimeoutMsFromSeconds(600), 600_000);
+    assert.equal(aiRequestTimeoutMsFromSeconds(3_600), 3_600_000);
+    assert.equal(aiRequestTimeoutMsFromSeconds(0), 1_000);
 });

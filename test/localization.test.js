@@ -64,11 +64,11 @@ test('creates a fixed localization from the Zotero locale', () => {
     );
     assert.match(
         localization.t('preferences.conversion.privacyNote'),
-        /selected provider receives the complete PDF.*API keys.*unencrypted/i
+        /selected provider receives the complete PDF.*Keys are stored unencrypted/i
     );
     assert.match(
         chinese.t('preferences.conversion.privacyNote'),
-        /所选服务.*完整 PDF.*API Key.*未加密/
+        /所选服务.*完整 PDF.*密钥.*未加密/
     );
     assert.equal(chinese.t('revision.deleteParagraph'), '删除整段');
     assert.equal(localization.t('revision.start'), 'Manage corrections');
@@ -99,11 +99,11 @@ test('creates a fixed localization from the Zotero locale', () => {
     );
     assert.match(
         localization.t('preferences.ai.autoTranslateSelectionHelp'),
-        /stable Markdown selection.*AI Provider.*cost/i
+        /stable selection automatically.*AI provider.*cost/i
     );
     assert.match(
         chinese.t('preferences.ai.autoTranslateSelectionHelp'),
-        /选区.*稳定.*AI Provider.*费用/
+        /选区稳定后自动翻译.*AI 服务.*费用/
     );
     assert.match(
         localization.t('viewer.exportMarkdown'),

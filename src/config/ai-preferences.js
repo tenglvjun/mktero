@@ -29,6 +29,22 @@ export const AI_PROTOCOL_ANTHROPIC = 'anthropic-messages';
 export const AI_PROTOCOL_GOOGLE = 'google-generative-ai';
 
 export const AI_DEFAULT_API_BASE = 'https://api.openai.com/v1';
+export const AI_PROVIDER_API_BASES = Object.freeze({
+    [AI_PROVIDER_OPENAI]: 'https://api.openai.com/v1',
+    [AI_PROVIDER_ANTHROPIC]: 'https://api.anthropic.com/v1',
+    [AI_PROVIDER_GOOGLE]: 'https://generativelanguage.googleapis.com/v1beta',
+    [AI_PROVIDER_DEEPSEEK]: 'https://api.deepseek.com',
+    [AI_PROVIDER_ALIBABA]:
+        'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    [AI_PROVIDER_MOONSHOT]: 'https://api.moonshot.ai/v1',
+    [AI_PROVIDER_MINIMAX]: 'https://api.minimax.io/anthropic/v1',
+});
+const AI_KNOWN_API_BASE_ALIASES = Object.freeze([
+    'https://api.anthropic.com',
+    'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    'https://api.moonshot.cn/v1',
+    'https://api.minimax.io/anthropic',
+]);
 export const AI_DEFAULT_TARGET_LANGUAGE = 'zh-CN';
 export const AI_DEFAULT_REASONING = 'none';
 export const AI_PROVIDER_DEFAULT_REASONING = 'provider-default';
@@ -252,6 +268,43 @@ function normalizeStoredReasoning(value) {
         return AI_DEFAULT_REASONING;
     }
     return normalizeReasoning(reasoning);
+}
+
+export function defaultAIApiBaseForProvider(provider) {
+    return AI_PROVIDER_API_BASES[normalizeProvider(provider)] || '';
+}
+
+export function isReplaceableAIApiBase(value) {
+    const current = trimTrailingSlash(String(value || '').trim());
+    if (!current) return true;
+    return getKnownAIApiBases().has(current);
+}
+
+export function aiRequestTimeoutSecondsFromMs(value) {
+    return Math.round(
+        normalizeInteger(
+            value,
+            AI_DEFAULT_REQUEST_TIMEOUT_MS,
+            1_000,
+            AI_MAX_REQUEST_TIMEOUT_MS
+        ) / 1_000
+    );
+}
+
+export function aiRequestTimeoutMsFromSeconds(value) {
+    return normalizeInteger(
+        Number(value) * 1_000,
+        AI_DEFAULT_REQUEST_TIMEOUT_MS,
+        1_000,
+        AI_MAX_REQUEST_TIMEOUT_MS
+    );
+}
+
+function getKnownAIApiBases() {
+    return new Set([
+        ...Object.values(AI_PROVIDER_API_BASES).map(trimTrailingSlash),
+        ...AI_KNOWN_API_BASE_ALIASES.map(trimTrailingSlash),
+    ]);
 }
 
 function normalizeProvider(value) {

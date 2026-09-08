@@ -1,5 +1,6 @@
 import {
     ArrowLeft,
+    BookOpen,
     Check,
     ChevronDown,
     ChevronLeft,
@@ -19,9 +20,12 @@ import {
     RefreshCw,
     RotateCcw,
     Save,
+    Settings,
+    Sparkles,
     Trash2,
     TriangleAlert,
     X,
+    Zap,
     ZoomIn,
     ZoomOut,
 } from 'lucide';
@@ -43,6 +47,10 @@ export const LUCIDE_ICONS = Object.freeze({
     arrowLeft: Object.freeze({
         name: 'arrow-left',
         nodes: ArrowLeft,
+    }),
+    bookOpen: Object.freeze({
+        name: 'book-open',
+        nodes: BookOpen,
     }),
     check: Object.freeze({
         name: 'check',
@@ -133,6 +141,14 @@ export const LUCIDE_ICONS = Object.freeze({
         name: 'save',
         nodes: Save,
     }),
+    settings: Object.freeze({
+        name: 'settings',
+        nodes: Settings,
+    }),
+    sparkles: Object.freeze({
+        name: 'sparkles',
+        nodes: Sparkles,
+    }),
     trash2: Object.freeze({
         name: 'trash-2',
         nodes: Trash2,
@@ -144,6 +160,10 @@ export const LUCIDE_ICONS = Object.freeze({
     x: Object.freeze({
         name: 'x',
         nodes: X,
+    }),
+    zap: Object.freeze({
+        name: 'zap',
+        nodes: Zap,
     }),
     zoomIn: Object.freeze({
         name: 'zoom-in',

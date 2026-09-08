@@ -7,6 +7,8 @@ const REFERENCE_HEADING_PATTERN = /^(?:(#{1,6})[ \t]+)?(?:\*{1,2}|_{1,2})?(?:(?:
 const AUTHOR_AFFILIATIONS_HEADING_PATTERN = /^#{1,6}[ \t]+(?:author[ \t]+affiliations?|作者单位|作者机构)[ \t]*#*[ \t]*$/gim;
 const MAIN_CONTENT_HEADING_PATTERN = /^(?:(?:#{1,6})[ \t]+)?(?:\*{1,2}|_{1,2})?(?:(?:\d+(?:\.\d+)*)[.)]?[ \t]+)?(?:abstract|summary|background|introduction|materials?[ \t]+and[ \t]+methods|methods?|results?|摘要|背景|引言|绪论|材料与方法|方法|结果)(?:\*{1,2}|_{1,2})?[ \t]*[:：]?[ \t]*#*[ \t]*$/gim;
 const FRONT_MATTER_HEADING_PATTERN = /^(?:authors?(?:[ \t]+(?:details?|information))?|affiliations?|institutional[ \t]+affiliations?|institutions?|departments?|correspond(?:ence|ing[ \t]+authors?)|contact[ \t]+information|keywords?|作者|作者信息|作者单位|机构|所属机构|通讯作者|关键词)$/i;
+const PUBLISHER_CHROME_HEADING_PATTERN = /^(?:check[ \t]+for[ \t]+updates|open[ \t]+access)$/i;
+const MAX_PUBLISHER_CHROME_WORDS = 4;
 const MARKDOWN_HEADING_PATTERN = /^(#{1,6})[ \t]+.+$/gm;
 const NUMBERED_REFERENCE_PATTERN = /^[ \t]*(?:[-*+][ \t]+)?(?:\[(\d{1,4})\]|(\d{1,4})[.)])[ \t]+/gm;
 const MIN_NUMERIC_CITATION_STYLE_CONTAINERS = 2;
@@ -140,24 +142,62 @@ function findAuthorAreaStart(markdown, authorAreaEnd) {
 }
 
 function findImplicitBodyStart(markdown, frontMatterEnd) {
-    const paragraph = paragraphRanges(markdown, {
+    const paragraphs = paragraphRanges(markdown, {
         from: findAuthorAreaStart(markdown, frontMatterEnd),
         to: frontMatterEnd,
-    }).find(range => frontMatterParagraphHasProse(markdown, range));
-    if (!paragraph) return null;
-    const markers = findSuperscriptMarkers(
-        markdown,
-        paragraph.from,
-        paragraph.to,
-        { includeLikelyExponents: true }
-    );
-    const hasBylineMarkers = markers.length > 0 && markers.every(marker => (
-        /^\s*\d+(?:\s*[,;，；]\s*\d+)*\s*$/.test(marker.value)
-    ));
-    return hasBylineMarkers
-        && paragraphLooksLikeByline(markdown, paragraph, markers)
-        ? paragraph.to
-        : paragraph.from;
+    });
+    for (const paragraph of paragraphs) {
+        if (!frontMatterParagraphHasProse(markdown, paragraph)) continue;
+        const markers = findSuperscriptMarkers(
+            markdown,
+            paragraph.from,
+            paragraph.to,
+            { includeLikelyExponents: true }
+        );
+        if (paragraphLooksLikeNumericByline(markdown, paragraph, markers)) {
+            return paragraph.to;
+        }
+        if (!paragraphLooksLikePublisherChrome(markdown, paragraph, markers)) {
+            return paragraph.from;
+        }
+    }
+    return null;
+}
+
+function paragraphLooksLikeNumericByline(markdown, paragraph, markers) {
+    return markers.length > 0
+        && markers.every(marker => (
+            /^\s*\d+(?:\s*[,;，；]\s*\d+)*\s*$/.test(marker.value)
+        ))
+        && paragraphLooksLikeByline(markdown, paragraph, markers);
+}
+
+function isTitlePreamble(markdown, from, to) {
+    if (from >= to || !markdown.slice(from, to).trim()) return true;
+    return paragraphRanges(markdown, { from, to }).every(paragraph => {
+        if (!frontMatterParagraphHasProse(markdown, paragraph)) return true;
+        const markers = findSuperscriptMarkers(
+            markdown,
+            paragraph.from,
+            paragraph.to,
+            { includeLikelyExponents: true }
+        );
+        return paragraphLooksLikePublisherChrome(markdown, paragraph, markers);
+    });
+}
+
+function paragraphLooksLikePublisherChrome(markdown, paragraph, markers) {
+    if (markers.length) return false;
+    const source = markdown.slice(paragraph.from, paragraph.to)
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+        .replace(/^#{1,6}[ \t]+/, '');
+    const text = plainReferenceText(source);
+    if (!text) return true;
+    if (/^(?:https?:\/\/|doi:|10\.\d{4,})/i.test(text)) return true;
+    if (PUBLISHER_CHROME_HEADING_PATTERN.test(text)) return true;
+    if (/[.!?。！？]/.test(text)) return false;
+    const words = text.match(/\p{L}+/gu) || [];
+    return words.length > 0 && words.length <= MAX_PUBLISHER_CHROME_WORDS;
 }
 
 function frontMatterParagraphHasProse(markdown, paragraph) {
@@ -198,13 +238,14 @@ function findMainContentStart(markdown, bodyEnd) {
         const isMainContent = new RegExp(MAIN_CONTENT_HEADING_PATTERN)
             .test(heading[0]);
         const followsOnlyTitles = titleAreaEnd === null
-            ? heading.index === 0
+            ? isTitlePreamble(source, 0, heading.index)
             : !source.slice(titleAreaEnd, heading.index).trim();
         if (level === 1 && !isMainContent && followsOnlyTitles) {
             titleAreaEnd = heading.index + heading[0].length;
             continue;
         }
         if (FRONT_MATTER_HEADING_PATTERN.test(label)) continue;
+        if (PUBLISHER_CHROME_HEADING_PATTERN.test(label)) continue;
         if (new RegExp(REFERENCE_HEADING_PATTERN).test(heading[0])) continue;
         candidates.push(heading.index);
         break;

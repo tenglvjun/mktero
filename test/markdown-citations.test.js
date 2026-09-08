@@ -361,6 +361,133 @@ test('keeps citations in an unheaded introduction after an author byline', () =>
     );
 });
 
+test('does not treat author affiliation markers after publisher chrome as citations', () => {
+    const markdown = [
+        'https://doi.org/10.1038/s44294-025-00078-8',
+        '',
+        '# Machine learning-based menstrual phase identification using wearable device data',
+        '',
+        'Check for updates',
+        '',
+        'Grentina Kilungeja $^{1}$, Krystal Graham $^{2}$, Xudong Li $^{1}$ & Mona Nasser $^{2}$',
+        '',
+        'This study applies machine learning to identify menstrual cycle phases using physiological signals recorded from a wrist-worn device.',
+        '',
+        '## Results',
+        '',
+        'The RF model achieved 87% accuracy $^{1}$. Later work confirmed this $^{2}$.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+    const authorLineFrom = markdown.indexOf('Grentina Kilungeja');
+    const authorLineTo = markdown.indexOf('This study applies');
+
+    assert.deepEqual(
+        result.citations
+            .filter(citation => (
+                citation.from >= authorLineFrom && citation.to <= authorLineTo
+            ))
+            .map(citation => ({
+                label: markdown.slice(citation.from, citation.to),
+                kind: citation.kind,
+            })),
+        []
+    );
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', kind: 'reference', targetIds: ['number:1'] },
+            { label: '2', kind: 'reference', targetIds: ['number:2'] },
+        ]
+    );
+    assert.ok(result.citations.every(citation => (
+        citation.from > markdown.indexOf('## Results')
+    )));
+});
+
+test('does not treat author affiliation markers after a chrome heading as citations', () => {
+    const markdown = [
+        '# Machine learning-based menstrual phase identification using wearable device data',
+        '',
+        '## Check for updates',
+        '',
+        'Grentina Kilungeja $^{1}$, Krystal Graham $^{2}$, Xudong Li $^{1}$ & Mona Nasser $^{2}$',
+        '',
+        'This study applies machine learning to identify menstrual cycle phases using physiological signals recorded from a wrist-worn device.',
+        '',
+        '## Results',
+        '',
+        'The RF model achieved 87% accuracy $^{1}$. Later work confirmed this $^{2}$.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', kind: 'reference', targetIds: ['number:1'] },
+            { label: '2', kind: 'reference', targetIds: ['number:2'] },
+        ]
+    );
+    assert.ok(result.citations.every(citation => (
+        citation.from > markdown.indexOf('## Results')
+    )));
+});
+
+test('keeps unheaded citations after publisher chrome when there is no byline', () => {
+    const markdown = [
+        'https://doi.org/10.1038/s44294-025-00078-8',
+        '',
+        '# Paper',
+        '',
+        'Check for updates',
+        '',
+        'The unheaded introduction cites prior work $^{1}$.',
+        '',
+        '## Results',
+        '',
+        'The results cite the second study $^{2}$.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', kind: 'reference', targetIds: ['number:1'] },
+            { label: '2', kind: 'reference', targetIds: ['number:2'] },
+        ]
+    );
+    assert.ok(result.citations[0].from < markdown.indexOf('## Results'));
+});
+
 test('does not map a punctuated author byline as references', () => {
     const markdown = [
         '# Paper',

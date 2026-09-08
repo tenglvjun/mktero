@@ -83,6 +83,7 @@ test('loads cache usage and clears it from the preferences pane', async () => {
         document,
         zotero: { logError: assert.fail },
         cache,
+        confirmClearCache: async () => true,
     });
 
     await controller.init();
@@ -90,6 +91,7 @@ test('loads cache usage and clears it from the preferences pane', async () => {
     assert.equal(status.attributes['aria-busy'], 'false');
 
     const clearing = button.listener();
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(clearCalls, 1);
     assert.equal(button.disabled, true);
     assert.equal(status.textContent, 'Clearing cache...');
@@ -137,6 +139,7 @@ test('restores cache controls when clearing the cache fails', async () => {
             getStats: async () => ({ entries: 0, sizeBytes: 0 }),
             clear: async () => { throw failure; },
         },
+        confirmClearCache: async () => true,
     });
 
     await controller.init();
@@ -318,21 +321,21 @@ test('tests the current AI SDK settings without exposing the key', async () => {
             <select id="mktero-ai-target-language">
                 <option value="zh-CN">Simplified Chinese</option>
             </select>
-            <input id="mktero-ai-request-timeout" value="600000">
+            <input id="mktero-ai-request-timeout" value="600">
             <input id="mktero-ai-max-output-tokens" value="0">
             <input id="mktero-ai-streaming" type="checkbox" checked>
             <input id="mktero-ai-auto-translate-selection" type="checkbox" checked>
             <button id="mktero-ai-test"></button>
-            <span id="mktero-ai-test-status"></span>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
         </section>
     </body>`);
     let testedSettings;
+    const alerts = [];
     const controller = createPreferencesController({
         document: dom.window.document,
         zotero: {
-            Prefs: { get: () => null },
+            Prefs: { get: () => undefined },
             logError: () => {},
         },
         cache: {
@@ -343,6 +346,7 @@ test('tests the current AI SDK settings without exposing the key', async () => {
             testedSettings = settings;
             return { text: 'OK' };
         },
+        notifyAITestResult: alert => alerts.push(alert),
     });
 
     await controller.init();
@@ -355,11 +359,15 @@ test('tests the current AI SDK settings without exposing the key', async () => {
     assert.equal(testedSettings.apiKey, 'private-token');
     assert.equal(testedSettings.model, 'example-chat');
     assert.equal(testedSettings.reasoning, 'high');
-    assert.equal(testedSettings.requestTimeoutMs, '600000');
+    assert.equal(testedSettings.requestTimeoutMs, 600_000);
     assert.equal(testedSettings.maxOutputTokens, '0');
     assert.equal(
         dom.window.document.getElementById('mktero-ai-request-timeout').max,
-        '3600000'
+        '3600'
+    );
+    assert.equal(
+        dom.window.document.getElementById('mktero-ai-request-timeout').value,
+        '600'
     );
     assert.equal(
         dom.window.document.getElementById('mktero-ai-max-output-tokens').max,
@@ -368,13 +376,21 @@ test('tests the current AI SDK settings without exposing the key', async () => {
     assert.equal(testedSettings.streaming, true);
     assert.equal(testedSettings.autoTranslateSelection, true);
     assert.equal(
-        dom.window.document.getElementById('mktero-ai-test-status').textContent,
-        'Connection successful'
+        dom.window.document.getElementById('mktero-ai-test')
+            .getAttribute('aria-label'),
+        'Test connection'
     );
-    assert.doesNotMatch(
-        dom.window.document.getElementById('mktero-ai-test-status').textContent,
-        /private-token/
+    assert.equal(
+        dom.window.document.getElementById('mktero-ai-test')
+            .querySelector('svg[data-lucide="zap"]') instanceof
+            dom.window.SVGElement,
+        true
     );
+    assert.deepEqual(alerts, [{
+        title: 'Test connection',
+        message: 'Connection successful',
+    }]);
+    assert.doesNotMatch(JSON.stringify(alerts), /private-token/);
     controller.destroy();
 });
 
@@ -501,6 +517,197 @@ test('initializes an imported preferences fragment from Zotero capture-phase loa
     dom.window.document.body.append(replacementPane);
     replacementPane.dispatchEvent(new dom.window.Event('load'));
     assert.equal(initializeCalls, 2);
+});
+
+test('switches preference sections with the tab list', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <div id="mktero-pref-tablist" role="tablist">
+                <button id="mktero-tab-conversion" class="mktero-pref-tab" type="button"
+                        role="tab" aria-selected="true"
+                        aria-controls="mktero-conversion-section" tabindex="0">PDF</button>
+                <button id="mktero-tab-ai" class="mktero-pref-tab" type="button"
+                        role="tab" aria-selected="false"
+                        aria-controls="mktero-ai-section" tabindex="-1">AI</button>
+            </div>
+            <div id="mktero-conversion-section" role="tabpanel"></div>
+            <div id="mktero-ai-section" role="tabpanel" hidden></div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const { document } = dom.window;
+    const controller = createPreferencesController({
+        document,
+        zotero: {
+            Prefs: { get: () => undefined },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const conversionTab = document.getElementById('mktero-tab-conversion');
+    const aiTab = document.getElementById('mktero-tab-ai');
+    const conversion = document.getElementById('mktero-conversion-section');
+    const ai = document.getElementById('mktero-ai-section');
+    assert.equal(document.getElementById('mktero-pref-tablist')
+        .getAttribute('aria-label'), 'Settings sections');
+    assert.equal(conversion.hidden, false);
+    assert.equal(ai.hidden, true);
+
+    aiTab.click();
+    assert.equal(aiTab.getAttribute('aria-selected'), 'true');
+    assert.equal(conversionTab.getAttribute('aria-selected'), 'false');
+    assert.equal(conversion.hidden, true);
+    assert.equal(ai.hidden, false);
+
+    conversionTab.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+        key: 'ArrowRight',
+        bubbles: true,
+    }));
+    assert.equal(ai.hidden, false);
+    controller.destroy();
+});
+
+test('hides AI connection settings until AI features are enabled', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <input id="mktero-ai-enabled" type="checkbox">
+            <div id="mktero-ai-settings" hidden></div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: { get: () => undefined },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const settings = dom.window.document.getElementById('mktero-ai-settings');
+    const enabled = dom.window.document.getElementById('mktero-ai-enabled');
+    assert.equal(settings.hidden, true);
+
+    enabled.checked = true;
+    enabled.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(settings.hidden, false);
+
+    enabled.checked = false;
+    enabled.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(settings.hidden, true);
+    controller.destroy();
+});
+
+test('fills a known provider API base when the current URL is still a default', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <input id="mktero-ai-enabled" type="checkbox" checked>
+            <div id="mktero-ai-settings">
+                <select id="mktero-ai-provider">
+                    <option value="openai">OpenAI</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="custom">Custom</option>
+                </select>
+                <select id="mktero-ai-protocol">
+                    <option value="openai-responses">Responses</option>
+                    <option value="openai-chat-completions">Chat</option>
+                </select>
+                <div id="mktero-ai-api-base-row" hidden>
+                    <input id="mktero-ai-api-base" value="https://api.openai.com/v1">
+                </div>
+                <div id="mktero-ai-protocol-row" hidden></div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const writes = [];
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => (
+                    key === 'extensions.mktero.aiProvider' ? 'openai' : undefined
+                ),
+                set: (key, value, global) => writes.push({ key, value, global }),
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const provider = dom.window.document.getElementById('mktero-ai-provider');
+    const apiBase = dom.window.document.getElementById('mktero-ai-api-base');
+    const apiBaseRow = dom.window.document.getElementById('mktero-ai-api-base-row');
+    const protocolRow = dom.window.document.getElementById('mktero-ai-protocol-row');
+    assert.equal(apiBaseRow.hidden, true);
+    assert.equal(protocolRow.hidden, true);
+    provider.value = 'deepseek';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(apiBase.value, 'https://api.deepseek.com');
+    assert.equal(apiBaseRow.hidden, true);
+    assert.deepEqual(writes.at(-1), {
+        key: 'extensions.mktero.aiApiBase',
+        value: 'https://api.deepseek.com',
+        global: true,
+    });
+
+    apiBase.value = 'https://api.example.com/v1';
+    provider.value = 'openai';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(apiBase.value, 'https://api.example.com/v1');
+
+    provider.value = 'custom';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(apiBaseRow.hidden, false);
+    assert.equal(protocolRow.hidden, false);
+    controller.destroy();
+});
+
+test('does not clear the cache when confirmation is cancelled', async () => {
+    const status = createControl({ textContent: '' });
+    const button = {
+        disabled: false,
+        addEventListener(_type, listener) {
+            this.listener = listener;
+        },
+    };
+    const document = {
+        getElementById(id) {
+            if (id === 'mktero-cache-status') return status;
+            if (id === 'mktero-clear-cache') return button;
+        },
+    };
+    let clearCalls = 0;
+    const controller = createPreferencesController({
+        document,
+        zotero: { logError: assert.fail },
+        cache: {
+            getStats: async () => ({ entries: 2, sizeBytes: 1536 }),
+            clear: async () => { clearCalls++; },
+        },
+        confirmClearCache: async () => false,
+    });
+
+    await controller.init();
+    await button.listener();
+    assert.equal(clearCalls, 0);
+    assert.equal(status.textContent, '2 local cache entries, 1.5 KB');
 });
 
 function createControl(properties = {}) {
