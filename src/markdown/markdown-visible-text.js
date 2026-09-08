@@ -29,8 +29,8 @@ const MATH_EXCLUDED_NODE_NAMES = new Set([
     'InlineCode',
 ]);
 
-export function createVisibleMarkdownTextIndex(markdown) {
-    const hiddenRanges = collectHiddenRanges(markdown);
+export function createVisibleMarkdownTextIndex(markdown, extraHiddenRanges = []) {
+    const hiddenRanges = collectHiddenRanges(markdown, extraHiddenRanges);
     const segments = [];
     const chunks = [];
     let sourceFrom = 0;
@@ -118,7 +118,7 @@ export function createVisibleMarkdownTextIndex(markdown) {
     };
 }
 
-function collectHiddenRanges(markdown) {
+function collectHiddenRanges(markdown, extraHiddenRanges = []) {
     const ranges = [];
     const escapeRanges = [];
     const inlineMathRanges = [];
@@ -170,6 +170,18 @@ function collectHiddenRanges(markdown) {
         }
     }
     appendMarkdownEscapeRanges(ranges, escapeRanges, inlineMathRanges);
+    if (Array.isArray(extraHiddenRanges)) {
+        for (const range of extraHiddenRanges) {
+            if (!Number.isSafeInteger(range?.from)
+                || !Number.isSafeInteger(range?.to)
+                || range.from < 0
+                || range.to > markdown.length
+                || range.from >= range.to) {
+                continue;
+            }
+            ranges.push({ from: range.from, to: range.to });
+        }
+    }
     ranges.sort((left, right) => left.from - right.from || left.to - right.to);
     const merged = [];
     for (const range of ranges) {

@@ -113,3 +113,10 @@ test('rejects invalid visible-text source ranges', () => {
     assert.equal(index.textForSourceRange(1, 1), '');
     assert.equal(index.textForSourceRange(0, markdown.length + 1), '');
 });
+
+test('hides extra ranges in the visible Markdown index', () => {
+    const markdown = 'Hello **x** World';
+    const index = createVisibleMarkdownTextIndex(markdown, [{ from: 6, to: 11 }]);
+    assert.equal(index.text, 'Hello  World');
+});
+
