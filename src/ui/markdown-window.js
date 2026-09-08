@@ -553,6 +553,16 @@ class MarkdownTabView {
                 markdown,
                 annotationOverlay,
                 sourceMap,
+                chromeRanges: translatedView
+                    ? []
+                    : comparisonView
+                        ? mapChromeRangesToComparison(
+                            model.chromeRanges,
+                            model.translationBlockRanges
+                        )
+                        : Array.isArray(model.chromeRanges)
+                            ? model.chromeRanges
+                            : [],
                 sourceActionRanges: translatedView
                     ? []
                     : comparisonView
@@ -615,7 +625,12 @@ class MarkdownTabView {
             this.fragmentIndex = createMarkdownFragmentIndex(markdown);
             this.syncOutline(
                 comparisonView ? model.markdown || '' : markdown,
-                comparisonView ? model.comparisonSourceRanges : null
+                comparisonView ? model.comparisonSourceRanges : null,
+                translatedView
+                    ? []
+                    : Array.isArray(model.chromeRanges)
+                        ? model.chromeRanges
+                        : []
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
@@ -4121,10 +4136,10 @@ class MarkdownTabView {
         });
     }
 
-    syncOutline(markdown, sourceRanges = null) {
+    syncOutline(markdown, sourceRanges = null, chromeRanges = []) {
         const list = this.elements.outlineList;
         list.replaceChildren();
-        const headings = extractMarkdownOutline(markdown);
+        const headings = extractMarkdownOutline(markdown, chromeRanges);
         if (!headings.length) {
             list.appendChild(this.createElement(
                 'li',
@@ -4651,6 +4666,14 @@ function mapAnnotationOverlayToComparison(overlay, blockRanges) {
         }),
         unmatched: [...(source.unmatched || [])],
     };
+}
+
+function mapChromeRangesToComparison(chromeRanges, blockRanges) {
+    if (!Array.isArray(chromeRanges)) return [];
+    return chromeRanges.flatMap(range => {
+        const mapped = mapSourceRangeToComparison(range, blockRanges);
+        return mapped ? [mapped] : [];
+    });
 }
 
 function mapSourceMapToComparison(sourceMap, blockRanges) {
