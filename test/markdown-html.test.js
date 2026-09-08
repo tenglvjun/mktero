@@ -418,6 +418,46 @@ test('does not trust HTML nested inside a MinerU algorithm wrapper', () => {
     assert.match(html, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
 });
 
+test('renders algorithm math that HTML-escaped a greater-than sign', () => {
+    const html = renderMarkdownHTML([
+        '<div class="mineru-algorithm" style="white-space: pre-wrap; font-family:monospace;">',
+        'subject to $\\rho(H) &gt; \\alpha$',
+        '</div>',
+    ].join('\n'));
+
+    assert.match(html, /^<section class="mktero-algorithm">/);
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<mi>ρ<\/mi>/);
+    assert.match(html, /<mo>&gt;<\/mo>/);
+    assert.match(html, /<mi>α<\/mi>/);
+});
+
+test('does not turn HTML-escaped math into raw HTML tags', () => {
+    const html = renderMarkdownHTML('$a &lt;script&gt; b$');
+
+    assert.doesNotMatch(html, /<script/i);
+    assert.doesNotMatch(html, /katex-error/);
+});
+
+test('renders OCR-spaced cases math that nested math inside \\text', () => {
+    const html = renderMarkdownHTML([
+        '$$',
+        'S _ {k} \\leftarrow \\left\\{ \\begin{array}{l l} S _ {k} ^ {\\prime} & \\text {if \\mathcal {R} (\\mathcal {T} _{text {val}, k}) > \\mathcal {R} _{text {best}}} \\\\ S _{k - 1} & \\text {otherwise} \\end{array} \\right.',
+        '$$',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<math/);
+    assert.match(html, /<mi>𝒮<\/mi>|<mi>S<\/mi>/);
+});
+
+test('keeps ordinary \\text labels without math unchanged', () => {
+    const html = renderMarkdownHTML('$\\text{otherwise}$');
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /otherwise/);
+});
+
 test('preserves escaped Markdown punctuation as literal text', () => {
     assert.equal(
         renderMarkdownHTML('\\# literal \\* text'),
