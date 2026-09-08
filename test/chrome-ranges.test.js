@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     absorbBlankLines,
+    findLeadingPublisherChromeRanges,
     mapChromeRanges,
     normalizeChromeRanges,
     subtractChromeRanges,
+    visibleDocumentChromeRanges,
     visibleTextForRanges,
 } from '../src/markdown/chrome-ranges.js';
 
@@ -69,4 +71,66 @@ test('maps chrome ranges using original-document transform coordinates', () => {
         18
     );
     assert.deepEqual(shifted, [{ from: 8, to: 14 }]);
+});
+
+test('hides leading publisher UI chrome before the paper title', () => {
+    const markdown = [
+        'Check for updates',
+        '',
+        'REVIEW ARTICLE OPEN',
+        '',
+        '# Systematic review and meta-analysis',
+        '',
+        'Han Li and authors.',
+    ].join('\n');
+    const ranges = findLeadingPublisherChromeRanges(markdown);
+    assert.equal(
+        ranges.some(range => (
+            markdown.slice(range.from, range.to).includes('Check for updates')
+        )),
+        true
+    );
+    assert.equal(
+        ranges.some(range => (
+            markdown.slice(range.from, range.to).includes('REVIEW ARTICLE OPEN')
+        )),
+        true
+    );
+    assert.equal(
+        ranges.some(range => (
+            markdown.slice(range.from, range.to).includes('Systematic review')
+        )),
+        false
+    );
+});
+
+test('does not hide the paper title heading with publisher chrome', () => {
+    const markdown = [
+        'Check for updates',
+        '',
+        'REVIEW ARTICLE OPEN',
+        '',
+        '# Systematic review and meta-analysis',
+        '',
+        'Han Li',
+    ].join('\n');
+    const titleFrom = markdown.indexOf('# Systematic');
+    const ranges = visibleDocumentChromeRanges(markdown, [
+        { from: 0, to: titleFrom + 2 },
+    ]);
+    assert.equal(ranges.some(range => range.to > titleFrom), false);
+    assert.equal(markdown.slice(titleFrom, titleFrom + 2), '# ');
+});
+
+test('does not hide introduction or body as publisher chrome', () => {
+    const markdown = [
+        '# INTRODUCTION',
+        '',
+        'Conversational artificial intelligence is gaining traction.',
+    ].join('\n');
+    assert.deepEqual(findLeadingPublisherChromeRanges(markdown), []);
+    assert.deepEqual(
+        visibleDocumentChromeRanges(markdown, [{ from: 0, to: 1 }]),
+        []
+    );
 });

@@ -3,6 +3,93 @@ export const MAX_CHROME_RANGES_BYTES = 1024 * 1024;
 
 const BLANK_LINE = /^[ \t]*$/;
 
+const PUBLISHER_UI_PATTERN = /^(?:check for updates|review article(?:\s+open)?|open access|download pdf|view (?:pdf|article|full text)|full text(?: html)?|accepted manuscript)$/i;
+const ATX_HEADING_PATTERN = /^ {0,3}#{1,6}(?:[ \t]+|$)/;
+
+export function visibleDocumentChromeRanges(markdown, storedRanges) {
+    if (typeof markdown !== 'string') return [];
+    return clipChromeBeforeFirstPaperHeading(
+        markdown,
+        normalizeChromeRanges([
+            ...normalizeChromeRanges(storedRanges, markdown.length),
+            ...findLeadingPublisherChromeRanges(markdown),
+        ], markdown.length)
+    );
+}
+
+export function findLeadingPublisherChromeRanges(markdown) {
+    if (typeof markdown !== 'string' || !markdown) return [];
+    const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
+    const ranges = [];
+    let offset = 0;
+    for (const raw of lines) {
+        const ending = /\r?\n$/.exec(raw)?.[0] || '';
+        const text = raw.slice(0, raw.length - ending.length);
+        const from = offset;
+        offset += raw.length;
+        const visible = stripHeadingMarks(text);
+        if (!visible) continue;
+        if (isPublisherUIText(visible)) {
+            ranges.push({ from, to: from + text.length });
+            continue;
+        }
+        break;
+    }
+    return clipChromeBeforeFirstPaperHeading(
+        markdown,
+        absorbBlankLines(markdown, ranges)
+    );
+}
+
+function clipChromeBeforeFirstPaperHeading(markdown, ranges) {
+    const headingFrom = firstPaperHeadingOffset(markdown);
+    if (headingFrom === null) return ranges;
+    const limit = headingFrom > 0 ? headingFrom - 1 : headingFrom;
+    return normalizeChromeRanges(
+        ranges
+            .map(range => ({
+                from: range.from,
+                to: Math.min(range.to, limit),
+            }))
+            .filter(range => range.to > range.from),
+        markdown.length
+    );
+}
+
+function firstPaperHeadingOffset(markdown) {
+    const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
+    let offset = 0;
+    for (let index = 0; index < lines.length; index++) {
+        const raw = lines[index];
+        const ending = /\r?\n$/.exec(raw)?.[0] || '';
+        const text = raw.slice(0, raw.length - ending.length);
+        const visible = stripHeadingMarks(text);
+        const lineFrom = offset;
+        offset += raw.length;
+        if (!visible || isPublisherUIText(visible)) continue;
+        if (ATX_HEADING_PATTERN.test(text)) return lineFrom;
+        const next = lines[index + 1];
+        if (next && /^( {0,3})(?:=+|-+)[ \t]*$/.test(
+            next.replace(/\r?\n$/, '')
+        )) {
+            return lineFrom;
+        }
+        return null;
+    }
+    return null;
+}
+
+function stripHeadingMarks(text) {
+    return String(text || '')
+        .replace(ATX_HEADING_PATTERN, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isPublisherUIText(text) {
+    return PUBLISHER_UI_PATTERN.test(text);
+}
+
 export function normalizeChromeRanges(ranges, markdownLength) {
     if (!Array.isArray(ranges)
         || ranges.length > MAX_CHROME_RANGES

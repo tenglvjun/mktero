@@ -38,6 +38,9 @@ import { createLocalization } from '../i18n/localization.js';
 import { findGitHubRepositories } from '../markdown/github-repository-links.js';
 import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
 import {
+    visibleDocumentChromeRanges,
+} from '../markdown/chrome-ranges.js';
+import {
     createMarkdownFragmentID,
     createMarkdownFragmentIndex,
     createMarkdownReadingPositionAnchor,
@@ -549,6 +552,10 @@ class MarkdownTabView {
                 'is-comparing',
                 comparisonView
             );
+            const sourceChromeRanges = visibleDocumentChromeRanges(
+                model.markdown || markdown,
+                model.chromeRanges
+            );
             this.editor.setDocument({
                 markdown,
                 annotationOverlay,
@@ -557,12 +564,10 @@ class MarkdownTabView {
                     ? []
                     : comparisonView
                         ? mapChromeRangesToComparison(
-                            model.chromeRanges,
+                            sourceChromeRanges,
                             model.translationBlockRanges
                         )
-                        : Array.isArray(model.chromeRanges)
-                            ? model.chromeRanges
-                            : [],
+                        : sourceChromeRanges,
                 sourceActionRanges: translatedView
                     ? []
                     : comparisonView
@@ -626,11 +631,7 @@ class MarkdownTabView {
             this.syncOutline(
                 comparisonView ? model.markdown || '' : markdown,
                 comparisonView ? model.comparisonSourceRanges : null,
-                translatedView
-                    ? []
-                    : Array.isArray(model.chromeRanges)
-                        ? model.chromeRanges
-                        : []
+                translatedView ? [] : sourceChromeRanges
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();

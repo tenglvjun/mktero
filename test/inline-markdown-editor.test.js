@@ -9,6 +9,7 @@ import { JSDOM } from 'jsdom';
 import {
     MarkdownAnnotationOverlay,
 } from '../src/core/markdown-annotation-overlay.js';
+import { visibleDocumentChromeRanges } from '../src/markdown/chrome-ranges.js';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 import { selectedMarkdownAnnotation } from '../src/editor/inline-rendering.js';
 import { createAnnotationPopup } from '../src/editor/annotation-popup.js';
@@ -7837,6 +7838,45 @@ test('hides chromeRanges in the Markdown reader without changing source', () => 
     assert.equal(
         renderedLineTexts(document).some(text => text.includes('Hello')),
         true
+    );
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps the paper title styled after hiding leading publisher chrome', () => {
+    const markdown = [
+        'Check for updates',
+        '',
+        'REVIEW ARTICLE OPEN',
+        '',
+        '# Systematic review and meta-analysis',
+        '',
+        'Han Li',
+    ].join('\n');
+    const titleFrom = markdown.indexOf('# Systematic');
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        chromeRanges: visibleDocumentChromeRanges(markdown, [
+            { from: 0, to: titleFrom + 2 },
+        ]),
+    });
+    const titleLine = [...document.querySelectorAll('.cm-line')].find(line => (
+        line.textContent.includes('Systematic review')
+    ));
+    assert.ok(titleLine?.className.includes('cm-mktero-heading-1'));
+    assert.equal(
+        renderedLineTexts(document).some(text => (
+            text.includes('Check for updates')
+        )),
+        false
     );
     editor.destroy();
     dom.window.close();
