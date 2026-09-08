@@ -67,17 +67,18 @@ export function visibleTextForRanges(markdown, ranges) {
 
 export function mapChromeRanges(ranges, transforms, markdownLength) {
     const steps = Array.isArray(transforms) ? transforms : [];
-    let mapped = Array.isArray(ranges)
-        ? ranges.map(range => ({ from: range.from, to: range.to }))
-        : [];
-    for (const transform of steps) {
-        if (!isTransform(transform)) continue;
-        mapped = mapped
-            .filter(range => !rangesOverlap(range, transform))
-            .map(range => ({
-                from: mapPosition(range.from, -1, transform),
-                to: mapPosition(range.to, 1, transform),
-            }));
+    const mapped = [];
+    for (const range of Array.isArray(ranges) ? ranges : []) {
+        if (!isHalfOpenRange(range, Number.MAX_SAFE_INTEGER)) continue;
+        if (steps.some(transform => (
+            isTransform(transform) && rangesOverlap(range, transform)
+        ))) {
+            continue;
+        }
+        mapped.push({
+            from: mapPosition(range.from, -1, steps),
+            to: mapPosition(range.to, 1, steps),
+        });
     }
     return normalizeChromeRanges(mapped, markdownLength);
 }
@@ -205,16 +206,22 @@ function rangesOverlap(left, right) {
     return left.from < right.to && left.to > right.from;
 }
 
-function mapPosition(position, association, transform) {
-    if (position < transform.from
-        || (position === transform.from && association < 0)) {
-        return position;
+function mapPosition(position, association, transforms) {
+    let delta = 0;
+    for (const transform of transforms) {
+        if (!isTransform(transform)) continue;
+        const replacementFrom = transform.from + delta;
+        const replacementTo = replacementFrom + transform.replacementLength;
+        if (position < transform.from
+            || (position === transform.from && association < 0)) {
+            return position + delta;
+        }
+        if (position > transform.to
+            || (position === transform.to && association > 0)) {
+            delta += transform.replacementLength - (transform.to - transform.from);
+            continue;
+        }
+        return association < 0 ? replacementFrom : replacementTo;
     }
-    if (position > transform.to
-        || (position === transform.to && association > 0)) {
-        return position + transform.replacementLength - (transform.to - transform.from);
-    }
-    return association < 0
-        ? transform.from
-        : transform.from + transform.replacementLength;
+    return position + delta;
 }

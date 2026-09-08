@@ -57,3 +57,16 @@ test('maps chrome ranges through an unrelated replacement and drops overlaps', (
         []
     );
 });
+
+test('maps chrome ranges using original-document transform coordinates', () => {
+    const chrome = [{ from: 4, to: 10 }];
+    const shifted = mapChromeRanges(
+        chrome,
+        [
+            { from: 0, to: 3, replacementLength: 7 },
+            { from: 11, to: 14, replacementLength: 3 },
+        ],
+        18
+    );
+    assert.deepEqual(shifted, [{ from: 8, to: 14 }]);
+});
