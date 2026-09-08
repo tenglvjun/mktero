@@ -12,6 +12,7 @@ import {
     resolveSourceMapLocation,
 } from '../core/markdown-source-map.js';
 import { createLocalization } from '../i18n/localization.js';
+import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
     createInlineRenderingExtension,
@@ -20,6 +21,7 @@ import {
     selectedMarkdownAnnotation,
     selectionAnchor,
     setAnnotationOverlay,
+    setChromeRanges,
     setCorrectionRenderingState,
     setFigureHighlight,
     setInlineEditingRange,
@@ -786,7 +788,7 @@ export function createInlineMarkdownEditor({
         activateDOMGlobals(ownerWindow);
         const domSelection = ownerWindow.document.getSelection?.();
         clampSelectionFocusToPointerLine(view, domSelection, event);
-        const selection = selectedMarkdownAnnotation(view);
+        const selection = selectedMarkdownAnnotation(view, currentChromeRanges);
         if (!selection) return;
         if (markdownSelectionSide(
             domSelection,
@@ -883,12 +885,14 @@ export function createInlineMarkdownEditor({
     );
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
     let currentSourceMap = [];
+    let currentChromeRanges = [];
     let currentSourceActionRanges = null;
     let openSelectionKey = null;
     const setDocument = ({
         markdown,
         annotationOverlay,
         sourceMap,
+        chromeRanges,
         sourceActionRanges,
         translationRanges,
         translationFailures,
@@ -926,6 +930,7 @@ export function createInlineMarkdownEditor({
         }
         annotationPopup.close();
         currentSourceMap = Array.isArray(sourceMap) ? sourceMap : [];
+        currentChromeRanges = normalizeChromeRanges(chromeRanges, value.length);
         currentSourceActionRanges = Array.isArray(sourceActionRanges)
             ? normalizeSourceActionRanges(sourceActionRanges, value.length)
             : null;
@@ -934,6 +939,7 @@ export function createInlineMarkdownEditor({
             setAnnotationOverlay.of(
                 annotationOverlay || createEmptyAnnotationOverlay()
             ),
+            setChromeRanges.of(currentChromeRanges),
             setTranslationRanges.of(translationRanges || []),
             setTranslationFailures.of(translationFailures || []),
             setTranslationPairs.of(translationPairs || []),

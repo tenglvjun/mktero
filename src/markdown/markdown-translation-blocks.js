@@ -10,6 +10,7 @@ import {
 import {
     analyzeMarkdownTableReferences,
 } from './markdown-table-references.js';
+import { normalizeChromeRanges } from './chrome-ranges.js';
 
 const MARKDOWN_PARSER = markdownParser.configure(GFM);
 const HEADING_PATTERN = /^(?:ATXHeading[1-6]|SetextHeading[12])$/;
@@ -40,8 +41,9 @@ export const TRANSLATION_PROTECTED_CONTENT_CHANGED =
 export const MAX_TRANSLATION_BATCH_BLOCKS = 8;
 export const MAX_TRANSLATION_BATCH_SOURCE_TOKENS = 2_000;
 
-export function collectMarkdownTranslationBlocks(markdown) {
+export function collectMarkdownTranslationBlocks(markdown, { chromeRanges } = {}) {
     const source = String(markdown || '');
+    const hidden = normalizeChromeRanges(chromeRanges, source.length);
     const blocks = [];
     const interactiveRanges = collectInteractiveRanges(source);
     let interactiveRangeIndex = 0;
@@ -85,7 +87,10 @@ export function collectMarkdownTranslationBlocks(markdown) {
                 blockMarkdown,
                 protectedBlock.markdown,
                 protectedBlock.fragments
-            );
+            )
+            && !hidden.some(range => (
+                range.from <= node.from && node.to <= range.to
+            ));
         const requestBlock = translatable
             ? protectedBlock
             : protectMarkdown(blockMarkdown, [{

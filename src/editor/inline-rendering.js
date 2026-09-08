@@ -75,6 +75,7 @@ export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
 export const setAnnotationOverlay = StateEffect.define();
+export const setChromeRanges = StateEffect.define();
 export const setTranslationRanges = StateEffect.define();
 export const setTranslationFailures = StateEffect.define();
 export const setTranslationPairs = StateEffect.define();
@@ -595,6 +596,7 @@ export function createInlineRenderingExtension({
         highlightedTableID: null,
         highlightedFigureID: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
+        chromeRanges: [],
         translationRanges: [],
         translationFailures: [],
         translationPairs: [],
@@ -629,6 +631,7 @@ export function createInlineRenderingExtension({
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
             let annotationOverlayChanged = false;
+            let chromeRangesChanged = false;
             let translationRangesChanged = false;
             let translationFailuresChanged = false;
             let translationPairsChanged = false;
@@ -658,6 +661,12 @@ export function createInlineRenderingExtension({
                         )
                     );
                     annotationOverlayChanged = true;
+                }
+                else if (effect.is(setChromeRanges)) {
+                    context.chromeRanges = Array.isArray(effect.value)
+                        ? effect.value
+                        : [];
+                    chromeRangesChanged = true;
                 }
                 else if (effect.is(setTranslationRanges)) {
                     context.translationRanges = normalizeTranslationRanges(
@@ -710,6 +719,7 @@ export function createInlineRenderingExtension({
                 || tableHighlightChanged
                 || figureHighlightChanged
                 || annotationOverlayChanged
+                || chromeRangesChanged
                 || translationRangesChanged
                 || translationFailuresChanged
                 || translationPairsChanged
@@ -958,6 +968,7 @@ function buildDecorations(state, context) {
     decorateCitations(state, decorations, context);
     decorateTableReferences(state, decorations, context);
     decorateFigureReferences(state, decorations, context);
+    decorateChromeRanges(state, decorations, context);
     decoratePDFAnnotations(
         state,
         decorations,
@@ -1159,14 +1170,27 @@ function normalizeTranslationPairRange(from, to, documentLength) {
         : null;
 }
 
+function decorateChromeRanges(state, decorations, context) {
+    for (const range of context.chromeRanges || []) {
+        if (!validAnnotationRange(range, state.doc.length)) continue;
+        decorations.push(Decoration.replace({}).range(range.from, range.to));
+    }
+}
+
 function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
+    const chromeRanges = context.chromeRanges || [];
     for (const annotation of context.annotationOverlay?.matched || []) {
         const validRanges = (annotation.ranges || []).filter(range => (
             validAnnotationRange(range, state.doc.length)
         ));
-        const noteOffset = annotationStartOffset(validRanges);
-        for (const range of annotation.ranges || []) {
-            if (!validAnnotationRange(range, state.doc.length)) continue;
+        const visibleRanges = validRanges.flatMap(range => (
+            subtractChromeRanges(range, chromeRanges)
+        ));
+        let noteOffset = annotationStartOffset(validRanges);
+        if (offsetInsideChrome(noteOffset, chromeRanges)) {
+            noteOffset = visibleRanges[0]?.from ?? null;
+        }
+        for (const range of visibleRanges) {
             if (rangesOverlapEditing(range, context)) continue;
             if (renderedRanges.some(rendered => rangeContains(rendered, range))) {
                 continue;
@@ -1189,6 +1213,13 @@ function decoratePDFAnnotations(state, decorations, context, renderedRanges) {
             }).range(noteOffset));
         }
     }
+}
+
+function offsetInsideChrome(offset, chromeRanges) {
+    return Number.isInteger(offset)
+        && (chromeRanges || []).some(range => (
+            range.from <= offset && offset < range.to
+        ));
 }
 
 function validAnnotationRange(range, documentLength) {

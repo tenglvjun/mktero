@@ -7813,6 +7813,68 @@ test('skips chrome when selecting Markdown across page chrome', () => {
     dom.window.close();
 });
 
+test('hides chromeRanges in the Markdown reader without changing source', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+    });
+    assert.equal(editor.getMarkdown(), markdown);
+    assert.equal(
+        renderedLineTexts(document).some(text => text.trim() === '12'),
+        false
+    );
+    assert.equal(
+        renderedLineTexts(document).some(text => text.includes('Hello')),
+        true
+    );
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not paint annotation marks on hidden chrome', () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'HelloWorld',
+                color: '#ffd400',
+                ranges: [{ from: 0, to: markdown.length }],
+            }],
+            unmatched: [],
+        },
+    });
+    const marks = [...document.querySelectorAll('.cm-mktero-pdf-annotation')];
+    assert.equal(marks.some(mark => mark.textContent.includes('12')), false);
+    assert.equal(marks.some(mark => mark.textContent.includes('Hello')), true);
+    editor.destroy();
+    dom.window.close();
+});
+
 test('creates a local highlight from the selected Markdown text', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

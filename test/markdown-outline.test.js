@@ -138,3 +138,12 @@ test('anchors restored reading position to the matching section after reparse', 
         updated.indexOf('Updated methods.')
     );
 });
+
+test('omits headings whose offset is inside chromeRanges', () => {
+    const markdown = '# Nature\n\n# Methods';
+    assert.deepEqual(
+        extractMarkdownOutline(markdown, [{ from: 0, to: markdown.indexOf('\n\n') }])
+            .map(heading => heading.text),
+        ['Methods']
+    );
+});

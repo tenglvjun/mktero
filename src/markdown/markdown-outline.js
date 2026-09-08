@@ -1,15 +1,22 @@
 import { GFM, parser as markdownParser } from '@lezer/markdown';
+import { normalizeChromeRanges } from './chrome-ranges.js';
 
 const OUTLINE_PARSER = markdownParser.configure(GFM);
 const HEADING_NODE = /^(?:ATXHeading|SetextHeading)([1-6])$/;
 
-export function extractMarkdownOutline(markdown) {
+export function extractMarkdownOutline(markdown, chromeRanges = []) {
     const source = String(markdown || '');
+    const hidden = normalizeChromeRanges(chromeRanges, source.length);
     const headings = [];
     OUTLINE_PARSER.parse(source).iterate({
         enter(node) {
             const match = HEADING_NODE.exec(node.name);
             if (!match) return;
+            if (hidden.some(range => (
+                range.from <= node.from && node.from < range.to
+            ))) {
+                return;
+            }
             const text = visibleHeadingText(
                 source.slice(node.from, node.to),
                 node.name
