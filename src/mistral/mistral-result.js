@@ -1,5 +1,10 @@
 import { createMarkdownSourceMap } from '../core/markdown-source-map.js';
 import {
+    absorbBlankLines,
+    mapChromeRanges,
+    normalizeChromeRanges,
+} from '../markdown/chrome-ranges.js';
+import {
     normalizeMistralFigureLayouts,
     normalizeMistralMarkdown,
 } from './markdown-normalizer.js';
@@ -191,30 +196,45 @@ export function normalizeMistralResult(response, options = {}) {
     });
     const repeatedChromeLines = findRepeatedPageChromeLines(pageSources);
     const markdownPages = pageSources.map(({ page, source, records }) => {
-        const cleaned = removeMistralPageChrome(
+        const detected = detectMistralPageChrome(
             source,
             page.index,
             records,
             repeatedChromeLines
         );
-        pageBlockRecords.get(page.index).chromeRecords = cleaned.chromeRecords;
+        pageBlockRecords.get(page.index).chromeRecords = detected.chromeRecords;
+        const laidOut = normalizeMistralFigureLayouts(
+            detected.markdown,
+            records
+                .map(record => record.normalized)
+                .filter(block => block?.type === 'image' || block?.type === 'chart')
+        );
         return {
-            markdown: normalizeMistralFigureLayouts(
-                cleaned.markdown,
-                records
-                    .map(record => record.normalized)
-                    .filter(block => block?.type === 'image' || block?.type === 'chart')
-            ),
+            markdown: laidOut,
             records,
+            chromeRanges: mapChromeRangesThroughRewrite(
+                detected.chromeRanges,
+                detected.markdown,
+                laidOut
+            ),
         };
     });
-    const combinedMarkdown = markdownPages
-        .map(page => page.markdown)
-        .filter(page => page.length > 0)
-        .join('\n\n');
-    const markdown = normalizeMistralTextFlow(
-        combinedMarkdown,
+    const joined = joinMarkdownPages(markdownPages);
+    const flowed = applyMistralTextFlow(
+        joined.markdown,
         markdownPages.flatMap(page => page.records)
+    );
+    const markdown = flowed.markdown;
+    const chromeRanges = normalizeChromeRanges(
+        absorbBlankLines(
+            markdown,
+            mapChromeRanges(
+                joined.chromeRanges,
+                flowed.transforms,
+                markdown.length
+            )
+        ),
+        markdown.length
     );
     if (!markdown.trim()) throw invalidResult('Mistral result contains no Markdown');
     if (new TextEncoder().encode(markdown).length > limits.maxMarkdownBytes) {
@@ -257,6 +277,7 @@ export function normalizeMistralResult(response, options = {}) {
         assetBasePath: '',
         contentList,
         sourceMap,
+        chromeRanges,
         extractedPages: pageRecords.length,
         totalPages,
         warnings,
@@ -553,7 +574,7 @@ function findRepeatedPageChromeLines(pageSources) {
         .map(([text]) => text));
 }
 
-function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
+function detectMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
     const context = createPageChromeContext(markdown, records, repeatedLines);
     const removableIndexes = findRemovablePageChromeIndexes(
         context,
@@ -572,15 +593,77 @@ function removeMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
         removableIndexes
     );
 
-    if (!removableIndexes.size) return { markdown, chromeRecords };
     return {
-        markdown: context.lines
-            .filter((line, index) => !removableIndexes.has(index))
-            .join('')
-            .replace(/\n{3,}/gu, '\n\n')
-            .trim(),
+        markdown,
         chromeRecords,
+        chromeRanges: chromeRangesForLineIndexes(context.lines, removableIndexes),
     };
+}
+
+function chromeRangesForLineIndexes(lines, indexes) {
+    const ranges = [];
+    let offset = 0;
+    for (const [index, line] of lines.entries()) {
+        const from = offset;
+        const to = offset + line.length;
+        offset = to;
+        if (indexes.has(index) && from < to) {
+            ranges.push({ from, to });
+        }
+    }
+    return ranges;
+}
+
+function joinMarkdownPages(pages) {
+    const nonEmpty = pages.filter(page => page.markdown.length > 0);
+    const chromeRanges = [];
+    let offset = 0;
+    const parts = [];
+    for (const [index, page] of nonEmpty.entries()) {
+        for (const range of page.chromeRanges || []) {
+            chromeRanges.push({
+                from: range.from + offset,
+                to: range.to + offset,
+            });
+        }
+        parts.push(page.markdown);
+        offset += page.markdown.length;
+        if (index < nonEmpty.length - 1) offset += 2;
+    }
+    return {
+        markdown: parts.join('\n\n'),
+        chromeRanges,
+    };
+}
+
+function mapChromeRangesThroughRewrite(ranges, before, after) {
+    if (before === after) {
+        return normalizeChromeRanges(ranges, after.length);
+    }
+    const transform = inferReplacementTransform(before, after);
+    if (!transform) {
+        return normalizeChromeRanges(ranges, after.length);
+    }
+    return mapChromeRanges(ranges, [transform], after.length);
+}
+
+function inferReplacementTransform(before, after) {
+    let prefix = 0;
+    const maxPrefix = Math.min(before.length, after.length);
+    while (prefix < maxPrefix && before[prefix] === after[prefix]) prefix++;
+    let suffix = 0;
+    const maxSuffix = Math.min(before.length - prefix, after.length - prefix);
+    while (
+        suffix < maxSuffix
+        && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+    ) {
+        suffix++;
+    }
+    const from = prefix;
+    const to = before.length - suffix;
+    const replacementLength = after.length - prefix - suffix;
+    if (from === to && replacementLength === 0) return null;
+    return { from, to, replacementLength };
 }
 
 function createPageChromeContext(markdown, records, repeatedLines) {
@@ -723,11 +806,13 @@ function findChromeRecords(records, edgeTextByIndex, removableIndexes) {
     return chromeRecords;
 }
 
-function normalizeMistralTextFlow(markdown, records) {
+function applyMistralTextFlow(markdown, records) {
     const textBlocks = records
         .map(record => record.normalized)
         .filter(block => block?.type === 'text');
-    if (!markdown || textBlocks.length < 2) return markdown;
+    if (!markdown || textBlocks.length < 2) {
+        return { markdown, transforms: [] };
+    }
 
     const sourceMap = createMarkdownSourceMap(markdown, textBlocks, {
         includeMatchedTextRanges: true,
@@ -747,7 +832,17 @@ function normalizeMistralTextFlow(markdown, records) {
             replacement: ' ',
         });
     }
-    return applyMistralTextFlowEdits(markdown, edits);
+    const applied = applyMistralTextFlowEdits(markdown, edits);
+    return {
+        markdown: applied.markdown,
+        transforms: [...applied.edits]
+            .sort((left, right) => left.from - right.from)
+            .map(edit => ({
+                from: edit.from,
+                to: edit.to,
+                replacementLength: edit.replacement.length,
+            })),
+    };
 }
 
 function isMistralColumnContinuation(markdown, previous, current) {
@@ -795,14 +890,16 @@ function applyMistralTextFlowEdits(markdown, edits) {
     const sorted = [...edits].sort((left, right) => right.from - left.from);
     let result = markdown;
     let lastFrom = markdown.length + 1;
+    const applied = [];
     for (const edit of sorted) {
         if (edit.to > lastFrom) continue;
         result = result.slice(0, edit.from)
             + edit.replacement
             + result.slice(edit.to);
         lastFrom = edit.from;
+        applied.push(edit);
     }
-    return result;
+    return { markdown: result, edits: applied };
 }
 
 function edgeLineIndexes(lines) {

@@ -15,6 +15,26 @@ function page(overrides = {}) {
     };
 }
 
+function assertCovered(markdown, ranges, snippet) {
+    const from = markdown.indexOf(snippet);
+    assert.ok(from >= 0, snippet);
+    assert.equal(
+        ranges.some(range => range.from <= from && range.to >= from + snippet.length),
+        true,
+        snippet
+    );
+}
+
+function assertNotCovered(markdown, ranges, snippet) {
+    const from = markdown.indexOf(snippet);
+    assert.ok(from >= 0, snippet);
+    assert.equal(
+        ranges.some(range => range.from <= from && range.to >= from + snippet.length),
+        false,
+        snippet
+    );
+}
+
 test('orders pages, joins Markdown, decodes images, and normalizes block bboxes', () => {
     const result = normalizeMistralResult({
         pages: [
@@ -351,7 +371,7 @@ test('removes OCR text that is contained inside a Mistral image bbox', () => {
     );
 });
 
-test('removes Mistral publisher mastheads and repeated page chrome', () => {
+test('records Mistral publisher mastheads and repeated page chrome', () => {
     const result = normalizeMistralResult({
         pages: [
             page({
@@ -448,14 +468,16 @@ test('removes Mistral publisher mastheads and repeated page chrome', () => {
         ],
     });
 
-    assert.equal(
-        result.markdown,
-        '# Paper title\n\nOpening body paragraph.\n\n'
-            + 'Page two body.\n\nSensors 2023, 23, 9730\n\n'
-            + 'This is ordinary body text.\n\nMore body text.\n\n'
-            + 'Another body line.\n\nYet another body line.\n\n'
-            + 'RandomForestClassifier\n\nPage three body.'
-    );
+    assert.match(result.markdown, /# Paper title/);
+    assert.match(result.markdown, /Opening body paragraph/);
+    assert.match(result.markdown, /sensors/i);
+    assert.match(result.markdown, /MDPI/);
+    assert.match(result.markdown, /2 of 3/);
+    assert.match(result.markdown, /Page two body/);
+    assert.equal(result.sourceMap.some(entry => entry.type === 'footer'), false);
+    assert.equal(result.contentList.some(block => (
+        ['header', 'footer'].includes(block.type)
+    )), false);
     assert.deepEqual(result.contentList.map(block => block.type), [
         'heading',
         'text',
@@ -463,14 +485,21 @@ test('removes Mistral publisher mastheads and repeated page chrome', () => {
         'text',
         'text',
     ]);
-    assert.equal(result.sourceMap.some(entry => entry.type === 'footer'), false);
+    assertCovered(result.markdown, result.chromeRanges, 'MDPI');
+    assertCovered(result.markdown, result.chromeRanges, '2 of 3');
+    assert.equal(
+        result.chromeRanges.some(range => (
+            result.markdown.slice(range.from, range.to).includes('Page two body')
+        )),
+        false
+    );
     assert.equal(result.sourceMap.some(entry => (
         result.markdown.slice(entry.markdownFrom, entry.markdownTo)
             .includes('RandomForestClassifier')
     )), true);
 });
 
-test('removes publisher footer links when Mistral omits footer blocks', () => {
+test('records publisher footer links when Mistral omits footer blocks', () => {
     const result = normalizeMistralResult({
         pages: [
             page({
@@ -498,13 +527,17 @@ test('removes publisher footer links when Mistral omits footer blocks', () => {
         ],
     });
 
-    assert.equal(
-        result.markdown,
-        '# Paper title\n\nBody paragraph.\n\nSecond page body.'
-    );
+    assert.match(result.markdown, /# Paper title/);
+    assert.match(result.markdown, /Body paragraph/);
+    assert.match(result.markdown, /Second page body/);
+    assert.match(result.markdown, /Sensors 2023, 23, 9730/);
+    assert.match(result.markdown, /mdpi\.com\/journal\/sensors/);
+    assert.match(result.markdown, /2 of 2/);
+    assertCovered(result.markdown, result.chromeRanges, 'https://www.mdpi.com/journal/sensors');
+    assertCovered(result.markdown, result.chromeRanges, '2 of 2');
 });
 
-test('removes a complete publisher footer when conversion residue follows it', () => {
+test('records a complete publisher footer when conversion residue follows it', () => {
     const footer = index => [
         'https://www.jmir.org/2024/1/e45139',
         '',
@@ -533,15 +566,24 @@ test('removes a complete publisher footer when conversion residue follows it', (
         })),
     });
 
+    assert.match(result.markdown, /# Paper title/);
+    assert.match(result.markdown, /Body paragraph/);
+    assert.match(result.markdown, /Second page body/);
+    assert.match(result.markdown, /jmir\.org/i);
+    assert.match(result.markdown, /XSL/i);
+    assert.match(result.markdown, /RenderX/);
+    assert.match(result.markdown, /citation purposes/i);
+    assertCovered(result.markdown, result.chromeRanges, 'XSL·FO');
+    assertCovered(result.markdown, result.chromeRanges, 'RenderX');
     assert.equal(
-        result.markdown,
-        '# Paper title\n\nBody paragraph.\n\n![Figure]()\n\n'
-            + 'Second page body.\n\nMore body.\n\nEnd marker'
+        result.chromeRanges.some(range => (
+            result.markdown.slice(range.from, range.to).includes('Body paragraph')
+        )),
+        false
     );
-    assert.doesNotMatch(result.markdown, /jmir\.org|XSL|RenderX|citation purposes/iu);
 });
 
-test('removes publisher markers at the twelfth non-empty edge line', () => {
+test('records publisher markers at the twelfth non-empty edge line', () => {
     const result = normalizeMistralResult({
         pages: [page({
             markdown: [
@@ -554,8 +596,19 @@ test('removes publisher markers at the twelfth non-empty edge line', () => {
         })],
     });
 
-    assert.doesNotMatch(result.markdown, /jmir\.org|J Med Internet Res 2024 \|/iu);
+    assert.match(result.markdown, /jmir\.org/i);
+    assert.match(result.markdown, /J Med Internet Res 2024 \|/u);
     assert.match(result.markdown, /Body line 1\./u);
+    assertCovered(
+        result.markdown,
+        result.chromeRanges,
+        'https://www.jmir.org/2024/1/e45139'
+    );
+    assertCovered(
+        result.markdown,
+        result.chromeRanges,
+        'J Med Internet Res 2024 | vol. 26 | e45139 | p. 1'
+    );
 });
 
 test('keeps publisher-looking prose outside the page edge window', () => {
@@ -574,6 +627,13 @@ test('keeps publisher-looking prose outside the page edge window', () => {
     assert.match(result.markdown, /https:\/\/www\.jmir\.org\/2024\/1\/e45139/u);
     assert.match(result.markdown, /XSL·FO/u);
     assert.match(result.markdown, /RenderX/u);
+    assertNotCovered(
+        result.markdown,
+        result.chromeRanges,
+        'https://www.jmir.org/2024/1/e45139'
+    );
+    assertNotCovered(result.markdown, result.chromeRanges, 'XSL·FO');
+    assertNotCovered(result.markdown, result.chromeRanges, 'RenderX');
 });
 
 test('protects reference URLs that resemble a publisher footer', () => {
@@ -600,7 +660,56 @@ test('protects reference URLs that resemble a publisher footer', () => {
     });
 
     assert.match(result.markdown, new RegExp(referenceURL.replaceAll('.', '\\.'), 'u'));
-    assert.doesNotMatch(result.markdown, /www\.jmir\.org|J Med Internet Res 2024 \|/iu);
+    assertNotCovered(result.markdown, result.chromeRanges, referenceURL);
+});
+
+test('does not join Mistral body blocks across retained page chrome', () => {
+    const header = 'Journal of Example Research 2024';
+    const result = normalizeMistralResult({
+        pages: [
+            page({
+                index: 0,
+                markdown: `The experiment continued\n\n${header}`,
+                blocks: [
+                    {
+                        type: 'text',
+                        content: 'The experiment continued',
+                        bbox: [100, 780, 900, 860],
+                    },
+                    {
+                        type: 'footer',
+                        content: header,
+                        bbox: [100, 900, 900, 980],
+                    },
+                ],
+            }),
+            page({
+                index: 1,
+                markdown: `${header}\n\non the following page with enough text.`,
+                blocks: [
+                    {
+                        type: 'header',
+                        content: header,
+                        bbox: [100, 40, 900, 90],
+                    },
+                    {
+                        type: 'text',
+                        content: 'on the following page with enough text.',
+                        bbox: [100, 200, 900, 300],
+                    },
+                ],
+            }),
+        ],
+    });
+    assert.match(result.markdown, /The experiment continued/);
+    assert.match(result.markdown, /on the following page with enough text/);
+    assert.match(result.markdown, /Journal of Example Research 2024/);
+    assert.equal(
+        result.markdown.includes(
+            'The experiment continued on the following page with enough text.'
+        ),
+        false
+    );
 });
 
 test('joins a paragraph that continues from the bottom of one column', () => {
@@ -681,7 +790,7 @@ test('does not join the bottom of a right column to the top of a left column', (
     assert.equal(result.markdown, `${firstBlock}\n\n${secondBlock}`);
 });
 
-test('joins a paragraph across a page footer into the next page', () => {
+test('does not join a paragraph across a retained page footer', () => {
     const firstBlock = '... biosensor* [tiab]) AND';
     const secondBlock = '(wear* [tiab] OR worn [tiab])) AND ("menstruation" [MeSH Terms].';
     const result = normalizeMistralResult({
@@ -715,10 +824,18 @@ test('joins a paragraph across a page footer into the next page', () => {
         ],
     });
 
-    assert.equal(result.markdown, `${firstBlock} ${secondBlock}`);
-    const textEntries = result.sourceMap.filter(entry => entry.type === 'text');
-    assert.equal(textEntries.length, 1);
-    assert.equal(textEntries[0].locations.length, 2);
+    assert.equal(result.markdown.includes(firstBlock), true);
+    assert.equal(result.markdown.includes(secondBlock), true);
+    assert.match(result.markdown, /jmir\.org/i);
+    assert.equal(
+        result.markdown.includes(`${firstBlock} ${secondBlock}`),
+        false
+    );
+    assertCovered(
+        result.markdown,
+        result.chromeRanges,
+        'https://www.jmir.org/2024/1/e45139'
+    );
 });
 
 test('keeps separate paragraphs across a page boundary when the first ends', () => {
