@@ -193,6 +193,9 @@ function createResult(
     };
     if (cacheKey) extracted.cacheKey = cacheKey;
     if (parsedResult.userEdited) extracted.userEdited = true;
+    if (Array.isArray(parsedResult.chromeRanges)) {
+        extracted.chromeRanges = parsedResult.chromeRanges;
+    }
     return extracted;
 }
 

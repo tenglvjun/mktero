@@ -806,3 +806,70 @@ test('destroys open and pending revision sessions during shutdown', async () => 
     assert.equal(registry.get(42), undefined);
     assert.equal(registry.get(43), undefined);
 });
+
+test('shifts chromeRanges with unrelated corrections and drops overlapping ones', async () => {
+    const heading = '# Study';
+    const paragraph = 'The study included 5O participants.';
+    const chrome = '12';
+    const conclusion = 'Conclusion.';
+    const markdown = [heading, paragraph, chrome, conclusion].join('\n\n');
+    const paragraphFrom = markdown.indexOf(paragraph);
+    const chromeFrom = markdown.indexOf(chrome);
+    const conclusionFrom = markdown.indexOf(conclusion);
+    const baseDocument = {
+        itemID: 42,
+        cacheKey: CACHE_KEY,
+        markdown,
+        chromeRanges: [{ from: chromeFrom, to: chromeFrom + chrome.length }],
+        sourceMap: [{
+            type: 'title',
+            markdownFrom: 0,
+            markdownTo: heading.length,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 180] }],
+        }, {
+            type: 'text',
+            markdownFrom: paragraphFrom,
+            markdownTo: paragraphFrom + paragraph.length,
+            locations: [{ pageIndex: 0, bbox: [100, 200, 900, 300] }],
+        }, {
+            type: 'text',
+            markdownFrom: conclusionFrom,
+            markdownTo: conclusionFrom + conclusion.length,
+            locations: [{ pageIndex: 1, bbox: [100, 100, 900, 180] }],
+        }],
+        assets: [],
+        assetBasePath: '',
+        extractedPages: 2,
+        totalPages: 2,
+    };
+    const session = await openMarkdownRevisionSession({
+        baseDocument,
+        store: createMemoryStore(),
+    });
+    const paragraphBlock = session.snapshot().editableBlocks.find(block => (
+        block.originalMarkdown.includes('5O participants')
+    ));
+    const replacement = 'The study included fifty participants.';
+    const shifted = await session.commit({
+        blockID: paragraphBlock.id,
+        replacementMarkdown: replacement,
+    });
+    const delta = replacement.length - paragraph.length;
+    assert.deepEqual(shifted.chromeRanges, [{
+        from: chromeFrom + delta,
+        to: chromeFrom + chrome.length + delta,
+    }]);
+
+    const overlapSession = await openMarkdownRevisionSession({
+        baseDocument,
+        store: createMemoryStore(),
+    });
+    const chromeBlock = overlapSession.snapshot().editableBlocks.find(block => (
+        block.originalMarkdown.trim() === '12'
+    ));
+    const dropped = await overlapSession.commit({
+        blockID: chromeBlock.id,
+        replacementMarkdown: 'page',
+    });
+    assert.deepEqual(dropped.chromeRanges, []);
+});
