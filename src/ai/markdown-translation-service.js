@@ -85,6 +85,7 @@ export class MarkdownTranslationService {
         documentKey,
         markdown,
         targetLanguage,
+        chromeRanges,
     }) {
         const configuredSettings = this.getSettings();
         const selectedLanguage = targetLanguage === undefined
@@ -106,11 +107,16 @@ export class MarkdownTranslationService {
         return this.#getCachedDocumentTranslationForSettings(
             normalizedDocumentKey,
             source,
-            settings
+            settings,
+            chromeRanges
         );
     }
 
-    async listCachedDocumentTranslationVariants({ documentKey, markdown }) {
+    async listCachedDocumentTranslationVariants({
+        documentKey,
+        markdown,
+        chromeRanges,
+    }) {
         if (!this.cache?.getTranslation) return [];
         const source = String(markdown || '');
         const normalizedDocumentKey = translationIdentifier(documentKey);
@@ -130,7 +136,8 @@ export class MarkdownTranslationService {
                     await this.#getCachedDocumentTranslationForSettings(
                         normalizedDocumentKey,
                         source,
-                        settings
+                        settings,
+                        chromeRanges
                     );
                 return result;
             }
@@ -143,6 +150,7 @@ export class MarkdownTranslationService {
         markdown,
         existingTranslation,
         targetLanguage,
+        chromeRanges,
     }) {
         const configuredSettings = this.getSettings();
         const selectedLanguage = targetLanguage === undefined
@@ -173,7 +181,8 @@ export class MarkdownTranslationService {
                 normalizedDocumentKey,
                 translationKey,
                 source,
-                settings.targetLanguage
+                settings.targetLanguage,
+                chromeRanges
             )
             : null;
         if (exact) {
@@ -190,7 +199,7 @@ export class MarkdownTranslationService {
             settings,
             existingTranslation
         );
-        const blocks = collectMarkdownTranslationBlocks(source);
+        const blocks = collectSourceTranslationBlocks(source, chromeRanges);
         const visible = normalizeVisibleTranslation(
             existingTranslation,
             source,
@@ -205,7 +214,8 @@ export class MarkdownTranslationService {
             normalizedDocumentKey,
             translationKey,
             source,
-            settings
+            settings,
+            chromeRanges
         );
         return compatible
             ? withDocumentTranslationIdentity(compatible, {
@@ -270,6 +280,7 @@ export class MarkdownTranslationService {
         existingTranslation = null,
         forceRetranslate = false,
         targetLanguage,
+        chromeRanges,
     }) {
         const configuredSettings = this.getSettings();
         const selectedLanguage = targetLanguage === undefined
@@ -312,7 +323,8 @@ export class MarkdownTranslationService {
                 normalizedDocumentKey,
                 translationKey,
                 source,
-                settings.targetLanguage
+                settings.targetLanguage,
+                chromeRanges
             )
             : null;
         if (!cached) {
@@ -320,7 +332,8 @@ export class MarkdownTranslationService {
                 normalizedDocumentKey,
                 translationKey,
                 source,
-                settings
+                settings,
+                chromeRanges
             );
         }
         if (cached
@@ -339,7 +352,7 @@ export class MarkdownTranslationService {
                 };
             }
         }
-        const blocks = collectMarkdownTranslationBlocks(source);
+        const blocks = collectSourceTranslationBlocks(source, chromeRanges);
         const translatableBlocks = blocks.filter(block => block.translatable);
         validateDocumentTranslationInput(translatableBlocks);
         const visible = normalizeVisibleTranslation(
@@ -563,7 +576,8 @@ export class MarkdownTranslationService {
         documentKey,
         translationKey,
         source,
-        targetLanguage
+        targetLanguage,
+        chromeRanges
     ) {
         try {
             const cached = await this.cache.getTranslation(
@@ -575,7 +589,7 @@ export class MarkdownTranslationService {
                 || cached.promptVersion !== TRANSLATION_PROMPT_VERSION) {
                 throw new Error('The cached document translation identity changed');
             }
-            const blocks = collectMarkdownTranslationBlocks(source);
+            const blocks = collectSourceTranslationBlocks(source, chromeRanges);
             const translatableBlocks = blocks.filter(block => block.translatable);
             const cachedTranslationsByID = new Map(cached.blocks.map(block => [
                 block.id,
@@ -634,7 +648,8 @@ export class MarkdownTranslationService {
         documentKey,
         translationKey,
         source,
-        settings
+        settings,
+        chromeRanges
     ) {
         if (!this.cache?.getTranslationByLanguage) return null;
         try {
@@ -652,7 +667,7 @@ export class MarkdownTranslationService {
                 || !Array.isArray(cached.sourceBlocks)) {
                 return null;
             }
-            const blocks = collectMarkdownTranslationBlocks(source);
+            const blocks = collectSourceTranslationBlocks(source, chromeRanges);
             const reconciled = reconcileTranslationBlocks(
                 blocks,
                 cached,
@@ -695,7 +710,8 @@ export class MarkdownTranslationService {
     async #getCachedDocumentTranslationForSettings(
         documentKey,
         source,
-        settings
+        settings,
+        chromeRanges
     ) {
         const translationKey = await this.#safeCreateDocumentTranslationKey(
             documentKey,
@@ -707,14 +723,16 @@ export class MarkdownTranslationService {
                 documentKey,
                 translationKey,
                 source,
-                settings.targetLanguage
+                settings.targetLanguage,
+                chromeRanges
             )
             : null;
         const cached = exact || await this.#readCompatibleDocumentTranslation(
             documentKey,
             translationKey,
             source,
-            settings
+            settings,
+            chromeRanges
         );
         return cached
             ? withDocumentTranslationIdentity(cached, {
@@ -1901,6 +1919,13 @@ function createDocumentTranslationRequestPlan({
             translation => !retainedFailureIDs.has(translation.id)
         ).length,
     };
+}
+
+function collectSourceTranslationBlocks(source, chromeRanges) {
+    return collectMarkdownTranslationBlocks(
+        source,
+        Array.isArray(chromeRanges) ? { chromeRanges } : {}
+    );
 }
 
 function aiError(message, code) {

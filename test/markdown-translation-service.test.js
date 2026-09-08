@@ -183,6 +183,48 @@ test('translates a complete Markdown document in one provider request', async ()
     assert.equal(cached[0][2].translatedMarkdown, result.translatedMarkdown);
 });
 
+test('does not send OCR chrome paragraphs to the translation provider', async () => {
+    const requests = [];
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const service = new MarkdownTranslationService({
+        aiGateway: {
+            async generateText(request) {
+                requests.push(request.messages[1].content);
+                return {
+                    text: translateBatchRequest(
+                        request.messages[1].content,
+                        source => source
+                            .replace('Hello', '你好')
+                            .replace('World', '世界')
+                    ),
+                    model: 'provider-model',
+                };
+            },
+        },
+        cache: {
+            getTranslation: async () => null,
+            putTranslation: async () => {},
+        },
+        getSettings: () => ({ ...SETTINGS, streaming: false }),
+        createCacheKey: async () => 'c'.repeat(64),
+    });
+
+    const result = await service.translateDocument({
+        documentKey: 'a'.repeat(64),
+        markdown,
+        chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+    });
+
+    assert.deepEqual(parseTranslationRequest(requests[0]).map(entry => (
+        entry.sourceMarkdown
+    )), ['Hello', 'World']);
+    assert.doesNotMatch(requests[0], /(^|\n)12(\n|$)/);
+    assert.match(result.translatedMarkdown, /12/);
+    assert.equal(result.totalBlocks, 2);
+});
+
 test('streams the complete document by default and uses the selected language', async () => {
     const requests = [];
     const service = new MarkdownTranslationService({
