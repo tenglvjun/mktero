@@ -104,7 +104,7 @@ Open `Settings -> Mktero` after installation.
 | --- | --- | --- |
 | Conversion provider | Yes | Select MinerU or Mistral OCR 4.1 |
 | API key | Required for a cache miss | Enter the key for the selected provider; use the adjacent manage link to create or update it |
-| AI features and provider settings | Optional | Translate Markdown through a hosted or loopback model service |
+| AI features and provider settings | Optional | Enable AI to reveal streaming, provider, model, key, reasoning, timeout, and token limits; a custom URL and protocol appear only for Custom |
 | Translation language | Optional | Choose Simplified/Traditional Chinese, Japanese, Korean, Spanish, French, or Brazilian Portuguese |
 | Automatically translate Markdown selections | Optional, off by default | Translate a stable selection without an extra click; disabling it keeps the manual popup action |
 | Body text font and size | Optional | Choose the reading font and a 16–22 px body size |
@@ -113,8 +113,9 @@ Open `Settings -> Mktero` after installation.
 MinerU, Mistral, and AI credentials are stored as ordinary, unencrypted
 preferences in the active Zotero profile. Mistral uses a synchronous request;
 it can be cancelled locally, but it has no resumable server task. MinerU keeps
-its existing resumable task behavior. Use `Test connection` to validate an AI
-endpoint before translating.
+its existing resumable task behavior. Use the lightning icon next to the AI
+provider to validate an endpoint before translating. Clearing the local cache
+asks for confirmation.
 
 ### Open a PDF
 
