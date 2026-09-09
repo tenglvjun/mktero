@@ -554,7 +554,8 @@ class MarkdownTabView {
             );
             const sourceChromeRanges = visibleDocumentChromeRanges(
                 model.markdown || markdown,
-                model.chromeRanges
+                model.chromeRanges,
+                model.title
             );
             this.editor.setDocument({
                 markdown,

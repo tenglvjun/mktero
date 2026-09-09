@@ -5,16 +5,91 @@ const BLANK_LINE = /^[ \t]*$/;
 
 const PUBLISHER_UI_PATTERN = /^(?:check for updates|review article(?:\s+open)?|open access|download pdf|view (?:pdf|article|full text)|full text(?: html)?|accepted manuscript)$/i;
 const ATX_HEADING_PATTERN = /^ {0,3}#{1,6}(?:[ \t]+|$)/;
+const PAPER_TITLE_HEADING_PATTERN = /^ {0,3}#{1,2}(?:[ \t]+|$)/;
+const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})/;
 
-export function visibleDocumentChromeRanges(markdown, storedRanges) {
+export function visibleDocumentChromeRanges(markdown, storedRanges, itemTitle) {
     if (typeof markdown !== 'string') return [];
-    return clipChromeBeforeFirstPaperHeading(
+    const titleFrom = paperTitleHeadingOffset(markdown, itemTitle);
+    return clipChromeAwayFromHeading(
         markdown,
         normalizeChromeRanges([
             ...normalizeChromeRanges(storedRanges, markdown.length),
             ...findLeadingPublisherChromeRanges(markdown),
-        ], markdown.length)
+            ...findLeadingPreambleChromeRanges(markdown, titleFrom),
+        ], markdown.length),
+        titleFrom
     );
+}
+
+function findLeadingPreambleChromeRanges(markdown, titleFrom) {
+    if (typeof markdown !== 'string' || !markdown) return [];
+    if (!Number.isSafeInteger(titleFrom) || titleFrom <= 0) return [];
+    const to = lineBreakBefore(markdown, titleFrom);
+    if (to <= 0) return [];
+    return [{ from: 0, to }];
+}
+
+function lineBreakBefore(markdown, offset) {
+    let to = offset;
+    if (to > 0 && markdown[to - 1] === '\n') to--;
+    if (to > 0 && markdown[to - 1] === '\r') to--;
+    return to;
+}
+
+function paperTitleHeadingOffset(markdown, itemTitle) {
+    const itemKey = titleHeadingKey(itemTitle);
+    if (!itemKey) return null;
+    const matches = collectTitleHeadings(markdown).filter(heading => (
+        heading.key === itemKey
+    ));
+    if (matches.length >= 2) return matches[1].from;
+    return matches[0]?.from ?? null;
+}
+
+function collectTitleHeadings(markdown) {
+    const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
+    const headings = [];
+    let offset = 0;
+    let fence = null;
+    for (const raw of lines) {
+        const ending = /\r?\n$/.exec(raw)?.[0] || '';
+        const text = raw.slice(0, raw.length - ending.length);
+        const lineFrom = offset;
+        offset += raw.length;
+        const fenceMark = FENCE_PATTERN.exec(text);
+        if (fence) {
+            if (closesFence(fence, fenceMark, text)) fence = null;
+            continue;
+        }
+        if (fenceMark) {
+            fence = {
+                marker: fenceMark[1][0],
+                length: fenceMark[1].length,
+            };
+            continue;
+        }
+        if (!PAPER_TITLE_HEADING_PATTERN.test(text)) continue;
+        const key = titleHeadingKey(text);
+        if (!key) continue;
+        headings.push({ from: lineFrom, key });
+    }
+    return headings;
+}
+
+function titleHeadingKey(text) {
+    return stripHeadingMarks(text)
+        .replace(/[ \t]+#+$/u, '')
+        .replace(/\s+/gu, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function closesFence(fence, fenceMark, text) {
+    return Boolean(fenceMark)
+        && fenceMark[1][0] === fence.marker
+        && fenceMark[1].length >= fence.length
+        && !text.slice(fenceMark[0].length).trim();
 }
 
 export function findLeadingPublisherChromeRanges(markdown) {
@@ -35,14 +110,33 @@ export function findLeadingPublisherChromeRanges(markdown) {
         }
         break;
     }
-    return clipChromeBeforeFirstPaperHeading(
+    return clipChromeBeforeOffset(
         markdown,
-        absorbBlankLines(markdown, ranges)
+        absorbBlankLines(markdown, ranges),
+        firstPaperHeadingOffset(markdown)
     );
 }
 
-function clipChromeBeforeFirstPaperHeading(markdown, ranges) {
-    const headingFrom = firstPaperHeadingOffset(markdown);
+function clipChromeAwayFromHeading(markdown, ranges, headingFrom) {
+    if (!Number.isSafeInteger(headingFrom)
+        || headingFrom < 0
+        || headingFrom >= markdown.length) {
+        return normalizeChromeRanges(ranges, markdown.length);
+    }
+    const protectedFrom = lineBreakBefore(markdown, headingFrom);
+    const headingTo = lineEnd(markdown, headingFrom);
+    if (headingTo <= protectedFrom) {
+        return normalizeChromeRanges(ranges, markdown.length);
+    }
+    return normalizeChromeRanges(
+        (Array.isArray(ranges) ? ranges : []).flatMap(range => (
+            subtractChromeRanges(range, [{ from: protectedFrom, to: headingTo }])
+        )),
+        markdown.length
+    );
+}
+
+function clipChromeBeforeOffset(markdown, ranges, headingFrom) {
     if (headingFrom === null) return ranges;
     const limit = headingFrom > 0 ? headingFrom - 1 : headingFrom;
     return normalizeChromeRanges(

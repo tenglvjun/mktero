@@ -40,7 +40,10 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
   supports a conservative fallback when coordinates are unavailable.
 - Mistral and MinerU keep publisher mastheads, repeated page headers and
   footers, and page numbers in stored Markdown. The reader hides those
-  ranges. Highlights and notes skip them so PDF mapping stays on body
+  ranges, and also hides text before the `#` or `##` heading that matches
+  the Zotero item title. If that title heading appears twice, the reader
+  uses the second copy.
+  Highlights and notes skip hidden ranges so PDF mapping stays on body
   text. Mistral still joins safe column continuations when only
   whitespace sits between body blocks.
 - The Markdown outline omits keyword lists and short journal callout
