@@ -280,3 +280,49 @@ test('omits headings whose offset is inside chromeRanges', () => {
         ['Methods']
     );
 });
+
+test('omits a KEYWORDS heading that only introduces a term list', () => {
+    const markdown = [
+        '# Paper title',
+        '',
+        '# KEYWORDS',
+        '',
+        'anxiety, breathing exercise, coronary angiography, music therapy, pain',
+        '',
+        '# 1 | INTRODUCTION',
+        '',
+        'Coronary angiography is invasive.',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => heading.text),
+        ['Paper title', '1 | INTRODUCTION']
+    );
+});
+
+test('omits a short bullet box heading before the next section', () => {
+    const markdown = [
+        '# 1 | INTRODUCTION',
+        '',
+        'Music therapy utilizes rhythm, melody and harmony to',
+        '',
+        '# What is known about the topic',
+        '',
+        '- Previous research studied music therapy.',
+        '',
+        '# What this paper adds',
+        '',
+        '- This study compares music and breathing exercises.',
+        '',
+        'aid in the treatment of illnesses.',
+        '',
+        '## 2 | METHODS',
+        '',
+        'This trial was single-blind.',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => heading.text),
+        ['1 | INTRODUCTION', '2 | METHODS']
+    );
+});
