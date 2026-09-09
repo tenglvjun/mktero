@@ -272,11 +272,111 @@ test('keeps Markdown heading levels when they already vary', () => {
     );
 });
 
+test('promotes an unnumbered deeper heading after a long previous section', () => {
+    const body = 'This paragraph explains the introduction in enough detail. '.repeat(8);
+    const markdown = [
+        '# 引言',
+        '',
+        body,
+        '',
+        '## 方法',
+        '',
+        '本研究采用随机对照设计。',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => [heading.text, heading.level]),
+        [
+            ['引言', 1],
+            ['方法', 1],
+        ]
+    );
+});
+
 test('omits headings whose offset is inside chromeRanges', () => {
     const markdown = '# Nature\n\n# Methods';
     assert.deepEqual(
         extractMarkdownOutline(markdown, [{ from: 0, to: markdown.indexOf('\n\n') }])
             .map(heading => heading.text),
         ['Methods']
+    );
+});
+
+test('levels numbered Wiley headings across different Markdown heading marks', () => {
+    const markdown = [
+        '# Paper title',
+        '',
+        '# 1 | INTRODUCTION',
+        '',
+        'Coronary angiography is an invasive diagnostic procedure.',
+        '',
+        '## 2 | METHODS',
+        '',
+        'This trial was single-blind.',
+        '',
+        '### 2.1 | Design',
+        '',
+        'Patients were randomized.',
+        '',
+        '#### 2.4.1 | Breathing group',
+        '',
+        'Exercises started 30 min before angiography.',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => [heading.text, heading.level]),
+        [
+            ['Paper title', 1],
+            ['1 | INTRODUCTION', 1],
+            ['2 | METHODS', 1],
+            ['2.1 | Design', 2],
+            ['2.4.1 | Breathing group', 3],
+        ]
+    );
+});
+
+test('omits a KEYWORDS heading that only introduces a term list', () => {
+    const markdown = [
+        '# Paper title',
+        '',
+        '# KEYWORDS',
+        '',
+        'anxiety, breathing exercise, coronary angiography, music therapy, pain',
+        '',
+        '# 1 | INTRODUCTION',
+        '',
+        'Coronary angiography is invasive.',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => heading.text),
+        ['Paper title', '1 | INTRODUCTION']
+    );
+});
+
+test('omits a short bullet box heading before the next section', () => {
+    const markdown = [
+        '# 1 | INTRODUCTION',
+        '',
+        'Music therapy utilizes rhythm, melody and harmony to',
+        '',
+        '# What is known about the topic',
+        '',
+        '- Previous research studied music therapy.',
+        '',
+        '# What this paper adds',
+        '',
+        '- This study compares music and breathing exercises.',
+        '',
+        'aid in the treatment of illnesses.',
+        '',
+        '## 2 | METHODS',
+        '',
+        'This trial was single-blind.',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => heading.text),
+        ['1 | INTRODUCTION', '2 | METHODS']
     );
 });
