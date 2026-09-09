@@ -30,7 +30,8 @@ export function extractMarkdownOutline(markdown, chromeRanges = []) {
         },
     });
     return assignOutlineLevels(
-        omitNonSectionHeadings(source, headings)
+        omitNonSectionHeadings(source, headings),
+        source
     );
 }
 
@@ -127,20 +128,48 @@ const LETTER_HEADING_PATTERN = /^([A-Z](?:\.\d+)*)\.(?:\s|$)/;
 const LETTER_SUBHEADING_PATTERN = /^([A-Z]\.\d+(?:\.\d+)*)(?:\s|$)/;
 const ROMAN_HEADING_PATTERN = /^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.(?:\s|$)/i;
 
-function assignOutlineLevels(headings) {
+function assignOutlineLevels(headings, markdown) {
     if (headings.length < 2) return headings;
     const scheme = outlineNumberingScheme(headings.map(heading => heading.text));
     const numbered = headings.some(heading => (
         numberedHeadingDepth(heading.text, scheme) > 0
     ));
-    if (!numbered) return headings;
-    return headings.map(heading => {
-        const depth = numberedHeadingDepth(heading.text, scheme);
-        return {
-            ...heading,
-            level: depth || 1,
-        };
-    });
+    if (numbered) {
+        return headings.map(heading => {
+            const depth = numberedHeadingDepth(heading.text, scheme);
+            return {
+                ...heading,
+                level: depth || 1,
+            };
+        });
+    }
+    return promoteLongSectionSiblings(markdown, headings);
+}
+
+function promoteLongSectionSiblings(markdown, headings) {
+    const next = headings.map(heading => ({ ...heading }));
+    for (let index = 1; index < next.length; index++) {
+        const previous = next[index - 1];
+        const current = next[index];
+        if (current.level <= previous.level) continue;
+        if (!sectionBodyIsLong(markdown, previous.offset, current.offset)) {
+            continue;
+        }
+        current.level = previous.level;
+    }
+    return next;
+}
+
+function sectionBodyIsLong(markdown, previousOffset, currentOffset) {
+    const body = markdown.slice(
+        headingExclusiveEnd(markdown, previousOffset),
+        currentOffset
+    );
+    const paragraphs = body.split(/\n\s*\n/)
+        .map(part => part.trim())
+        .filter(Boolean);
+    if (paragraphs.length >= 2) return true;
+    return body.replace(/\s+/g, '').length > 400;
 }
 
 function outlineNumberingScheme(texts) {

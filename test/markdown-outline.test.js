@@ -272,6 +272,27 @@ test('keeps Markdown heading levels when they already vary', () => {
     );
 });
 
+test('promotes an unnumbered deeper heading after a long previous section', () => {
+    const body = 'This paragraph explains the introduction in enough detail. '.repeat(8);
+    const markdown = [
+        '# 引言',
+        '',
+        body,
+        '',
+        '## 方法',
+        '',
+        '本研究采用随机对照设计。',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => [heading.text, heading.level]),
+        [
+            ['引言', 1],
+            ['方法', 1],
+        ]
+    );
+});
+
 test('omits headings whose offset is inside chromeRanges', () => {
     const markdown = '# Nature\n\n# Methods';
     assert.deepEqual(
