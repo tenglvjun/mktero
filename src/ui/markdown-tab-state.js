@@ -14,6 +14,7 @@ const READY_RESULT_FIELDS = [
     'cacheHit',
     'cacheKey',
     'sourceMap',
+    'pdfOutline',
     'extractedPages',
     'totalPages',
     'annotationOverlay',

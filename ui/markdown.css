@@ -423,23 +423,88 @@ main {
     user-select: none;
 }
 
-.markdown-outline-title {
+.markdown-outline-header {
     position: sticky;
     z-index: 1;
     top: 0;
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border-subtle);
+    background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised));
+}
+
+.markdown-outline-title {
     display: flex;
-    min-height: 50px;
+    min-height: 40px;
     align-items: center;
     gap: 8px;
     margin: 0;
     padding: 0 16px;
-    border-bottom: 1px solid var(--border-subtle);
     color: var(--text);
-    background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised));
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
+}
+
+.markdown-outline-segments {
+    display: flex;
+    min-width: 0;
+    padding: 0 9px 8px;
+}
+
+.markdown-outline-segment {
+    display: inline-flex;
+    min-width: 0;
+    height: 26px;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    color: var(--muted);
+    background: var(--surface-raised);
+    cursor: pointer;
+    font: 12px/1 var(--ui-font);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.markdown-outline-segment + .markdown-outline-segment {
+    margin-left: -1px;
+}
+
+.markdown-outline-segment:first-child {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.markdown-outline-segment:last-child {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.markdown-outline-segment:hover {
+    position: relative;
+    z-index: 1;
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+}
+
+.markdown-outline-segment:focus-visible {
+    position: relative;
+    z-index: 2;
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
+}
+
+.markdown-outline-segment[aria-selected='true'] {
+    position: relative;
+    z-index: 1;
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+    font-weight: 600;
 }
 
 .markdown-panel-title-icon {
@@ -452,6 +517,8 @@ main {
 .markdown-outline-list {
     margin: 0;
     padding: 10px 9px 28px;
+    min-height: 0;
+    flex: 1 1 auto;
     overflow-x: hidden;
     overflow-y: auto;
     list-style: none;
@@ -485,6 +552,55 @@ main {
 .markdown-outline-link:hover {
     color: var(--text);
     background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.markdown-outline-link[data-asset-type] {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px;
+    white-space: normal;
+    text-overflow: unset;
+}
+
+.markdown-outline-thumb {
+    display: block;
+    width: 100%;
+    height: 88px;
+    overflow: hidden;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    pointer-events: none;
+}
+
+.markdown-outline-table-thumb table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    color: var(--reader-text);
+    font-size: 9px;
+    line-height: 1.25;
+}
+
+.markdown-outline-table-thumb th,
+.markdown-outline-table-thumb td {
+    padding: 2px 4px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.markdown-outline-table-thumb th {
+    background: color-mix(in srgb, var(--text) 6%, var(--surface-raised));
+    font-weight: 650;
+}
+
+.markdown-outline-caption {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
 }
 
 .markdown-outline-link[data-level="1"] {

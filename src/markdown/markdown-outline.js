@@ -4,6 +4,11 @@ import { normalizeChromeRanges } from './chrome-ranges.js';
 const OUTLINE_PARSER = markdownParser.configure(GFM);
 const HEADING_NODE = /^(?:ATXHeading|SetextHeading)([1-6])$/;
 
+const MAX_PDF_OUTLINE_ENTRIES = 500;
+const MIN_PDF_OUTLINE_MATCHES = 3;
+const SECTION_NUMBER_PREFIX_PATTERN =
+    /^(?:\d{1,2}(?:\.\d+)*\.?\s+|[ivxlcdm]{1,6}\.\s+|[a-z]\.\s+)/i;
+
 export function extractMarkdownOutline(markdown, chromeRanges = []) {
     const source = String(markdown || '');
     const hidden = normalizeChromeRanges(chromeRanges, source.length);
@@ -32,6 +37,71 @@ export function extractMarkdownOutline(markdown, chromeRanges = []) {
     return assignOutlineLevels(
         omitNonSectionHeadings(source, headings),
         source
+    );
+}
+
+export function extractAlignedMarkdownOutline(
+    markdown,
+    chromeRanges = [],
+    pdfOutline = []
+) {
+    const headings = extractMarkdownOutline(markdown, chromeRanges);
+    const bookmarks = flattenPdfOutline(pdfOutline);
+    if (!bookmarks.length) return headings;
+
+    const used = new Set();
+    const matched = [];
+    for (const bookmark of bookmarks) {
+        const key = outlineMatchKey(bookmark.title);
+        if (!key) continue;
+        const indexes = [];
+        for (const [index, heading] of headings.entries()) {
+            if (used.has(index)) continue;
+            if (outlineMatchKey(heading.text) === key) indexes.push(index);
+        }
+        if (indexes.length !== 1) continue;
+        const index = indexes[0];
+        used.add(index);
+        matched.push({
+            ...headings[index],
+            level: bookmark.level,
+        });
+    }
+
+    if (matched.length < MIN_PDF_OUTLINE_MATCHES
+        || matched.length * 2 < bookmarks.length) {
+        return headings;
+    }
+    return matched;
+}
+
+function flattenPdfOutline(nodes, level = 1, output = []) {
+    if (!Array.isArray(nodes) || output.length >= MAX_PDF_OUTLINE_ENTRIES) {
+        return output;
+    }
+    for (const node of nodes) {
+        if (output.length >= MAX_PDF_OUTLINE_ENTRIES) break;
+        const title = String(node?.title || '').trim();
+        if (title) {
+            output.push({
+                title,
+                level: clampOutlineLevel(level),
+            });
+        }
+        if (Array.isArray(node?.items) && node.items.length) {
+            flattenPdfOutline(
+                node.items,
+                title ? level + 1 : level,
+                output
+            );
+        }
+    }
+    return output;
+}
+
+function outlineMatchKey(text) {
+    return markdownHeadingKey(
+        String(text || '').trim().replace(SECTION_NUMBER_PREFIX_PATTERN, '')
     );
 }
 

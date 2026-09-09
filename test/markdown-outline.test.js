@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     createMarkdownFragmentIndex,
     createMarkdownReadingPositionAnchor,
+    extractAlignedMarkdownOutline,
     extractMarkdownOutline,
     resolveMarkdownReadingPosition,
 } from '../src/markdown/markdown-outline.js';
@@ -378,5 +379,91 @@ test('omits a short bullet box heading before the next section', () => {
     assert.deepEqual(
         extractMarkdownOutline(markdown).map(heading => heading.text),
         ['1 | INTRODUCTION', '2 | METHODS']
+    );
+});
+
+test('keeps the Markdown outline when the PDF has no bookmarks', () => {
+    const markdown = '# Overview\n\n## Methods\n\n### Results';
+    assert.deepEqual(
+        extractAlignedMarkdownOutline(markdown, [], []),
+        extractMarkdownOutline(markdown)
+    );
+});
+
+test('uses unique PDF bookmarks to order and indent the Markdown outline', () => {
+    const markdown = [
+        '# Discussion',
+        '',
+        '# Introduction',
+        '',
+        '# Methods',
+        '',
+        '# Results',
+    ].join('\n');
+    const pdfOutline = [
+        { title: '1. Introduction', items: [
+            { title: 'Methods', items: [] },
+        ] },
+        { title: 'Results', items: [] },
+    ];
+
+    assert.deepEqual(
+        extractAlignedMarkdownOutline(markdown, [], pdfOutline)
+            .map(heading => [heading.text, heading.level]),
+        [
+            ['Introduction', 1],
+            ['Methods', 2],
+            ['Results', 1],
+        ]
+    );
+});
+
+test('does not guess when a PDF bookmark matches more than one heading', () => {
+    const markdown = [
+        '# Methods',
+        '',
+        '# Methods',
+        '',
+        '# Results',
+        '',
+        '# Discussion',
+    ].join('\n');
+    const pdfOutline = [
+        { title: 'Methods', items: [] },
+        { title: 'Results', items: [] },
+        { title: 'Discussion', items: [] },
+    ];
+
+    assert.deepEqual(
+        extractAlignedMarkdownOutline(markdown, [], pdfOutline)
+            .map(heading => heading.text),
+        ['Methods', 'Methods', 'Results', 'Discussion']
+    );
+});
+
+test('falls back when too few PDF bookmarks uniquely match headings', () => {
+    const markdown = [
+        '# Introduction',
+        '',
+        '# Methods',
+        '',
+        '# Results',
+        '',
+        '# Extra',
+    ].join('\n');
+    const pdfOutline = [
+        { title: 'Introduction', items: [] },
+        { title: 'Methods', items: [] },
+        { title: 'Results', items: [] },
+        { title: 'Appendix A', items: [] },
+        { title: 'Appendix B', items: [] },
+        { title: 'Appendix C', items: [] },
+        { title: 'Appendix D', items: [] },
+        { title: 'Appendix E', items: [] },
+    ];
+
+    assert.deepEqual(
+        extractAlignedMarkdownOutline(markdown, [], pdfOutline),
+        extractMarkdownOutline(markdown)
     );
 });

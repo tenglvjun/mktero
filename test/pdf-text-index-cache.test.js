@@ -88,6 +88,25 @@ test('rejects an index that exceeds its serialized size budget', async t => {
     });
 });
 
+test('persists an optional PDF outline and still reads indexes without one', async t => {
+    const fixture = await createCacheFixture(t);
+    const withOutlineKey = 'f'.repeat(64);
+    const withoutOutlineKey = '1'.repeat(64);
+    const withOutline = {
+        ...createIndex('Selected text'),
+        outline: [{ title: 'Introduction', items: [] }],
+    };
+
+    await fixture.cache.put(withOutlineKey, withOutline);
+    await fixture.cache.put(withoutOutlineKey, createIndex('Other text'));
+
+    assert.deepEqual(await fixture.cache.get(withOutlineKey), withOutline);
+    assert.equal(
+        (await fixture.cache.get(withoutOutlineKey)).outline,
+        undefined
+    );
+});
+
 async function createCacheFixture(t, options = {}) {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-pdf-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));

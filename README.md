@@ -49,7 +49,11 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
 - The Markdown outline omits keyword lists and short journal callout
   boxes. Numbered headings indent by 1 / 2.1 depth even when OCR mixed
   `#` and `##`. Unnumbered headings stay nested unless a full previous
-  section was already written.
+  section was already written. When the PDF has unique bookmarks, the
+  outline uses that order and depth instead of OCR heading marks.
+  Switch the outline to Figures to jump through captioned figures and
+  tables in document order. Local figures and tables appear as
+  thumbnails.
 - Keep reliable page and region mappings so text, formulas, tables, and figures
   can jump back to their PDF source.
 - Preview citations, author affiliations, figures, and tables without losing

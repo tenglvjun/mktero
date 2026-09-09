@@ -1,6 +1,7 @@
 import {
     createDehyphenatedPdfAnnotationTextIndex,
 } from '../markdown/pdf-annotation-text.js';
+import { validatePdfOutline } from '../pdf/pdf-outline.js';
 
 const CACHE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'entry.json';
@@ -322,6 +323,7 @@ export function validatePDFTextIndex(index) {
         for (const item of page.items) validateTextItem(item, page.rawText);
         for (const style of Object.values(page.styles)) validateStyle(style);
     }
+    validatePdfOutline(index.outline);
     return index;
 }
 

@@ -44,9 +44,13 @@ import {
     createMarkdownFragmentID,
     createMarkdownFragmentIndex,
     createMarkdownReadingPositionAnchor,
-    extractMarkdownOutline,
+    extractAlignedMarkdownOutline,
     resolveMarkdownReadingPosition,
 } from '../markdown/markdown-outline.js';
+import {
+    extractMarkdownAssetOutline,
+} from '../markdown/markdown-asset-outline.js';
+import { appendRenderedMarkdown } from '../editor/rendered-markdown-dom.js';
 import {
     createTranslationReadingPositionAnchor,
     mapComparisonRangeToSource,
@@ -80,6 +84,8 @@ const DOCUMENT_ACTION_FEEDBACK = Object.freeze({
 });
 const WARNING_TOAST_TIMEOUT_MS = 5_000;
 const CORRECTION_UNDO_TIMEOUT_MS = 8_000;
+const OUTLINE_SEGMENT_HEADINGS = 'headings';
+const OUTLINE_SEGMENT_FIGURES = 'figures';
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
@@ -261,6 +267,11 @@ class MarkdownTabView {
         this.translationLanguageSignature = '';
         this.translationReaderFonts = new Map();
         this.activeNavigationOffset = 0;
+        this.outlineSegment = OUTLINE_SEGMENT_HEADINGS;
+        this.outlineMarkdown = '';
+        this.outlineSourceRanges = null;
+        this.outlineChromeRanges = [];
+        this.outlinePdfOutline = [];
         this.activeTranslationFailureID = null;
         this.listeners = [];
         this.sidePanels = Object.fromEntries(
@@ -632,7 +643,8 @@ class MarkdownTabView {
             this.syncOutline(
                 comparisonView ? model.markdown || '' : markdown,
                 comparisonView ? model.comparisonSourceRanges : null,
-                translatedView ? [] : sourceChromeRanges
+                translatedView ? [] : sourceChromeRanges,
+                translatedView && !comparisonView ? [] : model.pdfOutline
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
@@ -1134,15 +1146,40 @@ class MarkdownTabView {
             this.t('viewer.outlineTitle')
         );
         outlineTitle.appendChild(outlineTitleLabel);
+        const outlineHeadingsButton = this.createOutlineSegmentButton(
+            OUTLINE_SEGMENT_HEADINGS,
+            'viewer.outlineHeadings'
+        );
+        const outlineFiguresButton = this.createOutlineSegmentButton(
+            OUTLINE_SEGMENT_FIGURES,
+            'viewer.outlineFigures'
+        );
+        const outlineSegments = this.createElement('div', {
+            class: 'markdown-outline-segments',
+            role: 'tablist',
+            'aria-label': this.t('viewer.outlineSections'),
+        });
+        appendChildren(
+            outlineSegments,
+            outlineHeadingsButton,
+            outlineFiguresButton
+        );
+        const outlineHeader = this.createElement('div', {
+            class: 'markdown-outline-header',
+        });
+        appendChildren(outlineHeader, outlineTitle, outlineSegments);
         const outlineList = this.createElement('ol', {
+            id: 'mktero-outline-list',
             class: 'markdown-outline-list',
+            role: 'tabpanel',
+            'aria-labelledby': 'mktero-outline-segment-headings',
         });
         const outline = this.createElement('aside', {
             id: 'mktero-outline',
             class: 'markdown-outline',
             'aria-label': this.t('viewer.outline'),
         });
-        appendChildren(outline, outlineTitle, outlineList);
+        appendChildren(outline, outlineHeader, outlineList);
         outline.style.setProperty(
             '--outline-width',
             `${this.sidePanels.outline.width}px`
@@ -1218,6 +1255,8 @@ class MarkdownTabView {
             outline,
             outlineTitle,
             outlineTitleLabel,
+            outlineSegments,
+            outlineSegmentButtons: [outlineHeadingsButton, outlineFiguresButton],
             outlineList,
             outlineResizer: outlineControls.resizer,
             outlineToggle: outlineControls.toggle,
@@ -1816,6 +1855,20 @@ class MarkdownTabView {
         return { edge, resizer, toggle };
     }
 
+    createOutlineSegmentButton(segment, labelKey) {
+        return this.createElement('button', {
+            class: 'markdown-outline-segment',
+            type: 'button',
+            role: 'tab',
+            id: `mktero-outline-segment-${segment}`,
+            'data-outline-segment': segment,
+            'aria-selected': segment === OUTLINE_SEGMENT_HEADINGS
+                ? 'true'
+                : 'false',
+            'aria-controls': 'mktero-outline-list',
+        }, this.t(labelKey));
+    }
+
     createElement(tagName, attributes = {}, text = '') {
         const element = this.document.createElementNS(XHTML_NAMESPACE, tagName);
         for (const [name, value] of Object.entries(attributes)) {
@@ -2038,6 +2091,13 @@ class MarkdownTabView {
             if (!href) return;
             event.preventDefault();
             this.openLink(href);
+        });
+        this.listen(this.elements.outlineSegments, 'click', event => {
+            const button = event.target?.closest?.('.markdown-outline-segment');
+            if (!button || !this.elements.outlineSegments.contains(button)) {
+                return;
+            }
+            this.setOutlineSegment(button.getAttribute('data-outline-segment'));
         });
         this.listen(this.elements.outlineList, 'click', event => {
             const button = event.target?.closest?.('.markdown-outline-link');
@@ -3300,8 +3360,19 @@ class MarkdownTabView {
         this.elements.outlineTitleLabel.textContent = this.t(
             'viewer.outlineTitle'
         );
-        this.elements.outlineList.querySelector('.markdown-outline-empty')
-            ?.replaceChildren(this.t('viewer.outlineEmpty'));
+        this.elements.outlineSegments.setAttribute(
+            'aria-label',
+            this.t('viewer.outlineSections')
+        );
+        for (const button of this.elements.outlineSegmentButtons) {
+            const segment = button.getAttribute('data-outline-segment');
+            button.textContent = this.t(
+                segment === OUTLINE_SEGMENT_FIGURES
+                    ? 'viewer.outlineFigures'
+                    : 'viewer.outlineHeadings'
+            );
+        }
+        this.renderOutlineList();
         this.elements.notes.setAttribute('aria-label', this.t('viewer.notes'));
         this.elements.notesTitleLabel.textContent = this.t('viewer.notesTitle');
         this.elements.notesList.querySelector('.markdown-notes-empty')
@@ -4138,43 +4209,168 @@ class MarkdownTabView {
         });
     }
 
-    syncOutline(markdown, sourceRanges = null, chromeRanges = []) {
+    syncOutline(
+        markdown,
+        sourceRanges = null,
+        chromeRanges = [],
+        pdfOutline = []
+    ) {
+        this.outlineMarkdown = String(markdown || '');
+        this.outlineSourceRanges = sourceRanges;
+        this.outlineChromeRanges = Array.isArray(chromeRanges)
+            ? chromeRanges
+            : [];
+        this.outlinePdfOutline = Array.isArray(pdfOutline) ? pdfOutline : [];
+        this.renderOutlineList();
+    }
+
+    setOutlineSegment(segment) {
+        if (segment !== OUTLINE_SEGMENT_HEADINGS
+            && segment !== OUTLINE_SEGMENT_FIGURES) {
+            return;
+        }
+        if (this.outlineSegment === segment) return;
+        this.outlineSegment = segment;
+        this.syncOutlineSegmentButtons();
+        this.renderOutlineList();
+    }
+
+    syncOutlineSegmentButtons() {
+        const selectedID = `mktero-outline-segment-${this.outlineSegment}`;
+        for (const button of this.elements.outlineSegmentButtons) {
+            const selected = button.getAttribute('data-outline-segment')
+                === this.outlineSegment;
+            button.setAttribute('aria-selected', selected ? 'true' : 'false');
+        }
+        this.elements.outlineList.setAttribute('aria-labelledby', selectedID);
+    }
+
+    renderOutlineList() {
         const list = this.elements.outlineList;
         list.replaceChildren();
-        const headings = extractMarkdownOutline(markdown, chromeRanges);
-        if (!headings.length) {
+        const items = this.outlineSegment === OUTLINE_SEGMENT_FIGURES
+            ? this.outlineAssetItems()
+            : this.outlineHeadingItems();
+        if (!items.length) {
             list.appendChild(this.createElement(
                 'li',
                 { class: 'markdown-outline-empty' },
-                this.t('viewer.outlineEmpty')
+                this.outlineEmptyMessage()
             ));
             this.syncActiveNavigation(this.activeNavigationOffset);
             return;
         }
-        for (const heading of headings) {
-            const offset = mapSourceOffsetToComparison(
-                heading.offset,
-                sourceRanges
-            );
-            const button = this.createElement(
-                'button',
-                {
-                    class: 'markdown-outline-link',
-                    type: 'button',
-                    'data-level': String(heading.level),
-                    'data-offset': String(offset),
-                    style: `--outline-indent: ${(heading.level - 1) * 12}px;`,
-                    title: heading.text,
-                },
-                heading.text
-            );
-            const item = this.createElement('li', {
+        for (const item of items) {
+            const button = this.createOutlineItemButton(item);
+            const listItem = this.createElement('li', {
                 class: 'markdown-outline-item',
             });
-            item.appendChild(button);
-            list.appendChild(item);
+            listItem.appendChild(button);
+            list.appendChild(listItem);
         }
         this.syncActiveNavigation(this.activeNavigationOffset);
+    }
+
+    outlineEmptyMessage() {
+        return this.outlineSegment === OUTLINE_SEGMENT_FIGURES
+            ? this.t('viewer.outlineFiguresEmpty')
+            : this.t('viewer.outlineEmpty');
+    }
+
+    outlineHeadingItems() {
+        return extractAlignedMarkdownOutline(
+            this.outlineMarkdown,
+            this.outlineChromeRanges,
+            this.outlinePdfOutline
+        ).map(heading => ({
+            text: heading.text,
+            offset: mapSourceOffsetToComparison(
+                heading.offset,
+                this.outlineSourceRanges
+            ),
+            level: heading.level,
+        }));
+    }
+
+    outlineAssetItems() {
+        return extractMarkdownAssetOutline(
+            this.outlineMarkdown,
+            this.outlineChromeRanges
+        ).map(asset => ({
+            text: asset.text,
+            offset: mapSourceOffsetToComparison(
+                asset.offset,
+                this.outlineSourceRanges
+            ),
+            type: asset.type,
+            imageSource: asset.imageSource || '',
+            tablePreviewSource: asset.tablePreviewSource || '',
+        }));
+    }
+
+    createOutlineItemButton(item) {
+        const button = this.createElement(
+            'button',
+            this.outlineItemAttributes(item)
+        );
+        if (!item.type) {
+            button.textContent = item.text;
+            return button;
+        }
+        const tableThumb = this.createOutlineTableThumb(item);
+        if (tableThumb) button.appendChild(tableThumb);
+        const thumbURL = this.outlineThumbURL(item);
+        if (thumbURL) {
+            button.appendChild(this.createElement('img', {
+                class: 'markdown-outline-thumb',
+                src: thumbURL,
+                alt: '',
+                draggable: 'false',
+            }));
+        }
+        button.appendChild(this.createElement(
+            'span',
+            { class: 'markdown-outline-caption' },
+            item.text
+        ));
+        return button;
+    }
+
+    createOutlineTableThumb(item) {
+        if (item.type !== 'table' || !item.tablePreviewSource) return null;
+        const thumb = this.createElement('div', {
+            class: 'markdown-outline-thumb markdown-outline-table-thumb',
+        });
+        appendRenderedMarkdown(
+            thumb,
+            item.tablePreviewSource,
+            source => this.resolveImageURL(source),
+            false,
+            this.t
+        );
+        return thumb;
+    }
+
+    outlineThumbURL(item) {
+        if (item.type !== 'figure' || !item.imageSource) return null;
+        return this.resolveImageURL(item.imageSource);
+    }
+
+    outlineItemAttributes(item) {
+        const attributes = {
+            class: 'markdown-outline-link',
+            type: 'button',
+            'data-offset': String(item.offset),
+            title: item.text,
+        };
+        if (item.level) {
+            attributes['data-level'] = String(item.level);
+            attributes.style = `--outline-indent: ${(item.level - 1) * 12}px;`;
+        }
+        if (item.type) {
+            attributes['data-asset-type'] = item.type;
+        }
+        return attributes;
     }
 
     syncNotes(annotationOverlay, markdownLength) {

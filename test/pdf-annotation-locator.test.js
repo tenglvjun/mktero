@@ -42,9 +42,62 @@ test('extracts PDF text without loading a packaged fake-worker URL', async () =>
         const index = await engine.extract(fileData);
 
         assert.equal(index.pages[0].rawText, 'Ovulation limits (±2 days)');
+        assert.deepEqual(index.outline, []);
     }
     finally {
         await engine.dispose();
+    }
+});
+
+test('keeps PDF bookmarks when getOutline succeeds and ignores outline failures', async () => {
+    const fileData = new Uint8Array([1]);
+    const engine = createTestPDFEngine({
+        loadDocument() {
+            const loadingTask = createSyntheticPDFDocument([[
+                createTextItem('Selected text'),
+            ]]);
+            loadingTask.promise = loadingTask.promise.then(document => ({
+                ...document,
+                async getOutline() {
+                    return [{
+                        title: 'Introduction',
+                        dest: ['page', 1],
+                        items: [],
+                    }];
+                },
+            }));
+            return loadingTask;
+        },
+    });
+    const failingEngine = createTestPDFEngine({
+        loadDocument() {
+            const loadingTask = createSyntheticPDFDocument([[
+                createTextItem('Selected text'),
+            ]]);
+            loadingTask.promise = loadingTask.promise.then(document => ({
+                ...document,
+                async getOutline() {
+                    throw new Error('outline unavailable');
+                },
+            }));
+            return loadingTask;
+        },
+    });
+
+    try {
+        const indexed = await engine.extract(fileData);
+        const failed = await failingEngine.extract(fileData);
+        assert.deepEqual(indexed.outline, [{
+            title: 'Introduction',
+            items: [],
+        }]);
+        assert.equal(indexed.pages[0].rawText, 'Selected text');
+        assert.deepEqual(failed.outline, []);
+        assert.equal(failed.pages[0].rawText, 'Selected text');
+    }
+    finally {
+        await engine.dispose();
+        await failingEngine.dispose();
     }
 });
 
