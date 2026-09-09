@@ -29,7 +29,7 @@ export function extractMarkdownOutline(markdown, chromeRanges = []) {
             });
         },
     });
-    return inferFlatNumberedOutlineLevels(
+    return assignOutlineLevels(
         omitNonSectionHeadings(source, headings)
     );
 }
@@ -127,32 +127,20 @@ const LETTER_HEADING_PATTERN = /^([A-Z](?:\.\d+)*)\.(?:\s|$)/;
 const LETTER_SUBHEADING_PATTERN = /^([A-Z]\.\d+(?:\.\d+)*)(?:\s|$)/;
 const ROMAN_HEADING_PATTERN = /^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.(?:\s|$)/i;
 
-function inferFlatNumberedOutlineLevels(headings) {
+function assignOutlineLevels(headings) {
     if (headings.length < 2) return headings;
-    const groups = new Map();
-    for (const [index, heading] of headings.entries()) {
-        const indexes = groups.get(heading.level) || [];
-        indexes.push(index);
-        groups.set(heading.level, indexes);
-    }
-    const next = headings.map(heading => ({ ...heading }));
-    for (const indexes of groups.values()) {
-        if (indexes.length < 2) continue;
-        const scheme = outlineNumberingScheme(
-            indexes.map(index => headings[index].text)
-        );
-        const depths = indexes.map(index => (
-            numberedHeadingDepth(headings[index].text, scheme)
-        ));
-        if (new Set(depths.filter(Boolean)).size < 2) continue;
-        for (const [offset, index] of indexes.entries()) {
-            next[index] = {
-                ...next[index],
-                level: depths[offset] || 1,
-            };
-        }
-    }
-    return next;
+    const scheme = outlineNumberingScheme(headings.map(heading => heading.text));
+    const numbered = headings.some(heading => (
+        numberedHeadingDepth(heading.text, scheme) > 0
+    ));
+    if (!numbered) return headings;
+    return headings.map(heading => {
+        const depth = numberedHeadingDepth(heading.text, scheme);
+        return {
+            ...heading,
+            level: depth || 1,
+        };
+    });
 }
 
 function outlineNumberingScheme(texts) {

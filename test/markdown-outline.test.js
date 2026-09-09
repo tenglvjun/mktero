@@ -281,6 +281,39 @@ test('omits headings whose offset is inside chromeRanges', () => {
     );
 });
 
+test('levels numbered Wiley headings across different Markdown heading marks', () => {
+    const markdown = [
+        '# Paper title',
+        '',
+        '# 1 | INTRODUCTION',
+        '',
+        'Coronary angiography is an invasive diagnostic procedure.',
+        '',
+        '## 2 | METHODS',
+        '',
+        'This trial was single-blind.',
+        '',
+        '### 2.1 | Design',
+        '',
+        'Patients were randomized.',
+        '',
+        '#### 2.4.1 | Breathing group',
+        '',
+        'Exercises started 30 min before angiography.',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => [heading.text, heading.level]),
+        [
+            ['Paper title', 1],
+            ['1 | INTRODUCTION', 1],
+            ['2 | METHODS', 1],
+            ['2.1 | Design', 2],
+            ['2.4.1 | Breathing group', 3],
+        ]
+    );
+});
+
 test('omits a KEYWORDS heading that only introduces a term list', () => {
     const markdown = [
         '# Paper title',
