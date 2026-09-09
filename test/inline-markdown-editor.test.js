@@ -7866,7 +7866,7 @@ test('keeps the paper title styled after hiding leading publisher chrome', () =>
         markdown,
         chromeRanges: visibleDocumentChromeRanges(markdown, [
             { from: 0, to: titleFrom + 2 },
-        ]),
+        ], 'Systematic review and meta-analysis'),
     });
     const titleLine = [...document.querySelectorAll('.cm-line')].find(line => (
         line.textContent.includes('Systematic review')
@@ -7876,6 +7876,42 @@ test('keeps the paper title styled after hiding leading publisher chrome', () =>
         renderedLineTexts(document).some(text => (
             text.includes('Check for updates')
         )),
+        false
+    );
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps the paper title styled after hiding leading preamble chrome', () => {
+    const markdown = [
+        'MDPI',
+        'sensors',
+        '# Systematic review and meta-analysis',
+        '',
+        'Han Li',
+    ].join('\n');
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        chromeRanges: visibleDocumentChromeRanges(
+            markdown,
+            [],
+            'Systematic review and meta-analysis'
+        ),
+    });
+    const titleLine = [...document.querySelectorAll('.cm-line')].find(line => (
+        line.textContent.includes('Systematic review')
+    ));
+    assert.ok(titleLine?.className.includes('cm-mktero-heading-1'));
+    assert.equal(
+        renderedLineTexts(document).some(text => text.includes('MDPI')),
         false
     );
     editor.destroy();
