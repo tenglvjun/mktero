@@ -4798,6 +4798,207 @@ test('shows a live Markdown outline and scrolls to the selected heading', () => 
     view.destroy();
 });
 
+test('aligns the Markdown outline to unique PDF bookmarks', () => {
+    const markdown = [
+        '# Discussion',
+        '',
+        '# Introduction',
+        '',
+        '# Methods',
+        '',
+        '# Results',
+    ].join('\n');
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+        pdfOutline: [
+            { title: '1. Introduction', items: [
+                { title: 'Methods', items: [] },
+            ] },
+            { title: 'Results', items: [] },
+        ],
+    }));
+    const buttons = [...shadow.querySelectorAll('.markdown-outline-link')];
+
+    assert.deepEqual(buttons.map(button => button.textContent), [
+        'Introduction',
+        'Methods',
+        'Results',
+    ]);
+    assert.deepEqual(buttons.map(button => button.getAttribute('data-level')), [
+        '1',
+        '2',
+        '1',
+    ]);
+    view.destroy();
+});
+
+test('switches the outline between headings and captioned figures', () => {
+    const markdown = [
+        '# Methods',
+        '',
+        'See Figure 1.',
+        '',
+        '![Figure 1. PRISMA flowchart](images/flow.png)',
+        '',
+        '| Model | Accuracy |',
+        '| --- | ---: |',
+        '| LLaMA | 0.72 |',
+        '',
+        'Table 1. Open-source model performance',
+    ].join('\n');
+    const scrolledOffsets = [];
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => scrolledOffsets.push(offset);
+            return editor;
+        },
+    });
+    const outline = shadow.querySelector('#mktero-outline');
+    const headingsTab = shadow.querySelector(
+        '.markdown-outline-segment[data-outline-segment="headings"]'
+    );
+    const figuresTab = shadow.querySelector(
+        '.markdown-outline-segment[data-outline-segment="figures"]'
+    );
+
+    assert.equal(headingsTab.getAttribute('aria-selected'), 'true');
+    assert.equal(figuresTab.getAttribute('aria-selected'), 'false');
+    assert.deepEqual(
+        [...outline.querySelectorAll('.markdown-outline-link')]
+            .map(button => button.textContent),
+        ['Methods']
+    );
+
+    figuresTab.dispatchEvent(new document.defaultView.Event('click', {
+        bubbles: true,
+    }));
+    const figureButtons = [...outline.querySelectorAll('.markdown-outline-link')];
+    assert.equal(headingsTab.getAttribute('aria-selected'), 'false');
+    assert.equal(figuresTab.getAttribute('aria-selected'), 'true');
+    assert.deepEqual(
+        figureButtons.map(button => (
+            button.querySelector('.markdown-outline-caption')?.textContent
+            || button.textContent
+        )),
+        [
+            'Figure 1. PRISMA flowchart',
+            'Table 1. Open-source model performance',
+        ]
+    );
+
+    figureButtons[1].dispatchEvent(new document.defaultView.Event('click', {
+        bubbles: true,
+    }));
+    assert.deepEqual(scrolledOffsets, [markdown.indexOf('| Model |')]);
+
+    view.render(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: `${markdown}\n\n![Figure 2. Architecture](images/arch.png)`,
+        sourceKind: 'markdown',
+    }));
+    assert.equal(figuresTab.getAttribute('aria-selected'), 'true');
+    assert.deepEqual(
+        [...outline.querySelectorAll('.markdown-outline-link')]
+            .map(button => (
+                button.querySelector('.markdown-outline-caption')?.textContent
+                || button.textContent
+            )),
+        [
+            'Figure 1. PRISMA flowchart',
+            'Table 1. Open-source model performance',
+            'Figure 2. Architecture',
+        ]
+    );
+    view.destroy();
+});
+
+test('shows local thumbnails for outline figures and tables', () => {
+    const markdown = [
+        '![Figure 1. PRISMA flowchart](images/flow.png)',
+        '',
+        '| Model | Accuracy |',
+        '| --- | ---: |',
+        '| LLaMA | 0.72 |',
+        '',
+        'Table 1. Open-source model performance',
+    ].join('\n');
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        assets: [{
+            path: 'images/flow.png',
+            mimeType: 'image/png',
+            data: new Uint8Array([1, 2, 3]),
+        }],
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow(window) {
+            window.URL = {
+                createObjectURL() {
+                    return 'blob:mktero-outline-figure';
+                },
+                revokeObjectURL() {},
+            };
+            window.Blob = globalThis.Blob;
+        },
+    });
+    const figuresTab = shadow.querySelector(
+        '.markdown-outline-segment[data-outline-segment="figures"]'
+    );
+    figuresTab.dispatchEvent(new figuresTab.ownerDocument.defaultView.Event('click', {
+        bubbles: true,
+    }));
+    const buttons = [...shadow.querySelectorAll('.markdown-outline-link')];
+    const figureThumb = buttons[0].querySelector('.markdown-outline-thumb');
+    const figureCaption = buttons[0].querySelector('.markdown-outline-caption');
+    const tableThumb = buttons[1].querySelector('.markdown-outline-thumb');
+    const tableCaption = buttons[1].querySelector('.markdown-outline-caption');
+
+    assert.equal(figureThumb.getAttribute('src'), 'blob:mktero-outline-figure');
+    assert.equal(figureThumb.getAttribute('alt'), '');
+    assert.equal(figureCaption.textContent, 'Figure 1. PRISMA flowchart');
+    assert.equal(
+        tableThumb.classList.contains('markdown-outline-table-thumb'),
+        true
+    );
+    assert.equal(tableThumb.querySelector('table')?.textContent.includes('LLaMA'), true);
+    assert.equal(tableCaption.textContent, 'Table 1. Open-source model performance');
+    view.destroy();
+});
+
+test('shows an empty figures outline when Markdown has no captioned figures', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Methods\n\nParagraph only.',
+        sourceKind: 'markdown',
+    }));
+    const figuresTab = shadow.querySelector(
+        '.markdown-outline-segment[data-outline-segment="figures"]'
+    );
+    figuresTab.dispatchEvent(new document.defaultView.Event('click', {
+        bubbles: true,
+    }));
+
+    assert.equal(shadow.querySelectorAll('.markdown-outline-link').length, 0);
+    assert.equal(
+        shadow.querySelector('.markdown-outline-empty').textContent,
+        'No figures or tables'
+    );
+    view.destroy();
+});
+
 test('shows an empty outline state when Markdown has no headings', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -4928,6 +5129,18 @@ test('localizes the Markdown viewer chrome from the Zotero locale', () => {
         'Markdown 只读视图'
     );
     assert.equal(shadow.querySelector('.markdown-outline-title').textContent, '目录');
+    assert.equal(
+        shadow.querySelector(
+            '.markdown-outline-segment[data-outline-segment="headings"]'
+        ).textContent,
+        '标题'
+    );
+    assert.equal(
+        shadow.querySelector(
+            '.markdown-outline-segment[data-outline-segment="figures"]'
+        ).textContent,
+        '图表'
+    );
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
     assert.equal(shadow.querySelector('.markdown-notes-title').textContent, '笔记');
     assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, '暂无笔记');

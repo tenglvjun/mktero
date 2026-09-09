@@ -376,8 +376,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         conversion,
         getApiKey: () => getMinerUApiKey(Zotero),
         readFile: path => IOUtils.read(path),
-        preparePDFIndex: (itemID, options) => trackPDFIndexTask(
-            runtime.pdfIndexOperations,
+        preparePDFIndex: (itemID, options) => preparePDFIndexForItem(
             itemID,
             options,
             pdfAnnotationLocator
@@ -398,8 +397,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         conversion: mistralConversion,
         getApiKey: () => getMistralApiKey(Zotero),
         readFile: path => IOUtils.read(path),
-        preparePDFIndex: (itemID, options) => trackPDFIndexTask(
-            runtime.pdfIndexOperations,
+        preparePDFIndex: (itemID, options) => preparePDFIndexForItem(
             itemID,
             options,
             pdfAnnotationLocator
@@ -1948,6 +1946,28 @@ function abortAllConversions() {
 function trackPDFIndexTask(tracker, itemID, options, locator) {
     const task = locator.prepare(itemID, options);
     return tracker.track(itemID, options.signal, task);
+}
+
+function preparePDFIndexForItem(itemID, options, locator) {
+    const task = trackPDFIndexTask(
+        runtime.pdfIndexOperations,
+        itemID,
+        options,
+        locator
+    );
+    void Promise.resolve(task).then(index => {
+        applyPdfOutlineToOpenMarkdown(itemID, index?.outline);
+    }).catch(() => {});
+    return task;
+}
+
+function applyPdfOutlineToOpenMarkdown(itemID, outline) {
+    const presentation = runtime.presenter?.get(itemID)
+        || runtime.presenter?.getForSourceItem?.(itemID);
+    if (!presentation || presentation.closed) return;
+    runtime.presenter.update(presentation, {
+        pdfOutline: Array.isArray(outline) ? outline : [],
+    });
 }
 
 function registerMainWindowContextMenu(window) {

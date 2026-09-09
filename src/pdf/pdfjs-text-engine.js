@@ -10,6 +10,7 @@ import {
 import {
     createDehyphenatedPdfAnnotationTextIndex,
 } from '../markdown/pdf-annotation-text.js';
+import { normalizePdfOutline } from './pdf-outline.js';
 import {
     isLikelyNumericSuperscriptExponent,
     isNumericCitationContent,
@@ -125,9 +126,17 @@ export function createPDFJSTextEngine({
                     });
                     page.cleanup?.();
                 }
+                let outline = [];
+                try {
+                    outline = normalizePdfOutline(await document.getOutline?.());
+                }
+                catch {
+                    outline = [];
+                }
                 return {
                     profile: PDF_TEXT_INDEX_PROFILE,
                     pages,
+                    outline,
                 };
             }
             finally {
