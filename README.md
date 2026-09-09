@@ -43,6 +43,10 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
   ranges. Highlights and notes skip them so PDF mapping stays on body
   text. Mistral still joins safe column continuations when only
   whitespace sits between body blocks.
+- The Markdown outline omits keyword lists and short journal callout
+  boxes. Numbered headings indent by 1 / 2.1 depth even when OCR mixed
+  `#` and `##`. Unnumbered headings stay nested unless a full previous
+  section was already written.
 - Keep reliable page and region mappings so text, formulas, tables, and figures
   can jump back to their PDF source.
 - Preview citations, author affiliations, figures, and tables without losing
