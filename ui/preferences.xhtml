@@ -121,6 +121,22 @@
             </html:div>
 
             <html:label class="mktero-setting-row mktero-switch-row"
+                        for="mktero-reader-source-peek">
+                <html:span class="mktero-setting-copy">
+                    <html:strong data-i18n="preferences.reader.sourcePeekLabel"></html:strong>
+                    <html:small data-i18n="preferences.reader.sourcePeekHelp"></html:small>
+                </html:span>
+                <html:span class="mktero-switch-control">
+                    <html:input id="mktero-reader-source-peek"
+                                class="mktero-switch-input"
+                                type="checkbox"
+                                role="switch"
+                                preference="extensions.mktero.readerSourcePeek" />
+                    <html:span class="mktero-switch" aria-hidden="true"></html:span>
+                </html:span>
+            </html:label>
+
+            <html:label class="mktero-setting-row mktero-switch-row"
                         for="mktero-cache-enabled">
                 <html:span class="mktero-setting-copy">
                     <html:strong data-i18n="preferences.cache.reuseLabel"></html:strong>

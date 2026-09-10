@@ -564,10 +564,6 @@ async function openReaderAsMarkdown(reader, { forceRefresh = false } = {}) {
     });
 }
 
-async function openReaderCitationGraph(reader, { forceRefresh = false } = {}) {
-    return openCitationGraph(reader.itemID, { forceRefresh });
-}
-
 async function openCitationGraph(itemID, { forceRefresh = false } = {}) {
     if (!runtime.citationLibrary || !runtime.citationPresenter) {
         throw new Error(runtimeTranslate('graph.loadFailed'));
@@ -2106,9 +2102,6 @@ function registerReaderToolbarAction() {
         zotero: Zotero,
         pluginID: runtime.id,
         onOpen: openReaderAsMarkdown,
-        onOpenCitationGraph: runtime.citationPresenter
-            ? openReaderCitationGraph
-            : null,
         onPDFReaderAvailable: reader => (
             runtime.localAnnotations?.synchronizePending(
                 reader.itemID,

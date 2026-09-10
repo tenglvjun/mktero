@@ -60,6 +60,8 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         readerFontSize: options.readerFontSize,
         onReaderFontChange: options.onReaderFontChange,
         onReaderFontSizeChange: options.onReaderFontSizeChange,
+        readerSourcePeek: options.readerSourcePeek,
+        onReaderSourcePeekChange: options.onReaderSourcePeekChange,
         sourcePeekDelay: options.sourcePeekDelay,
     });
     view.render(model);
@@ -89,7 +91,39 @@ function createTestInlineEditor({ document, parent, initialMarkdown }) {
         focus: () => content.focus(),
         refreshRendering: () => {},
         destroy: () => editor.remove(),
+        searchHighlights: [],
+        scrolledOffsets: [],
+        setDocumentSearchHighlights(value) {
+            this.searchHighlights.push(value);
+        },
+        scrollToOffset(offset) {
+            this.scrolledOffsets.push(offset);
+        },
     };
+}
+
+function dispatchShortcut(target, {
+    key,
+    code = '',
+    metaKey = false,
+    ctrlKey = false,
+    shiftKey = false,
+} = {}) {
+    const ownerWindow = target.ownerDocument?.defaultView || target;
+    const event = new ownerWindow.Event('keydown', {
+        bubbles: true,
+        cancelable: true,
+    });
+    Object.defineProperties(event, {
+        key: { value: key },
+        code: { value: code },
+        metaKey: { value: metaKey },
+        ctrlKey: { value: ctrlKey },
+        shiftKey: { value: shiftKey },
+        isComposing: { value: false },
+    });
+    target.dispatchEvent(event);
+    return event;
 }
 
 function dispatchMouseEvent(target, type, clientX, clientY = 0, buttons) {
@@ -5411,6 +5445,243 @@ test('hides the PDF source peek when the document has no mapping', async () => {
         assert.deepEqual(rendered, []);
     }
     finally {
+        view.destroy();
+    }
+});
+
+test('toggles the PDF source peek from the reader toolbar', async () => {
+    const persisted = [];
+    const markdown = 'Mapped paragraph for source peek.';
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{
+                pageIndex: 0,
+                bbox: [100, 200, 800, 360],
+            }],
+        }],
+        onRenderSourcePeek: () => ({
+            dataURL: 'data:image/jpeg;base64,cGVlaw==',
+        }),
+    }), {}, {
+        sourcePeekDelay: 0,
+        onReaderSourcePeekChange: enabled => persisted.push(enabled),
+    });
+    const peek = shadow.querySelector('#mktero-source-peek');
+    const toggle = shadow.querySelector('#mktero-source-peek-toggle');
+
+    try {
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(peek.hidden, false);
+        assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+
+        toggle.click();
+        assert.equal(peek.hidden, true);
+        assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+        assert.deepEqual(persisted, [false]);
+
+        toggle.click();
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(peek.hidden, false);
+        assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+        assert.deepEqual(persisted, [false, true]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('opens document find from the keyboard and searches visible Markdown', () => {
+    let editor;
+    const markdown = 'See BERT in methods and BERT again.';
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            editor = createTestInlineEditor(options);
+            return editor;
+        },
+    });
+
+    try {
+        const panel = shadow.querySelector('#mktero-document-search-panel');
+        const input = shadow.querySelector('#mktero-document-search-input');
+        const count = shadow.querySelector('.markdown-document-search-count');
+        assert.equal(panel.hidden, true);
+
+        const shortcut = dispatchShortcut(view.host, { key: 'f', metaKey: true });
+        assert.equal(shortcut.defaultPrevented, true);
+        assert.equal(panel.hidden, false);
+
+        input.value = 'BERT';
+        input.dispatchEvent(new input.ownerDocument.defaultView.Event('input', {
+            bubbles: true,
+        }));
+
+        assert.equal(count.textContent, '1/2');
+        assert.deepEqual(editor.searchHighlights.at(-1), {
+            matches: [
+                { from: markdown.indexOf('BERT'), to: markdown.indexOf('BERT') + 4 },
+                { from: markdown.lastIndexOf('BERT'), to: markdown.lastIndexOf('BERT') + 4 },
+            ],
+            activeIndex: 0,
+        });
+        assert.equal(
+            editor.scrolledOffsets.at(-1),
+            markdown.indexOf('BERT')
+        );
+
+        shadow.querySelector('[aria-label="Next match"]').click();
+        assert.equal(count.textContent, '2/2');
+        assert.equal(editor.searchHighlights.at(-1).activeIndex, 1);
+        assert.equal(
+            editor.scrolledOffsets.at(-1),
+            markdown.lastIndexOf('BERT')
+        );
+
+        assert.equal(
+            shadow.querySelector('.markdown-reading-layout')?.contains(panel),
+            true
+        );
+        assert.equal(
+            shadow.querySelector('.markdown-reader-toolbar')?.contains(panel),
+            false
+        );
+
+        dispatchShortcut(view.host, { key: 'Escape' });
+        assert.equal(panel.hidden, true);
+        assert.deepEqual(editor.searchHighlights.at(-1), {
+            matches: [],
+            activeIndex: -1,
+        });
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('document find skips hidden chrome and searches the current translation view', () => {
+    let editor;
+    const markdown = 'SECRET BERT\n\n# Paper\n\nVisible BERT here.';
+    const translatedMarkdown = 'Visible BERT stays.';
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        title: 'Paper',
+        markdown,
+        translatedMarkdown,
+        translationStatus: 'ready',
+        translationView: 'original',
+        sourceKind: 'markdown',
+    });
+    const { view, shadow } = createView(model, {}, {
+        editorFactory(options) {
+            editor = createTestInlineEditor(options);
+            return editor;
+        },
+    });
+
+    try {
+        dispatchShortcut(view.host, { key: 'f', ctrlKey: true });
+        const input = shadow.querySelector('#mktero-document-search-input');
+        input.value = 'BERT';
+        input.dispatchEvent(new input.ownerDocument.defaultView.Event('input', {
+            bubbles: true,
+        }));
+
+        const visibleFrom = markdown.lastIndexOf('BERT');
+        assert.deepEqual(editor.searchHighlights.at(-1).matches, [
+            { from: visibleFrom, to: visibleFrom + 4 },
+        ]);
+
+        view.render({
+            ...model,
+            translationView: 'translated',
+        });
+        assert.deepEqual(editor.searchHighlights.at(-1).matches, [
+            { from: translatedMarkdown.indexOf('BERT'), to: translatedMarkdown.indexOf('BERT') + 4 },
+        ]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('opens document find from a window Cmd+F when the Mktero tab is visible', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Find BERT here.',
+        sourceKind: 'markdown',
+    }));
+    const ownerWindow = document.defaultView;
+    document.body.appendChild(view.root);
+    view.host.getClientRects = () => [{ width: 800, height: 600 }];
+    let stolen = false;
+    const steal = () => {
+        stolen = true;
+    };
+    ownerWindow.addEventListener('keydown', steal, true);
+
+    try {
+        const shortcut = dispatchShortcut(ownerWindow, {
+            key: 'f',
+            metaKey: true,
+            code: 'KeyF',
+        });
+        assert.equal(shortcut.defaultPrevented, true);
+        assert.equal(stolen, false);
+        assert.equal(
+            shadow.querySelector('#mktero-document-search-panel').hidden,
+            false
+        );
+    }
+    finally {
+        ownerWindow.removeEventListener('keydown', steal, true);
+        view.destroy();
+    }
+});
+
+test('does not steal window Cmd+F when the Mktero tab is not visible', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Find BERT here.',
+        sourceKind: 'markdown',
+    }));
+    const ownerWindow = document.defaultView;
+    view.host.getClientRects = () => [];
+    let stolen = false;
+    const steal = () => {
+        stolen = true;
+    };
+    ownerWindow.addEventListener('keydown', steal, true);
+
+    try {
+        const shortcut = dispatchShortcut(ownerWindow, {
+            key: 'f',
+            metaKey: true,
+            code: 'KeyF',
+        });
+        assert.equal(shortcut.defaultPrevented, false);
+        assert.equal(stolen, true);
+        assert.equal(
+            shadow.querySelector('#mktero-document-search-panel').hidden,
+            true
+        );
+    }
+    finally {
+        ownerWindow.removeEventListener('keydown', steal, true);
         view.destroy();
     }
 });

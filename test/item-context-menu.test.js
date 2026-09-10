@@ -69,11 +69,8 @@ test('adds a Markdown action for a parent item and opens its PDF attachment', as
     assert.ok(menuItem);
     assert.equal(menuItem.hidden, false);
     assert.equal(menuItem.getAttribute('label'), 'Read as Markdown with Mktero');
-    assert.equal(menuItem.getAttribute('class'), 'menuitem-iconic');
-    assert.equal(
-        menuItem.getAttribute('image'),
-        'resource://mktero/ui/icons/mktero.svg'
-    );
+    assert.equal(menuItem.getAttribute('class') || '', '');
+    assert.equal(menuItem.getAttribute('image') || '', '');
 
     menuItem.dispatchEvent(new harness.document.defaultView.Event('command'));
     await new Promise(resolve => setImmediate(resolve));

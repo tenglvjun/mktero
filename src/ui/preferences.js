@@ -44,8 +44,10 @@ import {
 import {
     getMarkdownReaderFont,
     getMarkdownReaderFontSize,
+    getMarkdownReaderSourcePeek,
     setMarkdownReaderFont,
     setMarkdownReaderFontSize,
+    setMarkdownReaderSourcePeek,
 } from '../config/reader-preferences.js';
 import {
     createLucideIcon,
@@ -120,6 +122,9 @@ export function createPreferencesController({
     );
     const readerFontInput = document.getElementById(
         'mktero-reader-font-family'
+    );
+    const readerSourcePeekInput = document.getElementById(
+        'mktero-reader-source-peek'
     );
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
@@ -248,6 +253,20 @@ export function createPreferencesController({
         if (!readerFontInput) return;
         readerFontInput.value = getMarkdownReaderFont(zotero);
         readerFontInput.addEventListener('change', updateReaderFont);
+    }
+
+    function updateReaderSourcePeek() {
+        if (!readerSourcePeekInput) return;
+        readerSourcePeekInput.checked = setMarkdownReaderSourcePeek(
+            zotero,
+            readerSourcePeekInput.checked
+        );
+    }
+
+    function initializeReaderSourcePeek() {
+        if (!readerSourcePeekInput) return;
+        readerSourcePeekInput.checked = getMarkdownReaderSourcePeek(zotero);
+        readerSourcePeekInput.addEventListener('change', updateReaderSourcePeek);
     }
 
     function getSelectedConversionProvider() {
@@ -527,6 +546,7 @@ export function createPreferencesController({
             initializePreferenceControlLimits();
             initializeReaderFont();
             initializeReaderFontSize();
+            initializeReaderSourcePeek();
             await refresh();
         },
         destroy() {
@@ -561,6 +581,10 @@ export function createPreferencesController({
                 updateReaderFontSize
             );
             readerFontInput?.removeEventListener('change', updateReaderFont);
+            readerSourcePeekInput?.removeEventListener(
+                'change',
+                updateReaderSourcePeek
+            );
             for (const tab of preferenceTabs()) {
                 tab.removeEventListener('click', handlePreferenceTabClick);
                 tab.removeEventListener('keydown', handlePreferenceTabKeydown);

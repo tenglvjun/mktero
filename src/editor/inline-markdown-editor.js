@@ -1,6 +1,5 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { searchKeymap } from '@codemirror/search';
 import { Compartment, EditorState, Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
@@ -41,6 +40,10 @@ import {
 } from './correction-interactions.js';
 import { createFigurePreviewPopup } from './figure-preview-popup.js';
 import { createTablePreviewPopup } from './table-preview-popup.js';
+import {
+    createDocumentSearchHighlightExtension,
+    setDocumentSearchHighlight,
+} from './document-search-highlight.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const SELECTION_TRANSLATION_CONTEXT_RADIUS = 800;
@@ -521,8 +524,8 @@ export function createInlineMarkdownEditor({
                 keymap.of([
                     ...defaultKeymap,
                     ...historyKeymap,
-                    ...searchKeymap,
                 ]),
+                createDocumentSearchHighlightExtension(),
                 EditorView.lineWrapping,
                 EditorView.updateListener.of(update => {
                     const correctingDocument = update.docChanged
@@ -944,6 +947,10 @@ export function createInlineMarkdownEditor({
             setTranslationFailures.of(translationFailures || []),
             setTranslationPairs.of(translationPairs || []),
             setTranslationPairHighlight.of(null),
+            setDocumentSearchHighlight.of({
+                matches: [],
+                activeIndex: -1,
+            }),
             setInlineEditingRange.of(null),
             editingMode.reconfigure([
                 EditorView.editable.of(false),
@@ -1025,6 +1032,17 @@ export function createInlineMarkdownEditor({
                 : 0;
             const requestedDocument = view.state.doc;
             requestEditorScroll(view, position, requestedDocument);
+        },
+        setDocumentSearchHighlights(value = {}) {
+            activateDOMGlobals(ownerWindow);
+            view.dispatch({
+                effects: setDocumentSearchHighlight.of({
+                    matches: Array.isArray(value.matches) ? value.matches : [],
+                    activeIndex: Number.isSafeInteger(value.activeIndex)
+                        ? value.activeIndex
+                        : -1,
+                }),
+            });
         },
         returnToCitation,
         highlightTranslationBlock(blockID) {
