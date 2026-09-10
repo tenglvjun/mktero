@@ -414,9 +414,9 @@ test('synchronizes reader typography across Zotero windows and cleans up', () =>
     preferenceObservers.get('extensions.mktero.readerWidth')('wide');
     assert.deepEqual(first.view.readerWidthCalls, ['wide']);
     assert.deepEqual(second.view.readerWidthCalls, ['wide']);
-    preferenceObservers.get('extensions.mktero.readerAlignment')('start');
-    assert.deepEqual(first.view.readerAlignmentCalls, ['start']);
-    assert.deepEqual(second.view.readerAlignmentCalls, ['start']);
+    preferenceObservers.get('extensions.mktero.readerAlignment')('justify');
+    assert.deepEqual(first.view.readerAlignmentCalls, ['justify']);
+    assert.deepEqual(second.view.readerAlignmentCalls, ['justify']);
 
     presenter.dispose();
     assert.deepEqual(firstWindow.closed, [first.tabID]);
