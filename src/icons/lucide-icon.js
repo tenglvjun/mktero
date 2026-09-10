@@ -14,7 +14,9 @@ import {
     GalleryThumbnails,
     Languages,
     LoaderCircle,
+    Maximize2,
     MessageSquarePlus,
+    Minimize2,
     MessageSquareText,
     MoreHorizontal,
     Network,
@@ -114,6 +116,14 @@ export const LUCIDE_ICONS = Object.freeze({
     loaderCircle: Object.freeze({
         name: 'loader-circle',
         nodes: LoaderCircle,
+    }),
+    maximize2: Object.freeze({
+        name: 'maximize-2',
+        nodes: Maximize2,
+    }),
+    minimize2: Object.freeze({
+        name: 'minimize-2',
+        nodes: Minimize2,
     }),
     languages: Object.freeze({
         name: 'languages',
