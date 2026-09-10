@@ -20,9 +20,12 @@ import {
     observeMarkdownReaderLineHeight,
     observeMarkdownReaderSourcePeek,
     observeMarkdownReaderWidth,
+    setMarkdownReaderAlignment,
     setMarkdownReaderFont,
     setMarkdownReaderFontSize,
+    setMarkdownReaderLineHeight,
     setMarkdownReaderSourcePeek,
+    setMarkdownReaderWidth,
 } from '../config/reader-preferences.js';
 import { createLocalization } from '../i18n/localization.js';
 import { createMarkdownTabView } from './markdown-window.js';
@@ -334,6 +337,13 @@ export class MarkdownTabPresenter {
             readerLineHeight: this.readerLineHeight,
             readerWidth: this.readerWidth,
             readerAlignment: this.readerAlignment,
+            onReaderLineHeightChange: value => (
+                this.updateReaderLineHeight(value)
+            ),
+            onReaderWidthChange: value => this.updateReaderWidth(value),
+            onReaderAlignmentChange: value => (
+                this.updateReaderAlignment(value)
+            ),
             readerSourcePeek: this.readerSourcePeek,
             onReaderSourcePeekChange: enabled => (
                 this.updateReaderSourcePeek(enabled)
@@ -484,6 +494,42 @@ export class MarkdownTabPresenter {
         for (const presentation of this.presentations.values()) {
             presentation.view.setReaderAlignment?.(normalized);
         }
+    }
+
+    updateReaderLineHeight(value) {
+        const normalized = normalizeMarkdownReaderLineHeight(value);
+        try {
+            setMarkdownReaderLineHeight(this.zotero, normalized);
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+        }
+        this.applyReaderLineHeight(normalized);
+        return normalized;
+    }
+
+    updateReaderWidth(value) {
+        const normalized = normalizeMarkdownReaderWidth(value);
+        try {
+            setMarkdownReaderWidth(this.zotero, normalized);
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+        }
+        this.applyReaderWidth(normalized);
+        return normalized;
+    }
+
+    updateReaderAlignment(value) {
+        const normalized = normalizeMarkdownReaderAlignment(value);
+        try {
+            setMarkdownReaderAlignment(this.zotero, normalized);
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+        }
+        this.applyReaderAlignment(normalized);
+        return normalized;
     }
 
     updateReaderSourcePeek(enabled) {

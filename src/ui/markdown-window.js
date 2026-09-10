@@ -26,14 +26,17 @@ import {
     getMarkdownReaderLineHeightCss,
     getMarkdownReaderWidthCss,
     MARKDOWN_READER_ALIGNMENT_DEFAULT,
+    MARKDOWN_READER_ALIGNMENT_OPTIONS,
     MARKDOWN_READER_FONT_DEFAULT,
     MARKDOWN_READER_FONT_OPTIONS,
     MARKDOWN_READER_FONT_SIZE_DEFAULT as DEFAULT_READER_FONT_SIZE,
     MARKDOWN_READER_FONT_SIZE_MAX as MAX_READER_FONT_SIZE,
     MARKDOWN_READER_FONT_SIZE_MIN as MIN_READER_FONT_SIZE,
     MARKDOWN_READER_LINE_HEIGHT_DEFAULT,
+    MARKDOWN_READER_LINE_HEIGHT_OPTIONS,
     MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
     MARKDOWN_READER_WIDTH_DEFAULT,
+    MARKDOWN_READER_WIDTH_OPTIONS,
     normalizeMarkdownReaderAlignment,
     normalizeMarkdownReaderFont,
     normalizeMarkdownReaderFontSize,
@@ -215,6 +218,9 @@ export function createMarkdownTabView({
     readerLineHeight = MARKDOWN_READER_LINE_HEIGHT_DEFAULT,
     readerWidth = MARKDOWN_READER_WIDTH_DEFAULT,
     readerAlignment = MARKDOWN_READER_ALIGNMENT_DEFAULT,
+    onReaderLineHeightChange = null,
+    onReaderWidthChange = null,
+    onReaderAlignmentChange = null,
     readerSourcePeek = MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
     onReaderSourcePeekChange = null,
     sourcePeekDelay = SOURCE_PEEK_DELAY_MS,
@@ -234,6 +240,9 @@ export function createMarkdownTabView({
         readerLineHeight,
         readerWidth,
         readerAlignment,
+        onReaderLineHeightChange,
+        onReaderWidthChange,
+        onReaderAlignmentChange,
         readerSourcePeek,
         onReaderSourcePeekChange,
         sourcePeekDelay,
@@ -256,6 +265,9 @@ class MarkdownTabView {
         readerLineHeight,
         readerWidth,
         readerAlignment,
+        onReaderLineHeightChange,
+        onReaderWidthChange,
+        onReaderAlignmentChange,
         readerSourcePeek,
         onReaderSourcePeekChange,
         sourcePeekDelay,
@@ -285,6 +297,9 @@ class MarkdownTabView {
         this.readerAlignment = normalizeMarkdownReaderAlignment(
             readerAlignment
         );
+        this.onReaderLineHeightChange = onReaderLineHeightChange;
+        this.onReaderWidthChange = onReaderWidthChange;
+        this.onReaderAlignmentChange = onReaderAlignmentChange;
         this.readerSourcePeek = normalizeMarkdownReaderSourcePeek(
             readerSourcePeek
         );
@@ -319,6 +334,7 @@ class MarkdownTabView {
         this.githubRepositories = [];
         this.readerFontOptionsOpen = false;
         this.readerFontOptionsContext = '';
+        this.typographyOpen = false;
         this.translationLanguagesOpen = false;
         this.translationLanguageSignature = '';
         this.translationReaderFonts = new Map();
@@ -1189,41 +1205,6 @@ class MarkdownTabView {
             class: 'markdown-reading-layout',
         });
         readingLayout.appendChild(primaryPane);
-        const citationGraphButton = this.createElement('button', {
-            id: 'mktero-citation-graph',
-            class: 'markdown-citation-graph-button',
-            type: 'button',
-            'aria-label': this.t('viewer.openCitationGraph'),
-            title: this.t('viewer.openCitationGraph'),
-        });
-        citationGraphButton.appendChild(createLucideIcon(
-            this.document,
-            LUCIDE_ICONS.network,
-            { className: 'markdown-citation-graph-icon', size: 19 }
-        ));
-        const githubReposButton = this.createElement('button', {
-            id: 'mktero-github-repos',
-            class: 'markdown-github-repos-button',
-            type: 'button',
-            'aria-label': this.t('viewer.openGitHubRepositories'),
-            title: this.t('viewer.openGitHubRepositories'),
-            'aria-haspopup': 'true',
-            'aria-expanded': 'false',
-            'aria-controls': 'mktero-github-repos-menu',
-        });
-        githubReposButton.appendChild(createLucideIcon(
-            this.document,
-            LUCIDE_ICONS.github,
-            { className: 'markdown-github-repos-icon', size: 19 }
-        ));
-        githubReposButton.hidden = true;
-        const githubReposMenu = this.createElement('div', {
-            id: 'mktero-github-repos-menu',
-            class: 'markdown-github-repos-menu',
-            role: 'menu',
-            'aria-label': this.t('viewer.githubRepositories'),
-        });
-        githubReposMenu.hidden = true;
         const sourcePeekImage = this.createElement('img', {
             class: 'markdown-source-peek-image',
             alt: '',
@@ -1289,6 +1270,7 @@ class MarkdownTabView {
         appendChildren(correctionUndo, correctionUndoMessage, correctionUndoButton);
         correctionUndo.hidden = true;
         documentActions.toolbar.appendChild(correctionBanner);
+        documentActions.toolbar.appendChild(focusExit);
         const editorSection = this.createElement('section', {
             class: 'markdown-editor',
             'aria-label': this.t('viewer.readOnly'),
@@ -1296,12 +1278,9 @@ class MarkdownTabView {
         appendChildren(
             editorSection,
             documentActions.toolbar,
+            documentActions.translationProgress,
             readingLayout,
-            citationGraphButton,
-            githubReposButton,
-            githubReposMenu,
             sourcePeek,
-            focusExit,
             correctionUndo,
             snapshotHost
         );
@@ -1448,9 +1427,11 @@ class MarkdownTabView {
             correctionUndoMessage,
             correctionUndoButton,
             editorActions: documentActions.toolbar,
-            citationGraphButton,
-            githubReposButton,
-            githubReposMenu,
+            citationGraphButton: documentActions.citationGraphButton,
+            citationGraphLabel: documentActions.citationGraphLabel,
+            githubRepos: documentActions.githubRepos,
+            githubReposButton: documentActions.githubReposButton,
+            githubReposMenu: documentActions.githubReposMenu,
             sourcePeek,
             sourcePeekImage,
             sourcePeekCaption,
@@ -1471,7 +1452,6 @@ class MarkdownTabView {
             translationIdleIcon: documentActions.translationIdleIcon,
             translationLoadingIcon: documentActions.translationLoadingIcon,
             translationControls: documentActions.translationControls,
-            translationSeparator: documentActions.translationSeparator,
             translationView: documentActions.translationView,
             translationViewButtons: documentActions.translationViewButtons,
             translationViewLabels: documentActions.translationViewLabels,
@@ -1497,16 +1477,29 @@ class MarkdownTabView {
             exportMarkdownLabel: documentActions.exportMarkdownLabel,
             readerControls: documentActions.readerControls,
             readerFontSize: documentActions.readerFontSize,
+            readerFontSizeLabel: documentActions.readerFontSizeLabel,
             readerFontDecrease: documentActions.readerFontDecrease,
             readerFontIncrease: documentActions.readerFontIncrease,
             readerFontValue: documentActions.readerFontValue,
             readerFontFamily: documentActions.readerFontFamily,
+            readerFontFamilyLabel: documentActions.readerFontFamilyLabel,
             readerFontTrigger: documentActions.readerFontTrigger,
             readerFontCurrent: documentActions.readerFontCurrent,
             readerFontOptions: documentActions.readerFontOptions,
             documentSearchToggle: documentActions.documentSearchToggle,
             sourcePeekToggle: documentActions.sourcePeekToggle,
             focusToggle: documentActions.focusToggle,
+            typography: documentActions.typography,
+            typographyToggle: documentActions.typographyToggle,
+            typographyPanel: documentActions.typographyPanel,
+            readerLineHeightLabel: documentActions.readerLineHeightLabel,
+            readerLineHeightGroup: documentActions.readerLineHeightGroup,
+            readerWidthLabel: documentActions.readerWidthLabel,
+            readerWidthGroup: documentActions.readerWidthGroup,
+            readerAlignmentLabel: documentActions.readerAlignmentLabel,
+            readerAlignmentGroup: documentActions.readerAlignmentGroup,
+            translationProgress: documentActions.translationProgress,
+            translationProgressBar: documentActions.translationProgressBar,
             documentSearchPanel: documentActions.documentSearchPanel,
             documentSearchInput: documentActions.documentSearchInput,
             documentSearchCount: documentActions.documentSearchCount,
@@ -1679,12 +1672,20 @@ class MarkdownTabView {
             readerFontValue,
             readerFontIncrease
         );
+        const readerFontSizeLabel = this.createElement('span', {
+            id: 'mktero-reader-font-size-label',
+            class: 'markdown-typography-label',
+        }, this.t('viewer.textSize'));
         const readerFontSize = this.createElement('div', {
             class: 'markdown-reader-font-size',
             role: 'group',
-            'aria-label': this.t('viewer.textSize'),
+            'aria-labelledby': 'mktero-reader-font-size-label',
         });
         readerFontSize.appendChild(readerFontControls);
+        const readerFontSizeRow = this.createElement('div', {
+            class: 'markdown-typography-row',
+        });
+        appendChildren(readerFontSizeRow, readerFontSizeLabel, readerFontSize);
         const readerFontCurrent = this.createElement('span', {
             class: 'markdown-reader-font-current',
         });
@@ -1724,12 +1725,85 @@ class MarkdownTabView {
             class: 'markdown-reader-font-picker',
         });
         appendChildren(readerFontPicker, readerFontTrigger, readerFontOptions);
+        const readerFontFamilyLabel = this.createElement('span', {
+            id: 'mktero-reader-font-family-label',
+            class: 'markdown-typography-label',
+        }, this.t('viewer.textFont'));
         const readerFontFamily = this.createElement('div', {
             class: 'markdown-reader-font-family',
             role: 'group',
-            'aria-label': this.t('viewer.textFont'),
+            'aria-labelledby': 'mktero-reader-font-family-label',
         });
         readerFontFamily.appendChild(readerFontPicker);
+        const readerFontFamilyRow = this.createElement('div', {
+            class: 'markdown-typography-row',
+        });
+        appendChildren(
+            readerFontFamilyRow,
+            readerFontFamilyLabel,
+            readerFontFamily
+        );
+        const readerFontRow = this.createElement('div', {
+            class: 'markdown-typography-font-row',
+        });
+        appendChildren(readerFontRow, readerFontSizeRow, readerFontFamilyRow);
+        const readerLineHeight = this.createTypographySegmentGroup({
+            id: 'mktero-reader-line-height',
+            labelKey: 'viewer.lineHeight',
+            attribute: 'data-reader-line-height',
+            options: MARKDOWN_READER_LINE_HEIGHT_OPTIONS,
+            selected: this.readerLineHeight,
+        });
+        const readerWidth = this.createTypographySegmentGroup({
+            id: 'mktero-reader-width',
+            labelKey: 'viewer.width',
+            attribute: 'data-reader-width',
+            options: MARKDOWN_READER_WIDTH_OPTIONS,
+            selected: this.readerWidth,
+        });
+        const readerAlignment = this.createTypographySegmentGroup({
+            id: 'mktero-reader-alignment',
+            labelKey: 'viewer.alignment',
+            attribute: 'data-reader-alignment',
+            options: MARKDOWN_READER_ALIGNMENT_OPTIONS,
+            selected: this.readerAlignment,
+        });
+        const typographyToggle = this.createElement('button', {
+            id: 'mktero-typography-toggle',
+            class: 'markdown-typography-toggle',
+            type: 'button',
+            'aria-haspopup': 'dialog',
+            'aria-expanded': 'false',
+            'aria-controls': 'mktero-typography-panel',
+            'aria-label': this.t('viewer.typography'),
+            title: this.t('viewer.typography'),
+        });
+        typographyToggle.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.type,
+            {
+                className: 'markdown-typography-toggle-icon',
+                size: 16,
+            }
+        ));
+        const typographyPanel = this.createElement('div', {
+            id: 'mktero-typography-panel',
+            class: 'markdown-typography-panel',
+            role: 'dialog',
+            'aria-label': this.t('viewer.typography'),
+        });
+        typographyPanel.hidden = true;
+        appendChildren(
+            typographyPanel,
+            readerFontRow,
+            readerLineHeight.row,
+            readerWidth.row,
+            readerAlignment.row
+        );
+        const typography = this.createElement('div', {
+            class: 'markdown-typography',
+        });
+        appendChildren(typography, typographyToggle, typographyPanel);
         const documentSearchControls = this.createDocumentSearchControls();
         const readerControls = this.createElement('div', {
             class: 'markdown-reader-controls',
@@ -1766,13 +1840,43 @@ class MarkdownTabView {
                 size: 16,
             }
         ));
+        const githubReposButton = this.createElement('button', {
+            id: 'mktero-github-repos',
+            class: 'markdown-github-repos-toggle',
+            type: 'button',
+            'aria-label': this.t('viewer.openGitHubRepositories'),
+            title: this.t('viewer.openGitHubRepositories'),
+            'aria-haspopup': 'false',
+            'aria-expanded': 'false',
+            'aria-controls': 'mktero-github-repos-menu',
+        });
+        githubReposButton.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.github,
+            {
+                className: 'markdown-github-repos-icon',
+                size: 16,
+            }
+        ));
+        githubReposButton.hidden = true;
+        const githubReposMenu = this.createElement('div', {
+            id: 'mktero-github-repos-menu',
+            class: 'markdown-github-repos-menu',
+            role: 'menu',
+            'aria-label': this.t('viewer.githubRepositories'),
+        });
+        githubReposMenu.hidden = true;
+        const githubRepos = this.createElement('div', {
+            class: 'markdown-github-repos',
+        });
+        appendChildren(githubRepos, githubReposButton, githubReposMenu);
         appendChildren(
             readerControls,
-            readerFontSize,
-            readerFontFamily,
+            typography,
             sourcePeekToggle,
             focusToggle,
-            documentSearchControls.documentSearchToggle
+            documentSearchControls.documentSearchToggle,
+            githubRepos
         );
         const correctionToggle = this.createElement('button', {
             id: 'mktero-correction-toggle',
@@ -1850,7 +1954,7 @@ class MarkdownTabView {
             {
                 className: 'markdown-reader-action-icon '
                     + 'markdown-translation-idle-icon',
-                size: 18,
+                size: 16,
             }
         );
         const translationLoadingIcon = createLucideIcon(
@@ -1988,18 +2092,12 @@ class MarkdownTabView {
             translationFailurePosition,
             nextTranslationFailure
         );
-        const translationSeparator = this.createElement('span', {
-            class: 'markdown-translation-separator',
-            role: 'separator',
-            'aria-orientation': 'vertical',
-        });
         appendChildren(
             translationControls,
             translationViewLabel,
             translationView,
             translationContext,
             translationFailureNavigation,
-            translationSeparator,
             translateDocument
         );
         const reparse = this.createElement('button', {
@@ -2065,6 +2163,28 @@ class MarkdownTabView {
             this.t('viewer.exportMarkdownShort')
         );
         exportMarkdown.appendChild(exportMarkdownLabel);
+        const citationGraphButton = this.createElement('button', {
+            id: 'mktero-citation-graph',
+            class: 'markdown-reader-action markdown-reader-action--child',
+            type: 'button',
+            'aria-label': this.t('viewer.openCitationGraph'),
+            title: this.t('viewer.openCitationGraph'),
+        });
+        citationGraphButton.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.network,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        const citationGraphLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-action-label' },
+            this.t('viewer.openCitationGraph')
+        );
+        citationGraphButton.appendChild(citationGraphLabel);
+        menu.appendChild(citationGraphButton);
         menu.appendChild(correctionToggle);
         menu.appendChild(restoreCorrections);
         menu.appendChild(retranslateDocument);
@@ -2082,6 +2202,16 @@ class MarkdownTabView {
             role: 'toolbar',
             'aria-label': this.t('viewer.toolbar'),
         });
+        const translationProgressBar = this.createElement('div', {
+            class: 'markdown-translation-progress-bar',
+        });
+        const translationProgress = this.createElement('div', {
+            class: 'markdown-translation-progress',
+            role: 'progressbar',
+            'aria-hidden': 'true',
+        });
+        translationProgress.hidden = true;
+        translationProgress.appendChild(translationProgressBar);
         appendChildren(
             editorActions,
             navigationBack,
@@ -2107,7 +2237,6 @@ class MarkdownTabView {
             translationLoadingIcon,
             translateDocumentLabel,
             translationControls,
-            translationSeparator,
             translationView,
             translationViewButtons,
             translationViewLabels,
@@ -2126,20 +2255,74 @@ class MarkdownTabView {
             saveSnapshotLabel,
             exportMarkdown,
             exportMarkdownLabel,
+            citationGraphButton,
+            citationGraphLabel,
+            githubRepos,
+            githubReposButton,
+            githubReposMenu,
             readerControls,
             readerFontSize,
+            readerFontSizeLabel,
             readerFontDecrease,
             readerFontIncrease,
             readerFontValue,
             readerFontFamily,
+            readerFontFamilyLabel,
             readerFontTrigger,
             readerFontCurrent,
             readerFontOptions,
+            typography,
+            typographyToggle,
+            typographyPanel,
+            readerLineHeightLabel: readerLineHeight.label,
+            readerLineHeightGroup: readerLineHeight.group,
+            readerWidthLabel: readerWidth.label,
+            readerWidthGroup: readerWidth.group,
+            readerAlignmentLabel: readerAlignment.label,
+            readerAlignmentGroup: readerAlignment.group,
             ...documentSearchControls,
             sourcePeekToggle,
             focusToggle,
+            translationProgress,
+            translationProgressBar,
             status,
         };
+    }
+
+    createTypographySegmentGroup({
+        id,
+        labelKey,
+        attribute,
+        options,
+        selected,
+    }) {
+        const label = this.createElement('span', {
+            id: `${id}-label`,
+            class: 'markdown-typography-label',
+        }, this.t(labelKey));
+        const group = this.createElement('div', {
+            id,
+            class: 'markdown-typography-segments',
+            role: 'radiogroup',
+            'aria-labelledby': `${id}-label`,
+        });
+        for (const option of options) {
+            const button = this.createElement('button', {
+                class: 'markdown-typography-segment',
+                type: 'button',
+                role: 'radio',
+                'aria-checked': String(option.value === selected),
+                tabindex: option.value === selected ? '0' : '-1',
+            }, this.t(option.labelKey));
+            button.setAttribute(attribute, option.value);
+            button.setAttribute('data-i18n', option.labelKey);
+            group.appendChild(button);
+        }
+        const row = this.createElement('div', {
+            class: 'markdown-typography-row',
+        });
+        appendChildren(row, label, group);
+        return { row, label, group };
     }
 
     createSidePanelEdge(name) {
@@ -2250,7 +2433,39 @@ class MarkdownTabView {
             if (this.elements.actionToggle.disabled) return;
             this.setReaderFontOptionsOpen(false);
             this.setTranslationLanguagesOpen(false);
+            this.setTypographyOpen(false);
             this.setDocumentActionsOpen(!this.documentActionsOpen);
+        });
+        this.listen(this.elements.typographyToggle, 'click', () => {
+            this.setDocumentActionsOpen(false);
+            this.setTranslationLanguagesOpen(false);
+            this.setGitHubReposOpen(false);
+            this.setTypographyOpen(!this.typographyOpen);
+        });
+        this.listen(this.elements.readerLineHeightGroup, 'click', event => {
+            const button = event.target?.closest?.('[data-reader-line-height]');
+            if (!button || !this.elements.readerLineHeightGroup.contains(button)) {
+                return;
+            }
+            this.changeReaderLineHeight(
+                button.getAttribute('data-reader-line-height')
+            );
+        });
+        this.listen(this.elements.readerWidthGroup, 'click', event => {
+            const button = event.target?.closest?.('[data-reader-width]');
+            if (!button || !this.elements.readerWidthGroup.contains(button)) {
+                return;
+            }
+            this.changeReaderWidth(button.getAttribute('data-reader-width'));
+        });
+        this.listen(this.elements.readerAlignmentGroup, 'click', event => {
+            const button = event.target?.closest?.('[data-reader-alignment]');
+            if (!button || !this.elements.readerAlignmentGroup.contains(button)) {
+                return;
+            }
+            this.changeReaderAlignment(
+                button.getAttribute('data-reader-alignment')
+            );
         });
         this.listen(this.elements.reparse, 'click', event => {
             void this.reparseDocument(event.currentTarget);
@@ -2352,7 +2567,7 @@ class MarkdownTabView {
                 .catch(error => this.zotero?.logError?.(error));
         });
         this.listen(this.elements.githubReposButton, 'click', () => {
-            this.setGitHubReposOpen(!this.githubReposOpen);
+            this.openGitHubRepositories();
         });
         this.listen(this.elements.githubReposMenu, 'click', event => {
             const item = event.target?.closest?.('.markdown-github-repos-item');
@@ -2372,6 +2587,7 @@ class MarkdownTabView {
         this.listen(this.elements.readerFontTrigger, 'click', () => {
             this.setDocumentActionsOpen(false);
             this.setTranslationLanguagesOpen(false);
+            this.setGitHubReposOpen(false);
             this.setReaderFontOptionsOpen(!this.readerFontOptionsOpen);
         });
         this.listen(this.elements.readerFontTrigger, 'keydown', event => {
@@ -2415,6 +2631,12 @@ class MarkdownTabView {
                 this.elements.githubReposButton.focus?.();
                 return;
             }
+            if (event.key === 'Escape' && this.typographyOpen) {
+                event.preventDefault();
+                this.setTypographyOpen(false);
+                this.elements.typographyToggle.focus?.();
+                return;
+            }
             if (event.key === 'Escape' && this.documentActionsOpen) {
                 event.preventDefault();
                 this.setDocumentActionsOpen(false);
@@ -2437,7 +2659,8 @@ class MarkdownTabView {
             if (!this.documentActionsOpen
                 && !this.readerFontOptionsOpen
                 && !this.translationLanguagesOpen
-                && !this.githubReposOpen) return;
+                && !this.githubReposOpen
+                && !this.typographyOpen) return;
             const path = event.composedPath?.() || [];
             if (!path.includes(this.elements.translationView)) {
                 this.setTranslationLanguagesOpen(false);
@@ -2445,11 +2668,13 @@ class MarkdownTabView {
             if (!path.includes(this.elements.readerFontFamily)) {
                 this.setReaderFontOptionsOpen(false);
             }
+            if (!path.includes(this.elements.typography)) {
+                this.setTypographyOpen(false);
+            }
             if (!path.includes(this.elements.editorActions)) {
                 this.setDocumentActionsOpen(false);
             }
-            if (!path.includes(this.elements.githubReposButton)
-                && !path.includes(this.elements.githubReposMenu)) {
+            if (!path.includes(this.elements.githubRepos)) {
                 this.setGitHubReposOpen(false);
             }
         };
@@ -3317,8 +3542,25 @@ class MarkdownTabView {
         return button;
     }
 
-    setReaderFontOptionsOpen(open) {
+    setTypographyOpen(open) {
         const visible = Boolean(open)
+            && !this.elements.readerFontSize.hidden;
+        this.typographyOpen = visible;
+        this.elements.typographyToggle.setAttribute(
+            'aria-expanded',
+            String(visible)
+        );
+        this.elements.typographyPanel.hidden = !visible;
+        this.elements.typography.classList.toggle('is-open', visible);
+        if (!visible) this.setReaderFontOptionsOpen(false);
+    }
+
+    setReaderFontOptionsOpen(open) {
+        if (open && !this.elements.readerFontFamily.hidden) {
+            this.setTypographyOpen(true);
+        }
+        const visible = Boolean(open)
+            && this.typographyOpen
             && !this.elements.readerFontFamily.hidden;
         this.readerFontOptionsOpen = visible;
         this.elements.readerFontTrigger.setAttribute(
@@ -3426,6 +3668,11 @@ class MarkdownTabView {
             '--reader-line-height',
             getMarkdownReaderLineHeightCss(this.readerLineHeight)
         );
+        this.syncTypographySegment(
+            this.elements?.readerLineHeightGroup,
+            'data-reader-line-height',
+            this.readerLineHeight
+        );
         if (changed) this.editor?.requestMeasure?.();
     }
 
@@ -3436,6 +3683,11 @@ class MarkdownTabView {
         this.host.style.setProperty(
             '--reader-width',
             getMarkdownReaderWidthCss(this.readerWidth)
+        );
+        this.syncTypographySegment(
+            this.elements?.readerWidthGroup,
+            'data-reader-width',
+            this.readerWidth
         );
         if (changed) this.editor?.requestMeasure?.();
     }
@@ -3448,7 +3700,65 @@ class MarkdownTabView {
             '--reader-text-align',
             getMarkdownReaderAlignmentCss(this.readerAlignment)
         );
+        this.syncTypographySegment(
+            this.elements?.readerAlignmentGroup,
+            'data-reader-alignment',
+            this.readerAlignment
+        );
         if (changed) this.editor?.requestMeasure?.();
+    }
+
+    syncTypographySegment(group, attribute, selected) {
+        if (!group) return;
+        for (const button of group.querySelectorAll(`[${attribute}]`)) {
+            const on = button.getAttribute(attribute) === selected;
+            button.setAttribute('aria-checked', String(on));
+            button.setAttribute('tabindex', on ? '0' : '-1');
+        }
+    }
+
+    syncTypographySegmentLabels(group, options) {
+        if (!group) return;
+        for (const option of options) {
+            const button = group.querySelector(`[data-i18n="${option.labelKey}"]`);
+            if (button) button.textContent = this.t(option.labelKey);
+        }
+    }
+
+    changeReaderLineHeight(value) {
+        const normalized = normalizeMarkdownReaderLineHeight(value);
+        if (normalized === this.readerLineHeight) return;
+        this.setReaderLineHeight(normalized);
+        try {
+            this.onReaderLineHeightChange?.(normalized);
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
+    }
+
+    changeReaderWidth(value) {
+        const normalized = normalizeMarkdownReaderWidth(value);
+        if (normalized === this.readerWidth) return;
+        this.setReaderWidth(normalized);
+        try {
+            this.onReaderWidthChange?.(normalized);
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
+    }
+
+    changeReaderAlignment(value) {
+        const normalized = normalizeMarkdownReaderAlignment(value);
+        if (normalized === this.readerAlignment) return;
+        this.setReaderAlignment(normalized);
+        try {
+            this.onReaderAlignmentChange?.(normalized);
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
     }
 
     setReaderSourcePeek(enabled) {
@@ -3491,13 +3801,14 @@ class MarkdownTabView {
             this.setReaderFontOptionsOpen(false);
             this.setTranslationLanguagesOpen(false);
             this.setGitHubReposOpen(false);
+            this.setTypographyOpen(false);
             this.focusModeRestore = {
                 outline: this.sidePanels.outline.visible,
                 notes: this.sidePanels.notes.visible,
             };
             this.setSidePanelVisibility('outline', false, { source: 'focus' });
             this.setSidePanelVisibility('notes', false, { source: 'focus' });
-            this.hideSourcePeek();
+            this.scheduleSourcePeek();
         }
         else {
             const restore = this.focusModeRestore || {};
@@ -3660,6 +3971,7 @@ class MarkdownTabView {
         return this.translationLanguagesOpen
             || this.readerFontOptionsOpen
             || this.githubReposOpen
+            || this.typographyOpen
             || this.documentActionsOpen;
     }
 
@@ -3827,6 +4139,37 @@ class MarkdownTabView {
             'title',
             this.t('viewer.sourcePeekToggle')
         );
+        this.elements.typographyToggle.setAttribute(
+            'aria-label',
+            this.t('viewer.typography')
+        );
+        this.elements.typographyToggle.setAttribute(
+            'title',
+            this.t('viewer.typography')
+        );
+        this.elements.typographyPanel.setAttribute(
+            'aria-label',
+            this.t('viewer.typography')
+        );
+        this.elements.readerLineHeightLabel.textContent = this.t(
+            'viewer.lineHeight'
+        );
+        this.elements.readerWidthLabel.textContent = this.t('viewer.width');
+        this.elements.readerAlignmentLabel.textContent = this.t(
+            'viewer.alignment'
+        );
+        this.syncTypographySegmentLabels(
+            this.elements.readerLineHeightGroup,
+            MARKDOWN_READER_LINE_HEIGHT_OPTIONS
+        );
+        this.syncTypographySegmentLabels(
+            this.elements.readerWidthGroup,
+            MARKDOWN_READER_WIDTH_OPTIONS
+        );
+        this.syncTypographySegmentLabels(
+            this.elements.readerAlignmentGroup,
+            MARKDOWN_READER_ALIGNMENT_OPTIONS
+        );
         this.syncFocusModeControls();
         this.elements.documentSearchPanel.setAttribute(
             'aria-label',
@@ -3891,6 +4234,9 @@ class MarkdownTabView {
         this.elements.citationGraphButton.setAttribute(
             'title',
             this.t('viewer.openCitationGraph')
+        );
+        this.elements.citationGraphLabel.textContent = this.t(
+            'viewer.openCitationGraph'
         );
         this.elements.githubReposButton.setAttribute(
             'aria-label',
@@ -4055,9 +4401,8 @@ class MarkdownTabView {
             'title',
             this.t('viewer.openSettings')
         );
-        this.elements.readerFontSize.setAttribute(
-            'aria-label',
-            this.t('viewer.textSize')
+        this.elements.readerFontSizeLabel.textContent = this.t(
+            'viewer.textSize'
         );
         this.elements.readerFontDecrease.setAttribute(
             'aria-label',
@@ -4075,9 +4420,8 @@ class MarkdownTabView {
             'title',
             this.t('viewer.textSizeIncrease')
         );
-        this.elements.readerFontFamily.setAttribute(
-            'aria-label',
-            this.t('viewer.textFont')
+        this.elements.readerFontFamilyLabel.textContent = this.t(
+            'viewer.textFont'
         );
         this.elements.readerFontOptions.setAttribute(
             'aria-label',
@@ -4147,7 +4491,8 @@ class MarkdownTabView {
             || exportAvailable
             || correctionAvailable
             || restoreAvailable
-            || translationAvailable;
+            || translationAvailable
+            || citationGraphAvailable;
         const readerControlsAvailable = model.status === 'ready'
             || loadingView.preserveContent;
         const toolbarAvailable = documentActionsAvailable
@@ -4159,6 +4504,7 @@ class MarkdownTabView {
             && this.elements.readerControls.contains(activeElement);
         if (!readerControlsAvailable) {
             this.setReaderFontOptionsOpen(false);
+            this.setTypographyOpen(false);
             if (readerControlHadFocus) {
                 if (toolbarAvailable && !this.documentActionBusy) {
                     this.elements.actionToggle.focus?.();
@@ -4174,6 +4520,9 @@ class MarkdownTabView {
         this.elements.exportMarkdown.hidden = !exportAvailable;
         this.elements.correctionToggle.hidden = !correctionAvailable;
         this.elements.translationControls.hidden = !translationAvailable;
+        if (!translationAvailable) {
+            this.elements.translationProgress.hidden = true;
+        }
         this.elements.restoreCorrections.hidden = !restoreAvailable;
         this.elements.actionToggle.hidden = !documentActionsAvailable;
         this.elements.citationGraphButton.hidden = !citationGraphAvailable;
@@ -4182,6 +4531,8 @@ class MarkdownTabView {
         this.syncGitHubRepositories(model, citationGraphAvailable);
         this.elements.readerFontSize.hidden = !readerControlsAvailable;
         this.elements.readerFontFamily.hidden = !readerControlsAvailable;
+        this.elements.typography.hidden = !readerControlsAvailable;
+        this.elements.typographyToggle.hidden = !readerControlsAvailable;
         this.syncNavigationBack();
         this.elements.reparse.disabled = !reparseAvailable
             || loadingView.visible
@@ -4205,10 +4556,6 @@ class MarkdownTabView {
         this.elements.translationViewLabel.hidden = !translationReady;
         this.elements.translationView.hidden = !translationReady;
         this.elements.translationFailureNavigation.hidden = !partial;
-        this.elements.translationSeparator.hidden = completeTranslationReady
-            || translationReady
-            && !partial
-            && !translating;
         this.elements.translateDocument.hidden = completeTranslationReady
             || translationReady
             && !partial
@@ -4545,6 +4892,27 @@ class MarkdownTabView {
         }
         this.elements.translationStatus.textContent = status;
         this.elements.translationStatus.hidden = !status;
+        const progress = Math.max(
+            0,
+            Math.min(100, Number(model.translationProgress) || 0)
+        );
+        this.elements.translationProgress.hidden = !translating;
+        this.elements.translationProgressBar.style.width = translating
+            ? `${progress}%`
+            : '0%';
+        if (translating) {
+            this.elements.translationProgress.setAttribute(
+                'aria-valuenow',
+                String(progress)
+            );
+            this.elements.translationProgress.setAttribute('aria-valuemin', '0');
+            this.elements.translationProgress.setAttribute('aria-valuemax', '100');
+            this.elements.translationProgress.removeAttribute('aria-hidden');
+        }
+        else {
+            this.elements.translationProgress.setAttribute('aria-hidden', 'true');
+            this.elements.translationProgress.removeAttribute('aria-valuenow');
+        }
         this.elements.previousTranslationFailure.disabled = !partial
             || !translationReady;
         this.elements.nextTranslationFailure.disabled = !partial
@@ -4654,7 +5022,10 @@ class MarkdownTabView {
         this.documentActionsOpen = Boolean(open);
         const available = !this.elements.actionToggle.hidden;
         this.syncDocumentActionMenuState(this.documentActionsOpen && available);
-        if (this.documentActionsOpen) this.setGitHubReposOpen(false);
+        if (this.documentActionsOpen) {
+            this.setTypographyOpen(false);
+            this.setGitHubReposOpen(false);
+        }
     }
 
     syncGitHubRepositories(model, citationGraphAvailable) {
@@ -4663,22 +5034,30 @@ class MarkdownTabView {
             : [];
         this.githubRepositories = repositories;
         const available = repositories.length > 0;
+        const multiple = repositories.length > 1;
         this.elements.githubReposButton.hidden = !available;
-        this.elements.githubReposButton.classList.toggle(
-            'markdown-github-repos-button--raised',
-            available && citationGraphAvailable
+        this.elements.githubReposButton.setAttribute(
+            'aria-haspopup',
+            multiple ? 'true' : 'false'
         );
-        this.elements.githubReposMenu.classList.toggle(
-            'markdown-github-repos-menu--raised',
-            available && citationGraphAvailable
-        );
-        if (!available) this.setGitHubReposOpen(false);
+        if (!available || !multiple) this.setGitHubReposOpen(false);
         if (this.githubReposOpen) this.renderGitHubReposMenu();
+    }
+
+    openGitHubRepositories() {
+        if (this.githubRepositories.length === 1) {
+            this.setGitHubReposOpen(false);
+            const href = safeMarkdownLinkURL(this.githubRepositories[0].href);
+            if (href) this.openLink(href);
+            return;
+        }
+        this.setDocumentActionsOpen(false);
+        this.setGitHubReposOpen(!this.githubReposOpen);
     }
 
     setGitHubReposOpen(open) {
         const available = !this.elements.githubReposButton.hidden
-            && this.githubRepositories.length > 0;
+            && this.githubRepositories.length > 1;
         this.githubReposOpen = Boolean(open) && available;
         this.elements.githubReposButton.setAttribute(
             'aria-expanded',
@@ -4686,10 +5065,9 @@ class MarkdownTabView {
         );
         this.elements.githubReposMenu.hidden = !this.githubReposOpen;
         if (this.githubReposOpen) {
-            this.documentActionsOpen = false;
-            this.syncDocumentActionMenuState(false);
             this.setReaderFontOptionsOpen(false);
             this.setTranslationLanguagesOpen(false);
+            this.setTypographyOpen(false);
             this.renderGitHubReposMenu();
         }
     }
@@ -4731,6 +5109,7 @@ class MarkdownTabView {
             'tabindex',
             menuTabIndex
         );
+        this.elements.citationGraphButton.setAttribute('tabindex', menuTabIndex);
         this.elements.editorActions.classList.toggle('is-open', visible);
     }
 
@@ -5179,8 +5558,7 @@ class MarkdownTabView {
 
     scheduleSourcePeek() {
         if (this.destroyed) return;
-        if (this.focusMode
-            || !this.readerSourcePeek
+        if (!this.readerSourcePeek
             || typeof this.model.onRenderSourcePeek !== 'function') {
             this.hideSourcePeek();
             return;

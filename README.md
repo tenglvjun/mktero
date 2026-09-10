@@ -145,9 +145,12 @@ asks for confirmation.
    tab. A valid cache entry skips the remote conversion.
 3. Use the outline, find, citations, figure/table previews, source links, and
    Zotero notes panel to navigate the document.
-4. Use the reader toolbar to adjust typography, enter focus mode, switch reading
-   mode, translate, correct recognition errors, save a snapshot, or export
-   Markdown. Escape leaves focus mode.
+4. Use the reader toolbar to open the typography popover for text size, font,
+   line height, column width, and alignment, enter focus mode, switch reading
+   mode, or translate. A GitHub icon appears in the toolbar when the paper
+   links to repositories. Document actions such as corrections, snapshot,
+   export, and citation graph are in the overflow menu. Escape leaves
+   focus mode; find and typography stay available.
 
 Mktero tabs are session-only and are not restored after Zotero restarts. Closing
 the tab or shutting down the extension cancels active conversion and

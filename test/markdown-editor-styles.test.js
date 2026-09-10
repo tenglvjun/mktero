@@ -137,13 +137,12 @@ test('keeps the reader toolbar above content without covering it', () => {
     const readerControls = ruleBody('.markdown-reader-controls');
     const translationControls = ruleBody('.markdown-translation-controls');
     const fontFamily = ruleBody('.markdown-reader-font-family');
-    const translationSeparator = ruleBody('.markdown-translation-separator');
     const editorHost = ruleBody('.markdown-editor-host');
 
     assert.match(toolbar, /--toolbar-control-gap:\s*10px/);
     assert.match(toolbar, /position:\s*relative/);
     assert.match(toolbar, /flex:\s*0 0 auto/);
-    assert.match(toolbar, /flex-wrap:\s*wrap/);
+    assert.match(toolbar, /flex-wrap:\s*nowrap/);
     assert.match(translatingToolbar, /flex-wrap:\s*nowrap/);
     assert.match(toolbar, /min-height:\s*44px/);
     assert.match(toolbar, /padding:\s*4px 12px/);
@@ -162,12 +161,7 @@ test('keeps the reader toolbar above content without covering it', () => {
     assert.doesNotMatch(translationControls, /border-inline-start/);
     assert.doesNotMatch(fontFamily, /padding-inline-start/);
     assert.doesNotMatch(fontFamily, /border-inline-start/);
-    assert.match(translationSeparator, /width:\s*1px/);
-    assert.match(translationSeparator, /height:\s*24px/);
-    assert.match(
-        translationSeparator,
-        /background:\s*var\(--border-subtle\)/
-    );
+    assert.doesNotMatch(MARKDOWN_STYLES, /\.markdown-translation-separator/);
     assert.match(editorHost, /flex:\s*1 1 auto/);
     assert.match(editorHost, /overflow:\s*hidden/);
 });
@@ -193,18 +187,10 @@ test('keeps block correction actions compact and above the editor', () => {
     assert.match(deleted, /min-height:\s*36px/);
 });
 
-test('keeps block correction actions clear of the citation graph button', () => {
-    const graphButton = ruleBody('.markdown-citation-graph-button');
+test('keeps block correction actions inside the reading pane', () => {
     const toolbar = ruleBody('.mktero-correction-editor-toolbar');
-    const graphInset = pixelDeclaration(graphButton, 'inset-inline-end');
-    const graphWidth = pixelDeclaration(graphButton, 'width');
-    const toolbarInset = pixelDeclaration(toolbar, 'inset-inline-end');
-
-    assert.ok(
-        toolbarInset >= graphInset + graphWidth + 8,
-        'Correction actions must leave 8px beside the citation graph button'
-    );
-    assert.match(toolbar, /max-width:\s*calc\(100% - 84px\)/);
+    assert.match(toolbar, /inset-inline-end:\s*16px/);
+    assert.match(toolbar, /max-width:\s*calc\(100% - 32px\)/);
 });
 
 test('keeps the deleted-correction undo prompt usable with long copy', () => {
@@ -223,10 +209,10 @@ test('styles the reader font picker as part of the top toolbar', () => {
     const option = ruleBody('.markdown-reader-font-option');
 
     assert.doesNotMatch(MARKDOWN_STYLES, /\.markdown-reader-font-label/);
-    assert.match(picker, /width:\s*148px/);
     assert.match(picker, /position:\s*relative/);
+    assert.match(picker, /width:\s*100%/);
     assert.match(trigger, /display:\s*flex/);
-    assert.match(trigger, /height:\s*30px/);
+    assert.match(trigger, /height:\s*32px/);
     assert.match(trigger, /border:\s*1px\s+solid\s+var\(--border\)/);
     assert.match(trigger, /cursor:\s*pointer/);
     assert.match(options, /display:\s*grid/);
@@ -508,12 +494,18 @@ test('keeps document translation status legible without crowding the toolbar', (
             '    .markdown-translation-loading-icon',
         ].join('\n')
     );
-    assert.match(action, /width:\s*auto/);
-    assert.match(action, /height:\s*32px/);
-    assert.match(action, /min-height:\s*32px/);
-    assert.match(action, /padding:\s*0 10px/);
-    assert.match(action, /gap:\s*7px/);
-    assert.match(controls, /flex:\s*1 1 auto/);
+    const translatingAction = ruleBody(
+        '.markdown-translation-action.is-translating'
+    );
+    assert.match(action, /width:\s*30px/);
+    assert.match(action, /height:\s*30px/);
+    assert.match(action, /padding:\s*0/);
+    assert.match(action, /background:\s*transparent/);
+    assert.match(translatingAction, /width:\s*auto/);
+    assert.match(translatingAction, /height:\s*32px/);
+    assert.match(translatingAction, /padding:\s*0 10px/);
+    assert.match(translatingAction, /gap:\s*7px/);
+    assert.match(controls, /flex:\s*0 1 auto/);
     assert.match(controls, /max-width:\s*100%/);
     assert.match(status, /font-variant-numeric:\s*tabular-nums/);
     assert.match(status, /text-overflow:\s*ellipsis/);
@@ -666,43 +658,19 @@ test('keeps paired bilingual blocks free of per-block action styles', () => {
     assert.doesNotMatch(MARKDOWN_STYLES, /cm-mktero-translation-retry/);
 });
 
-test('wraps translation controls at narrow reader widths', () => {
+test('keeps translation controls on one toolbar row at narrow widths', () => {
     const viewButton = ruleBody('.markdown-translation-view-button');
 
     assert.match(viewButton, /overflow:\s*hidden/);
     assert.match(viewButton, /text-overflow:\s*ellipsis/);
     assert.match(viewButton, /white-space:\s*nowrap/);
-    assert.match(
+    assert.doesNotMatch(
         MARKDOWN_STYLES,
-        /@container\s+markdown-reader\s*\(max-width:\s*620px\)[\s\S]*\.markdown-reader-toolbar\.is-translating\s*\{[^}]*flex-wrap:\s*wrap/
-    );
-    assert.match(
-        MARKDOWN_STYLES,
-        /@container\s+markdown-reader\s*\(max-width:\s*620px\)[\s\S]*\.markdown-translation-controls\s*\{[^}]*flex:\s*1 0 100%[^}]*flex-wrap:\s*wrap/
-    );
-    assert.match(
-        MARKDOWN_STYLES,
-        /@container\s+markdown-reader\s*\(max-width:\s*390px\)[\s\S]*\.markdown-translation-view\s*\{[^}]*width:\s*100%/
+        /@container\s+markdown-reader\s*\(max-width:\s*620px\)[\s\S]*\.markdown-translation-controls\s*\{[^}]*flex:\s*1 0 100%/
     );
     assert.match(
         MARKDOWN_STYLES,
         /@container\s+markdown-reader\s*\(max-width:\s*390px\)[\s\S]*\.markdown-translation-view-button\s*\{[^}]*min-width:\s*0/
-    );
-    assert.match(
-        MARKDOWN_STYLES,
-        /@container\s+markdown-reader\s*\(max-width:\s*390px\)[\s\S]*\.markdown-translation-controls\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto/
-    );
-    assert.match(
-        MARKDOWN_STYLES,
-        /@container\s+markdown-reader\s*\(max-width:\s*390px\)[\s\S]*\.markdown-translation-context\s*\{[^}]*grid-column:\s*1/
-    );
-    assert.match(
-        MARKDOWN_STYLES,
-        /@container\s+markdown-reader\s*\(max-width:\s*390px\)[\s\S]*\.markdown-translation-failure-navigation\s*\{[^}]*grid-column:\s*2/
-    );
-    assert.match(
-        MARKDOWN_STYLES,
-        /@container\s+markdown-reader\s*\(max-width:\s*390px\)[\s\S]*\.markdown-translation-action\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/
     );
 });
 
