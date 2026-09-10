@@ -93,7 +93,7 @@ MinerU、Mistral 和 AI 凭据会作为普通的未加密首选项存储在当�
 3. 使用目录、查找、引用、图表预览、来源链接和 Zotero 笔记面板浏览文档。
 4. 使用阅读器工具栏调整字体、切换阅读模式、翻译、校对识别错误、保存快照或导出 Markdown。
 
-Mktero 标签页是会话级的，Zotero 重启后不会恢复。关闭标签页或关闭扩展时，进行中的转换和翻译请求会被取消。
+Mktero 标签页是会话级的，Zotero 重启后不会恢复。关闭标签页或关闭扩展时，进行中的转换和翻译请求会被取消。再次打开同一 PDF 和同一转换配置时，会回到上次阅读的段落。清空本地缓存，或用另一家 OCR 服务转换同一 PDF，会从头开始。
 
 ## 阅读与标注工作流
 
@@ -161,7 +161,7 @@ PDF、OCR 结果、压缩包、图片路径、API 响应和首选项都会被视
 | --- | --- | --- |
 | 缓存未命中时的完整 PDF | 所选 MinerU 或 Mistral 服务 | Mktero 不同步 |
 | MinerU/Mistral API 凭据和 AI 凭据 | 当前 Zotero 配置文件，未加密 | 否 |
-| 缓存的 Markdown、图片、来源映射、PDF 索引、校对和译文 | 当前 Zotero 配置文件，未加密 | 否 |
+| 缓存的 Markdown、图片、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
 | 用户为只有标题的文献点击“导入文献”后发送的受限引用文本 | OpenAlex | Mktero 不同步 |
 | 用户点击导入后发送的规范化 DOI、arXiv ID、PMID 或 OpenAlex 工作 ID、已确认的元数据，以及可选的公开 PDF 请求 | 选定的元数据/PDF Provider | Mktero 不同步 |

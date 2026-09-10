@@ -141,6 +141,7 @@ test('passes through Markdown produced by MinerU', async () => {
                 cacheHit: true,
                 resumedTask: true,
                 cacheKey: 'a'.repeat(64),
+                sourceHash: 'b'.repeat(64),
                 sourceMap,
                 chromeRanges,
             }),
@@ -156,6 +157,7 @@ test('passes through Markdown produced by MinerU', async () => {
     assert.equal(result.cacheHit, true);
     assert.equal(result.resumedTask, true);
     assert.equal(result.cacheKey, 'a'.repeat(64));
+    assert.equal(result.sourceHash, 'b'.repeat(64));
     assert.equal(result.sourceMap, sourceMap);
     assert.equal(result.chromeRanges, chromeRanges);
 });

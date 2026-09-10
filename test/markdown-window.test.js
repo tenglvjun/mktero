@@ -63,6 +63,7 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         readerSourcePeek: options.readerSourcePeek,
         onReaderSourcePeekChange: options.onReaderSourcePeekChange,
         sourcePeekDelay: options.sourcePeekDelay,
+        readingPositionDelay: options.readingPositionDelay,
     });
     view.render(model);
     return { document, view, shadow: view.host.shadowRoot };
@@ -4370,6 +4371,119 @@ test('restores the current Markdown position after a reparse replaces the docume
         },
     });
     assert.deepEqual(scrolledOffsets, [replacementMarkdown.indexOf('New methods.')]);
+    view.destroy();
+});
+
+test('restores a persisted Markdown reading offset when the document first becomes ready', () => {
+    const markdown = [
+        '# Overview',
+        '',
+        'Hello.',
+        '',
+        '# Methods',
+        '',
+        'Method text.',
+    ].join('\n');
+    const restoreReadingOffset = markdown.indexOf('Method text.');
+    const scrolledOffsets = [];
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        cacheKey: 'b'.repeat(64),
+        sourceKind: 'markdown',
+        restoreReadingOffset,
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => scrolledOffsets.push(offset);
+            return editor;
+        },
+    });
+
+    assert.deepEqual(scrolledOffsets, [restoreReadingOffset]);
+    view.destroy();
+});
+
+test('starts from the beginning when the conversion key changes', () => {
+    const initialMarkdown = [
+        '# Overview',
+        '',
+        'Original overview.',
+        '',
+        '# Methods',
+        '',
+        'Original methods.',
+    ].join('\n');
+    const replacementMarkdown = [
+        '# Overview',
+        '',
+        'Added overview context.',
+        '',
+        '# Methods',
+        '',
+        'New methods.',
+    ].join('\n');
+    const scrolledOffsets = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: initialMarkdown,
+        cacheKey: 'b'.repeat(64),
+        sourceKind: 'markdown',
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => scrolledOffsets.push(offset);
+            return editor;
+        },
+    });
+
+    editorOptions.onViewportChange(initialMarkdown.indexOf('Original methods.'));
+    view.render({
+        ...model,
+        cacheKey: 'c'.repeat(64),
+        markdown: replacementMarkdown,
+    });
+
+    assert.equal(scrolledOffsets.at(-1), 0);
+    view.destroy();
+});
+
+test('reports the current source reading position after viewport changes', () => {
+    const markdown = [
+        '# Overview',
+        '',
+        'Hello.',
+        '',
+        '# Methods',
+        '',
+        'Method text.',
+    ].join('\n');
+    const positions = [];
+    let editorOptions;
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        cacheKey: 'b'.repeat(64),
+        sourceKind: 'markdown',
+        onReadingPositionChange: anchor => positions.push(anchor),
+    }), {}, {
+        readingPositionDelay: 0,
+        editorFactory(options) {
+            editorOptions = options;
+            return createTestInlineEditor(options);
+        },
+    });
+
+    editorOptions.onViewportChange(markdown.indexOf('Method text.'));
+
+    assert.equal(positions.at(-1)?.offset, markdown.indexOf('Method text.'));
+    assert.equal(positions.at(-1)?.headingKey, 'methods');
     view.destroy();
 });
 

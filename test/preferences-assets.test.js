@@ -139,6 +139,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(script, /createZoteroPDFTextIndexCache/);
     assert.match(script, /createZoteroTranslationCache/);
     assert.match(script, /createZoteroCitationGraphCache/);
+    assert.match(script, /createZoteroMarkdownReadingPositionStore/);
     assert.match(script, /AISDKGateway/);
     assert.match(script, /createCombinedLocalCache/);
     assert.doesNotMatch(script, /setMkteroLanguagePreference/);

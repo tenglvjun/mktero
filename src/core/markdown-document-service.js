@@ -77,6 +77,9 @@ export class MarkdownDocumentService {
         if (extracted.cacheKey) {
             result.cacheKey = extracted.cacheKey;
         }
+        if (isSourceHash(extracted.sourceHash)) {
+            result.sourceHash = extracted.sourceHash;
+        }
         if (Array.isArray(extracted.sourceMap)) {
             result.sourceMap = extracted.sourceMap;
         }
@@ -181,6 +184,10 @@ function copyIdentity(target, source) {
     const parserProfile = boundedIdentity(source?.parserProfile, 4_096);
     if (provider) target.provider = provider;
     if (parserProfile) target.parserProfile = parserProfile;
+}
+
+function isSourceHash(value) {
+    return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 }
 
 function boundedIdentity(value, maxLength) {

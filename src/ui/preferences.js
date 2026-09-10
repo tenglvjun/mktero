@@ -11,6 +11,9 @@ import {
     createZoteroCitationGraphCache,
 } from '../cache/citation-graph-cache.js';
 import {
+    createZoteroMarkdownReadingPositionStore,
+} from '../cache/markdown-reading-position-store.js';
+import {
     AI_API_BASE_PREF,
     AI_PROTOCOL_PREF,
     AI_PROVIDER_CUSTOM,
@@ -733,6 +736,11 @@ globalThis.MkteroPreferences = {
                 pathUtils: PathUtils,
             }),
             createZoteroCitationGraphCache({
+                zotero: Zotero,
+                ioUtils: IOUtils,
+                pathUtils: PathUtils,
+            }),
+            createZoteroMarkdownReadingPositionStore({
                 zotero: Zotero,
                 ioUtils: IOUtils,
                 pathUtils: PathUtils,

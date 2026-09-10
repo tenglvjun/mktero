@@ -149,7 +149,9 @@ asks for confirmation.
 
 Mktero tabs are session-only and are not restored after Zotero restarts. Closing
 the tab or shutting down the extension cancels active conversion and
-translation requests.
+translation requests. Reopening the same PDF and conversion profile restores the
+last reading paragraph. Clearing the local cache, or converting the same PDF
+with a different OCR provider, starts from the beginning.
 
 ## Reading and annotation workflows
 
@@ -335,7 +337,7 @@ and raw HTML is escaped or sanitized before rendering.
 | --- | --- | --- |
 | Complete PDF on a cache miss | Selected MinerU or Mistral provider | Not by Mktero |
 | MinerU/Mistral API credentials and AI credentials | Active Zotero profile, unencrypted | No |
-| Cached Markdown, figures, source maps, PDF indexes, corrections, and translations | Active Zotero profile, unencrypted | No |
+| Cached Markdown, figures, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
