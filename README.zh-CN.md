@@ -21,7 +21,7 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 > 配置 MinerU API Token 或 Mistral API Key。可选的 AI 翻译会把受保护的 Markdown 批次发送给你配置的 Provider。
 > 处理敏感文档前，请阅读[数据与隐私](#数据与隐私)。
 
-常用链接：[产品介绍页](https://tenglvjun.github.io/mktero/) ·
+常用链接：[产品介绍页](https://mktero.com/) ·
 [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest) ·
 [Discussions](https://github.com/tenglvjun/mktero/discussions) ·
 [Issues](https://github.com/tenglvjun/mktero/issues)
