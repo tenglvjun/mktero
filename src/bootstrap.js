@@ -107,6 +107,8 @@ import {
     PDFIndexOperationTracker,
 } from './pdf/pdf-index-operation-tracker.js';
 import { createPDFJSTextEngine } from './pdf/pdfjs-text-engine.js';
+import { createPDFPageCropRenderer } from './pdf/pdfjs-page-crop.js';
+import { createZoteroSourcePeekRenderer } from './platform/zotero-source-peek.js';
 import { sha256Hex } from './core/sha256.js';
 import {
     createZoteroPDFFileLoader,
@@ -180,6 +182,7 @@ const runtime = {
     revisionSessions: null,
     pdfTextIndexCache: null,
     pdfAnnotationLocator: null,
+    sourcePeekRenderer: null,
     savedMarkdownStore: null,
     savedMarkdownResolver: null,
     markdownExporter: null,
@@ -276,6 +279,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.pdfTextIndexCache = pdfTextIndexCache;
     const readerTextLocator = createZoteroPDFTextLocator(Zotero);
+    const loadPDFFile = createZoteroPDFFileLoader(
+        Zotero,
+        path => IOUtils.read(path)
+    );
     const pdfAnnotationLocator = new PDFAnnotationLocator({
         engine: createPDFJSTextEngine({
             workerSrc: `${rootURI}pdf.worker.mjs`,
@@ -286,15 +293,22 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache: pdfTextIndexCache,
         createAbortController: createZoteroAbortController,
         createSourceHash: fileData => sha256Hex(fileData),
-        loadFile: createZoteroPDFFileLoader(
-            Zotero,
-            path => IOUtils.read(path)
-        ),
+        loadFile: loadPDFFile,
         measureText: createZoteroTextMeasurer(Zotero),
         readerLocator: readerTextLocator,
         onError: error => Zotero.logError?.(error),
     });
     runtime.pdfAnnotationLocator = pdfAnnotationLocator;
+    runtime.sourcePeekRenderer = createZoteroSourcePeekRenderer({
+        zotero: Zotero,
+        cropRenderer: createPDFPageCropRenderer({
+            loadFile: loadPDFFile,
+            workerSrc: `${rootURI}pdf.worker.mjs`,
+            cMapUrl: `${rootURI}pdfjs/cmaps/`,
+            standardFontDataUrl: `${rootURI}pdfjs/standard_fonts/`,
+            wasmUrl: `${rootURI}pdfjs/wasm/`,
+        }),
+    });
     runtime.annotationActions = createZoteroAnnotationActions(Zotero, {
         locateText: (itemID, text, options) => (
             pdfAnnotationLocator.locate(itemID, text, options)
@@ -487,6 +501,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeAITargetLanguageObserver?.();
     runtime.localAnnotations?.dispose();
     runtime.pdfAnnotationLocator?.dispose();
+    void runtime.sourcePeekRenderer?.disposeAll();
     runtime.annotationOverlayRefresher?.dispose();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();
@@ -512,6 +527,7 @@ globalThis.shutdown = function shutdown() {
     runtime.revisionSessions = null;
     runtime.pdfTextIndexCache = null;
     runtime.pdfAnnotationLocator = null;
+    runtime.sourcePeekRenderer = null;
     runtime.savedMarkdownStore = null;
     runtime.savedMarkdownResolver = null;
     runtime.markdownExporter = null;
@@ -586,6 +602,7 @@ async function openItemAsMarkdown(itemID, {
         sourceItemID: itemID,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
             abortConversion(itemID);
+            void runtime.sourcePeekRenderer?.dispose(itemID);
             abortDocumentTranslations(itemID);
             runtime.citationPresenter?.closeForItem(itemID);
             void closeRevisionSession(itemID);
@@ -631,6 +648,10 @@ async function openItemAsMarkdown(itemID, {
             runAnnotationAction('openInPDF', itemID, annotationID)
         ),
         onOpenSourceInPDF: location => openSourceInPDF(itemID, location),
+        onRenderSourcePeek: (location, options) => (
+            runtime.sourcePeekRenderer?.render(itemID, location, options)
+        ),
+        onDisposeSourcePeek: () => runtime.sourcePeekRenderer?.dispose(itemID),
         onCopySourcedMarkdown: target => copySourcedMarkdown(itemID, target),
         onCopyCode: code => copyCode(code),
         onCreateMarkdownAnnotation: draft => (
@@ -848,6 +869,14 @@ function createSavedMarkdownActions(noteID, sourceItem) {
         onOpenSourceInPDF: withSource((itemID, location) => (
             openSourceInPDF(itemID, location)
         )),
+        onRenderSourcePeek: withSource((itemID, location, options) => (
+            runtime.sourcePeekRenderer?.render(itemID, location, options)
+        )),
+        onDisposeSourcePeek: () => {
+            const sourceItemID = currentSourceItemID();
+            if (!sourceItemID) return undefined;
+            return runtime.sourcePeekRenderer?.dispose(sourceItemID);
+        },
         onCopySourcedMarkdown: withSource((itemID, target) => (
             copySourcedMarkdown(itemID, target)
         )),
