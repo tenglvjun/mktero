@@ -45,12 +45,20 @@ import {
     normalizeConversionProvider,
 } from '../config/conversion-preferences.js';
 import {
+    getMarkdownReaderAlignment,
     getMarkdownReaderFont,
     getMarkdownReaderFontSize,
+    getMarkdownReaderLineHeight,
     getMarkdownReaderSourcePeek,
+    getMarkdownReaderWidth,
+    MARKDOWN_READER_FONT_SIZE_MAX,
+    MARKDOWN_READER_FONT_SIZE_MIN,
+    setMarkdownReaderAlignment,
     setMarkdownReaderFont,
     setMarkdownReaderFontSize,
+    setMarkdownReaderLineHeight,
     setMarkdownReaderSourcePeek,
+    setMarkdownReaderWidth,
 } from '../config/reader-preferences.js';
 import {
     createLucideIcon,
@@ -125,6 +133,15 @@ export function createPreferencesController({
     );
     const readerFontInput = document.getElementById(
         'mktero-reader-font-family'
+    );
+    const readerLineHeightInput = document.getElementById(
+        'mktero-reader-line-height'
+    );
+    const readerWidthInput = document.getElementById(
+        'mktero-reader-width'
+    );
+    const readerAlignmentInput = document.getElementById(
+        'mktero-reader-alignment'
     );
     const readerSourcePeekInput = document.getElementById(
         'mktero-reader-source-peek'
@@ -238,10 +255,54 @@ export function createPreferencesController({
 
     function initializeReaderFontSize() {
         if (!readerFontSizeInput || !readerFontSizeValue) return;
+        readerFontSizeInput.min = String(MARKDOWN_READER_FONT_SIZE_MIN);
+        readerFontSizeInput.max = String(MARKDOWN_READER_FONT_SIZE_MAX);
         const size = getMarkdownReaderFontSize(zotero);
         readerFontSizeInput.value = String(size);
         readerFontSizeValue.textContent = t('viewer.textSizeValue', { size });
         readerFontSizeInput.addEventListener('input', updateReaderFontSize);
+    }
+
+    function updateReaderLineHeight() {
+        if (!readerLineHeightInput) return;
+        readerLineHeightInput.value = setMarkdownReaderLineHeight(
+            zotero,
+            readerLineHeightInput.value
+        );
+    }
+
+    function initializeReaderLineHeight() {
+        if (!readerLineHeightInput) return;
+        readerLineHeightInput.value = getMarkdownReaderLineHeight(zotero);
+        readerLineHeightInput.addEventListener('change', updateReaderLineHeight);
+    }
+
+    function updateReaderWidth() {
+        if (!readerWidthInput) return;
+        readerWidthInput.value = setMarkdownReaderWidth(
+            zotero,
+            readerWidthInput.value
+        );
+    }
+
+    function initializeReaderWidth() {
+        if (!readerWidthInput) return;
+        readerWidthInput.value = getMarkdownReaderWidth(zotero);
+        readerWidthInput.addEventListener('change', updateReaderWidth);
+    }
+
+    function updateReaderAlignment() {
+        if (!readerAlignmentInput) return;
+        readerAlignmentInput.value = setMarkdownReaderAlignment(
+            zotero,
+            readerAlignmentInput.value
+        );
+    }
+
+    function initializeReaderAlignment() {
+        if (!readerAlignmentInput) return;
+        readerAlignmentInput.value = getMarkdownReaderAlignment(zotero);
+        readerAlignmentInput.addEventListener('change', updateReaderAlignment);
     }
 
     function updateReaderFont() {
@@ -549,6 +610,9 @@ export function createPreferencesController({
             initializePreferenceControlLimits();
             initializeReaderFont();
             initializeReaderFontSize();
+            initializeReaderLineHeight();
+            initializeReaderWidth();
+            initializeReaderAlignment();
             initializeReaderSourcePeek();
             await refresh();
         },
@@ -584,6 +648,15 @@ export function createPreferencesController({
                 updateReaderFontSize
             );
             readerFontInput?.removeEventListener('change', updateReaderFont);
+            readerLineHeightInput?.removeEventListener(
+                'change',
+                updateReaderLineHeight
+            );
+            readerWidthInput?.removeEventListener('change', updateReaderWidth);
+            readerAlignmentInput?.removeEventListener(
+                'change',
+                updateReaderAlignment
+            );
             readerSourcePeekInput?.removeEventListener(
                 'change',
                 updateReaderSourcePeek

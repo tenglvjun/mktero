@@ -77,6 +77,9 @@ function createViewHarness() {
                 destroyCalls: 0,
                 readerFontCalls: [],
                 readerFontSizeCalls: [],
+                readerLineHeightCalls: [],
+                readerWidthCalls: [],
+                readerAlignmentCalls: [],
                 readerSourcePeekCalls: [],
                 render(model) {
                     renderCalls.push({ ...model });
@@ -86,6 +89,15 @@ function createViewHarness() {
                 },
                 setReaderFont(font) {
                     this.readerFontCalls.push(font);
+                },
+                setReaderLineHeight(value) {
+                    this.readerLineHeightCalls.push(value);
+                },
+                setReaderWidth(value) {
+                    this.readerWidthCalls.push(value);
+                },
+                setReaderAlignment(value) {
+                    this.readerAlignmentCalls.push(value);
                 },
                 setReaderSourcePeek(enabled) {
                     this.readerSourcePeekCalls.push(enabled);
@@ -289,6 +301,9 @@ test('persists reader font size changes across Markdown tabs and sessions', () =
     assert.deepEqual(unregisteredObservers, [
         'extensions.mktero.readerFont-observer',
         'extensions.mktero.readerFontSize-observer',
+        'extensions.mktero.readerLineHeight-observer',
+        'extensions.mktero.readerWidth-observer',
+        'extensions.mktero.readerAlignment-observer',
         'extensions.mktero.readerSourcePeek-observer',
     ]);
     const nextHarness = createViewHarness();
@@ -352,6 +367,9 @@ test('persists reader font changes across Markdown tabs and sessions', () => {
     assert.deepEqual(unregisteredObservers, [
         'extensions.mktero.readerFont-observer',
         'extensions.mktero.readerFontSize-observer',
+        'extensions.mktero.readerLineHeight-observer',
+        'extensions.mktero.readerWidth-observer',
+        'extensions.mktero.readerAlignment-observer',
         'extensions.mktero.readerSourcePeek-observer',
     ]);
 });
@@ -390,6 +408,15 @@ test('synchronizes reader typography across Zotero windows and cleans up', () =>
     preferenceObservers.get('extensions.mktero.readerSourcePeek')(false);
     assert.deepEqual(first.view.readerSourcePeekCalls, [false]);
     assert.deepEqual(second.view.readerSourcePeekCalls, [false]);
+    preferenceObservers.get('extensions.mktero.readerLineHeight')('loose');
+    assert.deepEqual(first.view.readerLineHeightCalls, ['loose']);
+    assert.deepEqual(second.view.readerLineHeightCalls, ['loose']);
+    preferenceObservers.get('extensions.mktero.readerWidth')('wide');
+    assert.deepEqual(first.view.readerWidthCalls, ['wide']);
+    assert.deepEqual(second.view.readerWidthCalls, ['wide']);
+    preferenceObservers.get('extensions.mktero.readerAlignment')('start');
+    assert.deepEqual(first.view.readerAlignmentCalls, ['start']);
+    assert.deepEqual(second.view.readerAlignmentCalls, ['start']);
 
     presenter.dispose();
     assert.deepEqual(firstWindow.closed, [first.tabID]);
@@ -397,6 +424,9 @@ test('synchronizes reader typography across Zotero windows and cleans up', () =>
     assert.deepEqual(unregisteredObservers, [
         'multi-window-extensions.mktero.readerFont-observer',
         'multi-window-extensions.mktero.readerFontSize-observer',
+        'multi-window-extensions.mktero.readerLineHeight-observer',
+        'multi-window-extensions.mktero.readerWidth-observer',
+        'multi-window-extensions.mktero.readerAlignment-observer',
         'multi-window-extensions.mktero.readerSourcePeek-observer',
     ]);
 });

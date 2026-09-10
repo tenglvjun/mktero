@@ -37,6 +37,7 @@ test('uses balanced typography for long-form Markdown', () => {
     assert.match(host, /--reader-width:\s*60rem/);
     assert.match(host, /--reader-font-size:\s*18px/);
     assert.match(host, /--reader-line-height:\s*1\.78/);
+    assert.match(host, /--reader-text-align:\s*start/);
     assert.match(host, /--reader-text:\s*#2c3238/);
     assert.match(
         host,
@@ -1049,12 +1050,12 @@ test('keeps snapshot code blocks from inheriting inline code chrome', () => {
 test('styles paper-like paragraphs and interactive reader code blocks', () => {
     const paragraph = ruleBody('.markdown-snapshot-host p');
     assert.match(paragraph, /hyphens:\s*auto/);
-    assert.match(paragraph, /text-align:\s*justify/);
+    assert.match(paragraph, /text-align:\s*var\(--reader-text-align\)/);
     assert.match(paragraph, /text-justify:\s*inter-word/);
 
     const line = ruleBody('.markdown-editor-host > .cm-editor .cm-line');
     assert.match(line, /hyphens:\s*auto/);
-    assert.match(line, /text-align:\s*justify/);
+    assert.match(line, /text-align:\s*var\(--reader-text-align\)/);
 
     const block = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-code-block'

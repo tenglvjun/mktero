@@ -21,16 +21,25 @@ import {
     isSupportedAITargetLanguage,
 } from '../config/ai-preferences.js';
 import {
+    getMarkdownReaderAlignmentCss,
     getMarkdownReaderFontFamily,
+    getMarkdownReaderLineHeightCss,
+    getMarkdownReaderWidthCss,
+    MARKDOWN_READER_ALIGNMENT_DEFAULT,
     MARKDOWN_READER_FONT_DEFAULT,
     MARKDOWN_READER_FONT_OPTIONS,
     MARKDOWN_READER_FONT_SIZE_DEFAULT as DEFAULT_READER_FONT_SIZE,
     MARKDOWN_READER_FONT_SIZE_MAX as MAX_READER_FONT_SIZE,
     MARKDOWN_READER_FONT_SIZE_MIN as MIN_READER_FONT_SIZE,
+    MARKDOWN_READER_LINE_HEIGHT_DEFAULT,
     MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
+    MARKDOWN_READER_WIDTH_DEFAULT,
+    normalizeMarkdownReaderAlignment,
     normalizeMarkdownReaderFont,
     normalizeMarkdownReaderFontSize,
+    normalizeMarkdownReaderLineHeight,
     normalizeMarkdownReaderSourcePeek,
+    normalizeMarkdownReaderWidth,
 } from '../config/reader-preferences.js';
 import {
     accessibleAnnotationText,
@@ -203,6 +212,9 @@ export function createMarkdownTabView({
     readerFontSize = DEFAULT_READER_FONT_SIZE,
     onReaderFontChange = null,
     onReaderFontSizeChange = null,
+    readerLineHeight = MARKDOWN_READER_LINE_HEIGHT_DEFAULT,
+    readerWidth = MARKDOWN_READER_WIDTH_DEFAULT,
+    readerAlignment = MARKDOWN_READER_ALIGNMENT_DEFAULT,
     readerSourcePeek = MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
     onReaderSourcePeekChange = null,
     sourcePeekDelay = SOURCE_PEEK_DELAY_MS,
@@ -219,6 +231,9 @@ export function createMarkdownTabView({
         readerFontSize,
         onReaderFontChange,
         onReaderFontSizeChange,
+        readerLineHeight,
+        readerWidth,
+        readerAlignment,
         readerSourcePeek,
         onReaderSourcePeekChange,
         sourcePeekDelay,
@@ -238,6 +253,9 @@ class MarkdownTabView {
         readerFontSize,
         onReaderFontChange,
         onReaderFontSizeChange,
+        readerLineHeight,
+        readerWidth,
+        readerAlignment,
         readerSourcePeek,
         onReaderSourcePeekChange,
         sourcePeekDelay,
@@ -260,6 +278,13 @@ class MarkdownTabView {
         this.readerFontSize = normalizeMarkdownReaderFontSize(readerFontSize);
         this.onReaderFontChange = onReaderFontChange;
         this.onReaderFontSizeChange = onReaderFontSizeChange;
+        this.readerLineHeight = normalizeMarkdownReaderLineHeight(
+            readerLineHeight
+        );
+        this.readerWidth = normalizeMarkdownReaderWidth(readerWidth);
+        this.readerAlignment = normalizeMarkdownReaderAlignment(
+            readerAlignment
+        );
         this.readerSourcePeek = normalizeMarkdownReaderSourcePeek(
             readerSourcePeek
         );
@@ -367,6 +392,9 @@ class MarkdownTabView {
         });
         this.setReaderFont(this.readerFont);
         this.setReaderFontSize(this.readerFontSize);
+        this.setReaderLineHeight(this.readerLineHeight);
+        this.setReaderWidth(this.readerWidth);
+        this.setReaderAlignment(this.readerAlignment);
         this.syncSourcePeekToggle();
         this.editor = editorFactory({
             document: this.document,
@@ -3339,6 +3367,39 @@ class MarkdownTabView {
             = this.readerFontSize >= MAX_READER_FONT_SIZE;
     }
 
+    setReaderLineHeight(value) {
+        const next = normalizeMarkdownReaderLineHeight(value);
+        const changed = next !== this.readerLineHeight;
+        this.readerLineHeight = next;
+        this.host.style.setProperty(
+            '--reader-line-height',
+            getMarkdownReaderLineHeightCss(this.readerLineHeight)
+        );
+        if (changed) this.editor?.requestMeasure?.();
+    }
+
+    setReaderWidth(value) {
+        const next = normalizeMarkdownReaderWidth(value);
+        const changed = next !== this.readerWidth;
+        this.readerWidth = next;
+        this.host.style.setProperty(
+            '--reader-width',
+            getMarkdownReaderWidthCss(this.readerWidth)
+        );
+        if (changed) this.editor?.requestMeasure?.();
+    }
+
+    setReaderAlignment(value) {
+        const next = normalizeMarkdownReaderAlignment(value);
+        const changed = next !== this.readerAlignment;
+        this.readerAlignment = next;
+        this.host.style.setProperty(
+            '--reader-text-align',
+            getMarkdownReaderAlignmentCss(this.readerAlignment)
+        );
+        if (changed) this.editor?.requestMeasure?.();
+    }
+
     setReaderSourcePeek(enabled) {
         const next = normalizeMarkdownReaderSourcePeek(enabled);
         const changed = next !== this.readerSourcePeek;
@@ -3931,6 +3992,9 @@ class MarkdownTabView {
         }
         this.setReaderFont(this.readerFont);
         this.setReaderFontSize(this.readerFontSize);
+        this.setReaderLineHeight(this.readerLineHeight);
+        this.setReaderWidth(this.readerWidth);
+        this.setReaderAlignment(this.readerAlignment);
         this.syncSourcePeekToggle();
         this.elements.outline.setAttribute('aria-label', this.t('viewer.outline'));
         this.elements.outlineTitleLabel.textContent = this.t(

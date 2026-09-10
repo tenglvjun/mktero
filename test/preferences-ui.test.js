@@ -161,6 +161,20 @@ test('configures the Markdown reader font size from preferences', async () => {
                 <option value="georgia">Georgia</option>
                 <option value="cambria">Cambria</option>
             </select>
+            <select id="mktero-reader-line-height">
+                <option value="tight">Tight</option>
+                <option value="standard">Standard</option>
+                <option value="loose">Loose</option>
+            </select>
+            <select id="mktero-reader-width">
+                <option value="narrow">Narrow</option>
+                <option value="standard">Standard</option>
+                <option value="wide">Wide</option>
+            </select>
+            <select id="mktero-reader-alignment">
+                <option value="justify">Justified</option>
+                <option value="start">Left</option>
+            </select>
             <input id="mktero-reader-source-peek" type="checkbox">
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
@@ -201,9 +215,27 @@ test('configures the Markdown reader font size from preferences', async () => {
     assert.equal(value.textContent, '22 px');
 
     const font = dom.window.document.getElementById('mktero-reader-font-family');
+    assert.equal(input.min, '14');
+    assert.equal(input.max, '28');
     assert.equal(font.value, 'system-serif');
     font.value = 'cambria';
     font.dispatchEvent(new dom.window.Event('change'));
+    const lineHeight = dom.window.document.getElementById(
+        'mktero-reader-line-height'
+    );
+    assert.equal(lineHeight.value, 'standard');
+    lineHeight.value = 'loose';
+    lineHeight.dispatchEvent(new dom.window.Event('change'));
+    const width = dom.window.document.getElementById('mktero-reader-width');
+    assert.equal(width.value, 'standard');
+    width.value = 'narrow';
+    width.dispatchEvent(new dom.window.Event('change'));
+    const alignment = dom.window.document.getElementById(
+        'mktero-reader-alignment'
+    );
+    assert.equal(alignment.value, 'start');
+    alignment.value = 'justify';
+    alignment.dispatchEvent(new dom.window.Event('change'));
     const sourcePeek = dom.window.document.getElementById(
         'mktero-reader-source-peek'
     );
@@ -222,6 +254,21 @@ test('configures the Markdown reader font size from preferences', async () => {
             global: true,
         },
         {
+            key: 'extensions.mktero.readerLineHeight',
+            value: 'loose',
+            global: true,
+        },
+        {
+            key: 'extensions.mktero.readerWidth',
+            value: 'narrow',
+            global: true,
+        },
+        {
+            key: 'extensions.mktero.readerAlignment',
+            value: 'justify',
+            global: true,
+        },
+        {
             key: 'extensions.mktero.readerSourcePeek',
             value: false,
             global: true,
@@ -235,7 +282,7 @@ test('configures the Markdown reader font size from preferences', async () => {
     font.dispatchEvent(new dom.window.Event('change'));
     sourcePeek.checked = true;
     sourcePeek.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(writes.length, 3);
+    assert.equal(writes.length, 6);
 });
 
 test('switches one conversion API key field with the selected provider', async () => {
