@@ -333,6 +333,8 @@ class MarkdownTabView {
         this.sourcePeekGeneration = 0;
         this.sourcePeekKey = '';
         this.sourcePeekLocation = null;
+        this.focusMode = false;
+        this.focusModeRestore = null;
         this.outlineSegment = OUTLINE_SEGMENT_HEADINGS;
         this.outlineMarkdown = '';
         this.outlineSourceRanges = null;
@@ -1239,6 +1241,21 @@ class MarkdownTabView {
             title: this.t('viewer.sourcePeekOpen'),
         });
         appendChildren(sourcePeek, sourcePeekImage, sourcePeekCaption);
+        const focusExit = this.createElement('button', {
+            id: 'mktero-focus-exit',
+            class: 'markdown-focus-exit',
+            type: 'button',
+            'aria-label': this.t('viewer.focusModeExit'),
+            title: this.t('viewer.focusModeExit'),
+        });
+        focusExit.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.minimize2,
+            {
+                className: 'markdown-focus-exit-icon',
+                size: 16,
+            }
+        ));
         const snapshotHost = this.createElement('div', {
             id: 'mktero-snapshot',
             class: 'markdown-snapshot-host',
@@ -1284,6 +1301,7 @@ class MarkdownTabView {
             githubReposButton,
             githubReposMenu,
             sourcePeek,
+            focusExit,
             correctionUndo,
             snapshotHost
         );
@@ -1436,6 +1454,7 @@ class MarkdownTabView {
             sourcePeek,
             sourcePeekImage,
             sourcePeekCaption,
+            focusExit,
             navigationBack: documentActions.navigationBack,
             editorSection,
             actionToggle: documentActions.toggle,
@@ -1487,6 +1506,7 @@ class MarkdownTabView {
             readerFontOptions: documentActions.readerFontOptions,
             documentSearchToggle: documentActions.documentSearchToggle,
             sourcePeekToggle: documentActions.sourcePeekToggle,
+            focusToggle: documentActions.focusToggle,
             documentSearchPanel: documentActions.documentSearchPanel,
             documentSearchInput: documentActions.documentSearchInput,
             documentSearchCount: documentActions.documentSearchCount,
@@ -1730,11 +1750,28 @@ class MarkdownTabView {
                 size: 16,
             }
         ));
+        const focusToggle = this.createElement('button', {
+            id: 'mktero-focus-toggle',
+            class: 'markdown-focus-toggle',
+            type: 'button',
+            'aria-pressed': 'false',
+            'aria-label': this.t('viewer.focusMode'),
+            title: this.t('viewer.focusMode'),
+        });
+        focusToggle.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.maximize2,
+            {
+                className: 'markdown-focus-toggle-icon',
+                size: 16,
+            }
+        ));
         appendChildren(
             readerControls,
             readerFontSize,
             readerFontFamily,
             sourcePeekToggle,
+            focusToggle,
             documentSearchControls.documentSearchToggle
         );
         const correctionToggle = this.createElement('button', {
@@ -2100,6 +2137,7 @@ class MarkdownTabView {
             readerFontOptions,
             ...documentSearchControls,
             sourcePeekToggle,
+            focusToggle,
             status,
         };
     }
@@ -2170,6 +2208,12 @@ class MarkdownTabView {
         });
         this.listen(this.elements.sourcePeekToggle, 'click', () => {
             this.changeReaderSourcePeek(!this.readerSourcePeek);
+        });
+        this.listen(this.elements.focusToggle, 'click', () => {
+            this.setFocusMode(!this.focusMode);
+        });
+        this.listen(this.elements.focusExit, 'click', () => {
+            this.setFocusMode(false);
         });
         this.listen(this.elements.documentSearchClose, 'click', () => {
             this.closeDocumentSearch();
@@ -2380,6 +2424,13 @@ class MarkdownTabView {
             if (event.key === 'Escape' && this.documentSearchOpen) {
                 event.preventDefault();
                 this.closeDocumentSearch();
+                return;
+            }
+            if (event.key === 'Escape'
+                && this.focusMode
+                && !this.hasOpenReaderMenu()) {
+                event.preventDefault();
+                this.setFocusMode(false);
             }
         });
         const closeDocumentActionsOnOutsidePress = event => {
@@ -3430,6 +3481,53 @@ class MarkdownTabView {
         }
     }
 
+    setFocusMode(enabled) {
+        const next = Boolean(enabled);
+        if (next === this.focusMode) return;
+        this.focusMode = next;
+        this.elements.view.classList.toggle('is-focus-mode', next);
+        if (next) {
+            this.setDocumentActionsOpen(false);
+            this.setReaderFontOptionsOpen(false);
+            this.setTranslationLanguagesOpen(false);
+            this.setGitHubReposOpen(false);
+            this.focusModeRestore = {
+                outline: this.sidePanels.outline.visible,
+                notes: this.sidePanels.notes.visible,
+            };
+            this.setSidePanelVisibility('outline', false, { source: 'focus' });
+            this.setSidePanelVisibility('notes', false, { source: 'focus' });
+            this.hideSourcePeek();
+        }
+        else {
+            const restore = this.focusModeRestore || {};
+            this.focusModeRestore = null;
+            this.setSidePanelVisibility('outline', restore.outline !== false, {
+                source: 'focus',
+            });
+            this.setSidePanelVisibility('notes', restore.notes !== false, {
+                source: 'focus',
+            });
+            this.syncResponsiveSidePanels();
+            this.scheduleSourcePeek();
+        }
+        this.syncFocusModeControls();
+    }
+
+    syncFocusModeControls() {
+        if (!this.elements?.focusToggle || !this.elements?.focusExit) return;
+        this.elements.focusToggle.setAttribute(
+            'aria-pressed',
+            String(this.focusMode)
+        );
+        const enterLabel = this.t('viewer.focusMode');
+        const exitLabel = this.t('viewer.focusModeExit');
+        this.elements.focusToggle.setAttribute('aria-label', enterLabel);
+        this.elements.focusToggle.setAttribute('title', enterLabel);
+        this.elements.focusExit.setAttribute('aria-label', exitLabel);
+        this.elements.focusExit.setAttribute('title', exitLabel);
+    }
+
     clearDocumentActionStatus() {
         if (this.actionStatusTimer !== null) {
             this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
@@ -3729,6 +3827,7 @@ class MarkdownTabView {
             'title',
             this.t('viewer.sourcePeekToggle')
         );
+        this.syncFocusModeControls();
         this.elements.documentSearchPanel.setAttribute(
             'aria-label',
             this.t('viewer.find')
@@ -5080,7 +5179,8 @@ class MarkdownTabView {
 
     scheduleSourcePeek() {
         if (this.destroyed) return;
-        if (!this.readerSourcePeek
+        if (this.focusMode
+            || !this.readerSourcePeek
             || typeof this.model.onRenderSourcePeek !== 'function') {
             this.hideSourcePeek();
             return;
@@ -5160,6 +5260,7 @@ class MarkdownTabView {
             { page: peek.pageIndex + 1 }
         );
         this.elements.sourcePeek.hidden = false;
+        this.syncSourcePeekLayout();
     }
 
     hideSourcePeek() {
@@ -5169,6 +5270,15 @@ class MarkdownTabView {
         this.elements.sourcePeek.hidden = true;
         this.elements.sourcePeekImage.removeAttribute('src');
         this.elements.sourcePeekCaption.textContent = '';
+        this.syncSourcePeekLayout();
+    }
+
+    syncSourcePeekLayout() {
+        this.elements.readingLayout?.classList.toggle(
+            'has-source-peek',
+            Boolean(this.elements.sourcePeek)
+                && !this.elements.sourcePeek.hidden
+        );
     }
 
     createSourcePeekCanvas(width, height) {

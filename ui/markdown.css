@@ -1005,6 +1005,55 @@ main {
     white-space: nowrap;
 }
 
+.markdown-reading-layout.has-source-peek {
+    padding-inline-end: 172px;
+}
+
+.markdown-focus-exit {
+    position: absolute;
+    z-index: 9;
+    inset-block-start: 12px;
+    inset-inline-end: 12px;
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
+    box-shadow: var(--shadow-float);
+    cursor: pointer;
+}
+
+.markdown-focus-exit:hover,
+.markdown-focus-exit:focus-visible {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    color: var(--accent-strong);
+    outline: none;
+}
+
+.markdown-focus-exit:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+    outline-offset: 2px;
+}
+
+.mktero-tab-view:not(.is-focus-mode) .markdown-focus-exit {
+    display: none;
+}
+
+.mktero-tab-view.is-focus-mode .markdown-reader-toolbar,
+.mktero-tab-view.is-focus-mode .markdown-outline,
+.mktero-tab-view.is-focus-mode .markdown-notes,
+.mktero-tab-view.is-focus-mode .markdown-side-panel-resizer,
+.mktero-tab-view.is-focus-mode .markdown-side-panel-toggle,
+.mktero-tab-view.is-focus-mode .markdown-citation-graph-button,
+.mktero-tab-view.is-focus-mode .markdown-github-repos-button,
+.mktero-tab-view.is-focus-mode .markdown-github-repos-menu {
+    display: none !important;
+}
+
 .markdown-citation-graph-button {
     position: absolute;
     z-index: 5;
@@ -1745,6 +1794,7 @@ main {
 
 .markdown-document-search-toggle,
 .markdown-source-peek-toggle,
+.markdown-focus-toggle,
 .markdown-document-search-button {
     display: grid;
     width: 30px;
@@ -1764,18 +1814,21 @@ main {
 }
 
 .markdown-document-search-toggle:focus-visible,
-.markdown-source-peek-toggle:focus-visible {
+.markdown-source-peek-toggle:focus-visible,
+.markdown-focus-toggle:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
     outline-offset: 1px;
 }
 
 .markdown-document-search-toggle[aria-expanded='true'],
-.markdown-source-peek-toggle[aria-pressed='true'] {
+.markdown-source-peek-toggle[aria-pressed='true'],
+.markdown-focus-toggle[aria-pressed='true'] {
     border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
     background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.markdown-source-peek-toggle[aria-pressed='true'] {
+.markdown-source-peek-toggle[aria-pressed='true'],
+.markdown-focus-toggle[aria-pressed='true'] {
     color: var(--accent-strong);
 }
 

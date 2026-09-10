@@ -145,8 +145,9 @@ asks for confirmation.
    tab. A valid cache entry skips the remote conversion.
 3. Use the outline, find, citations, figure/table previews, source links, and
    Zotero notes panel to navigate the document.
-4. Use the reader toolbar to adjust typography, switch reading mode, translate,
-   correct recognition errors, save a snapshot, or export Markdown.
+4. Use the reader toolbar to adjust typography, enter focus mode, switch reading
+   mode, translate, correct recognition errors, save a snapshot, or export
+   Markdown. Escape leaves focus mode.
 
 Mktero tabs are session-only and are not restored after Zotero restarts. Closing
 the tab or shutting down the extension cancels active conversion and

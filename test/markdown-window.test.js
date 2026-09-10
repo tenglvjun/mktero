@@ -5609,10 +5609,20 @@ test('toggles the PDF source peek from the reader toolbar', async () => {
         await Promise.resolve();
         await Promise.resolve();
         assert.equal(peek.hidden, false);
+        assert.equal(
+            shadow.querySelector('.markdown-reading-layout')
+                .classList.contains('has-source-peek'),
+            true
+        );
         assert.equal(toggle.getAttribute('aria-pressed'), 'true');
 
         toggle.click();
         assert.equal(peek.hidden, true);
+        assert.equal(
+            shadow.querySelector('.markdown-reading-layout')
+                .classList.contains('has-source-peek'),
+            false
+        );
         assert.equal(toggle.getAttribute('aria-pressed'), 'false');
         assert.deepEqual(persisted, [false]);
 
@@ -5812,6 +5822,90 @@ test('does not steal window Cmd+F when the Mktero tab is not visible', () => {
     }
     finally {
         ownerWindow.removeEventListener('keydown', steal, true);
+        view.destroy();
+    }
+});
+
+test('enters focus mode to hide chrome and restore it on exit', () => {
+    const markdown = '# Overview\n\nBody.';
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{
+                pageIndex: 0,
+                bbox: [100, 200, 800, 360],
+            }],
+        }],
+        onRenderSourcePeek: () => ({
+            dataURL: 'data:image/jpeg;base64,cGVlaw==',
+        }),
+    }), {}, {
+        sourcePeekDelay: 0,
+    });
+    const toggle = shadow.querySelector('#mktero-focus-toggle');
+    const exit = shadow.querySelector('#mktero-focus-exit');
+    const outline = shadow.querySelector('#mktero-outline');
+    const notes = shadow.querySelector('#mktero-notes');
+    const peek = shadow.querySelector('#mktero-source-peek');
+
+    try {
+        assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+        assert.equal(view.elements.view.classList.contains('is-focus-mode'), false);
+        assert.equal(outline.hidden, false);
+        assert.equal(notes.hidden, false);
+
+        toggle.click();
+
+        assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+        assert.equal(view.elements.view.classList.contains('is-focus-mode'), true);
+        assert.equal(outline.hidden, true);
+        assert.equal(notes.hidden, true);
+        assert.equal(peek.hidden, true);
+        assert.equal(
+            shadow.querySelector('.markdown-reading-layout')
+                .classList.contains('has-source-peek'),
+            false
+        );
+
+        exit.click();
+
+        assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+        assert.equal(view.elements.view.classList.contains('is-focus-mode'), false);
+        assert.equal(outline.hidden, false);
+        assert.equal(notes.hidden, false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('leaves focus mode from Escape when the Markdown tab is visible', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview\n\nBody.',
+        sourceKind: 'markdown',
+    }));
+
+    try {
+        shadow.querySelector('#mktero-focus-toggle').click();
+        assert.equal(view.elements.view.classList.contains('is-focus-mode'), true);
+
+        dispatchWindowKeyboardEvent(document.defaultView, 'Escape');
+
+        assert.equal(view.elements.view.classList.contains('is-focus-mode'), false);
+        assert.equal(
+            shadow.querySelector('#mktero-focus-toggle').getAttribute('aria-pressed'),
+            'false'
+        );
+    }
+    finally {
         view.destroy();
     }
 });
