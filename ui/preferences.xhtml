@@ -91,8 +91,8 @@
                 <html:div class="mktero-reader-font-control">
                     <html:input id="mktero-reader-font-size"
                                 type="range"
-                                min="16"
-                                max="22"
+                                min="14"
+                                max="28"
                                 step="1"
                                 value="18"
                                 preference="extensions.mktero.readerFontSize"
@@ -116,6 +116,53 @@
                         <html:option value="georgia" data-i18n="viewer.fontGeorgia">Georgia</html:option>
                         <html:option value="cambria" data-i18n="viewer.fontCambria">Cambria</html:option>
                         <html:option value="times-new-roman" data-i18n="viewer.fontTimesNewRoman">Times New Roman</html:option>
+                    </html:select>
+                </html:div>
+            </html:div>
+            <html:div class="mktero-setting-row mktero-reader-font-row">
+                <html:div class="mktero-setting-copy">
+                    <html:label for="mktero-reader-line-height"><html:strong data-i18n="preferences.reader.lineHeightLabel"></html:strong></html:label>
+                    <html:small id="mktero-reader-line-height-help"
+                                data-i18n="preferences.reader.lineHeightHelp"></html:small>
+                </html:div>
+                <html:div class="mktero-reader-font-control">
+                    <html:select id="mktero-reader-line-height"
+                                 preference="extensions.mktero.readerLineHeight"
+                                 aria-describedby="mktero-reader-line-height-help">
+                        <html:option value="tight" data-i18n="viewer.lineHeightTight">Tight</html:option>
+                        <html:option value="standard" data-i18n="viewer.lineHeightStandard">Standard</html:option>
+                        <html:option value="loose" data-i18n="viewer.lineHeightLoose">Loose</html:option>
+                    </html:select>
+                </html:div>
+            </html:div>
+            <html:div class="mktero-setting-row mktero-reader-font-row">
+                <html:div class="mktero-setting-copy">
+                    <html:label for="mktero-reader-width"><html:strong data-i18n="preferences.reader.widthLabel"></html:strong></html:label>
+                    <html:small id="mktero-reader-width-help"
+                                data-i18n="preferences.reader.widthHelp"></html:small>
+                </html:div>
+                <html:div class="mktero-reader-font-control">
+                    <html:select id="mktero-reader-width"
+                                 preference="extensions.mktero.readerWidth"
+                                 aria-describedby="mktero-reader-width-help">
+                        <html:option value="narrow" data-i18n="viewer.widthNarrow">Narrow</html:option>
+                        <html:option value="standard" data-i18n="viewer.widthStandard">Standard</html:option>
+                        <html:option value="wide" data-i18n="viewer.widthWide">Wide</html:option>
+                    </html:select>
+                </html:div>
+            </html:div>
+            <html:div class="mktero-setting-row mktero-reader-font-row">
+                <html:div class="mktero-setting-copy">
+                    <html:label for="mktero-reader-alignment"><html:strong data-i18n="preferences.reader.alignmentLabel"></html:strong></html:label>
+                    <html:small id="mktero-reader-alignment-help"
+                                data-i18n="preferences.reader.alignmentHelp"></html:small>
+                </html:div>
+                <html:div class="mktero-reader-font-control">
+                    <html:select id="mktero-reader-alignment"
+                                 preference="extensions.mktero.readerAlignment"
+                                 aria-describedby="mktero-reader-alignment-help">
+                        <html:option value="start" data-i18n="viewer.alignmentStart">Left</html:option>
+                        <html:option value="justify" data-i18n="viewer.alignmentJustify">Justified</html:option>
                     </html:select>
                 </html:div>
             </html:div>

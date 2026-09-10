@@ -58,6 +58,9 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         localization: options.localization,
         readerFont: options.readerFont,
         readerFontSize: options.readerFontSize,
+        readerLineHeight: options.readerLineHeight,
+        readerWidth: options.readerWidth,
+        readerAlignment: options.readerAlignment,
         onReaderFontChange: options.onReaderFontChange,
         onReaderFontSizeChange: options.onReaderFontSizeChange,
         readerSourcePeek: options.readerSourcePeek,
@@ -2638,7 +2641,7 @@ test('adjusts the persisted reader font size from the top toolbar', () => {
         assert.deepEqual(persistedSizes, [19, 20, 21, 22]);
         assert.equal(value.textContent, '22 px');
         assert.equal(view.host.style.getPropertyValue('--reader-font-size'), '22px');
-        assert.equal(increase.disabled, true);
+        assert.equal(increase.disabled, false);
         assert.equal(decrease.disabled, false);
 
         decrease.click();
@@ -2677,6 +2680,19 @@ test('refreshes editor geometry after reader typography changes', () => {
         view.setReaderFontSize(view.readerFontSize);
 
         assert.equal(measureRequests, initialRequests + 2);
+        view.setReaderLineHeight('loose');
+        view.setReaderWidth('narrow');
+        view.setReaderAlignment('justify');
+        assert.equal(
+            view.host.style.getPropertyValue('--reader-line-height'),
+            '2.05'
+        );
+        assert.equal(view.host.style.getPropertyValue('--reader-width'), '45rem');
+        assert.equal(
+            view.host.style.getPropertyValue('--reader-text-align'),
+            'justify'
+        );
+        assert.equal(measureRequests, initialRequests + 5);
     }
     finally {
         view.destroy();

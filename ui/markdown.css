@@ -16,6 +16,7 @@
     --reader-width: 60rem;
     --reader-font-size: 18px;
     --reader-line-height: 1.78;
+    --reader-text-align: start;
     --reader-caption-font-size: calc(var(--reader-font-size) * 0.82);
     --reader-caption-line-height: 1.5;
     --reader-code-font-size: calc(var(--reader-font-size) * 0.82);
@@ -2145,7 +2146,7 @@ main {
     margin: 0 0 1.25em;
     hyphenate-limit-chars: 6 3 3;
     hyphens: auto;
-    text-align: justify;
+    text-align: var(--reader-text-align);
     text-align-last: start;
     text-justify: inter-word;
     text-wrap: pretty;
@@ -2475,7 +2476,7 @@ main {
     padding-inline: 0;
     hyphenate-limit-chars: 6 3 3;
     hyphens: auto;
-    text-align: justify;
+    text-align: var(--reader-text-align);
     text-align-last: start;
     text-justify: inter-word;
     text-wrap: pretty;

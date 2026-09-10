@@ -59,6 +59,15 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         /pref\("extensions\.mktero\.readerFont", "system-serif"\)/
     );
     assert.match(prefs, /pref\("extensions\.mktero\.readerSourcePeek", true\)/);
+    assert.match(
+        prefs,
+        /pref\("extensions\.mktero\.readerLineHeight", "standard"\)/
+    );
+    assert.match(prefs, /pref\("extensions\.mktero\.readerWidth", "standard"\)/);
+    assert.match(
+        prefs,
+        /pref\("extensions\.mktero\.readerAlignment", "start"\)/
+    );
     assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
     assert.doesNotMatch(pane, /id="mktero-language"/);
     assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
@@ -89,6 +98,11 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(pane, /preference="extensions\.mktero\.readerFontSize"/);
     assert.match(pane, /preference="extensions\.mktero\.readerFont"/);
     assert.match(pane, /preference="extensions\.mktero\.readerSourcePeek"/);
+    assert.match(pane, /preference="extensions\.mktero\.readerLineHeight"/);
+    assert.match(pane, /preference="extensions\.mktero\.readerWidth"/);
+    assert.match(pane, /preference="extensions\.mktero\.readerAlignment"/);
+    assert.match(pane, /min="14"/);
+    assert.match(pane, /max="28"/);
     assert.match(pane, /preference="extensions\.mktero\.aiEnabled"/);
     assert.match(pane, /preference="extensions\.mktero\.aiProvider"/);
     assert.match(pane, /preference="extensions\.mktero\.aiProtocol"/);
@@ -282,13 +296,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row"/g
         ) || []).length,
-        13
+        16
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-(?:field|reader-font)-control(?: [^"]+)?">/g
         ) || []).length,
-        13
+        16
     );
 });
 
