@@ -16,6 +16,7 @@ export class MistralDocumentExtractor {
         readFile,
         preparePDFIndex = null,
         createCacheKey = null,
+        createSourceHash = null,
         parserProfile = MISTRAL_PARSER_PROFILE_ID,
         readRevision = null,
         isCacheEnabled = () => false,
@@ -37,6 +38,7 @@ export class MistralDocumentExtractor {
         this.readFile = readFile;
         this.preparePDFIndex = preparePDFIndex;
         this.createCacheKey = createCacheKey;
+        this.createSourceHash = createSourceHash;
         this.parserProfile = parserProfile;
         this.readRevision = readRevision;
         this.isCacheEnabled = isCacheEnabled;
@@ -66,6 +68,7 @@ export class MistralDocumentExtractor {
         const cacheEnabled = Boolean(this.isCacheEnabled());
         const warnings = [];
         let cacheKey = null;
+        let sourceHash = null;
         if (this.createCacheKey) {
             try {
                 cacheKey = await this.createCacheKey(fileData, {
@@ -77,6 +80,11 @@ export class MistralDocumentExtractor {
                 warnings.push('The local Markdown cache is unavailable.');
             }
         }
+        sourceHash = await readSourceHash(
+            this.createSourceHash,
+            fileData,
+            error => this.#reportCacheError(error)
+        );
 
         if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
             const revision = await this.readRevision({
@@ -97,6 +105,7 @@ export class MistralDocumentExtractor {
                     warnings,
                     cacheKey,
                     this.parserProfile,
+                    sourceHash,
                 );
             }
         }
@@ -133,6 +142,7 @@ export class MistralDocumentExtractor {
             warnings,
             cacheKey,
             this.parserProfile,
+            sourceHash,
         );
     }
 
@@ -175,6 +185,7 @@ function createResult(
     warnings = [],
     cacheKey = null,
     parserProfile = MISTRAL_PARSER_PROFILE_ID,
+    sourceHash = null,
 ) {
     const extracted = {
         kind: 'markdown',
@@ -192,11 +203,24 @@ function createResult(
         resumedTask: false,
     };
     if (cacheKey) extracted.cacheKey = cacheKey;
+    if (sourceHash) extracted.sourceHash = sourceHash;
     if (parsedResult.userEdited) extracted.userEdited = true;
     if (Array.isArray(parsedResult.chromeRanges)) {
         extracted.chromeRanges = parsedResult.chromeRanges;
     }
     return extracted;
+}
+
+async function readSourceHash(createSourceHash, fileData, onError) {
+    if (typeof createSourceHash !== 'function') return null;
+    try {
+        const sourceHash = await createSourceHash(fileData);
+        return typeof sourceHash === 'string' && sourceHash ? sourceHash : null;
+    }
+    catch (error) {
+        onError(error);
+        return null;
+    }
 }
 
 function throwIfAborted(signal) {

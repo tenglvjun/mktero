@@ -50,6 +50,10 @@ test('reads a PDF and delegates to synchronous Mistral conversion', async () => 
             assert.equal(options.parserProfile, MISTRAL_PARSER_PROFILE_ID);
             return 'a'.repeat(64);
         },
+        createSourceHash: async value => {
+            assert.equal(value, fileData);
+            return 'e'.repeat(64);
+        },
         isCacheEnabled: () => true,
     });
     const controller = new AbortController();
@@ -63,6 +67,7 @@ test('reads a PDF and delegates to synchronous Mistral conversion', async () => 
     assert.equal(result.markdown, '# Mistral result');
     assert.equal(result.cacheHit, false);
     assert.equal(result.resumedTask, false);
+    assert.equal(result.sourceHash, 'e'.repeat(64));
     assert.equal(result.extractedPages, 2);
     assert.equal(result.totalPages, 2);
     assert.deepEqual(result.chromeRanges, [{ from: 0, to: 2 }]);

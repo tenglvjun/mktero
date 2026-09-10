@@ -107,6 +107,7 @@ export class MarkdownTabPresenter {
         onImportReference,
         onOpenReferenceMatch,
         onSubscribeReferenceUpdates,
+        onReadingPositionChange,
     } = {}) {
         this.ensureSessionStateFilter();
         const owner = this.zotero.getMainWindow?.();
@@ -245,6 +246,9 @@ export class MarkdownTabPresenter {
             if (onSubscribeReferenceUpdates !== undefined) {
                 existing.model.onSubscribeReferenceUpdates = onSubscribeReferenceUpdates;
             }
+            if (onReadingPositionChange !== undefined) {
+                existing.model.onReadingPositionChange = onReadingPositionChange;
+            }
             tabs.select(existing.tabID);
             return { ...existing, created: false };
         }
@@ -289,6 +293,7 @@ export class MarkdownTabPresenter {
                 onImportReference,
                 onOpenReferenceMatch,
                 onSubscribeReferenceUpdates,
+                onReadingPositionChange,
             },
             this.localization.t.bind(this.localization)
         );
@@ -576,6 +581,7 @@ function createInitialModel(
         renderMode: 'markdown',
         cacheHit: false,
         cacheKey: null,
+        sourceHash: null,
         sourceMap: [],
         annotationOverlay: createEmptyAnnotationOverlay(),
         editableBlocks: [],

@@ -17,6 +17,7 @@ export class MinerUDocumentExtractor {
         readFile,
         preparePDFIndex = null,
         createCacheKey = null,
+        createSourceHash = null,
         readRevision = null,
         isCacheEnabled = () => false,
         onCacheError = error => zotero.logError?.(error),
@@ -34,6 +35,7 @@ export class MinerUDocumentExtractor {
         this.readFile = readFile;
         this.preparePDFIndex = preparePDFIndex;
         this.createCacheKey = createCacheKey;
+        this.createSourceHash = createSourceHash;
         this.readRevision = readRevision;
         this.isCacheEnabled = isCacheEnabled;
         this.onCacheError = onCacheError;
@@ -61,6 +63,7 @@ export class MinerUDocumentExtractor {
         const cacheEnabled = Boolean(this.isCacheEnabled());
         const warnings = [];
         let cacheKey = null;
+        let sourceHash = null;
         if (this.createCacheKey) {
             try {
                 cacheKey = await this.createCacheKey(fileData);
@@ -70,6 +73,11 @@ export class MinerUDocumentExtractor {
                 warnings.push('The local Markdown cache is unavailable.');
             }
         }
+        sourceHash = await readSourceHash(
+            this.createSourceHash,
+            fileData,
+            error => this.#reportCacheError(error)
+        );
         if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
             const revision = await this.readRevision({
                 itemID,
@@ -88,7 +96,9 @@ export class MinerUDocumentExtractor {
                     result,
                     true,
                     warnings,
-                    cacheKey
+                    cacheKey,
+                    false,
+                    sourceHash
                 );
             }
         }
@@ -120,7 +130,8 @@ export class MinerUDocumentExtractor {
             converted.origin === 'cache',
             warnings,
             cacheKey,
-            converted.origin === 'resumed'
+            converted.origin === 'resumed',
+            sourceHash
         );
     }
 
@@ -162,7 +173,8 @@ function createResult(
     cacheHit,
     warnings = [],
     cacheKey = null,
-    resumedTask = false
+    resumedTask = false,
+    sourceHash = null
 ) {
     const extracted = {
         kind: 'markdown',
@@ -180,11 +192,24 @@ function createResult(
         resumedTask,
     };
     if (cacheKey) extracted.cacheKey = cacheKey;
+    if (sourceHash) extracted.sourceHash = sourceHash;
     if (parsedResult.userEdited) extracted.userEdited = true;
     if (Array.isArray(parsedResult.chromeRanges)) {
         extracted.chromeRanges = parsedResult.chromeRanges;
     }
     return extracted;
+}
+
+async function readSourceHash(createSourceHash, fileData, onError) {
+    if (typeof createSourceHash !== 'function') return null;
+    try {
+        const sourceHash = await createSourceHash(fileData);
+        return typeof sourceHash === 'string' && sourceHash ? sourceHash : null;
+    }
+    catch (error) {
+        onError(error);
+        return null;
+    }
 }
 
 function throwIfAborted(signal) {

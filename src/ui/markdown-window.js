@@ -94,6 +94,7 @@ const CORRECTION_UNDO_TIMEOUT_MS = 8_000;
 const OUTLINE_SEGMENT_HEADINGS = 'headings';
 const OUTLINE_SEGMENT_FIGURES = 'figures';
 const SOURCE_PEEK_DELAY_MS = 80;
+const READING_POSITION_SAVE_DELAY_MS = 500;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
@@ -205,6 +206,7 @@ export function createMarkdownTabView({
     readerSourcePeek = MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
     onReaderSourcePeekChange = null,
     sourcePeekDelay = SOURCE_PEEK_DELAY_MS,
+    readingPositionDelay = READING_POSITION_SAVE_DELAY_MS,
 }) {
     return new MarkdownTabView({
         document,
@@ -220,6 +222,7 @@ export function createMarkdownTabView({
         readerSourcePeek,
         onReaderSourcePeekChange,
         sourcePeekDelay,
+        readingPositionDelay,
     });
 }
 
@@ -238,6 +241,7 @@ class MarkdownTabView {
         readerSourcePeek,
         onReaderSourcePeekChange,
         sourcePeekDelay,
+        readingPositionDelay,
     }) {
         this.localization = localization;
         this.t = localization.t.bind(localization);
@@ -263,6 +267,9 @@ class MarkdownTabView {
         this.sourcePeekDelay = Number.isFinite(sourcePeekDelay)
             ? Math.max(0, sourcePeekDelay)
             : SOURCE_PEEK_DELAY_MS;
+        this.readingPositionDelay = Number.isFinite(readingPositionDelay)
+            ? Math.max(0, readingPositionDelay)
+            : READING_POSITION_SAVE_DELAY_MS;
         this.renderedAssets = undefined;
         this.assetURLs = new Map();
         this.renderedMarkdown = undefined;
@@ -291,6 +298,10 @@ class MarkdownTabView {
         this.translationLanguageSignature = '';
         this.translationReaderFonts = new Map();
         this.activeNavigationOffset = 0;
+        this.renderedCacheKey = '';
+        this.didRestorePersistedPosition = false;
+        this.readingPositionTimer = null;
+        this.lastPersistedReadingSignature = '';
         this.renderedSourceMap = [];
         this.sourcePeekTimer = null;
         this.sourcePeekMicrotask = false;
@@ -407,7 +418,10 @@ class MarkdownTabView {
                 this.openAnnotationInPDF(annotationID)
             ),
             onSourceNavigationError: error => this.zotero?.logError?.(error),
-            onViewportChange: offset => this.syncActiveNavigation(offset),
+            onViewportChange: offset => {
+                this.syncActiveNavigation(offset);
+                this.schedulePersistedReadingPosition();
+            },
             onNavigationBackChange: available => {
                 this.navigationBackAvailable = Boolean(available);
                 this.syncNavigationBack();
@@ -696,7 +710,28 @@ class MarkdownTabView {
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
-            if (translationAnchor) {
+            const previousCacheKey = this.renderedCacheKey || '';
+            const nextCacheKey = typeof model.cacheKey === 'string'
+                ? model.cacheKey
+                : '';
+            const conversionIdentityChanged = Boolean(
+                previousCacheKey
+                && nextCacheKey
+                && previousCacheKey !== nextCacheKey
+            );
+            this.renderedCacheKey = nextCacheKey;
+            if (conversionIdentityChanged) {
+                this.didRestorePersistedPosition = false;
+                this.lastPersistedReadingSignature = '';
+                if (Number.isFinite(model.restoreReadingOffset)) {
+                    this.restoreReadingPosition(model.restoreReadingOffset);
+                    this.didRestorePersistedPosition = true;
+                }
+                else {
+                    this.restoreReadingPosition(0);
+                }
+            }
+            else if (translationAnchor) {
                 const position = resolveTranslationReadingPosition(
                     translationAnchor,
                     this.renderedTranslationView,
@@ -708,6 +743,11 @@ class MarkdownTabView {
                 this.restoreReadingPosition(
                     resolveMarkdownReadingPosition(markdown, restoreAnchor)
                 );
+            }
+            else if (!this.didRestorePersistedPosition
+                && Number.isFinite(model.restoreReadingOffset)) {
+                this.restoreReadingPosition(model.restoreReadingOffset);
+                this.didRestorePersistedPosition = true;
             }
             if (this.documentSearchOpen) {
                 this.runDocumentSearch({
@@ -722,6 +762,7 @@ class MarkdownTabView {
 
     destroy() {
         if (this.destroyed) return;
+        this.flushPersistedReadingPosition();
         this.destroyed = true;
         this.clearDocumentActionStatus();
         this.clearWarningToast();
@@ -5096,6 +5137,60 @@ class MarkdownTabView {
         this.editor.scrollToOffset?.(normalizedOffset);
     }
 
+    schedulePersistedReadingPosition() {
+        if (this.destroyed
+            || this.model.status !== 'ready'
+            || this.model.renderMode === 'html'
+            || typeof this.model.onReadingPositionChange !== 'function') {
+            return;
+        }
+        if (this.readingPositionDelay <= 0) {
+            this.flushPersistedReadingPosition();
+            return;
+        }
+        if (this.readingPositionTimer != null) {
+            this.ownerWindow.clearTimeout?.(this.readingPositionTimer);
+        }
+        this.readingPositionTimer = this.ownerWindow.setTimeout(() => {
+            this.readingPositionTimer = null;
+            this.flushPersistedReadingPosition();
+        }, this.readingPositionDelay);
+    }
+
+    flushPersistedReadingPosition() {
+        if (this.readingPositionTimer != null) {
+            this.ownerWindow.clearTimeout?.(this.readingPositionTimer);
+            this.readingPositionTimer = null;
+        }
+        if (this.model.status !== 'ready'
+            || this.model.renderMode === 'html'
+            || typeof this.model.onReadingPositionChange !== 'function') {
+            return;
+        }
+        const sourceOffset = sourceOffsetForDisplayedReadingPosition(
+            this.activeNavigationOffset,
+            this.renderedTranslationView,
+            this.renderedTranslationBlockRanges
+        );
+        const anchor = createMarkdownReadingPositionAnchor(
+            this.model.markdown || '',
+            sourceOffset
+        );
+        if (anchor.offset <= 0) return;
+        const signature = readingPositionSignature(anchor);
+        if (signature === this.lastPersistedReadingSignature) return;
+        this.lastPersistedReadingSignature = signature;
+        try {
+            const result = this.model.onReadingPositionChange(anchor);
+            if (result && typeof result.catch === 'function') {
+                result.catch(error => this.zotero?.logError?.(error));
+            }
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
+    }
+
     createNoteItem(annotation, matched, markdownLength) {
         const offset = matched
             ? firstAnnotationOffset(annotation, markdownLength)
@@ -5406,6 +5501,33 @@ class MarkdownTabView {
             resolveZipPath(this.model.assetBasePath || '', decodedPath)
         ) || null;
     }
+}
+
+function readingPositionSignature(anchor) {
+    return [
+        Math.max(0, Math.trunc(Number(anchor?.offset) || 0)),
+        String(anchor?.headingKey || ''),
+        Math.max(0, Math.trunc(Number(anchor?.headingOccurrence) || 0)),
+        Math.max(0, Math.trunc(Number(anchor?.relativeOffset) || 0)),
+    ].join(':');
+}
+
+function sourceOffsetForDisplayedReadingPosition(offset, view, blockRanges) {
+    const requested = Number(offset);
+    if (!Number.isFinite(requested)) return 0;
+    const normalized = Math.max(0, Math.trunc(requested));
+    if (view !== 'translated' && view !== 'compare') return normalized;
+    const translationAnchor = createTranslationReadingPositionAnchor(
+        normalized,
+        view,
+        blockRanges
+    );
+    const sourceOffset = resolveTranslationReadingPosition(
+        translationAnchor,
+        'original',
+        blockRanges
+    );
+    return sourceOffset === null ? normalized : sourceOffset;
 }
 
 function findActiveNavigationItem(elements, offset) {

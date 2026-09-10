@@ -37,6 +37,7 @@ test('reads the current Zotero PDF and delegates conversion', async () => {
             },
         },
         getApiKey: () => 'configured-token',
+        createSourceHash: async () => 'd'.repeat(64),
         readFile: async filePath => {
             assert.equal(filePath, '/tmp/paper.pdf');
             return new Uint8Array([1, 2, 3]);
@@ -57,6 +58,7 @@ test('reads the current Zotero PDF and delegates conversion', async () => {
     assert.equal(result.markdown, '# MinerU result');
     assert.equal(result.cacheHit, false);
     assert.equal(result.resumedTask, false);
+    assert.equal(result.sourceHash, 'd'.repeat(64));
     assert.equal(calls[0].apiKey, 'configured-token');
     assert.equal(calls[0].fileName, 'paper.pdf');
     assert.equal(calls[0].key, null);

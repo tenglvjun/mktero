@@ -24,6 +24,9 @@ import {
     createZoteroMarkdownAnnotationStore,
 } from './cache/markdown-annotation-store.js';
 import {
+    createZoteroMarkdownReadingPositionStore,
+} from './cache/markdown-reading-position-store.js';
+import {
     AI_TARGET_LANGUAGES,
     getAISettings,
     isSupportedAITargetLanguage,
@@ -77,6 +80,9 @@ import {
     formatEvidenceMarkdown,
 } from './markdown/markdown-evidence.js';
 import { selectExportMarkdown } from './markdown/export-markdown-selector.js';
+import {
+    resolveMarkdownReadingPosition,
+} from './markdown/markdown-outline.js';
 import {
     CONVERSION_PROGRESS,
     normalizeConversionProgress,
@@ -179,6 +185,7 @@ const runtime = {
     cache: null,
     translationService: null,
     revisionStore: null,
+    readingPositions: null,
     revisionSessions: null,
     pdfTextIndexCache: null,
     pdfAnnotationLocator: null,
@@ -267,6 +274,11 @@ globalThis.startup = async function startup({ id, rootURI }) {
         createAbortController: createZoteroAbortController,
     });
     runtime.revisionStore = createZoteroMarkdownRevisionStore({
+        zotero: Zotero,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+    });
+    runtime.readingPositions = createZoteroMarkdownReadingPositionStore({
         zotero: Zotero,
         ioUtils: IOUtils,
         pathUtils: PathUtils,
@@ -396,6 +408,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             pdfAnnotationLocator
         ),
         createCacheKey: fileData => createMinerUCacheKey(fileData),
+        createSourceHash: fileData => sha256Hex(fileData),
         readRevision: options => readRevisionSnapshot(options),
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
     });
@@ -423,6 +436,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
                 parserProfile: MISTRAL_PARSER_PROFILE_ID,
             }
         ),
+        createSourceHash: fileData => sha256Hex(fileData),
         readRevision: options => readRevisionSnapshot(options),
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
     });
@@ -524,6 +538,7 @@ globalThis.shutdown = function shutdown() {
     runtime.translationService = null;
     runtime.translationRequests = null;
     runtime.revisionStore = null;
+    runtime.readingPositions = null;
     runtime.revisionSessions = null;
     runtime.pdfTextIndexCache = null;
     runtime.pdfAnnotationLocator = null;
@@ -675,6 +690,7 @@ async function openItemAsMarkdown(itemID, {
             runtime.referenceImportService,
             { getSourceItemID: () => itemID }
         ),
+        onReadingPositionChange: anchor => saveReadingPosition(itemID, anchor),
     });
     if (presentation.created) {
         void runtime.actionsTags?.openMarkdownSession({
@@ -739,8 +755,9 @@ async function openItemAsMarkdown(itemID, {
             controller.signal
         );
         throwIfRevisionAborted(controller.signal);
+        const positionedResult = await attachReadingPosition(revisionResult);
         const readyResult = await attachCachedDocumentTranslation(
-            revisionResult,
+            positionedResult,
             controller.signal
         );
         runtime.presenter?.update(
@@ -941,6 +958,46 @@ async function readRevisionSnapshot({ itemID, cacheKey, signal }) {
     const entry = await replaceRevisionSession(itemID, saved.base, { signal });
     throwIfRevisionAborted(signal);
     return { ...entry.session.snapshot(), itemID };
+}
+
+async function attachReadingPosition(result) {
+    if (!runtime.readingPositions
+        || typeof result?.sourceHash !== 'string'
+        || typeof result?.cacheKey !== 'string'
+        || typeof result?.markdown !== 'string') {
+        return result;
+    }
+    try {
+        const record = await runtime.readingPositions.load(
+            result.sourceHash,
+            result.cacheKey
+        );
+        if (!record?.anchor) return result;
+        return {
+            ...result,
+            restoreReadingOffset: resolveMarkdownReadingPosition(
+                result.markdown,
+                record.anchor
+            ),
+        };
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        return result;
+    }
+}
+
+function saveReadingPosition(itemID, anchor) {
+    const model = runtime.presenter?.get(itemID)?.model;
+    if (!runtime.readingPositions
+        || typeof model?.sourceHash !== 'string'
+        || typeof model?.cacheKey !== 'string') {
+        return;
+    }
+    Promise.resolve(runtime.readingPositions.save(model.sourceHash, {
+        cacheKey: model.cacheKey,
+        anchor,
+    })).catch(error => Zotero.logError?.(error));
 }
 
 async function attachRevisionSession(itemID, result, signal) {
