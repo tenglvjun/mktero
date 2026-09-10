@@ -54,9 +54,13 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
   Switch the outline to Figures to jump through captioned figures and
   tables in document order. Local figures and tables appear as
   thumbnails.
+- Find in the currently displayed Markdown with `Cmd/Ctrl+F`. Search uses
+  visible body text, so hidden page chrome, Markdown marks, and math
+  delimiters are skipped.
 - Keep reliable page and region mappings so text, formulas, tables, and figures
   can jump back to their PDF source. The reader also shows a live PDF crop of
-  the current paragraph; click it to open that location in the PDF.
+  the current paragraph; click it to open that location in the PDF. Hide the
+  thumbnail from the reader toolbar or Settings.
 - Preview citations, author affiliations, figures, and tables without losing
   the current reading position.
 - See whether each Markdown reference already exists in any accessible Zotero
@@ -122,6 +126,7 @@ Open `Settings -> Mktero` after installation.
 | Translation language | Optional | Choose Simplified/Traditional Chinese, Japanese, Korean, Spanish, French, or Brazilian Portuguese |
 | Automatically translate Markdown selections | Optional, off by default | Translate a stable selection without an extra click; disabling it keeps the manual popup action |
 | Body text font and size | Optional | Choose the reading font and a 16–22 px body size |
+| PDF source thumbnail | Optional, on by default | Show a live PDF crop of the current paragraph |
 | Reuse conversion results | Optional | Reuse results for the same PDF content and parser profile |
 
 MinerU, Mistral, and AI credentials are stored as ordinary, unencrypted
@@ -137,8 +142,8 @@ asks for confirmation.
    right-click a PDF or library item and choose `Read as Markdown with Mktero`.
 2. Follow the upload, conversion, and download progress in the temporary Mktero
    tab. A valid cache entry skips the remote conversion.
-3. Use the outline, citations, figure/table previews, source links, and Zotero
-   notes panel to navigate the document.
+3. Use the outline, find, citations, figure/table previews, source links, and
+   Zotero notes panel to navigate the document.
 4. Use the reader toolbar to adjust typography, switch reading mode, translate,
    correct recognition errors, save a snapshot, or export Markdown.
 

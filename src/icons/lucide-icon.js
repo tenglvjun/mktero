@@ -11,6 +11,7 @@ import {
     Download,
     ExternalLink,
     FileText,
+    GalleryThumbnails,
     Languages,
     LoaderCircle,
     MessageSquarePlus,
@@ -20,6 +21,7 @@ import {
     RefreshCw,
     RotateCcw,
     Save,
+    Search,
     Settings,
     Sparkles,
     Trash2,
@@ -92,6 +94,10 @@ export const LUCIDE_ICONS = Object.freeze({
         name: 'file-text',
         nodes: FileText,
     }),
+    galleryThumbnails: Object.freeze({
+        name: 'gallery-thumbnails',
+        nodes: GalleryThumbnails,
+    }),
     github: Object.freeze({
         name: 'github',
         nodes: Object.freeze([
@@ -117,6 +123,45 @@ export const LUCIDE_ICONS = Object.freeze({
         name: 'message-square-text',
         nodes: MessageSquareText,
     }),
+    mktero: Object.freeze({
+        name: 'mktero',
+        viewBox: '0 0 16 16',
+        nodes: Object.freeze([
+            Object.freeze([
+                'rect',
+                Object.freeze({
+                    x: '1.25',
+                    y: '2.25',
+                    width: '13.5',
+                    height: '11.5',
+                    rx: '2.25',
+                    fill: '#F4F7FC',
+                    stroke: '#4072E5',
+                    'stroke-width': '1.5',
+                }),
+            ]),
+            Object.freeze([
+                'path',
+                Object.freeze({
+                    d: 'M3.5 10.5V5.75L5.75 8L8 5.75V10.5',
+                    stroke: '#4072E5',
+                    'stroke-width': '1.45',
+                    'stroke-linecap': 'round',
+                    'stroke-linejoin': 'round',
+                }),
+            ]),
+            Object.freeze([
+                'path',
+                Object.freeze({
+                    d: 'M11.25 5.75V10.25M9.5 8.5L11.25 10.25L13 8.5',
+                    stroke: '#4072E5',
+                    'stroke-width': '1.45',
+                    'stroke-linecap': 'round',
+                    'stroke-linejoin': 'round',
+                }),
+            ]),
+        ]),
+    }),
     messageSquarePlus: Object.freeze({
         name: 'message-square-plus',
         nodes: MessageSquarePlus,
@@ -140,6 +185,10 @@ export const LUCIDE_ICONS = Object.freeze({
     save: Object.freeze({
         name: 'save',
         nodes: Save,
+    }),
+    search: Object.freeze({
+        name: 'search',
+        nodes: Search,
     }),
     settings: Object.freeze({
         name: 'settings',
@@ -185,6 +234,7 @@ export function createLucideIcon(
         .join(' ');
     const svg = createSvgElement(document, 'svg', {
         ...DEFAULT_ATTRIBUTES,
+        ...(icon.viewBox ? { viewBox: icon.viewBox } : {}),
         width: String(size),
         height: String(size),
         class: classes,

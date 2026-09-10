@@ -5,6 +5,9 @@ export const MARKDOWN_READER_FONT_SIZE_MIN = 16;
 export const MARKDOWN_READER_FONT_SIZE_MAX = 22;
 export const MARKDOWN_READER_FONT_PREF = 'extensions.mktero.readerFont';
 export const MARKDOWN_READER_FONT_DEFAULT = 'system-serif';
+export const MARKDOWN_READER_SOURCE_PEEK_PREF
+    = 'extensions.mktero.readerSourcePeek';
+export const MARKDOWN_READER_SOURCE_PEEK_DEFAULT = true;
 export const MARKDOWN_READER_FONT_OPTIONS = Object.freeze([
     Object.freeze({
         value: 'system-serif',
@@ -103,4 +106,35 @@ export function getMarkdownReaderFontFamily(value) {
     return MARKDOWN_READER_FONT_OPTIONS.find(option => (
         option.value === normalized
     )).family;
+}
+
+export function getMarkdownReaderSourcePeek(zotero) {
+    return normalizeMarkdownReaderSourcePeek(
+        zotero?.Prefs?.get?.(MARKDOWN_READER_SOURCE_PEEK_PREF, true)
+    );
+}
+
+export function setMarkdownReaderSourcePeek(zotero, value) {
+    const normalized = normalizeMarkdownReaderSourcePeek(value);
+    zotero?.Prefs?.set?.(MARKDOWN_READER_SOURCE_PEEK_PREF, normalized, true);
+    return normalized;
+}
+
+export function observeMarkdownReaderSourcePeek(zotero, onChange) {
+    if (typeof zotero?.Prefs?.registerObserver !== 'function'
+        || typeof onChange !== 'function') {
+        return () => {};
+    }
+    const observer = zotero.Prefs.registerObserver(
+        MARKDOWN_READER_SOURCE_PEEK_PREF,
+        value => onChange(normalizeMarkdownReaderSourcePeek(value)),
+        true
+    );
+    return () => zotero.Prefs.unregisterObserver?.(observer);
+}
+
+export function normalizeMarkdownReaderSourcePeek(value) {
+    if (value === false || value === 0 || value === 'false') return false;
+    if (value === true || value === 1 || value === 'true') return true;
+    return MARKDOWN_READER_SOURCE_PEEK_DEFAULT;
 }

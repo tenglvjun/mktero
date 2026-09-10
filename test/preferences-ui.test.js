@@ -156,11 +156,12 @@ test('configures the Markdown reader font size from preferences', async () => {
         <section id="mktero-preferences-pane">
             <input id="mktero-reader-font-size" type="range" min="16" max="22">
             <output id="mktero-reader-font-size-value"></output>
-            <select id="mktero-reader-font-family">
+             <select id="mktero-reader-font-family">
                 <option value="system-serif">System serif</option>
                 <option value="georgia">Georgia</option>
                 <option value="cambria">Cambria</option>
             </select>
+            <input id="mktero-reader-source-peek" type="checkbox">
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
         </section>
@@ -203,6 +204,12 @@ test('configures the Markdown reader font size from preferences', async () => {
     assert.equal(font.value, 'system-serif');
     font.value = 'cambria';
     font.dispatchEvent(new dom.window.Event('change'));
+    const sourcePeek = dom.window.document.getElementById(
+        'mktero-reader-source-peek'
+    );
+    assert.equal(sourcePeek.checked, true);
+    sourcePeek.checked = false;
+    sourcePeek.dispatchEvent(new dom.window.Event('change'));
     assert.deepEqual(writes, [
         {
             key: 'extensions.mktero.readerFontSize',
@@ -214,6 +221,11 @@ test('configures the Markdown reader font size from preferences', async () => {
             value: 'cambria',
             global: true,
         },
+        {
+            key: 'extensions.mktero.readerSourcePeek',
+            value: false,
+            global: true,
+        },
     ]);
 
     controller.destroy();
@@ -221,7 +233,9 @@ test('configures the Markdown reader font size from preferences', async () => {
     input.dispatchEvent(new dom.window.Event('input'));
     font.value = 'georgia';
     font.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(writes.length, 2);
+    sourcePeek.checked = true;
+    sourcePeek.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(writes.length, 3);
 });
 
 test('switches one conversion API key field with the selected provider', async () => {

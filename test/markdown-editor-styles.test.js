@@ -799,6 +799,23 @@ test('styles citation popups and temporary reference highlights', () => {
         '.markdown-editor-host > .cm-editor .cm-mktero-reference-highlight'
     );
     assert.match(highlight, /animation:\s*mktero-reference-highlight 3s ease-out/);
+
+    const searchPanel = ruleBody('.markdown-document-search-panel');
+    assert.match(searchPanel, /position:\s*absolute/);
+    assert.match(searchPanel, /inset-block-start:\s*12px/);
+    assert.match(searchPanel, /inset-inline-end:\s*16px/);
+    assert.match(searchPanel, /background:\s*var\(--surface-raised\)/);
+    assert.match(searchPanel, /border:\s*1px solid var\(--border\)/);
+    assert.match(searchPanel, /border-radius:\s*var\(--radius-lg\)/);
+
+    const searchMatch = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-search-match'
+    );
+    assert.match(searchMatch, /background:\s*color-mix\(in srgb, var\(--warning\)/);
+    const activeSearchMatch = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-search-match.is-active'
+    );
+    assert.match(activeSearchMatch, /box-shadow:/);
 });
 
 test('styles the citation library picker like the reader font picker', () => {

@@ -77,6 +77,7 @@ function createViewHarness() {
                 destroyCalls: 0,
                 readerFontCalls: [],
                 readerFontSizeCalls: [],
+                readerSourcePeekCalls: [],
                 render(model) {
                     renderCalls.push({ ...model });
                 },
@@ -85,6 +86,9 @@ function createViewHarness() {
                 },
                 setReaderFont(font) {
                     this.readerFontCalls.push(font);
+                },
+                setReaderSourcePeek(enabled) {
+                    this.readerSourcePeekCalls.push(enabled);
                 },
                 destroy() {
                     this.destroyCalls++;
@@ -285,6 +289,7 @@ test('persists reader font size changes across Markdown tabs and sessions', () =
     assert.deepEqual(unregisteredObservers, [
         'extensions.mktero.readerFont-observer',
         'extensions.mktero.readerFontSize-observer',
+        'extensions.mktero.readerSourcePeek-observer',
     ]);
     const nextHarness = createViewHarness();
     const nextPresenter = createPresenter(
@@ -347,6 +352,7 @@ test('persists reader font changes across Markdown tabs and sessions', () => {
     assert.deepEqual(unregisteredObservers, [
         'extensions.mktero.readerFont-observer',
         'extensions.mktero.readerFontSize-observer',
+        'extensions.mktero.readerSourcePeek-observer',
     ]);
 });
 
@@ -381,6 +387,9 @@ test('synchronizes reader typography across Zotero windows and cleans up', () =>
     preferenceObservers.get('extensions.mktero.readerFontSize')(20);
     assert.deepEqual(first.view.readerFontSizeCalls, [20]);
     assert.deepEqual(second.view.readerFontSizeCalls, [20]);
+    preferenceObservers.get('extensions.mktero.readerSourcePeek')(false);
+    assert.deepEqual(first.view.readerSourcePeekCalls, [false]);
+    assert.deepEqual(second.view.readerSourcePeekCalls, [false]);
 
     presenter.dispose();
     assert.deepEqual(firstWindow.closed, [first.tabID]);
@@ -388,6 +397,7 @@ test('synchronizes reader typography across Zotero windows and cleans up', () =>
     assert.deepEqual(unregisteredObservers, [
         'multi-window-extensions.mktero.readerFont-observer',
         'multi-window-extensions.mktero.readerFontSize-observer',
+        'multi-window-extensions.mktero.readerSourcePeek-observer',
     ]);
 });
 

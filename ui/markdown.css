@@ -942,6 +942,7 @@ main {
 
 .markdown-reading-layout {
     display: flex;
+    position: relative;
     width: 100%;
     min-width: 0;
     min-height: 0;
@@ -1739,6 +1740,128 @@ main {
 
 .markdown-reader-font-family {
     flex: 0 1 auto;
+}
+
+.markdown-document-search-toggle,
+.markdown-source-peek-toggle,
+.markdown-document-search-button {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    background: transparent;
+    cursor: pointer;
+}
+
+.markdown-document-search-toggle:hover {
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.markdown-document-search-toggle:focus-visible,
+.markdown-source-peek-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
+}
+
+.markdown-document-search-toggle[aria-expanded='true'],
+.markdown-source-peek-toggle[aria-pressed='true'] {
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.markdown-source-peek-toggle[aria-pressed='true'] {
+    color: var(--accent-strong);
+}
+
+.markdown-source-peek-toggle[aria-pressed='false'] {
+    border-color: transparent;
+    background: transparent;
+}
+
+.markdown-document-search-panel {
+    display: flex;
+    position: absolute;
+    z-index: 12;
+    inset-block-start: 12px;
+    inset-inline-end: 16px;
+    min-width: 0;
+    height: 40px;
+    align-items: center;
+    gap: 2px;
+    padding: 0 4px 0 12px;
+    color: var(--text);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-float);
+    font: 13px/1.3 var(--ui-font);
+}
+
+.markdown-document-search-input {
+    width: 9.5rem;
+    min-width: 6rem;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    appearance: none;
+}
+
+.markdown-document-search-input::placeholder {
+    color: var(--muted);
+}
+
+.markdown-document-search-input::-webkit-search-decoration,
+.markdown-document-search-input::-webkit-search-cancel-button {
+    appearance: none;
+}
+
+.markdown-document-search-input:focus {
+    outline: none;
+}
+
+.markdown-document-search-count {
+    min-width: 2.75rem;
+    margin-inline: 6px 4px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+    white-space: nowrap;
+}
+
+.markdown-document-search-divider {
+    width: 1px;
+    height: 16px;
+    margin-inline: 4px;
+    background: var(--border);
+}
+
+.markdown-document-search-button {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+}
+
+.markdown-document-search-button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.markdown-document-search-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 0;
+}
+
+.markdown-document-search-button:disabled {
+    opacity: 0.38;
+    cursor: default;
 }
 
 .markdown-reader-font-controls {
@@ -2545,6 +2668,18 @@ main {
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
     animation: mktero-reference-highlight 3s ease-out;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-search-match {
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--warning) 34%, transparent);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-search-match.is-active {
+    background: color-mix(in srgb, var(--warning) 58%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 40%, transparent);
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation {

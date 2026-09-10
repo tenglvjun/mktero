@@ -13,7 +13,6 @@ export function registerReaderToolbar({
     zotero,
     pluginID,
     onOpen,
-    onOpenCitationGraph = null,
     onPDFReaderAvailable = null,
     onError = defaultErrorHandler,
     translate = translateEnglish,
@@ -49,23 +48,10 @@ export function registerReaderToolbar({
                 doc,
                 reader,
                 className: 'mktero-markdown-button',
-                icon: LUCIDE_ICONS.fileText,
+                icon: LUCIDE_ICONS.mktero,
                 title: translate('toolbar.openMarkdown'),
                 ariaLabel: translate('toolbar.openMarkdownAria'),
                 onClick: () => onOpen(reader),
-                onError,
-            }));
-        }
-        if (typeof onOpenCitationGraph === 'function'
-            && !doc.querySelector?.(GRAPH_BUTTON_SELECTOR)) {
-            append(createToolbarButton({
-                doc,
-                reader,
-                className: 'mktero-citation-graph-button',
-                icon: LUCIDE_ICONS.network,
-                title: translate('toolbar.openCitationGraph'),
-                ariaLabel: translate('toolbar.openCitationGraphAria'),
-                onClick: () => onOpenCitationGraph(reader),
                 onError,
             }));
         }

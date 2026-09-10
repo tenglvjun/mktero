@@ -27,8 +27,10 @@ import {
     MARKDOWN_READER_FONT_SIZE_DEFAULT as DEFAULT_READER_FONT_SIZE,
     MARKDOWN_READER_FONT_SIZE_MAX as MAX_READER_FONT_SIZE,
     MARKDOWN_READER_FONT_SIZE_MIN as MIN_READER_FONT_SIZE,
+    MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
     normalizeMarkdownReaderFont,
     normalizeMarkdownReaderFontSize,
+    normalizeMarkdownReaderSourcePeek,
 } from '../config/reader-preferences.js';
 import {
     accessibleAnnotationText,
@@ -40,6 +42,7 @@ import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
 import {
     visibleDocumentChromeRanges,
 } from '../markdown/chrome-ranges.js';
+import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
 import {
     createMarkdownFragmentID,
     createMarkdownFragmentIndex,
@@ -199,6 +202,8 @@ export function createMarkdownTabView({
     readerFontSize = DEFAULT_READER_FONT_SIZE,
     onReaderFontChange = null,
     onReaderFontSizeChange = null,
+    readerSourcePeek = MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
+    onReaderSourcePeekChange = null,
     sourcePeekDelay = SOURCE_PEEK_DELAY_MS,
 }) {
     return new MarkdownTabView({
@@ -212,6 +217,8 @@ export function createMarkdownTabView({
         readerFontSize,
         onReaderFontChange,
         onReaderFontSizeChange,
+        readerSourcePeek,
+        onReaderSourcePeekChange,
         sourcePeekDelay,
     });
 }
@@ -228,6 +235,8 @@ class MarkdownTabView {
         readerFontSize,
         onReaderFontChange,
         onReaderFontSizeChange,
+        readerSourcePeek,
+        onReaderSourcePeekChange,
         sourcePeekDelay,
     }) {
         this.localization = localization;
@@ -247,6 +256,10 @@ class MarkdownTabView {
         this.readerFontSize = normalizeMarkdownReaderFontSize(readerFontSize);
         this.onReaderFontChange = onReaderFontChange;
         this.onReaderFontSizeChange = onReaderFontSizeChange;
+        this.readerSourcePeek = normalizeMarkdownReaderSourcePeek(
+            readerSourcePeek
+        );
+        this.onReaderSourcePeekChange = onReaderSourcePeekChange;
         this.sourcePeekDelay = Number.isFinite(sourcePeekDelay)
             ? Math.max(0, sourcePeekDelay)
             : SOURCE_PEEK_DELAY_MS;
@@ -289,6 +302,12 @@ class MarkdownTabView {
         this.outlineSourceRanges = null;
         this.outlineChromeRanges = [];
         this.outlinePdfOutline = [];
+        this.renderedChromeRanges = [];
+        this.documentSearchOpen = false;
+        this.documentSearchQuery = '';
+        this.documentSearchComposing = false;
+        this.documentSearchResult = { matches: [], truncated: false };
+        this.documentSearchActiveIndex = -1;
         this.activeTranslationFailureID = null;
         this.listeners = [];
         this.sidePanels = Object.fromEntries(
@@ -337,6 +356,7 @@ class MarkdownTabView {
         });
         this.setReaderFont(this.readerFont);
         this.setReaderFontSize(this.readerFontSize);
+        this.syncSourcePeekToggle();
         this.editor = editorFactory({
             document: this.document,
             parent: this.elements.editorHost,
@@ -479,6 +499,7 @@ class MarkdownTabView {
                     sourceMap: [],
                 });
                 this.renderedMarkdown = '';
+                this.renderedChromeRanges = [];
                 elements.readingLayout.classList.remove('is-comparing');
                 this.renderedRenderMode = 'markdown';
                 this.renderedTranslationBlockRanges = [];
@@ -487,6 +508,7 @@ class MarkdownTabView {
                 this.syncNotes(createEmptyAnnotationOverlay(), 0);
                 this.renderedSourceMap = [];
                 this.hideSourcePeek();
+                this.closeDocumentSearch({ restoreFocus: false });
             }
             this.editor.setCorrectionState?.({
                 enabled: false,
@@ -501,6 +523,7 @@ class MarkdownTabView {
                 elements.readingLayout.hidden = true;
                 elements.snapshotHost.hidden = false;
                 this.renderedMarkdown = undefined;
+                this.renderedChromeRanges = [];
                 elements.readingLayout.classList.remove('is-comparing');
                 this.renderedRenderMode = 'html';
                 this.renderedTranslationBlockRanges = [];
@@ -510,6 +533,7 @@ class MarkdownTabView {
                 this.syncNotes(createEmptyAnnotationOverlay(), 0);
                 this.renderedSourceMap = [];
                 this.hideSourcePeek();
+                this.closeDocumentSearch({ restoreFocus: false });
                 this.editor.setCorrectionState?.({ enabled: false });
                 return;
             }
@@ -589,18 +613,20 @@ class MarkdownTabView {
                 model.chromeRanges,
                 model.title
             );
+            const editorChromeRanges = translatedView
+                ? []
+                : comparisonView
+                    ? mapChromeRangesToComparison(
+                        sourceChromeRanges,
+                        model.translationBlockRanges
+                    )
+                    : sourceChromeRanges;
+            this.renderedChromeRanges = editorChromeRanges;
             this.editor.setDocument({
                 markdown,
                 annotationOverlay,
                 sourceMap,
-                chromeRanges: translatedView
-                    ? []
-                    : comparisonView
-                        ? mapChromeRangesToComparison(
-                            sourceChromeRanges,
-                            model.translationBlockRanges
-                        )
-                        : sourceChromeRanges,
+                chromeRanges: editorChromeRanges,
                 sourceActionRanges: translatedView
                     ? []
                     : comparisonView
@@ -682,6 +708,12 @@ class MarkdownTabView {
                 this.restoreReadingPosition(
                     resolveMarkdownReadingPosition(markdown, restoreAnchor)
                 );
+            }
+            if (this.documentSearchOpen) {
+                this.runDocumentSearch({
+                    keepIndex: true,
+                    reveal: false,
+                });
             }
             return;
         }
@@ -1145,6 +1177,7 @@ class MarkdownTabView {
         });
         snapshotHost.hidden = true;
         const documentActions = this.createDocumentActions();
+        readingLayout.appendChild(documentActions.documentSearchPanel);
         const correctionBanner = this.createElement('div', {
             class: 'markdown-correction-banner',
             role: 'status',
@@ -1383,7 +1416,106 @@ class MarkdownTabView {
             readerFontTrigger: documentActions.readerFontTrigger,
             readerFontCurrent: documentActions.readerFontCurrent,
             readerFontOptions: documentActions.readerFontOptions,
+            documentSearchToggle: documentActions.documentSearchToggle,
+            sourcePeekToggle: documentActions.sourcePeekToggle,
+            documentSearchPanel: documentActions.documentSearchPanel,
+            documentSearchInput: documentActions.documentSearchInput,
+            documentSearchCount: documentActions.documentSearchCount,
+            documentSearchPrevious: documentActions.documentSearchPrevious,
+            documentSearchNext: documentActions.documentSearchNext,
+            documentSearchClose: documentActions.documentSearchClose,
             actionStatus: documentActions.status,
+        };
+    }
+
+    createDocumentSearchControls() {
+        const toggle = this.createElement('button', {
+            id: 'mktero-document-search-toggle',
+            class: 'markdown-document-search-toggle',
+            type: 'button',
+            'aria-expanded': 'false',
+            'aria-controls': 'mktero-document-search-panel',
+            'aria-label': this.t('viewer.find'),
+            title: this.t('viewer.find'),
+        });
+        toggle.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.search,
+            {
+                className: 'markdown-document-search-icon',
+                size: 16,
+            }
+        ));
+        const input = this.createElement('input', {
+            id: 'mktero-document-search-input',
+            class: 'markdown-document-search-input',
+            type: 'search',
+            'aria-label': this.t('viewer.find'),
+            placeholder: this.t('viewer.findPlaceholder'),
+            autocomplete: 'off',
+            autocorrect: 'off',
+            spellcheck: 'false',
+        });
+        const count = this.createElement('span', {
+            class: 'markdown-document-search-count',
+            role: 'status',
+            'aria-live': 'polite',
+            'aria-atomic': 'true',
+        });
+        const previous = this.createElement('button', {
+            class: 'markdown-document-search-button',
+            type: 'button',
+            'aria-label': this.t('viewer.findPrevious'),
+            title: this.t('viewer.findPrevious'),
+        });
+        previous.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.chevronUp,
+            { size: 16 }
+        ));
+        const next = this.createElement('button', {
+            class: 'markdown-document-search-button',
+            type: 'button',
+            'aria-label': this.t('viewer.findNext'),
+            title: this.t('viewer.findNext'),
+        });
+        next.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.chevronDown,
+            { size: 16 }
+        ));
+        const close = this.createElement('button', {
+            class: 'markdown-document-search-button',
+            type: 'button',
+            'aria-label': this.t('viewer.findClose'),
+            title: this.t('viewer.findClose'),
+        });
+        close.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.x,
+            { size: 16 }
+        ));
+        const divider = this.createElement('span', {
+            class: 'markdown-document-search-divider',
+            role: 'separator',
+            'aria-orientation': 'vertical',
+        });
+        const panel = this.createElement('div', {
+            id: 'mktero-document-search-panel',
+            class: 'markdown-document-search-panel',
+            role: 'search',
+            'aria-label': this.t('viewer.find'),
+        });
+        panel.hidden = true;
+        appendChildren(panel, input, count, divider, previous, next, close);
+        return {
+            documentSearchToggle: toggle,
+            documentSearchPanel: panel,
+            documentSearchInput: input,
+            documentSearchCount: count,
+            documentSearchPrevious: previous,
+            documentSearchNext: next,
+            documentSearchClose: close,
         };
     }
 
@@ -1509,10 +1641,33 @@ class MarkdownTabView {
             'aria-label': this.t('viewer.textFont'),
         });
         readerFontFamily.appendChild(readerFontPicker);
+        const documentSearchControls = this.createDocumentSearchControls();
         const readerControls = this.createElement('div', {
             class: 'markdown-reader-controls',
         });
-        appendChildren(readerControls, readerFontSize, readerFontFamily);
+        const sourcePeekToggle = this.createElement('button', {
+            id: 'mktero-source-peek-toggle',
+            class: 'markdown-source-peek-toggle',
+            type: 'button',
+            'aria-pressed': 'true',
+            'aria-label': this.t('viewer.sourcePeekToggle'),
+            title: this.t('viewer.sourcePeekToggle'),
+        });
+        sourcePeekToggle.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.galleryThumbnails,
+            {
+                className: 'markdown-source-peek-toggle-icon',
+                size: 16,
+            }
+        ));
+        appendChildren(
+            readerControls,
+            readerFontSize,
+            readerFontFamily,
+            sourcePeekToggle,
+            documentSearchControls.documentSearchToggle
+        );
         const correctionToggle = this.createElement('button', {
             id: 'mktero-correction-toggle',
             class: 'markdown-reader-action markdown-reader-action--child',
@@ -1874,6 +2029,8 @@ class MarkdownTabView {
             readerFontTrigger,
             readerFontCurrent,
             readerFontOptions,
+            ...documentSearchControls,
+            sourcePeekToggle,
             status,
         };
     }
@@ -1938,6 +2095,44 @@ class MarkdownTabView {
         this.listen(this.elements.navigationBack, 'click', () => {
             this.editor.returnToCitation?.();
         });
+        this.listen(this.elements.documentSearchToggle, 'click', () => {
+            if (this.documentSearchOpen) this.closeDocumentSearch();
+            else this.openDocumentSearch();
+        });
+        this.listen(this.elements.sourcePeekToggle, 'click', () => {
+            this.changeReaderSourcePeek(!this.readerSourcePeek);
+        });
+        this.listen(this.elements.documentSearchClose, 'click', () => {
+            this.closeDocumentSearch();
+        });
+        this.listen(this.elements.documentSearchPrevious, 'click', () => {
+            this.stepDocumentSearch(-1);
+        });
+        this.listen(this.elements.documentSearchNext, 'click', () => {
+            this.stepDocumentSearch(1);
+        });
+        this.listen(this.elements.documentSearchInput, 'input', () => {
+            if (this.documentSearchComposing) return;
+            this.onDocumentSearchQueryChange();
+        });
+        this.listen(this.elements.documentSearchInput, 'compositionstart', () => {
+            this.documentSearchComposing = true;
+        });
+        this.listen(this.elements.documentSearchInput, 'compositionend', () => {
+            this.documentSearchComposing = false;
+            this.onDocumentSearchQueryChange();
+        });
+        this.listen(this.elements.documentSearchInput, 'keydown', event => {
+            this.handleDocumentSearchInputKeydown(event);
+        });
+        this.listen(this.host, 'keydown', event => {
+            this.handleDocumentSearchShortcut(event);
+        }, true);
+        this.listen(this.ownerWindow, 'keydown', event => {
+            this.handleDocumentSearchShortcut(event, {
+                requireForeground: true,
+            });
+        }, true);
         this.listen(this.elements.actionToggle, 'click', () => {
             if (this.elements.actionToggle.disabled) return;
             this.setReaderFontOptionsOpen(false);
@@ -2111,6 +2306,11 @@ class MarkdownTabView {
                 event.preventDefault();
                 this.setDocumentActionsOpen(false);
                 this.elements.actionToggle.focus?.();
+                return;
+            }
+            if (event.key === 'Escape' && this.documentSearchOpen) {
+                event.preventDefault();
+                this.closeDocumentSearch();
             }
         });
         const closeDocumentActionsOnOutsidePress = event => {
@@ -3098,6 +3298,36 @@ class MarkdownTabView {
             = this.readerFontSize >= MAX_READER_FONT_SIZE;
     }
 
+    setReaderSourcePeek(enabled) {
+        const next = normalizeMarkdownReaderSourcePeek(enabled);
+        const changed = next !== this.readerSourcePeek;
+        this.readerSourcePeek = next;
+        this.syncSourcePeekToggle();
+        if (!changed) return;
+        if (next) this.scheduleSourcePeek();
+        else this.hideSourcePeek();
+    }
+
+    syncSourcePeekToggle() {
+        if (!this.elements?.sourcePeekToggle) return;
+        this.elements.sourcePeekToggle.setAttribute(
+            'aria-pressed',
+            String(this.readerSourcePeek)
+        );
+    }
+
+    changeReaderSourcePeek(enabled) {
+        const normalized = normalizeMarkdownReaderSourcePeek(enabled);
+        if (normalized === this.readerSourcePeek) return;
+        this.setReaderSourcePeek(normalized);
+        try {
+            this.onReaderSourcePeekChange?.(normalized);
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
+    }
+
     clearDocumentActionStatus() {
         if (this.actionStatusTimer !== null) {
             this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
@@ -3179,6 +3409,189 @@ class MarkdownTabView {
         this.listeners.push({ element, type, listener, options });
     }
 
+    handleDocumentSearchShortcut(event, { requireForeground = false } = {}) {
+        if (this.destroyed || event.isComposing) return;
+        if (requireForeground && !this.isMarkdownTabForeground()) return;
+        if (isDocumentSearchOpenShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.openDocumentSearch();
+            return;
+        }
+        if (!this.documentSearchOpen) return;
+        if (isDocumentSearchNextShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.stepDocumentSearch(1);
+            return;
+        }
+        if (isDocumentSearchPreviousShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.stepDocumentSearch(-1);
+            return;
+        }
+        if (event.key === 'Escape' && !this.hasOpenReaderMenu()) {
+            consumeDocumentSearchShortcut(event);
+            this.closeDocumentSearch();
+        }
+    }
+
+    isMarkdownTabForeground() {
+        if (!this.host?.isConnected || this.host.hidden || this.root?.hidden) {
+            return false;
+        }
+        try {
+            const rects = this.host.getClientRects?.() || [];
+            return [...rects].some(rect => (
+                Number(rect.width) > 0 && Number(rect.height) > 0
+            ));
+        }
+        catch {
+            return true;
+        }
+    }
+
+    handleDocumentSearchInputKeydown(event) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            this.stepDocumentSearch(event.shiftKey ? -1 : 1);
+        }
+    }
+
+    hasOpenReaderMenu() {
+        return this.translationLanguagesOpen
+            || this.readerFontOptionsOpen
+            || this.githubReposOpen
+            || this.documentActionsOpen;
+    }
+
+    openDocumentSearch() {
+        if (this.destroyed
+            || this.model.status !== 'ready'
+            || this.renderedRenderMode === 'html') {
+            return;
+        }
+        this.setDocumentActionsOpen(false);
+        this.setReaderFontOptionsOpen(false);
+        this.setTranslationLanguagesOpen(false);
+        this.setGitHubReposOpen(false);
+        this.documentSearchOpen = true;
+        this.syncDocumentSearch();
+        this.runDocumentSearch({
+            keepIndex: true,
+            reveal: false,
+        });
+        this.elements.documentSearchInput.focus?.();
+        this.elements.documentSearchInput.select?.();
+    }
+
+    closeDocumentSearch({ restoreFocus = true } = {}) {
+        const wasOpen = this.documentSearchOpen;
+        this.documentSearchOpen = false;
+        this.documentSearchComposing = false;
+        this.editor?.setDocumentSearchHighlights?.({
+            matches: [],
+            activeIndex: -1,
+        });
+        this.syncDocumentSearch();
+        if (wasOpen && restoreFocus) {
+            this.elements.documentSearchToggle.focus?.();
+        }
+    }
+
+    onDocumentSearchQueryChange() {
+        this.documentSearchQuery = String(
+            this.elements.documentSearchInput.value || ''
+        );
+        this.runDocumentSearch({
+            keepIndex: false,
+            reveal: true,
+        });
+    }
+
+    runDocumentSearch({ keepIndex = false, reveal = true } = {}) {
+        const result = searchMarkdownDocument(
+            this.renderedMarkdown || '',
+            this.documentSearchQuery,
+            { chromeRanges: this.renderedChromeRanges }
+        );
+        this.documentSearchResult = result;
+        if (!result.matches.length) {
+            this.documentSearchActiveIndex = -1;
+        }
+        else if (keepIndex && this.documentSearchActiveIndex >= 0) {
+            this.documentSearchActiveIndex = Math.min(
+                this.documentSearchActiveIndex,
+                result.matches.length - 1
+            );
+        }
+        else {
+            this.documentSearchActiveIndex = 0;
+        }
+        this.syncDocumentSearch();
+        this.editor?.setDocumentSearchHighlights?.({
+            matches: result.matches,
+            activeIndex: this.documentSearchActiveIndex,
+        });
+        const active = result.matches[this.documentSearchActiveIndex];
+        if (reveal && active) {
+            this.editor?.scrollToOffset?.(active.from);
+        }
+    }
+
+    stepDocumentSearch(direction) {
+        const matches = this.documentSearchResult.matches;
+        if (!this.documentSearchOpen || !matches.length) return;
+        const count = matches.length;
+        const current = this.documentSearchActiveIndex < 0
+            ? (direction > 0 ? -1 : 0)
+            : this.documentSearchActiveIndex;
+        this.documentSearchActiveIndex = (current + direction + count) % count;
+        this.syncDocumentSearch();
+        this.editor?.setDocumentSearchHighlights?.({
+            matches,
+            activeIndex: this.documentSearchActiveIndex,
+        });
+        this.editor?.scrollToOffset?.(
+            matches[this.documentSearchActiveIndex].from
+        );
+    }
+
+    syncDocumentSearch() {
+        const open = this.documentSearchOpen;
+        this.elements.documentSearchPanel.hidden = !open;
+        this.elements.documentSearchToggle.setAttribute(
+            'aria-expanded',
+            String(open)
+        );
+        this.elements.documentSearchPrevious.disabled = !this.documentSearchResult
+            .matches.length;
+        this.elements.documentSearchNext.disabled = !this.documentSearchResult
+            .matches.length;
+        if (!open) return;
+        if (this.elements.documentSearchInput.value !== this.documentSearchQuery) {
+            this.elements.documentSearchInput.value = this.documentSearchQuery;
+        }
+        const total = this.documentSearchResult.matches.length;
+        const current = this.documentSearchActiveIndex >= 0
+            ? this.documentSearchActiveIndex + 1
+            : 0;
+        if (!this.documentSearchQuery) {
+            this.elements.documentSearchCount.textContent = '';
+            return;
+        }
+        if (!total) {
+            this.elements.documentSearchCount.textContent = this.t(
+                'viewer.findNone'
+            );
+            return;
+        }
+        this.elements.documentSearchCount.textContent = this.t(
+            this.documentSearchResult.truncated
+                ? 'viewer.findCountTruncated'
+                : 'viewer.findCount',
+            { current, total }
+        );
+    }
+
     syncContentVisibility(visible) {
         this.elements.workspace.hidden = !visible;
     }
@@ -3197,6 +3610,58 @@ class MarkdownTabView {
         this.elements.editorActions.setAttribute(
             'aria-label',
             this.t('viewer.toolbar')
+        );
+        this.elements.documentSearchToggle.setAttribute(
+            'aria-label',
+            this.t('viewer.find')
+        );
+        this.elements.documentSearchToggle.setAttribute(
+            'title',
+            this.t('viewer.find')
+        );
+        this.elements.sourcePeekToggle.setAttribute(
+            'aria-label',
+            this.t('viewer.sourcePeekToggle')
+        );
+        this.elements.sourcePeekToggle.setAttribute(
+            'title',
+            this.t('viewer.sourcePeekToggle')
+        );
+        this.elements.documentSearchPanel.setAttribute(
+            'aria-label',
+            this.t('viewer.find')
+        );
+        this.elements.documentSearchInput.setAttribute(
+            'aria-label',
+            this.t('viewer.find')
+        );
+        this.elements.documentSearchInput.setAttribute(
+            'placeholder',
+            this.t('viewer.findPlaceholder')
+        );
+        this.elements.documentSearchPrevious.setAttribute(
+            'aria-label',
+            this.t('viewer.findPrevious')
+        );
+        this.elements.documentSearchPrevious.setAttribute(
+            'title',
+            this.t('viewer.findPrevious')
+        );
+        this.elements.documentSearchNext.setAttribute(
+            'aria-label',
+            this.t('viewer.findNext')
+        );
+        this.elements.documentSearchNext.setAttribute(
+            'title',
+            this.t('viewer.findNext')
+        );
+        this.elements.documentSearchClose.setAttribute(
+            'aria-label',
+            this.t('viewer.findClose')
+        );
+        this.elements.documentSearchClose.setAttribute(
+            'title',
+            this.t('viewer.findClose')
         );
         this.elements.navigationBack.setAttribute(
             'aria-label',
@@ -3425,6 +3890,7 @@ class MarkdownTabView {
         }
         this.setReaderFont(this.readerFont);
         this.setReaderFontSize(this.readerFontSize);
+        this.syncSourcePeekToggle();
         this.elements.outline.setAttribute('aria-label', this.t('viewer.outline'));
         this.elements.outlineTitleLabel.textContent = this.t(
             'viewer.outlineTitle'
@@ -4509,7 +4975,8 @@ class MarkdownTabView {
 
     scheduleSourcePeek() {
         if (this.destroyed) return;
-        if (typeof this.model.onRenderSourcePeek !== 'function') {
+        if (!this.readerSourcePeek
+            || typeof this.model.onRenderSourcePeek !== 'function') {
             this.hideSourcePeek();
             return;
         }
@@ -5410,4 +5877,32 @@ function isSafeSnapshotLinkURL(value) {
     return /^https?:\/\//i.test(source)
         || /^zotero:\/\//i.test(source)
         || source.startsWith('#');
+}
+
+function consumeDocumentSearchShortcut(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+}
+
+function isDocumentSearchOpenShortcut(event) {
+    return isModifiedKey(event, 'f') && !event.shiftKey;
+}
+
+function isDocumentSearchNextShortcut(event) {
+    return (event.key === 'F3' && !event.shiftKey)
+        || isModifiedKey(event, 'g') && !event.shiftKey;
+}
+
+function isDocumentSearchPreviousShortcut(event) {
+    return (event.key === 'F3' && event.shiftKey)
+        || isModifiedKey(event, 'g') && event.shiftKey;
+}
+
+function isModifiedKey(event, key) {
+    const eventKey = String(event.key || '').toLowerCase();
+    const code = String(event.code || '').toLowerCase();
+    return (eventKey === key || code === `key${key}`)
+        && (event.metaKey || event.ctrlKey)
+        && !event.altKey;
 }

@@ -58,6 +58,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         prefs,
         /pref\("extensions\.mktero\.readerFont", "system-serif"\)/
     );
+    assert.match(prefs, /pref\("extensions\.mktero\.readerSourcePeek", true\)/);
     assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
     assert.doesNotMatch(pane, /id="mktero-language"/);
     assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
@@ -87,6 +88,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.doesNotMatch(pane, /id="mktero-citation-section"/);
     assert.match(pane, /preference="extensions\.mktero\.readerFontSize"/);
     assert.match(pane, /preference="extensions\.mktero\.readerFont"/);
+    assert.match(pane, /preference="extensions\.mktero\.readerSourcePeek"/);
     assert.match(pane, /preference="extensions\.mktero\.aiEnabled"/);
     assert.match(pane, /preference="extensions\.mktero\.aiProvider"/);
     assert.match(pane, /preference="extensions\.mktero\.aiProtocol"/);
@@ -171,9 +173,9 @@ test('ships responsive settings cards and a cache switch', async () => {
     ]);
 
     assert.match(pane, /class="mktero-settings-card"/);
-    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 4);
-    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 4);
-    assert.equal((pane.match(/role="switch"/g) || []).length, 4);
+    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 5);
+    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 5);
+    assert.equal((pane.match(/role="switch"/g) || []).length, 5);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionLabel"/);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionHelp"/);
     assert.match(pane, /id="mktero-ai-streaming"/);

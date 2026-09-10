@@ -4,12 +4,16 @@ import {
 import {
     getMarkdownReaderFont,
     getMarkdownReaderFontSize,
+    getMarkdownReaderSourcePeek,
     normalizeMarkdownReaderFont,
     normalizeMarkdownReaderFontSize,
+    normalizeMarkdownReaderSourcePeek,
     observeMarkdownReaderFont,
     observeMarkdownReaderFontSize,
+    observeMarkdownReaderSourcePeek,
     setMarkdownReaderFont,
     setMarkdownReaderFontSize,
+    setMarkdownReaderSourcePeek,
 } from '../config/reader-preferences.js';
 import { createLocalization } from '../i18n/localization.js';
 import { createMarkdownTabView } from './markdown-window.js';
@@ -43,6 +47,7 @@ export class MarkdownTabPresenter {
         this.localization = localization;
         this.readerFont = getMarkdownReaderFont(zotero);
         this.readerFontSize = getMarkdownReaderFontSize(zotero);
+        this.readerSourcePeek = getMarkdownReaderSourcePeek(zotero);
         this.presentations = new Map();
         this.disposeReaderFontObserver = observeMarkdownReaderFont(
             zotero,
@@ -51,6 +56,10 @@ export class MarkdownTabPresenter {
         this.disposeReaderFontSizeObserver = observeMarkdownReaderFontSize(
             zotero,
             size => this.applyReaderFontSize(size)
+        );
+        this.disposeReaderSourcePeekObserver = observeMarkdownReaderSourcePeek(
+            zotero,
+            enabled => this.applyReaderSourcePeek(enabled)
         );
         this.sessionStateTabs = null;
         this.disposeSessionStateFilter = null;
@@ -293,6 +302,10 @@ export class MarkdownTabPresenter {
             readerFontSize: this.readerFontSize,
             onReaderFontChange: font => this.updateReaderFont(font),
             onReaderFontSizeChange: size => this.updateReaderFontSize(size),
+            readerSourcePeek: this.readerSourcePeek,
+            onReaderSourcePeekChange: enabled => (
+                this.updateReaderSourcePeek(enabled)
+            ),
         });
         view.render(model);
         this.closeForSourceItem(sourceItemID, {
@@ -414,6 +427,27 @@ export class MarkdownTabPresenter {
         }
     }
 
+    updateReaderSourcePeek(enabled) {
+        const normalized = normalizeMarkdownReaderSourcePeek(enabled);
+        try {
+            setMarkdownReaderSourcePeek(this.zotero, normalized);
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+        }
+        this.applyReaderSourcePeek(normalized);
+        return normalized;
+    }
+
+    applyReaderSourcePeek(enabled) {
+        const normalized = normalizeMarkdownReaderSourcePeek(enabled);
+        if (normalized === this.readerSourcePeek) return;
+        this.readerSourcePeek = normalized;
+        for (const presentation of this.presentations.values()) {
+            presentation.view.setReaderSourcePeek?.(normalized);
+        }
+    }
+
     getForSourceItem(sourceItemID) {
         if (sourceItemID === null || sourceItemID === undefined) return null;
         const sourceKey = String(sourceItemID);
@@ -458,6 +492,8 @@ export class MarkdownTabPresenter {
         this.disposeReaderFontObserver = null;
         this.disposeReaderFontSizeObserver?.();
         this.disposeReaderFontSizeObserver = null;
+        this.disposeReaderSourcePeekObserver?.();
+        this.disposeReaderSourcePeekObserver = null;
         this.closeAll({ reason: MARKDOWN_TAB_CLOSE_REASONS.SHUTDOWN });
         this.restoreSessionStateFilter();
         this.tabIconStyle?.remove?.();

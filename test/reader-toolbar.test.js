@@ -72,12 +72,12 @@ test('adds an action to PDF reader toolbars and opens that reader item', async (
     assert.equal(appended[0].children[0].tagName, 'svg');
     assert.equal(
         appended[0].children[0].attributes['data-lucide'],
-        'file-text'
+        'mktero'
     );
     assert.deepEqual(opened, [42]);
 });
 
-test('adds a separate citation graph action to PDF reader toolbars', async () => {
+test('does not add a citation graph action to PDF reader toolbars', () => {
     let handler;
     const zotero = {
         Reader: {
@@ -87,38 +87,26 @@ test('adds a separate citation graph action to PDF reader toolbars', async () =>
             unregisterEventListener() {},
         },
     };
-    const openedMarkdown = [];
-    const openedGraphs = [];
     registerReaderToolbar({
         zotero,
         pluginID: 'mktero@example.com',
-        onOpen: reader => openedMarkdown.push(reader.itemID),
-        onOpenCitationGraph: reader => openedGraphs.push(reader.itemID),
+        onOpen: () => {},
+        onOpenCitationGraph: () => {},
     });
     const appended = [];
-    const reader = { type: 'pdf', itemID: 42 };
 
     handler({
-        reader,
+        reader: { type: 'pdf', itemID: 42 },
         doc: createDocument(),
         append: element => appended.push(element),
     });
-    appended[0].click();
-    appended[1].click();
-    await Promise.resolve();
 
-    assert.equal(appended.length, 2);
+    assert.equal(appended.length, 1);
     assert.equal(appended[0].className.includes('mktero-markdown-button'), true);
     assert.equal(
-        appended[1].className.includes('mktero-citation-graph-button'),
-        true
+        appended[0].className.includes('mktero-citation-graph-button'),
+        false
     );
-    assert.equal(
-        appended[1].children[0].attributes['data-lucide'],
-        'network'
-    );
-    assert.deepEqual(openedMarkdown, [42]);
-    assert.deepEqual(openedGraphs, [42]);
 });
 
 test('synchronizes pending annotations when a PDF reader opens', async () => {
@@ -359,33 +347,26 @@ test('adds and removes the toolbar action without restarting Zotero', async () =
         zotero,
         pluginID: 'mktero@example.com',
         onOpen: async () => {},
-        onOpenCitationGraph: async () => {},
     });
     await Promise.resolve();
     await Promise.resolve();
 
     assert.ok(document.querySelector('.mktero-markdown-button'));
-    assert.ok(document.querySelector('.mktero-citation-graph-button'));
+    assert.equal(document.querySelector('.mktero-citation-graph-button'), null);
     toolbarHandler({
         reader,
         doc: document,
         append: element => document.querySelector('.custom-sections').append(element),
     });
     assert.equal(document.querySelectorAll('.mktero-markdown-button').length, 1);
-    assert.equal(
-        document.querySelectorAll('.mktero-citation-graph-button').length,
-        1
-    );
     dispose();
     assert.equal(document.querySelector('.mktero-markdown-button'), null);
-    assert.equal(document.querySelector('.mktero-citation-graph-button'), null);
     toolbarHandler({
         reader,
         doc: document,
         append: element => document.querySelector('.custom-sections').append(element),
     });
     assert.equal(document.querySelector('.mktero-markdown-button'), null);
-    assert.equal(document.querySelector('.mktero-citation-graph-button'), null);
     assert.deepEqual(cleanedPluginIDs, ['mktero@example.com']);
 });
 

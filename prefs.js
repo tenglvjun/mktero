@@ -4,6 +4,7 @@ pref("extensions.mktero.mistralApiKey", "");
 pref("extensions.mktero.cacheEnabled", true);
 pref("extensions.mktero.readerFontSize", 18);
 pref("extensions.mktero.readerFont", "system-serif");
+pref("extensions.mktero.readerSourcePeek", true);
 pref("extensions.mktero.aiEnabled", false);
 pref("extensions.mktero.aiProvider", "openai");
 pref("extensions.mktero.aiProtocol", "openai-responses");

@@ -28,8 +28,6 @@ export function registerItemContextMenu({
     menuItem.id = MENU_ITEM_ID;
     menuItem.hidden = true;
     menuItem.setAttribute('label', translate('menu.readAsMarkdown'));
-    menuItem.setAttribute('class', 'menuitem-iconic');
-    menuItem.setAttribute('image', `${rootURI}ui/icons/mktero.svg`);
 
     const handlePopupShowing = event => {
         if (event.target !== menu) return;
