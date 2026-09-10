@@ -45,6 +45,9 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         os.tmpdir(),
         'mktero-citation-bootstrap-'
     ));
+    const pdfPath = path.join(profilePath, 'paper.pdf');
+    const pdfData = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    await writeFile(pdfPath, pdfData);
     const ioUtils = createNodeIOUtils();
     const pathUtils = {
         join: path.join,
@@ -79,7 +82,11 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         id: 42,
         libraryID: 1,
         parentItem: parent,
+        attachmentFilename: 'paper.pdf',
         isPDFAttachment: () => true,
+        getDisplayTitle: () => 'Library paper',
+        getFilePathAsync: async () => pdfPath,
+        getAnnotations: () => [],
     };
     const items = new Map([[7, parent], [42, attachment]]);
     const preferences = new Map([
@@ -166,6 +173,18 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         await rm(profilePath, { recursive: true, force: true });
     });
 
+    const cacheKey = await createMinerUCacheKey(pdfData);
+    await createZoteroMarkdownCache({
+        zotero,
+        ioUtils,
+        pathUtils,
+    }).put(cacheKey, {
+        markdown: '# Library paper\n\nCached markdown.',
+        assets: [],
+        sourceMap: [],
+        extractedPages: 1,
+        totalPages: 1,
+    });
     await import('../src/bootstrap.js?citation-graph-lifecycle-regression');
     await globalThis.startup({
         id: 'mktero@tenglvjun.github.io',
@@ -181,8 +200,15 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         append: button => toolbarButtons.push(button),
     });
 
-    assert.equal(toolbarButtons.length, 2);
-    toolbarButtons[1].click();
+    assert.equal(toolbarButtons.length, 1);
+    toolbarButtons[0].click();
+    const markdownRoot = await waitFor(() => mainWindow.tabRoot('tab-1'));
+    const markdownShadow = markdownRoot.shadowRoot;
+    const graphButton = await waitFor(() => {
+        const button = markdownShadow.querySelector('#mktero-citation-graph');
+        return button && !button.hidden && !button.disabled ? button : null;
+    });
+    graphButton.click();
     const firstHost = await waitFor(() => mainWindow.document.querySelector(
         '.mktero-citation-graph-modal-host'
     ));
@@ -209,7 +235,8 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         null
     );
 
-    toolbarButtons[1].click();
+    await waitFor(() => !graphButton.disabled);
+    graphButton.click();
     await waitFor(() => mainWindow.document.querySelector(
         '.mktero-citation-graph-modal-host'
     ));
