@@ -55,7 +55,8 @@ Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
   tables in document order. Local figures and tables appear as
   thumbnails.
 - Keep reliable page and region mappings so text, formulas, tables, and figures
-  can jump back to their PDF source.
+  can jump back to their PDF source. The reader also shows a live PDF crop of
+  the current paragraph; click it to open that location in the PDF.
 - Preview citations, author affiliations, figures, and tables without losing
   the current reading position.
 - See whether each Markdown reference already exists in any accessible Zotero

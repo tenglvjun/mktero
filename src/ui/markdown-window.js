@@ -48,6 +48,10 @@ import {
     resolveMarkdownReadingPosition,
 } from '../markdown/markdown-outline.js';
 import {
+    selectSourcePeek,
+    sourcePeekKey,
+} from '../core/source-peek.js';
+import {
     extractMarkdownAssetOutline,
 } from '../markdown/markdown-asset-outline.js';
 import { appendRenderedMarkdown } from '../editor/rendered-markdown-dom.js';
@@ -86,6 +90,7 @@ const WARNING_TOAST_TIMEOUT_MS = 5_000;
 const CORRECTION_UNDO_TIMEOUT_MS = 8_000;
 const OUTLINE_SEGMENT_HEADINGS = 'headings';
 const OUTLINE_SEGMENT_FIGURES = 'figures';
+const SOURCE_PEEK_DELAY_MS = 80;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
@@ -194,6 +199,7 @@ export function createMarkdownTabView({
     readerFontSize = DEFAULT_READER_FONT_SIZE,
     onReaderFontChange = null,
     onReaderFontSizeChange = null,
+    sourcePeekDelay = SOURCE_PEEK_DELAY_MS,
 }) {
     return new MarkdownTabView({
         document,
@@ -206,6 +212,7 @@ export function createMarkdownTabView({
         readerFontSize,
         onReaderFontChange,
         onReaderFontSizeChange,
+        sourcePeekDelay,
     });
 }
 
@@ -221,6 +228,7 @@ class MarkdownTabView {
         readerFontSize,
         onReaderFontChange,
         onReaderFontSizeChange,
+        sourcePeekDelay,
     }) {
         this.localization = localization;
         this.t = localization.t.bind(localization);
@@ -239,6 +247,9 @@ class MarkdownTabView {
         this.readerFontSize = normalizeMarkdownReaderFontSize(readerFontSize);
         this.onReaderFontChange = onReaderFontChange;
         this.onReaderFontSizeChange = onReaderFontSizeChange;
+        this.sourcePeekDelay = Number.isFinite(sourcePeekDelay)
+            ? Math.max(0, sourcePeekDelay)
+            : SOURCE_PEEK_DELAY_MS;
         this.renderedAssets = undefined;
         this.assetURLs = new Map();
         this.renderedMarkdown = undefined;
@@ -267,6 +278,12 @@ class MarkdownTabView {
         this.translationLanguageSignature = '';
         this.translationReaderFonts = new Map();
         this.activeNavigationOffset = 0;
+        this.renderedSourceMap = [];
+        this.sourcePeekTimer = null;
+        this.sourcePeekMicrotask = false;
+        this.sourcePeekGeneration = 0;
+        this.sourcePeekKey = '';
+        this.sourcePeekLocation = null;
         this.outlineSegment = OUTLINE_SEGMENT_HEADINGS;
         this.outlineMarkdown = '';
         this.outlineSourceRanges = null;
@@ -468,6 +485,8 @@ class MarkdownTabView {
                 this.fragmentIndex = new Map();
                 this.syncOutline('');
                 this.syncNotes(createEmptyAnnotationOverlay(), 0);
+                this.renderedSourceMap = [];
+                this.hideSourcePeek();
             }
             this.editor.setCorrectionState?.({
                 enabled: false,
@@ -489,6 +508,8 @@ class MarkdownTabView {
                 this.syncSnapshot();
                 this.syncOutline('');
                 this.syncNotes(createEmptyAnnotationOverlay(), 0);
+                this.renderedSourceMap = [];
+                this.hideSourcePeek();
                 this.editor.setCorrectionState?.({ enabled: false });
                 return;
             }
@@ -631,6 +652,7 @@ class MarkdownTabView {
                 annotationRanges: correctionAnnotationRanges,
             });
             this.renderedMarkdown = markdown;
+            this.renderedSourceMap = sourceMap;
             this.renderedRenderMode = 'markdown';
             this.renderedTranslationView = translationViewName(
                 translatedView,
@@ -672,6 +694,19 @@ class MarkdownTabView {
         this.clearDocumentActionStatus();
         this.clearWarningToast();
         this.clearCorrectionUndo();
+        if (this.sourcePeekTimer != null) {
+            this.ownerWindow.clearTimeout?.(this.sourcePeekTimer);
+        }
+        this.sourcePeekTimer = null;
+        this.sourcePeekMicrotask = false;
+        this.sourcePeekGeneration += 1;
+        this.hideSourcePeek();
+        try {
+            this.model.onDisposeSourcePeek?.();
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
         for (const { element, type, listener, options } of this.listeners) {
             element.removeEventListener(type, listener, options);
         }
@@ -1086,6 +1121,23 @@ class MarkdownTabView {
             'aria-label': this.t('viewer.githubRepositories'),
         });
         githubReposMenu.hidden = true;
+        const sourcePeekImage = this.createElement('img', {
+            class: 'markdown-source-peek-image',
+            alt: '',
+            draggable: 'false',
+        });
+        const sourcePeekCaption = this.createElement('span', {
+            class: 'markdown-source-peek-caption',
+        });
+        const sourcePeek = this.createElement('button', {
+            id: 'mktero-source-peek',
+            class: 'markdown-source-peek',
+            type: 'button',
+            hidden: 'true',
+            'aria-label': this.t('viewer.sourcePeekOpen'),
+            title: this.t('viewer.sourcePeekOpen'),
+        });
+        appendChildren(sourcePeek, sourcePeekImage, sourcePeekCaption);
         const snapshotHost = this.createElement('div', {
             id: 'mktero-snapshot',
             class: 'markdown-snapshot-host',
@@ -1129,6 +1181,7 @@ class MarkdownTabView {
             citationGraphButton,
             githubReposButton,
             githubReposMenu,
+            sourcePeek,
             correctionUndo,
             snapshotHost
         );
@@ -1278,6 +1331,9 @@ class MarkdownTabView {
             citationGraphButton,
             githubReposButton,
             githubReposMenu,
+            sourcePeek,
+            sourcePeekImage,
+            sourcePeekCaption,
             navigationBack: documentActions.navigationBack,
             editorSection,
             actionToggle: documentActions.toggle,
@@ -1981,6 +2037,11 @@ class MarkdownTabView {
         });
         this.listen(this.elements.citationGraphButton, 'click', () => {
             this.openCitationGraph();
+        });
+        this.listen(this.elements.sourcePeek, 'click', () => {
+            if (!this.sourcePeekLocation) return;
+            Promise.resolve(this.openSourceLocation(this.sourcePeekLocation))
+                .catch(error => this.zotero?.logError?.(error));
         });
         this.listen(this.elements.githubReposButton, 'click', () => {
             this.setGitHubReposOpen(!this.githubReposOpen);
@@ -3172,6 +3233,14 @@ class MarkdownTabView {
         this.elements.githubReposButton.setAttribute(
             'title',
             this.t('viewer.openGitHubRepositories')
+        );
+        this.elements.sourcePeek.setAttribute(
+            'aria-label',
+            this.t('viewer.sourcePeekOpen')
+        );
+        this.elements.sourcePeek.setAttribute(
+            'title',
+            this.t('viewer.sourcePeekOpen')
         );
         this.elements.githubReposMenu.setAttribute(
             'aria-label',
@@ -4435,6 +4504,121 @@ class MarkdownTabView {
             if (active) link.setAttribute('aria-current', 'location');
             else link.removeAttribute('aria-current');
         }
+        this.scheduleSourcePeek();
+    }
+
+    scheduleSourcePeek() {
+        if (this.destroyed) return;
+        if (typeof this.model.onRenderSourcePeek !== 'function') {
+            this.hideSourcePeek();
+            return;
+        }
+        if (this.sourcePeekDelay <= 0) {
+            if (this.sourcePeekMicrotask) return;
+            this.sourcePeekMicrotask = true;
+            Promise.resolve().then(() => {
+                this.sourcePeekMicrotask = false;
+                if (!this.destroyed) void this.syncSourcePeek();
+            });
+            return;
+        }
+        if (this.sourcePeekTimer != null) {
+            this.ownerWindow.clearTimeout?.(this.sourcePeekTimer);
+        }
+        this.sourcePeekTimer = this.ownerWindow.setTimeout(() => {
+            this.sourcePeekTimer = null;
+            if (!this.destroyed) void this.syncSourcePeek();
+        }, this.sourcePeekDelay);
+    }
+
+    async syncSourcePeek() {
+        if (this.destroyed) return;
+        const peek = this.model.status === 'ready'
+            && this.model.renderMode !== 'html'
+            && typeof this.model.onRenderSourcePeek === 'function'
+            ? selectSourcePeek(
+                this.renderedSourceMap,
+                this.activeNavigationOffset,
+                (this.renderedMarkdown || '').length
+            )
+            : null;
+        if (!peek) {
+            this.hideSourcePeek();
+            return;
+        }
+        this.sourcePeekLocation = {
+            pageIndex: peek.pageIndex,
+            bbox: [...peek.bbox],
+        };
+        const key = sourcePeekKey(peek);
+        if (key && key === this.sourcePeekKey
+            && this.elements.sourcePeekImage.getAttribute('src')) {
+            return;
+        }
+        const generation = ++this.sourcePeekGeneration;
+        let result;
+        try {
+            result = await this.model.onRenderSourcePeek(peek, {
+                createCanvas: (width, height) => (
+                    this.createSourcePeekCanvas(width, height)
+                ),
+                ownerDocument: this.document,
+            });
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+            if (generation === this.sourcePeekGeneration
+                && !this.elements.sourcePeekImage.getAttribute('src')) {
+                this.hideSourcePeek();
+            }
+            return;
+        }
+        if (this.destroyed || generation !== this.sourcePeekGeneration) return;
+        if (typeof result?.dataURL !== 'string'
+            || !result.dataURL.startsWith('data:image/')) {
+            if (!this.elements.sourcePeekImage.getAttribute('src')) {
+                this.hideSourcePeek();
+            }
+            return;
+        }
+        this.sourcePeekKey = key;
+        this.elements.sourcePeekImage.setAttribute('src', result.dataURL);
+        this.elements.sourcePeekCaption.textContent = this.t(
+            'viewer.sourcePeekPage',
+            { page: peek.pageIndex + 1 }
+        );
+        this.elements.sourcePeek.hidden = false;
+    }
+
+    hideSourcePeek() {
+        this.sourcePeekKey = '';
+        this.sourcePeekLocation = null;
+        if (!this.elements?.sourcePeek) return;
+        this.elements.sourcePeek.hidden = true;
+        this.elements.sourcePeekImage.removeAttribute('src');
+        this.elements.sourcePeekCaption.textContent = '';
+    }
+
+    createSourcePeekCanvas(width, height) {
+        const canvas = this.document.createElementNS(XHTML_NAMESPACE, 'canvas');
+        canvas.width = Math.max(1, Math.ceil(Number(width) || 1));
+        canvas.height = Math.max(1, Math.ceil(Number(height) || 1));
+        canvas.hidden = true;
+        this.ensureSourcePeekCanvasHost().appendChild(canvas);
+        return canvas;
+    }
+
+    ensureSourcePeekCanvasHost() {
+        if (this.elements.sourcePeekCanvasHost?.isConnected) {
+            return this.elements.sourcePeekCanvasHost;
+        }
+        const host = this.createElement('div', {
+            class: 'markdown-source-peek-canvas-host',
+            hidden: 'true',
+        });
+        this.mount.appendChild(host);
+        this.elements.sourcePeekCanvasHost = host;
+        return host;
     }
 
     restoreReadingPosition(offset) {

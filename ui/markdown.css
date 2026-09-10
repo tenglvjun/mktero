@@ -46,6 +46,11 @@
 }
 
 @media (prefers-color-scheme: dark) {
+    .markdown-source-peek-image {
+        background: #f7f5f0;
+        box-shadow: 0 1px 2px rgb(0 0 0 / 28%);
+    }
+
     :host {
         color-scheme: dark;
         --background: #181b20;
@@ -943,6 +948,59 @@ main {
     flex: 1 1 auto;
     overflow: hidden;
     background: var(--reader-background);
+}
+
+.markdown-source-peek-canvas-host {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.markdown-source-peek {
+    position: absolute;
+    z-index: 8;
+    inset-block-start: 52px;
+    inset-inline-end: 12px;
+    display: flex;
+    width: 148px;
+    height: 216px;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 6px 6px 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--muted);
+    background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
+    box-shadow: var(--shadow-float);
+    cursor: pointer;
+}
+
+.markdown-source-peek:hover,
+.markdown-source-peek:focus-visible {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    outline: none;
+}
+
+.markdown-source-peek-image {
+    display: block;
+    width: 136px;
+    height: 186px;
+    object-fit: contain;
+    background: #fff;
+    border: 1px solid var(--border-subtle);
+    border-radius: 2px;
+    box-shadow: 0 1px 2px rgb(28 36 46 / 8%);
+}
+
+.markdown-source-peek-caption {
+    margin-top: 4px;
+    overflow: hidden;
+    font: 11px/1.4 var(--ui-font);
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .markdown-citation-graph-button {

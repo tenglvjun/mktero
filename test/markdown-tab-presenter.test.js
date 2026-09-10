@@ -583,6 +583,7 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
         onDeleteAnnotation: () => calls.push('stale-delete'),
         onOpenAnnotationInPDF: () => calls.push('stale-open'),
         onOpenSourceInPDF: () => calls.push('stale-source'),
+        onRenderSourcePeek: () => calls.push('stale-peek'),
         onCopySourcedMarkdown: () => calls.push('stale-copy'),
     });
     const second = presenter.open(42, {
@@ -591,6 +592,7 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
         onDeleteAnnotation: id => calls.push({ deleted: id }),
         onOpenAnnotationInPDF: id => calls.push({ opened: id }),
         onOpenSourceInPDF: location => calls.push({ source: location }),
+        onRenderSourcePeek: location => calls.push({ peek: location }),
         onCopySourcedMarkdown: target => calls.push({ copied: target }),
     });
 
@@ -599,6 +601,10 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
     await second.model.onDeleteAnnotation('ANN00001');
     await second.model.onOpenAnnotationInPDF('ANN00001');
     await second.model.onOpenSourceInPDF({
+        pageIndex: 2,
+        bbox: [100, 200, 900, 300],
+    });
+    await second.model.onRenderSourcePeek({
         pageIndex: 2,
         bbox: [100, 200, 900, 300],
     });
@@ -616,6 +622,12 @@ test('exposes and refreshes PDF annotation actions on the tab model', async () =
         { opened: 'ANN00001' },
         {
             source: {
+                pageIndex: 2,
+                bbox: [100, 200, 900, 300],
+            },
+        },
+        {
+            peek: {
                 pageIndex: 2,
                 bbox: [100, 200, 900, 300],
             },

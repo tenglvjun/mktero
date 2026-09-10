@@ -60,6 +60,7 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         readerFontSize: options.readerFontSize,
         onReaderFontChange: options.onReaderFontChange,
         onReaderFontSizeChange: options.onReaderFontSizeChange,
+        sourcePeekDelay: options.sourcePeekDelay,
     });
     view.render(model);
     return { document, view, shadow: view.host.shadowRoot };
@@ -5334,4 +5335,82 @@ test('refreshes inline rendering when cached image assets change', () => {
     });
     assert.equal(refreshes, 2);
     view.destroy();
+});
+
+test('shows a PDF source peek for the current paragraph and opens the PDF', async () => {
+    let editorOptions;
+    const opened = [];
+    const rendered = [];
+    const markdown = 'Mapped paragraph for source peek.';
+    const location = {
+        pageIndex: 2,
+        bbox: [100, 200, 800, 360],
+    };
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [location],
+        }],
+        onOpenSourceInPDF: target => opened.push(target),
+        onRenderSourcePeek: peek => {
+            rendered.push(peek);
+            return { dataURL: 'data:image/jpeg;base64,cGVlaw==' };
+        },
+    }), {}, {
+        sourcePeekDelay: 0,
+        editorFactory(options) {
+            editorOptions = options;
+            return createTestInlineEditor(options);
+        },
+    });
+    const peek = shadow.querySelector('#mktero-source-peek');
+    const image = shadow.querySelector('.markdown-source-peek-image');
+    const caption = shadow.querySelector('.markdown-source-peek-caption');
+
+    try {
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(peek.hidden, false);
+        assert.equal(image.getAttribute('src'), 'data:image/jpeg;base64,cGVlaw==');
+        assert.equal(caption.textContent, 'Page 3');
+        assert.equal(rendered.length, 1);
+        peek.click();
+        assert.deepEqual(opened, [location]);
+
+        editorOptions.onViewportChange(4);
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(rendered.length, 1);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('hides the PDF source peek when the document has no mapping', async () => {
+    const rendered = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Unmapped paragraph.',
+        sourceMap: [],
+        onRenderSourcePeek: () => {
+            rendered.push(true);
+            return { dataURL: 'data:image/jpeg;base64,cGVlaw==' };
+        },
+    }), {}, { sourcePeekDelay: 0 });
+
+    try {
+        await Promise.resolve();
+        assert.equal(shadow.querySelector('#mktero-source-peek').hidden, true);
+        assert.deepEqual(rendered, []);
+    }
+    finally {
+        view.destroy();
+    }
 });

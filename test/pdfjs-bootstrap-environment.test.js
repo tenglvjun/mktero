@@ -54,3 +54,19 @@ test('extracts PDF text when worker globals only exist on the Zotero window', as
         else globalThis.Zotero = previousZotero;
     }
 });
+
+test('adopts Path2D from the Zotero window for PDF.js rendering', async () => {
+    const previousPath2D = globalThis.Path2D;
+    function WindowPath2D() {}
+    const { adoptPDFJSWindowGlobals } = await import(
+        '../src/pdf/pdfjs-bootstrap-environment.js?path2d'
+    );
+    try {
+        adoptPDFJSWindowGlobals({ Path2D: WindowPath2D });
+        assert.equal(globalThis.Path2D, WindowPath2D);
+    }
+    finally {
+        if (previousPath2D === undefined) delete globalThis.Path2D;
+        else globalThis.Path2D = previousPath2D;
+    }
+});
