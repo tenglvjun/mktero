@@ -25,7 +25,7 @@ local cache avoids repeating conversions for the same PDF and parser profile.
 > configured by you. Review [Privacy and data handling](#privacy-and-data-handling)
 > before processing sensitive documents.
 
-Useful links: [Product page](https://tenglvjun.github.io/mktero/) ·
+Useful links: [Product page](https://mktero.com/) ·
 [Download](https://github.com/tenglvjun/mktero/releases/latest) ·
 [Discussions](https://github.com/tenglvjun/mktero/discussions) ·
 [Issues](https://github.com/tenglvjun/mktero/issues)
