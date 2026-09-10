@@ -347,10 +347,22 @@ test('persists reader font changes across Markdown tabs and sessions', () => {
     assert.equal(harness.calls[1].readerFont, 'cambria');
 
     harness.calls[0].onReaderFontChange('times-new-roman');
+    harness.calls[0].onReaderLineHeightChange('loose');
+    harness.calls[0].onReaderWidthChange('narrow');
+    harness.calls[0].onReaderAlignmentChange('justify');
 
     assert.equal(stored.get('extensions.mktero.readerFont'), 'times-new-roman');
+    assert.equal(stored.get('extensions.mktero.readerLineHeight'), 'loose');
+    assert.equal(stored.get('extensions.mktero.readerWidth'), 'narrow');
+    assert.equal(stored.get('extensions.mktero.readerAlignment'), 'justify');
     assert.deepEqual(harness.views[0].readerFontCalls, ['times-new-roman']);
     assert.deepEqual(harness.views[1].readerFontCalls, ['times-new-roman']);
+    assert.deepEqual(harness.views[0].readerLineHeightCalls, ['loose']);
+    assert.deepEqual(harness.views[1].readerLineHeightCalls, ['loose']);
+    assert.deepEqual(harness.views[0].readerWidthCalls, ['narrow']);
+    assert.deepEqual(harness.views[1].readerWidthCalls, ['narrow']);
+    assert.deepEqual(harness.views[0].readerAlignmentCalls, ['justify']);
+    assert.deepEqual(harness.views[1].readerAlignmentCalls, ['justify']);
 
     stored.set('extensions.mktero.readerFont', 'system-serif');
     preferenceObservers.get('extensions.mktero.readerFont')('system-serif');

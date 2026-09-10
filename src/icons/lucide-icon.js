@@ -28,6 +28,7 @@ import {
     Sparkles,
     Trash2,
     TriangleAlert,
+    Type,
     X,
     Zap,
     ZoomIn,
@@ -215,6 +216,10 @@ export const LUCIDE_ICONS = Object.freeze({
     triangleAlert: Object.freeze({
         name: 'triangle-alert',
         nodes: TriangleAlert,
+    }),
+    type: Object.freeze({
+        name: 'type',
+        nodes: Type,
     }),
     x: Object.freeze({
         name: 'x',

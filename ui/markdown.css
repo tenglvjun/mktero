@@ -963,7 +963,7 @@ main {
 .markdown-source-peek {
     position: absolute;
     z-index: 8;
-    inset-block-start: 52px;
+    inset-block-start: 12px;
     inset-inline-end: 12px;
     display: flex;
     width: 148px;
@@ -1006,115 +1006,69 @@ main {
 }
 
 .markdown-reading-layout.has-source-peek {
-    padding-inline-end: 172px;
+    padding-inline-end: 0;
 }
 
 .markdown-focus-exit {
-    position: absolute;
-    z-index: 9;
-    inset-block-start: 12px;
-    inset-inline-end: 12px;
     display: grid;
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    margin-inline-start: auto;
     place-items: center;
     padding: 0;
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--text);
-    background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
-    box-shadow: var(--shadow-float);
+    background: transparent;
     cursor: pointer;
 }
 
-.markdown-focus-exit:hover,
-.markdown-focus-exit:focus-visible {
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-    color: var(--accent-strong);
-    outline: none;
+.markdown-focus-exit:hover {
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
 }
 
 .markdown-focus-exit:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
-    outline-offset: 2px;
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
 }
 
 .mktero-tab-view:not(.is-focus-mode) .markdown-focus-exit {
     display: none;
 }
 
-.mktero-tab-view.is-focus-mode .markdown-reader-toolbar,
 .mktero-tab-view.is-focus-mode .markdown-outline,
 .mktero-tab-view.is-focus-mode .markdown-notes,
 .mktero-tab-view.is-focus-mode .markdown-side-panel-resizer,
 .mktero-tab-view.is-focus-mode .markdown-side-panel-toggle,
-.mktero-tab-view.is-focus-mode .markdown-citation-graph-button,
-.mktero-tab-view.is-focus-mode .markdown-github-repos-button,
-.mktero-tab-view.is-focus-mode .markdown-github-repos-menu {
+.mktero-tab-view.is-focus-mode .markdown-reader-navigation-back,
+.mktero-tab-view.is-focus-mode .markdown-source-peek-toggle,
+.mktero-tab-view.is-focus-mode .markdown-reader-action--primary,
+.mktero-tab-view.is-focus-mode .markdown-focus-toggle {
     display: none !important;
 }
 
-.markdown-citation-graph-button {
-    position: absolute;
-    z-index: 5;
-    inset-block-end: 18px;
-    inset-inline-end: 18px;
-    display: grid;
-    width: 40px;
-    height: 40px;
-    place-items: center;
-    padding: 0;
-    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
-    border-radius: 50%;
-    color: var(--accent-strong);
-    background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
-    box-shadow: var(--shadow-float);
-    cursor: pointer;
-}
-
-.markdown-github-repos-button {
-    position: absolute;
-    z-index: 5;
-    inset-block-end: 18px;
-    inset-inline-end: 18px;
-    display: grid;
-    width: 40px;
-    height: 40px;
-    place-items: center;
-    padding: 0;
-    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
-    border-radius: 50%;
-    color: var(--accent-strong);
-    background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
-    box-shadow: var(--shadow-float);
-    cursor: pointer;
-}
-
-.markdown-github-repos-button--raised {
-    inset-block-end: 66px;
+.markdown-github-repos {
+    position: relative;
+    flex: 0 0 auto;
 }
 
 .markdown-github-repos-menu {
     position: absolute;
-    z-index: 6;
-    inset-block-end: 66px;
-    inset-inline-end: 18px;
+    z-index: 8;
+    top: calc(100% + 8px);
+    right: 0;
     display: flex;
     min-width: 11.5rem;
-    max-width: min(18rem, calc(100% - 36px));
-    max-height: min(16rem, calc(100% - 92px));
+    max-width: min(18rem, calc(100vw - 24px));
+    max-height: 12rem;
     flex-direction: column;
     overflow: auto;
     padding: 6px;
     border: 1px solid var(--border);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
-    box-shadow: var(--shadow-float);
-}
-
-.markdown-github-repos-button--raised + .markdown-github-repos-menu,
-.markdown-github-repos-menu--raised {
-    inset-block-end: 114px;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-popover);
 }
 
 .markdown-github-repos-item {
@@ -1140,35 +1094,6 @@ main {
 .markdown-github-repos-item:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
     outline-offset: 1px;
-}
-
-.markdown-citation-graph-button:hover,
-.markdown-citation-graph-button:focus-visible {
-    border-color: var(--accent);
-    color: var(--accent-contrast);
-    background: var(--accent);
-}
-
-.markdown-github-repos-button:hover,
-.markdown-github-repos-button:focus-visible {
-    border-color: var(--accent);
-    color: var(--accent-contrast);
-    background: var(--accent);
-}
-
-.markdown-citation-graph-button:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
-    outline-offset: 2px;
-}
-
-.markdown-github-repos-button:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
-    outline-offset: 2px;
-}
-
-.markdown-citation-graph-button:disabled {
-    cursor: progress;
-    opacity: 0.55;
 }
 
 .markdown-reading-pane {
@@ -1197,8 +1122,8 @@ main {
     position: absolute;
     z-index: 4;
     inset-block-end: 16px;
-    inset-inline-end: 66px;
-    max-width: calc(100% - 84px);
+    inset-inline-end: 16px;
+    max-width: calc(100% - 32px);
     flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
@@ -1341,7 +1266,7 @@ main {
     min-width: 0;
     min-height: 44px;
     flex: 0 0 auto;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: var(--toolbar-control-gap);
     padding: 4px 12px;
@@ -1366,9 +1291,24 @@ main {
     display: flex;
     min-width: 0;
     max-width: 100%;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     align-items: center;
     gap: var(--toolbar-control-gap);
+}
+
+.markdown-translation-progress {
+    display: block;
+    width: 100%;
+    height: 2px;
+    flex: none;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.markdown-translation-progress-bar {
+    width: 0;
+    height: 100%;
+    background: var(--accent);
 }
 
 .markdown-translation-context {
@@ -1387,6 +1327,14 @@ main {
     font-variant-numeric: tabular-nums;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.markdown-reader-toolbar.is-translating .markdown-translation-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
 }
 
 .markdown-translation-failure-navigation {
@@ -1449,40 +1397,65 @@ main {
     opacity: 0.5;
 }
 
-.markdown-translation-separator {
-    width: 1px;
-    height: 24px;
-    flex: 0 0 1px;
-    background: var(--border-subtle);
-}
-
 .markdown-translation-action {
-    display: inline-flex;
-    width: auto;
+    display: grid;
+    width: 30px;
+    height: 30px;
     min-width: 0;
-    height: 32px;
-    min-height: 32px;
     max-width: 100%;
     flex: 0 0 auto;
-    align-items: center;
-    gap: 7px;
-    justify-content: center;
-    padding: 0 10px;
-    border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+    place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    color: var(--accent-strong);
-    background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+    color: var(--text);
+    background: transparent;
     cursor: pointer;
     font: 600 12px/1.2 var(--ui-font);
 }
 
 .markdown-translation-action-label {
-    min-width: 0;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
     white-space: nowrap;
 }
 
-.markdown-translation-action:hover:not(:disabled),
+.markdown-translation-action.is-translating .markdown-translation-action-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+}
+
+.markdown-translation-action:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
 .markdown-translation-action:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
+}
+
+.markdown-translation-action.is-translating {
+    display: inline-flex;
+    width: auto;
+    height: 32px;
+    min-height: 32px;
+    align-items: center;
+    gap: 7px;
+    justify-content: center;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+}
+
+.markdown-translation-action.is-translating:hover:not(:disabled),
+.markdown-translation-action.is-translating:focus-visible {
     border-color: var(--accent);
     outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
     outline-offset: 1px;
@@ -1784,17 +1757,121 @@ main {
     gap: 8px;
 }
 
-.markdown-reader-font-size {
+.markdown-typography-panel .markdown-reader-font-size,
+.markdown-typography-panel .markdown-reader-font-family {
+    width: 100%;
+    min-height: 0;
+}
+
+.markdown-typography-font-row {
+    display: grid;
+    grid-template-columns: auto minmax(8rem, 1fr);
+    gap: 8px 10px;
+    align-items: end;
+}
+
+.markdown-typography-font-row .markdown-reader-font-controls {
+    width: auto;
+    grid-template-columns: 32px 3.25rem 32px;
+}
+
+.markdown-typography-font-row .markdown-reader-font-button,
+.markdown-typography-font-row .markdown-reader-font-value {
+    height: 32px;
+}
+
+.markdown-typography-font-row .markdown-reader-font-button {
+    width: 32px;
+}
+
+.markdown-typography {
+    position: relative;
     flex: 0 0 auto;
 }
 
-.markdown-reader-font-family {
-    flex: 0 1 auto;
+.markdown-typography-panel {
+    position: absolute;
+    z-index: 8;
+    top: calc(100% + 8px);
+    left: 0;
+    display: grid;
+    width: min(300px, calc(100vw - 24px));
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-popover);
+}
+
+.markdown-typography-panel[hidden] {
+    display: none;
+}
+
+.markdown-typography-row {
+    display: grid;
+    gap: 6px;
+}
+
+.markdown-typography-label {
+    color: var(--muted);
+    font: 600 11px/1.2 var(--ui-font);
+}
+
+.markdown-typography-segments {
+    display: flex;
+    min-width: 0;
+}
+
+.markdown-typography-segment {
+    display: inline-flex;
+    min-width: 0;
+    height: 28px;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--surface-raised);
+    cursor: pointer;
+    font: 12px/1 var(--ui-font);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.markdown-typography-segment + .markdown-typography-segment {
+    margin-left: -1px;
+}
+
+.markdown-typography-segment:first-child {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.markdown-typography-segment:last-child {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.markdown-typography-segment[aria-checked='true'] {
+    z-index: 1;
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+    font-weight: 600;
+}
+
+.markdown-typography-segment:focus-visible {
+    z-index: 2;
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
 }
 
 .markdown-document-search-toggle,
 .markdown-source-peek-toggle,
 .markdown-focus-toggle,
+.markdown-typography-toggle,
+.markdown-github-repos-toggle,
 .markdown-document-search-button {
     display: grid;
     width: 30px;
@@ -1815,14 +1892,18 @@ main {
 
 .markdown-document-search-toggle:focus-visible,
 .markdown-source-peek-toggle:focus-visible,
-.markdown-focus-toggle:focus-visible {
+.markdown-focus-toggle:focus-visible,
+.markdown-typography-toggle:focus-visible,
+.markdown-github-repos-toggle:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
     outline-offset: 1px;
 }
 
 .markdown-document-search-toggle[aria-expanded='true'],
 .markdown-source-peek-toggle[aria-pressed='true'],
-.markdown-focus-toggle[aria-pressed='true'] {
+.markdown-focus-toggle[aria-pressed='true'],
+.markdown-typography-toggle[aria-expanded='true'],
+.markdown-github-repos-toggle[aria-expanded='true'] {
     border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
     background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
@@ -1977,14 +2058,14 @@ main {
     display: flex;
     min-width: 0;
     width: 100%;
-    height: 30px;
-    padding: 0 8px;
+    height: 32px;
+    padding: 0 10px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-raised);
     color: var(--text);
     cursor: pointer;
-    font: 12px/1 var(--ui-font);
+    font: 12px/1.3 var(--ui-font);
     align-items: center;
     justify-content: space-between;
     text-align: left;
@@ -1999,14 +2080,15 @@ main {
 
 .markdown-reader-font-picker {
     position: relative;
-    flex: 0 1 148px;
-    width: 148px;
-    min-width: 104px;
+    flex: none;
+    width: 100%;
+    min-width: 0;
 }
 
 .markdown-reader-font-current {
     min-width: 0;
     overflow: hidden;
+    line-height: 1.3;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -2028,7 +2110,7 @@ main {
     top: calc(100% + 6px);
     left: 0;
     display: grid;
-    width: max(100%, 164px);
+    width: 100%;
     gap: 2px;
     padding: 4px;
     border: 1px solid var(--border);
@@ -4409,76 +4491,17 @@ main {
         --toolbar-control-gap: 8px;
 
         min-height: 44px;
-        flex-wrap: wrap;
         padding: 4px 8px;
-    }
-
-    .markdown-reader-toolbar.is-translating {
-        flex-wrap: wrap;
-    }
-
-    .markdown-translation-controls {
-        width: 100%;
-        flex: 1 0 100%;
-        flex-wrap: wrap;
-        padding: 5px 0 1px;
-        border-top: 1px solid var(--border-subtle);
-    }
-    .markdown-reader-font-picker {
-        flex-basis: 132px;
-        width: 132px;
     }
 
     .markdown-reader-action-menu { right: 8px; }
 }
 
 @container markdown-reader (max-width: 390px) {
-    .markdown-reader-font-controls {
-        grid-template-columns: 28px 38px 28px;
-    }
-
-    .markdown-reader-font-button { width: 28px; }
-    .markdown-reader-font-family { flex: 1 1 auto; }
-    .markdown-reader-font-picker {
-        flex: 1 1 auto;
-        width: auto;
-    }
-
     .markdown-reader-action-status { max-width: 84px; }
-    .markdown-translation-controls {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 6px;
-    }
-    .markdown-translation-view {
-        width: 100%;
-        grid-column: 1 / -1;
-    }
     .markdown-translation-view-button {
         min-width: 0;
-        flex: 1 1 0;
         padding-inline: 5px;
-    }
-    .markdown-translation-status {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .markdown-translation-context {
-        grid-row: 2;
-        grid-column: 1;
-        overflow: hidden;
-    }
-    .markdown-translation-failure-navigation {
-        grid-row: 2;
-        grid-column: 2;
-    }
-    .markdown-translation-separator { display: none; }
-    .markdown-translation-action {
-        width: 100%;
-        grid-row: 3;
-        grid-column: 1 / -1;
     }
 }
 

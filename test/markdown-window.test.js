@@ -63,6 +63,9 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         readerAlignment: options.readerAlignment,
         onReaderFontChange: options.onReaderFontChange,
         onReaderFontSizeChange: options.onReaderFontSizeChange,
+        onReaderLineHeightChange: options.onReaderLineHeightChange,
+        onReaderWidthChange: options.onReaderWidthChange,
+        onReaderAlignmentChange: options.onReaderAlignmentChange,
         readerSourcePeek: options.readerSourcePeek,
         onReaderSourcePeekChange: options.onReaderSourcePeekChange,
         sourcePeekDelay: options.sourcePeekDelay,
@@ -192,7 +195,38 @@ test('shows Markdown without editing controls', () => {
     }
 });
 
-test('lists unique GitHub repositories from a floating reader button', async () => {
+test('opens a single GitHub repository from the reader toolbar', async () => {
+    const launched = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Code: https://github.com/owner/repo',
+        sourceKind: 'markdown',
+    }), {
+        launchURL: href => launched.push(href),
+    });
+
+    try {
+        const button = shadow.querySelector('#mktero-github-repos');
+        const menu = shadow.querySelector('#mktero-github-repos-menu');
+        assert.equal(button.hidden, false);
+        assert.equal(
+            shadow.querySelector('.markdown-reader-controls').contains(button),
+            true
+        );
+        assert.equal(button.getAttribute('aria-haspopup'), 'false');
+        assert.equal(menu.hidden, true);
+
+        button.click();
+        assert.deepEqual(launched, ['https://github.com/owner/repo']);
+        assert.equal(menu.hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('lists GitHub repositories from a toolbar popup when there are several', async () => {
     const launched = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -203,7 +237,6 @@ test('lists unique GitHub repositories from a floating reader button', async () 
             'Again: https://github.com/owner/repo/blob/main/src/app.js',
         ].join('\n'),
         sourceKind: 'markdown',
-        onOpenCitationGraph: () => {},
     }), {
         launchURL: href => launched.push(href),
     });
@@ -211,14 +244,14 @@ test('lists unique GitHub repositories from a floating reader button', async () 
     try {
         const button = shadow.querySelector('#mktero-github-repos');
         const menu = shadow.querySelector('#mktero-github-repos-menu');
+        const actions = shadow.querySelector('#mktero-document-action-menu');
         assert.equal(button.hidden, false);
+        assert.equal(actions.contains(button), false);
         assert.equal(
             button.querySelector('[data-lucide]').dataset.lucide,
             'github'
         );
-        assert.ok(
-            button.classList.contains('markdown-github-repos-button--raised')
-        );
+        assert.equal(button.getAttribute('aria-haspopup'), 'true');
         assert.equal(menu.hidden, true);
 
         button.click();
@@ -258,7 +291,7 @@ test('hides the GitHub repository button when the paper has none', async () => {
     }
 });
 
-test('shows the current-paper citation graph button in the reader', async () => {
+test('opens the current-paper citation graph from document actions', async () => {
     const opened = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -270,7 +303,9 @@ test('shows the current-paper citation graph button in the reader', async () => 
 
     try {
         const button = shadow.querySelector('#mktero-citation-graph');
+        const actions = shadow.querySelector('#mktero-document-action-menu');
         assert.equal(button.hidden, false);
+        assert.equal(actions.contains(button), true);
         assert.equal(
             button.querySelector('[data-lucide]').dataset.lucide,
             'network'
@@ -2496,9 +2531,6 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
         const translationControls = shadow.querySelector(
             '.markdown-translation-controls'
         );
-        const translationSeparator = shadow.querySelector(
-            '.markdown-translation-separator'
-        );
         const translationViewLabel = shadow.querySelector(
             '.markdown-translation-view-label'
         );
@@ -2521,10 +2553,21 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
             toolbar?.getAttribute('aria-label'),
             'Markdown reading toolbar'
         );
-        assert.equal(toolbar?.nextElementSibling, readingLayout);
+        assert.equal(
+            toolbar?.nextElementSibling,
+            shadow.querySelector('.markdown-translation-progress')
+        );
+        assert.equal(
+            shadow.querySelector('.markdown-translation-progress')
+                ?.nextElementSibling,
+            readingLayout
+        );
         assert.equal(readingLayout?.contains(editor), true);
-        assert.equal(toolbar?.contains(size), true);
-        assert.equal(toolbar?.contains(family), true);
+        const typography = shadow.querySelector('.markdown-typography');
+        const typographyPanel = shadow.querySelector('#mktero-typography-panel');
+        assert.equal(toolbar?.contains(typography), true);
+        assert.equal(typographyPanel?.contains(size), true);
+        assert.equal(typographyPanel?.contains(family), true);
         assert.equal(
             toolbar?.querySelector('.markdown-reader-font-label'),
             null
@@ -2545,18 +2588,12 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
                 translationView,
                 translationContext,
                 failureNavigation,
-                translationSeparator,
                 translate,
             ]
         );
         assert.deepEqual(
             [...translationContext.children],
             [translationStatus]
-        );
-        assert.equal(translationSeparator?.getAttribute('role'), 'separator');
-        assert.equal(
-            translationSeparator?.getAttribute('aria-orientation'),
-            'vertical'
         );
         assert.equal(menu?.contains(size), false);
         assert.equal(menu?.contains(family), false);
@@ -2609,7 +2646,7 @@ test('enables the citation return button from editor navigation state', () => {
     }
 });
 
-test('adjusts the persisted reader font size from the top toolbar', () => {
+test('adjusts the persisted reader font size from the typography popover', () => {
     const persistedSizes = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -2626,8 +2663,15 @@ test('adjusts the persisted reader font size from the top toolbar', () => {
         const increase = shadow.querySelector('#mktero-reader-font-increase');
         const value = shadow.querySelector('#mktero-reader-font-value');
         const group = shadow.querySelector('.markdown-reader-font-size');
+        const panel = shadow.querySelector('#mktero-typography-panel');
 
-        assert.equal(group.getAttribute('aria-label'), 'Text size');
+        shadow.querySelector('#mktero-typography-toggle').click();
+        assert.equal(panel.contains(group), true);
+        assert.equal(group.getAttribute('aria-labelledby'), 'mktero-reader-font-size-label');
+        assert.equal(
+            shadow.querySelector('#mktero-reader-font-size-label').textContent,
+            'Text size'
+        );
         assert.equal(decrease.textContent, 'A−');
         assert.equal(increase.textContent, 'A+');
         assert.equal(value.textContent, '18 px');
@@ -2649,6 +2693,66 @@ test('adjusts the persisted reader font size from the top toolbar', () => {
         assert.equal(increase.disabled, false);
         assert.equal(decrease.getAttribute('tabindex'), '0');
         assert.equal(increase.getAttribute('tabindex'), '0');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('adjusts line height, width, and alignment from the typography popover', () => {
+    const persisted = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }), {}, {
+        onReaderLineHeightChange: value => persisted.push(['lineHeight', value]),
+        onReaderWidthChange: value => persisted.push(['width', value]),
+        onReaderAlignmentChange: value => persisted.push(['alignment', value]),
+    });
+
+    try {
+        const toggle = shadow.querySelector('#mktero-typography-toggle');
+        const panel = shadow.querySelector('#mktero-typography-panel');
+        assert.equal(toggle.getAttribute('aria-label'), 'Typography');
+        assert.equal(panel.hidden, true);
+
+        toggle.click();
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+        assert.equal(panel.hidden, false);
+        assert.equal(
+            panel.contains(shadow.querySelector('.markdown-reader-font-size')),
+            true
+        );
+        assert.equal(
+            panel.contains(shadow.querySelector('#mktero-reader-font-family')),
+            true
+        );
+
+        shadow.querySelector('[data-reader-line-height="loose"]').click();
+        shadow.querySelector('[data-reader-width="narrow"]').click();
+        shadow.querySelector('[data-reader-alignment="justify"]').click();
+
+        assert.deepEqual(persisted, [
+            ['lineHeight', 'loose'],
+            ['width', 'narrow'],
+            ['alignment', 'justify'],
+        ]);
+        assert.equal(
+            view.host.style.getPropertyValue('--reader-line-height'),
+            '2.05'
+        );
+        assert.equal(view.host.style.getPropertyValue('--reader-width'), '45rem');
+        assert.equal(
+            view.host.style.getPropertyValue('--reader-text-align'),
+            'justify'
+        );
+        assert.equal(
+            shadow.querySelector('[data-reader-line-height="loose"]')
+                .getAttribute('aria-checked'),
+            'true'
+        );
     }
     finally {
         view.destroy();
@@ -5826,7 +5930,7 @@ test('does not steal window Cmd+F when the Mktero tab is not visible', () => {
     }
 });
 
-test('enters focus mode to hide chrome and restore it on exit', () => {
+test('enters focus mode to hide chrome and restore it on exit', async () => {
     const markdown = '# Overview\n\nBody.';
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -5860,16 +5964,29 @@ test('enters focus mode to hide chrome and restore it on exit', () => {
         assert.equal(outline.hidden, false);
         assert.equal(notes.hidden, false);
 
+        await Promise.resolve();
+        await Promise.resolve();
         toggle.click();
+        await Promise.resolve();
+        await Promise.resolve();
 
         assert.equal(toggle.getAttribute('aria-pressed'), 'true');
         assert.equal(view.elements.view.classList.contains('is-focus-mode'), true);
         assert.equal(outline.hidden, true);
         assert.equal(notes.hidden, true);
-        assert.equal(peek.hidden, true);
+        assert.equal(peek.hidden, false);
         assert.equal(
             shadow.querySelector('.markdown-reading-layout')
                 .classList.contains('has-source-peek'),
+            true
+        );
+        const toolbar = shadow.querySelector('.markdown-reader-toolbar');
+        assert.equal(toolbar.hidden, false);
+        assert.equal(toolbar.contains(exit), true);
+        assert.equal(toolbar.lastElementChild, exit);
+        dispatchShortcut(view.host, { key: 'f', metaKey: true });
+        assert.equal(
+            shadow.querySelector('#mktero-document-search-panel').hidden,
             false
         );
 
