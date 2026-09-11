@@ -7,7 +7,10 @@ import {
     normalizePDFAnnotationTextQuote,
     trailingCodePoints,
 } from './pdf-annotation.js';
-import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
+import {
+    createVisibleMarkdownTextIndex,
+    visibleMarkdownTextForRanges,
+} from '../markdown/markdown-visible-text.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
     createPdfAnnotationTextIndex,
@@ -583,10 +586,9 @@ export function markdownAnnotationRangeMatchesSource(markdown, rangeOrRanges, te
         || ranges.some(range => !validRange(range, source.length))) {
         return false;
     }
-    const visible = ranges.map(range => (
-        createVisibleMarkdownTextIndex(source.slice(range.from, range.to)).text
-    )).join('');
-    return normalizeVisibleText(visible) === normalizeVisibleText(text);
+    return normalizeVisibleText(
+        visibleMarkdownTextForRanges(source, ranges)
+    ) === normalizeVisibleText(text);
 }
 
 export function createMarkdownAnnotationTextQuote(

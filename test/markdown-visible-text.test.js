@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     createVisibleMarkdownTextIndex,
+    visibleMarkdownTextForRanges,
 } from '../src/markdown/markdown-visible-text.js';
 
 test('indexes rendered inline math without its delimiters', () => {
@@ -118,5 +119,27 @@ test('hides extra ranges in the visible Markdown index', () => {
     const markdown = 'Hello **x** World';
     const index = createVisibleMarkdownTextIndex(markdown, [{ from: 6, to: 11 }]);
     assert.equal(index.text, 'Hello  World');
+});
+
+test('strips heading marks from visible Markdown range text', () => {
+    const markdown = '### 3.1 Execution State and Schema Authoring\n\nBody.';
+    assert.equal(
+        visibleMarkdownTextForRanges(markdown, [{
+            from: 0,
+            to: markdown.indexOf('\n'),
+        }]).trim(),
+        '3.1 Execution State and Schema Authoring'
+    );
+});
+
+test('strips display math delimiters from visible Markdown range text', () => {
+    const formula = '(R_t, \\Delta\\Sigma_t, a_t)';
+    const markdown = `Intro.\n\n$$\n${formula}\n$$\n\nBody.`;
+    const from = markdown.indexOf('$$');
+    const to = markdown.lastIndexOf('$$') + 2;
+    assert.equal(
+        visibleMarkdownTextForRanges(markdown, [{ from, to }]).trim(),
+        formula
+    );
 });
 

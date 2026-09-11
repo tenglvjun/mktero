@@ -1318,6 +1318,52 @@ test('shows one note marker when an annotation covers formula content', () => {
     dom.window.close();
 });
 
+test('highlights a display math formula covered by an annotation', () => {
+    const formula = 'A_t = (P, \\Sigma_t, O_t)';
+    const markdown = [
+        'Intro paragraph.',
+        '',
+        '$$',
+        formula,
+        '$$',
+        '',
+        'Body paragraph.',
+    ].join('\n');
+    const from = markdown.indexOf('$$');
+    const to = markdown.lastIndexOf('$$') + 2;
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'MATHDISP1',
+                type: 'highlight',
+                text: formula,
+                color: '#ffd400',
+                ranges: [{ from, to }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const highlight = document.querySelector(
+        '.cm-mktero-math-display .cm-mktero-pdf-annotation--highlight'
+    );
+    assert.ok(highlight);
+    assert.match(highlight.getAttribute('style') || '', /#ffd400/i);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('edits PDF annotation notes safely after clicking the note marker', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -5346,6 +5392,62 @@ test('links affiliations after leading equal-contribution and corresponding-auth
     );
     assert.equal(citations[0].getAttribute('aria-label'), 'View author affiliation 1');
     assert.equal(citations.at(-1).getAttribute('aria-label'), 'View author affiliation 2');
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders latex daggers in author superscripts with KaTeX', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Repo-To-Skill',
+        '',
+        'Jianyu Chen $^{1,2\\dagger\\dagger}$, Hongjin Qian $^{1}$\\dagger',
+        '',
+        '$^{1}$ Beijing Academy of Artificial Intelligence',
+        '',
+        '$^{2}$ Renmin University of China',
+        '',
+        '## Abstract',
+        '',
+        'Body text.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const authorLine = [...document.querySelectorAll('.cm-line')]
+        .find(line => line.textContent.includes('Jianyu Chen'));
+    const math = [...authorLine.querySelectorAll('.cm-mktero-math')];
+    const visibleMath = math.map(widget => {
+        const clone = widget.cloneNode(true);
+        for (const annotation of clone.querySelectorAll('annotation')) {
+            annotation.remove();
+        }
+        return clone.textContent;
+    });
+
+    assert.ok(authorLine);
+    assert.equal(math.length, 2);
+    assert.ok(math.every(widget => widget.querySelector('math')));
+    assert.ok(math.every(widget => (
+        widget.classList.contains('cm-mktero-citation-superscript')
+    )));
+    assert.deepEqual(
+        math.map(widget => widget.querySelector('annotation')?.textContent),
+        ['\\dagger\\dagger', '\\dagger']
+    );
+    assert.ok(visibleMath.every(text => text.includes('†')));
+    assert.ok(visibleMath.every(text => !text.includes('\\dagger')));
+    assert.deepEqual(
+        [...authorLine.querySelectorAll('.cm-mktero-citation')]
+            .map(citation => citation.textContent),
+        ['1', '2', '1']
+    );
     assert.equal(editor.getMarkdown(), markdown);
 
     editor.destroy();

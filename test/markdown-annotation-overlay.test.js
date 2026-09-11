@@ -605,6 +605,54 @@ test('matches PDF citation digits against inline MinerU superscripts', async () 
     assert.deepEqual(result.unmatched, []);
 });
 
+test('matches PDF highlights split by a line-end hyphen', async () => {
+    const markdown = [
+        'Current LLM agent runtimes execute procedural skills by repeatedly',
+        ' appending reasoning traces, actions, observations, and tool outputs',
+        ' to a growing conversational history. Consequently, the execution',
+        ' state is represented implicitly within natural language and must be',
+        ' reconstructed by the language model at every interaction.',
+    ].join('');
+    const annotations = [{
+        id: 'HYPHEN01',
+        type: 'highlight',
+        text: 'Current LLM agent runtimes execute procedural skills by repeatedly appending reasoning traces, ac- tions, observations, and tool outputs to a growing conversational history.',
+        comment: '',
+        color: '#ff6666',
+        pageLabel: '2',
+        pageIndex: 1,
+        sortIndex: '00002',
+    }, {
+        id: 'HYPHEN02',
+        type: 'highlight',
+        text: 'state is represented implicitly within natural lan- guage and must be reconstructed by the language model at every interaction.',
+        comment: '',
+        color: '#ff6666',
+        pageLabel: '3',
+        pageIndex: 2,
+        sortIndex: '00003',
+    }];
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => annotations },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+    const first = annotations[0].text.replace('ac- tions', 'actions');
+    const second = annotations[1].text.replace('lan- guage', 'language');
+
+    assert.deepEqual(result.unmatched, []);
+    assert.equal(result.matched[0].id, 'HYPHEN01');
+    assert.equal(markdown.slice(
+        result.matched[0].ranges[0].from,
+        result.matched[0].ranges[0].to
+    ), first);
+    assert.equal(result.matched[1].id, 'HYPHEN02');
+    assert.equal(markdown.slice(
+        result.matched[1].ranges[0].from,
+        result.matched[1].ranges[0].to
+    ), second);
+});
+
 test('does not flatten ordinary numeric superscript math into PDF text', async () => {
     const annotation = {
         id: 'MATH0002',

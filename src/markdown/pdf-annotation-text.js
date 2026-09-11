@@ -20,7 +20,9 @@ const SIGNED_NUMBER_WHITESPACE_PATTERN = /(?:[+\-−±]|(?<!\\)\\pm)(\s+)(?=\d)/
 const DEGREE_SYMBOL_WHITESPACE_PATTERN = /([\p{N})\]}])(\s+)(?=°)/gu;
 const DEGREE_SYMBOL_UNIT_WHITESPACE_PATTERN = /°(\s+)(?=\p{L})/gu;
 const LATEX_TEXT_UNIT_PATTERN = /(?<!\\)\\mathrm\{([A-Za-z]{1,32})\}/gu;
-const LATEX_BRACED_SUBSCRIPT_PATTERN = /(?<!\\)_\{([A-Za-z0-9][A-Za-z0-9,.;:+-]{0,63})\}/gu;
+const LATEX_BRACED_SUBSCRIPT_PATTERN = /(?<!\\)_[ \t]*\{[ \t]*([A-Za-z0-9][A-Za-z0-9,.;:+-]{0,63})[ \t]*\}/gu;
+const LATEX_TAG_PATTERN = /(?<!\\)\\tag\{([^}]{0,32})\}/gu;
+const EQUATION_NUMBER_WHITESPACE_PATTERN = /,(\s+)(?=\(\d{1,4}\))/gu;
 const LATEX_SINGLE_SUBSCRIPT_PATTERN = /(?<!\\)_([A-Za-z0-9])/gu;
 const LATEX_MATH_COMMAND_NAMES = new Set([
     'alpha',
@@ -129,6 +131,7 @@ const MATH_SYMBOL_CANONICAL_FORMS = new Map([
     ['ϱ', 'ρ'],
     ['ς', 'σ'],
     ['ϕ', 'φ'],
+    ['∆', 'Δ'],
 ]);
 const ALL_PDF_ANNOTATION_SYMBOL_REPLACEMENTS = [
     ...PDF_ANNOTATION_SYMBOL_REPLACEMENTS,
@@ -174,8 +177,16 @@ export function createPdfAnnotationTextIndex(
     );
 }
 
-export function createDehyphenatedPdfAnnotationTextIndex(text) {
-    return createLineWrappedPdfAnnotationTextIndex(text, false);
+export function createDehyphenatedPdfAnnotationTextIndex(
+    text,
+    sourceOffsetAt = offset => offset
+) {
+    return createLineWrappedPdfAnnotationTextIndex(
+        text,
+        false,
+        false,
+        sourceOffsetAt
+    );
 }
 
 export function createHyphenPreservingPdfAnnotationTextIndex(text) {
@@ -189,9 +200,13 @@ export function createHyphenFoldedPdfAnnotationTextIndex(text) {
 function createLineWrappedPdfAnnotationTextIndex(
     text,
     preserveHyphen,
-    foldLexicalHyphens = false
+    foldLexicalHyphens = false,
+    sourceOffsetAt = offset => offset
 ) {
-    const normalized = createPdfAnnotationTextIndex(String(text));
+    const normalized = createPdfAnnotationTextIndex(
+        String(text),
+        sourceOffsetAt
+    );
     const output = [];
     const sourceStarts = [];
     const sourceEnds = [];
@@ -303,6 +318,7 @@ function collectNormalizationMarkup(text) {
     const replacements = new Map();
     markAnnotationSymbols(text, ignoredOffsets, replacements);
     markLatexSubscripts(text, ignoredOffsets, replacements);
+    markLatexTags(text, ignoredOffsets, replacements);
     markStatisticalNumericExponents(text, ignoredOffsets, replacements);
     markMathematicalWhitespace(text, ignoredOffsets);
     for (const match of text.matchAll(CITATION_WRAPPER)) {
@@ -439,6 +455,19 @@ function markAnnotationSymbols(text, ignoredOffsets, replacements) {
                 match.index + 1,
                 match[0].length - 1
             );
+            let spaceFrom = match.index + match[0].length;
+            let spaceTo = spaceFrom;
+            while (spaceTo < text.length && /[ \t]/u.test(text[spaceTo])) {
+                spaceTo++;
+            }
+            if (spaceTo > spaceFrom
+                && (text[spaceTo] === '\\' || text[spaceTo] === '_')) {
+                markOffsetRange(
+                    ignoredOffsets,
+                    spaceFrom,
+                    spaceTo - spaceFrom
+                );
+            }
         }
     }
     for (const match of text.matchAll(LATEX_TEXT_UNIT_PATTERN)) {
@@ -462,6 +491,18 @@ function markLatexSubscripts(text, ignoredOffsets, replacements) {
     ]) {
         for (const match of text.matchAll(pattern)) {
             if (!isLikelyLatexSubscript(text, match.index)) continue;
+            let spaceFrom = match.index;
+            while (spaceFrom > 0 && /[ \t]/u.test(text[spaceFrom - 1])) {
+                spaceFrom--;
+            }
+            if (spaceFrom < match.index
+                && /[\p{L}\p{N})\]}]/u.test(text[spaceFrom - 1] || '')) {
+                markOffsetRange(
+                    ignoredOffsets,
+                    spaceFrom,
+                    match.index - spaceFrom
+                );
+            }
             replacements.set(match.index, {
                 from: match.index,
                 to: match.index + match[0].length,
@@ -471,6 +512,34 @@ function markLatexSubscripts(text, ignoredOffsets, replacements) {
                 ignoredOffsets,
                 match.index + 1,
                 match[0].length - 1
+            );
+        }
+    }
+}
+
+function markLatexTags(text, ignoredOffsets, replacements) {
+    for (const match of text.matchAll(LATEX_TAG_PATTERN)) {
+        const label = String(match[1] || '').trim();
+        if (!label) continue;
+        replacements.set(match.index, {
+            from: match.index,
+            to: match.index + match[0].length,
+            text: `(${label})`,
+        });
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + 1,
+            match[0].length - 1
+        );
+        let spaceFrom = match.index;
+        while (spaceFrom > 0 && /[ \t]/u.test(text[spaceFrom - 1])) {
+            spaceFrom--;
+        }
+        if (spaceFrom < match.index) {
+            markOffsetRange(
+                ignoredOffsets,
+                spaceFrom,
+                match.index - spaceFrom
             );
         }
     }
@@ -487,8 +556,20 @@ function isLikelyLatexSubscript(text, offset) {
             || command.name === 'text'
         );
     }
-    // Braces are the unambiguous LaTeX form, even when the base is a word.
-    return text[offset + 1] === '{';
+    let next = offset + 1;
+    while (next < text.length && /[ \t]/u.test(text[next])) next++;
+    if (text[next] === '{') return true;
+    if (!/^[A-Za-z0-9]$/u.test(text[next] || '')) return false;
+    if (next + 1 < text.length && /[A-Za-z0-9]/u.test(text[next + 1])) {
+        return false;
+    }
+    let previous = offset;
+    while (previous > 0 && /[ \t]/u.test(text[previous - 1])) previous--;
+    if (previous <= 0) return false;
+    const previousOffset = previousCodePointOffset(text, previous);
+    return isPdfAnnotationMathLetter(
+        String.fromCodePoint(text.codePointAt(previousOffset))
+    );
 }
 
 function latexCommandAtEnd(prefix) {
@@ -512,12 +593,55 @@ function normalizeMathSymbolText(text) {
     )).join('');
 }
 
+function isPdfAnnotationMathLetter(character) {
+    const mapped = MATH_SYMBOL_CANONICAL_FORMS.get(character)
+        || MATH_SYMBOL_CANONICAL_FORMS.get(character.normalize('NFKC'))
+        || character.normalize('NFKC');
+    return /^\p{Script=Greek}$/u.test(mapped);
+}
+
+function markMathLetterWhitespace(text, ignoredOffsets) {
+    for (let offset = 0; offset < text.length;) {
+        const character = String.fromCodePoint(text.codePointAt(offset));
+        const nextOffset = offset + character.length;
+        if (!/^\s$/u.test(character)) {
+            offset = nextOffset;
+            continue;
+        }
+        let end = nextOffset;
+        while (end < text.length && /^\s$/u.test(text[end])) end++;
+        let previous = offset;
+        while (previous > 0 && /[ \t]/u.test(text[previous - 1])) previous--;
+        const before = previous > 0
+            ? String.fromCodePoint(
+                text.codePointAt(previousCodePointOffset(text, previous))
+            )
+            : '';
+        const after = end < text.length
+            ? String.fromCodePoint(text.codePointAt(end))
+            : '';
+        if (isPdfAnnotationMathLetter(before)
+            && isPdfAnnotationMathLetter(after)) {
+            markOffsetRange(ignoredOffsets, offset, end - offset);
+        }
+        offset = end;
+    }
+}
+
 function markMathematicalWhitespace(text, ignoredOffsets) {
+    markMathLetterWhitespace(text, ignoredOffsets);
     for (const pattern of [
         RELATIONAL_OPERATOR_PATTERN,
         LATEX_RELATIONAL_OPERATOR_PATTERN,
     ]) {
         markRelationalOperatorWhitespace(text, pattern, ignoredOffsets);
+    }
+    for (const match of text.matchAll(EQUATION_NUMBER_WHITESPACE_PATTERN)) {
+        markOffsetRange(
+            ignoredOffsets,
+            match.index + 1,
+            match[1].length
+        );
     }
     for (const match of text.matchAll(
         OPENING_DELIMITER_SIGNED_NUMBER_WHITESPACE_PATTERN

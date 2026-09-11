@@ -1,5 +1,8 @@
 import { GFM, parser } from '@lezer/markdown';
-import { findInlineMathMatches } from './markdown-html.js';
+import {
+    findDisplayMathMatches,
+    findInlineMathMatches,
+} from './markdown-html.js';
 import { isNumericCitationContent } from './text-normalization.js';
 
 const MARKDOWN_PARSER = parser.configure(GFM);
@@ -116,6 +119,39 @@ export function createVisibleMarkdownTextIndex(markdown, extraHiddenRanges = [])
             return output.join('');
         },
     };
+}
+
+export function visibleMarkdownTextForRanges(markdown, ranges) {
+    const source = String(markdown || '');
+    if (!Array.isArray(ranges)) return '';
+    return ranges.map(range => {
+        if (!Number.isInteger(range?.from)
+            || !Number.isInteger(range?.to)
+            || range.from < 0
+            || range.to <= range.from
+            || range.to > source.length) {
+            return '';
+        }
+        return visibleTextForMarkdownSlice(source.slice(range.from, range.to));
+    }).join('');
+}
+
+function visibleTextForMarkdownSlice(source) {
+    const display = findDisplayMathMatches(source);
+    if (coversWholeSource(source, display[0])) {
+        return display[0].text;
+    }
+    const inline = findInlineMathMatches(source);
+    if (coversWholeSource(source, inline[0]) && !inline[0].text.startsWith('^')) {
+        return inline[0].text;
+    }
+    return createVisibleMarkdownTextIndex(source).text;
+}
+
+function coversWholeSource(source, match) {
+    return Boolean(match)
+        && !source.slice(0, match.start).trim()
+        && !source.slice(match.end).trim();
 }
 
 function collectHiddenRanges(markdown, extraHiddenRanges = []) {

@@ -42,12 +42,42 @@ test('does not resolve a PDF page hint from ambiguous source evidence', () => {
     assert.equal(resolvePDFPageIndexHint([
         entry,
         { ...entry, markdownFrom: 20, markdownTo: 60 },
-    ], { from: 24, to: 46 }, 100), null);
+    ], { from: 24, to: 46 }, 100), 3);
     assert.equal(resolvePDFPageIndexHint(
         [entry],
         { from: 70, to: 90 },
         100
-    ), null);
+    ), 3);
+});
+
+test('resolves a PDF page hint from overlapping or nearby source entries', () => {
+    const sourceMap = [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: 40,
+        locations: [{ pageIndex: 2, bbox: [100, 400, 900, 500] }],
+    }, {
+        type: 'equation',
+        markdownFrom: 42,
+        markdownTo: 70,
+        locations: [{ pageIndex: 2, bbox: [200, 250, 800, 320] }],
+    }, {
+        type: 'text',
+        markdownFrom: 72,
+        markdownTo: 110,
+        locations: [{ pageIndex: 2, bbox: [100, 100, 900, 200] }],
+    }];
+
+    assert.equal(resolvePDFPageIndexHint(
+        sourceMap,
+        { from: 40, to: 72 },
+        120
+    ), 2);
+    assert.equal(resolvePDFPageIndexHint(
+        sourceMap,
+        { from: 38, to: 74 },
+        120
+    ), 2);
 });
 
 test('maps unique MinerU content to Markdown blocks and keeps merged locations', () => {

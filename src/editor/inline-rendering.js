@@ -19,7 +19,10 @@ import {
     findAcademicTableGroups,
     findConsecutiveImagePacks,
 } from '../markdown/markdown-figures.js';
-import { analyzeMarkdownCitations } from '../markdown/markdown-citations.js';
+import {
+    analyzeMarkdownCitations,
+    findAuthorNoteLatexCommands,
+} from '../markdown/markdown-citations.js';
 import {
     analyzeMarkdownFigureReferences,
 } from '../markdown/markdown-figure-references.js';
@@ -52,9 +55,11 @@ import {
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
 import {
     subtractChromeRanges,
-    visibleTextForRanges,
 } from '../markdown/chrome-ranges.js';
-import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
+import {
+    createVisibleMarkdownTextIndex,
+    visibleMarkdownTextForRanges,
+} from '../markdown/markdown-visible-text.js';
 import {
     findTextOccurrences,
     isNumericCitationContent,
@@ -1664,7 +1669,10 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
 function annotationSelectionWithoutChrome(view, from, to, chromeRanges) {
     const ranges = subtractChromeRanges({ from, to }, chromeRanges);
     if (!ranges.length) return null;
-    const text = visibleTextForRanges(view.state.doc.toString(), ranges).trim();
+    const text = visibleMarkdownTextForRanges(
+        view.state.doc.toString(),
+        ranges
+    ).trim();
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     return { text, ranges };
 }
@@ -2317,6 +2325,64 @@ function decorateMath(
         ));
         renderedMathRanges.push({ from: matchFrom, to: matchTo });
     }
+
+    decorateAuthorNoteLatexCommands(
+        source,
+        node.from,
+        state,
+        decorations,
+        excludedRanges,
+        renderedMathRanges,
+        context
+    );
+}
+
+function decorateAuthorNoteLatexCommands(
+    source,
+    nodeFrom,
+    state,
+    decorations,
+    excludedRanges,
+    renderedMathRanges,
+    context
+) {
+    for (const match of findAuthorNoteLatexCommands(source)) {
+        const matchFrom = nodeFrom + match.start;
+        const matchTo = nodeFrom + match.end;
+        if (rangeOverlapsAny(matchFrom, matchTo, excludedRanges)
+            || rangeOverlapsAny(matchFrom, matchTo, renderedMathRanges)) {
+            continue;
+        }
+        decorations.push(renderedMathRange(
+            match.raw,
+            matchFrom,
+            matchTo,
+            'math',
+            context,
+            true,
+            authorNoteLatexClassName(state, context, matchFrom, matchTo),
+            `$${match.raw}$`
+        ));
+        renderedMathRanges.push({ from: matchFrom, to: matchTo });
+    }
+}
+
+function authorNoteLatexClassName(state, context, from, to) {
+    const result = citationAnalysis(state, context);
+    const markups = [
+        ...result.citations.map(citation => citation.superscriptMarkup),
+        ...result.affiliations.map(affiliation => affiliation.markerMarkup),
+    ].filter(Boolean);
+    for (const markup of markups) {
+        if (!markup.raiseContent) continue;
+        if (from >= markup.contentFrom && to <= markup.contentTo) {
+            return 'cm-mktero-citation-superscript';
+        }
+        if (from === markup.wrapperTo) {
+            return 'cm-mktero-citation-superscript';
+        }
+    }
+    return '';
 }
 
 function hasSuperscriptCitationMarkup(state, context, from, to) {
@@ -2708,11 +2774,13 @@ function renderedMathRange(
     display,
     context,
     inline = false,
-    extraClassName = ''
+    extraClassName = '',
+    renderSource = source
 ) {
     return Decoration.replace({
         widget: new RenderedMarkdownWidget({
             source,
+            renderSource,
             display,
             from,
             annotations: annotationsOverlappingRange(
