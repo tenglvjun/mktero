@@ -211,7 +211,10 @@ export function findAcademicFigureGroups(markdown) {
             if (leadingCaption) {
                 imageStart = nextNonBlankLine(lines, imageStart + 1);
             }
-            const images = collectNearbyImages(lines, imageStart, blockedLines);
+            const expectedCount = gridMarker.rows.reduce((sum, row) => sum + row, 0);
+            const images = collectMarkedFigureImages(
+                lines, imageStart, blockedLines, expectedCount
+            );
             const captionIndex = nextNonBlankLine(
                 lines,
                 (images.at(-1)?.index ?? lines.length - 1) + 1
@@ -226,7 +229,7 @@ export function findAcademicFigureGroups(markdown) {
             const caption = leadingCaption || trailingCaption || embeddedCaption;
             const imageCount = images.length;
             if (caption
-                && imageCount === gridMarker.rows.reduce((sum, row) => sum + row, 0)
+                && imageCount === expectedCount
                 && gridMarker.columns === Math.max(...gridMarker.rows)
                 && imageCount > 1) {
                 const layout = gridMarker.columns === 1
@@ -806,6 +809,20 @@ function collectNearbyImages(lines, startIndex, blockedLines) {
         index = nextIndex;
     }
     return images;
+}
+
+function collectMarkedFigureImages(lines, startIndex, blockedLines, expectedCount) {
+    const images = [];
+    let index = nextNonBlankLine(lines, startIndex);
+    while (index < lines.length
+        && !blockedLines.has(index)
+        && isMarkdownImageLine(lines[index].raw)) {
+        if (images.length === expectedCount) return [];
+        images.push({ index, source: lines[index].text.trim() });
+        if (captionFromImageLine(lines[index].raw)) break;
+        index = nextNonBlankLine(lines, index + 1);
+    }
+    return images.length === expectedCount ? images : [];
 }
 
 function leadingVerticalABPanelGroup(lines, startIndex, blockedLines) {

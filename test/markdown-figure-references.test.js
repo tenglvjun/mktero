@@ -1,6 +1,51 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeMarkdownFigureReferences } from '../src/markdown/markdown-figure-references.js';
+import { findAcademicFigureGroups } from '../src/markdown/markdown-figures.js';
+
+test('keeps all marked panels after OCR removal leaves extra blank lines', () => {
+    for (const newline of ['\n', '\r\n']) {
+        for (const blankLines of [0, 1, 2, 5]) {
+            const separator = newline.repeat(blankLines + 1);
+            const markdown = [
+                'See Figure 1.',
+                '<!-- mktero-figure-layout: columns=2 rows=2,2 -->',
+                ...['a', 'b', 'c', 'd'].map(name => `![](images/${name}.png)`),
+                'Figure 1. Four panels.',
+            ].join(separator);
+            const groups = findAcademicFigureGroups(markdown);
+            assert.equal(groups.length, 1);
+            assert.equal(groups[0].images.length, 4);
+            assert.deepEqual(groups[0].gridRows, [2, 2]);
+            const preview = analyzeMarkdownFigureReferences(markdown).targets[0];
+            for (const name of ['a', 'b', 'c', 'd']) {
+                assert.ok(preview.figure.source.includes(`images/${name}.png`));
+            }
+        }
+    }
+});
+
+test('does not extend marked figures through prose, fences or another figure', () => {
+    const marker = '<!-- mktero-figure-layout: columns=2 rows=2 -->';
+    for (const barrier of [
+        'An independent paragraph.',
+        '```markdown\n![](images/code.png)\n```',
+        '<!-- mktero-figure-layout: columns=2 rows=2 -->',
+        'Figure 2. An independent figure.',
+    ]) {
+        const source = [marker, '![](images/a.png)', '', '', barrier,
+            '![](images/b.png)', 'Figure 1. Results.'].join('\n');
+        assert.ok(!findAcademicFigureGroups(source).some(group => (
+            group.from === 0 && group.gridColumns === 2
+        )));
+    }
+    const fenced = '```markdown\n' + [marker, '![](images/a.png)', '', '',
+        '![](images/b.png)', 'Figure 1. Results.'].join('\n') + '\n```';
+    assert.deepEqual(findAcademicFigureGroups(fenced), []);
+    const wrongCount = [marker, '![](images/a.png)', '![](images/b.png)',
+        '![](images/c.png)', 'Figure 1. Results.'].join('\n');
+    assert.ok(!findAcademicFigureGroups(wrongCount).some(group => group.gridColumns));
+});
 
 test('maps a prose figure reference to a uniquely captioned image', () => {
     const markdown = [

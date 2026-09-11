@@ -76,11 +76,13 @@
 
 ## T01：修复已标记图组的空行断组
 
+**实施状态：已完成。** 2026-09-11，先验证新回归失败，再通过三组相关测试共 138 项；代码与引用预览均覆盖 CRLF、多空行及独立内容边界。
+
 **Files:** 修改 `src/markdown/markdown-figures.js`；测试 `test/markdown-figure-references.test.js`、`test/mistral-result.test.js`、`test/markdown-html.test.js`。
 
 **Interfaces:** 消费已有 `parseFigureLayoutMarker()`；保留 `findAcademicFigureGroups(markdown)` 和所有旧调用签名。新增内部 `collectMarkedFigureImages(lines, startIndex, blockedLines, expectedCount)`，只供合法布局标记分支使用。
 
-- [ ] **Step 1：先加入能够失败的真实分组回归。**
+- [x] **Step 1：先加入能够失败的真实分组回归。**
 
 ```js
 test('keeps all marked panels after OCR removal leaves extra blank lines', () => {
@@ -104,8 +106,8 @@ test('keeps all marked panels after OCR removal leaves extra blank lines', () =>
 });
 ```
 
-- [ ] **Step 2：运行 `node --test test/markdown-figure-references.test.js`，确认新测试因成员数不对而失败。**
-- [ ] **Step 3：实现标记分支专用扫描。** 循环跨过空白行；只接受尚未被代码块屏蔽的独立图片；遇到图注、非图片正文或第二个布局标记立刻停止；收集数必须等于 expectedCount。普通未标记路径保留原保守边界。禁止全篇压缩空行。
+- [x] **Step 2：运行 `node --test test/markdown-figure-references.test.js`，确认新测试因成员数不对而失败。**
+- [x] **Step 3：实现标记分支专用扫描。** 循环跨过空白行；只接受尚未被代码块屏蔽的独立图片；遇到图注、非图片正文或第二个布局标记立刻停止；收集数必须等于 expectedCount。普通未标记路径保留原保守边界。禁止全篇压缩空行。
 
 ```js
 const expectedCount = gridMarker.rows.reduce((sum, count) => sum + count, 0);
@@ -115,8 +117,8 @@ const images = collectMarkedFigureImages(
 if (images.length !== expectedCount) continue;
 ```
 
-- [ ] **Step 4：加入两个独立 Figure、代码围栏内伪标记、错误 count、0/1/2/5 个空白行、CRLF 的用例，并验证引用预览源包含四个图片路径。** Run: `node --test test/markdown-figure-references.test.js test/mistral-result.test.js test/markdown-html.test.js`，Expected: PASS。
-- [ ] **Step 5：提交。** `git commit -m "fix: retain marked figure groups across OCR whitespace"`，仅暂存本任务文件。
+- [x] **Step 4：加入两个独立 Figure、代码围栏内伪标记、错误 count、0/1/2/5 个空白行、CRLF 的用例，并验证引用预览源包含四个图片路径。** Run: `node --test test/markdown-figure-references.test.js test/mistral-result.test.js test/markdown-html.test.js`，Expected: PASS。
+- [x] **Step 5：提交。** `git commit -m "fix: retain marked figure groups across OCR whitespace"`，仅暂存本任务文件。
 
 此修复也适用于已有缓存中的合法标记。Mistral 原先的独立删文步骤在 T05/T09 被公共成功事务替代，不另外长期维护第二套删文管线。
 
