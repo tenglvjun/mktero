@@ -3748,6 +3748,75 @@ test('renders an academic caption above a one-column GFM table', () => {
     dom.window.close();
 });
 
+test('renders LaTeX in a MinerU HTML table caption', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        'Table 1: Baseline runtimes suffer $\\mathcal{O}(T^{2})$ accumulation.',
+        '',
+        '<table><tr><td>Runtime</td><td>Score</td></tr></table>',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        openLink: () => {},
+    });
+    const caption = document.querySelector('.cm-mktero-html-table caption');
+
+    assert.equal(
+        caption?.querySelector('.mktero-table-label')?.textContent,
+        'Table 1:'
+    );
+    assert.equal(caption?.querySelectorAll('.math-inline').length, 1);
+    assert.match(
+        caption?.innerHTML || '',
+        /<annotation encoding="application\/x-tex">\\mathcal\{O\}\(T\^\{2\}\)<\/annotation>/
+    );
+    assert.doesNotMatch(caption?.textContent || '', /\$\\mathcal\{O\}/);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders LaTeX in a GFM table caption', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        'Table 6: Runtimes suffer $O(N^{2})$ collapse and keep an $O(1)$ footprint.',
+        '',
+        '| Horizon | Score |',
+        '| --- | --- |',
+        '| 10 | 1.00 |',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        openLink: () => {},
+    });
+    const caption = document.querySelector('.cm-mktero-table caption');
+
+    assert.equal(
+        caption?.querySelector('.mktero-table-label')?.textContent,
+        'Table 6:'
+    );
+    assert.equal(caption?.querySelectorAll('.math-inline').length, 2);
+    assert.doesNotMatch(caption?.textContent || '', /\$O\(N\^\{2\}\)/);
+    assert.doesNotMatch(caption?.textContent || '', /\$O\(1\)/);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('renders a MinerU HTML table and its preceding caption as one table', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

@@ -851,6 +851,42 @@ test('renders compact raw HTML tables emitted by MinerU', () => {
     assert.doesNotMatch(html, /&lt;table&gt;/);
 });
 
+test('renders LaTeX in academic HTML table captions', () => {
+    const html = renderMarkdownHTML([
+        'Table 1: Baseline runtimes suffer $\\mathcal{O}(T^{2})$ accumulation '
+            + 'and a bounded $\\mathcal{O}(1)$ footprint.',
+        '',
+        '<table><tr><td>Runtime</td><td>Score</td></tr></table>',
+    ].join('\n'));
+
+    assert.match(html, /<span class="mktero-table-label">Table 1:<\/span>/);
+    assert.equal((html.match(/class="math-inline"/g) || []).length, 2);
+    assert.match(
+        html,
+        /<annotation encoding="application\/x-tex">\\mathcal\{O\}\(T\^\{2\}\)<\/annotation>/
+    );
+    assert.match(
+        html,
+        /<annotation encoding="application\/x-tex">\\mathcal\{O\}\(1\)<\/annotation>/
+    );
+    assert.doesNotMatch(html, /\$\\mathcal\{O\}/);
+});
+
+test('renders LaTeX in academic GFM table captions', () => {
+    const html = renderMarkdownHTML([
+        'Table 6: Runtimes suffer $O(N^{2})$ collapse and keep an $O(1)$ footprint.',
+        '',
+        '| Horizon | Score |',
+        '| --- | --- |',
+        '| 10 | 1.00 |',
+    ].join('\n'));
+
+    assert.match(html, /<span class="mktero-table-label">Table 6:<\/span>/);
+    assert.equal((html.match(/class="math-inline"/g) || []).length, 2);
+    assert.doesNotMatch(html, /\$O\(N\^\{2\}\)/);
+    assert.doesNotMatch(html, /\$O\(1\)/);
+});
+
 test('renders a MinerU table caption as the native table caption', () => {
     const html = renderMarkdownHTML([
         'Table 3 Means & standard deviations of desired emotions',
