@@ -1598,23 +1598,30 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
         || !selectionNodeInEditor(view, range.endContainer)) {
         return null;
     }
-    const selectedText = selection.toString();
-    if (!selectedText.trim()) return null;
     const renderedStart = renderedSelectionContainer(
         range.startContainer,
         view
     );
     const renderedEnd = renderedSelectionContainer(range.endContainer, view);
-    if (renderedStart || renderedEnd) {
-        return renderedStart && renderedStart === renderedEnd
-            ? selectedRenderedMarkdownAnnotation(
+    if (renderedStart && renderedStart === renderedEnd) {
+        if (isRenderedMathContainer(renderedStart)) {
+            return selectedRenderedMathAnnotation(
                 view,
-                range,
-                selectedText,
+                renderedStart,
                 chromeRanges
-            )
-            : null;
+            );
+        }
+        const selectedText = selection.toString();
+        if (!selectedText.trim()) return null;
+        return selectedRenderedMarkdownAnnotation(
+            view,
+            range,
+            selectedText,
+            chromeRanges
+        );
     }
+    const selectedText = selection.toString();
+    if (!selectedText.trim()) return null;
     const renderedIntersections = intersectingRenderedContent(view, range);
     if (renderedIntersections === null) return null;
     try {
@@ -1636,6 +1643,15 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
                 from,
                 to,
                 chromeRanges
+            ) || (
+                renderedIntersections.every(isRenderedMathContainer)
+                    ? annotationSelectionWithoutChrome(
+                        view,
+                        from,
+                        to,
+                        chromeRanges
+                    )
+                    : null
             );
         }
         return annotationSelectionWithoutChrome(view, from, to, chromeRanges);
@@ -1651,6 +1667,51 @@ function annotationSelectionWithoutChrome(view, from, to, chromeRanges) {
     const text = visibleTextForRanges(view.state.doc.toString(), ranges).trim();
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     return { text, ranges };
+}
+
+function selectedRenderedMathAnnotation(view, container, chromeRanges) {
+    const sourceFrom = Number(container.dataset.markdownFrom);
+    const sourceTo = Number(container.dataset.markdownTo);
+    if (!Number.isInteger(sourceFrom)
+        || !Number.isInteger(sourceTo)
+        || sourceFrom < 0
+        || sourceTo <= sourceFrom
+        || sourceTo > view.state.doc.length) {
+        return null;
+    }
+    const text = visibleMathAnnotationText(
+        view.state.sliceDoc(sourceFrom, sourceTo)
+    );
+    if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
+    const ranges = subtractChromeRanges(
+        { from: sourceFrom, to: sourceTo },
+        chromeRanges
+    );
+    if (!ranges.length) return null;
+    return { text, ranges };
+}
+
+function visibleMathAnnotationText(source) {
+    const display = findDisplayMathMatches(source);
+    if (coversWholeSource(source, display[0])) {
+        return normalizeText(display[0].text);
+    }
+    const inline = findInlineMathMatches(source);
+    if (coversWholeSource(source, inline[0])) {
+        return normalizeText(inline[0].text);
+    }
+    return normalizeText(createVisibleMarkdownTextIndex(source).text);
+}
+
+function coversWholeSource(source, match) {
+    return Boolean(match)
+        && !source.slice(0, match.start).trim()
+        && !source.slice(match.end).trim();
+}
+
+function isRenderedMathContainer(container) {
+    return container.classList.contains('cm-mktero-math')
+        || container.classList.contains('cm-mktero-math-display');
 }
 
 function selectedRenderedMarkdownAnnotation(

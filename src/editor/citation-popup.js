@@ -202,7 +202,8 @@ export function createCitationPopup(parent, {
             renderContent({ document }) {
                 contentRoot = createElement(document, 'div');
                 contentRoot.className = 'mktero-citation-popup-content';
-                if (typeof onListReferenceLibraries === 'function') {
+                const importable = targets.some(isReferenceTarget);
+                if (importable && typeof onListReferenceLibraries === 'function') {
                     const header = createElement(document, 'div');
                     header.className = 'mktero-citation-popup-header';
                     libraryPicker = createLibraryPicker(document, {
@@ -233,12 +234,14 @@ export function createCitationPopup(parent, {
                     },
                 }));
                 for (const row of rows) contentRoot.appendChild(row.element);
-                void loadLibraries();
-                if (typeof onListReferenceLibraries !== 'function'
+                if (importable) void loadLibraries();
+                if (importable
+                    && typeof onListReferenceLibraries !== 'function'
                     && typeof onGetReferenceStatus === 'function') {
                     refreshRows();
                 }
-                if (typeof onSubscribeReferenceUpdates === 'function') {
+                if (importable
+                    && typeof onSubscribeReferenceUpdates === 'function') {
                     unsubscribeUpdates = onSubscribeReferenceUpdates(event => {
                         if (controller.signal?.aborted) return;
                         if (event?.type === 'updated' && event.reference) {
@@ -331,6 +334,10 @@ function createCitationItem({
         t('reference.metadataCandidates')
     );
     controls.append(status, action);
+    if (!isReferenceTarget(target)) {
+        controls.hidden = true;
+        candidatePanel.hidden = true;
+    }
     row = {
         element,
         target,
@@ -1306,7 +1313,9 @@ function createElement(document, name) {
 }
 
 function isReferenceTarget(target) {
-    return Boolean(target && !target.affiliation);
+    return Boolean(target)
+        && !target.affiliation
+        && !String(target.id || '').startsWith('affiliation:');
 }
 
 function createAbortController(parent) {

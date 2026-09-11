@@ -14,7 +14,7 @@ export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
     figureLayouts: 'same-page-image-group-layout-v1',
     textFlow: 'cross-page-continuation-v1',
     prose: 'unclosed-parenthetical-comma-v1',
-    columns: 'same-page-two-column-reading-order-v3',
+    columns: 'same-page-two-column-reading-order-v6',
     chrome: 'page-edge-repeated-v1',
 });
 

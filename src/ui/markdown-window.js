@@ -1462,6 +1462,7 @@ class MarkdownTabView {
             translationLanguageOptions:
                 documentActions.translationLanguageOptions,
             translationStatus: documentActions.translationStatus,
+            translationContext: documentActions.translationContext,
             translationFailureNavigation:
                 documentActions.translationFailureNavigation,
             translationFailurePosition:
@@ -1869,6 +1870,7 @@ class MarkdownTabView {
         const githubRepos = this.createElement('div', {
             class: 'markdown-github-repos',
         });
+        githubRepos.hidden = true;
         appendChildren(githubRepos, githubReposButton, githubReposMenu);
         appendChildren(
             readerControls,
@@ -2097,9 +2099,9 @@ class MarkdownTabView {
             translationViewLabel,
             translationView,
             translationContext,
-            translationFailureNavigation,
-            translateDocument
+            translationFailureNavigation
         );
+        readerControls.appendChild(translateDocument);
         const reparse = this.createElement('button', {
             id: 'mktero-reparse',
             class: 'markdown-reader-action markdown-reader-action--child',
@@ -2245,6 +2247,7 @@ class MarkdownTabView {
             translationLanguageChevron,
             translationLanguageOptions,
             translationStatus,
+            translationContext,
             translationFailureNavigation,
             translationFailurePosition,
             previousTranslationFailure,
@@ -4519,7 +4522,6 @@ class MarkdownTabView {
         this.elements.saveSnapshot.hidden = !saveAvailable;
         this.elements.exportMarkdown.hidden = !exportAvailable;
         this.elements.correctionToggle.hidden = !correctionAvailable;
-        this.elements.translationControls.hidden = !translationAvailable;
         if (!translationAvailable) {
             this.elements.translationProgress.hidden = true;
         }
@@ -4611,6 +4613,13 @@ class MarkdownTabView {
             partial,
             translationReady,
         });
+        this.elements.translationContext.hidden =
+            this.elements.translationStatus.hidden;
+        this.elements.translationControls.hidden = !translationAvailable
+            || (
+                this.elements.translationView.hidden
+                && this.elements.translationFailureNavigation.hidden
+            );
         this.elements.restoreCorrections.disabled = !restoreAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
@@ -5035,6 +5044,7 @@ class MarkdownTabView {
         this.githubRepositories = repositories;
         const available = repositories.length > 0;
         const multiple = repositories.length > 1;
+        this.elements.githubRepos.hidden = !available;
         this.elements.githubReposButton.hidden = !available;
         this.elements.githubReposButton.setAttribute(
             'aria-haspopup',

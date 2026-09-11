@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { findAcademicFigureGroups } from '../src/markdown/markdown-figures.js';
 import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
+import { reassembleMinerUColumnFlow } from '../src/mineru/column-flow-normalizer.js';
 import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
 import { MINERU_SOURCE_MAP_OPTIONS } from '../src/mineru/parser-profile.js';
 
@@ -24,7 +25,7 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
     );
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.columns,
-        'same-page-two-column-reading-order-v3'
+        'same-page-two-column-reading-order-v6'
     );
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.chrome,
@@ -378,6 +379,148 @@ test('orders same-page two-column prose by PDF reading order', () => {
             locations: [{ pageIndex: 3, bbox: [510, 650, 900, 850] }],
         }]
     );
+});
+
+test('keeps a left-column introduction before right-column prose split by display math', () => {
+    const heading = '# 1 Introduction';
+    const leftColumn = 'Large Language Models (LLMs) have rapidly evolved from '
+        + 'passive language interfaces into autonomous systems.';
+    const rightColumnTop = 'In this paper, we introduce SKILL.state, a runtime '
+        + 'architecture that reformulates procedural skill execution.';
+    const formula = '$$\nA_t = (P, \\Sigma_t, O_t),\n$$';
+    const rightColumnBottom = 'where P denotes the immutable procedural '
+        + 'specification and the latest observation.';
+    const result = prepareMinerUResult({
+        markdown: [
+            rightColumnTop,
+            heading,
+            leftColumn,
+            formula,
+            rightColumnBottom,
+        ].join('\n\n'),
+        contentList: [{
+            type: 'text',
+            text: rightColumnTop,
+            pageIndex: 0,
+            bbox: [510, 250, 900, 400],
+        }, {
+            type: 'text',
+            text: '1 Introduction',
+            pageIndex: 0,
+            bbox: [100, 240, 280, 280],
+        }, {
+            type: 'text',
+            text: leftColumn,
+            pageIndex: 0,
+            bbox: [100, 300, 490, 520],
+        }, {
+            type: 'equation',
+            text: formula,
+            pageIndex: 0,
+            bbox: [510, 420, 900, 480],
+        }, {
+            type: 'text',
+            text: rightColumnBottom,
+            pageIndex: 0,
+            bbox: [510, 500, 900, 700],
+        }],
+    });
+
+    assert.equal(result.markdown, [
+        heading,
+        leftColumn,
+        rightColumnTop,
+        formula,
+        rightColumnBottom,
+    ].join('\n\n'));
+});
+
+test('keeps a full-width abstract heading from hiding two-column abstract prose', () => {
+    const heading = '# Abstract';
+    const leftColumn = 'Large Language Models (LLMs) increasingly act as autonomous '
+        + 'agents executing complex, long-running procedural skills.';
+    const rightColumn = 'Modern agent runtimes almost universally adopt a '
+        + 'conversational execution model at every step.';
+    const markdown = [heading, rightColumn, leftColumn].join('\n\n');
+    const headingFrom = 0;
+    const headingTo = heading.length;
+    const rightFrom = headingTo + 2;
+    const rightTo = rightFrom + rightColumn.length;
+    const leftFrom = rightTo + 2;
+    const leftTo = leftFrom + leftColumn.length;
+    const result = reassembleMinerUColumnFlow(markdown, [{
+        type: 'text',
+        markdownFrom: headingFrom,
+        markdownTo: headingTo,
+        locations: [{ pageIndex: 0, bbox: [80, 70, 920, 120] }],
+    }, {
+        type: 'text',
+        markdownFrom: rightFrom,
+        markdownTo: rightTo,
+        locations: [{ pageIndex: 0, bbox: [510, 130, 900, 480] }],
+    }, {
+        type: 'text',
+        markdownFrom: leftFrom,
+        markdownTo: leftTo,
+        locations: [{ pageIndex: 0, bbox: [100, 140, 490, 700] }],
+    }]);
+
+    assert.equal(result, [heading, leftColumn, rightColumn].join('\n\n'));
+});
+
+test('orders two-column abstract prose when column boxes share a narrow gutter', () => {
+    const leftColumn = 'Large Language Models (LLMs) increasingly act as autonomous '
+        + 'agents executing complex, long-running procedural skills.';
+    const rightColumn = 'Modern agent runtimes almost universally adopt a '
+        + 'conversational execution model at every step.';
+    const markdown = [rightColumn, leftColumn].join('\n\n');
+    const result = reassembleMinerUColumnFlow(markdown, [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: rightColumn.length,
+        locations: [{ pageIndex: 0, bbox: [500, 130, 900, 480] }],
+    }, {
+        type: 'text',
+        markdownFrom: rightColumn.length + 2,
+        markdownTo: markdown.length,
+        locations: [{ pageIndex: 0, bbox: [100, 140, 505, 700] }],
+    }]);
+
+    assert.equal(result, [leftColumn, rightColumn].join('\n\n'));
+});
+
+test('does not reorder single-column prose around headings or display math', () => {
+    const heading = '# Experimental Methods';
+    const before = 'The following display records the measured quantity.';
+    const formula = '$$\nE = mc^2\n$$';
+    const after = 'The next paragraph continues the same single-column argument.';
+    const markdown = [heading, before, formula, after].join('\n\n');
+    const result = prepareMinerUResult({
+        markdown,
+        contentList: [{
+            type: 'text',
+            text: 'Experimental Methods',
+            pageIndex: 0,
+            bbox: [100, 120, 280, 160],
+        }, {
+            type: 'text',
+            text: before,
+            pageIndex: 0,
+            bbox: [100, 180, 900, 260],
+        }, {
+            type: 'equation',
+            text: formula,
+            pageIndex: 0,
+            bbox: [250, 280, 750, 360],
+        }, {
+            type: 'text',
+            text: after,
+            pageIndex: 0,
+            bbox: [100, 380, 900, 460],
+        }],
+    });
+
+    assert.equal(result.markdown, markdown);
 });
 
 test('orders a same-page block before a cross-page paragraph continuation', () => {

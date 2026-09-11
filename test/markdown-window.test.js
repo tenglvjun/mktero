@@ -211,6 +211,10 @@ test('opens a single GitHub repository from the reader toolbar', async () => {
         const menu = shadow.querySelector('#mktero-github-repos-menu');
         assert.equal(button.hidden, false);
         assert.equal(
+            shadow.querySelector('.markdown-github-repos').hidden,
+            false
+        );
+        assert.equal(
             shadow.querySelector('.markdown-reader-controls').contains(button),
             true
         );
@@ -281,6 +285,10 @@ test('hides the GitHub repository button when the paper has none', async () => {
 
     try {
         assert.equal(shadow.querySelector('#mktero-github-repos').hidden, true);
+        assert.equal(
+            shadow.querySelector('.markdown-github-repos').hidden,
+            true
+        );
         assert.equal(
             shadow.querySelector('#mktero-github-repos-menu').hidden,
             true
@@ -577,7 +585,12 @@ test('translates the document and switches between three reading modes', async (
         const compareMode = shadow.querySelector(
             '[data-translation-view="compare"]'
         );
-        assert.equal(controls.hidden, false);
+        assert.equal(controls.hidden, true);
+        assert.equal(
+            shadow.querySelector('.markdown-reader-controls').contains(translate),
+            true
+        );
+        assert.equal(controls.contains(translate), false);
         assert.equal(translate.hidden, false);
         assert.equal(translate.textContent, 'Translate document');
         assert.equal(
@@ -729,6 +742,7 @@ test('translates the document and switches between three reading modes', async (
                 ?.classList.contains('is-translating'),
             false
         );
+        assert.equal(controls.hidden, false);
         assert.equal(translate.hidden, true);
         assert.equal(translate.getAttribute('aria-label'), 'Translated');
         assert.equal(translate.getAttribute('title'), 'Translated');
@@ -2581,6 +2595,12 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
             [shadow.querySelector('.markdown-reader-font-picker')]
         );
         assert.equal(readerControls?.nextElementSibling, translationControls);
+        assert.equal(readerControls?.contains(translate), true);
+        assert.equal(translationControls?.contains(translate), false);
+        assert.equal(
+            shadow.querySelector('.markdown-github-repos')?.hidden,
+            true
+        );
         assert.deepEqual(
             [...translationControls.children],
             [
@@ -2588,7 +2608,6 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
                 translationView,
                 translationContext,
                 failureNavigation,
-                translate,
             ]
         );
         assert.deepEqual(
