@@ -152,6 +152,28 @@ test('normalizes LaTeX Greek symbols and braced subscripts from PDF text', () =>
     assert.equal(normalizePdfAnnotationText('\\input_{secret}'), '\\input_{secret}');
     assert.equal(normalizePdfAnnotationText('\\operatorname{foo}_{bar}'), '\\operatorname{foo}_{bar}');
     assert.equal(normalizePdfAnnotationText('\\tau_i'), 'τi');
+    assert.equal(
+        normalizePdfAnnotationText('A _ {t} = (P, \\Sigma_t, O _ {t}),\\tag{2}'),
+        'At=(P, Σt, Ot),(2)'
+    );
+    assert.equal(
+        normalizePdfAnnotationText(
+            '(R _ {t}, \\Delta \\Sigma_ {t}, a _ {t}), \\tag{3}'
+        ),
+        '(Rt, ΔΣt, at),(3)'
+    );
+    assert.equal(
+        normalizePdfAnnotationText('\\Delta\\Sigma_{t} is a structured state update'),
+        'ΔΣt is a structured state update'
+    );
+    assert.equal(
+        normalizePdfAnnotationText('\\Delta\\Sigma_{t} is a structured state update'),
+        normalizePdfAnnotationText('ΔΣ_t is a structured state update')
+    );
+    assert.equal(
+        normalizePdfAnnotationText('\\Delta \\Sigma_{t}'),
+        normalizePdfAnnotationText('∆Σt')
+    );
     assert.equal(normalizePdfAnnotationText('literal \\_value'), 'literal \\_value');
     assert.equal(normalizePdfAnnotationText('\\\\tau_i'), '\\\\tau_i');
     assert.equal(normalizePdfAnnotationText('\\\\tau_{i}'), '\\\\tau_{i}');

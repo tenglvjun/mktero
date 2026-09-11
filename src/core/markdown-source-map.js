@@ -328,17 +328,90 @@ export function resolvePDFPageIndexHint(
         range,
         documentLength
     );
-    if (!match) return null;
-    const rangeLocation = resolveSourceMapLocation(
-        match,
-        range,
-        documentLength
+    if (match) {
+        const rangeLocation = resolveSourceMapLocation(
+            match,
+            range,
+            documentLength
+        );
+        if (rangeLocation) return rangeLocation.pageIndex;
+        return uniqueSourceMapEntryPage(match);
+    }
+    const overlappingPages = uniqueSourceMapPages(
+        overlappingSourceMapEntries(sourceMap, range, documentLength)
     );
-    if (rangeLocation) return rangeLocation.pageIndex;
-    const pageIndex = match.locations[0].pageIndex;
-    return match.locations.every(location => location.pageIndex === pageIndex)
+    if (overlappingPages.length === 1) return overlappingPages[0];
+    if (overlappingPages.length > 1) return null;
+    const nearestPages = uniqueSourceMapPages(
+        nearestSourceMapEntries(sourceMap, range, documentLength)
+    );
+    return nearestPages.length === 1 ? nearestPages[0] : null;
+}
+
+function overlappingSourceMapEntries(sourceMap, range, documentLength) {
+    if (!Array.isArray(sourceMap) || !isValidDocumentRange(range, documentLength)) {
+        return [];
+    }
+    return sourceMap.filter(entry => (
+        isValidSourceMapEntry(entry, documentLength)
+        && entry.markdownFrom < range.to
+        && entry.markdownTo > range.from
+    ));
+}
+
+function nearestSourceMapEntries(sourceMap, range, documentLength) {
+    if (!Array.isArray(sourceMap) || !isValidDocumentRange(range, documentLength)) {
+        return [];
+    }
+    let bestDistance = Infinity;
+    const nearest = [];
+    for (const entry of sourceMap) {
+        if (!isValidSourceMapEntry(entry, documentLength)) continue;
+        const distance = sourceMapRangeDistance(range, entry);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            nearest.length = 0;
+            nearest.push(entry);
+        }
+        else if (distance === bestDistance) {
+            nearest.push(entry);
+        }
+    }
+    return nearest;
+}
+
+function sourceMapRangeDistance(range, entry) {
+    if (entry.markdownFrom < range.to && entry.markdownTo > range.from) {
+        return 0;
+    }
+    if (range.from >= entry.markdownTo) return range.from - entry.markdownTo;
+    return entry.markdownFrom - range.to;
+}
+
+function uniqueSourceMapPages(entries) {
+    const pages = new Set();
+    for (const entry of entries) {
+        const pageIndex = uniqueSourceMapEntryPage(entry);
+        if (pageIndex === null) return [];
+        pages.add(pageIndex);
+    }
+    return [...pages];
+}
+
+function uniqueSourceMapEntryPage(entry) {
+    const pageIndex = entry?.locations?.[0]?.pageIndex;
+    if (!Number.isSafeInteger(pageIndex) || pageIndex < 0) return null;
+    return entry.locations.every(location => location.pageIndex === pageIndex)
         ? pageIndex
         : null;
+}
+
+function isValidDocumentRange(range, documentLength) {
+    return Number.isSafeInteger(range?.from)
+        && Number.isSafeInteger(range?.to)
+        && range.from >= 0
+        && range.to > range.from
+        && range.to <= documentLength;
 }
 
 export function resolveSourceMapLocation(

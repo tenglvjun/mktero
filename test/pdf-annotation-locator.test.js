@@ -1165,6 +1165,86 @@ test('matches PDF whitespace, signed numbers, dehyphenation, and CJK text', asyn
     locator.dispose();
 });
 
+test('locates Delta-Sigma formula prose from LaTeX Markdown', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('ΔΣ_t is a structured state update', { hasEOL: true }),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        '\\Delta\\Sigma_{t} is a structured state update',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
+    locator.dispose();
+});
+
+test('uses an equation tag to choose one of several same-page formula matches', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('(Rt, ΔΣt, at) using the LLM', { y: 700, hasEOL: true }),
+        createTextItem('(Rt, ΔΣt, at), (3)', { y: 640, hasEOL: true }),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        '(R _ {t}, \\Delta \\Sigma_ {t}, a _ {t}), \\tag{3}',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    locator.dispose();
+});
+
+test('uses a page hint to choose one of several formula matches', async () => {
+    const locator = await createSyntheticLocator([
+        [createTextItem('(Rt, ΔΣt, at) using the LLM', { y: 700, hasEOL: true })],
+        [createTextItem('(Rt, ΔΣt, at), (3)', { y: 640, hasEOL: true })],
+    ]);
+
+    const located = await locator.locate(
+        42,
+        '(R _ {t}, \\Delta \\Sigma_ {t}, a _ {t}), \\tag{3}',
+        { pdfPageIndexHint: 1 }
+    );
+
+    assert.equal(located.position.pageIndex, 1);
+    locator.dispose();
+});
+
+test('locates a tagged display formula with spaced Delta Sigma', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('(Rt, ΔΣt, at), (3)', { hasEOL: true }),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        '(R _ {t}, \\Delta \\Sigma_ {t}, a _ {t}), \\tag{3}',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
+    locator.dispose();
+});
+
+test('locates a tagged display formula from spaced LaTeX Markdown', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('At = (P, Σt, Ot), (2)', { hasEOL: true }),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'A _ {t} = (P, \\Sigma_t, O _ {t}),\\tag{2}',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
+    locator.dispose();
+});
+
 test('matches Markdown LaTeX formulas against PDF math text', async () => {
     const locator = await createSyntheticLocator([[
         createTextItem(

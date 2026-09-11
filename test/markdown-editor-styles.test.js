@@ -299,6 +299,12 @@ test('keeps rendered display math spacing inside the CodeMirror block widget', (
         '.markdown-editor-host > .cm-editor .cm-mktero-math-display annotation',
     ].join('\n'));
     assert.match(annotation, /display:\s*none/);
+
+    const mathHighlight = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display > .cm-mktero-pdf-annotation'
+    );
+    assert.match(mathHighlight, /display:\s*inline-block/);
+    assert.match(mathHighlight, /padding:\s*0\.2em 0\.75em/);
 });
 
 test('keeps rendered figure spacing inside the CodeMirror block widget', () => {
@@ -784,6 +790,11 @@ test('styles citation popups and temporary reference highlights', () => {
     assert.match(superscriptCitation, /font-size:\s*0\.75em/);
     assert.match(superscriptCitation, /line-height:\s*1/);
     assert.match(superscriptCitation, /vertical-align:\s*super/);
+
+    const superscriptMath = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math.cm-mktero-citation-superscript'
+    );
+    assert.match(superscriptMath, /vertical-align:\s*super/);
 
     const affiliationMarker = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-affiliation-marker'

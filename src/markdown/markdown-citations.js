@@ -23,7 +23,12 @@ const WRAPPED_SUPERSCRIPT_PATTERNS = [
     /\$(?:\{\})?\^\{\s*([^{}\r\n]{1,80}?)\s*\}\$/g,
     /\\\((?:\{\})?\^\{\s*([^{}\r\n]{1,80}?)\s*\}\\\)/g,
 ];
-const AUTHOR_NOTE_DECORATED_AFFILIATION_PATTERN = /^([*†‡§¶#+‖]*)(\d+|\p{L})([*†‡§¶#+‖]*)$/u;
+const AUTHOR_NOTE_MARK_PATTERN = '(?:[*†‡§¶#+‖]|\\\\(?:dagger|ddagger|dag|ddag)(?![A-Za-z]))';
+const AUTHOR_NOTE_DECORATED_AFFILIATION_PATTERN = new RegExp(
+    `^(${AUTHOR_NOTE_MARK_PATTERN}*)(\\d+|\\p{L})(${AUTHOR_NOTE_MARK_PATTERN}*)$`,
+    'u'
+);
+const AUTHOR_NOTE_LATEX_COMMAND_PATTERN = /\\(?:dagger|ddagger|dag|ddag)(?![A-Za-z])/g;
 const UNICODE_SUPERSCRIPT_CHARACTERS = {
     '⁰': '0',
     '¹': '1',
@@ -37,6 +42,35 @@ const UNICODE_SUPERSCRIPT_CHARACTERS = {
     '⁹': '9',
     '⁻': '-',
 };
+
+export function findAuthorNoteLatexCommands(source) {
+    const text = String(source || '');
+    const commands = [];
+    for (const match of text.matchAll(AUTHOR_NOTE_LATEX_COMMAND_PATTERN)) {
+        if (isEscapedAuthorNoteCommand(text, match.index)) continue;
+        const end = match.index + match[0].length;
+        const previous = commands.at(-1);
+        if (previous && previous.end === match.index) {
+            previous.end = end;
+            previous.raw += match[0];
+            continue;
+        }
+        commands.push({
+            start: match.index,
+            end,
+            raw: match[0],
+        });
+    }
+    return commands;
+}
+
+function isEscapedAuthorNoteCommand(source, index) {
+    let backslashes = 0;
+    for (let cursor = index - 1; cursor >= 0 && source[cursor] === '\\'; cursor--) {
+        backslashes++;
+    }
+    return backslashes % 2 === 1;
+}
 
 export function analyzeMarkdownCitations(markdown) {
     const source = String(markdown || '');

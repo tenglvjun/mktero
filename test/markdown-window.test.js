@@ -6,6 +6,10 @@ import { createLocalization } from '../src/i18n/localization.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
 import { createEvidenceSnippet } from '../src/markdown/markdown-evidence.js';
 import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.js';
+import {
+    collectMarkdownTranslationBlocks,
+    createDocumentTranslationViews,
+} from '../src/markdown/markdown-translation-blocks.js';
 
 const MARKDOWN_STYLES = readFileSync(
     new URL('../ui/markdown.css', import.meta.url),
@@ -1810,6 +1814,139 @@ test('keeps source annotations and evidence actions on bilingual source blocks',
         text: '\u8bd1\u6587',
         ranges: [{ from: 36, to: 38 }],
     }), /source/i);
+    view.destroy();
+});
+
+test('creates bilingual heading annotations from visible text', async () => {
+    const created = [];
+    let editorOptions;
+    const markdown = '### 3.1 Execution State and Schema Authoring\n\nBody paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: '### 3.1 执行状态与模式设计',
+    }, {
+        id: blocks[1].id,
+        markdown: '正文。',
+    }]);
+    const heading = views.blockRanges[0];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        translationStatus: 'ready',
+        translationView: 'compare',
+        translatedMarkdown: views.translatedMarkdown,
+        comparisonMarkdown: views.comparisonMarkdown,
+        translationBlockRanges: views.blockRanges,
+        onCreateMarkdownAnnotation: annotation => {
+            created.push(annotation);
+            return {
+                ...annotation,
+                id: 'mktero-local-heading',
+                source: 'markdown',
+                type: 'highlight',
+            };
+        },
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument() {},
+                setCorrectionState() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    await editorOptions.createMarkdownAnnotation({
+        text: '3.1 Execution State and Schema Authoring',
+        comment: '',
+        color: '#2ea8e5',
+        ranges: [{
+            from: heading.comparisonSourceFrom,
+            to: heading.comparisonSourceTo,
+        }],
+    }, { side: 'source' });
+
+    assert.deepEqual(created[0].ranges, [{
+        from: heading.sourceFrom,
+        to: heading.sourceTo,
+    }]);
+    assert.equal(created[0].text, '3.1 Execution State and Schema Authoring');
+    view.destroy();
+});
+
+test('creates bilingual display math annotations from formula text', async () => {
+    const created = [];
+    let editorOptions;
+    const formula = '(R_t, \\Delta\\Sigma_t, a_t)';
+    const markdown = [
+        'Given the current execution context.',
+        '',
+        '$$',
+        formula,
+        '$$',
+        '',
+        'where R_t denotes the trace.',
+    ].join('\n');
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const translations = blocks.filter(block => block.translatable).map(block => ({
+        id: block.id,
+        markdown: `${block.markdown} 译文。`,
+    }));
+    const views = createDocumentTranslationViews(markdown, blocks, translations);
+    const mathBlock = views.blockRanges.find(range => (
+        markdown.slice(range.sourceFrom, range.sourceTo).includes('$$')
+    ));
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        translationStatus: 'ready',
+        translationView: 'compare',
+        translatedMarkdown: views.translatedMarkdown,
+        comparisonMarkdown: views.comparisonMarkdown,
+        translationBlockRanges: views.blockRanges,
+        onCreateMarkdownAnnotation: annotation => {
+            created.push(annotation);
+            return {
+                ...annotation,
+                id: 'mktero-local-math',
+                source: 'markdown',
+                type: 'highlight',
+            };
+        },
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                setDocument() {},
+                setCorrectionState() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+
+    await editorOptions.createMarkdownAnnotation({
+        text: formula,
+        comment: '',
+        color: '#2ea8e5',
+        ranges: [{
+            from: mathBlock.comparisonSourceFrom,
+            to: mathBlock.comparisonSourceTo,
+        }],
+    }, { side: 'source' });
+
+    assert.deepEqual(created[0].ranges, [{
+        from: mathBlock.sourceFrom,
+        to: mathBlock.sourceTo,
+    }]);
+    assert.equal(created[0].text, formula);
     view.destroy();
 });
 

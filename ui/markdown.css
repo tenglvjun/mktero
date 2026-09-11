@@ -2768,6 +2768,10 @@ main {
     vertical-align: super;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-math.cm-mktero-citation-superscript {
+    vertical-align: super;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-citation:hover {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
@@ -4449,6 +4453,14 @@ main {
     font-size: 1em;
     -moz-user-select: text;
     user-select: text;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-display > .cm-mktero-pdf-annotation {
+    display: inline-block;
+    max-width: 100%;
+    padding: 0.2em 0.75em;
+    border-radius: 6px;
+    cursor: pointer;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-math annotation,

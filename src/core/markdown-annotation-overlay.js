@@ -1,5 +1,6 @@
 import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
+    createDehyphenatedPdfAnnotationTextIndex,
     createHyphenFoldedPdfAnnotationTextIndex,
     createPdfAnnotationTextIndex,
     expandPdfAnnotationSourceRange,
@@ -70,6 +71,7 @@ export class MarkdownAnnotationOverlay {
         }
         const index = createVisibleMarkdownTextIndex(markdown);
         let normalizedIndex = null;
+        let dehyphenatedIndex = null;
         const matched = [];
         const unmatched = [];
         let previousSourceTo = 0;
@@ -178,10 +180,62 @@ export class MarkdownAnnotationOverlay {
                 previousSourceTo = Math.max(previousSourceTo, normalizedRange.to);
                 continue;
             }
+            const dehyphenatedText = createDehyphenatedPdfAnnotationTextIndex(
+                annotation.text
+            ).text;
+            if (!dehyphenatedIndex
+                && !candidates.length
+                && !normalizedCandidates.length) {
+                dehyphenatedIndex = createDehyphenatedPdfAnnotationTextIndex(
+                    index.text,
+                    offset => index.sourceOffsetAt(offset)
+                );
+            }
+            const dehyphenatedCandidateResult = candidates.length
+                || normalizedCandidates.length
+                ? { offsets: [], truncated: false }
+                : findTextOccurrences(
+                    dehyphenatedIndex.text,
+                    dehyphenatedText,
+                    MAX_MATCH_CANDIDATES
+                );
+            const dehyphenatedCandidates = dehyphenatedCandidateResult.offsets;
+            const dehyphenatedRanges = dehyphenatedCandidateResult.truncated
+                ? []
+                : dehyphenatedCandidates.map(candidate => (
+                    dehyphenatedIndex.sourceRange(
+                        candidate,
+                        dehyphenatedText.length
+                    )
+                ));
+            const dehyphenatedPageRanges = selectPageCandidates(
+                dehyphenatedRanges,
+                annotation.pageIndex,
+                sourceMap,
+                markdown.length
+            );
+            const dehyphenatedRange = selectCandidateRange(
+                dehyphenatedPageRanges,
+                previousSourceTo
+            );
+            if (dehyphenatedRange) {
+                matched.push(resolvedAnnotation(
+                    annotation,
+                    'normalized',
+                    dehyphenatedRange
+                ));
+                previousSourceTo = Math.max(
+                    previousSourceTo,
+                    dehyphenatedRange.to
+                );
+                continue;
+            }
             const ambiguous = candidateResult.truncated
                 || candidates.length
                 || normalizedCandidateResult.truncated
-                || normalizedCandidates.length;
+                || normalizedCandidates.length
+                || dehyphenatedCandidateResult.truncated
+                || dehyphenatedCandidates.length;
             unmatched.push({
                 ...annotation,
                 reason: ambiguous ? 'ambiguous' : 'not-found',

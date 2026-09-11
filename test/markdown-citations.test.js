@@ -1117,6 +1117,37 @@ test('maps alphabetic author superscripts to affiliations and ignores symbols', 
     );
 });
 
+test('maps affiliation numbers before trailing latex author-note commands', () => {
+    const markdown = [
+        '# Repo-To-Skill',
+        '',
+        'Jianyu Chen $^{1,2\\dagger}$, Hongjin Qian $^{1\\dagger\\dagger}$',
+        '',
+        '$^{1}$ Beijing Academy of Artificial Intelligence',
+        '',
+        '$^{2}$ Renmin University of China',
+        '',
+        '## Abstract',
+        '',
+        'Body text.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '2', kind: 'affiliation', targetIds: ['affiliation:2'] },
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+        ]
+    );
+});
+
 test('recovers plain affiliation markers emitted between superscript definitions', () => {
     const markdown = [
         '# Paper',

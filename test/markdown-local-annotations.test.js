@@ -1156,6 +1156,21 @@ test('reports an unreadable local annotation store without breaking conversion',
     assert.deepEqual(errors, ['private filesystem detail']);
 });
 
+test('matches a display math annotation to its formula text', () => {
+    const formula = '(R_t, \\Delta\\Sigma_t, a_t)';
+    const markdown = `Intro.\n\n$$\n${formula}\n$$\n\nBody.`;
+    const from = markdown.indexOf('$$');
+    const to = markdown.lastIndexOf('$$') + 2;
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            markdown,
+            [{ from, to }],
+            formula
+        ),
+        true
+    );
+});
+
 test('matches a split Markdown annotation that skipped chrome', () => {
     const markdown = 'Hello\n\n12\n\nWorld';
     assert.equal(
