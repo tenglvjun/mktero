@@ -1695,6 +1695,91 @@ test('matches parenthetical and narrative author-year citations', () => {
     );
 });
 
+test('matches ACM natbib square-bracket author-year citations', () => {
+    const markdown = [
+        '# Selective Forgetting',
+        '',
+        'Flat retrieval Lewis et al. [2020] is sensitive to noise Gao et al. [2023].',
+        'Graphs store entities Ji et al. [2021], Peng et al. [2023].',
+        'Forgetting is required [Kirkpatrick et al., 2017; Wei et al., 2026].',
+        '',
+        '## References',
+        '',
+        'Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia, Jinliu Pan, Yuxi Bi, '
+            + 'Yi Dai, Jiawei Sun, Meng Wang, and Haofen Wang. Retrieval-augmented '
+            + 'generation for large language models: A survey. arXiv preprint '
+            + 'arXiv:2312.10997, 2023.',
+        '',
+        'Shaoxiong Ji, Shirui Pan, Erik Cambria, Pekka Marttinen, and Philip S Yu. '
+            + 'A survey on knowledge graphs: Representation, acquisition, and '
+            + 'applications. IEEE transactions on neural networks and learning '
+            + 'systems, 33(2):494–514, 2021.',
+        '',
+        'James Kirkpatrick, Razvan Pascanu, Neil Rabinowitz, Joel Veness, '
+            + 'Guillaume Desjardins, Andrei A Rusu, Kieran Milan, John Quan, '
+            + 'Tiago Ramalho, Agnieszka Grabska-Barwinska, et al. Overcoming '
+            + 'catastrophic forgetting in neural networks. Proceedings of the '
+            + 'national academy of sciences, 114(13):3521–3526, 2017.',
+        '',
+        'Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, '
+            + 'Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, '
+            + 'Wen-tau Yih, Tim Rocktäschel, et al. Retrieval-augmented generation '
+            + 'for knowledge-intensive nlp tasks. volume 33, pages 9459–9474, 2020.',
+        '',
+        'Ciyuan Peng, Feng Xia, Mehdi Naseriparsa, and Francesco Osborne. '
+            + 'Knowledge graphs: Opportunities and challenges. 2023. '
+            + 'URL https://arxiv.org/abs/2303.13948.',
+        '',
+        'Lei Wei, Xu Dong, Xiao Peng, Niantao Xie, and Bin Wang. Fademem: '
+            + 'Biologically-inspired forgetting for efficient agent memory. '
+            + 'pages 4011–4015, 2026.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.equal(result.references.length, 6);
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            referenceIds: citation.referenceIds,
+        })),
+        [
+            { label: 'Lewis et al. [2020]', referenceIds: ['reference:4'] },
+            { label: 'Gao et al. [2023]', referenceIds: ['reference:1'] },
+            { label: 'Ji et al. [2021]', referenceIds: ['reference:2'] },
+            { label: 'Peng et al. [2023]', referenceIds: ['reference:5'] },
+            {
+                label: '[Kirkpatrick et al., 2017; Wei et al., 2026]',
+                referenceIds: ['reference:3', 'reference:6'],
+            },
+        ]
+    );
+});
+
+test('ignores markdown links when matching square-bracket author-year citations', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'See [Lewis et al., 2020](https://example.org/lewis) and Smith et al. [2020].',
+        '',
+        '## References',
+        '',
+        'Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, '
+            + 'Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, '
+            + 'Wen-tau Yih, Tim Rocktäschel, et al. Retrieval-augmented generation '
+            + 'for knowledge-intensive nlp tasks. volume 33, pages 9459–9474, 2020.',
+        '',
+        'Smith, A., Jones, B., & Lee, C. (2020). Follow-up study.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.citations.map(citation => markdown.slice(citation.from, citation.to)),
+        ['Smith et al. [2020]']
+    );
+});
+
 test('continues an author-year reference list after an embedded author note', () => {
     const citation = '(Blood & Zatorre, 2001; Blood et al., 1999; '
         + 'Koelsch, Fritz, Schulze, Alsop, & Schlaug, 2005; '

@@ -292,7 +292,7 @@ The popup header contains only the target-library picker. Each reference shows
 its status on the left and its own import, retry, copy, or open action on the
 right, so actions always apply to one visible reference.
 
-Grouped author-year citations resolve every matched bibliography entry. If PDF
+Grouped author-year citations resolve every matched bibliography entry, including ACM/natbib square-bracket forms such as `Lewis et al. [2020]` and `[Kirkpatrick et al., 2017; Wei et al., 2026]`. If PDF
 conversion inserts a stray heading inside an APA-style bibliography, Mktero
 continues the reference list only when multiple bibliography-shaped entries
 clearly resume after it, so a genuine author note still ends the list.
