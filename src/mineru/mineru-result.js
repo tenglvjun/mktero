@@ -1,4 +1,5 @@
 import { createMarkdownSourceMap } from '../core/markdown-source-map.js';
+import { reassembleMinerUBlockFlow } from './block-flow-normalizer.js';
 import { reassembleMinerUColumnFlow } from './column-flow-normalizer.js';
 import { reassembleMinerUFigurePanels } from './figure-panel-normalizer.js';
 import {
@@ -56,18 +57,28 @@ export function prepareMinerUResult(result) {
                     includeMatchedTextRanges: textFlowChanged || columnFlowChanged,
                 })
                 : columnSourceMap;
-            const finalMarkdown = figurePanelsChanged
+            const columnOrderedMarkdown = figurePanelsChanged
                 ? reassembleMinerUColumnFlow(
                     reassembled,
                     reassembledSourceMap
                 )
                 : reassembled;
-            const finalColumnFlowChanged = finalMarkdown !== reassembled;
-            sourceMap = finalColumnFlowChanged
-                ? createMarkdownSourceMap(finalMarkdown, contentList, {
+            const finalColumnFlowChanged = columnOrderedMarkdown !== reassembled;
+            const columnOrderedSourceMap = finalColumnFlowChanged
+                ? createMarkdownSourceMap(columnOrderedMarkdown, contentList, {
                     includeMatchedTextRanges: true,
                 })
                 : reassembledSourceMap;
+            const finalMarkdown = reassembleMinerUBlockFlow(
+                columnOrderedMarkdown,
+                columnOrderedSourceMap
+            );
+            const blockFlowChanged = finalMarkdown !== columnOrderedMarkdown;
+            sourceMap = blockFlowChanged
+                ? createMarkdownSourceMap(finalMarkdown, contentList, {
+                    includeMatchedTextRanges: true,
+                })
+                : columnOrderedSourceMap;
             const figureLayoutMarkdown = normalizeMinerUFigureLayouts(
                 finalMarkdown,
                 contentList.filter(block => (
@@ -79,7 +90,8 @@ export function prepareMinerUResult(result) {
                 ? createMarkdownSourceMap(figureLayoutMarkdown, contentList, {
                     includeMatchedTextRanges: textFlowChanged
                         || columnFlowChanged
-                        || finalColumnFlowChanged,
+                        || finalColumnFlowChanged
+                        || blockFlowChanged,
                 })
                 : sourceMap;
             markdown = figureLayoutMarkdown;

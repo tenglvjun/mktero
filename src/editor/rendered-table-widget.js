@@ -1,5 +1,6 @@
 import { WidgetType } from '@codemirror/view';
 import { parseGFMTableRow } from '../markdown/markdown-tables.js';
+import { renderTableCaptionContent } from '../markdown/markdown-html.js';
 import {
     appendRenderedMarkdown,
     installRenderedCitations,
@@ -369,10 +370,16 @@ export class RenderedTableWidget extends WidgetType {
 
 export function createTableCaption(document, caption) {
     const element = createHTMLNode(document, 'caption');
-    const label = createHTMLNode(document, 'span');
-    label.className = 'mktero-table-label';
-    label.textContent = caption.label;
-    element.append(label, ` ${caption.description}`);
+    const html = renderTableCaptionContent(caption);
+    if (!html) return element;
+    const DOMParserType = document.defaultView.DOMParser;
+    const parsed = new DOMParserType().parseFromString(
+        `<!doctype html><html><body>${html}</body></html>`,
+        'text/html'
+    );
+    element.append(...[...parsed.body.childNodes].map(node => (
+        document.importNode(node, true)
+    )));
     return element;
 }
 

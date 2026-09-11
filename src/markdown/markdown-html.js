@@ -71,7 +71,7 @@ export function renderMarkdownHTML(
         extensions: [
             createMathBlockExtension(mathBudget, target),
             createMathInlineExtension(mathBudget, target),
-            createAcademicTableExtension(),
+            createAcademicTableExtension(mathBudget, target),
         ],
     });
     const algorithmHTML = renderStandaloneMinerUAlgorithm(
@@ -365,21 +365,26 @@ function renderCaptionMath(source, mathBudget, target = 'mktero') {
     return renderMath(source, false, mathBudget, target);
 }
 
-function renderTableCaption(caption) {
-    return '<caption>'
-        + `<span class="mktero-table-label">${escapeHTML(caption.label)}</span>`
-        + ` ${escapeHTML(caption.description)}`
-        + '</caption>';
+export function renderTableCaptionContent(caption, mathBudget, target = 'mktero') {
+    if (!caption?.label) return '';
+    const budget = mathBudget || createMathRenderBudget();
+    return `<span class="mktero-table-label">${escapeHTML(caption.label)}</span>`
+        + ` ${renderCaptionMathSource(caption.description || '', budget, target)}`;
 }
 
-function createAcademicTableExtension() {
+function renderTableCaption(caption, mathBudget, target = 'mktero') {
+    const content = renderTableCaptionContent(caption, mathBudget, target);
+    return content ? `<caption>${content}</caption>` : '';
+}
+
+function createAcademicTableExtension(mathBudget, target = 'mktero') {
     return {
         name: 'mkteroAcademicTable',
         renderer(token) {
             const table = this.parser.parse([token.table]).trim();
             return table.replace(
                 /^<table>/,
-                `<table>${renderTableCaption(token.caption)}`
+                `<table>${renderTableCaption(token.caption, mathBudget, target)}`
             );
         },
     };

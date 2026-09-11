@@ -369,6 +369,46 @@ test('returns no mappings for malformed inputs', () => {
     }]), []);
 });
 
+test('maps unique MinerU code blocks onto fenced Markdown code', () => {
+    const markdown = [
+        'Prose mentions skill.instructions without being a code block.',
+        '',
+        '```python',
+        'Instructions:',
+        '{skill.instructions}',
+        '',
+        'Skill Execution State:',
+        '{json.dumps(state)}',
+        '```',
+        '',
+        '## Appendix A. Runtime Prompts',
+    ].join('\n');
+    const code = [
+        'Instructions:',
+        '{skill.instructions}',
+        '',
+        'Skill Execution State:',
+        '{json.dumps(state)}',
+    ].join('\n');
+
+    const [entry] = createMarkdownSourceMap(markdown, [{
+        type: 'code',
+        text: code,
+        pageIndex: 9,
+        bbox: [114, 750, 884, 920],
+    }]);
+
+    assert.equal(entry?.type, 'code');
+    assert.equal(
+        markdown.slice(entry.markdownFrom, entry.markdownTo),
+        ['```python', code, '```'].join('\n')
+    );
+    assert.deepEqual(entry.locations, [{
+        pageIndex: 9,
+        bbox: [114, 750, 884, 920],
+    }]);
+});
+
 test('does not map typed MinerU blocks to incompatible Markdown syntax', () => {
     const markdown = [
         'The prose mentions E = mc^2 + 1 without displaying an equation.',

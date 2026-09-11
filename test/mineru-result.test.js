@@ -28,6 +28,10 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
         'same-page-two-column-reading-order-v6'
     );
     assert.equal(
+        MINERU_SOURCE_MAP_OPTIONS.blockFlow,
+        'misplaced-code-page-order-v2'
+    );
+    assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.chrome,
         'page-edge-repeated-v1'
     );
@@ -487,6 +491,316 @@ test('orders two-column abstract prose when column boxes share a narrow gutter',
     }]);
 
     assert.equal(result, [leftColumn, rightColumn].join('\n\n'));
+});
+
+test('moves a later-page code block out of the references section', () => {
+    const lastReference = 'Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and Yanlin Wang. 2024. '
+        + 'Memorybank: Enhancing large language models with long-term memory.';
+    const code = [
+        'Instructions:',
+        '{skill.instructions}',
+        '',
+        'Skill Execution State:',
+        '{json.dumps(state)}',
+        '',
+        '1. Step-by-step reasoning (will be discarded after execution)',
+        '2. A JSON block containing the State Patch and Action.',
+    ].join('\n');
+    const appendix = '## Appendix A. Runtime Prompts';
+    const appendixIntro = 'This appendix provides the exact system prompts used by the four '
+        + 'evaluated runtimes.';
+    const heading = '## A.4 SKILL.state Runtime';
+    const note = 'Note: The skill.instructions placeholder dynamically injects the '
+        + 'task-specific system prompt.';
+    const result = prepareMinerUResult({
+        markdown: [
+            lastReference,
+            '',
+            '```python',
+            code,
+            '```',
+            '',
+            appendix,
+            '',
+            appendixIntro,
+            '',
+            heading,
+            '',
+            note,
+        ].join('\n'),
+        contentList: [{
+            type: 'text',
+            text: lastReference,
+            pageIndex: 8,
+            bbox: [512, 237, 884, 303],
+        }, {
+            type: 'code',
+            text: code,
+            pageIndex: 9,
+            bbox: [114, 760, 884, 920],
+        }, {
+            type: 'text',
+            text: 'Appendix A. Runtime Prompts',
+            pageIndex: 9,
+            bbox: [114, 83, 386, 101],
+        }, {
+            type: 'text',
+            text: appendixIntro,
+            pageIndex: 9,
+            bbox: [112, 108, 884, 158],
+        }, {
+            type: 'text',
+            text: 'A.4 SKILL.state Runtime',
+            pageIndex: 9,
+            bbox: [114, 728, 322, 745],
+        }, {
+            type: 'text',
+            text: note,
+            pageIndex: 10,
+            bbox: [112, 85, 885, 149],
+        }],
+    });
+
+    const pythonIndex = result.markdown.indexOf('```python');
+    const appendixIndex = result.markdown.indexOf(appendix);
+    const headingIndex = result.markdown.indexOf(heading);
+    const noteIndex = result.markdown.indexOf(note);
+    assert.ok(result.markdown.indexOf(lastReference) < appendixIndex);
+    assert.ok(appendixIndex < headingIndex);
+    assert.ok(headingIndex < pythonIndex);
+    assert.ok(pythonIndex < noteIndex);
+    assert.match(result.markdown.slice(pythonIndex), /```python[\s\S]*?```/);
+});
+
+test('keeps in-place appendix code while relocating a later-page prompt', () => {
+    const lastReference = 'Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and Yanlin Wang. 2024. '
+        + 'Memorybank: Enhancing large language models with long-term memory.';
+    const misplaced = [
+        'Instructions:',
+        '{skill.instructions}',
+        '',
+        'Skill Execution State:',
+        '{json.dumps(state)}',
+    ].join('\n');
+    const a1Code = [
+        'History:',
+        'Observation: {history[0].observation}',
+        'Reasoning & Action: {history[0].response}',
+    ].join('\n');
+    const result = prepareMinerUResult({
+        markdown: [
+            lastReference,
+            '',
+            '```python',
+            misplaced,
+            '```',
+            '',
+            '## Appendix A. Runtime Prompts',
+            '',
+            'This appendix provides the exact system prompts used by the four '
+                + 'evaluated runtimes.',
+            '',
+            '## A.1 Prompt Runtime (ReAct-style)',
+            '',
+            '```txt',
+            a1Code,
+            '```',
+            '',
+            '## A.4 SKILL.state Runtime',
+            '',
+            'Note: The skill.instructions placeholder dynamically injects the '
+                + 'task-specific system prompt.',
+        ].join('\n'),
+        contentList: [{
+            type: 'text',
+            text: lastReference,
+            pageIndex: 8,
+            bbox: [512, 237, 884, 303],
+        }, {
+            type: 'code',
+            text: misplaced,
+            pageIndex: 9,
+            bbox: [114, 760, 884, 920],
+        }, {
+            type: 'text',
+            text: 'Appendix A. Runtime Prompts',
+            pageIndex: 9,
+            bbox: [114, 83, 386, 101],
+        }, {
+            type: 'text',
+            text: 'This appendix provides the exact system prompts used by the four '
+                + 'evaluated runtimes.',
+            pageIndex: 9,
+            bbox: [112, 108, 884, 158],
+        }, {
+            type: 'text',
+            text: 'A.1 Prompt Runtime (ReAct-style)',
+            pageIndex: 9,
+            bbox: [114, 166, 391, 181],
+        }, {
+            type: 'text',
+            text: 'A.4 SKILL.state Runtime',
+            pageIndex: 9,
+            bbox: [114, 728, 322, 745],
+        }, {
+            type: 'text',
+            text: 'Note: The skill.instructions placeholder dynamically injects the '
+                + 'task-specific system prompt.',
+            pageIndex: 10,
+            bbox: [112, 85, 885, 149],
+        }],
+    });
+
+    assert.match(
+        result.markdown,
+        /## A\.1 Prompt Runtime \(ReAct-style\)\n\n```txt\nHistory:\nObservation: \{history\[0\]\.observation\}/
+    );
+    assert.match(
+        result.markdown,
+        /## A\.4 SKILL\.state Runtime\n\n```python\nInstructions:/
+    );
+    assert.ok(
+        result.markdown.indexOf('## Appendix A. Runtime Prompts')
+            < result.markdown.indexOf('```python')
+    );
+});
+
+test('moves an unmapped appendix prompt out of the references section', () => {
+    const lastReference = 'Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and Yanlin Wang. 2024. '
+        + 'Memorybank: Enhancing large language models with long-term memory.';
+    const misplaced = [
+        'Instructions:',
+        '{skill.instructions}',
+        '',
+        'Skill Execution State:',
+        '{json.dumps(state)}',
+        '',
+        '1. Step-by-step reasoning (will be discarded after execution)',
+        '2. A JSON block containing the State Patch and Action.',
+    ].join('\n');
+    const a1Code = [
+        'History:',
+        'Observation: {history[0].observation}',
+        'Reasoning & Action: {history[0].response}',
+    ].join('\n');
+    const note = 'Note: The skill.instructions placeholder dynamically injects the '
+        + 'task-specific system prompt.';
+    const result = prepareMinerUResult({
+        markdown: [
+            lastReference,
+            '',
+            '```python',
+            misplaced,
+            '```',
+            '',
+            '## Appendix A. Runtime Prompts',
+            '',
+            'This appendix provides the exact system prompts used by the four '
+                + 'evaluated runtimes.',
+            '',
+            '## A.1 Prompt Runtime (ReAct-style)',
+            '',
+            '```txt',
+            a1Code,
+            '```',
+            '',
+            '## A.4 SKILL.state Runtime',
+            '',
+            note,
+        ].join('\n'),
+        contentList: [{
+            type: 'text',
+            text: lastReference,
+            pageIndex: 8,
+            bbox: [512, 237, 884, 303],
+        }, {
+            type: 'text',
+            text: 'Appendix A. Runtime Prompts',
+            pageIndex: 9,
+            bbox: [114, 83, 386, 101],
+        }, {
+            type: 'text',
+            text: 'This appendix provides the exact system prompts used by the four '
+                + 'evaluated runtimes.',
+            pageIndex: 9,
+            bbox: [112, 108, 884, 158],
+        }, {
+            type: 'text',
+            text: 'A.1 Prompt Runtime (ReAct-style)',
+            pageIndex: 9,
+            bbox: [114, 166, 391, 181],
+        }, {
+            type: 'text',
+            text: 'A.4 SKILL.state Runtime',
+            pageIndex: 9,
+            bbox: [114, 728, 322, 745],
+        }, {
+            type: 'text',
+            text: note,
+            pageIndex: 10,
+            bbox: [112, 85, 885, 149],
+        }],
+    });
+
+    assert.match(
+        result.markdown,
+        /## A\.1 Prompt Runtime \(ReAct-style\)\n\n```txt\nHistory:/
+    );
+    assert.match(
+        result.markdown,
+        /## A\.4 SKILL\.state Runtime\n\n```python\nInstructions:/
+    );
+    assert.ok(
+        result.markdown.indexOf(lastReference)
+            < result.markdown.indexOf('## Appendix A. Runtime Prompts')
+    );
+    assert.ok(
+        result.markdown.indexOf('## Appendix A. Runtime Prompts')
+            < result.markdown.indexOf('```python')
+    );
+});
+
+test('does not move a code block that already follows its page order', () => {
+    const heading = '## A.4 SKILL.state Runtime';
+    const code = [
+        'Instructions:',
+        '{skill.instructions}',
+        '',
+        'Skill Execution State:',
+        '{json.dumps(state)}',
+    ].join('\n');
+    const note = 'Note: The skill.instructions placeholder dynamically injects the '
+        + 'task-specific system prompt.';
+    const markdown = [
+        heading,
+        '',
+        '```python',
+        code,
+        '```',
+        '',
+        note,
+    ].join('\n');
+    const result = prepareMinerUResult({
+        markdown,
+        contentList: [{
+            type: 'text',
+            text: 'A.4 SKILL.state Runtime',
+            pageIndex: 9,
+            bbox: [114, 728, 322, 745],
+        }, {
+            type: 'code',
+            text: code,
+            pageIndex: 9,
+            bbox: [114, 760, 884, 920],
+        }, {
+            type: 'text',
+            text: note,
+            pageIndex: 10,
+            bbox: [112, 85, 885, 149],
+        }],
+    });
+
+    assert.equal(result.markdown, markdown);
 });
 
 test('does not reorder single-column prose around headings or display math', () => {
