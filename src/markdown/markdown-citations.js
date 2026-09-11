@@ -1102,45 +1102,75 @@ function findAuthorYearCitations(markdown, bodyFrom, bodyEnd, references) {
     const body = markdown.slice(bodyFrom, bodyEnd);
     const citations = [];
     const referencesByYear = groupReferencesByYear(references);
-    const parentheticalPattern = /[（(]((?:[^()（）\r\n]|\r?\n(?!\r?\n)){1,240})[)）]/g;
-    for (const match of body.matchAll(parentheticalPattern)) {
-        const matched = [];
-        for (const segment of match[1].split(/[;；]/)) {
-            const authorYear = parseAuthorYearSegment(segment);
-            if (!authorYear) continue;
-            for (const year of authorYear.years) {
-                matched.push(...matchAuthorReferences(
-                    referencesByYear,
-                    authorYear.authors,
-                    year
+    const parentheticalContainers = [
+        {
+            pattern: /[（(]((?:[^()（）\r\n]|\r?\n(?!\r?\n)){1,240})[)）]/g,
+            skip: () => false,
+        },
+        {
+            pattern: /\[((?:[^\[\]\r\n]|\r?\n(?!\r?\n)){1,240})\]/g,
+            skip: squareBracketLooksLikeMarkup,
+        },
+    ];
+    for (const { pattern, skip } of parentheticalContainers) {
+        for (const match of body.matchAll(pattern)) {
+            if (skip(body, match)) continue;
+            const matched = [];
+            for (const segment of match[1].split(/[;；]/)) {
+                const authorYear = parseAuthorYearSegment(segment);
+                if (!authorYear) continue;
+                for (const year of authorYear.years) {
+                    matched.push(...matchAuthorReferences(
+                        referencesByYear,
+                        authorYear.authors,
+                        year
+                    ));
+                }
+            }
+            const unique = uniqueReferences(matched);
+            if (unique.length) {
+                citations.push(createCitation(
+                    bodyFrom + match.index,
+                    bodyFrom + match.index + match[0].length,
+                    unique
                 ));
             }
         }
-        const unique = uniqueReferences(matched);
-        if (unique.length) {
+    }
+
+    const narrativePatterns = [
+        /(^|[^\p{L}\p{N}_])([\p{L}][\p{L}'’.-]*(?:\s+et\s+al\.?|\s+(?:&|and)\s+[\p{L}][\p{L}'’.-]*)?)\s*[（(]([^()（）\r\n]{1,120})[)）]/giu,
+        /(^|[^\p{L}\p{N}_])([\p{L}][\p{L}'’.-]*(?:\s+et\s+al\.?|\s+(?:&|and)\s+[\p{L}][\p{L}'’.-]*)?)\s*\[([^\[\]\r\n]{1,120})\]/giu,
+    ];
+    for (const pattern of narrativePatterns) {
+        for (const match of body.matchAll(pattern)) {
+            if (squareBracketNarrativeLooksLikeMarkup(body, match)) continue;
+            const years = parseYearSequence(match[3]);
+            const matched = uniqueReferences(years.flatMap(year => (
+                matchAuthorReferences(referencesByYear, match[2], year)
+            )));
+            if (!matched.length) continue;
+            const from = bodyFrom + match.index + match[1].length;
             citations.push(createCitation(
-                bodyFrom + match.index,
+                from,
                 bodyFrom + match.index + match[0].length,
-                unique
+                matched
             ));
         }
     }
-
-    const narrativePattern = /(^|[^\p{L}\p{N}_])([\p{L}][\p{L}'’.-]*(?:\s+et\s+al\.?|\s+(?:&|and)\s+[\p{L}][\p{L}'’.-]*)?)\s*[（(]([^()（）\r\n]{1,120})[)）]/giu;
-    for (const match of body.matchAll(narrativePattern)) {
-        const years = parseYearSequence(match[3]);
-        const matched = uniqueReferences(years.flatMap(year => (
-            matchAuthorReferences(referencesByYear, match[2], year)
-        )));
-        if (!matched.length) continue;
-        const from = bodyFrom + match.index + match[1].length;
-        citations.push(createCitation(
-            from,
-            bodyFrom + match.index + match[0].length,
-            matched
-        ));
-    }
     return citations;
+}
+
+function squareBracketLooksLikeMarkup(body, match) {
+    const before = body[match.index - 1] || '';
+    const after = body[match.index + match[0].length] || '';
+    return before === '!' || ['(', '[', ':'].includes(after);
+}
+
+function squareBracketNarrativeLooksLikeMarkup(body, match) {
+    if (!match[0].endsWith(']')) return false;
+    const after = body[match.index + match[0].length] || '';
+    return ['(', '[', ':'].includes(after);
 }
 
 function parseAuthorYearSegment(segment) {
