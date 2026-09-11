@@ -321,6 +321,7 @@ function parseAffiliations(markdown, frontMatterEnd) {
                 from: contentFrom,
                 to,
                 markerMarkup: marker.markup,
+                affiliation: true,
             });
         }
         if (!paragraphAffiliations.length) {
@@ -433,6 +434,7 @@ function parsePlainAffiliationParagraph(
             text,
             from: contentFrom,
             to,
+            affiliation: true,
             markerMarkup: {
                 wrapperFrom: markerFrom,
                 contentFrom: markerFrom,
@@ -1066,7 +1068,7 @@ function findAuthorYearCitations(markdown, bodyFrom, bodyEnd, references) {
     const body = markdown.slice(bodyFrom, bodyEnd);
     const citations = [];
     const referencesByYear = groupReferencesByYear(references);
-    const parentheticalPattern = /[（(]([^()（）\r\n]{1,240})[)）]/g;
+    const parentheticalPattern = /[（(]((?:[^()（）\r\n]|\r?\n(?!\r?\n)){1,240})[)）]/g;
     for (const match of body.matchAll(parentheticalPattern)) {
         const matched = [];
         for (const segment of match[1].split(/[;；]/)) {
@@ -1154,11 +1156,20 @@ function matchAuthorReferences(referencesByYear, authors, year) {
     return (referencesByYear.get(normalizedYear) || []).filter(reference => {
         if (leadingAuthorOnly) {
             return keys.length === 1
-                && referenceFirstAuthorKey(reference) === keys[0];
+                && authorKeyMatchesFamilyName(
+                    referenceFirstAuthorKey(reference),
+                    keys[0]
+                );
         }
         const searchable = ` ${reference.authorSearchText} `;
         return keys.every(key => searchable.includes(` ${key} `));
     });
+}
+
+function authorKeyMatchesFamilyName(referenceKey, citationKey) {
+    if (referenceKey === citationKey) return true;
+    const parts = referenceKey.split(' ').filter(Boolean);
+    return parts.length >= 2 && parts.at(-1) === citationKey;
 }
 
 function referenceFirstAuthorKey(reference) {

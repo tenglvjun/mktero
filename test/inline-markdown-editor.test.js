@@ -5132,6 +5132,62 @@ test('shows author affiliations instead of references for front-matter superscri
     dom.window.close();
 });
 
+test('does not offer reference import for author affiliation popups', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# SKILL.state: Scalable Long-Horizon Agent Skills',
+        '',
+        'Sanket Badhe $^{1}$, Priyanka Tiwari $^{2}$, Jonghyun Chung $^{1}$,',
+        '',
+        '$^{1}$ Google LLC, $^{2}$ Purdue University Correspondence: '
+            + 'sanketbadhe@google.com',
+        '',
+        '## Abstract',
+        '',
+        'Large language models act as agents.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        onListReferenceLibraries: async () => ({
+            libraries: [{
+                libraryID: 1,
+                name: 'My Library',
+                type: 'user',
+                editable: true,
+                filesEditable: true,
+            }],
+            defaultLibraryID: 1,
+        }),
+        onGetReferenceStatus: async () => ({
+            state: 'absent',
+            canImport: true,
+        }),
+        onImportReference: async () => ({ state: 'imported' }),
+    });
+    const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+    const affiliation = citations.find(citation => (
+        citation.getAttribute('data-citation-kind') === 'affiliation'
+        && citation.textContent === '2'
+    ));
+    assert.ok(affiliation);
+
+    affiliation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    const popup = document.querySelector('.mktero-citation-popup');
+    assert.equal(popup?.getAttribute('aria-label'), 'Author affiliations');
+    assert.match(popup?.textContent || '', /Purdue University Correspondence/);
+    assert.equal(document.querySelector('.mktero-citation-popup-header'), null);
+    assert.doesNotMatch(popup?.textContent || '', /Import reference/);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('links an author affiliation before a corresponding-author symbol', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -7364,6 +7420,104 @@ test('shows selection actions across inline math', async () => {
 
     assert.equal(created.text, 'Before n = 22 after.');
     assert.deepEqual(created.ranges, [{ from: 0, to: markdown.length }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('shows selection actions from inline math into following prose', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '$O_t$ is the latest environment observation.';
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-inline-math' };
+        },
+    });
+    const math = document.querySelector('.cm-mktero-math');
+    const line = document.querySelector('.cm-line');
+    const end = textNodeContaining(line, 'observation.');
+    assert.ok(math);
+    assert.ok(end);
+    const range = document.createRange();
+    range.setStart(math, 0);
+    range.setEnd(end, end.textContent.length);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+    math.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const actions = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(actions);
+    assert.ok(actions.querySelector('[data-action="add-note"]'));
+    actions.querySelector('[data-color="#ffd400"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.text, 'O_t is the latest environment observation.');
+    assert.deepEqual(created.ranges, [{ from: 0, to: markdown.length }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('shows selection actions for a display math formula', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const formula = 'A_t = P, \\Sigma_t, O_t';
+    const markdown = [
+        'Intro paragraph.',
+        '',
+        '$$',
+        formula,
+        '$$',
+        '',
+        'where P denotes the specification.',
+    ].join('\n');
+    let created;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async createMarkdownAnnotation(annotation) {
+            created = annotation;
+            return { ...annotation, id: 'mktero-local-math' };
+        },
+    });
+    const math = document.querySelector('.cm-mktero-math-display');
+    assert.ok(math);
+    const range = document.createRange();
+    range.selectNodeContents(math);
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+    math.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const actions = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(actions);
+    assert.ok(actions.querySelector('[data-action="add-note"]'));
+    actions.querySelector('[data-color="#ffd400"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.text, formula);
+    assert.deepEqual(created.ranges, [{
+        from: Number(math.dataset.markdownFrom),
+        to: Number(math.dataset.markdownTo),
+    }]);
 
     editor.destroy();
     dom.window.close();

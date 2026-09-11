@@ -108,6 +108,58 @@ test('renders XHTML controls and closes after opening a Zotero match', async () 
     dom.window.close();
 });
 
+test('shows affiliation details without reference import controls', async () => {
+    const { dom, document, parent, anchor } = createHarness();
+    const popup = createCitationPopup(parent);
+    popup.open({
+        anchor,
+        label: 'Author affiliations',
+        targets: [{
+            id: 'affiliation:2',
+            label: '2',
+            number: 2,
+            text: 'Purdue University Correspondence: sanketbadhe@google.com',
+            affiliation: true,
+        }],
+        onListReferenceLibraries: async () => ({
+            libraries: [{
+                libraryID: 1,
+                name: 'My Library',
+                type: 'user',
+                editable: true,
+                filesEditable: true,
+            }],
+            defaultLibraryID: 1,
+        }),
+        onGetReferenceStatus: async () => ({
+            state: 'absent',
+            canImport: true,
+        }),
+        onImportReference: async () => ({ state: 'imported' }),
+    });
+    await nextTask();
+
+    const popupElement = document.querySelector('.mktero-citation-popup');
+    assert.equal(popupElement?.getAttribute('aria-label'), 'Author affiliations');
+    assert.match(
+        popupElement?.textContent || '',
+        /Purdue University Correspondence/
+    );
+    assert.equal(document.querySelector('.mktero-citation-popup-header'), null);
+    assert.equal(
+        document.querySelector('.mktero-citation-popup-library-select'),
+        null
+    );
+    assert.equal(
+        document.querySelector('.mktero-citation-popup-actions')?.hidden,
+        true
+    );
+    assert.doesNotMatch(popupElement?.textContent || '', /Import reference/);
+
+    popup.destroy();
+    dom.window.close();
+});
+
 test('offers a per-row import action without batch selection controls', async () => {
     const { dom, document, parent, anchor } = createHarness();
     let activated = 0;

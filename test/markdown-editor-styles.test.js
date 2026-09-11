@@ -273,6 +273,34 @@ test('keeps inline math inside the prose line box', () => {
     assert.doesNotMatch(displayMath, /background\s*:/);
 });
 
+test('keeps rendered display math spacing inside the CodeMirror block widget', () => {
+    const displayMath = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display'
+    );
+    assert.match(displayMath, /display:\s*flow-root/);
+    assert.doesNotMatch(displayMath, /margin:/);
+    assert.match(displayMath, /-moz-user-select:\s*text/);
+    assert.match(displayMath, /user-select:\s*text/);
+
+    const inner = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display'
+    );
+    assert.match(inner, /margin:\s*24px 0/);
+
+    const math = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display math'
+    );
+    assert.match(math, /display:\s*inline/);
+    assert.match(math, /-moz-user-select:\s*text/);
+    assert.match(math, /user-select:\s*text/);
+
+    const annotation = ruleBody([
+        '.markdown-editor-host > .cm-editor .cm-mktero-math annotation,',
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display annotation',
+    ].join('\n'));
+    assert.match(annotation, /display:\s*none/);
+});
+
 test('keeps rendered figure spacing inside the CodeMirror block widget', () => {
     const image = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-image'

@@ -4426,17 +4426,34 @@ main {
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-display {
+    display: flow-root;
     overflow-x: auto;
-    margin: 24px 0;
     padding: 16px 14px;
     border-radius: var(--radius-md);
     text-align: center;
     cursor: text;
+    -moz-user-select: text;
+    user-select: text;
 }
 
-.markdown-editor-host > .cm-editor .cm-mktero-math math,
-.markdown-editor-host > .cm-editor .cm-mktero-math-display math {
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display {
+    margin: 24px 0;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math math {
     font-size: 1em;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-display math {
+    display: inline;
+    font-size: 1em;
+    -moz-user-select: text;
+    user-select: text;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math annotation,
+.markdown-editor-host > .cm-editor .cm-mktero-math-display annotation {
+    display: none;
 }
 
 .math-fallback {

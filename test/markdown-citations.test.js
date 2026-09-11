@@ -1028,17 +1028,20 @@ test('maps author superscripts to affiliations without stealing body references'
             id: affiliation.id,
             number: affiliation.number,
             text: affiliation.text,
+            affiliation: affiliation.affiliation,
         })),
         [
             {
                 id: 'affiliation:1',
                 number: 1,
                 text: 'Department of Psychology, Stanford University.',
+                affiliation: true,
             },
             {
                 id: 'affiliation:2',
                 number: 2,
                 text: 'Youper, Inc.',
+                affiliation: true,
             },
         ]
     );
@@ -1733,6 +1736,86 @@ test('stops an author-year reference list at a genuine author note', () => {
     assert.equal(result.references.length, 1);
     assert.equal(result.references[0].text,
         'BLOOD, A. J., & ZATORRE, R. J. (2001). A reference entry.');
+});
+
+test('matches ACL author-year citations wrapped across a MinerU line break', () => {
+    const citation = '(Yao et al., 2022; Schick et al., 2023; Qin\n'
+        + 'et al., 2024; Wu et al., 2023)';
+    const markdown = [
+        '# SKILL.state: Scalable Long-Horizon Agent Skills',
+        '',
+        `LLMs use tools ${citation}.`,
+        '',
+        '## References',
+        '',
+        'Yujia Qin, Shihao Liang, Yining Ye, Kunlun Zhu, Lan Yan, '
+            + 'Yaxi Lu, Yankai Lin, Xin Cong, Xiangru Tang, Bill Qian, '
+            + 'and 1 others. 2024. ToolLLM: Facilitating large language '
+            + 'models to master 16000+ real-world apis. In International '
+            + 'Conference on Learning Representations (ICLR).',
+        '',
+        'Timo Schick, Jane Dwivedi-Yu, Roberto Dessi, Roberta Raileanu, '
+            + 'Maria Lomeli, Luke Zettlemoyer, Nicola Cancedda, and Thomas '
+            + 'Scialom. 2023. Toolformer: Language models can teach '
+            + 'themselves to use tools. In Advances in Neural Information '
+            + 'Processing Systems (NeurIPS).',
+        '',
+        'Qingyun Wu, Gagan Bansal, Jieyu Zhang, Yiran Wu, Beibin Li, '
+            + 'Erkang Zhu, Li Jiang, Xiaoyun Zhang, Shaokun Zhang, Jiale '
+            + 'Liu, and 1 others. 2023. AutoGen: Enabling next-gen llm '
+            + 'applications via multi-agent conversation. arXiv preprint '
+            + 'arXiv:2308.08155.',
+        '',
+        'Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, '
+            + 'Karthik Narasimhan, and Yuan Cao. 2022. React: Synergizing '
+            + 'reasoning and acting in language models. arXiv preprint '
+            + 'arXiv:2210.03629.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.equal(result.citations.length, 1);
+    assert.equal(
+        markdown.slice(result.citations[0].from, result.citations[0].to),
+        citation
+    );
+    assert.deepEqual(result.citations[0].referenceIds, [
+        'reference:4',
+        'reference:2',
+        'reference:1',
+        'reference:3',
+    ]);
+});
+
+test('matches et al citations to given-name-first IEEE references', () => {
+    const markdown = [
+        '# SKILL.state',
+        '',
+        'Systems reason and act (Yao et al., 2022; Schick et al., 2023).',
+        '',
+        '## References',
+        '',
+        '[1] Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, '
+            + 'Karthik Narasimhan, and Yuan Cao. ReAct: Synergizing reasoning '
+            + 'and acting in language models. ICLR, 2022.',
+        '',
+        '[2] Timo Schick, Jane Dwivedi-Yu, Roberto Dessi, Roberta Raileanu, '
+            + 'Maria Lomeli, Luke Zettlemoyer, Nicola Cancedda, and Thomas '
+            + 'Scialom. Toolformer: Language models can teach themselves to '
+            + 'use tools. NeurIPS, 2023.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.equal(result.citations.length, 1);
+    assert.equal(
+        markdown.slice(result.citations[0].from, result.citations[0].to),
+        '(Yao et al., 2022; Schick et al., 2023)'
+    );
+    assert.deepEqual(result.citations[0].referenceIds, [
+        'number:1',
+        'number:2',
+    ]);
 });
 
 test('matches initials-first author-year references with trailing years', () => {
