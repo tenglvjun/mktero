@@ -13,7 +13,7 @@ export class MinerUConversion {
         cache = null,
         prepareResult = prepareMinerUResult,
         recoverFigures = async result => result,
-        createPreviousCacheKey = null,
+        createPreviousCacheKeys = null,
         createDataID = createTaskDataID,
         now = Date.now,
         maxTaskAgeMs = DEFAULT_PENDING_TASK_MAX_AGE_MS,
@@ -32,7 +32,7 @@ export class MinerUConversion {
         if (typeof prepareResult !== 'function') throw new TypeError('A MinerU result preparer is required');
         this.prepareResult = prepareResult;
         this.recoverFigures = recoverFigures;
-        this.createPreviousCacheKey = createPreviousCacheKey;
+        this.createPreviousCacheKeys = createPreviousCacheKeys;
         this.createDataID = createDataID;
         this.now = now;
         this.maxTaskAgeMs = maxTaskAgeMs;
@@ -178,13 +178,16 @@ export class MinerUConversion {
             }
             let cached = await this.#readCache(key, cacheEnabled, warnings);
             let migrated = false;
-            if (!cached && cacheEnabled && this.createPreviousCacheKey) {
+            if (!cached && cacheEnabled && this.createPreviousCacheKeys) {
                 try {
-                    const previousKey = await this.createPreviousCacheKey(fileData);
+                    const previousKeys = await this.createPreviousCacheKeys(fileData);
                     throwIfAborted(signal);
-                    if (previousKey && previousKey !== key) {
+                    for (const previousKey of new Set(previousKeys)) {
+                        if (!previousKey || previousKey === key) continue;
                         cached = await this.#readCache(previousKey, cacheEnabled, warnings);
+                        throwIfAborted(signal);
                         migrated = Boolean(cached);
+                        if (cached) break;
                     }
                 }
                 catch (error) { throwIfAborted(signal); this.#reportError(error); }

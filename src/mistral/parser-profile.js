@@ -9,7 +9,7 @@ export const MISTRAL_OCR_REQUEST_OPTIONS = Object.freeze({
 });
 
 // Keep every behavior that affects the extracted document in the cache identity.
-export const MISTRAL_PREVIOUS_PARSER_PROFILE_ID = JSON.stringify({
+const PREVIOUS_PARSER_OPTIONS = Object.freeze({
     provider: 'mistral',
     model: MISTRAL_OCR_MODEL_ID,
     request: MISTRAL_OCR_REQUEST_OPTIONS,
@@ -21,7 +21,16 @@ export const MISTRAL_PREVIOUS_PARSER_PROFILE_ID = JSON.stringify({
     figureCoordinateFrame: 'unverified-preserve-v1',
 });
 
-export const MISTRAL_PARSER_PROFILE_ID = JSON.stringify({
-    ...JSON.parse(MISTRAL_PREVIOUS_PARSER_PROFILE_ID),
+const LABEL_RECOVERY_PARSER_OPTIONS = Object.freeze({
+    ...PREVIOUS_PARSER_OPTIONS,
     figureLabelRecovery: 'verified-pdf-image-v1',
+});
+
+export const MISTRAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    JSON.stringify(LABEL_RECOVERY_PARSER_OPTIONS), JSON.stringify(PREVIOUS_PARSER_OPTIONS),
+]);
+
+export const MISTRAL_PARSER_PROFILE_ID = JSON.stringify({
+    ...LABEL_RECOVERY_PARSER_OPTIONS,
+    figureReadingOrder: 'verified-pdf-title-order-v1',
 });

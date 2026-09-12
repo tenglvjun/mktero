@@ -1,4 +1,4 @@
-import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_ID } from '../mistral/parser-profile.js';
+import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_IDS } from '../mistral/parser-profile.js';
 import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 
 export class MistralConfigurationError extends Error {
@@ -98,10 +98,14 @@ export class MistralDocumentExtractor {
             throwIfAborted(signal);
             if (!revision && this.createCacheKey) {
                 try {
-                    for (const parserProfile of [MISTRAL_PREVIOUS_PARSER_PROFILE_ID, LEGACY_FIGURE_PROFILES.mistral]) {
+                    const visited = new Set([cacheKey]);
+                    for (const parserProfile of [...MISTRAL_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mistral]) {
                         const legacyKey = await this.createCacheKey(fileData, { parserProfile });
-                        if (legacyKey && legacyKey !== cacheKey) {
+                        throwIfAborted(signal);
+                        if (legacyKey && !visited.has(legacyKey)) {
+                            visited.add(legacyKey);
                             revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
+                            throwIfAborted(signal);
                             if (revision) {
                                 revisionKey = legacyKey;
                                 revisionProfile = parserProfile;

@@ -5,6 +5,7 @@ import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mj
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { validateFigureCrop } from '../figures/figure-model.js';
 import { inspectPDFFigureImage } from './pdfjs-figure-image.js';
+import { verifyPDFFigureOrder } from './pdfjs-figure-order.js';
 import {
     createFigureAbortScope, throwIfFigureAborted, waitForFigureOperation,
 } from '../figures/figure-async.js';
@@ -87,6 +88,30 @@ export function createPDFFigureRegionRenderer({
                             if (!recovered) return null;
                             const rect = cropRectangle(geometry, { bbox: recovered.bbox }, limits);
                             return { ...recovered, crop: await renderCrop(page, rect, operation.signal) };
+                        }
+                        finally { page.cleanup?.(); }
+                    });
+                    renderQueue = queued.catch(() => {});
+                    const result = waitForFigureOperation(queued, operation.signal).finally(() => {
+                        operation.dispose();
+                        jobs.delete(result);
+                    });
+                    jobs.add(result);
+                    return result;
+                },
+                verifyFigureOrder(request, { signal: operationSignal } = {}) {
+                    const operation = createFigureAbortScope([scope.signal, operationSignal], {
+                        ...abortOptions, timeoutMs: limits.cropTimeoutMs,
+                    });
+                    const queued = renderQueue.then(async () => {
+                        throwIfFigureAborted(operation.signal);
+                        const page = await getPage(request.pageIndex, operation.signal);
+                        try {
+                            pageGeometry(page, request.pageIndex);
+                            return await verifyPDFFigureOrder(page, request, {
+                                createCanvas: sessionCreateCanvas, decodeImage: sessionDecodeImage,
+                                signal: operation.signal, limits,
+                            });
                         }
                         finally { page.cleanup?.(); }
                     });

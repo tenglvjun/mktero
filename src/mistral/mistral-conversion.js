@@ -14,7 +14,7 @@ export class MistralConversion {
         cache = null,
         prepareResult = normalizeMistralResult,
         recoverFigures = async result => result,
-        createPreviousCacheKey = null,
+        createPreviousCacheKeys = null,
         parserProfile = MISTRAL_PARSER_PROFILE_ID,
         onError = () => {},
     }) {
@@ -31,7 +31,7 @@ export class MistralConversion {
         this.cache = cache;
         this.prepareResult = prepareResult;
         this.recoverFigures = recoverFigures;
-        this.createPreviousCacheKey = createPreviousCacheKey;
+        this.createPreviousCacheKeys = createPreviousCacheKeys;
         this.parserProfile = parserProfile;
         this.onError = onError;
     }
@@ -53,12 +53,15 @@ export class MistralConversion {
             try {
                 let cached = await this.cache.get(key);
                 let migrated = false;
-                if (!cached && this.createPreviousCacheKey) {
-                    const previousKey = await this.createPreviousCacheKey(fileData);
+                if (!cached && this.createPreviousCacheKeys) {
+                    const previousKeys = await this.createPreviousCacheKeys(fileData);
                     throwIfAborted(signal);
-                    if (previousKey && previousKey !== key) {
+                    for (const previousKey of new Set(previousKeys)) {
+                        if (!previousKey || previousKey === key) continue;
                         cached = await this.cache.get(previousKey);
+                        throwIfAborted(signal);
                         migrated = Boolean(cached);
+                        if (cached) break;
                     }
                 }
                 throwIfAborted(signal);

@@ -46,10 +46,14 @@ Useful links: [Product page](https://mktero.com/) ·
   agree. Independent OCR label rows such as `(A)`, `(B)`, and fullwidth
   equivalents leave the text only after the complete image is recovered;
   body references and labels within captions remain intact. This local pass
-  also upgrades the previous parser profile's cached results without another
-  OCR upload and leaves user corrections intact. Mistral layouts that cannot
-  be verified against a complete PDF image retain their original images and
-  OCR text because their coordinate origin and rotation remain unverified.
+  also upgrades compatible cached results without another OCR upload and
+  leaves user corrections intact. Both providers can reunite image groups
+  split by a misplaced title when PDF text positions, a shared caption, and
+  every image's pixels verify the relationship, including vector charts.
+  The title stays searchable above the group; images return to PDF row order
+  and stale layout markers are rebuilt, including images spanning a whole
+  row. Ambiguous, rotated, or unverifiable groups retain their original
+  images and text.
 - Mistral and MinerU keep publisher mastheads, repeated page headers and
   footers, and page numbers in stored Markdown. The reader hides those
   ranges, and also hides text before the `#` or `##` heading that matches
