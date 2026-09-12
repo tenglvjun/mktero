@@ -321,6 +321,54 @@ export async function disposeFigureValidation() {
     renderer = null;
 }
 
+export async function showValidationComparison(parent, { fileData, resourceRoot, caseID = 'grid-4x4' }) {
+    const document = validationDocuments.find(value => value.provider === 'mineru' && value.caseID === caseID)?.document;
+    const figure = document?.figureMap?.figures[0];
+    if (!figure) throw new Error('Comparison figure is unavailable');
+    const environment = createZoteroFigureCanvasEnvironment({ getMainWindow: () => parent.ownerDocument.defaultView });
+    const renderer = createPDFFigureRegionRenderer({ ...environment,
+        workerSrc: resourceRoot + '/pdf.worker.mjs', cMapUrl: resourceRoot + '/pdfjs/cmaps/',
+        standardFontDataUrl: resourceRoot + '/pdfjs/standard_fonts/', wasmUrl: resourceRoot + '/pdfjs/wasm/' });
+    let page;
+    let crop;
+    try {
+        const session = await renderer.open(fileData);
+        const geometry = await session.getPageGeometry(figure.pageIndex);
+        const source = await session.renderRegion({ pageIndex: figure.pageIndex, bbox: [0, 0, 1000, 1000],
+            coordinateFrame: 'display-cropbox', rotation: geometry.rotation, dpi: 72 });
+        page = await decodePNG(environment, source.data);
+        crop = await decodePNG(environment, document.assets.find(asset => asset.path === figure.render.assetPath).data);
+        const canvas = environment.createCanvas(1200, 900);
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        const draw = (image, x, title) => {
+            const scale = Math.min(550 / image.width, 790 / image.height);
+            const width = image.width * scale;
+            const height = image.height * scale;
+            context.fillStyle = '#202428';
+            context.font = '18px sans-serif';
+            context.fillText(title, x, 32);
+            context.drawImage(image, x, 60, width, height);
+            return { x, y: 60, width, height };
+        };
+        const sourceRect = draw(page.canvas, 20, 'Original PDF page');
+        draw(crop.canvas, 620, 'Restored PNG');
+        const [left, top, right, bottom] = figure.visualBBox;
+        context.strokeStyle = '#c61d36';
+        context.lineWidth = 2;
+        context.strokeRect(sourceRect.x + left / 1000 * sourceRect.width,
+            sourceRect.y + top / 1000 * sourceRect.height,
+            (right - left) / 1000 * sourceRect.width, (bottom - top) / 1000 * sourceRect.height);
+        parent.replaceChildren(canvas);
+    }
+    finally {
+        await renderer.disposeAll();
+        if (page) page.canvas.width = page.canvas.height = 0;
+        if (crop) crop.canvas.width = crop.canvas.height = 0;
+    }
+}
+
 function releaseURLs() {
     for (const { ownerWindow, url } of objectURLs.splice(0)) ownerWindow.URL.revokeObjectURL(url);
 }

@@ -193,7 +193,8 @@ export async function runFigureReaderValidation({
         report.listenerFinal = ownerWindows.flatMap(window => listenerSnapshot(window) || []);
         report.urlFinal = activeURLs();
         requireCondition(noAdditionalListeners(report.listenerBaseline, report.listenerFinal),
-            'Figure reader retained listeners after repeated tab closes');
+            'Figure reader retained listeners after repeated tab closes: '
+                + JSON.stringify(additionalListeners(report.listenerBaseline, report.listenerFinal)));
         requireCondition(report.closeCallbacks === cycles + 3 + ownerWindows.length,
             'A tab close callback was lost or repeated');
         report.passed = true;
@@ -350,6 +351,18 @@ function noAdditionalListeners(baseline, current) {
             if (position < 0) return false;
             remaining.splice(position, 1);
             return true;
+        });
+    });
+}
+
+function additionalListeners(baseline, current) {
+    return current.map((types, index) => {
+        const remaining = [...baseline[index]];
+        return types.filter(type => {
+            const position = remaining.indexOf(type);
+            if (position < 0) return true;
+            remaining.splice(position, 1);
+            return false;
         });
     });
 }

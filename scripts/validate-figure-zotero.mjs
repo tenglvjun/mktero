@@ -178,7 +178,7 @@ async function runValidation(root, output, zotero, caseIDs) {
                 const service = Components.classes['@mozilla.org/eventlistenerservice;1']
                     .getService(Components.interfaces.nsIEventListenerService);
                 return [owner, owner.document].map(target => service.getListenerInfoFor(target)
-                    .map(listener => listener.type).sort());
+                    .map(listener => listener.type + ':' + String(listener.listenerObject).slice(0, 160)).sort());
             },
         });
         await stage('complete');

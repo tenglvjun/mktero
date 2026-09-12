@@ -82,6 +82,12 @@ try {
                 }
             }
             await page.evaluate(() => MkteroFigureValidation.disposeFigureValidation());
+            await page.setViewportSize({ width: 1200, height: 900 });
+            await page.evaluate(async () => MkteroFigureValidation.showValidationComparison(window.figureHost, {
+                fileData: new Uint8Array(await (await fetch('/test/fixtures/figures/compound-figures.pdf')).arrayBuffer()),
+                resourceRoot: '/build/package',
+            }));
+            await page.screenshot({ path: path.join(output, `${name}-comparison.png`) });
             console.log(`${name}: ${report.cases.length} pixel cases and 12 reader layouts passed.`);
         }
         finally { await browser.close(); }
