@@ -8,6 +8,8 @@
 
 **交付范围：** 将已同意的第一步缺陷修复、第二步公共图组模型、第三步 PDF 整图区裁剪作为同一项功能完成，并覆盖缓存、修订、翻译、引用、快照和导出。
 
+**实施状态：** 三步实现已提交，运行时代码见 `3eb6bdf`，原生验证脚本收尾见 `09c5f5a`。具体状态与命令见主开发计划的“实施状态”和 [验收记录](../../figure-region-validation.md)。合成 provider fixture 不证明 Mistral 生产坐标语义；其未验证方向仍按第 7 节 preserve。未取得用户原报错 PDF，不宣称已对该文件回归。
+
 ## 1. 最终行为与边界
 
 一张论文 Figure 是一个语义对象，可以包含多个图片裁片、PDF 矢量内容、子图标签、坐标轴文字、图例和一个公共图注。程序先确定这些内容的归属，再重排正文。
@@ -102,7 +104,7 @@ flowchart TD
         pageIndex: 0,
         width: 612,
         height: 792,
-        unit: 'pt', // pt / px；px 的 dpi 未提供时为 null
+        unit: 'pt', // pt / px / pdf-user-unit；px 的 dpi 未提供时为 null
         dpi: null,
         markdownRange: null, // 有确切页拼接范围时为 { from, to }
         coordinateFrame: 'display-cropbox',
@@ -129,6 +131,8 @@ flowchart TD
 ```
 
 `bbox`、页面几何和 `sourceRanges` 允许缺失；缺失必须降低自动处理能力。`bboxKind` 只允许 `visual-body`、`caption`、`text`、`group`、`unknown`。`role` 只允许 `panel`、`caption`、`figure-text`、`body`、`unknown`。适配器只依据验证过的字段设置 role/parentId；不能把服务商未知字段原样透传。
+
+`unit` 的已知值只允许 `pt`、`px`、`pdf-user-unit`。`pt` 表示 1/72 英寸的物理点；`pdf-user-unit` 表示尚未乘 PDF UserUnit 的用户空间长度；`px` 表示服务商图像像素。未知单位允许缺省，但该页不能自动合成。非空 dpi 必须是有限正数且只用于 px；缺失 dpi 的 px 仅可比较宽高比，仍需独立验证 frame 和方向。模型校验集中执行这些规则，不能只在某一家适配器中处理。
 
 `sourceRanges` 属于 block，始终对应当前 FigureInput.markdown。页的 markdownRange 只在原始页拼接边界可证明时填写；MinerU 无显式页文本范围时使用已绑定资产的页锚点窗口，不把整份 Markdown 当作每一页。sourceOrdinal 在适配时按原输出固定；parentId 只能引用同页验证过的父图块。Mistral 每页产生范围后按真实拼接偏移平移。MinerU 详细布局的点坐标按所属 `page_size` 归一化，扁平列表的 bbox 已经是 0–1000，不再次缩放。
 
@@ -270,7 +274,11 @@ panel.label 只采纳服务商明确字段或能唯一对应一个 panel 的独�
 
 ### MinerU
 
-在现有 `full.md`、稳定 `content_list.json` 和图片之外，可选读取同一逻辑结果根目录内唯一的 `middle.json` 或 `<name>_middle.json`。只接受 `pdf_info[]` 页对象及经过白名单验证的 `page_idx`、`page_size`、`para_blocks`、`blocks`、`lines`、`spans`、`type`、`bbox`、`image_path` 和文本内容字段。
+在现有 `full.md`、稳定 `content_list.json` 和图片之外，可选读取同一逻辑结果根目录内唯一的 `middle.json` 或 `<name>_middle.json`。只接受根级 `_backend`、`_version_name`、`pdf_info[]`，以及经过白名单验证的 `page_idx`、`page_size`、`para_blocks`、`blocks`、`lines`、`spans`、`type`、`bbox`、`image_path` 和文本内容字段。提取后的详细布局使用 `schema`、`backend`、`version`、`pdfInfo` 字段，不透传整个原 JSON。
+
+当前适配目标为 VLM backend 的 3.4.5 输出，支持集合由 parser profile 常量声明；缺少或未知 backend/version 时不授权自动裁图。已核对固定上游提交 `4fe4bde114a23ee5dd637eae99b767f4669bf58c`：[页面尺寸取自 page.get_size()](https://github.com/opendatalab/MinerU/blob/4fe4bde114a23ee5dd637eae99b767f4669bf58c/mineru/backend/vlm/model_output_to_middle_json.py#L23-L31)，[随后写入 page_size](https://github.com/opendatalab/MinerU/blob/4fe4bde114a23ee5dd637eae99b767f4669bf58c/mineru/backend/vlm/model_output_to_middle_json.py#L70-L74)。[pypdfium2 尺寸接口](https://pypdfium2.readthedocs.io/en/stable/python_api.html#pypdfium2._helpers.page.PdfPage.get_size) 返回 PDF canvas units，[UserUnit 说明](https://pypdfium2.readthedocs.io/en/stable/python_api.html#user-unit) 明确该附加缩放未被计入。因此当前 `unit: 'pdf-user-unit'` 声明成立，不能改为已经缩放的物理 pt。
+
+这一结论解决单位契约；T04/T07/T15 仍需验证实际输出版本、可见框和页面方向，并在本地 PDF.js 上覆盖旋转、非零 CropBox 与 UserUnit。云服务未提供详细文件或其版本不在支持集合时，继续保留原内容，不能用源码的格式能力推断当前结果包必然有足够证据。
 
 详细布局用于保存每个 body/span 的位置、图注位置和父块关系，不能只保留父块的第一个 img_path。图片路径必须与已抽出的资产一一核对。没有 detailed JSON、格式不支持、文件过大或结构冲突时降级到稳定列表；可选文件不使整个成功结果失败。多个候选 detailed JSON 不任取一个，而是忽略详细布局并记录有界原因码。
 
@@ -280,7 +288,15 @@ panel.label 只采纳服务商明确字段或能唯一对应一个 panel 的独�
 
 保留现有请求选项 `include_blocks: true` 和 `include_image_base64: true`。先规范化 `pages[].blocks` 与 `images` 的坐标和图片身份；block 与 image 元数据几何一致时合并，冲突时不选一个“看起来合理”的值。
 
+当前适配目标为 `mistral-ocr-4-1`；dimensions.width/height 为像素，dpi 有效时才换算物理尺寸。未知 model 或无法核验的坐标语义保持 unknown，不按字段名称猜成 PDF 点坐标。
+
+**坐标证据门槛：** 已有字段文档能证明截图像素与 DPI，尚不能证明截图相对于 PDF CropBox 的原点和旋转方向。已知 model 加上匹配的宽高比，不足以声明 `display-cropbox`。启用该 frame 前，必须有明确的服务商契约，或保存可复核的真实 OCR 输出与对应自有 PDF，对照非对称标记验证 0/90/180/270 度、非零 CropBox、180 度长方页和旋转方形页。记录实际 model、请求选项、文件 hash、原始框、转换框及对照结果；自动化回归离线读取经清理的 fixture。
+
+缺少这些证据时，生产适配器输出 `coordinateFrame: 'unknown'`，已知模型记 `missing-geometry`，未知模型记 `unsupported-layout-schema`，该页候选走 preserve。手工构造的 Mistral JSON 和 fake geometry 可以验证内部算法，不能作为生产 frame 白名单的依据。证据补齐后通过 parser profile 常量启用已验证组合，使缓存身份随之更新，不增加“忽略坐标校验”的用户开关。
+
 拆分现有解析函数，保留全部图内文字候选记录。prepare 只消费当前 input.markdown、blocks、contentList，不从旧 pages[].markdown 重新生成文字；providerState 只保留 pageOrder、已验证 chromeHints 等旁证。取消“在 sourceMap 构造前先丢掉 interiorTextRecords”的行为；是否消费这些记录由公共恢复事务决定。已有页眉页脚保留与 `chromeRanges` 语义继续生效。
+
+保留图内证据是 `decodeMistralResult()` 的默认行为，无须额外传入 `preserveFigureText: true`。同步兼容入口 `normalizeMistralResult()` 遵守相同规则；旧缓存兼容由既有 Markdown 和布局标记的读取保证，不能据此让新转换提前删除文字。
 
 Mistral 新结果不再按 4 张→2 列、其他数量→最多 3 列推测原布局。旧文档中的布局标记仍能显示；自动恢复的新图组使用已生成的单张完整 PNG。
 
@@ -317,6 +333,8 @@ await renderer.disposeAll();
 坐标框允许 `display-cropbox`、`unrotated-cropbox`、`unrotated-mediabox`、`unknown`。getPageGeometry 的 width/height 是 scale=1、计入 userUnit 和页面旋转的可见 viewport 尺寸；viewBox 是 PDF.js page.view 的有效可见框，不能假称它是原始 MediaBox。mediaBox 默认为 null，只有加载适配器有独立可信数据时填写。需要 MediaBox 变换但没有该证据时 preserve；本次不新增手写 PDF 字典解析器，也不使用 PDF.js 私有字段。
 
 服务商适配器必须根据已核验的输出版本声明 frame，未知版本不能凭页尺寸猜测。已验证为显示坐标的输入可使用本地页面旋转；无法证明方向的输入保持 unknown，特别不能靠相同长宽比判断 180 度或方形页面方向。比较尺寸时先区分单位：pt 可直接换算，px 且有 dpi 时换算到 pt，px 无 dpi 时只能核对纵横比；frame/方向仍需独立证据。可比的维度或纵横比冲突超过 1% 时不裁剪。非零可见框偏移及 0/90/180/270 度旋转均通过 viewport 变换验证，不能重复应用旋转。
+
+PDF.js scale=1 的 width/height 已包含 UserUnit；这两个值不能再次乘 UserUnit。只有明确声明为 `pdf-user-unit` 的服务商长度在尺寸比较时乘一次 UserUnit。例：有效框 600×800、UserUnit=2、rotation=0 时，PDF.js 显示尺寸为 1200×1600；服务商的 600×800 pdf-user-unit、1200×1600 pt 或 2400×3200 px（144 DPI）应对齐到同一页面。图组 bbox 已归一化到 0–1000，不再乘 UserUnit；切换为 90 度时使用 viewport 的 1600×1200 显示尺寸和变换。
 
 服务在判断几何邻接之前调用纯函数 `alignFigureInputToPDF(input, pageGeometryByIndex)`，将已知 frame 的框统一到显示页坐标；未知/冲突页保留原因，不参与 compose。输入块保留 sourceBBox，页保留 sourceGeometry；无法对齐的页设置 geometryReason（稳定 preserve 原因码），该页的块不参与 compose；最终 visualBBox、captionBBox、panels 和 sourceMap 全部使用显示页的 0–1000 坐标。变换用 PDF.js scale=1 viewportTransform 的六个有限数值，先从输入框转到 PDF 用户空间，再转显示坐标；不能直接拿 unrotated bbox 做来源跳转。原几何和变换进入有界 provenance。
 
@@ -377,7 +395,7 @@ preserve 原因码固定为 `missing-geometry`、`coordinate-mismatch`、`ambigu
 - 明确 forceRefresh 仍走既有重新转换语义；已有修订存储不被后台删除。更早、未列入兼容表的旧修订不重写，仍保留在原存储/已有快照中；本次兼容目标是当前 0.3.9 基线。
 - `MarkdownRevisionSession` 克隆并平移 figureMap 中的 render.range 与 captionRanges。正文纠错不改 ID、PDF 坐标、原始片段或 PNG。若编辑与一个 Figure 的受保护图片范围相交，只使该记录失效，不猜测新坐标、不删除用户内容。
 - 纯同步偏移映射可把内存中的 markdownHash 标为 null；异步持久化时重新计算 hash。持久化文件必须有有效 hash，读取时校验；不能在编辑循环引入异步竞态。
-- 修订存储增加可选 figure-map.json 和大小记录，并覆盖 load/save/delete、clone、回滚和旧数据读取。
+- 修订存储增加可选 figure-map.json、大小记录和 JSON 字节的 `figureMapHash`，并覆盖 load/save/delete、clone、回滚和旧数据读取。它与 map 内绑定正文的 `markdownHash` 各司其职；新写入同时校验，旧 metadata 缺少新增 hash 时不因此拒绝旧修订。既有不可变 base 的图组身份、坐标、原片段和资产不能被后续 save 静默替换。失败清理只删除本次事务确实创建的文件，保留先前 base、用户文件和先前可读 metadata；不能用递归删除整个 entry 代替逐项回滚。
 
 资产路径约定：FigureInput 中的 block.assetPath、figureMap 的 render.assetPath 是相对于 assetBasePath 的 Markdown 图片目的地；assets[].path 继续使用既有逻辑归档路径。normalizeFigureAssetPath(path, basePath) 返回规范化的归档资产键，用于与 assets[].path 比较；生成 Markdown 时仍使用相对目的地，不能重复拼接 basePath。任何遍历、绝对路径、URL 或控制字符都拒绝，绝不是操作系统路径。
 
@@ -396,6 +414,8 @@ preserve 原因码固定为 `missing-geometry`、`coordinate-mismatch`、`ambigu
 - 规范 Markdown 的图片目的地为受保护片段；图注文字继续进入现有可翻译 image description 通路。
 - 图组原始 fragments 不作为正文上下文发送给 AI，不进入翻译批次。
 - `createDocumentTranslationViews` 的 blockRanges 和实际图片节点共同生成 FigureView。译文中图片路径必须仍与源对象一一对应。双语沿用 removeRepeatedComparisonImages：图片一次、原译图注各一次；comparison FigureView 包含原图节点和可选译文图注范围，不为了构造元数据再插入一张图片。
+- `MarkdownTranslationService.translateDocument`、`getCachedDocumentTranslation`、`listCachedDocumentTranslationVariants`、`reconcileDocumentTranslation` 均接收可选 `figureMap = null`。bootstrap 传入与本次 markdown 同一版本的 map，服务内的新请求、精确缓存、兼容缓存及已有译文重建均传至 `createDocumentTranslationViews`。服务返回的 FigureView 与阅读器按相同输入生成的视图一致；不能只在直接调用辅助函数的测试中传 map。
+- FigureView 是当前文本与当前 map 的派生数据。旧翻译缓存的文本仍可复用，重开时重新生成视图，不信任缓存里的旧偏移；仅更新 figureMap 不触发额外翻译请求。异步翻译持有不可变的输入快照，过期结果不得覆盖已纠错的新文档。provenance 只用于本地追溯，不因新增参数进入 AI 请求。
 - 原文 figureMap 的偏移不能直接传入译文。无法可靠映射时，仅退回当前视图的安全 Markdown 分析，不恢复图内文字到正文。
 - 用户改动正文后，图引用、标注和图目录随源范围一起平移。图注公式、引用和中文标签保持现有安全与本地化规则。
 
@@ -414,12 +434,16 @@ preserve 原因码固定为 `missing-geometry`、`coordinate-mismatch`、`ambigu
 | 文件 | 职责与公开接口 |
 | --- | --- |
 | `src/figures/figure-limits.js` | 导出 `FIGURE_LIMITS`、`FIGURE_PIPELINE_PROFILE` 和稳定 preserve 原因码 |
-| `src/figures/figure-model.js` | `validateFigureInput(input)`、`validateFigureMap(map, document)`、`cloneFigureMap(map)`、`normalizeFigureAssetPath(path, basePath)`；`alignFigureInputToPDF(input, pageGeometryByIndex, options = {}) -> FigureInput` 为纯坐标对齐 |
+| `src/figures/figure-model.js` | `validateFigureInput(input)`、`validateFigureMap(map, document)`、`cloneFigureMap(map)`、`normalizeFigureAssetPath(path, basePath)`；集中校验单位、范围、路径与模型预算 |
+| `src/figures/figure-page-geometry.js` | `alignFigureInputToPDF(input, pageGeometryByIndex, options = {}) -> FigureInput`；纯坐标对齐，由 figure-model.js 重导出以兼容现有入口 |
 | `src/figures/figure-source-binding.js` | `bindFigureSourceRanges(input, options = {}) -> FigureInput`；只绑定，不删除 |
 | `src/figures/figure-region-resolver.js` | `resolveFigureCandidates(input, options = {}) -> FigureCandidate[]`；几何、图注、正文阻挡、归属 |
 | `src/figures/figure-transaction.js` | `composeFigureDraft(input, completed, options = {}) -> FigureDraft`；精确编辑与追溯片段 |
 | `src/figures/figure-restoration-service.js` | `FigureRestorationService.restore(input, { fileData, signal, onProgress }) -> Promise<FigureDraft>`；PDF 几何对齐、预算、渲染、取消、单图回退 |
-| `src/figures/figure-finalization.js` | `finalizeFigureMap(prepared, blueprints, { hash }) -> Promise<ConvertedDocument>`；`finalizeRestoredDocument(input, draft, { prepare, hash, signal }) -> Promise<ConvertedDocument>`；最终唯一图片锚点、范围、hash 与整体回退 |
+| `src/figures/figure-finalization.js` | `finalizeFigureMap(prepared, blueprints, { hash, signal, preserved = [] }) -> Promise<ConvertedDocument>`；`finalizeRestoredDocument(input, draft, { prepare, hash, signal }) -> Promise<ConvertedDocument>`；最终唯一图片锚点、范围、hash 与整体回退 |
+| `src/figures/figure-normalization.js` | `normalizeOutsideRestoredFigures(markdown, blocks, normalize)`；按内部授权的 figureId/assetPath 保护已恢复图片，供原正文归一化使用 |
+| `src/figures/figure-async.js` | `createFigureAbortScope(signals, options)` 返回 signal/abort/dispose；`waitForFigureOperation(operation, signal, onAbort)` 统一取消等待与监听清理 |
+| `src/figures/figure-map-serialization.js` | `serializeFigureMap(map, document, options)` 返回 map/json/bytes 或 null；`parseFigureMapJSON(json, document, options)` 校验正文 hash 与预算，供缓存、修订、快照共用 |
 | `src/figures/figure-analysis.js` | `analyzeDocumentFigures(markdown, { figureMap = null, viewRanges = null, viewKind = 'original' } = {}) -> FigureView[]`；文档级统一图分析 |
 | `src/figures/figure-map-transforms.js` | `mapFigureMapThroughEdits(map, edits, markdown) -> FigureMap`；纯偏移更新，hash 标为 null |
 | `src/figures/legacy-figure-profiles.js` | 保存 0.3.9 的两家精确 profile，供修订基线查找；不从新 profile 动态派生 |
@@ -432,7 +456,9 @@ preserve 原因码固定为 `missing-geometry`、`coordinate-mismatch`、`ambigu
 | 现有 cache/revision/snapshot | 持久化及清理新增可选元数据；保持老格式读取 |
 | 现有 editor/window/reference/outline/translation | 传递并使用统一 FigureView；避免重新猜测图组 |
 
-`FigureDraft` 的完整形状为 `{ input: FigureInput, blueprints: FigureBlueprint[], preserved: PreservedFigure[] }`。FigureBlueprint 保存 id、label、pageIndex、visualBBox、captionBBox、memberBlockIds、panels、renderAssetPath、width、height、provenance；不含最终偏移和 hash。`completed` 是 `{ candidate, crop, assetPath }[]`。`ConvertedDocument` 沿用原结果字段，新增可选 figureMap。finalizeRestoredDocument 在发布前把 draft.preserved 合入 map；全部候选回退但有 preserve 摘要时，也生成 figures=[] 的有效 map，支持缓存重开后的说明。最终绑定整体回退使用 ambiguous-source-range 原因，不残留已放弃的 PNG。
+`FigureDraft` 的完整形状为 `{ input: FigureInput, blueprints: FigureBlueprint[], preserved: PreservedFigure[] }`。FigureBlueprint 保存 id、label、pageIndex、visualBBox、captionBBox、memberBlockIds、panels、renderAssetPath、renderCaption、width、height、provenance；不含最终偏移和 hash。renderCaption 是写入规范图片描述的已转义 Markdown，用于最终锚点核对。`completed` 是 `{ candidate, crop, assetPath }[]`。`ConvertedDocument` 沿用原结果字段，新增可选 figureMap。finalizeRestoredDocument 在发布前把 draft.preserved 合入 map；全部候选回退但有 preserve 摘要时，也生成 figures=[] 的有效 map，支持缓存重开后的说明。最终绑定整体回退使用 ambiguous-source-range 原因，不残留已放弃的 PNG。
+
+全回退与元数据无效分开处理：`blueprints.length === 0` 本身不是丢弃有效 preserve 摘要的理由；在 hash、范围、资产及预算校验成功时，空 figures 的 map 必须经过缓存和 UI 传递。可选 map 自身无法通过校验时仍允许降级为 null，保留可读 Markdown 和原资产；不能伪造 hash 或绕过资产校验来保住提示。取消始终向上传递。
 
 `hash` 的统一签名为 `hash(data: Uint8Array) -> Promise<string>`，返回 64 位小写 hex。`validateFigureMap` 的第二参数为 `{ markdown, assets, assetBasePath = '', markdownHash = null, persisted = false }`；持久化调用先计算实际 markdownHash，再以 persisted=true 验证，不能只检查 hash 字符串形式。校验器不修改输入，适配器负责白名单投影，clone 负责深拷贝。
 
@@ -459,4 +485,4 @@ preserve 原因码固定为 `missing-geometry`、`coordinate-mismatch`、`ambigu
 
 真实 PDF.js 像素与 Zotero 集成必须另行验证，不能用 fake canvas 测试代替：在 Zotero 7、8、9、10 打开样例，核对阅读、预览、缩放、来源跳转和清理。实际报错 PDF/OCR 结果若可获得，也加入本地回归；未获得时如实记录合成与真实样例的覆盖边界，不宣称已经修好了未检查的原文件。
 
-实施按主计划的有依赖任务串行推进，每个任务都有失败测试、实现、通过验证和独立提交。最后一个 PR 一并评审三步结果；版本发布仍遵循项目既有发布流程，不在规划阶段预设版本号。
+实施按主计划的有依赖任务串行推进。新增或缺失行为经过失败测试、实现与通过验证；已有实现直接复核，不通过删除代码重演红灯。尚未提交的交织改动按可独立审查的功能分组提交，保留已有提交。最后一个 PR 一并评审三步结果；版本发布仍遵循项目既有发布流程，不在规划阶段预设版本号。
