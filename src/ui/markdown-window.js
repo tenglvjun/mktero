@@ -16,6 +16,7 @@ import {
     markdownAnnotationRangeMatchesSource,
 } from '../core/markdown-local-annotations.js';
 import { resolvePDFPageIndexHint } from '../core/markdown-source-map.js';
+import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     AI_TARGET_LANGUAGES,
     isSupportedAITargetLanguage,
@@ -625,6 +626,11 @@ class MarkdownTabView {
                 : comparisonView
                     ? model.comparisonMarkdown || ''
                     : model.markdown || '';
+            const figureViews = analyzeDocumentFigures(markdown, {
+                figureMap: model.figureMap,
+                viewRanges: model.translationBlockRanges,
+                viewKind: translatedView ? 'translation' : comparisonView ? 'comparison' : 'original',
+            });
             const documentChanged = this.renderedRenderMode !== 'markdown'
                 || this.renderedMarkdown !== markdown;
             const previousTranslationView = this.renderedTranslationView;
@@ -686,6 +692,7 @@ class MarkdownTabView {
                 markdown,
                 annotationOverlay,
                 sourceMap,
+                figureViews,
                 chromeRanges: editorChromeRanges,
                 sourceActionRanges: translatedView
                     ? []
@@ -752,7 +759,10 @@ class MarkdownTabView {
                 comparisonView ? model.markdown || '' : markdown,
                 comparisonView ? model.comparisonSourceRanges : null,
                 translatedView ? [] : sourceChromeRanges,
-                translatedView && !comparisonView ? [] : model.pdfOutline
+                translatedView && !comparisonView ? [] : model.pdfOutline,
+                comparisonView
+                    ? analyzeDocumentFigures(model.markdown, { figureMap: model.figureMap })
+                    : figureViews
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
@@ -5341,7 +5351,8 @@ class MarkdownTabView {
         markdown,
         sourceRanges = null,
         chromeRanges = [],
-        pdfOutline = []
+        pdfOutline = [],
+        figureViews = null
     ) {
         this.outlineMarkdown = String(markdown || '');
         this.outlineSourceRanges = sourceRanges;
@@ -5349,6 +5360,7 @@ class MarkdownTabView {
             ? chromeRanges
             : [];
         this.outlinePdfOutline = Array.isArray(pdfOutline) ? pdfOutline : [];
+        this.outlineFigureViews = figureViews;
         this.renderOutlineList();
     }
 
@@ -5423,7 +5435,8 @@ class MarkdownTabView {
     outlineAssetItems() {
         return extractMarkdownAssetOutline(
             this.outlineMarkdown,
-            this.outlineChromeRanges
+            this.outlineChromeRanges,
+            { figureViews: this.outlineFigureViews }
         ).map(asset => ({
             text: asset.text,
             offset: mapSourceOffsetToComparison(
@@ -5431,6 +5444,7 @@ class MarkdownTabView {
                 this.outlineSourceRanges
             ),
             type: asset.type,
+            sourceId: asset.sourceId,
             imageSource: asset.imageSource || '',
             tablePreviewSource: asset.tablePreviewSource || '',
         }));

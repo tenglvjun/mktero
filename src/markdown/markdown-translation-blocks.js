@@ -1,4 +1,5 @@
 import { GFM, parser as markdownParser } from '@lezer/markdown';
+import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     findDisplayMathMatches,
     findInlineMathMatches,
@@ -467,7 +468,7 @@ export function createComparisonMarkdownView(markdown, blocks, translations) {
     };
 }
 
-export function createDocumentTranslationViews(markdown, blocks, translations) {
+export function createDocumentTranslationViews(markdown, blocks, translations, { figureMap = null } = {}) {
     const translated = createTranslatedMarkdownView(
         markdown,
         blocks,
@@ -481,15 +482,22 @@ export function createDocumentTranslationViews(markdown, blocks, translations) {
     const comparisonByID = new Map(
         comparison.blockRanges.map(range => [range.id, range])
     );
+    const blockRanges = translated.blockRanges.map(range => ({
+        ...range,
+        ...comparisonByID.get(range.id),
+    }));
     return {
         translatedMarkdown: translated.markdown,
         comparisonMarkdown: comparison.markdown,
         comparisonSourceRanges: comparison.sourceRanges,
         comparisonTranslationRanges: comparison.translationRanges,
-        blockRanges: translated.blockRanges.map(range => ({
-            ...range,
-            ...comparisonByID.get(range.id),
-        })),
+        blockRanges,
+        translatedFigureViews: analyzeDocumentFigures(translated.markdown, {
+            figureMap, viewRanges: blockRanges, viewKind: 'translation',
+        }),
+        comparisonFigureViews: analyzeDocumentFigures(comparison.markdown, {
+            figureMap, viewRanges: blockRanges, viewKind: 'comparison',
+        }),
     };
 }
 

@@ -1,4 +1,5 @@
-import { MISTRAL_PARSER_PROFILE_ID } from '../mistral/parser-profile.js';
+import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_IDS } from '../mistral/parser-profile.js';
+import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 
 export class MistralConfigurationError extends Error {
     constructor() {
@@ -87,11 +88,37 @@ export class MistralDocumentExtractor {
         );
 
         if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
-            const revision = await this.readRevision({
+            let revisionKey = cacheKey;
+            let revisionProfile = this.parserProfile;
+            let revision = await this.readRevision({
                 itemID,
                 cacheKey,
                 signal,
             });
+            throwIfAborted(signal);
+            if (!revision && this.createCacheKey) {
+                try {
+                    const visited = new Set([cacheKey]);
+                    for (const parserProfile of [...MISTRAL_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mistral]) {
+                        const legacyKey = await this.createCacheKey(fileData, { parserProfile });
+                        throwIfAborted(signal);
+                        if (legacyKey && !visited.has(legacyKey)) {
+                            visited.add(legacyKey);
+                            revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
+                            throwIfAborted(signal);
+                            if (revision) {
+                                revisionKey = legacyKey;
+                                revisionProfile = parserProfile;
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (error) {
+                    throwIfAborted(signal);
+                    this.#reportCacheError(error);
+                }
+            }
             throwIfAborted(signal);
             if (revision) {
                 onProgress?.(100);
@@ -103,8 +130,8 @@ export class MistralDocumentExtractor {
                     },
                     true,
                     warnings,
-                    cacheKey,
-                    this.parserProfile,
+                    revisionKey,
+                    revisionProfile,
                     sourceHash,
                 );
             }
@@ -198,6 +225,7 @@ function createResult(
         extractedPages: parsedResult.extractedPages,
         totalPages: parsedResult.totalPages,
         sourceMap: parsedResult.sourceMap,
+        ...(parsedResult.figureMap ? { figureMap: parsedResult.figureMap } : {}),
         warnings,
         cacheHit,
         resumedTask: false,

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-
 test('extracts PDF text when worker globals only exist on the Zotero window', async () => {
     await fetch('data:text/plain,ready');
     const NativeAbortController = globalThis.AbortController;

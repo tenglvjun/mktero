@@ -79,6 +79,7 @@ await Promise.all([
             'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'
         )],
         outfile: path.join(packageRoot, 'pdf.worker.mjs'),
+        inject: [path.join(projectRoot, 'src/pdf/pdfjs-runtime-compat.js')],
         bundle: true,
         format: 'esm',
         platform: 'browser',

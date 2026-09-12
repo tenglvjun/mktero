@@ -55,8 +55,8 @@ import {
 import {
     createSavedMarkdownOpenResolver,
 } from './core/saved-markdown-open-resolver.js';
-import { MINERU_PARSER_PROFILE_ID } from './mineru/parser-profile.js';
-import { MISTRAL_PARSER_PROFILE_ID } from './mistral/parser-profile.js';
+import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS } from './mineru/parser-profile.js';
+import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_IDS } from './mistral/parser-profile.js';
 import {
     createZoteroBlobFactory,
     createZoteroSavedMarkdownStore,
@@ -98,6 +98,15 @@ import {
 import { ZoteroAnnotationExtractor } from './extractors/zotero-annotation-extractor.js';
 import { MinerUClient } from './mineru/mineru-client.js';
 import { MinerUConversion } from './mineru/mineru-conversion.js';
+import { decodeMinerUFigureInput } from './mineru/figure-layout-adapter.js';
+import { prepareMinerUResult } from './mineru/mineru-result.js';
+import { decodeMistralResult, prepareMistralResult } from './mistral/mistral-result.js';
+import { FigureRestorationService } from './figures/figure-restoration-service.js';
+import { FigureLabelRecoveryService } from './figures/figure-label-recovery.js';
+import { FigureReadingOrderService } from './figures/figure-reading-order.js';
+import { finalizeRestoredDocument } from './figures/figure-finalization.js';
+import { createPDFFigureRegionRenderer } from './pdf/pdfjs-figure-region.js';
+import { createZoteroFigureCanvasEnvironment } from './platform/zotero-figure-canvas.js';
 import { MistralClient } from './mistral/mistral-client.js';
 import { MistralConversion } from './mistral/mistral-conversion.js';
 import {
@@ -190,6 +199,7 @@ const runtime = {
     pdfTextIndexCache: null,
     pdfAnnotationLocator: null,
     sourcePeekRenderer: null,
+    figureRegionRenderer: null,
     savedMarkdownStore: null,
     savedMarkdownResolver: null,
     markdownExporter: null,
@@ -389,12 +399,58 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ioUtils: IOUtils,
         pathUtils: PathUtils,
     });
+    const figureRegionRenderer = createPDFFigureRegionRenderer({
+        createCanvas: (width, height) => createZoteroFigureCanvasEnvironment(Zotero).createCanvas(width, height),
+        encodePNG: (canvas, options) => createZoteroFigureCanvasEnvironment(Zotero).encodePNG(canvas, options),
+        createAbortController: createZoteroAbortController,
+        workerSrc: `${rootURI}pdf.worker.mjs`,
+        cMapUrl: `${rootURI}pdfjs/cmaps/`,
+        standardFontDataUrl: `${rootURI}pdfjs/standard_fonts/`,
+        wasmUrl: `${rootURI}pdfjs/wasm/`,
+    });
+    runtime.figureRegionRenderer = figureRegionRenderer;
+    const figureRestoration = new FigureRestorationService({
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, {
+            ...options, ...createZoteroFigureCanvasEnvironment(Zotero),
+        }),
+        hash: sha256Hex,
+        createAbortController: createZoteroAbortController,
+    });
+    const figureLabelRecovery = new FigureLabelRecoveryService({
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, {
+            ...options, ...createZoteroFigureCanvasEnvironment(Zotero),
+        }),
+        hash: sha256Hex,
+        createAbortController: createZoteroAbortController,
+    });
+    const figureReadingOrder = new FigureReadingOrderService({
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, {
+            ...options, ...createZoteroFigureCanvasEnvironment(Zotero),
+        }),
+        hash: sha256Hex,
+        createAbortController: createZoteroAbortController,
+    });
+    const recoverFigures = async (result, context) => figureReadingOrder.recover(
+        await figureLabelRecovery.recover(result, context), context
+    );
+    const prepareWithFigures = (decode, prepare) => async (raw, context) => {
+        const input = decode(raw);
+        const draft = await figureRestoration.restore(input, context);
+        return finalizeRestoredDocument(input, draft, {
+            prepare, hash: sha256Hex, signal: context.signal,
+        });
+    };
     const conversion = new MinerUConversion({
         client: new MinerUClient({
             createAbortController: createZoteroAbortController,
         }),
         pendingTasks,
         cache,
+        prepareResult: prepareWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
+        recoverFigures,
+        createPreviousCacheKeys: fileData => Promise.all(MINERU_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => (
+            createMarkdownCacheKey(fileData, { parserProfile })
+        ))),
         onError: error => Zotero.logError?.(error),
     });
     const mineruExtractor = new MinerUDocumentExtractor({
@@ -407,7 +463,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             options,
             pdfAnnotationLocator
         ),
-        createCacheKey: fileData => createMinerUCacheKey(fileData),
+        createCacheKey: (fileData, options) => createMinerUCacheKey(fileData, options),
         createSourceHash: fileData => sha256Hex(fileData),
         readRevision: options => readRevisionSnapshot(options),
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
@@ -417,6 +473,11 @@ globalThis.startup = async function startup({ id, rootURI }) {
             createAbortController: createZoteroAbortController,
         }),
         cache,
+        prepareResult: prepareWithFigures(decodeMistralResult, prepareMistralResult),
+        recoverFigures,
+        createPreviousCacheKeys: fileData => Promise.all(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => (
+            createMarkdownCacheKey(fileData, { parserProfile })
+        ))),
         onError: error => Zotero.logError?.(error),
     });
     const mistralExtractor = new MistralDocumentExtractor({
@@ -432,8 +493,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
         createCacheKey: (fileData, options) => createMarkdownCacheKey(
             fileData,
             {
-                ...options,
                 parserProfile: MISTRAL_PARSER_PROFILE_ID,
+                ...options,
             }
         ),
         createSourceHash: fileData => sha256Hex(fileData),
@@ -516,6 +577,7 @@ globalThis.shutdown = function shutdown() {
     runtime.localAnnotations?.dispose();
     runtime.pdfAnnotationLocator?.dispose();
     void runtime.sourcePeekRenderer?.disposeAll();
+    void runtime.figureRegionRenderer?.disposeAll();
     runtime.annotationOverlayRefresher?.dispose();
     runtime.disposeToolbar?.();
     disposeAllContextMenus();
@@ -543,6 +605,7 @@ globalThis.shutdown = function shutdown() {
     runtime.pdfTextIndexCache = null;
     runtime.pdfAnnotationLocator = null;
     runtime.sourcePeekRenderer = null;
+    runtime.figureRegionRenderer = null;
     runtime.savedMarkdownStore = null;
     runtime.savedMarkdownResolver = null;
     runtime.markdownExporter = null;
@@ -1020,6 +1083,7 @@ async function attachRevisionSession(itemID, result, signal) {
             cacheKey: result.cacheKey,
             markdown: result.markdown,
             sourceMap: result.sourceMap || [],
+            figureMap: result.figureMap || null,
             assets: result.assets || [],
             assetBasePath: result.assetBasePath || '',
             extractedPages: result.extractedPages,
@@ -1156,6 +1220,7 @@ async function translateDocument(documentID, {
                 documentKey: String(presentation.model.cacheKey || ''),
                 markdown: presentation.model.markdown,
                 chromeRanges: presentation.model.chromeRanges,
+                figureMap: presentation.model.figureMap,
                 signal,
                 targetLanguage,
                 retryBlockIDs,
@@ -1471,6 +1536,7 @@ async function resolveTranslationAfterRevision(snapshot, {
                     documentKey: String(snapshot.cacheKey || ''),
                     markdown: snapshot.markdown,
                     chromeRanges: snapshot.chromeRanges,
+                    figureMap: snapshot.figureMap,
                     existingTranslation: previousTranslation,
                     targetLanguage: previousTranslation.targetLanguage,
                 }) || null;
@@ -1544,6 +1610,7 @@ async function attachCachedDocumentTranslation(result, signal) {
                 documentKey: result.cacheKey,
                 markdown: result.markdown,
                 chromeRanges: result.chromeRanges,
+                figureMap: result.figureMap,
             });
         if (signal?.aborted) throw signal.reason || new Error('Aborted');
     } while (getAISettings(Zotero).targetLanguage !== targetLanguage);
@@ -1626,6 +1693,7 @@ async function activateCachedTranslationLanguage(
             markdown,
             targetLanguage,
             chromeRanges: presentation.model.chromeRanges,
+            figureMap: presentation.model.figureMap,
         });
     const current = runtime.presenter?.get(documentID);
     if (current !== presentation
@@ -1889,6 +1957,7 @@ async function saveSnapshotForModel(pdfItemOrID, model) {
         assets: model.assets,
         assetBasePath: model.assetBasePath,
         sourceMap: model.sourceMap,
+        figureMap: model.figureMap,
         cacheKey,
         parserProfile,
         containsUserCorrections: Boolean(model.hasCorrections),
@@ -1944,6 +2013,7 @@ async function copySourcedMarkdown(itemID, target) {
         const snippet = createEvidenceSnippet({
             markdown: model.markdown,
             sourceMap: model.sourceMap,
+            figureMap: model.figureMap,
             target,
         });
         if (typeof runtime.evidenceReference?.resolve !== 'function'

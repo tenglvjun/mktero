@@ -3805,6 +3805,21 @@ main {
     padding: 12px;
 }
 
+.mktero-figure-source-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin: 8px 0 0 auto;
+    padding: 6px;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
 .mktero-figure-preview-viewport {
     max-height: min(440px, calc(100vh - 144px));
     overflow: auto;
@@ -3869,6 +3884,10 @@ main {
 
 .mktero-figure-preview-viewport .mktero-figure-panel + .mktero-figure-panel {
     margin-top: 10px;
+}
+
+.mktero-figure-preview-viewport .mktero-figure-panels-grid > .mktero-figure-panel + .mktero-figure-panel {
+    margin-top: 0;
 }
 
 .mktero-figure-preview-viewport .mktero-figure-panel-label {
@@ -4045,6 +4064,10 @@ main {
     margin-top: 12px;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-grid > .mktero-figure-panel + .mktero-figure-panel {
+    margin-top: 0;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panel-label {
     max-width: 100%;
     margin: 6px auto 0;
@@ -4076,20 +4099,6 @@ main {
     color: var(--text);
     font-weight: 650;
     white-space: nowrap;
-}
-
-@media (max-width: 760px) {
-    .mktero-figure-preview-viewport .mktero-figure-panels-grid,
-    .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 520px) {
-    .mktero-figure-preview-viewport .mktero-figure-panels-grid,
-    .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-panels-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-image-inline {

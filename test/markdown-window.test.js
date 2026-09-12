@@ -1587,6 +1587,7 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         sourceMap,
         chromeRanges: [],
             sourceActionRanges: null,
+            figureViews: [],
             translationRanges: [],
             translationFailures: [],
             translationPairs: [],
@@ -2470,6 +2471,53 @@ test('keeps actionable warning toasts available for settings recovery', () => {
         assert.equal(shadow.querySelector('#mktero-warning').hidden, false);
         assert.equal(shadow.querySelector('#mktero-warning-settings').hidden, false);
         assert.equal(timers.length, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('keeps preserved figures silent while showing other warning toasts', () => {
+    const timers = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        sourceHash: 'a'.repeat(64),
+        markdown: '# Cached paper',
+        figureMap: {
+            version: 1,
+            pipeline: 'figure-region-v1',
+            markdownHash: 'b'.repeat(64),
+            figures: [],
+            preserved: [{ id: 'fig-p0-b1', pageIndex: 0, reason: 'resource-limit' }],
+        },
+    }), {}, {
+        configureWindow(window) {
+            window.setTimeout = (callback, delay) => {
+                const timer = { callback, delay };
+                timers.push(timer);
+                return timer;
+            };
+            window.clearTimeout = () => {};
+        },
+    });
+    try {
+        const warning = shadow.querySelector('#mktero-warning');
+        const message = shadow.querySelector('#mktero-warning .message-body');
+        assert.equal(warning.hidden, true);
+        assert.equal(message.textContent, '');
+        assert.equal(timers.length, 0);
+        view.render(view.model);
+        assert.equal(warning.hidden, true);
+        assert.equal(timers.length, 0);
+        view.render({ ...view.model, warnings: ['Other warning.'] });
+        assert.equal(warning.hidden, false);
+        assert.equal(message.textContent, 'Other warning.');
+        assert.equal(timers.length, 1);
+        view.render({ ...view.model, warnings: [] });
+        assert.equal(warning.hidden, true);
+        assert.equal(message.textContent, '');
+        assert.equal(timers.length, 1);
     }
     finally {
         view.destroy();

@@ -81,6 +81,7 @@ test('marks progress while collecting a resumed MinerU task', async () => {
     assert.deepEqual(progress, [
         [CONVERSION_PROGRESS.PARSING, { resumingTask: true }],
         [42, { resumingTask: true }],
+        [100, { resumingTask: true }],
     ]);
 });
 

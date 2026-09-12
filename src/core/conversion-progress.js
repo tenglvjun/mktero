@@ -7,6 +7,7 @@ export const CONVERSION_PROGRESS = Object.freeze({
     PARSING_FALLBACK: 20,
     PARSING_MAX: 90,
     DOWNLOADING: 95,
+    RESTORING_FIGURES: 97,
     COMPLETE: 100,
 });
 

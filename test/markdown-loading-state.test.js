@@ -28,7 +28,7 @@ test('describes provider-neutral loading stages', () => {
     );
     assert.equal(
         createLoadingPresentation({ status: 'loading', progress: 97 }).detail,
-        'Downloading and preparing the Markdown result.'
+        'Restoring complete figures...'
     );
 });
 
@@ -71,7 +71,7 @@ test('makes resumed conversion work visible without exposing task details', () =
         status: 'loading',
         progress: 97,
         resumingTask: true,
-    }).detail, 'Downloading and preparing the Markdown result.');
+    }).detail, 'Restoring complete figures...');
 });
 
 test('hides the loading presentation outside conversion and clamps invalid progress', () => {

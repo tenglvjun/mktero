@@ -13,6 +13,7 @@ import {
 import { createLocalization } from '../i18n/localization.js';
 import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
+import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     createInlineRenderingExtension,
     pointerTouchesRect,
@@ -23,6 +24,7 @@ import {
     setChromeRanges,
     setCorrectionRenderingState,
     setFigureHighlight,
+    setFigureViews,
     setInlineEditingRange,
     setReferenceHighlight,
     setTableHighlight,
@@ -179,6 +181,8 @@ export function createInlineMarkdownEditor({
     const figurePreviewPopup = createFigurePreviewPopup(parent, {
         resolveImageURL,
         localization,
+        openSourceLocation,
+        onSourceNavigationError,
     });
     let destroyed = false;
     const citationHighlight = createTimedTargetHighlight({
@@ -814,7 +818,8 @@ export function createInlineMarkdownEditor({
         const evidence = createSourcedEvidence(
             view.state.doc.toString(),
             currentSourceMap,
-            copyTarget
+            copyTarget,
+            currentFigureViews
         );
         for (const popup of interactionPopups) {
             if (popup !== annotationPopup) popup.close();
@@ -888,6 +893,7 @@ export function createInlineMarkdownEditor({
     );
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
     let currentSourceMap = [];
+    let currentFigureViews = [];
     let currentChromeRanges = [];
     let currentSourceActionRanges = null;
     let openSelectionKey = null;
@@ -895,6 +901,8 @@ export function createInlineMarkdownEditor({
         markdown,
         annotationOverlay,
         sourceMap,
+        figureMap = null,
+        figureViews = null,
         chromeRanges,
         sourceActionRanges,
         translationRanges,
@@ -933,6 +941,7 @@ export function createInlineMarkdownEditor({
         }
         annotationPopup.close();
         currentSourceMap = Array.isArray(sourceMap) ? sourceMap : [];
+        currentFigureViews = figureViews || analyzeDocumentFigures(value, { figureMap });
         currentChromeRanges = normalizeChromeRanges(chromeRanges, value.length);
         currentSourceActionRanges = Array.isArray(sourceActionRanges)
             ? normalizeSourceActionRanges(sourceActionRanges, value.length)
@@ -943,6 +952,7 @@ export function createInlineMarkdownEditor({
                 annotationOverlay || createEmptyAnnotationOverlay()
             ),
             setChromeRanges.of(currentChromeRanges),
+            setFigureViews.of(currentFigureViews),
             setTranslationRanges.of(translationRanges || []),
             setTranslationFailures.of(translationFailures || []),
             setTranslationPairs.of(translationPairs || []),
@@ -1546,9 +1556,9 @@ function repairStalledViewport(
     return true;
 }
 
-function createSourcedEvidence(markdown, sourceMap, target) {
+function createSourcedEvidence(markdown, sourceMap, target, figureViews) {
     try {
-        return createEvidenceSnippet({ markdown, sourceMap, target });
+        return createEvidenceSnippet({ markdown, sourceMap, target, figureViews });
     }
     catch {
         return null;

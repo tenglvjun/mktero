@@ -1,4 +1,6 @@
 import { GFM, parser } from '@lezer/markdown';
+import { cloneFigureMap } from '../figures/figure-model.js';
+import { mapFigureMapThroughEdits } from '../figures/figure-map-transforms.js';
 import { mapChromeRanges } from '../markdown/chrome-ranges.js';
 import {
     findDisplayMathMatches,
@@ -361,6 +363,9 @@ function materializeRevision(revision) {
         markdown,
         sourceMap,
         chromeRanges,
+        ...(revision.base.figureMap ? {
+            figureMap: mapFigureMapThroughEdits(revision.base.figureMap, transforms, markdown),
+        } : {}),
         assets: cloneAssets(revision.base.assets || []),
         assetBasePath: revision.base.assetBasePath || '',
         extractedPages: revision.base.extractedPages ?? null,
@@ -833,6 +838,7 @@ function cloneBaseDocument(document) {
     return {
         itemID: document.itemID,
         cacheKey: document.cacheKey,
+        ...(document.figureMap ? { figureMap: cloneFigureMap(document.figureMap) } : {}),
         markdown: document.markdown,
         sourceMap: (document.sourceMap || []).map(entry => cloneSourceMapEntry(entry)),
         chromeRanges: (document.chromeRanges || []).map(range => ({

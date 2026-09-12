@@ -15,7 +15,6 @@ import {
 } from '../markdown/markdown-html.js';
 import { translateEnglish } from '../i18n/localization.js';
 import {
-    findAcademicFigureGroups,
     findAcademicTableGroups,
     findConsecutiveImagePacks,
 } from '../markdown/markdown-figures.js';
@@ -53,6 +52,7 @@ import {
     installRenderedAnnotations,
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
+import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     subtractChromeRanges,
 } from '../markdown/chrome-ranges.js';
@@ -79,6 +79,7 @@ const MAX_MATCH_CANDIDATES = 10_000;
 export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
+export const setFigureViews = StateEffect.define();
 export const setAnnotationOverlay = StateEffect.define();
 export const setChromeRanges = StateEffect.define();
 export const setTranslationRanges = StateEffect.define();
@@ -600,6 +601,7 @@ export function createInlineRenderingExtension({
         highlightedReferenceID: null,
         highlightedTableID: null,
         highlightedFigureID: null,
+        figureViews: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
         chromeRanges: [],
         translationRanges: [],
@@ -618,7 +620,7 @@ export function createInlineRenderingExtension({
             analyzeMarkdownTableReferences
         ),
         figureReferences: createReferenceAnalysisCache(
-            analyzeMarkdownFigureReferences,
+            source => analyzeMarkdownFigureReferences(source, { figureViews: context.figureViews }),
             { indexTargetsByFrom: true }
         ),
     };
@@ -635,6 +637,7 @@ export function createInlineRenderingExtension({
             let referenceHighlightChanged = false;
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
+            let figureViewsChanged = false;
             let annotationOverlayChanged = false;
             let chromeRangesChanged = false;
             let translationRangesChanged = false;
@@ -656,6 +659,11 @@ export function createInlineRenderingExtension({
                 else if (effect.is(setFigureHighlight)) {
                     context.highlightedFigureID = effect.value;
                     figureHighlightChanged = true;
+                }
+                else if (effect.is(setFigureViews)) {
+                    context.figureViews = Array.isArray(effect.value) ? effect.value : null;
+                    context.figureReferences.document = null;
+                    figureViewsChanged = true;
                 }
                 else if (effect.is(setAnnotationOverlay)) {
                     context.annotationOverlay = effect.value
@@ -718,11 +726,16 @@ export function createInlineRenderingExtension({
                     correctionStateChanged = true;
                 }
             }
+            if (transaction.docChanged && !figureViewsChanged) {
+                context.figureViews = null;
+                context.figureReferences.document = null;
+            }
             if (transaction.docChanged
                 || syntaxTreeChanged
                 || referenceHighlightChanged
                 || tableHighlightChanged
                 || figureHighlightChanged
+                || figureViewsChanged
                 || annotationOverlayChanged
                 || chromeRangesChanged
                 || translationRangesChanged
@@ -912,7 +925,8 @@ function buildDecorations(state, context) {
     referenceAnalysis(state, context.figureReferences);
     const algorithmGroups = findMinerUAlgorithmGroups(state.doc.toString())
         .filter(group => !rangesOverlapEditing(group, context));
-    const figureGroups = findAcademicFigureGroups(state.doc.toString())
+    const figureGroups = (context.figureViews || analyzeDocumentFigures(state.doc.toString()))
+        .map(group => group.translatedCaption ? { ...group, to: group.imageRange.to } : group)
         .filter(group => !rangesOverlapEditing(group, context));
     const imagePacks = findConsecutiveImagePacks(
         state.doc.toString(),
@@ -2420,8 +2434,8 @@ function renderedRange(node, state, display, context) {
     );
     const tableIsHighlighted = node.tableTarget?.id
         && node.tableTarget.id === context.highlightedTableID;
-    const figureIsHighlighted = context.figureReferences.targetsByFrom
-        ?.get(node.from)?.id === context.highlightedFigureID;
+    const highlightedFigure = context.figureReferences.targets.get(context.highlightedFigureID);
+    const figureIsHighlighted = highlightedFigure?.from === node.from;
     const annotations = annotationsForRange(
         context.annotationOverlay,
         node.from,

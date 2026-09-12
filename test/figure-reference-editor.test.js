@@ -4,6 +4,38 @@ import { EditorView } from '@codemirror/view';
 import { JSDOM } from 'jsdom';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 import { createLocalization } from '../src/i18n/localization.js';
+import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js';
+
+test('keeps restored parent and panel highlights and PDF navigation tied to the current document', async () => {
+    const source = await makeRestoredFigureDocument();
+    source.figureMap.figures[0].panels[0].label = 'a';
+    source.markdown += '\n\nSee Fig. 1a.';
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', { pretendToBeVisual: true });
+    const { document } = dom.window;
+    const opened = [];
+    const editor = createInlineMarkdownEditor({ parent: document.querySelector('#editor'),
+        resolveImageURL: path => `blob:${path}`, openSourceLocation: location => opened.push(location) });
+    try {
+        editor.setDocument(source);
+        const references = [...document.querySelectorAll('.cm-mktero-figure-reference')];
+        assert.equal(references.length, 2);
+        references[0].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+        assert.ok(document.querySelector('.cm-mktero-figure-target-highlight'));
+        document.querySelectorAll('.cm-mktero-figure-reference')[1]
+            .dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true }));
+        const popup = document.querySelector('.mktero-figure-preview-popup');
+        assert.equal(popup.querySelectorAll('img').length, 1);
+        popup.querySelector('.mktero-figure-source-button').click();
+        assert.deepEqual(opened[0].bbox, source.figureMap.figures[0].panels[0].bbox);
+        editor.setDocument({ markdown: 'Other document.' });
+        assert.equal(document.querySelectorAll('.cm-mktero-figure-reference').length, 0);
+        assert.equal(document.querySelectorAll('.mktero-figure-preview-popup').length, 0);
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+});
 
 test('previews a captioned image from its prose figure reference', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {

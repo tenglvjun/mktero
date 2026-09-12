@@ -4,6 +4,7 @@ import {
     SAVED_MARKDOWN_NOTE_KIND,
     SOURCE_MARKDOWN_ATTACHMENT_TITLE,
     SOURCE_MAP_ATTACHMENT_TITLE,
+    FIGURE_MAP_ATTACHMENT_TITLE,
     createSavedMarkdownManifest,
     isSavedMarkdownNote,
     parseSavedMarkdownNote,
@@ -101,6 +102,48 @@ test('rejects unsafe and incomplete saved note metadata', () => {
 test('exports stable internal attachment titles', () => {
     assert.equal(SOURCE_MARKDOWN_ATTACHMENT_TITLE, 'Mktero source.md');
     assert.equal(SOURCE_MAP_ATTACHMENT_TITLE, 'Mktero source-map.json');
+    assert.equal(FIGURE_MAP_ATTACHMENT_TITLE, 'Mktero figure-map.json');
+});
+
+test('writes schema 3 and preserves supported read versions without upgrading unknown formats', () => {
+    assert.equal(manifest.schemaVersion, 3);
+    const html = serializeSavedMarkdownNote({ bodyHTML: '<p>Text</p>', manifest });
+    for (const version of [1, 2, 3]) {
+        assert.equal(parseSavedMarkdownNote(replaceManifestMarker(html,
+            { ...manifest, schemaVersion: version })).schemaVersion, version);
+    }
+    assert.throws(() => parseSavedMarkdownNote(replaceManifestMarker(html,
+        { ...manifest, schemaVersion: 99 })), { code: 'UNSUPPORTED_SAVED_MARKDOWN_VERSION' });
+});
+
+test('accepts figure attachment fields only as a complete bounded set', () => {
+    const metadata = { figureMapAttachmentKey: 'FIGURE01', figureMapBytes: 1024,
+        figureMapHash: 'd'.repeat(64) };
+    const value = createSavedMarkdownManifest({ ...manifest, ...metadata });
+    const html = serializeSavedMarkdownNote({ bodyHTML: '<p>Text</p>', manifest: value });
+    assert.equal(parseSavedMarkdownNote(html).manifest.figureMapAttachmentKey, 'FIGURE01');
+    for (const invalid of [
+        { figureMapBytes: undefined }, { figureMapHash: 'bad' },
+        { figureMapBytes: 9 * 1024 * 1024 }, { figureMapAttachmentKey: '../bad' },
+    ]) {
+        assert.throws(() => createSavedMarkdownManifest({ ...value, ...invalid }), /figure metadata/);
+        const parsed = parseSavedMarkdownNote(replaceManifestMarker(html, { ...value, ...invalid }));
+        assert.equal(parsed.manifest.figureMapAttachmentKey, undefined);
+    }
+});
+
+test('reads the old attribute-based v1 snapshot with its original version', () => {
+    const fields = {
+        kind: manifest.kind, 'source-pdf-key': manifest.sourcePDFKey,
+        'source-parent-key': manifest.sourceParentKey, 'cache-key': manifest.cacheKey,
+        'markdown-hash': manifest.markdownHash, 'parser-profile': manifest.parserProfile,
+        'source-attachment-key': manifest.sourceAttachmentKey,
+        'source-map-key': manifest.sourceMapAttachmentKey,
+        assets: encodeURIComponent(JSON.stringify(manifest.assets)),
+        'snapshot-html-hash': manifest.snapshotHTMLHash, 'created-at': manifest.createdAt,
+    };
+    const attributes = Object.entries(fields).map(([key, value]) => `data-mktero-${key}="${value}"`).join(' ');
+    assert.equal(parseSavedMarkdownNote(`<div ${attributes}><p>Legacy</p></div>`).schemaVersion, 1);
 });
 
 function replaceManifestMarker(html, replacement) {

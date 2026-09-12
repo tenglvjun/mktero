@@ -32,6 +32,9 @@ export function createLoadingPresentation(model = {}, translate = translateEngli
 }
 
 function progressDetail(progress, translate) {
+    if (progress >= CONVERSION_PROGRESS.RESTORING_FIGURES) {
+        return translate('loading.restoringFigures');
+    }
     if (progress < CONVERSION_PROGRESS.UPLOADING) {
         return translate('loading.preparing');
     }

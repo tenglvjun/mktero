@@ -314,7 +314,7 @@ test('normalizes Mistral filename-alt figures before figure analysis', () => {
     );
 });
 
-test('removes OCR text that is contained inside a Mistral image bbox', () => {
+test('retains image interior OCR text until a complete figure is rendered', () => {
     const result = normalizeMistralResult({
         pages: [page({
             markdown: [
@@ -357,18 +357,16 @@ test('removes OCR text that is contained inside a Mistral image bbox', () => {
 
     assert.equal(
         result.markdown,
-        'Body text outside the figure.\n\n![img-0.png](img-0.png)'
+        'Ovulation\n\nLH surge\n\nBody text outside the figure.\n\n![img-0.png](img-0.png)'
     );
     assert.deepEqual(result.contentList.map(block => block.type), [
         'image',
         'text',
+        'text',
+        'text',
     ]);
-    assert.equal(
-        result.sourceMap.some(entry => entry.markdownFrom >= 0
-            && result.markdown.slice(entry.markdownFrom, entry.markdownTo)
-                .includes('Ovulation')),
-        false
-    );
+    assert.deepEqual(result.contentList.find(block => block.text === 'Ovulation').bbox,
+        [180, 180, 420, 240]);
 });
 
 test('records Mistral publisher mastheads and repeated page chrome', () => {
@@ -1096,7 +1094,7 @@ test('restores a full-width main panel above a multi-column panel grid', () => {
     assert.match(html, /grid-column:1 \/ -1/u);
 });
 
-test('uses a conservative grid fallback when Mistral omits image bboxes', () => {
+test('keeps all images without inventing a grid when Mistral omits bboxes', () => {
     const images = Array.from({ length: 9 }, (_, index) => ({
         id: `img-${index}.png`,
         image_base64: 'data:image/png;base64,AQID',
@@ -1112,14 +1110,9 @@ test('uses a conservative grid fallback when Mistral omits image bboxes', () => 
         })],
     });
 
-    assert.match(
-        result.markdown,
-        /<!-- mktero-figure-layout: columns=3 rows=3,3,3 -->/u
-    );
-    const groups = findAcademicFigures(result.markdown);
-    assert.equal(groups.length, 1);
-    assert.equal(groups[0].layout, 'grid');
-    assert.deepEqual(groups[0].gridRows, [3, 3, 3]);
+    assert.doesNotMatch(result.markdown, /mktero-figure-layout/u);
+    for (const image of images) assert.ok(result.markdown.includes(`(${image.id})`));
+    assert.equal(result.markdown.split('Figure 3.').length - 1, 1);
 });
 
 test('groups a vertically stacked figure without forcing its panels wider', () => {
@@ -1157,6 +1150,12 @@ test('does not merge an already captioned image with the following figure', () =
     const images = Array.from({ length: 10 }, (_, index) => ({
         id: `img-${index}.jpeg`,
         image_base64: 'data:image/jpeg;base64,AQID',
+        bbox: index === 0 ? [50, 10, 300, 60] : [
+            50 + ((index - 1) % 3) * 300,
+            100 + Math.floor((index - 1) / 3) * 250,
+            300 + ((index - 1) % 3) * 300,
+            300 + Math.floor((index - 1) / 3) * 250,
+        ],
     }));
     const result = normalizeMistralResult({
         pages: [page({
@@ -1218,6 +1217,7 @@ test('keeps a preceding caption attached to the complete Mistral image group', (
     const images = [0, 1, 2].map(index => ({
         id: `img-${index}.png`,
         image_base64: 'data:image/png;base64,AQID',
+        bbox: [50 + index * 300, 100, 300 + index * 300, 500],
     }));
     const result = normalizeMistralResult({
         pages: [page({
@@ -1314,7 +1314,7 @@ test('rejects malformed pages, images, Markdown, and resource limits', () => {
         error => error.code === 'MISTRAL_INVALID_RESULT'
             && /blocks exceed/u.test(error.message)
     );
-    assert.throws(
+    assert.doesNotThrow(
         () => normalizeMistralResult({
             pages: [page({
                 markdown: 'Text inside image.\n\n![Figure](img-0.png)',
@@ -1332,9 +1332,7 @@ test('rejects malformed pages, images, Markdown, and resource limits', () => {
                     bbox: [200, 200, 500, 300],
                 }],
             })],
-        }, { maxBBoxChecks: 0 }),
-        error => error.code === 'MISTRAL_INVALID_RESULT'
-            && /layout matching exceeds/u.test(error.message)
+        }, { maxBBoxChecks: 0 })
     );
 });
 

@@ -12,14 +12,16 @@ export class MistralConversion {
     constructor({
         client,
         cache = null,
-        normalizeResult = normalizeMistralResult,
+        prepareResult = normalizeMistralResult,
+        recoverFigures = async result => result,
+        createPreviousCacheKeys = null,
         parserProfile = MISTRAL_PARSER_PROFILE_ID,
         onError = () => {},
     }) {
         if (!client?.ocr) {
             throw new TypeError('A Mistral OCR client is required');
         }
-        if (typeof normalizeResult !== 'function') {
+        if (typeof prepareResult !== 'function') {
             throw new TypeError('A Mistral result normalizer is required');
         }
         if (typeof parserProfile !== 'string' || !parserProfile) {
@@ -27,7 +29,9 @@ export class MistralConversion {
         }
         this.client = client;
         this.cache = cache;
-        this.normalizeResult = normalizeResult;
+        this.prepareResult = prepareResult;
+        this.recoverFigures = recoverFigures;
+        this.createPreviousCacheKeys = createPreviousCacheKeys;
         this.parserProfile = parserProfile;
         this.onError = onError;
     }
@@ -47,17 +51,41 @@ export class MistralConversion {
 
         if (!forceRefresh && cacheEnabled && key && this.cache) {
             try {
-                const cached = await this.cache.get(key);
+                let cached = await this.cache.get(key);
+                let migrated = false;
+                if (!cached && this.createPreviousCacheKeys) {
+                    const previousKeys = await this.createPreviousCacheKeys(fileData);
+                    throwIfAborted(signal);
+                    for (const previousKey of new Set(previousKeys)) {
+                        if (!previousKey || previousKey === key) continue;
+                        cached = await this.cache.get(previousKey);
+                        throwIfAborted(signal);
+                        migrated = Boolean(cached);
+                        if (cached) break;
+                    }
+                }
+                throwIfAborted(signal);
                 if (cached) {
+                    const result = await this.#recoverFigures(cached, { fileData, signal, onProgress });
+                    throwIfAborted(signal);
+                    if (migrated || result !== cached) {
+                        try { await this.cache.put(key, result, { signal }); }
+                        catch (error) {
+                            throwIfAborted(signal);
+                            this.#reportError(error);
+                            warnings.push(CACHE_WRITE_WARNING);
+                        }
+                    }
                     onProgress?.(100);
                     return {
-                        result: withIdentity(cached, this.parserProfile),
+                        result: withIdentity(result, this.parserProfile),
                         origin: 'cache',
                         warnings,
                     };
                 }
             }
             catch (error) {
+                throwIfAborted(signal);
                 this.#reportError(error);
                 warnings.push(CACHE_READ_WARNING);
             }
@@ -68,30 +96,45 @@ export class MistralConversion {
             apiKey,
             fileName,
             fileData,
-            onProgress,
+            onProgress: progress => onProgress?.(Math.min(96, progress)),
             signal,
         });
         throwIfAborted(signal);
+        const prepared = await this.prepareResult(raw, { fileData, signal, onProgress });
         const normalized = withIdentity(
-            await this.normalizeResult(raw),
+            await this.#recoverFigures(prepared, { fileData, signal, onProgress }),
             this.parserProfile
         );
+        throwIfAborted(signal);
 
         if (this.cache && cacheEnabled && key) {
             try {
-                await this.cache.put(key, normalized);
+                await this.cache.put(key, normalized, { signal });
             }
             catch (error) {
+                throwIfAborted(signal);
                 this.#reportError(error);
                 warnings.push(CACHE_WRITE_WARNING);
             }
         }
+
+        throwIfAborted(signal);
+        onProgress?.(100);
 
         return {
             result: normalized,
             origin: 'fresh',
             warnings,
         };
+    }
+
+    async #recoverFigures(result, context) {
+        if (result.userEdited) return result;
+        try { return await this.recoverFigures(result, context); }
+        catch {
+            throwIfAborted(context.signal);
+            return result;
+        }
     }
 
     #reportError(error) {

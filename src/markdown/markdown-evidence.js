@@ -1,7 +1,7 @@
 import {
     findUniqueContainingSourceMapEntry,
 } from '../core/markdown-source-map.js';
-import { findAcademicFigures } from './markdown-figures.js';
+import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import { createVisibleMarkdownTextIndex } from './markdown-visible-text.js';
 import { parseGFMTableRow } from './markdown-tables.js';
 
@@ -17,6 +17,8 @@ const MARKDOWN_ASCII_PUNCTUATION = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/g;
 export function createEvidenceSnippet({
     markdown,
     sourceMap,
+    figureMap = null,
+    figureViews = null,
     target,
     maxContentLength = DEFAULT_MAX_EVIDENCE_CONTENT_LENGTH,
     maxLocations = DEFAULT_MAX_EVIDENCE_LOCATIONS,
@@ -63,7 +65,8 @@ export function createEvidenceSnippet({
             source.slice(range.from, range.to),
             entry.type,
             source,
-            range
+            range,
+            figureViews || analyzeDocumentFigures(source, { figureMap })
         );
     if (!content) {
         throw evidenceError('Evidence content is empty', INVALID_EVIDENCE);
@@ -163,7 +166,7 @@ function quoteMarkdownText(value) {
     )).join('\n');
 }
 
-function blockEvidenceMarkdown(source, type, document, range) {
+function blockEvidenceMarkdown(source, type, document, range, figures) {
     const value = String(source || '').trim();
     if (type === 'equation') {
         const body = /^\$\$([\s\S]*)\$\$$/.exec(value)?.[1];
@@ -186,7 +189,7 @@ function blockEvidenceMarkdown(source, type, document, range) {
         );
     }
     if (type === 'image' || type === 'chart') {
-        const figure = findAcademicFigures(document).find(candidate => (
+        const figure = figures.find(candidate => (
             candidate.from <= range.from && candidate.to >= range.to
         ));
         if (figure?.caption?.text) return quoteMarkdownText(figure.caption.text);

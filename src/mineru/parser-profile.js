@@ -1,3 +1,5 @@
+import { FIGURE_PIPELINE_PROFILE } from '../figures/figure-limits.js';
+
 export const MINERU_BATCH_OPTIONS = Object.freeze({
     model_version: 'vlm',
     enable_formula: true,
@@ -8,7 +10,13 @@ export const MINERU_FILE_OPTIONS = Object.freeze({
     is_ocr: true,
 });
 
-export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+export const MINERU_FIGURE_LAYOUT_OPTIONS = Object.freeze({
+    backend: 'vlm',
+    versions: Object.freeze(['3.4.5']),
+    unit: 'pdf-user-unit',
+});
+
+const PREVIOUS_SOURCE_MAP_OPTIONS = Object.freeze({
     textMatching: 'exact-then-academic-v2',
     figurePanels: 'same-page-horizontal-or-labeled-vertical-ab-v2',
     figureLayouts: 'same-page-image-group-layout-v1',
@@ -17,7 +25,27 @@ export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
     columns: 'same-page-two-column-reading-order-v6',
     blockFlow: 'misplaced-code-page-order-v2',
     chrome: 'page-edge-repeated-v1',
+    figureStructure: FIGURE_PIPELINE_PROFILE,
+    figureLayout: MINERU_FIGURE_LAYOUT_OPTIONS,
 });
+
+const LABEL_RECOVERY_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...PREVIOUS_SOURCE_MAP_OPTIONS,
+    figureLabelRecovery: 'verified-pdf-image-v1',
+});
+
+export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...LABEL_RECOVERY_SOURCE_MAP_OPTIONS,
+    figureReadingOrder: 'verified-pdf-title-order-v1',
+});
+
+export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    LABEL_RECOVERY_SOURCE_MAP_OPTIONS, PREVIOUS_SOURCE_MAP_OPTIONS,
+].map(sourceMap => JSON.stringify({
+    batch: MINERU_BATCH_OPTIONS,
+    file: MINERU_FILE_OPTIONS,
+    sourceMap,
+})));
 
 export const MINERU_PARSER_PROFILE_ID = JSON.stringify({
     batch: MINERU_BATCH_OPTIONS,

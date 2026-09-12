@@ -6,6 +6,7 @@ import {
     serializeSavedMarkdownNote,
 } from '../src/core/saved-markdown-note-format.js';
 import { sha256Hex } from '../src/core/sha256.js';
+import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js';
 import {
     SavedMarkdownNoteConflictError,
     createZoteroBlobFactory,
@@ -222,6 +223,74 @@ function createHarness(options = {}) {
         createUserAttachment,
     };
 }
+
+test('round-trips restored figures and keeps their PNG readable without optional metadata', async () => {
+    const { store, parent, pdf, files } = createHarness({ enforceZoteroParentRules: true });
+    const document = await makeRestoredFigureDocument();
+    const saved = await store.saveSnapshot({ ...document, pdfItem: pdf, parentItem: parent,
+        cacheKey: 'a'.repeat(64), parserProfile: 'figure-region-test' });
+    const loaded = await store.read(saved.note);
+    assert.equal(loaded.manifest.schemaVersion, 3);
+    assert.deepEqual(loaded.figureMap, document.figureMap);
+    assert.equal(loaded.figureMapAttachment.getField('title'), 'Mktero figure-map.json');
+    assert.equal(loaded.figureMapAttachment.parentID, parent.id);
+    files.delete(await loaded.figureMapAttachment.getFilePathAsync());
+    const reopened = await store.read(saved.note);
+    assert.equal(reopened.figureMap, null);
+    assert.equal(reopened.markdown, document.markdown);
+    assert.equal(reopened.sourceAvailable, true);
+    assert.equal(reopened.assetsComplete, true);
+    const caption = /<p class="mktero-caption">([\s\S]*?)<\/p>/g;
+    assert.equal([...reopened.bodyHTML.matchAll(caption)].length, 1);
+});
+
+test('rejects tampered or unowned figure attachments without dropping readable content', async () => {
+    const { store, parent, pdf, files } = createHarness();
+    const document = await makeRestoredFigureDocument();
+    const saved = await store.saveSnapshot({ ...document, pdfItem: pdf, parentItem: parent,
+        cacheKey: 'a'.repeat(64), parserProfile: 'figure-region-test' });
+    const loaded = await store.read(saved.note);
+    const attachment = loaded.figureMapAttachment;
+    const path = await attachment.getFilePathAsync();
+    const original = files.get(path);
+    files.set(path, new TextEncoder().encode('{}'));
+    assert.equal((await store.read(saved.note)).figureMap, null);
+    files.set(path, original);
+    attachment.libraryID = 99;
+    assert.equal((await store.read(saved.note)).figureMapAttachment, null);
+    attachment.libraryID = 1;
+    attachment.relations.clear();
+    assert.equal((await store.read(saved.note)).figureMapAttachment, null);
+    assert.equal((await store.read(saved.note)).assetsComplete, true);
+});
+
+test('removes owned figure attachments when replacing or deleting a snapshot', async () => {
+    const { store, parent, pdf, items } = createHarness();
+    const document = await makeRestoredFigureDocument();
+    const options = { ...document, pdfItem: pdf, parentItem: parent,
+        cacheKey: 'a'.repeat(64), parserProfile: 'figure-region-test' };
+    const saved = await store.saveSnapshot(options);
+    const first = (await store.read(saved.note)).figureMapAttachment;
+    await store.saveSnapshot(options);
+    assert.equal(items.has(first.id), false);
+    const second = (await store.read(saved.note)).figureMapAttachment;
+    await store.deleteSavedNote(saved.note);
+    assert.equal(items.has(second.id), false);
+});
+
+test('validates figures before import and rolls their attachments back after rendering fails', async () => {
+    const { store, parent, pdf, items } = createHarness();
+    const document = await makeRestoredFigureDocument();
+    const options = { ...document, pdfItem: pdf, parentItem: parent,
+        cacheKey: 'a'.repeat(64), parserProfile: 'figure-region-test' };
+    const before = items.size;
+    await assert.rejects(store.saveSnapshot({ ...options,
+        figureMap: { ...document.figureMap, markdownHash: 'b'.repeat(64) } }));
+    assert.equal(items.size, before);
+    store.renderHTML = () => { throw new Error('render failed'); };
+    await assert.rejects(store.saveSnapshot(options), /render failed/);
+    assert.equal(items.size, before);
+});
 
 test('creates image attachments through an injected Blob factory', async () => {
     const BlobType = globalThis.Blob;

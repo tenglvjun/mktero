@@ -22,9 +22,135 @@ import {
     sha256Hex,
 } from '../src/cache/markdown-cache.js';
 import { MISTRAL_PARSER_PROFILE_ID } from '../src/mistral/parser-profile.js';
+import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js';
+import { makeFigureInput } from './helpers/figure-fixtures.js';
+import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
+import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
+import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { createMarkdownTabView } from '../src/ui/markdown-window.js';
+import { parseHTML } from 'linkedom';
 
 const CACHE_KEY = 'a'.repeat(64);
 const SECOND_CACHE_KEY = 'b'.repeat(64);
+
+for (const failure of ['render-failed', 'missing-geometry', 'resource-limit']) {
+    test(`reopens an all-preserved ${failure} result from disk without a figure warning`, async t => {
+        const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-preserved-cache-'));
+        t.after(() => rm(rootPath, { recursive: true, force: true }));
+        const options = { rootPath, ioUtils: createNodeIOUtils(),
+            pathUtils: { join: path.join, filename: path.basename } };
+        const { input } = makeFigureInput();
+        if (failure !== 'render-failed') input.pages[0].coordinateFrame = 'unknown';
+        if (failure === 'resource-limit') {
+            const panel = input.blocks.find(block => block.role === 'panel');
+            input.pages = Array.from({ length: 1001 }, (_, pageIndex) => ({ ...input.pages[0], pageIndex }));
+            input.blocks = input.pages.map(({ pageIndex }) => ({
+                ...panel, id: `panel-${pageIndex}`, pageIndex, parentId: null, sourceOrdinal: pageIndex,
+            }));
+        }
+        const hash = data => sha256Hex(data, { crypto: webcrypto });
+        const service = new FigureRestorationService({ hash, openPDF: async () => ({
+            getPageGeometry: async () => ({ pageIndex: 0, width: 1000, height: 1000,
+                rotation: 0, userUnit: 1, coordinateFrame: 'display-cropbox',
+                viewBox: [0, 0, 1000, 1000], mediaBox: null, viewportTransform: [1, 0, 0, -1, 0, 1000] }),
+            renderRegion: async () => { throw new Error('Unavailable canvas'); },
+            close: async () => {},
+        }) });
+        const draft = await service.restore(input, { fileData: Uint8Array.of(1) });
+        assert.equal(draft.input.markdown, input.markdown);
+        assert.deepEqual(draft.input.assets, input.assets);
+        const result = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+        await new MarkdownCache(options).put(CACHE_KEY, result);
+        const loaded = await new MarkdownCache(options).get(CACHE_KEY);
+        assert.equal(loaded.markdown, result.markdown);
+        assert.deepEqual(loaded.assets, result.assets);
+        assert.deepEqual(loaded.figureMap.figures, []);
+        assert.equal(loaded.figureMap.preserved.length, failure === 'resource-limit' ? 1000 : 1);
+        assert.ok(loaded.figureMap.preserved.some(entry => entry.reason === failure));
+        assert.equal(loaded.figureMap.markdownHash, await hash(new TextEncoder().encode(loaded.markdown)));
+        const { document, window } = parseHTML('<html><body></body></html>');
+        const timers = [];
+        const previousSetTimeout = window.setTimeout;
+        const previousClearTimeout = window.clearTimeout;
+        window.setTimeout = callback => { timers.push(callback); return timers.length; };
+        window.clearTimeout = () => {};
+        const model = { ...loaded, itemID: 42, sourceItemID: 42, cacheKey: CACHE_KEY,
+            status: 'ready', progress: 100, renderMode: 'markdown', sourceKind: 'markdown' };
+        const view = createMarkdownTabView({ document, model, stylesheetText: ':host { display: block; }',
+            editorFactory: ({ parent }) => {
+                const content = document.createElement('div');
+                parent.append(content);
+                return { setDocument: ({ markdown }) => { content.textContent = markdown; },
+                    refreshRendering() {}, getMarkdown: () => content.textContent,
+                    destroy: () => content.remove(), setDocumentSearchHighlights() {} };
+            } });
+        try {
+            view.render(model);
+            const shadow = view.host.shadowRoot;
+            const warning = shadow.querySelector('#mktero-warning');
+            assert.equal(warning.hidden, true);
+            assert.equal(shadow.querySelector('#mktero-warning .message-body').textContent, '');
+            assert.equal(timers.length, 0);
+            view.render(model);
+            assert.equal(warning.hidden, true);
+            assert.equal(timers.length, 0);
+        }
+        finally {
+            view.destroy();
+            window.setTimeout = previousSetTimeout;
+            window.clearTimeout = previousClearTimeout;
+        }
+    });
+}
+
+test('round trips figure maps and keeps visible images when optional metadata is missing or invalid', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-figure-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const cache = new MarkdownCache({ rootPath, ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename } });
+    const document = await makeRestoredFigureDocument();
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    const metadataPath = path.join(entryPath, 'entry.json');
+    await cache.put(CACHE_KEY, document);
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+    assert.deepEqual((await cache.get(CACHE_KEY)).figureMap, document.figureMap);
+    assert.ok(metadata.figureMapBytes > 0);
+    assert.equal((await cache.getStats()).sizeBytes, metadata.sizeBytes);
+    await rm(path.join(entryPath, metadata.figureMapFile));
+    let loaded = await cache.get(CACHE_KEY);
+    assert.equal(loaded.figureMap, undefined);
+    assert.equal(loaded.markdown, document.markdown);
+    assert.equal(loaded.assets.length, document.assets.length);
+    await cache.put(CACHE_KEY, document);
+    const current = JSON.parse(await readFile(metadataPath, 'utf8'));
+    const badMap = { ...document.figureMap, markdownHash: 'b'.repeat(64) };
+    await writeFile(path.join(entryPath, current.figureMapFile), JSON.stringify(badMap));
+    loaded = await cache.get(CACHE_KEY);
+    assert.equal(loaded.figureMap, undefined);
+    assert.equal(loaded.markdown, document.markdown);
+    await writeFile(metadataPath, JSON.stringify({ ...current, figureMapFile: '../../outside.json' }));
+    assert.equal((await cache.get(CACHE_KEY)).markdown, document.markdown);
+});
+
+test('cancellation before figure cache commit leaves the previous generation intact', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-figure-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const controller = new AbortController();
+    const io = createNodeIOUtils();
+    const write = io.writeUTF8.bind(io);
+    io.writeUTF8 = async (file, text, options) => {
+        await write(file, text, options);
+        if (path.basename(file).startsWith('figure-map-')) controller.abort();
+    };
+    const cache = new MarkdownCache({ rootPath, ioUtils: io,
+        pathUtils: { join: path.join, filename: path.basename } });
+    await cache.put(CACHE_KEY, { markdown: '# Previous' });
+    const document = await makeRestoredFigureDocument();
+    await assert.rejects(cache.put(CACHE_KEY, document, { signal: controller.signal }), { name: 'AbortError' });
+    assert.equal((await cache.get(CACHE_KEY)).markdown, '# Previous');
+    assert.equal((await readdir(path.join(rootPath, 'entries', CACHE_KEY)))
+        .filter(file => file.startsWith('figure-map-')).length, 0);
+});
 
 test('restores cached Markdown and images across cache instances', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));

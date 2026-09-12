@@ -4,12 +4,16 @@ import {
     DEFAULT_PENDING_TASK_MAX_ENTRIES,
 } from './pending-task-store.js';
 import { prepareMinerUResult } from './mineru-result.js';
+import { throwIfFigureAborted as throwIfAborted } from '../figures/figure-async.js';
 
 export class MinerUConversion {
     constructor({
         client,
         pendingTasks,
         cache = null,
+        prepareResult = prepareMinerUResult,
+        recoverFigures = async result => result,
+        createPreviousCacheKeys = null,
         createDataID = createTaskDataID,
         now = Date.now,
         maxTaskAgeMs = DEFAULT_PENDING_TASK_MAX_AGE_MS,
@@ -25,6 +29,10 @@ export class MinerUConversion {
         this.client = client;
         this.pendingTasks = pendingTasks;
         this.cache = cache;
+        if (typeof prepareResult !== 'function') throw new TypeError('A MinerU result preparer is required');
+        this.prepareResult = prepareResult;
+        this.recoverFigures = recoverFigures;
+        this.createPreviousCacheKeys = createPreviousCacheKeys;
         this.createDataID = createDataID;
         this.now = now;
         this.maxTaskAgeMs = maxTaskAgeMs;
@@ -44,6 +52,7 @@ export class MinerUConversion {
         onProgress = () => {},
         signal,
     }) {
+        throwIfAborted(signal);
         const warnings = [];
         if (!key) {
             return this.#convertWithoutRecovery({
@@ -63,11 +72,12 @@ export class MinerUConversion {
                 fileData,
                 cacheEnabled,
                 forceRefresh,
-                onProgress,
+                onProgress: (progress, state) => onProgress(Math.min(96, progress), state),
                 signal,
                 warnings,
             })
         ));
+        throwIfAborted(signal);
 
         if (selected.origin === 'cache') {
             onProgress(CONVERSION_PROGRESS.COMPLETE);
@@ -81,14 +91,19 @@ export class MinerUConversion {
         }
         let result;
         try {
-            result = prepareMinerUResult(await this.client.collect({
+            const raw = await this.client.collect({
                 apiKey,
                 task: selected.task,
-                onProgress: reportProgress,
+                onProgress: progress => reportProgress(Math.min(96, progress)),
                 signal,
-            }));
+            });
+            throwIfAborted(signal);
+            result = await this.prepareResult(raw, { fileData, signal, onProgress: reportProgress });
+            result = await this.#recoverFigures(result, { fileData, signal, onProgress: reportProgress });
+            throwIfAborted(signal);
         }
         catch (error) {
+            throwIfAborted(signal);
             if (isTerminalTaskError(error)) {
                 await this.#clearCurrentTask(key, selected.task.batchID);
             }
@@ -100,7 +115,10 @@ export class MinerUConversion {
             result,
             cacheEnabled,
             warnings,
+            signal,
         });
+        throwIfAborted(signal);
+        reportProgress(CONVERSION_PROGRESS.COMPLETE);
         return { result, origin: selected.origin, warnings };
     }
 
@@ -116,15 +134,21 @@ export class MinerUConversion {
             fileName,
             fileData,
             dataID: this.createDataID(),
-            onProgress,
+            onProgress: progress => onProgress(Math.min(96, progress)),
             signal,
         });
-        const result = prepareMinerUResult(await this.client.collect({
+        throwIfAborted(signal);
+        const raw = await this.client.collect({
             apiKey,
             task,
-            onProgress,
+            onProgress: progress => onProgress(Math.min(96, progress)),
             signal,
-        }));
+        });
+        throwIfAborted(signal);
+        const prepared = await this.prepareResult(raw, { fileData, signal, onProgress });
+        const result = await this.#recoverFigures(prepared, { fileData, signal, onProgress });
+        throwIfAborted(signal);
+        onProgress(CONVERSION_PROGRESS.COMPLETE);
         return { result, origin: 'fresh', warnings: [] };
     }
 
@@ -152,8 +176,35 @@ export class MinerUConversion {
                 this.#rememberTask(key, pending);
                 return { task: pending, origin: 'resumed' };
             }
-            const cached = await this.#readCache(key, cacheEnabled, warnings);
-            if (cached) return { result: cached, origin: 'cache' };
+            let cached = await this.#readCache(key, cacheEnabled, warnings);
+            let migrated = false;
+            if (!cached && cacheEnabled && this.createPreviousCacheKeys) {
+                try {
+                    const previousKeys = await this.createPreviousCacheKeys(fileData);
+                    throwIfAborted(signal);
+                    for (const previousKey of new Set(previousKeys)) {
+                        if (!previousKey || previousKey === key) continue;
+                        cached = await this.#readCache(previousKey, cacheEnabled, warnings);
+                        throwIfAborted(signal);
+                        migrated = Boolean(cached);
+                        if (cached) break;
+                    }
+                }
+                catch (error) { throwIfAborted(signal); this.#reportError(error); }
+            }
+            if (cached) {
+                const result = await this.#recoverFigures(cached, { fileData, signal, onProgress });
+                throwIfAborted(signal);
+                if (cacheEnabled && (migrated || result !== cached)) {
+                    try { await this.cache.put(key, result, { signal }); }
+                    catch (error) {
+                        throwIfAborted(signal);
+                        this.#reportError(error);
+                        warnings.push('The Markdown result could not be saved to the local cache.');
+                    }
+                }
+                return { result, origin: 'cache' };
+            }
         }
 
         const task = await this.#submitTask({
@@ -177,6 +228,15 @@ export class MinerUConversion {
             this.#reportError(error);
             warnings.push('The local Markdown cache could not be read.');
             return null;
+        }
+    }
+
+    async #recoverFigures(result, context) {
+        if (result.userEdited) return result;
+        try { return await this.recoverFigures(result, context); }
+        catch {
+            throwIfAborted(context.signal);
+            return result;
         }
     }
 
@@ -212,22 +272,25 @@ export class MinerUConversion {
         return task;
     }
 
-    async #commitResult({ key, selected, result, cacheEnabled, warnings }) {
+    async #commitResult({ key, selected, result, cacheEnabled, warnings, signal }) {
         await this.#withKeyOperation(key, async () => {
+            throwIfAborted(signal);
             if (this.#currentTask(key)?.batchID !== selected.task.batchID) {
                 return;
             }
             if (this.cache && cacheEnabled) {
                 try {
-                    await this.cache.put(key, result);
+                    await this.cache.put(key, result, { signal });
                 }
                 catch (error) {
+                    throwIfAborted(signal);
                     this.#reportError(error);
                     warnings.push(
                         'The Markdown result could not be saved to the local cache.'
                     );
                 }
             }
+            throwIfAborted(signal);
             if (selected.supersededTask
                 && selected.supersededTask.batchID !== selected.task.batchID) {
                 await this.#deletePendingTask(

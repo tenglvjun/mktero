@@ -7,6 +7,7 @@ import {
     parseSavedMarkdownNote,
     serializeSavedMarkdownNote,
     SOURCE_MAP_ATTACHMENT_TITLE,
+    FIGURE_MAP_ATTACHMENT_TITLE,
     SOURCE_MARKDOWN_ATTACHMENT_TITLE,
 } from '../core/saved-markdown-note-format.js';
 import {
@@ -17,6 +18,8 @@ import { sha256Hex } from '../core/sha256.js';
 import { toUint8Array } from '../mineru/binary.js';
 import { renderZoteroNoteHTML } from '../markdown/zotero-note-html-renderer.js';
 import { translateEnglish } from '../i18n/localization.js';
+import { FIGURE_LIMITS } from '../figures/figure-limits.js';
+import { parseFigureMapJSON, serializeFigureMap } from '../figures/figure-map-serialization.js';
 
 const MAX_SOURCE_MARKDOWN_BYTES = 50 * 1024 * 1024;
 const MAX_SOURCE_MAP_BYTES = 20 * 1024 * 1024;
@@ -126,7 +129,8 @@ export class ZoteroSavedMarkdownStore {
                 recovered: false,
             };
         }
-        catch {
+        catch (error) {
+            if (error.code === 'UNSUPPORTED_SAVED_MARKDOWN_VERSION') throw error;
             const recovered = await this.#recoverSavedNoteHeader(note);
             if (recovered) return recovered;
             throw new Error('This Zotero note is not a Mktero saved Markdown note');
@@ -227,6 +231,13 @@ export class ZoteroSavedMarkdownStore {
             });
         }
 
+        const figureMapAttachment = manifest.figureMapAttachmentKey
+            ? this.#ownedSourceAttachment(attachments.get(manifest.figureMapAttachmentKey),
+                FIGURE_MAP_ATTACHMENT_TITLE, note, parent) : null;
+        const figureMap = sourceAvailable && assetsComplete && figureMapAttachment
+            ? await this.#readFigureMap(figureMapAttachment, manifest, { markdown, assets,
+                assetBasePath: manifest.assetBasePath }) : null;
+
         return {
             note,
             noteID,
@@ -235,6 +246,7 @@ export class ZoteroSavedMarkdownStore {
             bodyHTML,
             markdown,
             sourceMap,
+            figureMap,
             sourceAvailable,
             snapshotAvailable: Boolean(bodyHTML.trim()),
             snapshotModified: !header.recovered
@@ -243,6 +255,7 @@ export class ZoteroSavedMarkdownStore {
             assetsComplete,
             sourceAttachment,
             sourceMapAttachment,
+            figureMapAttachment,
         };
     }
 
@@ -253,6 +266,7 @@ export class ZoteroSavedMarkdownStore {
         assets = [],
         assetBasePath = '',
         sourceMap = [],
+        figureMap = null,
         cacheKey,
         parserProfile,
         containsUserCorrections = false,
@@ -301,6 +315,7 @@ export class ZoteroSavedMarkdownStore {
             assets,
             assetBasePath,
             sourceMap,
+            figureMap,
         });
         const note = existing || await this.#createNote(parent);
         const createdAttachments = [];
@@ -385,6 +400,7 @@ export class ZoteroSavedMarkdownStore {
         await this.#eraseAttachments([
             saved.sourceAttachment,
             saved.sourceMapAttachment,
+            saved.figureMapAttachment,
         ].filter(attachment => (
             attachment
             && String(attachment.parentID || '') !== String(saved.note.id)
@@ -633,6 +649,10 @@ export class ZoteroSavedMarkdownStore {
             if (String(attachment.getField?.('title') || '') !== expectedTitle) {
                 return null;
             }
+            if (expectedTitle === FIGURE_MAP_ATTACHMENT_TITLE
+                && (String(attachment.parentID || '') !== String(parent?.id || '')
+                    || attachment.libraryID != null
+                        && String(attachment.libraryID) !== String(parent?.libraryID))) return null;
             const attachmentParentID = String(attachment.parentID || '');
             if (attachmentParentID === String(note?.id || '')) {
                 return attachment;
@@ -661,13 +681,31 @@ export class ZoteroSavedMarkdownStore {
         return { predicate, object };
     }
 
-    async #prepareSnapshot({ markdown, assets, assetBasePath, sourceMap }) {
+    async #readFigureMap(attachment, manifest, document) {
+        try {
+            const data = await this.#readAttachment(attachment, FIGURE_LIMITS.maxMapBytes);
+            if (!data || data.byteLength !== manifest.figureMapBytes
+                || await this.hash(data) !== manifest.figureMapHash) return null;
+            return await parseFigureMapJSON(new TextDecoder('utf-8', { fatal: true }).decode(data),
+                document, { hash: this.hash });
+        }
+        catch {
+            return null;
+        }
+    }
+
+    async #prepareSnapshot({ markdown, assets, assetBasePath, sourceMap, figureMap }) {
         const normalizedAssets = normalizeAssets(assets);
         const sourceMapJSON = serializeSourceMapJSON(sourceMap, markdown.length);
+        const figureData = await serializeFigureMap(figureMap, {
+            markdown, assets: normalizedAssets, assetBasePath,
+        }, { hash: this.hash });
         return {
             markdown,
             normalizedAssets,
             sourceMapJSON,
+            figureData,
+            figureMapHash: figureData ? await this.hash(new TextEncoder().encode(figureData.json)) : null,
             markdownHash: await this.hash(new TextEncoder().encode(markdown)),
             assetBasePath: assetBasePath
                 ? normalizeAssetPath(assetBasePath)
@@ -705,6 +743,10 @@ export class ZoteroSavedMarkdownStore {
             'application/json',
             createdAttachments
         );
+        const figureMapAttachment = prepared.figureData
+            ? await this.#importTextAttachment(note, parent, pdf, FIGURE_MAP_ATTACHMENT_TITLE,
+                'mktero-figure-map', prepared.figureData.json, temporaryFiles,
+                'application/json', createdAttachments) : null;
 
         const assetAttachments = [];
         for (const asset of prepared.normalizedAssets) {
@@ -718,7 +760,7 @@ export class ZoteroSavedMarkdownStore {
                 attachmentKey: requiredItemKey(attachment, 'image attachment'),
             });
         }
-        return { sourceAttachment, sourceMapAttachment, assetAttachments };
+        return { sourceAttachment, sourceMapAttachment, figureMapAttachment, assetAttachments };
     }
 
     #createSnapshotManifest({
@@ -748,6 +790,11 @@ export class ZoteroSavedMarkdownStore {
                 attachments.sourceMapAttachment,
                 'source map attachment'
             ),
+            ...(prepared.figureData ? {
+                figureMapAttachmentKey: requiredItemKey(attachments.figureMapAttachment, 'figure map attachment'),
+                figureMapBytes: prepared.figureData.bytes,
+                figureMapHash: prepared.figureMapHash,
+            } : {}),
             assetBasePath: prepared.assetBasePath,
             assets: attachments.assetAttachments.map(asset => ({
                 path: asset.path,
@@ -850,11 +897,13 @@ export class ZoteroSavedMarkdownStore {
         const oldKeys = new Set([
             previous.manifest.sourceAttachmentKey,
             previous.manifest.sourceMapAttachmentKey,
+            previous.manifest.figureMapAttachmentKey,
             ...previous.manifest.assets.map(asset => asset.attachmentKey),
         ]);
         const previousAttachments = [
             previous.sourceAttachment,
             previous.sourceMapAttachment,
+            previous.figureMapAttachment,
             ...await this.#childItems(previous.note.getAttachments?.() || []),
         ].filter(Boolean);
         for (const attachment of previousAttachments) {

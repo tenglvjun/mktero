@@ -1,8 +1,11 @@
 export const SAVED_MARKDOWN_NOTE_KIND = 'mktero-saved-markdown';
-export const SAVED_MARKDOWN_NOTE_SCHEMA_VERSION = 2;
+import { FIGURE_LIMITS } from '../figures/figure-limits.js';
+
+export const SAVED_MARKDOWN_NOTE_SCHEMA_VERSION = 3;
 export const ZOTERO_NOTE_SCHEMA_VERSION = 9;
 export const SOURCE_MARKDOWN_ATTACHMENT_TITLE = 'Mktero source.md';
 export const SOURCE_MAP_ATTACHMENT_TITLE = 'Mktero source-map.json';
+export const FIGURE_MAP_ATTACHMENT_TITLE = 'Mktero figure-map.json';
 
 const MAX_NOTE_HTML_BYTES = 20 * 1024 * 1024;
 const MAX_ASSETS = 2_000;
@@ -18,7 +21,12 @@ const MANIFEST_MARKER_PREFIX = 'zotero://mktero/saved-markdown?manifest=';
 const MANIFEST_MARKER_PATTERN = /^\s*<p\b[^>]*>\s*<a\b([^>]*)>[\s\S]*?<\/a>\s*<\/p>([\s\S]*)$/i;
 const MANIFEST_MARKER_LABEL = 'Mktero Markdown Snapshot';
 
-export function createSavedMarkdownManifest({
+export function createSavedMarkdownManifest(options) {
+    return normalizeSavedMarkdownManifest(options, { forWrite: true });
+}
+
+function normalizeSavedMarkdownManifest({
+    schemaVersion,
     sourcePDFKey,
     sourceParentKey = null,
     sourceLibraryKey = null,
@@ -27,15 +35,29 @@ export function createSavedMarkdownManifest({
     parserProfile,
     sourceAttachmentKey,
     sourceMapAttachmentKey,
+    figureMapAttachmentKey,
+    figureMapBytes,
+    figureMapHash,
     assetBasePath = '',
     assets = [],
     snapshotHTMLHash,
     createdAt,
     containsUserCorrections = false,
     correctionCount = 0,
-}) {
+}, { forWrite = false } = {}) {
+    const version = forWrite ? SAVED_MARKDOWN_NOTE_SCHEMA_VERSION : schemaVersion;
+    if (![1, 2, 3].includes(version)) {
+        const error = new Error('Unsupported saved Markdown manifest');
+        error.code = 'UNSUPPORTED_SAVED_MARKDOWN_VERSION';
+        throw error;
+    }
+    const figureMetadata = { figureMapAttachmentKey, figureMapBytes, figureMapHash };
+    if (forWrite && Object.values(figureMetadata).some(value => value !== undefined)
+        && !validFigureMetadata(figureMetadata)) {
+        throw new Error('Saved Markdown figure metadata is invalid');
+    }
     const manifest = {
-        schemaVersion: SAVED_MARKDOWN_NOTE_SCHEMA_VERSION,
+        schemaVersion: version,
         kind: SAVED_MARKDOWN_NOTE_KIND,
         sourcePDFKey,
         sourceParentKey,
@@ -45,6 +67,7 @@ export function createSavedMarkdownManifest({
         parserProfile,
         sourceAttachmentKey,
         sourceMapAttachmentKey,
+        ...(version === 3 && validFigureMetadata(figureMetadata) ? figureMetadata : {}),
         assetBasePath,
         assets,
         snapshotHTMLHash,
@@ -154,7 +177,7 @@ function parseManifestMarker(bodyHTML) {
         throw new Error('Saved Markdown manifest marker is invalid');
     }
     return {
-        manifest: createSavedMarkdownManifest(parsed),
+        manifest: normalizeSavedMarkdownManifest(parsed),
         bodyHTML: match[2],
     };
 }
@@ -167,7 +190,8 @@ function parseLegacyManifest(attributes) {
         attributes['data-mktero-assets'],
         'saved Markdown assets'
     );
-    return createSavedMarkdownManifest({
+    return normalizeSavedMarkdownManifest({
+        schemaVersion: 1,
         sourcePDFKey: attributes['data-mktero-source-pdf-key'],
         sourceParentKey: attributes['data-mktero-source-parent-key'] || null,
         sourceLibraryKey: attributes['data-mktero-source-library-key'] || null,
@@ -202,7 +226,7 @@ function validateManifest(manifest) {
     if (!manifest || typeof manifest !== 'object') {
         throw new TypeError('Saved Markdown manifest is required');
     }
-    if (manifest.schemaVersion !== SAVED_MARKDOWN_NOTE_SCHEMA_VERSION
+    if (![1, 2, 3].includes(manifest.schemaVersion)
         || manifest.kind !== SAVED_MARKDOWN_NOTE_KIND) {
         throw new Error('Unsupported saved Markdown manifest');
     }
@@ -260,12 +284,23 @@ function validateManifest(manifest) {
     if (typeof manifest.createdAt !== 'string') {
         throw new Error('Saved Markdown creation time is invalid');
     }
+    if (['figureMapAttachmentKey', 'figureMapBytes', 'figureMapHash'].some(key => manifest[key] !== undefined)
+        && (manifest.schemaVersion !== 3 || !validFigureMetadata(manifest))) {
+        throw new Error('Saved Markdown figure metadata is invalid');
+    }
     if (manifest.containsUserCorrections !== undefined
         && (manifest.containsUserCorrections !== true
             || !Number.isSafeInteger(manifest.correctionCount)
             || manifest.correctionCount < 1)) {
         throw new Error('Saved Markdown correction provenance is invalid');
     }
+}
+
+function validFigureMetadata(value) {
+    return typeof value.figureMapAttachmentKey === 'string' && ITEM_KEY.test(value.figureMapAttachmentKey)
+        && Number.isSafeInteger(value.figureMapBytes) && value.figureMapBytes > 0
+        && value.figureMapBytes <= FIGURE_LIMITS.maxMapBytes
+        && typeof value.figureMapHash === 'string' && HEX_HASH.test(value.figureMapHash);
 }
 
 function validateBodyHTML(bodyHTML) {

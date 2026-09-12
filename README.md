@@ -34,10 +34,26 @@ Useful links: [Product page](https://mktero.com/) ·
 
 - Reflow OCR output, multi-column text, formulas, tables, figures, lists, and
   code into a continuous academic reading document.
-- Mistral uses image coordinates to suppress OCR text that belongs inside an
-  extracted figure. Both OCR providers restore multi-panel layouts from image
-  coordinates; MinerU keeps its bbox-backed safety checks, while Mistral also
-  supports a conservative fallback when coordinates are unavailable.
+- The figure pipeline restores a complete figure from the local PDF only when
+  layout evidence, page coordinates, and exact Markdown ranges agree. The
+  generated local PNG preserves 2x2, 4x4, missing-cell, spanning, and irregular
+  arrangements. Interior OCR leaves the reading flow only after a successful
+  crop; captions remain selectable, searchable, and translatable. Uncertain
+  figures retain their original images and text.
+  MinerU region restoration requires supported detailed layout metadata.
+  Both providers can also recover labeled panels from a single complete PDF
+  image when its bounds, a matching PDF caption, and every panel's pixels
+  agree. Independent OCR label rows such as `(A)`, `(B)`, and fullwidth
+  equivalents leave the text only after the complete image is recovered;
+  body references and labels within captions remain intact. This local pass
+  also upgrades compatible cached results without another OCR upload and
+  leaves user corrections intact. Both providers can reunite image groups
+  split by a misplaced title when PDF text positions, a shared caption, and
+  every image's pixels verify the relationship, including vector charts.
+  The title stays searchable above the group; images return to PDF row order
+  and stale layout markers are rebuilt, including images spanning a whole
+  row. Ambiguous, rotated, or unverifiable groups retain their original
+  images and text.
 - Mistral and MinerU keep publisher mastheads, repeated page headers and
   footers, and page numbers in stored Markdown. The reader hides those
   ranges, and also hides text before the `#` or `##` heading that matches
@@ -302,6 +318,10 @@ clearly resume after it, so a genuine author note still ends the list.
 `Save snapshot` creates a dedicated `Mktero Markdown Snapshot` Note under the
 PDF's parent item. The Note contains portable HTML; figures are embedded image
 attachments; the original Markdown and source map are related attachments.
+Restored figures also include an optional `figure-map.json` attachment with
+page regions, panel identities, and consumed OCR fragments. Missing or invalid
+metadata never prevents reading the saved Markdown and PNGs; older snapshots
+remain readable.
 Mktero refuses to silently overwrite a snapshot Note that you edited. A
 standalone PDF without a parent library item cannot save a snapshot.
 
@@ -342,14 +362,14 @@ and raw HTML is escaped or sanitized before rendering.
 | --- | --- | --- |
 | Complete PDF on a cache miss | Selected MinerU or Mistral provider | Not by Mktero |
 | MinerU/Mistral API credentials and AI credentials | Active Zotero profile, unencrypted | No |
-| Cached Markdown, figures, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
+| Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
 | Protected Markdown translation batches | AI provider configured by you | Not by Mktero |
 | Selected Markdown text and bounded surrounding source context for selection translation | AI provider configured by you | Not by Mktero |
 | Zotero PDF annotations | Local Zotero library | According to Zotero settings |
-| Saved snapshot Note and attachments | Zotero items and attachments | According to Zotero settings |
+| Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
 | Exported Markdown and figures | User-selected local path | No |
 | Imported reference metadata and PDF attachments | Active Zotero profile, unencrypted | According to Zotero settings |
 

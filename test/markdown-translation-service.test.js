@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js';
+import { mapFigureMapThroughEdits } from '../src/figures/figure-map-transforms.js';
 import {
     MarkdownTranslationService,
     TRANSLATION_PROMPT_VERSION,
@@ -19,6 +22,70 @@ const SETTINGS = Object.freeze({
     targetLanguage: 'zh-CN',
     requestTimeoutMs: 30_000,
     maxOutputTokens: 2_048,
+});
+
+test('retains Figure identity across translation, cache variants and corrected source reconciliation', async () => {
+    const document = await makeRestoredFigureDocument();
+    const cache = new Map();
+    const service = new MarkdownTranslationService({
+        aiGateway: { async generateText(request) {
+            return { text: translateBatchRequest(request.messages[1].content, source => source
+                .replace('Treatment response in four panels.', 'Results across all panels.')) };
+        } },
+        getSettings: () => SETTINGS,
+        createCacheKey: async value => createHash('sha256').update(value).digest('hex'),
+        cache: {
+            getTranslation: async (_documentKey, key) => cache.get(key),
+            getTranslationByLanguage: async (_documentKey, language) => [...cache.values()]
+                .find(value => value.targetLanguage === language),
+            putTranslation: async (_documentKey, key, value) => cache.set(key, structuredClone(value)),
+        },
+    });
+    const options = { documentKey: 'a'.repeat(64), markdown: document.markdown, figureMap: document.figureMap };
+    const verify = value => {
+        assert.ok(value);
+        for (const key of ['translatedFigureViews', 'comparisonFigureViews']) {
+            assert.equal(value[key].length, 1);
+            assert.equal(value[key][0].sourceId, document.figureMap.figures[0].id);
+            assert.equal(value[key][0].images.length, 1);
+        }
+    };
+    const translated = await service.translateDocument(options);
+    verify(translated);
+    verify(await service.translateDocument(options));
+    verify(await service.getCachedDocumentTranslation(options));
+    const variants = await service.listCachedDocumentTranslationVariants(options);
+    assert.equal(variants.length, 1);
+    verify(variants[0]);
+    verify(await service.reconcileDocumentTranslation({ ...options, existingTranslation: translated }));
+    const prefix = 'Additional context.\n\n';
+    const corrected = { ...options, markdown: prefix + document.markdown };
+    corrected.figureMap = mapFigureMapThroughEdits(document.figureMap,
+        [{ from: 0, to: 0, replacementLength: prefix.length }], corrected.markdown);
+    verify(await service.getCachedDocumentTranslation(corrected));
+    cache.clear();
+    verify(await service.reconcileDocumentTranslation({ ...corrected, existingTranslation: translated }));
+});
+
+test('retains Figure identity when a failed translation is retried', async () => {
+    const document = await makeRestoredFigureDocument();
+    let fail = true;
+    const service = new MarkdownTranslationService({
+        aiGateway: { async generateText(request) {
+            return { text: fail ? '[]' : translateBatchRequest(request.messages[1].content, source => source) };
+        } },
+        getSettings: () => SETTINGS,
+        createCacheKey: async () => null,
+    });
+    const options = { documentKey: 'a'.repeat(64), markdown: document.markdown, figureMap: document.figureMap };
+    const partial = await service.translateDocument(options);
+    assert.equal(partial.partial, true);
+    assert.equal(partial.translatedFigureViews[0].sourceId, document.figureMap.figures[0].id);
+    fail = false;
+    const result = await service.translateDocument({ ...options, existingTranslation: partial,
+        retryBlockIDs: partial.failedBlocks.map(block => block.id) });
+    assert.equal(result.partial, false);
+    assert.equal(result.comparisonFigureViews[0].sourceId, document.figureMap.figures[0].id);
 });
 
 test('tests a valid connection before AI translation is enabled', async () => {
@@ -844,6 +911,8 @@ test('loads a complete document translation without calling the provider', async
             comparisonFrom: 0,
         }],
         comparisonTranslationRanges: [{ from: 9, to: 13 }],
+        translatedFigureViews: [],
+        comparisonFigureViews: [],
         blockRanges: [{
             id: 'translation-0-0-7-heading',
             type: 'heading',
