@@ -3,6 +3,8 @@
 Validation date: 2026-09-12. Implementation: `3eb6bdf`; final validation code:
 `09c5f5a8eeda762122a4bb28ff906960d49aa597`. Review baseline: `663733a`.
 Subsequent documentation commits do not change the tested runtime or fixtures.
+Delivery: [PR #129](https://github.com/tenglvjun/mktero/pull/129), without a
+release or version bump.
 
 The pipeline preserves provider Markdown and layout evidence until the local
 PDF crop passes PNG, exact-range, geometry, and budget checks. A successful

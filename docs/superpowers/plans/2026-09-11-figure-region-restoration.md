@@ -56,7 +56,7 @@
 | T07–T09 | 完成 | PDF.js 整区渲染、Firefox 115 兼容、成功后原子替换、最终 figureMap、两家转换接入与取消 |
 | T10–T11 | 完成 | 缓存、不可变修订基线、旧 0.3.9 身份兼容；所有候选回退仍可缓存重开并显示一次提示 |
 | T12–T14 | 完成 | FigureView、正文/目录/引用/预览、翻译四入口、纠错重建、快照与普通 Markdown 导出 |
-| T15 | 验收完成，PR 准备中 | 17 页/16 场景 fixture；浏览器与 Zotero 7–10 各 32 场景、1,068 像素探针、12 阅读布局通过；每个 Zotero 版本 100 次双窗口阅读及 100 次裁图循环通过 |
+| T15 | 完成，[PR #129](https://github.com/tenglvjun/mktero/pull/129) | 17 页/16 场景 fixture；浏览器与 Zotero 7–10 各 32 场景、1,068 像素探针、12 阅读布局通过；每个 Zotero 版本 100 次双窗口阅读及 100 次裁图循环通过 |
 
 恢复只在 PNG、资产预算和精确范围全部校验成功后移除所属 OCR 文字。缺少同页边界、单侧文字范围或坐标证据时保留原文；这也适用于 MinerU 中无法唯一绑定的尾随图注。Mistral 当前生产 `coordinateFrame` 为 `unknown`，已知模型记 `missing-geometry`，未知模型记 `unsupported-layout-schema`；合成 Mistral fixture 仅验证公共算法。
 
@@ -72,7 +72,7 @@ PDF.js 6 legacy 在 Firefox 115 缺少 `Promise.withResolvers` 和 `ArrayBuffer.
 - [x] **样例：** 连续生成两次 PDF/JSON 哈希一致；scan-only 是实际栅格页，特征与外部 caption/body 排除有独立像素检查。
 - [x] **代码检查：** Node 24.15.0 窄测试、check、全量 test、build 通过；五个开发脚本和兼容模块进入 check；未新增生产依赖或修改发布版本。
 - [x] **最终原生报告：** `09c5f5a` 的各版本报告已生成，四版均通过；路径、fixture 与 XPI hash 见验收记录。
-- [ ] **PR：** 将完整实现与验收记录放入一个 PR，不自动合并或发布。
+- [x] **PR：** 完整实现与验收记录已提交至 [PR #129](https://github.com/tenglvjun/mktero/pull/129)，未自动合并或发布。
 
 以下 T02–T15 的逐步内容保留原设计、接口和测试示例，用于追溯；它们不是尚未开始的待办清单。最终执行状态以本节及验收记录为准。未记录的早期红灯过程不补写，交织的实现按实际可审查提交交付，不虚构每个任务一次提交。
 
@@ -1330,7 +1330,7 @@ git diff --check
 
 ## 完成判定与实施顺序
 
-- [x] 三步实现与 T01–T15 验收已完成；PR 为最后交付动作。
+- [x] 三步实现与 T01–T15 验收已完成，已通过一个 PR 交付。
 - [x] 成功 Figure 的 PNG、Markdown、sourceMap、figureMap 与原片段同一事务提交；所有 preserve 原因都不提前删文。
 - [x] 所有候选回退时，有效 preserved 摘要仍经缓存进入 UI；可选元数据无效的安全降级单独通过测试。
 - [x] 无 proprietary Markdown 依赖；同一完整图在阅读、快照和普通导出中均可见。
