@@ -1,4 +1,5 @@
 import { createMarkdownSourceMap } from '../core/markdown-source-map.js';
+import { validateFigureMap } from '../figures/figure-model.js';
 import { reassembleMinerUBlockFlow } from './block-flow-normalizer.js';
 import { reassembleMinerUColumnFlow } from './column-flow-normalizer.js';
 import { reassembleMinerUFigurePanels } from './figure-panel-normalizer.js';
@@ -15,14 +16,24 @@ export function prepareMinerUResult(result) {
         sourceMap: existingSourceMap,
         ...prepared
     } = result || {};
-    if (prepared.userEdited) {
+    let restored = false;
+    if (prepared.figureMap) {
+        try {
+            validateFigureMap(prepared.figureMap, prepared);
+            restored = true;
+        }
+        catch {
+            delete prepared.figureMap;
+        }
+    }
+    if (prepared.userEdited || restored) {
         return {
             ...prepared,
             ...(existingSourceMap ? { sourceMap: existingSourceMap } : {}),
         };
     }
 
-    let markdown = normalizeMinerUMarkdown(prepared.markdown);
+    let markdown = normalizeMinerUMarkdown(prepared.markdown, { figureBlocks: contentList });
     let sourceMap = existingSourceMap;
     if (!Array.isArray(sourceMap) && Array.isArray(contentList)) {
         const initialSourceMap = createMarkdownSourceMap(markdown, contentList);

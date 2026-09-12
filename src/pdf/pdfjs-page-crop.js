@@ -1,5 +1,7 @@
 import {
     adoptPDFJSWindowGlobals,
+    createMkteroCanvasFactory,
+    MkteroFilterFactory,
 } from './pdfjs-bootstrap-environment.js';
 import {
     getDocument,
@@ -312,55 +314,6 @@ export function encodePageThumbnailDataURL(pageCanvas, createCanvas) {
         throw new Error('PDF page thumbnail encoding is unavailable');
     }
     return dataURL;
-}
-
-function createMkteroCanvasFactory(createCanvas) {
-    return class MkteroCanvasFactory {
-        create(width, height) {
-            if (!(width > 0) || !(height > 0)) {
-                throw new Error('Invalid canvas size');
-            }
-            const canvas = createCanvas(width, height);
-            canvas.width = width;
-            canvas.height = height;
-            const context = canvas.getContext?.('2d');
-            if (!context) {
-                throw new Error('Canvas rendering is unavailable');
-            }
-            return { canvas, context };
-        }
-        reset(canvasAndContext, width, height) {
-            if (!canvasAndContext?.canvas) {
-                throw new Error('Canvas is not specified');
-            }
-            if (!(width > 0) || !(height > 0)) {
-                throw new Error('Invalid canvas size');
-            }
-            canvasAndContext.canvas.width = width;
-            canvasAndContext.canvas.height = height;
-        }
-        destroy(canvasAndContext) {
-            const canvas = canvasAndContext?.canvas;
-            if (!canvas) return;
-            canvas.width = 0;
-            canvas.height = 0;
-            canvasAndContext.canvas = null;
-            canvasAndContext.context = null;
-        }
-    };
-}
-
-class MkteroFilterFactory {
-    addFilter() { return 'none'; }
-    addHCMFilter() { return 'none'; }
-    addAlphaFilter() { return 'none'; }
-    addLuminosityFilter() { return 'none'; }
-    addKnockoutFilter() { return 'none'; }
-    addHighlightHCMFilter() { return 'none'; }
-    addSelectionHCMFilter() { return 'none'; }
-    addSelectionFilter() { return 'none'; }
-    createSelectionStyle() { return null; }
-    destroy() {}
 }
 
 function validatePDFData(fileData) {

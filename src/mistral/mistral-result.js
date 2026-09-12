@@ -1,4 +1,7 @@
 import { createMarkdownSourceMap } from '../core/markdown-source-map.js';
+import { collectFigureImageNodes } from '../figures/figure-model.js';
+import { parseAcademicFigureCaption } from '../markdown/markdown-figures.js';
+import { MISTRAL_OCR_MODEL_ID } from './parser-profile.js';
 import {
     absorbBlankLines,
     mapChromeRanges,
@@ -16,7 +19,6 @@ export const DEFAULT_MAX_MISTRAL_ASSETS = 2_000;
 export const DEFAULT_MAX_MISTRAL_ASSET_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_MAX_MISTRAL_TOTAL_ASSET_BYTES = 150 * 1024 * 1024;
 export const DEFAULT_MAX_MISTRAL_SOURCE_LOCATIONS = 100_000;
-export const DEFAULT_MAX_MISTRAL_BBOX_CHECKS = 2_000_000;
 
 const IMAGE_MIME_TYPES = new Map([
     ['png', 'image/png'],
@@ -74,7 +76,8 @@ const MISTRAL_NON_PROSE_START_PATTERN = /^(?:#{1,6}(?:\s|$)|(?:[-+*]|\d+[.)])\s+
  * Mistral pages are deliberately kept in API reading order; MinerU's layout
  * reassembly must never be applied to this result.
  */
-export function normalizeMistralResult(response, options = {}) {
+export function decodeMistralResult(response, options = {}) {
+    const supportedModel = response?.model === undefined || response.model === MISTRAL_OCR_MODEL_ID;
     const limits = normalizeLimits(options);
     const pages = validatePages(response, limits.maxPages);
     const pageRecords = pages
@@ -85,10 +88,8 @@ export function normalizeMistralResult(response, options = {}) {
     const usedPaths = new Set();
     const pageAssets = new Map();
     const pageTables = new Map();
-    const pageBlockRecords = new Map();
     const tableBudget = { count: 0, bytes: 0 };
     const blockBudget = { count: 0 };
-    const bboxMatchBudget = { remaining: limits.maxBBoxChecks };
     const assets = [];
     let totalAssetBytes = 0;
 
@@ -168,24 +169,12 @@ export function normalizeMistralResult(response, options = {}) {
             dimensions,
             pageAssets.get(page.index)
         );
-        const interiorTextRecords = findImageInteriorTextRecords(
-            records,
-            bboxMatchBudget
-        );
-        const blockRecord = {
-            records,
-            interiorTextRecords,
-            chromeRecords: new Set(),
-        };
-        pageBlockRecords.set(page.index, blockRecord);
-        let source = removeImageInteriorText(
-            page.markdown.replace(/\r\n?/g, '\n').trim(),
-            interiorTextRecords
-        );
+        let source = page.markdown.replace(/\r\n?/g, '\n').trim();
         source = normalizeMistralMarkdown(
             source,
             {
                 tables,
+                normalizeCaptions: false,
                 onMissingTable: reference => warnings.push(
                     `Mistral table reference "${reference}" on page ${page.index} has no table content.`
                 ),
@@ -194,93 +183,124 @@ export function normalizeMistralResult(response, options = {}) {
         source = rewriteMarkdownImages(source, pageAssets.get(page.index));
         return { page, source, records };
     });
-    const repeatedChromeLines = findRepeatedPageChromeLines(pageSources);
-    const markdownPages = pageSources.map(({ page, source, records }) => {
-        const detected = detectMistralPageChrome(
-            source,
-            page.index,
-            records,
-            repeatedChromeLines
-        );
-        pageBlockRecords.get(page.index).chromeRecords = detected.chromeRecords;
-        const laidOut = normalizeMistralFigureLayouts(
-            detected.markdown,
-            records
-                .map(record => record.normalized)
-                .filter(block => block?.type === 'image' || block?.type === 'chart')
-        );
-        return {
-            markdown: laidOut,
-            records,
-            chromeRanges: mapChromeRangesThroughRewrite(
-                detected.chromeRanges,
-                detected.markdown,
-                laidOut
-            ),
-        };
-    });
-    const joined = joinMarkdownPages(markdownPages);
-    const flowed = applyMistralTextFlow(
-        joined.markdown,
-        markdownPages.flatMap(page => page.records)
-    );
-    const markdown = flowed.markdown;
-    const chromeRanges = normalizeChromeRanges(
-        absorbBlankLines(
-            markdown,
-            mapChromeRanges(
-                joined.chromeRanges,
-                flowed.transforms,
-                markdown.length
-            )
-        ),
-        markdown.length
-    );
+    const blocks = [];
+    const inputPages = [];
+    const markdownParts = [];
+    let offset = 0;
+    for (const { page, source, records } of pageSources) {
+        if (markdownParts.length && source) offset += 2;
+        const from = offset;
+        if (source) markdownParts.push(source);
+        offset += source.length;
+        const dimensions = normalizeDimensions(page.dimensions);
+        inputPages.push({
+            pageIndex: page.index, ...(dimensions || {}), unit: 'px',
+            dpi: Number.isFinite(page.dimensions?.dpi) ? page.dimensions.dpi : null,
+            // Pixel dimensions do not establish PDF CropBox origin or rotation.
+            coordinateFrame: 'unknown',
+            geometryReason: supportedModel ? 'missing-geometry' : 'unsupported-layout-schema',
+            rotation: null, geometryEvidence: 'mistral-ocr-blocks-v1',
+            markdownRange: source ? { from, to: offset } : null,
+        });
+        const normalized = records.filter(record => record.normalized).map(record => ({
+            ...record.normalized,
+            sourceOrdinal: record.sourceOrdinal,
+        }));
+        const represented = new Set(normalized.map(block => block.assetPath).filter(Boolean));
+        let nextOrdinal = records.length;
+        for (const image of collectFigureImageNodes(source)) {
+            if (represented.has(image.assetPath)) continue;
+            if (!assets.some(asset => asset.path === image.assetPath)) continue;
+            normalized.push({
+                type: 'image', pageIndex: page.index, assetPath: image.assetPath,
+                bbox: null, sourceOrdinal: nextOrdinal++,
+            });
+            represented.add(image.assetPath);
+        }
+        for (const block of normalized) {
+            const { sourceOrdinal } = block;
+            const image = ['image', 'chart'].includes(block.type);
+            const caption = block.type === 'caption' || parseAcademicFigureCaption(block.text);
+            blocks.push({
+                ...block, id: 'mistral:p' + page.index + ':b' + sourceOrdinal,
+                sourceOrdinal, role: image ? 'panel' : caption ? 'caption' : 'unknown',
+                bboxKind: image ? block.bbox ? 'visual-body' : 'unknown' : caption ? 'caption' : 'text',
+                sourceRanges: [], rangeEvidence: 'unresolved',
+            });
+        }
+    }
+    const markdown = markdownParts.join('\n\n');
     if (!markdown.trim()) throw invalidResult('Mistral result contains no Markdown');
     if (new TextEncoder().encode(markdown).length > limits.maxMarkdownBytes) {
         throw invalidResult('Mistral Markdown exceeds the configured resource limit');
     }
-
-    const contentList = [];
-    for (const page of pageRecords) {
-        const blockRecords = pageBlockRecords.get(page.index);
-        for (const record of blockRecords?.records || []) {
-            if (contentList.length >= limits.maxBlocks) {
-                throw invalidResult('Mistral blocks exceed the configured resource limit');
-            }
-            if (!record.normalized
-                || blockRecords.interiorTextRecords.has(record)
-                || blockRecords.chromeRecords?.has(record)
-                || ['header', 'footer'].includes(record.normalized.type)) {
-                continue;
-            }
-            contentList.push(record.normalized);
-        }
-    }
-
-    let sourceMap = createMarkdownSourceMap(
-        markdown,
-        contentList,
-        {
-            includeMatchedTextRanges: true,
-            maxContentBlocks: limits.maxBlocks,
-        }
-    );
-    sourceMap = limitSourceMap(sourceMap, limits.maxSourceLocations);
     const totalPages = Number.isSafeInteger(response?.usage_info?.pages_processed)
         && response.usage_info.pages_processed >= 0
-        ? response.usage_info.pages_processed
-        : pageRecords.length;
+        ? response.usage_info.pages_processed : pageRecords.length;
     return {
-        markdown,
-        assets,
-        assetBasePath: '',
-        contentList,
-        sourceMap,
-        chromeRanges,
-        extractedPages: pageRecords.length,
-        totalPages,
-        warnings,
+        provider: 'mistral', markdown, assets, assetBasePath: '', blocks, pages: inputPages,
+        contentList: blocks.map(contentRecord), providerState: { limits },
+        extractedPages: pageRecords.length, totalPages, warnings,
+    };
+}
+
+export function normalizeMistralResult(response, options = {}) {
+    return prepareMistralResult(decodeMistralResult(response, options));
+}
+
+export function prepareMistralResult(input) {
+    const limits = input.providerState?.limits || normalizeLimits({});
+    const blocksByPage = new Map();
+    for (const block of input.blocks) {
+        if (!blocksByPage.has(block.pageIndex)) blocksByPage.set(block.pageIndex, []);
+        blocksByPage.get(block.pageIndex).push({ normalized: contentRecord(block) });
+    }
+    const pageSources = input.pages.map(page => ({
+        page: { index: page.pageIndex },
+        source: page.markdownRange ? input.markdown.slice(page.markdownRange.from, page.markdownRange.to) : '',
+        records: blocksByPage.get(page.pageIndex) || [],
+    }));
+    const repeatedChromeLines = findRepeatedPageChromeLines(pageSources);
+    const contentList = [];
+    const markdownPages = pageSources.map(({ page, source, records }) => {
+        const normalized = normalizeMistralMarkdown(source, {
+            figureBlocks: records.map(record => record.normalized),
+        });
+        const detected = detectMistralPageChrome(normalized, page.index, records, repeatedChromeLines);
+        for (const record of records) {
+            const block = record.normalized;
+            if (block.bbox && !detected.chromeRecords.has(record)
+                && !['header', 'footer'].includes(block.type)) contentList.push(block);
+        }
+        const laidOut = normalizeMistralFigureLayouts(detected.markdown,
+            records.map(record => record.normalized).filter(block => (
+                ['image', 'chart'].includes(block.type)
+            )), { allowFallback: false });
+        return { markdown: laidOut, records,
+            chromeRanges: mapChromeRangesThroughRewrite(detected.chromeRanges, detected.markdown, laidOut) };
+    });
+    const joined = joinMarkdownPages(markdownPages);
+    const flowed = applyMistralTextFlow(joined.markdown, markdownPages.flatMap(page => page.records));
+    const markdown = flowed.markdown;
+    const chromeRanges = normalizeChromeRanges(absorbBlankLines(markdown,
+        mapChromeRanges(joined.chromeRanges, flowed.transforms, markdown.length)), markdown.length);
+    const sourceMap = limitSourceMap(createMarkdownSourceMap(markdown, contentList, {
+        includeMatchedTextRanges: true, maxContentBlocks: limits.maxBlocks,
+    }), limits.maxSourceLocations);
+    return {
+        markdown, assets: input.assets, assetBasePath: input.assetBasePath, contentList,
+        sourceMap, chromeRanges, extractedPages: input.extractedPages,
+        totalPages: input.totalPages, warnings: input.warnings || [],
+    };
+}
+
+function contentRecord(block) {
+    return {
+        type: block.type, pageIndex: block.pageIndex, bbox: block.bbox,
+        ...(block.assetPath ? { assetPath: block.assetPath } : {}),
+        ...(block.text ? { text: block.text } : {}),
+        ...(block.figureId ? { figureId: block.figureId, captionText: block.captionText,
+            captionBBox: block.captionBBox } : {}),
     };
 }
 
@@ -327,10 +347,6 @@ function normalizeLimits(options) {
         maxSourceLocations: boundedLimit(
             options.maxSourceLocations,
             DEFAULT_MAX_MISTRAL_SOURCE_LOCATIONS
-        ),
-        maxBBoxChecks: boundedLimit(
-            options.maxBBoxChecks,
-            DEFAULT_MAX_MISTRAL_BBOX_CHECKS
         ),
     };
 }
@@ -434,7 +450,8 @@ function normalizePageBlockRecords(
             type: table?.type || 'table',
         })));
     }
-    return rawBlocks.map(block => ({
+    return rawBlocks.map((block, sourceOrdinal) => ({
+        sourceOrdinal,
         normalized: normalizeBlock(
             block,
             page,
@@ -461,8 +478,18 @@ function appendImageMetadataRecords(records, page, dimensions, pageMap) {
                 ?? image,
             dimensions
         );
-        if (!assetPath || !bbox || mappedAssets.has(assetPath)) continue;
+        if (!assetPath || !bbox) continue;
+        if (mappedAssets.has(assetPath)) {
+            for (const record of records) {
+                if (record.normalized?.assetPath === assetPath && record.normalized.bbox
+                    && record.normalized.bbox.some((value, index) => Math.abs(value - bbox[index]) > 1)) {
+                    record.normalized.bbox = null;
+                }
+            }
+            continue;
+        }
         records.push({
+            sourceOrdinal: records.length,
             normalized: {
                 type: 'image',
                 pageIndex: page.index,
@@ -472,84 +499,6 @@ function appendImageMetadataRecords(records, page, dimensions, pageMap) {
         });
         mappedAssets.add(assetPath);
     }
-}
-
-function findImageInteriorTextRecords(records, matchBudget) {
-    const imageBlocks = records
-        .map(record => record.normalized)
-        .filter(block => block?.type === 'image' || block?.type === 'chart');
-    if (!imageBlocks.length) return new Set();
-
-    return new Set(records.filter(record => {
-        const block = record.normalized;
-        if (!block || !block.text || block.type === 'image' || block.type === 'chart') {
-            return false;
-        }
-        return imageBlocks.some(image => {
-            if (image.pageIndex !== block.pageIndex) return false;
-            if (matchBudget.remaining <= 0) {
-                throw invalidResult(
-                    'Mistral layout matching exceeds the configured resource limit'
-                );
-            }
-            matchBudget.remaining--;
-            return isMostlyContainedBBox(block.bbox, image.bbox);
-        });
-    }));
-}
-
-function isMostlyContainedBBox(inner, outer) {
-    const innerArea = bboxArea(inner);
-    if (!innerArea) return false;
-    const intersection = bboxIntersection(inner, outer);
-    if (!intersection) return false;
-    return bboxArea(intersection) / innerArea >= 0.8;
-}
-
-function bboxArea(bbox) {
-    return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]);
-}
-
-function bboxIntersection(left, right) {
-    const intersection = [
-        Math.max(left[0], right[0]),
-        Math.max(left[1], right[1]),
-        Math.min(left[2], right[2]),
-        Math.min(left[3], right[3]),
-    ];
-    return intersection[2] > intersection[0]
-        && intersection[3] > intersection[1]
-        ? intersection
-        : null;
-}
-
-function removeImageInteriorText(markdown, records) {
-    if (!markdown || !records?.size) return markdown;
-    const lines = markdown.match(/[^\r\n]*(?:\r\n|\n|$)/g) || [];
-    const lineIndexesByText = new Map();
-    for (const [index, line] of lines.entries()) {
-        const text = comparableMarkdownText(line);
-        if (!text) continue;
-        const indexes = lineIndexesByText.get(text) || [];
-        indexes.push(index);
-        lineIndexesByText.set(text, indexes);
-    }
-    const candidates = new Set([...records]
-        .flatMap(record => splitBlockTextLines(record.normalized?.text))
-        .map(comparableMarkdownText)
-        .filter(Boolean));
-
-    const matches = new Map();
-    for (const candidate of candidates) {
-        const matchingIndexes = lineIndexesByText.get(candidate) || [];
-        // A duplicated label is ambiguous without a text block range. Keep it
-        // visible rather than risk removing ordinary prose elsewhere.
-        if (matchingIndexes.length === 1) {
-            matches.set(matchingIndexes[0], true);
-        }
-    }
-    if (!matches.size) return markdown;
-    return lines.filter((line, index) => !matches.has(index)).join('').trim();
 }
 
 function findRepeatedPageChromeLines(pageSources) {
@@ -1030,15 +979,13 @@ function normalizeBlock(block, page, dimensions, pageMap, tables, warnings) {
     }
     if (!dimensions) {
         warnings.push(`Mistral block on page ${page.index} has invalid dimensions.`);
-        return null;
     }
-    const bbox = normalizeBBox(
+    const bbox = dimensions ? normalizeBBox(
         block.bbox ?? block.bounding_box ?? block.boundingBox ?? block,
         dimensions
-    );
+    ) : null;
     if (!bbox) {
         warnings.push(`Mistral block on page ${page.index} has an invalid bounding box.`);
-        return null;
     }
     const normalized = {
         type,

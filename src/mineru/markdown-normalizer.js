@@ -1,5 +1,6 @@
 import { normalizeMarkdownFigureCaptions } from '../markdown/markdown-figures.js';
 import { normalizeFigureLayouts } from '../markdown/figure-layout-normalizer.js';
+import { normalizeOutsideRestoredFigures } from '../figures/figure-normalization.js';
 
 const BLANK_LINE_SEPARATOR = /(\r?\n[ \t]*\r?\n(?:[ \t]*\r?\n)*)/;
 const BLOCK_START_PATTERN = /^(?: {0,3}(?:#{1,6}(?:[ \t]|$)|>|(?:[-+*]|\d+[.)])[ \t]+|```|~~~)| {4}\S|\t\S|<|\$\$|\\\[|\\begin\{|\[[^\]\n]+\]:)/;
@@ -19,10 +20,10 @@ const OCR_BULLET_ITEM_PATTERN = /^[ \t]*(?:\\-|•)[ \t]+\S[^\r\n]*[ \t]*$/u;
 const OCR_BULLET_PREFIX_PATTERN = /^([ \t]*)(?:\\-|•)(?=[ \t]+)/u;
 const MIN_PRECEDING_WORDS = 6;
 
-export function normalizeMinerUMarkdown(markdown) {
+export function normalizeMinerUMarkdown(markdown, { figureBlocks = [] } = {}) {
     if (typeof markdown !== 'string') return markdown;
 
-    const withFigureCaptions = normalizeMarkdownFigureCaptions(markdown);
+    const withFigureCaptions = normalizeOutsideRestoredFigures(markdown, figureBlocks, normalizeMarkdownFigureCaptions);
     if (!withFigureCaptions.includes('\n')) return withFigureCaptions;
 
     const parts = normalizeOCRBulletLists(withFigureCaptions).split(BLANK_LINE_SEPARATOR);
@@ -46,12 +47,13 @@ export function normalizeMinerUMarkdown(markdown) {
 }
 
 export function normalizeMinerUFigureLayouts(markdown, imageBlocks = []) {
-    return normalizeFigureLayouts(markdown, imageBlocks, {
+    return normalizeOutsideRestoredFigures(markdown, imageBlocks, source => normalizeFigureLayouts(source,
+        imageBlocks.filter(block => !block.figureId), {
         // MinerU content_list locations are the evidence required for a
         // layout change. Do not guess a grid when those locations are absent.
         allowFallback: false,
         skipExistingPanelLayout: true,
-    });
+    }));
 }
 
 function normalizeOCRBulletLists(markdown) {

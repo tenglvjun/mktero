@@ -29,7 +29,7 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 ## 核心能力
 
 - 将 OCR 结果、双栏正文、公式、表格、图片、列表和代码重排成连续的论文阅读文档。
-- Mistral 会依据图片坐标隐藏图片内部的 OCR 文字；两个 OCR Provider 都会根据图片坐标恢复多面板图表的原始排列布局。MinerU 只在有 bbox 证据时重排；Mistral 在缺少坐标时还支持保守的布局兜底。
+- 图组恢复流程只在版面证据、页面坐标和精确 Markdown 范围一致时，才从本地 PDF 恢复完整图表。生成的本地 PNG 会保留 2x2、4x4、缺角、跨行和不规则排列。只有裁切成功后，图内 OCR 才会从阅读流移除；图注仍可选择、搜索和翻译。证据不足的图组会保留原图片和文字，并显示非阻断提示。MinerU 恢复需要受支持的详细布局数据；Mistral 的坐标原点和旋转方向尚未独立验证，因此当前生产适配器会保留原图片和 OCR 文字。
 - Mistral 和 MinerU 会把出版商刊头、重复页眉页脚和页码保留在存储的 Markdown 中。阅读器会隐藏这些区间，并用 Zotero 条目标题去对 Markdown 中的 `#` 或 `##` 标题，隐藏该标题之前的内容；若同一标题出现两次，则以第二次为准。划区和高亮会跳过隐藏区间，以便映射回 PDF 正文。
 - Markdown 目录会去掉关键词列表和短刊头提示框。有 `1` / `2.1` 编号时按编号深度缩进，即使 OCR 把同级写成了 `#` 和 `##`。没有编号时保留标题层级，除非上一节已是完整长正文。PDF 书签能唯一对上标题时，目录改用书签的顺序和层级。可切换到「图表」按文中顺序跳转到带题注的图和表；本地图片和表格都显示缩略预览。
 - 用 `Cmd/Ctrl+F` 在当前显示的 Markdown 中查找。搜索可见正文，会跳过隐藏的页眉页脚、Markdown 标记和公式定界符。
@@ -133,7 +133,7 @@ AI 全文翻译需要用户主动触发，也不会重写原始 Markdown。Mkter
 
 ### 保存便携快照
 
-`Save snapshot` 会在 PDF 所属条目下创建专用的 `Mktero Markdown Snapshot` Note。Note 保存便携 HTML，图片作为内嵌附件，原始 Markdown 和来源映射作为关联附件。用户修改过快照 Note 后，Mktero 不会静默覆盖。没有父级文库条目的独立 PDF 无法保存快照。
+`Save snapshot` 会在 PDF 所属条目下创建专用的 `Mktero Markdown Snapshot` Note。Note 保存便携 HTML，图片作为内嵌附件，原始 Markdown 和来源映射作为关联附件。恢复的图表还会附带可选的 `figure-map.json`，记录页面区域、子图身份和被消费的 OCR 片段。元数据缺失或损坏不会影响 Markdown 和 PNG 的阅读，旧快照仍可打开。用户修改过快照 Note 后，Mktero 不会静默覆盖。没有父级文库条目的独立 PDF 无法保存快照。
 
 ### 导出 Markdown
 
@@ -162,14 +162,14 @@ PDF、OCR 结果、压缩包、图片路径、API 响应和首选项都会被视
 | --- | --- | --- |
 | 缓存未命中时的完整 PDF | 所选 MinerU 或 Mistral 服务 | Mktero 不同步 |
 | MinerU/Mistral API 凭据和 AI 凭据 | 当前 Zotero 配置文件，未加密 | 否 |
-| 缓存的 Markdown、图片、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
+| 缓存的 Markdown、图片、图表元数据（含 OCR 片段）、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
 | 用户为只有标题的文献点击“导入文献”后发送的受限引用文本 | OpenAlex | Mktero 不同步 |
 | 用户点击导入后发送的规范化 DOI、arXiv ID、PMID 或 OpenAlex 工作 ID、已确认的元数据，以及可选的公开 PDF 请求 | 选定的元数据/PDF Provider | Mktero 不同步 |
 | 受保护的 Markdown 翻译批次 | 你配置的 AI Provider | Mktero 不同步 |
 | 选区翻译使用的选中文本和附近受限长度的原文上下文 | 你配置的 AI Provider | Mktero 不同步 |
 | Zotero PDF 标注 | 本地 Zotero 文库 | 取决于 Zotero 设置 |
-| 保存的快照 Note 和附件 | Zotero 条目和附件 | 取决于 Zotero 设置 |
+| 保存的快照 Note 和附件（含可选图表元数据和 OCR 片段） | Zotero 条目和附件 | 取决于 Zotero 设置 |
 | 导出的 Markdown 和图片 | 用户选择的本地路径 | 否 |
 | 导入的文献元数据和 PDF 附件 | 当前 Zotero 配置文件，未加密 | 取决于 Zotero 设置 |
 

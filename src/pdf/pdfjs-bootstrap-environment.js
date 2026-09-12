@@ -1,4 +1,5 @@
 import '../platform/web-streams.js';
+import './pdfjs-runtime-compat.js';
 
 const PDFJS_WINDOW_GLOBALS = [
     'Path2D',
@@ -24,6 +25,74 @@ export function adoptPDFJSWindowGlobals(view) {
             globalThis[name] = view[name];
         }
     }
+}
+
+export function createMkteroCanvasFactory(createCanvas, {
+    maxPixels = 16_000_000, maxEdge = 8_192, maxTotalPixels = 32_000_000,
+} = {}) {
+    return class MkteroCanvasFactory {
+        constructor() {
+            this.allocations = new Map();
+            this.totalPixels = 0;
+        }
+        validateSize(width, height, previousPixels = 0) {
+            if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+                || width < 1 || height < 1 || width > maxEdge || height > maxEdge
+                || width * height > maxPixels
+                || this.totalPixels - previousPixels + width * height > maxTotalPixels) {
+                throw new RangeError('PDF canvas exceeds the resource limit');
+            }
+        }
+        create(width, height) {
+            this.validateSize(width, height);
+            const canvas = createCanvas(width, height);
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext?.('2d');
+            if (!context) {
+                canvas.width = 0;
+                canvas.height = 0;
+                throw new Error('Canvas rendering is unavailable');
+            }
+            this.allocations.set(canvas, width * height);
+            this.totalPixels += width * height;
+            return { canvas, context };
+        }
+        reset(canvasAndContext, width, height) {
+            if (!canvasAndContext?.canvas) {
+                throw new Error('Canvas is not specified');
+            }
+            const previousPixels = this.allocations.get(canvasAndContext.canvas) || 0;
+            this.validateSize(width, height, previousPixels);
+            canvasAndContext.canvas.width = width;
+            canvasAndContext.canvas.height = height;
+            this.totalPixels += width * height - previousPixels;
+            this.allocations.set(canvasAndContext.canvas, width * height);
+        }
+        destroy(canvasAndContext) {
+            const canvas = canvasAndContext?.canvas;
+            if (!canvas) return;
+            this.totalPixels -= this.allocations.get(canvas) || 0;
+            this.allocations.delete(canvas);
+            canvas.width = 0;
+            canvas.height = 0;
+            canvasAndContext.canvas = null;
+            canvasAndContext.context = null;
+        }
+    };
+}
+
+export class MkteroFilterFactory {
+    addFilter() { return 'none'; }
+    addHCMFilter() { return 'none'; }
+    addAlphaFilter() { return 'none'; }
+    addLuminosityFilter() { return 'none'; }
+    addKnockoutFilter() { return 'none'; }
+    addHighlightHCMFilter() { return 'none'; }
+    addSelectionHCMFilter() { return 'none'; }
+    addSelectionFilter() { return 'none'; }
+    createSelectionStyle() { return null; }
+    destroy() {}
 }
 
 adoptPDFJSWindowGlobals(mainWindow);

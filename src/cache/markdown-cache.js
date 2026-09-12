@@ -9,6 +9,9 @@ import {
     normalizeChromeRanges,
 } from '../markdown/chrome-ranges.js';
 import { sha256Hex } from '../core/sha256.js';
+import { FIGURE_LIMITS } from '../figures/figure-limits.js';
+import { serializeFigureMap, parseFigureMapJSON } from '../figures/figure-map-serialization.js';
+import { throwIfFigureAborted } from '../figures/figure-async.js';
 
 const CACHE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'entry.json';
@@ -71,6 +74,8 @@ export class MarkdownCache {
         maxSourceLocations = DEFAULT_MAX_SOURCE_LOCATIONS,
         maxTranslationBytes = DEFAULT_MAX_TRANSLATION_BYTES,
         maxChromeRangesBytes = MAX_CHROME_RANGES_BYTES,
+        maxFigureMapBytes = FIGURE_LIMITS.maxMapBytes,
+        hash = sha256Hex,
     }) {
         if (!rootPath) throw new TypeError('A cache root path is required');
         if (!ioUtils) throw new TypeError('An IOUtils adapter is required');
@@ -86,6 +91,8 @@ export class MarkdownCache {
         this.maxSourceLocations = maxSourceLocations;
         this.maxTranslationBytes = maxTranslationBytes;
         this.maxChromeRangesBytes = maxChromeRangesBytes;
+        this.maxFigureMapBytes = maxFigureMapBytes;
+        this.hash = hash;
         this.operationTail = Promise.resolve();
     }
 
@@ -170,6 +177,9 @@ export class MarkdownCache {
                 catch {}
             }
             metadata.lastAccessedAt = this.now();
+            const figureMap = await this.#readFigureMap(entryPath, metadata, {
+                markdown, assets, assetBasePath: metadata.assetBasePath,
+            });
             await this.#writeMetadata(metadataPath, metadata).catch(() => {});
 
             return {
@@ -180,6 +190,7 @@ export class MarkdownCache {
                 totalPages: metadata.totalPages,
                 ...(sourceMap ? { sourceMap } : {}),
                 ...(chromeRanges ? { chromeRanges } : {}),
+                ...(figureMap ? { figureMap } : {}),
                 ...(metadata.userEdited ? { userEdited: true } : {}),
             };
         }
@@ -190,14 +201,15 @@ export class MarkdownCache {
         }
     }
 
-    async put(cacheKey, result, { allowEmptyMarkdown = false } = {}) {
+    async put(cacheKey, result, { allowEmptyMarkdown = false, signal } = {}) {
+        throwIfFigureAborted(signal);
         validateCacheKey(cacheKey);
         if (typeof result?.markdown !== 'string'
             || (!allowEmptyMarkdown && !result.markdown.trim())) {
             throw new TypeError('Cached Markdown must be a non-empty string');
         }
 
-        return this.#withOperation(() => this.#put(cacheKey, result));
+        return this.#withOperation(() => this.#put(cacheKey, result, signal));
     }
 
     getTranslation(cacheKey, translationKey) {
@@ -417,7 +429,12 @@ export class MarkdownCache {
         await this.#scan({ removeInvalid: true, enforceLimits: true });
     }
 
-    async #put(cacheKey, result) {
+    async #put(cacheKey, result, signal) {
+        throwIfFigureAborted(signal);
+        const serializedFigureMap = await serializeFigureMap(result.figureMap, result, {
+            hash: this.hash, maxBytes: this.maxFigureMapBytes,
+        });
+        throwIfFigureAborted(signal);
         const entryPath = this.#entryPath(cacheKey);
         const assetsPath = this.path.join(entryPath, 'assets');
         await this.#ensureRoot();
@@ -434,11 +451,13 @@ export class MarkdownCache {
         const markdownFile = `document-${generation}.md`;
         const sourceMapFile = `source-map-${generation}.json`;
         const chromeRangesFile = `chrome-ranges-${generation}.json`;
+        const figureMapFile = `figure-map-${generation}.json`;
         const writtenPaths = [];
         const temporaryPaths = [];
         const assets = [];
         try {
             for (const [index, asset] of (result.assets || []).entries()) {
+                throwIfFigureAborted(signal);
                 const file = `${generation}-${String(index).padStart(4, '0')}.bin`;
                 const data = toUint8Array(asset.data, 'Cached image');
                 const filePath = this.path.join(assetsPath, file);
@@ -506,6 +525,13 @@ export class MarkdownCache {
                     storedChromeRanges = true;
                 }
             }
+            if (serializedFigureMap) {
+                const figureMapPath = this.path.join(entryPath, figureMapFile);
+                const temporaryPath = `${figureMapPath}.tmp`;
+                temporaryPaths.push(temporaryPath);
+                await this.io.writeUTF8(figureMapPath, serializedFigureMap.json, { tmpPath: temporaryPath });
+                writtenPaths.push(figureMapPath);
+            }
             const metadata = {
                 schemaVersion: CACHE_SCHEMA_VERSION,
                 cacheKey,
@@ -517,6 +543,7 @@ export class MarkdownCache {
                 totalPages: result.totalPages ?? null,
                 markdownBytes,
                 sizeBytes: markdownBytes + sourceMapBytes + chromeRangesBytes
+                    + (serializedFigureMap?.bytes || 0)
                     + assets.reduce((total, asset) => total + asset.size, 0),
                 assets,
             };
@@ -529,7 +556,12 @@ export class MarkdownCache {
                 metadata.chromeRangesBytes = chromeRangesBytes;
             }
             if (result.userEdited) metadata.userEdited = true;
+            if (serializedFigureMap) {
+                metadata.figureMapFile = figureMapFile;
+                metadata.figureMapBytes = serializedFigureMap.bytes;
+            }
             temporaryPaths.push(`${metadataPath}.tmp`);
+            throwIfFigureAborted(signal);
             await this.#writeMetadata(metadataPath, metadata);
             await this.#removeReferencedFiles(entryPath, previousMetadata);
         }
@@ -645,6 +677,23 @@ export class MarkdownCache {
         return this.io.writeUTF8(metadataPath, JSON.stringify(metadata), {
             tmpPath: `${metadataPath}.tmp`,
         });
+    }
+
+    async #readFigureMap(entryPath, metadata, document) {
+        if (!validFigureMapFile(metadata.figureMapFile)
+            || !Number.isSafeInteger(metadata.figureMapBytes)
+            || metadata.figureMapBytes < 1 || metadata.figureMapBytes > this.maxFigureMapBytes) return null;
+        try {
+            const path = this.path.join(entryPath, metadata.figureMapFile);
+            const info = await this.io.stat(path);
+            if (info.size !== metadata.figureMapBytes || info.type !== 'regular') return null;
+            const json = await this.io.readUTF8(path);
+            if (new TextEncoder().encode(json).length !== metadata.figureMapBytes) return null;
+            return await parseFigureMapJSON(json, document, { hash: this.hash, maxBytes: this.maxFigureMapBytes });
+        }
+        catch {
+            return null;
+        }
     }
 
     async #readSourceMapJSON(entryPath, metadata) {
@@ -837,6 +886,8 @@ export class MarkdownCache {
             ...(metadata.sourceMapFile
                 ? [this.path.join(entryPath, metadata.sourceMapFile)]
                 : []),
+            ...(validFigureMapFile(metadata.figureMapFile)
+                ? [this.path.join(entryPath, metadata.figureMapFile)] : []),
             ...(metadata.chromeRangesFile
                 ? [this.path.join(entryPath, metadata.chromeRangesFile)]
                 : []),
@@ -980,10 +1031,16 @@ function translationFiles(metadata) {
     return [...new Set(files)];
 }
 
+function validFigureMapFile(value) {
+    return typeof value === 'string' && /^figure-map-[a-z0-9-]+\.json$/u.test(value);
+}
+
 function cachedDocumentSize(metadata) {
     return metadata.markdownBytes
         + (metadata.sourceMapBytes || 0)
         + (metadata.chromeRangesBytes || 0)
+        + (Number.isSafeInteger(metadata.figureMapBytes) && metadata.figureMapBytes > 0
+            && validFigureMapFile(metadata.figureMapFile) ? metadata.figureMapBytes : 0)
         + metadata.assets.reduce((total, asset) => total + asset.size, 0);
 }
 

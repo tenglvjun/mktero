@@ -86,6 +86,7 @@ export class MarkdownTranslationService {
         markdown,
         targetLanguage,
         chromeRanges,
+        figureMap = null,
     }) {
         const configuredSettings = this.getSettings();
         const selectedLanguage = targetLanguage === undefined
@@ -108,7 +109,8 @@ export class MarkdownTranslationService {
             normalizedDocumentKey,
             source,
             settings,
-            chromeRanges
+            chromeRanges,
+            figureMap
         );
     }
 
@@ -116,6 +118,7 @@ export class MarkdownTranslationService {
         documentKey,
         markdown,
         chromeRanges,
+        figureMap = null,
     }) {
         if (!this.cache?.getTranslation) return [];
         const source = String(markdown || '');
@@ -137,7 +140,8 @@ export class MarkdownTranslationService {
                         normalizedDocumentKey,
                         source,
                         settings,
-                        chromeRanges
+                        chromeRanges,
+                        figureMap
                     );
                 return result;
             }
@@ -151,6 +155,7 @@ export class MarkdownTranslationService {
         existingTranslation,
         targetLanguage,
         chromeRanges,
+        figureMap = null,
     }) {
         const configuredSettings = this.getSettings();
         const selectedLanguage = targetLanguage === undefined
@@ -182,7 +187,8 @@ export class MarkdownTranslationService {
                 translationKey,
                 source,
                 settings.targetLanguage,
-                chromeRanges
+                chromeRanges,
+                figureMap
             )
             : null;
         if (exact) {
@@ -207,7 +213,8 @@ export class MarkdownTranslationService {
             settings,
             translationKey,
             normalizedDocumentKey,
-            settingsIdentity
+            settingsIdentity,
+            figureMap
         );
         if (visible) return visible;
         const compatible = await this.#readCompatibleDocumentTranslation(
@@ -215,7 +222,8 @@ export class MarkdownTranslationService {
             translationKey,
             source,
             settings,
-            chromeRanges
+            chromeRanges,
+            figureMap
         );
         return compatible
             ? withDocumentTranslationIdentity(compatible, {
@@ -281,6 +289,7 @@ export class MarkdownTranslationService {
         forceRetranslate = false,
         targetLanguage,
         chromeRanges,
+        figureMap = null,
     }) {
         const configuredSettings = this.getSettings();
         const selectedLanguage = targetLanguage === undefined
@@ -324,7 +333,8 @@ export class MarkdownTranslationService {
                 translationKey,
                 source,
                 settings.targetLanguage,
-                chromeRanges
+                chromeRanges,
+                figureMap
             )
             : null;
         if (!cached) {
@@ -333,7 +343,8 @@ export class MarkdownTranslationService {
                 translationKey,
                 source,
                 settings,
-                chromeRanges
+                chromeRanges,
+                figureMap
             );
         }
         if (cached
@@ -362,7 +373,8 @@ export class MarkdownTranslationService {
             settings,
             translationKey,
             normalizedDocumentKey,
-            settingsIdentity
+            settingsIdentity,
+            figureMap
         );
         const baseline = visible || cached;
         const visibleTranslationChanged = Boolean(existingTranslation)
@@ -423,7 +435,8 @@ export class MarkdownTranslationService {
             buildDocumentTranslationViews(
                 source,
                 blocks,
-                translations
+                translations,
+                figureMap
             );
         const value = {
             ...views,
@@ -577,7 +590,8 @@ export class MarkdownTranslationService {
         translationKey,
         source,
         targetLanguage,
-        chromeRanges
+        chromeRanges,
+        figureMap
     ) {
         try {
             const cached = await this.cache.getTranslation(
@@ -610,7 +624,8 @@ export class MarkdownTranslationService {
                 buildDocumentTranslationViews(
                     source,
                     blocks,
-                    translations
+                    translations,
+                    figureMap
                 );
             if (cached.translatedMarkdown !== views.translatedMarkdown) {
                 throw new Error('The cached document translation is inconsistent');
@@ -649,7 +664,8 @@ export class MarkdownTranslationService {
         translationKey,
         source,
         settings,
-        chromeRanges
+        chromeRanges,
+        figureMap
     ) {
         if (!this.cache?.getTranslationByLanguage) return null;
         try {
@@ -681,7 +697,8 @@ export class MarkdownTranslationService {
             const views = buildDocumentTranslationViews(
                 source,
                 blocks,
-                reconciled.translations
+                reconciled.translations,
+                figureMap
             );
             const partial = reconciled.failedBlocks.length > 0;
             const totalBlocks = reconciled.translations.length;
@@ -711,7 +728,8 @@ export class MarkdownTranslationService {
         documentKey,
         source,
         settings,
-        chromeRanges
+        chromeRanges,
+        figureMap
     ) {
         const translationKey = await this.#safeCreateDocumentTranslationKey(
             documentKey,
@@ -724,7 +742,8 @@ export class MarkdownTranslationService {
                 translationKey,
                 source,
                 settings.targetLanguage,
-                chromeRanges
+                chromeRanges,
+                figureMap
             )
             : null;
         const cached = exact || await this.#readCompatibleDocumentTranslation(
@@ -732,7 +751,8 @@ export class MarkdownTranslationService {
             translationKey,
             source,
             settings,
-            chromeRanges
+            chromeRanges,
+            figureMap
         );
         return cached
             ? withDocumentTranslationIdentity(cached, {
@@ -850,8 +870,8 @@ function protectedTextTranslationMessages(
     }];
 }
 
-function buildDocumentTranslationViews(source, blocks, translations) {
-    return createDocumentTranslationViews(source, blocks, translations);
+function buildDocumentTranslationViews(source, blocks, translations, figureMap) {
+    return createDocumentTranslationViews(source, blocks, translations, { figureMap });
 }
 
 async function requestDocumentTranslationBatches({
@@ -1467,7 +1487,8 @@ function normalizeVisibleTranslation(
     settings,
     translationKey,
     documentKey,
-    settingsIdentity
+    settingsIdentity,
+    figureMap
 ) {
     if (!value || !Array.isArray(value.blocks)) return null;
     const previousSourceBlocks = visibleTranslationSourceBlocks(value);
@@ -1505,7 +1526,8 @@ function normalizeVisibleTranslation(
             ...buildDocumentTranslationViews(
                 source,
                 blocks,
-                reconciled.translations
+                reconciled.translations,
+                figureMap
             ),
             documentKey,
             sourceMarkdown: source,

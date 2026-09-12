@@ -12,14 +12,14 @@ export class MistralConversion {
     constructor({
         client,
         cache = null,
-        normalizeResult = normalizeMistralResult,
+        prepareResult = normalizeMistralResult,
         parserProfile = MISTRAL_PARSER_PROFILE_ID,
         onError = () => {},
     }) {
         if (!client?.ocr) {
             throw new TypeError('A Mistral OCR client is required');
         }
-        if (typeof normalizeResult !== 'function') {
+        if (typeof prepareResult !== 'function') {
             throw new TypeError('A Mistral result normalizer is required');
         }
         if (typeof parserProfile !== 'string' || !parserProfile) {
@@ -27,7 +27,7 @@ export class MistralConversion {
         }
         this.client = client;
         this.cache = cache;
-        this.normalizeResult = normalizeResult;
+        this.prepareResult = prepareResult;
         this.parserProfile = parserProfile;
         this.onError = onError;
     }
@@ -48,6 +48,7 @@ export class MistralConversion {
         if (!forceRefresh && cacheEnabled && key && this.cache) {
             try {
                 const cached = await this.cache.get(key);
+                throwIfAborted(signal);
                 if (cached) {
                     onProgress?.(100);
                     return {
@@ -58,6 +59,7 @@ export class MistralConversion {
                 }
             }
             catch (error) {
+                throwIfAborted(signal);
                 this.#reportError(error);
                 warnings.push(CACHE_READ_WARNING);
             }
@@ -68,24 +70,29 @@ export class MistralConversion {
             apiKey,
             fileName,
             fileData,
-            onProgress,
+            onProgress: progress => onProgress?.(Math.min(96, progress)),
             signal,
         });
         throwIfAborted(signal);
         const normalized = withIdentity(
-            await this.normalizeResult(raw),
+            await this.prepareResult(raw, { fileData, signal, onProgress }),
             this.parserProfile
         );
+        throwIfAborted(signal);
 
         if (this.cache && cacheEnabled && key) {
             try {
-                await this.cache.put(key, normalized);
+                await this.cache.put(key, normalized, { signal });
             }
             catch (error) {
+                throwIfAborted(signal);
                 this.#reportError(error);
                 warnings.push(CACHE_WRITE_WARNING);
             }
         }
+
+        throwIfAborted(signal);
+        onProgress?.(100);
 
         return {
             result: normalized,

@@ -1062,7 +1062,7 @@ function rangeContainsLine(range, line) {
     return line.from >= range.from && line.to <= range.to;
 }
 
-function unescapeImageDescription(value) {
+export function unescapeImageDescription(value) {
     return String(value).replace(/\\([\\\[\]])/g, '$1');
 }
 
@@ -1082,7 +1082,7 @@ function markdownFence(line) {
     };
 }
 
-function escapeImageDescription(value) {
+export function escapeImageDescription(value) {
     return String(value)
         .replace(/\\/g, '\\\\')
         .replace(/\[/g, '\\[')

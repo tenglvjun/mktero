@@ -16,6 +16,7 @@ import {
     markdownAnnotationRangeMatchesSource,
 } from '../core/markdown-local-annotations.js';
 import { resolvePDFPageIndexHint } from '../core/markdown-source-map.js';
+import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     AI_TARGET_LANGUAGES,
     isSupportedAITargetLanguage,
@@ -325,6 +326,9 @@ class MarkdownTabView {
         this.actionStatusTimer = null;
         this.warningToastSignature = null;
         this.warningToastTimer = null;
+        this.shownFigureWarningKey = null;
+        this.warningToastFigureKey = null;
+        this.warningToastOrdinaryMessage = '';
         this.correctionUndoTimer = null;
         this.correctionUndoBlockID = null;
         this.navigationBackAvailable = false;
@@ -534,6 +538,13 @@ class MarkdownTabView {
                 ? [model.translationError]
                 : []),
         ], {
+            figureWarning: model.status === 'ready' && model.figureMap?.preserved?.length
+                ? {
+                    key: `${model.sourceItemID ?? model.itemID}:${model.cacheKey || model.sourceHash || model.figureMap?.markdownHash || ''}`,
+                    message: this.t(model.figureMap.preserved.some(entry => entry.reason === 'resource-limit')
+                        ? 'figure.restoreIncomplete' : 'figure.restorePartial',
+                    { count: model.figureMap.preserved.length }),
+                } : null,
             persistent: Boolean(
                 model.warningAction
                 || model.translationError && model.translationStatus !== 'partial'
@@ -625,6 +636,11 @@ class MarkdownTabView {
                 : comparisonView
                     ? model.comparisonMarkdown || ''
                     : model.markdown || '';
+            const figureViews = analyzeDocumentFigures(markdown, {
+                figureMap: model.figureMap,
+                viewRanges: model.translationBlockRanges,
+                viewKind: translatedView ? 'translation' : comparisonView ? 'comparison' : 'original',
+            });
             const documentChanged = this.renderedRenderMode !== 'markdown'
                 || this.renderedMarkdown !== markdown;
             const previousTranslationView = this.renderedTranslationView;
@@ -686,6 +702,7 @@ class MarkdownTabView {
                 markdown,
                 annotationOverlay,
                 sourceMap,
+                figureViews,
                 chromeRanges: editorChromeRanges,
                 sourceActionRanges: translatedView
                     ? []
@@ -752,7 +769,10 @@ class MarkdownTabView {
                 comparisonView ? model.markdown || '' : markdown,
                 comparisonView ? model.comparisonSourceRanges : null,
                 translatedView ? [] : sourceChromeRanges,
-                translatedView && !comparisonView ? [] : model.pdfOutline
+                translatedView && !comparisonView ? [] : model.pdfOutline,
+                comparisonView
+                    ? analyzeDocumentFigures(model.markdown, { figureMap: model.figureMap })
+                    : figureViews
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
@@ -3858,6 +3878,8 @@ class MarkdownTabView {
             this.warningToastTimer = null;
         }
         this.warningToastSignature = null;
+        this.warningToastFigureKey = null;
+        this.warningToastOrdinaryMessage = '';
         if (!this.elements?.warning) return;
         this.elements.warning.hidden = true;
         this.elements.warningMessage.textContent = '';
@@ -4979,10 +5001,17 @@ class MarkdownTabView {
             || Boolean(this.documentActionBusy);
     }
 
-    syncWarningToast(warnings, { persistent = false } = {}) {
-        const message = Array.isArray(warnings)
+    syncWarningToast(warnings, { persistent = false, figureWarning = null } = {}) {
+        const ordinaryMessage = Array.isArray(warnings)
             ? warnings.filter(Boolean).join(' ')
             : '';
+        const includeFigureWarning = figureWarning && (
+            figureWarning.key !== this.shownFigureWarningKey
+            || this.warningToastFigureKey === figureWarning.key
+                && this.warningToastOrdinaryMessage === ordinaryMessage
+        );
+        const message = [ordinaryMessage, includeFigureWarning ? figureWarning.message : '']
+            .filter(Boolean).join(' ');
         if (!message) {
             this.clearWarningToast();
             return;
@@ -4991,6 +5020,9 @@ class MarkdownTabView {
         if (signature === this.warningToastSignature) return;
 
         this.clearWarningToast();
+        this.warningToastOrdinaryMessage = ordinaryMessage;
+        this.warningToastFigureKey = includeFigureWarning ? figureWarning.key : null;
+        if (includeFigureWarning) this.shownFigureWarningKey = figureWarning.key;
         this.warningToastSignature = signature;
         this.elements.warningMessage.textContent = message;
         this.elements.warning.hidden = false;
@@ -5341,7 +5373,8 @@ class MarkdownTabView {
         markdown,
         sourceRanges = null,
         chromeRanges = [],
-        pdfOutline = []
+        pdfOutline = [],
+        figureViews = null
     ) {
         this.outlineMarkdown = String(markdown || '');
         this.outlineSourceRanges = sourceRanges;
@@ -5349,6 +5382,7 @@ class MarkdownTabView {
             ? chromeRanges
             : [];
         this.outlinePdfOutline = Array.isArray(pdfOutline) ? pdfOutline : [];
+        this.outlineFigureViews = figureViews;
         this.renderOutlineList();
     }
 
@@ -5423,7 +5457,8 @@ class MarkdownTabView {
     outlineAssetItems() {
         return extractMarkdownAssetOutline(
             this.outlineMarkdown,
-            this.outlineChromeRanges
+            this.outlineChromeRanges,
+            { figureViews: this.outlineFigureViews }
         ).map(asset => ({
             text: asset.text,
             offset: mapSourceOffsetToComparison(
@@ -5431,6 +5466,7 @@ class MarkdownTabView {
                 this.outlineSourceRanges
             ),
             type: asset.type,
+            sourceId: asset.sourceId,
             imageSource: asset.imageSource || '',
             tablePreviewSource: asset.tablePreviewSource || '',
         }));

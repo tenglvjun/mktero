@@ -4,6 +4,7 @@ import {
     parseAcademicFigureCaption,
 } from '../markdown/markdown-figures.js';
 import { normalizeFigureLayouts } from '../markdown/figure-layout-normalizer.js';
+import { normalizeOutsideRestoredFigures } from '../figures/figure-normalization.js';
 import { isNumericCitationContent } from '../markdown/text-normalization.js';
 
 const MARKDOWN_PARSER = markdownParser.configure(GFM);
@@ -23,6 +24,8 @@ const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 export function normalizeMistralMarkdown(markdown, {
     tables = null,
     onMissingTable = null,
+    normalizeCaptions = true,
+    figureBlocks = [],
 } = {}) {
     if (typeof markdown !== 'string' || !markdown) return markdown;
 
@@ -32,13 +35,15 @@ export function normalizeMistralMarkdown(markdown, {
         tables,
         onMissingTable
     );
-    return normalizeMistralFigureCaptions(withTables);
+    return normalizeCaptions
+        ? normalizeOutsideRestoredFigures(withTables, figureBlocks, normalizeMistralFigureCaptions) : withTables;
 }
 
-export function normalizeMistralFigureLayouts(markdown, imageBlocks = []) {
-    return normalizeFigureLayouts(markdown, imageBlocks, {
-        allowFallback: true,
-    });
+export function normalizeMistralFigureLayouts(markdown, imageBlocks = [], options = {}) {
+    return normalizeOutsideRestoredFigures(markdown, imageBlocks, source => normalizeFigureLayouts(source,
+        imageBlocks.filter(block => !block.figureId), {
+        allowFallback: Boolean(options.allowFallback),
+    }));
 }
 
 function nextNearbyLineIsImage(lines, index) {

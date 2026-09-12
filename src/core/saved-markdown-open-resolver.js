@@ -36,6 +36,7 @@ export class SavedMarkdownOpenResolver {
                 sourceMap: Array.isArray(cached.sourceMap)
                     ? cached.sourceMap
                     : [],
+                figureMap: cached.figureMap || saved.figureMap || null,
                 cacheHit: true,
                 parserProfile: saved.manifest.parserProfile,
             });
@@ -49,6 +50,7 @@ export class SavedMarkdownOpenResolver {
                 assets: saved.assets,
                 assetBasePath: saved.manifest.assetBasePath,
                 sourceMap: saved.sourceMap,
+                figureMap: saved.figureMap || null,
                 cacheHit: false,
                 parserProfile: saved.manifest.parserProfile,
             });
@@ -66,6 +68,7 @@ export class SavedMarkdownOpenResolver {
                 assets: [],
                 assetBasePath: '',
                 sourceMap: [],
+                figureMap: null,
                 cacheHit: false,
                 cacheKey: saved.manifest.cacheKey,
                 parserProfile: saved.manifest.parserProfile,
@@ -133,6 +136,7 @@ function createMarkdownDocument({
     assets,
     assetBasePath,
     sourceMap,
+    figureMap,
     cacheHit,
     parserProfile,
 }) {
@@ -147,6 +151,7 @@ function createMarkdownDocument({
         assets,
         assetBasePath,
         sourceMap: Array.isArray(sourceMap) ? sourceMap : [],
+        figureMap: figureMap || null,
         cacheHit,
         cacheKey: saved.manifest.cacheKey,
         parserProfile: parserProfile || saved.manifest.parserProfile,

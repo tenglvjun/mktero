@@ -1,4 +1,5 @@
 import { MISTRAL_PARSER_PROFILE_ID } from '../mistral/parser-profile.js';
+import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 
 export class MistralConfigurationError extends Error {
     constructor() {
@@ -87,11 +88,30 @@ export class MistralDocumentExtractor {
         );
 
         if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
-            const revision = await this.readRevision({
+            let revisionKey = cacheKey;
+            let revisionProfile = this.parserProfile;
+            let revision = await this.readRevision({
                 itemID,
                 cacheKey,
                 signal,
             });
+            throwIfAborted(signal);
+            if (!revision && this.createCacheKey) {
+                try {
+                    const legacyKey = await this.createCacheKey(fileData, { parserProfile: LEGACY_FIGURE_PROFILES.mistral });
+                    if (legacyKey && legacyKey !== cacheKey) {
+                        revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
+                        if (revision) {
+                            revisionKey = legacyKey;
+                            revisionProfile = LEGACY_FIGURE_PROFILES.mistral;
+                        }
+                    }
+                }
+                catch (error) {
+                    throwIfAborted(signal);
+                    this.#reportCacheError(error);
+                }
+            }
             throwIfAborted(signal);
             if (revision) {
                 onProgress?.(100);
@@ -103,8 +123,8 @@ export class MistralDocumentExtractor {
                     },
                     true,
                     warnings,
-                    cacheKey,
-                    this.parserProfile,
+                    revisionKey,
+                    revisionProfile,
                     sourceHash,
                 );
             }
@@ -198,6 +218,7 @@ function createResult(
         extractedPages: parsedResult.extractedPages,
         totalPages: parsedResult.totalPages,
         sourceMap: parsedResult.sourceMap,
+        ...(parsedResult.figureMap ? { figureMap: parsedResult.figureMap } : {}),
         warnings,
         cacheHit,
         resumedTask: false,

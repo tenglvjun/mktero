@@ -1,5 +1,6 @@
 import { prepareMinerUResult } from '../mineru/mineru-result.js';
 import { MINERU_PARSER_PROFILE_ID } from '../mineru/parser-profile.js';
+import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 
 export class MinerUConfigurationError extends Error {
     constructor() {
@@ -66,7 +67,7 @@ export class MinerUDocumentExtractor {
         let sourceHash = null;
         if (this.createCacheKey) {
             try {
-                cacheKey = await this.createCacheKey(fileData);
+                cacheKey = await this.createCacheKey(fileData, { parserProfile: MINERU_PARSER_PROFILE_ID });
             }
             catch (error) {
                 this.#reportCacheError(error);
@@ -79,11 +80,30 @@ export class MinerUDocumentExtractor {
             error => this.#reportCacheError(error)
         );
         if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
-            const revision = await this.readRevision({
+            let revisionKey = cacheKey;
+            let revisionProfile = MINERU_PARSER_PROFILE_ID;
+            let revision = await this.readRevision({
                 itemID,
                 cacheKey,
                 signal,
             });
+            throwIfAborted(signal);
+            if (!revision && this.createCacheKey) {
+                try {
+                    const legacyKey = await this.createCacheKey(fileData, { parserProfile: LEGACY_FIGURE_PROFILES.mineru });
+                    if (legacyKey && legacyKey !== cacheKey) {
+                        revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
+                        if (revision) {
+                            revisionKey = legacyKey;
+                            revisionProfile = LEGACY_FIGURE_PROFILES.mineru;
+                        }
+                    }
+                }
+                catch (error) {
+                    throwIfAborted(signal);
+                    this.#reportCacheError(error);
+                }
+            }
             throwIfAborted(signal);
             if (revision) {
                 onProgress?.(100);
@@ -96,9 +116,10 @@ export class MinerUDocumentExtractor {
                     result,
                     true,
                     warnings,
-                    cacheKey,
+                    revisionKey,
                     false,
-                    sourceHash
+                    sourceHash,
+                    revisionProfile
                 );
             }
         }
@@ -174,12 +195,13 @@ function createResult(
     warnings = [],
     cacheKey = null,
     resumedTask = false,
-    sourceHash = null
+    sourceHash = null,
+    parserProfile = MINERU_PARSER_PROFILE_ID
 ) {
     const extracted = {
         kind: 'markdown',
         provider: 'mineru',
-        parserProfile: MINERU_PARSER_PROFILE_ID,
+        parserProfile,
         title,
         markdown: parsedResult.markdown,
         assets: parsedResult.assets || [],
@@ -187,6 +209,7 @@ function createResult(
         extractedPages: parsedResult.extractedPages,
         totalPages: parsedResult.totalPages,
         sourceMap: parsedResult.sourceMap,
+        ...(parsedResult.figureMap ? { figureMap: parsedResult.figureMap } : {}),
         warnings,
         cacheHit,
         resumedTask,

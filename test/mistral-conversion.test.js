@@ -24,7 +24,7 @@ test('returns a cached Mistral result without an OCR request', async () => {
             },
             put: async () => assert.fail('cache writes are not expected on a hit'),
         },
-        normalizeResult: value => value,
+        prepareResult: value => value,
     });
 
     const result = await conversion.convert({
@@ -59,7 +59,7 @@ test('normalizes and caches a fresh Mistral result', async () => {
             get: async () => null,
             put: async (key, value) => { cached = { key, value }; },
         },
-        normalizeResult: value => ({
+        prepareResult: value => ({
             markdown: value.pages[0].markdown,
             assets: [],
             sourceMap: [],
@@ -88,7 +88,7 @@ test('normalizes and caches a fresh Mistral result', async () => {
     assert.equal(calls[0].apiKey, 'mistral-secret');
     assert.equal(calls[0].fileName, 'paper.pdf');
     assert.equal(calls[0].signal, signal);
-    assert.equal(calls[0].onProgress, onProgress);
+    assert.equal(typeof calls[0].onProgress, 'function');
 });
 
 test('does not read or write cache when disabled or forced', async () => {
@@ -106,7 +106,7 @@ test('does not read or write cache when disabled or forced', async () => {
             get: async () => { reads++; return { markdown: '# Old' }; },
             put: async () => { writes++; },
         },
-        normalizeResult: value => ({ markdown: value.pages[0].markdown }),
+        prepareResult: value => ({ markdown: value.pages[0].markdown }),
     });
 
     await conversion.convert({
@@ -146,7 +146,7 @@ test('reports cache read and write failures without failing OCR', async () => {
             },
             put: async () => { throw writeError; },
         },
-        normalizeResult: value => ({ markdown: value.pages[0].markdown }),
+        prepareResult: value => ({ markdown: value.pages[0].markdown }),
         onError: error => reported.push(error),
     });
 
@@ -176,7 +176,7 @@ test('propagates caller cancellation before starting OCR', async () => {
                 return { pages: [{ index: 0, markdown: '# Never' }] };
             },
         },
-        normalizeResult: value => value,
+        prepareResult: value => value,
     });
     const controller = new AbortController();
     controller.abort();

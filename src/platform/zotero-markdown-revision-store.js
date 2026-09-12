@@ -1,7 +1,12 @@
+import { serializeFigureMap, parseFigureMapJSON } from '../figures/figure-map-serialization.js';
+import { FIGURE_LIMITS } from '../figures/figure-limits.js';
+import { sha256Hex } from '../core/sha256.js';
+
 const STORE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'metadata.json';
 const MARKDOWN_FILE = 'base.md';
 const SOURCE_MAP_FILE = 'source-map.json';
+const FIGURE_MAP_FILE = 'figure-map.json';
 const CACHE_KEY_PATTERN = /^[a-f0-9]{64}$/;
 const CORRECTIONS_FILE_PATTERN = /^corrections-\d+-\d+\.json$/;
 const MAX_MARKDOWN_BYTES = 16 * 1024 * 1024;
@@ -31,6 +36,7 @@ export class ZoteroMarkdownRevisionStore {
         ioUtils,
         pathUtils,
         now = Date.now,
+        hash = sha256Hex,
     }) {
         if (!rootPath) throw new TypeError('A Markdown revision root is required');
         if (!ioUtils) throw new TypeError('An IOUtils adapter is required');
@@ -39,6 +45,7 @@ export class ZoteroMarkdownRevisionStore {
         this.io = ioUtils;
         this.path = pathUtils;
         this.now = now;
+        this.hash = hash;
         this.writeSequence = 0;
         this.operationTail = Promise.resolve();
     }
@@ -109,6 +116,24 @@ export class ZoteroMarkdownRevisionStore {
             || !Array.isArray(correctionData?.corrections)) {
             throw new Error('Invalid Markdown revision data');
         }
+        let figureMap;
+        if (validSize(metadata.figureMapBytes, FIGURE_LIMITS.maxMapBytes) && metadata.figureMapBytes > 0) {
+            try {
+                const json = await this.#readSizedUTF8(this.path.join(entryPath, FIGURE_MAP_FILE),
+                    metadata.figureMapBytes, FIGURE_LIMITS.maxMapBytes, 'Figure map');
+                if (metadata.figureMapHash !== undefined
+                    && (!CACHE_KEY_PATTERN.test(metadata.figureMapHash)
+                        || await this.hash(new TextEncoder().encode(json)) !== metadata.figureMapHash)) {
+                    throw new Error('Figure map hash is invalid');
+                }
+                figureMap = await parseFigureMapJSON(json, {
+                    markdown, assets, assetBasePath: metadata.assetBasePath,
+                }, { hash: this.hash });
+            }
+            catch {
+                // Optional Figure metadata cannot hide the corrected document.
+            }
+        }
         return {
             schemaVersion: STORE_SCHEMA_VERSION,
             base: {
@@ -116,6 +141,7 @@ export class ZoteroMarkdownRevisionStore {
                 cacheKey,
                 markdown,
                 sourceMap,
+                ...(figureMap ? { figureMap } : {}),
                 assets,
                 assetBasePath: metadata.assetBasePath,
                 extractedPages: metadata.extractedPages,
@@ -137,32 +163,58 @@ export class ZoteroMarkdownRevisionStore {
         const metadataPath = this.path.join(entryPath, METADATA_FILE);
         const previous = await this.#readOptionalMetadata(metadataPath, cacheKey);
         const serialized = serializeRevision(revision);
-        if (!previous) {
-            await this.#writeImmutableBase(entryPath, assetsPath, serialized);
+        if (revision.base.figureMap) {
+            const figureMap = await serializeFigureMap(revision.base.figureMap, revision.base, { hash: this.hash });
+            serialized.figureMapJSON = figureMap.json;
+            serialized.metadata.figureMapBytes = figureMap.bytes;
+            serialized.metadata.figureMapHash = await this.hash(new TextEncoder().encode(figureMap.json));
+            if (previous?.figureMapBytes && previous.figureMapHash === undefined) {
+                const json = await this.#readSizedUTF8(this.path.join(entryPath, FIGURE_MAP_FILE),
+                    previous.figureMapBytes, FIGURE_LIMITS.maxMapBytes, 'Figure map');
+                previous.figureMapHash = await this.hash(new TextEncoder().encode(json));
+            }
         }
-        else {
-            validateImmutableBase(previous, serialized.metadata);
+        else if (previous) {
+            for (const key of ['figureMapBytes', 'figureMapHash']) {
+                if (Object.hasOwn(previous, key)) serialized.metadata[key] = previous[key];
+            }
         }
+        if (previous) validateImmutableBase(previous, serialized.metadata);
 
-        const correctionsFile = [
+        let correctionsFile;
+        do {
+            correctionsFile = [
             'corrections-',
             Math.max(0, Math.trunc(this.now())),
             '-',
             this.writeSequence++,
             '.json',
-        ].join('');
+            ].join('');
+        } while (await this.io.exists(this.path.join(entryPath, correctionsFile)));
         const correctionsPath = this.path.join(entryPath, correctionsFile);
-        await this.io.writeUTF8(correctionsPath, serialized.correctionsJSON, {
-            tmpPath: `${correctionsPath}.tmp`,
-        });
         const metadata = {
             ...serialized.metadata,
             correctionsFile,
             correctionsBytes: serialized.correctionsBytes,
         };
-        await this.io.writeUTF8(metadataPath, JSON.stringify(metadata), {
-            tmpPath: `${metadataPath}.tmp`,
-        });
+        const created = [];
+        try {
+            if (!previous) await this.#writeImmutableBase(entryPath, assetsPath, serialized, created);
+            created.push(correctionsPath, `${correctionsPath}.tmp`, `${metadataPath}.tmp`);
+            await this.io.writeUTF8(correctionsPath, serialized.correctionsJSON, {
+                tmpPath: `${correctionsPath}.tmp`,
+            });
+            await this.io.writeUTF8(metadataPath, JSON.stringify(metadata), {
+                tmpPath: `${metadataPath}.tmp`,
+            });
+        }
+        catch (error) {
+            await Promise.allSettled(created.map(filePath => this.io.remove(filePath, {
+                recursive: false,
+                ignoreAbsent: true,
+            })));
+            throw error;
+        }
         if (previous?.correctionsFile
             && previous.correctionsFile !== correctionsFile) {
             await this.io.remove(
@@ -172,21 +224,25 @@ export class ZoteroMarkdownRevisionStore {
         }
     }
 
-    async #writeImmutableBase(entryPath, assetsPath, serialized) {
-        const markdownPath = this.path.join(entryPath, MARKDOWN_FILE);
-        const sourceMapPath = this.path.join(entryPath, SOURCE_MAP_FILE);
-        await this.io.writeUTF8(markdownPath, serialized.markdown, {
-            tmpPath: `${markdownPath}.tmp`,
-        });
-        await this.io.writeUTF8(sourceMapPath, serialized.sourceMapJSON, {
-            tmpPath: `${sourceMapPath}.tmp`,
-        });
-        await Promise.all(serialized.assets.map(async asset => {
-            const assetPath = this.path.join(assetsPath, asset.file);
-            await this.io.write(assetPath, asset.data, {
-                tmpPath: `${assetPath}.tmp`,
-            });
-        }));
+    async #writeImmutableBase(entryPath, assetsPath, serialized, created) {
+        const files = [
+            [this.path.join(entryPath, MARKDOWN_FILE), serialized.markdown],
+            [this.path.join(entryPath, SOURCE_MAP_FILE), serialized.sourceMapJSON],
+        ];
+        if (serialized.figureMapJSON) {
+            files.push([this.path.join(entryPath, FIGURE_MAP_FILE), serialized.figureMapJSON]);
+        }
+        for (const asset of serialized.assets) {
+            files.push([this.path.join(assetsPath, asset.file), asset.data]);
+        }
+        for (const [filePath, data] of files) {
+            if (await this.io.exists(filePath)) {
+                throw new Error('An incomplete Markdown revision base already exists');
+            }
+            created.push(filePath, `${filePath}.tmp`);
+            const write = typeof data === 'string' ? 'writeUTF8' : 'write';
+            await this.io[write](filePath, data, { tmpPath: `${filePath}.tmp` });
+        }
     }
 
     async #readOptionalMetadata(metadataPath, cacheKey) {
@@ -353,6 +409,8 @@ function validateImmutableBase(previous, next) {
     const fields = [
         'markdownBytes',
         'sourceMapBytes',
+        'figureMapBytes',
+        'figureMapHash',
         'assetBasePath',
         'extractedPages',
         'totalPages',

@@ -1,22 +1,23 @@
 import { normalizeChromeRanges } from './chrome-ranges.js';
+import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
-    findAcademicFigures,
     findAcademicTableGroups,
 } from './markdown-figures.js';
 
-export function extractMarkdownAssetOutline(markdown, chromeRanges = []) {
+export function extractMarkdownAssetOutline(markdown, chromeRanges = [], { figureViews = null } = {}) {
     const source = String(markdown || '');
     const hidden = normalizeChromeRanges(chromeRanges, source.length);
     const items = [];
-    for (const group of findAcademicFigures(source)) {
+    for (const group of figureViews || analyzeDocumentFigures(source)) {
         const text = assetCaptionText(group.caption);
         if (!text || isHiddenOffset(hidden, group.from)) continue;
-        const imageSource = firstLocalImageSource(group);
+        const imageSource = group.assetPath || firstLocalImageSource(group);
         items.push({
             type: 'figure',
             text,
             offset: group.from,
             ...(imageSource ? { imageSource } : {}),
+            ...(group.sourceId ? { sourceId: group.sourceId, location: group.location } : {}),
         });
     }
     for (const group of findAcademicTableGroups(source)) {
