@@ -2477,7 +2477,7 @@ test('keeps actionable warning toasts available for settings recovery', () => {
     }
 });
 
-test('shows one localized incomplete figure warning without counting resource-limited candidates', () => {
+test('keeps preserved figures silent while showing other warning toasts', () => {
     const timers = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -2503,21 +2503,21 @@ test('shows one localized incomplete figure warning without counting resource-li
     });
     try {
         const warning = shadow.querySelector('#mktero-warning');
-        assert.equal(warning.hidden, false);
-        assert.match(shadow.querySelector('#mktero-warning .message-body').textContent,
-            /Original images and text were kept for some figures/);
-        assert.equal(timers.length, 1);
-        view.render(view.model);
-        assert.equal(warning.hidden, false);
-        assert.equal(timers.length, 1);
-        timers[0].callback();
+        const message = shadow.querySelector('#mktero-warning .message-body');
+        assert.equal(warning.hidden, true);
+        assert.equal(message.textContent, '');
+        assert.equal(timers.length, 0);
         view.render(view.model);
         assert.equal(warning.hidden, true);
+        assert.equal(timers.length, 0);
         view.render({ ...view.model, warnings: ['Other warning.'] });
-        assert.equal(warning.textContent.includes('some figures'), false);
+        assert.equal(warning.hidden, false);
+        assert.equal(message.textContent, 'Other warning.');
+        assert.equal(timers.length, 1);
         view.render({ ...view.model, warnings: [] });
         assert.equal(warning.hidden, true);
-        assert.equal(timers.length, 2);
+        assert.equal(message.textContent, '');
+        assert.equal(timers.length, 1);
     }
     finally {
         view.destroy();

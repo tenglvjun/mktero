@@ -16,7 +16,7 @@ export const MINERU_FIGURE_LAYOUT_OPTIONS = Object.freeze({
     unit: 'pdf-user-unit',
 });
 
-export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+const PREVIOUS_SOURCE_MAP_OPTIONS = Object.freeze({
     textMatching: 'exact-then-academic-v2',
     figurePanels: 'same-page-horizontal-or-labeled-vertical-ab-v2',
     figureLayouts: 'same-page-image-group-layout-v1',
@@ -27,6 +27,17 @@ export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
     chrome: 'page-edge-repeated-v1',
     figureStructure: FIGURE_PIPELINE_PROFILE,
     figureLayout: MINERU_FIGURE_LAYOUT_OPTIONS,
+});
+
+export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...PREVIOUS_SOURCE_MAP_OPTIONS,
+    figureLabelRecovery: 'verified-pdf-image-v1',
+});
+
+export const MINERU_PREVIOUS_PARSER_PROFILE_ID = JSON.stringify({
+    batch: MINERU_BATCH_OPTIONS,
+    file: MINERU_FILE_OPTIONS,
+    sourceMap: PREVIOUS_SOURCE_MAP_OPTIONS,
 });
 
 export const MINERU_PARSER_PROFILE_ID = JSON.stringify({

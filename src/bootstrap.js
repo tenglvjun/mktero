@@ -55,8 +55,8 @@ import {
 import {
     createSavedMarkdownOpenResolver,
 } from './core/saved-markdown-open-resolver.js';
-import { MINERU_PARSER_PROFILE_ID } from './mineru/parser-profile.js';
-import { MISTRAL_PARSER_PROFILE_ID } from './mistral/parser-profile.js';
+import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_ID } from './mineru/parser-profile.js';
+import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_ID } from './mistral/parser-profile.js';
 import {
     createZoteroBlobFactory,
     createZoteroSavedMarkdownStore,
@@ -102,6 +102,7 @@ import { decodeMinerUFigureInput } from './mineru/figure-layout-adapter.js';
 import { prepareMinerUResult } from './mineru/mineru-result.js';
 import { decodeMistralResult, prepareMistralResult } from './mistral/mistral-result.js';
 import { FigureRestorationService } from './figures/figure-restoration-service.js';
+import { FigureLabelRecoveryService } from './figures/figure-label-recovery.js';
 import { finalizeRestoredDocument } from './figures/figure-finalization.js';
 import { createPDFFigureRegionRenderer } from './pdf/pdfjs-figure-region.js';
 import { createZoteroFigureCanvasEnvironment } from './platform/zotero-figure-canvas.js';
@@ -414,6 +415,13 @@ globalThis.startup = async function startup({ id, rootURI }) {
         hash: sha256Hex,
         createAbortController: createZoteroAbortController,
     });
+    const figureLabelRecovery = new FigureLabelRecoveryService({
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, {
+            ...options, ...createZoteroFigureCanvasEnvironment(Zotero),
+        }),
+        hash: sha256Hex,
+        createAbortController: createZoteroAbortController,
+    });
     const prepareWithFigures = (decode, prepare) => async (raw, context) => {
         const input = decode(raw);
         const draft = await figureRestoration.restore(input, context);
@@ -428,6 +436,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pendingTasks,
         cache,
         prepareResult: prepareWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
+        recoverFigures: (result, context) => figureLabelRecovery.recover(result, context),
+        createPreviousCacheKey: fileData => createMarkdownCacheKey(fileData, {
+            parserProfile: MINERU_PREVIOUS_PARSER_PROFILE_ID,
+        }),
         onError: error => Zotero.logError?.(error),
     });
     const mineruExtractor = new MinerUDocumentExtractor({
@@ -451,6 +463,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }),
         cache,
         prepareResult: prepareWithFigures(decodeMistralResult, prepareMistralResult),
+        recoverFigures: (result, context) => figureLabelRecovery.recover(result, context),
+        createPreviousCacheKey: fileData => createMarkdownCacheKey(fileData, {
+            parserProfile: MISTRAL_PREVIOUS_PARSER_PROFILE_ID,
+        }),
         onError: error => Zotero.logError?.(error),
     });
     const mistralExtractor = new MistralDocumentExtractor({

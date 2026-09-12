@@ -4,6 +4,7 @@ import {
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { validateFigureCrop } from '../figures/figure-model.js';
+import { inspectPDFFigureImage } from './pdfjs-figure-image.js';
 import {
     createFigureAbortScope, throwIfFigureAborted, waitForFigureOperation,
 } from '../figures/figure-async.js';
@@ -14,6 +15,7 @@ export function createPDFFigureRegionRenderer({
     loadDocument = getDocument,
     createCanvas,
     encodePNG,
+    decodeImage = null,
     ownerDocument: defaultOwnerDocument = null,
     workerSrc = '',
     cMapUrl = '',
@@ -36,7 +38,8 @@ export function createPDFFigureRegionRenderer({
     return {
         async open(fileData, { signal, ownerDocument = defaultOwnerDocument,
             createCanvas: sessionCreateCanvas = createCanvas,
-            encodePNG: sessionEncodePNG = encodePNG } = {}) {
+            encodePNG: sessionEncodePNG = encodePNG,
+            decodeImage: sessionDecodeImage = decodeImage } = {}) {
             if (!active) throw new Error('Figure renderer is closed');
             throwIfFigureAborted(signal);
             if (!ArrayBuffer.isView(fileData) || fileData.BYTES_PER_ELEMENT !== 1
@@ -67,6 +70,33 @@ export function createPDFFigureRegionRenderer({
                     finally {
                         operation.dispose();
                     }
+                },
+                recoverImageGroup(request, { signal: operationSignal } = {}) {
+                    const operation = createFigureAbortScope([scope.signal, operationSignal], {
+                        ...abortOptions, timeoutMs: limits.cropTimeoutMs,
+                    });
+                    const queued = renderQueue.then(async () => {
+                        throwIfFigureAborted(operation.signal);
+                        const page = await getPage(request.pageIndex, operation.signal);
+                        try {
+                            const geometry = pageGeometry(page, request.pageIndex);
+                            const recovered = await inspectPDFFigureImage(page, request, {
+                                createCanvas: sessionCreateCanvas, decodeImage: sessionDecodeImage,
+                                signal: operation.signal, limits,
+                            });
+                            if (!recovered) return null;
+                            const rect = cropRectangle(geometry, { bbox: recovered.bbox }, limits);
+                            return { ...recovered, crop: await renderCrop(page, rect, operation.signal) };
+                        }
+                        finally { page.cleanup?.(); }
+                    });
+                    renderQueue = queued.catch(() => {});
+                    const result = waitForFigureOperation(queued, operation.signal).finally(() => {
+                        operation.dispose();
+                        jobs.delete(result);
+                    });
+                    jobs.add(result);
+                    return result;
                 },
                 renderRegion(request, { signal: operationSignal } = {}) {
                     const operation = createFigureAbortScope([scope.signal, operationSignal], {

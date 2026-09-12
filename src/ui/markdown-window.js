@@ -326,9 +326,6 @@ class MarkdownTabView {
         this.actionStatusTimer = null;
         this.warningToastSignature = null;
         this.warningToastTimer = null;
-        this.shownFigureWarningKey = null;
-        this.warningToastFigureKey = null;
-        this.warningToastOrdinaryMessage = '';
         this.correctionUndoTimer = null;
         this.correctionUndoBlockID = null;
         this.navigationBackAvailable = false;
@@ -538,13 +535,6 @@ class MarkdownTabView {
                 ? [model.translationError]
                 : []),
         ], {
-            figureWarning: model.status === 'ready' && model.figureMap?.preserved?.length
-                ? {
-                    key: `${model.sourceItemID ?? model.itemID}:${model.cacheKey || model.sourceHash || model.figureMap?.markdownHash || ''}`,
-                    message: this.t(model.figureMap.preserved.some(entry => entry.reason === 'resource-limit')
-                        ? 'figure.restoreIncomplete' : 'figure.restorePartial',
-                    { count: model.figureMap.preserved.length }),
-                } : null,
             persistent: Boolean(
                 model.warningAction
                 || model.translationError && model.translationStatus !== 'partial'
@@ -3878,8 +3868,6 @@ class MarkdownTabView {
             this.warningToastTimer = null;
         }
         this.warningToastSignature = null;
-        this.warningToastFigureKey = null;
-        this.warningToastOrdinaryMessage = '';
         if (!this.elements?.warning) return;
         this.elements.warning.hidden = true;
         this.elements.warningMessage.textContent = '';
@@ -5001,17 +4989,10 @@ class MarkdownTabView {
             || Boolean(this.documentActionBusy);
     }
 
-    syncWarningToast(warnings, { persistent = false, figureWarning = null } = {}) {
-        const ordinaryMessage = Array.isArray(warnings)
+    syncWarningToast(warnings, { persistent = false } = {}) {
+        const message = Array.isArray(warnings)
             ? warnings.filter(Boolean).join(' ')
             : '';
-        const includeFigureWarning = figureWarning && (
-            figureWarning.key !== this.shownFigureWarningKey
-            || this.warningToastFigureKey === figureWarning.key
-                && this.warningToastOrdinaryMessage === ordinaryMessage
-        );
-        const message = [ordinaryMessage, includeFigureWarning ? figureWarning.message : '']
-            .filter(Boolean).join(' ');
         if (!message) {
             this.clearWarningToast();
             return;
@@ -5020,9 +5001,6 @@ class MarkdownTabView {
         if (signature === this.warningToastSignature) return;
 
         this.clearWarningToast();
-        this.warningToastOrdinaryMessage = ordinaryMessage;
-        this.warningToastFigureKey = includeFigureWarning ? figureWarning.key : null;
-        if (includeFigureWarning) this.shownFigureWarningKey = figureWarning.key;
         this.warningToastSignature = signature;
         this.elements.warningMessage.textContent = message;
         this.elements.warning.hidden = false;

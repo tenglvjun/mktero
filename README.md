@@ -39,10 +39,17 @@ Useful links: [Product page](https://mktero.com/) ·
   generated local PNG preserves 2x2, 4x4, missing-cell, spanning, and irregular
   arrangements. Interior OCR leaves the reading flow only after a successful
   crop; captions remain selectable, searchable, and translatable. Uncertain
-  figures retain their original images and text with a non-blocking notice.
-  MinerU restoration requires supported detailed layout metadata. Mistral's
-  coordinate origin and rotation are not independently verified yet, so its
-  current production adapter preserves the original images and OCR text.
+  figures retain their original images and text.
+  MinerU region restoration requires supported detailed layout metadata.
+  Both providers can also recover labeled panels from a single complete PDF
+  image when its bounds, a matching PDF caption, and every panel's pixels
+  agree. Independent OCR label rows such as `(A)`, `(B)`, and fullwidth
+  equivalents leave the text only after the complete image is recovered;
+  body references and labels within captions remain intact. This local pass
+  also upgrades the previous parser profile's cached results without another
+  OCR upload and leaves user corrections intact. Mistral layouts that cannot
+  be verified against a complete PDF image retain their original images and
+  OCR text because their coordinate origin and rotation remain unverified.
 - Mistral and MinerU keep publisher mastheads, repeated page headers and
   footers, and page numbers in stored Markdown. The reader hides those
   ranges, and also hides text before the `#` or `##` heading that matches

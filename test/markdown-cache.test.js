@@ -34,7 +34,7 @@ const CACHE_KEY = 'a'.repeat(64);
 const SECOND_CACHE_KEY = 'b'.repeat(64);
 
 for (const failure of ['render-failed', 'missing-geometry', 'resource-limit']) {
-    test(`reopens an all-preserved ${failure} result from disk with one figure warning`, async t => {
+    test(`reopens an all-preserved ${failure} result from disk without a figure warning`, async t => {
         const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-preserved-cache-'));
         t.after(() => rm(rootPath, { recursive: true, force: true }));
         const options = { rootPath, ioUtils: createNodeIOUtils(),
@@ -88,14 +88,12 @@ for (const failure of ['render-failed', 'missing-geometry', 'resource-limit']) {
             view.render(model);
             const shadow = view.host.shadowRoot;
             const warning = shadow.querySelector('#mktero-warning');
-            assert.equal(warning.hidden, false);
-            assert.match(warning.textContent, /Original images and text were kept/);
-            assert.equal(timers.length, 1);
-            view.render(model);
-            assert.equal(timers.length, 1);
-            timers[0]();
+            assert.equal(warning.hidden, true);
+            assert.equal(shadow.querySelector('#mktero-warning .message-body').textContent, '');
+            assert.equal(timers.length, 0);
             view.render(model);
             assert.equal(warning.hidden, true);
+            assert.equal(timers.length, 0);
         }
         finally {
             view.destroy();

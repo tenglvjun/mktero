@@ -13,6 +13,8 @@ export class MistralConversion {
         client,
         cache = null,
         prepareResult = normalizeMistralResult,
+        recoverFigures = async result => result,
+        createPreviousCacheKey = null,
         parserProfile = MISTRAL_PARSER_PROFILE_ID,
         onError = () => {},
     }) {
@@ -28,6 +30,8 @@ export class MistralConversion {
         this.client = client;
         this.cache = cache;
         this.prepareResult = prepareResult;
+        this.recoverFigures = recoverFigures;
+        this.createPreviousCacheKey = createPreviousCacheKey;
         this.parserProfile = parserProfile;
         this.onError = onError;
     }
@@ -47,12 +51,31 @@ export class MistralConversion {
 
         if (!forceRefresh && cacheEnabled && key && this.cache) {
             try {
-                const cached = await this.cache.get(key);
+                let cached = await this.cache.get(key);
+                let migrated = false;
+                if (!cached && this.createPreviousCacheKey) {
+                    const previousKey = await this.createPreviousCacheKey(fileData);
+                    throwIfAborted(signal);
+                    if (previousKey && previousKey !== key) {
+                        cached = await this.cache.get(previousKey);
+                        migrated = Boolean(cached);
+                    }
+                }
                 throwIfAborted(signal);
                 if (cached) {
+                    const result = await this.#recoverFigures(cached, { fileData, signal, onProgress });
+                    throwIfAborted(signal);
+                    if (migrated || result !== cached) {
+                        try { await this.cache.put(key, result, { signal }); }
+                        catch (error) {
+                            throwIfAborted(signal);
+                            this.#reportError(error);
+                            warnings.push(CACHE_WRITE_WARNING);
+                        }
+                    }
                     onProgress?.(100);
                     return {
-                        result: withIdentity(cached, this.parserProfile),
+                        result: withIdentity(result, this.parserProfile),
                         origin: 'cache',
                         warnings,
                     };
@@ -74,8 +97,9 @@ export class MistralConversion {
             signal,
         });
         throwIfAborted(signal);
+        const prepared = await this.prepareResult(raw, { fileData, signal, onProgress });
         const normalized = withIdentity(
-            await this.prepareResult(raw, { fileData, signal, onProgress }),
+            await this.#recoverFigures(prepared, { fileData, signal, onProgress }),
             this.parserProfile
         );
         throwIfAborted(signal);
@@ -99,6 +123,15 @@ export class MistralConversion {
             origin: 'fresh',
             warnings,
         };
+    }
+
+    async #recoverFigures(result, context) {
+        if (result.userEdited) return result;
+        try { return await this.recoverFigures(result, context); }
+        catch {
+            throwIfAborted(context.signal);
+            return result;
+        }
     }
 
     #reportError(error) {

@@ -1,4 +1,5 @@
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
+import { figureImageDimensions } from '../figures/figure-image-dimensions.js';
 import { throwIfFigureAborted, waitForFigureOperation } from '../figures/figure-async.js';
 
 const XHTML = 'http://www.w3.org/1999/xhtml';
@@ -15,6 +16,38 @@ export function createZoteroFigureCanvasEnvironment(zotero) {
             canvas.width = width;
             canvas.height = height;
             return canvas;
+        },
+        async decodeImage(asset, { signal } = {}) {
+            throwIfFigureAborted(signal);
+            const view = ownerDocument.defaultView;
+            const dimensions = figureImageDimensions(asset);
+            if (!dimensions || dimensions.width < 1 || dimensions.height < 1
+                || dimensions.width * dimensions.height > FIGURE_LIMITS.maxDecodedImagePixels
+                || asset.data.byteLength > 25 * 1024 * 1024) return null;
+            const image = new view.Image();
+            const url = view.URL.createObjectURL(new view.Blob([asset.data], { type: asset.mimeType }));
+            let closed = false;
+            const close = () => {
+                if (closed) return;
+                closed = true;
+                image.onload = image.onerror = null;
+                image.removeAttribute('src');
+                view.URL.revokeObjectURL(url);
+            };
+            try {
+                const loaded = new Promise((resolve, reject) => {
+                    image.onload = resolve;
+                    image.onerror = () => reject(new Error('Figure image decoding failed'));
+                    image.src = url;
+                });
+                await waitForFigureOperation(loaded, signal, close);
+                if (!image.naturalWidth || !image.naturalHeight
+                    || image.naturalWidth * image.naturalHeight > FIGURE_LIMITS.maxDecodedImagePixels) {
+                    throw new Error('Figure image exceeds the decoding limit');
+                }
+                return { image, width: image.naturalWidth, height: image.naturalHeight, close };
+            }
+            catch (error) { close(); throw error; }
         },
         async encodePNG(canvas, { signal } = {}) {
             throwIfFigureAborted(signal);

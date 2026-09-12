@@ -1,5 +1,5 @@
 import { prepareMinerUResult } from '../mineru/mineru-result.js';
-import { MINERU_PARSER_PROFILE_ID } from '../mineru/parser-profile.js';
+import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_ID } from '../mineru/parser-profile.js';
 import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 
 export class MinerUConfigurationError extends Error {
@@ -90,12 +90,15 @@ export class MinerUDocumentExtractor {
             throwIfAborted(signal);
             if (!revision && this.createCacheKey) {
                 try {
-                    const legacyKey = await this.createCacheKey(fileData, { parserProfile: LEGACY_FIGURE_PROFILES.mineru });
-                    if (legacyKey && legacyKey !== cacheKey) {
-                        revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
-                        if (revision) {
-                            revisionKey = legacyKey;
-                            revisionProfile = LEGACY_FIGURE_PROFILES.mineru;
+                    for (const parserProfile of [MINERU_PREVIOUS_PARSER_PROFILE_ID, LEGACY_FIGURE_PROFILES.mineru]) {
+                        const legacyKey = await this.createCacheKey(fileData, { parserProfile });
+                        if (legacyKey && legacyKey !== cacheKey) {
+                            revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
+                            if (revision) {
+                                revisionKey = legacyKey;
+                                revisionProfile = parserProfile;
+                                break;
+                            }
                         }
                     }
                 }
