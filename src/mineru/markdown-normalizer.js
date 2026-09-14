@@ -1,4 +1,7 @@
-import { normalizeMarkdownFigureCaptions } from '../markdown/markdown-figures.js';
+import {
+    normalizeMarkdownFigureCaptions,
+    normalizeMisassignedAcademicCaptions,
+} from '../markdown/markdown-figures.js';
 import { normalizeFigureLayouts } from '../markdown/figure-layout-normalizer.js';
 import { normalizeOutsideRestoredFigures } from '../figures/figure-normalization.js';
 
@@ -23,7 +26,13 @@ const MIN_PRECEDING_WORDS = 6;
 export function normalizeMinerUMarkdown(markdown, { figureBlocks = [] } = {}) {
     if (typeof markdown !== 'string') return markdown;
 
-    const withFigureCaptions = normalizeOutsideRestoredFigures(markdown, figureBlocks, normalizeMarkdownFigureCaptions);
+    const withFigureCaptions = normalizeOutsideRestoredFigures(
+        markdown,
+        figureBlocks,
+        source => normalizeMisassignedAcademicCaptions(
+            normalizeMarkdownFigureCaptions(source)
+        )
+    );
     if (!withFigureCaptions.includes('\n')) return withFigureCaptions;
 
     const parts = normalizeOCRBulletLists(withFigureCaptions).split(BLANK_LINE_SEPARATOR);

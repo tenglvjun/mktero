@@ -202,6 +202,7 @@ function renderStandaloneAcademicFigureGroup(
             imageToken,
             panelLabel: image.panelLabel || '',
             panelLabelPosition: image.panelLabelPosition || 'after',
+            panelRun: image.panelRun || '',
         } : null;
     });
     if (panels.some(panel => !panel)) return null;
@@ -215,16 +216,18 @@ function renderStandaloneAcademicFigureGroup(
             ? ' mktero-figure-group-vertical'
             : grid
                 ? ' mktero-figure-group-grid'
-            : '';
-    const renderedPanels = panels.map((panel, index) => renderFigurePanel(
-        panel,
-        resolveImageURL,
-        mathBudget,
-        resolveImageAttachmentKey,
-        target,
-        translate,
-        grid ? group.gridSpans?.[index] : null,
-        grid ? group.gridColumns : null,
+                : '';
+    const renderedPanels = clusterFigurePanelRuns(panels).map((run, index) => (
+        renderFigurePanelRun(
+            run,
+            resolveImageURL,
+            mathBudget,
+            resolveImageAttachmentKey,
+            target,
+            translate,
+            grid ? group.gridSpans?.[index] : null,
+            grid ? group.gridColumns : null,
+        )
     )).join('');
     const panelHTML = horizontal
         ? `<div class="mktero-figure-panels-horizontal">${renderedPanels}</div>`
@@ -234,10 +237,80 @@ function renderStandaloneAcademicFigureGroup(
                 + renderedPanels
                 + '</div>'
             : renderedPanels;
+    const tableHTML = (group.tablePanels || []).map(panel => (
+        renderFigureTablePanel(panel, parser, mathBudget, target)
+    )).join('');
     return `<figure class="mktero-figure mktero-figure-group${layoutClass}">`
         + panelHTML
+        + tableHTML
         + renderFigureCaption(group.caption, mathBudget, null, target)
         + '</figure>\n';
+}
+
+function clusterFigurePanelRuns(panels) {
+    const runs = [];
+    for (const panel of panels) {
+        const last = runs.at(-1);
+        if (panel.panelRun && last?.panelRun === panel.panelRun) {
+            last.panels.push(panel);
+            if (panel.panelLabel) {
+                last.panelLabel = panel.panelLabel;
+                last.panelLabelPosition = panel.panelLabelPosition || 'after';
+            }
+            continue;
+        }
+        runs.push({
+            panelRun: panel.panelRun || '',
+            panels: [panel],
+            panelLabel: panel.panelLabel || '',
+            panelLabelPosition: panel.panelLabelPosition || 'after',
+        });
+    }
+    return runs;
+}
+
+function renderFigurePanelRun(
+    run,
+    resolveImageURL,
+    mathBudget,
+    resolveImageAttachmentKey,
+    target,
+    translate,
+    gridColumnSpan = null,
+    gridColumns = null,
+) {
+    if (run.panels.length === 1) {
+        return renderFigurePanel(
+            run.panels[0],
+            resolveImageURL,
+            mathBudget,
+            resolveImageAttachmentKey,
+            target,
+            translate,
+            gridColumnSpan,
+            gridColumns,
+        );
+    }
+    const inner = run.panels.map(panel => renderImageToken(
+        panel.imageToken,
+        resolveImageURL,
+        resolveImageAttachmentKey,
+        translate,
+    )).join('');
+    const content = `<div class="mktero-figure-panels-horizontal">${inner}</div>`;
+    const before = run.panelLabelPosition === 'before';
+    const label = run.panelLabel
+        ? '<div class="mktero-figure-panel-label'
+            + (before ? ' mktero-figure-panel-label-before' : '')
+            + '">'
+            + renderCaptionMathSource(run.panelLabel, mathBudget, target)
+            + '</div>'
+        : '';
+    return `<div class="mktero-figure-panel">`
+        + (before ? label : '')
+        + content
+        + (before ? '' : label)
+        + '</div>';
 }
 
 function renderFigurePanel(
@@ -273,6 +346,34 @@ function renderFigurePanel(
         + image
         + (before ? '' : label)
         + '</div>';
+}
+
+function renderFigureTablePanel(panel, parser, mathBudget, target) {
+    const tables = (panel.sources || [])
+        .map(source => renderFigureTableSource(source, parser, mathBudget, target))
+        .filter(Boolean)
+        .join('');
+    if (!tables) return '';
+    const before = panel.panelLabelPosition !== 'after';
+    const label = panel.panelLabel
+        ? '<div class="mktero-figure-panel-label'
+            + (before ? ' mktero-figure-panel-label-before' : '')
+            + '">'
+            + renderCaptionMathSource(panel.panelLabel, mathBudget, target)
+            + '</div>'
+        : '';
+    return `<div class="mktero-figure-panel mktero-figure-table-panel">`
+        + (before ? label : '')
+        + tables
+        + (before ? '' : label)
+        + '</div>';
+}
+
+function renderFigureTableSource(source, parser, mathBudget, target) {
+    const html = sanitizeRawHTMLTable(String(source || '').trim(), mathBudget, target);
+    if (html) return html;
+    const rendered = renderParsedMarkdown(String(source || '').trim(), parser);
+    return /<table\b/i.test(rendered) ? rendered : '';
 }
 
 function renderImageToken(
