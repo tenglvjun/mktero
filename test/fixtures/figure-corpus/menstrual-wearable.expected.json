@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "id": "menstrual-wearable",
+  "archiveSha256": "1669517fe1518e77c94e3ff3e6e181607032fb515d16aae1207dc9cde28ccc2a",
+  "pages": 10,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 1,
+      "label": "Fig. 1 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        82,
+        59,
+        481,
+        180
+      ]
+    },
+    {
+      "pageIndex": 2,
+      "label": "Fig. 2 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        95,
+        59,
+        911,
+        568
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Fig. 3 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        95,
+        59,
+        911,
+        568
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Fig. 4 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        95,
+        59,
+        911,
+        568
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Fig. 5 |",
+      "panels": 4,
+      "captions": 1,
+      "owned": 4,
+      "bbox": [
+        94,
+        59,
+        910,
+        568
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Fig. 6 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        354,
+        55,
+        945,
+        203
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Fig. 7 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        353,
+        245,
+        945,
+        393
+      ]
+    }
+  ],
+  "preserved": []
+}

@@ -135,6 +135,10 @@ preference values as untrusted input.
   cases. Pair Zotero integration changes with cleanup and multi-window cases.
 - Keep tests deterministic: inject clocks, delays, fetch, file adapters, and
   DOM implementations instead of depending on the host machine.
+- The figure corpus expectations in `test/fixtures/figure-corpus/` are checked
+  by `scripts/figure-corpus-check.mjs` against local MinerU archives named by
+  `MKTERO_FIGURE_CORPUS`. After reviewing a real-data change, refresh them with
+  `--update`; never commit the archives themselves.
 
 ## Cross-file change checklist
 
