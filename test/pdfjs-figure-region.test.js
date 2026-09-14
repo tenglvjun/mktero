@@ -71,6 +71,40 @@ test('renders only the crop canvas, copies PDF bytes and releases every resource
     assert.ok(h.counts().cleaned > 0);
 });
 
+test('rejects a region whose render produced no visible content', async () => {
+    const h = harness({
+        createCanvas(width, height) {
+            return { width, height, getContext: () => ({
+                getImageData: (x, y, w, hh) => ({ data: new Uint8ClampedArray(w * hh * 4).fill(255) }),
+            }) };
+        },
+    });
+    const session = await h.renderer.open(Uint8Array.of(1));
+    await assert.rejects(session.renderRegion(request), /rendered empty/iu);
+    await h.renderer.disposeAll();
+});
+
+test('accepts a region whose rendered rows contain ink', async () => {
+    const h = harness({
+        createCanvas(width, height) {
+            return { width, height, getContext: () => ({
+                getImageData: (x, y, w, hh) => {
+                    const data = new Uint8ClampedArray(w * hh * 4).fill(255);
+                    data[0] = 12;
+                    data[1] = 12;
+                    data[2] = 12;
+                    return { data };
+                },
+            }) };
+        },
+    });
+    const session = await h.renderer.open(Uint8Array.of(1));
+    const crop = await session.renderRegion(request);
+    assert.equal(crop.mimeType, 'image/png');
+    assert.equal(crop.width, 600);
+    await h.renderer.disposeAll();
+});
+
 test('limits canvas dimensions before allocation and rejects wrong coordinate frames', async () => {
     const h = harness({ limits: { maxCropPixels: 40000, maxCropEdge: 300 } });
     const session = await h.renderer.open(Uint8Array.of(1));
