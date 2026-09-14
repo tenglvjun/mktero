@@ -1,4 +1,4 @@
-export const FIGURE_PIPELINE_PROFILE = 'figure-region-v2';
+export const FIGURE_PIPELINE_PROFILE = 'figure-region-v3';
 
 export const FIGURE_LIMITS = Object.freeze({
     maxPDFBytes: 256 * 1024 * 1024,
@@ -19,10 +19,10 @@ export const FIGURE_LIMITS = Object.freeze({
     maxFragmentLength: 65_536,
     maxCropPixels: 8_000_000,
     maxCropEdge: 4_096,
-    maxDecodedImagePixels: 16_000_000,
-    maxIntermediateCanvasPixels: 16_000_000,
+    maxDecodedImagePixels: 24_000_000,
+    maxIntermediateCanvasPixels: 24_000_000,
     maxIntermediateCanvasEdge: 8_192,
-    maxActiveCanvasPixels: 32_000_000,
+    maxActiveCanvasPixels: 48_000_000,
     maxCropBytes: 12 * 1024 * 1024,
     maxGeneratedBytes: 64 * 1024 * 1024,
     maxTotalAssetBytes: 150 * 1024 * 1024,

@@ -174,6 +174,10 @@ function resolveGroup(group, blocks, page, limits, budget) {
         return preserve(candidate, 'ambiguous-membership');
     }
     const panelBox = union(panels.map(block => block.bbox));
+    // Labels and internal text frequently sit a few units outside the tight
+    // panel union; own them within a small padded band instead of treating
+    // them as foreign content that forces the whole figure to preserve.
+    const labelBox = padded(panelBox, limits.ownedTextPadding);
     for (const parentBlock of parents) {
         const parentPanels = panels.filter(panel => panel.parentId === parentBlock.id);
         if (!validBox(parentBlock.bbox)
@@ -249,19 +253,23 @@ function resolveGroup(group, blocks, page, limits, budget) {
             && !captionNear(block.bbox, owner.bbox, limits)) {
             return preserve(candidate, 'ambiguous-membership');
         }
-        if (explicitLabel && !contains(panelBox, block.bbox)
+        if (explicitLabel && !contains(labelBox, block.bbox)
             && !captionNear(block.bbox, owner.bbox, limits)) {
             continue;
         }
-        if (block.role === 'body' || FOREIGN_TYPES.has(block.type)
-            || (block.role === 'caption' && !explicitLabel) || isPanel(block)) {
+        if (block.role === 'body' || FOREIGN_TYPES.has(block.type) || isPanel(block)) {
             continue;
         }
-        if (explicitText || explicitLabel || (block.type === 'text' && (
+        const inBandText = block.id !== caption?.id
+            && !isFigureCaptionText(block.text)
+            && isInBandAnnotationText(block, panelBox, captions, limits);
+        if (block.role === 'caption' && !explicitLabel && !inBandText) {
+            continue;
+        }
+        if (explicitText || explicitLabel || inBandText || (block.type === 'text' && (
             panels.some(panel => consume(budget)
                 && intersectionArea(panel.bbox, block.bbox) / area(block.bbox) >= limits.interiorTextRatio)
-            || (contains(panelBox, block.bbox) && looksLikeGapLabel(block.text, limits))
-            || isInBandAnnotationText(block, panelBox, captions, limits)
+            || (contains(labelBox, block.bbox) && looksLikeGapLabel(block.text, limits))
         ))) {
             owned.push(block);
             members.add(block.id);

@@ -154,6 +154,15 @@ function collectTextNodes(markdown, images, limits) {
         if (hasImage) continue;
         const text = normalizeText(visible.textForSourceRange(node.from, node.to));
         add(text, { from: node.from, to: node.to, heading: node.name !== 'Paragraph' });
+        // MinerU often glues a panel label and its caption into one paragraph
+        // without a blank line, so the caption only matches a single line.
+        const lines = textLineRanges(markdown, node.from, node.to);
+        if (lines.length < 2) continue;
+        for (const range of lines) {
+            if (++count > limits.maxLayoutBlocks) return { exact, tolerant };
+            const lineText = normalizeText(visible.textForSourceRange(range.from, range.to));
+            if (lineText && lineText !== text) add(lineText, range);
+        }
     }
     for (const image of images) {
         const range = image.captionRange;
@@ -162,6 +171,21 @@ function collectTextNodes(markdown, images, limits) {
         add(text, { ...range, imageCaption: true });
     }
     return { exact, tolerant };
+}
+
+function textLineRanges(markdown, from, to) {
+    const ranges = [];
+    let lineStart = from;
+    for (let index = from; index <= to; index++) {
+        if (index < to && markdown[index] !== '\n') continue;
+        let lineEnd = index;
+        if (lineEnd > lineStart && markdown[lineEnd - 1] === '\r') lineEnd--;
+        if (lineEnd > lineStart && /\S/u.test(markdown.slice(lineStart, lineEnd))) {
+            ranges.push({ from: lineStart, to: lineEnd });
+        }
+        lineStart = index + 1;
+    }
+    return ranges;
 }
 
 function bindInteriorUniqueText(blocks, pages, limits, candidatesFor) {
