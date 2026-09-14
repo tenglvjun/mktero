@@ -130,7 +130,9 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
     ))).join(' ').replace(/\s*\r?\n\s*/gu, ' ').trim();
     if (captionText.length > limits.maxCaptionLength) throw transactionError('resource-limit');
     const renderCaption = escapeImageDescription(captionText);
-    const replacement = `![${renderCaption}](${destination})`;
+    // Blank lines keep the generated image a standalone paragraph even when
+    // neighbouring fragments are consumed down to its edges.
+    const replacement = `\n\n![${renderCaption}](${destination})\n\n`;
     const anchorBlock = captionMembers.find(block => parseAcademicFigureCaption(block.text))
         || captionMembers[0]
         || members.find(block => candidate.panelBlockIds.includes(block.id));

@@ -200,9 +200,18 @@ function bindInteriorUniqueText(blocks, pages, limits, candidatesFor) {
         if (!panelsByPage.has(block.pageIndex)) panelsByPage.set(block.pageIndex, []);
         panelsByPage.get(block.pageIndex).push(block);
     }
+    const textByPage = new Map();
+    for (const block of blocks) {
+        if (block.role !== 'figure-text' || !block.parentId || !parents.has(block.parentId)
+            || !validBox(block.bbox)) continue;
+        if (!textByPage.has(block.pageIndex)) textByPage.set(block.pageIndex, []);
+        textByPage.get(block.pageIndex).push(block);
+    }
     const bands = new Map();
     for (const [pageIndex, pagePanels] of panelsByPage) {
-        bands.set(pageIndex, panelBand(pagePanels));
+        // Figure-text children (such as a shared legend) extend the band so
+        // sibling text on the same row can bind too.
+        bands.set(pageIndex, panelBand([...pagePanels, ...(textByPage.get(pageIndex) || [])]));
     }
     for (const block of blocks) {
         if (block.sourceRanges.length || block.assetPath || !block.text

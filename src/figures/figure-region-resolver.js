@@ -62,7 +62,10 @@ function groupPanels(blocks, panels, limits, budget) {
     for (const panel of panels) {
         const parent = byID.get(panel.parentId);
         if (parent?.bboxKind === 'group' && ['image', 'chart'].includes(parent.type)) {
-            if (!explicit.has(parent.id)) explicit.set(parent.id, { panels: [], parents: [parent] });
+            if (!explicit.has(parent.id)) {
+                explicit.set(parent.id, { panels: [], parents: [parent],
+                    label: figureGroupLabel(blocks, parent.id) });
+            }
             explicit.get(parent.id).panels.push(panel);
         }
         else remaining.push(panel);
@@ -119,6 +122,7 @@ function mergeAdjacentExplicitGroups(groups, limits, budget) {
         if (used.has(group)) continue;
         used.add(group);
         const members = [group];
+        let label = group.label || null;
         let box = groupBox(group);
         let changed = true;
         while (changed && box) {
@@ -129,13 +133,18 @@ function mergeAdjacentExplicitGroups(groups, limits, budget) {
                     return [...merged, {
                         panels: members.flatMap(member => member.panels),
                         parents: members.flatMap(member => member.parents),
+                        label,
                         exhausted: true,
                     }];
                 }
+                // Two groups that claim different "Fig. N" labels are separate
+                // figures even when their panels are geometrically adjacent.
+                if (label && other.label && !sameFigureLabel(label, other.label)) continue;
                 const otherBox = groupBox(other);
                 if (!otherBox || !adjacent(box, otherBox, limits)) continue;
                 used.add(other);
                 members.push(other);
+                if (!label) label = other.label || null;
                 box = groupBox({ panels: members.flatMap(member => member.panels) });
                 changed = true;
             }
@@ -143,9 +152,25 @@ function mergeAdjacentExplicitGroups(groups, limits, budget) {
         merged.push(members.length === 1 ? group : {
             panels: members.flatMap(member => member.panels),
             parents: members.flatMap(member => member.parents),
+            label,
         });
     }
     return merged;
+}
+
+function figureGroupLabel(blocks, parentId) {
+    for (const block of blocks) {
+        if (block.parentId !== parentId || block.role !== 'caption') continue;
+        const label = parseAcademicFigureCaption(block.text)?.label
+            || parseLooseAcademicFigureCaption(block.text)?.label;
+        if (label) return label;
+    }
+    return null;
+}
+
+function sameFigureLabel(left, right) {
+    const normalize = value => String(value || '').toLowerCase().replace(/\s+/gu, ' ').trim();
+    return normalize(left) === normalize(right);
 }
 
 function groupBox(group) {
@@ -178,6 +203,14 @@ function resolveGroup(group, blocks, page, limits, budget) {
     // panel union; own them within a small padded band instead of treating
     // them as foreign content that forces the whole figure to preserve.
     const labelBox = padded(panelBox, limits.ownedTextPadding);
+    // Figure-text children (for example a shared legend attached to one
+    // panel) extend the figure band even when they sit above the panels.
+    const bandBox = union([
+        ...panels,
+        ...blocks.filter(block => block.role === 'figure-text'
+            && parents.some(parentBlock => block.parentId === parentBlock.id)
+            && validBox(block.bbox)),
+    ].map(block => block.bbox));
     for (const parentBlock of parents) {
         const parentPanels = panels.filter(panel => panel.parentId === parentBlock.id);
         if (!validBox(parentBlock.bbox)
@@ -248,9 +281,9 @@ function resolveGroup(group, blocks, page, limits, budget) {
             if (block.text && block.sourceOrdinal >= ordinalMin && block.sourceOrdinal <= ordinalMax) return candidate;
             continue;
         }
-        if (explicitText && !contains(owner.bbox, block.bbox)
-            && intersectionArea(owner.bbox, block.bbox) === 0
-            && !captionNear(block.bbox, owner.bbox, limits)) {
+        if (explicitText && !contains(panelBox, block.bbox)
+            && intersectionArea(panelBox, block.bbox) === 0
+            && !captionNear(block.bbox, panelBox, limits)) {
             return preserve(candidate, 'ambiguous-membership');
         }
         if (explicitLabel && !contains(labelBox, block.bbox)
@@ -262,7 +295,7 @@ function resolveGroup(group, blocks, page, limits, budget) {
         }
         const inBandText = block.id !== caption?.id
             && !isFigureCaptionText(block.text)
-            && isInBandAnnotationText(block, panelBox, captions, limits);
+            && isInBandAnnotationText(block, bandBox, captions, limits);
         if (block.role === 'caption' && !explicitLabel && !inBandText) {
             continue;
         }
@@ -383,10 +416,21 @@ function orderCaptionParts(parts) {
 
 function isInBandAnnotationText(block, panelBox, captions, limits) {
     const value = String(block.text || '').trim();
-    if (!value || [...value].length > limits.ownedTextCodePoints) return false;
+    // Panel sub-captions legitimately run longer than axis annotations and
+    // still belong to the figure image.
+    const codePointLimit = block.role === 'caption'
+        ? Math.max(limits.ownedTextCodePoints, limits.ownedCaptionTextCodePoints)
+        : limits.ownedTextCodePoints;
+    if (!value || [...value].length > codePointLimit) return false;
     if (value.split(/\r?\n/u).length > limits.maxGapTextLines) return false;
-    if (!contains(padded(panelBox, limits.ownedTextPadding), block.bbox)) return false;
-    return captions.every(part => !validBox(part.bbox) || block.bbox[3] <= part.bbox[1]);
+    // Panel sub-captions such as "(c) Routing and failure isolation." sit a
+    // few units below their panel, beyond the generic in-band tolerance.
+    const padding = block.role === 'caption'
+        ? Math.max(limits.ownedTextPadding, limits.captionMinGap)
+        : limits.ownedTextPadding;
+    if (!contains(padded(panelBox, padding), block.bbox)) return false;
+    return captions.every(part => !validBox(part.bbox)
+        || intersectionArea(part.bbox, block.bbox) === 0);
 }
 
 export function looksLikeGapLabel(text, limits) {

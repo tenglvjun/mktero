@@ -17,6 +17,7 @@ import { translateEnglish } from '../i18n/localization.js';
 import {
     findAcademicTableGroups,
     findConsecutiveImagePacks,
+    parseFigureLayoutMarker,
 } from '../markdown/markdown-figures.js';
 import {
     analyzeMarkdownCitations,
@@ -2084,6 +2085,13 @@ function decorateSyntaxNode(node, state, decorations, context) {
         decorations.push(Decoration.line({
             class: 'cm-mktero-bilingual-boundary',
         }).range(state.doc.lineAt(node.from).from));
+        decorations.push(Decoration.replace({}).range(node.from, node.to));
+        return false;
+    }
+
+    if (node.name === 'CommentBlock'
+        && parseFigureLayoutMarker(state.sliceDoc(node.from, node.to))) {
+        // Layout markers only drive the renderer; never show the raw comment.
         decorations.push(Decoration.replace({}).range(node.from, node.to));
         return false;
     }
