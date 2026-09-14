@@ -1,6 +1,7 @@
 import { GFM, parser as markdownParser } from '@lezer/markdown';
 import {
     normalizeMarkdownFigureCaptions,
+    normalizeMisassignedAcademicCaptions,
     parseAcademicFigureCaption,
 } from '../markdown/markdown-figures.js';
 import { normalizeFigureLayouts } from '../markdown/figure-layout-normalizer.js';
@@ -198,11 +199,15 @@ function normalizeMistralFigureCaptions(markdown) {
         }
     }
 
-    if (!replacements.size) return markdown;
+    if (!replacements.size) {
+        return normalizeMisassignedAcademicCaptions(markdown);
+    }
     const collapsed = lines
         .map((line, index) => replacements.get(index) || line)
         .join('');
-    return normalizeMarkdownFigureCaptions(collapsed);
+    return normalizeMisassignedAcademicCaptions(
+        normalizeMarkdownFigureCaptions(collapsed)
+    );
 }
 
 function hasNearbyAcademicCaption(lines, imageIndex, direction) {
