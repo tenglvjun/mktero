@@ -126,8 +126,11 @@ function readDetailedLayout(bytes, root, { maxBytes, contentListBytes }) {
     try {
         const names = [];
         unzipSync(bytes, { filter(file) {
+            // The hosted API names its intermediate layout layout.json while
+            // the open-source CLI writes {name}_middle.json; both carry the
+            // same pdf_info structure. Multiple candidates stay ambiguous.
             if (directoryName(file.name) === root
-                && /^(?:.+_)?middle\.json$/i.test(file.name.split('/').at(-1))) {
+                && /^(?:.+_)?(?:middle|layout)\.json$/i.test(file.name.split('/').at(-1))) {
                 normalizeFigureAssetPath(file.name);
                 names.push({ name: file.name, size: file.originalSize });
             }

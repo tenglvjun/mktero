@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeFigureInput } from './helpers/figure-fixtures.js';
+import { makeFigureInput, createTestPNG } from './helpers/figure-fixtures.js';
 import { bindFigureSourceRanges } from '../src/figures/figure-source-binding.js';
 import { resolveFigureCandidates } from '../src/figures/figure-region-resolver.js';
 
@@ -14,14 +14,21 @@ test('owns all panels and internal text while keeping outside prose independent'
     assert.deepEqual(candidates[0].visualBBox, [98, 98, 902, 852]);
 });
 
-test('does not crop missing geometry or unbound internal text', () => {
+test('does not crop missing panel geometry', () => {
     const { input } = makeFigureInput();
-    let bound = bindFigureSourceRanges(input);
+    const bound = bindFigureSourceRanges(input);
     delete bound.blocks.find(block => block.role === 'panel').bbox;
     assert.equal(resolveFigureCandidates(bound)[0].decision, 'preserve');
-    bound = bindFigureSourceRanges(input);
-    bound.blocks.find(block => block.role === 'figure-text').sourceRanges = [];
-    assert.equal(resolveFigureCandidates(bound)[0].reason, 'ambiguous-source-range');
+});
+
+test('composes without consuming internal text that is missing from the Markdown', () => {
+    const { input } = makeFigureInput();
+    const bound = bindFigureSourceRanges(input);
+    const text = bound.blocks.find(block => block.role === 'figure-text');
+    text.sourceRanges = [];
+    const candidate = resolveFigureCandidates(bound)[0];
+    assert.equal(candidate.decision, 'compose');
+    assert.ok(!candidate.ownedTextBlockIds.includes(text.id));
 });
 
 test('preserves groups overlapping a caption, body paragraph, table or unknown long text', () => {
@@ -105,4 +112,50 @@ test('keeps the resource-limit summary inside the candidate budget across pages'
         assert.equal(candidates.length, maxFigures);
         assert.equal(candidates.at(-1).reason, 'resource-limit');
     }
+});
+
+test('attaches a nearby parentless caption to its parent figure group', () => {
+    const { input } = makeFigureInput();
+    const caption = input.blocks.find(block => block.role === 'caption');
+    caption.parentId = null;
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.deepEqual(candidates[0].captionBlockIds, [caption.id]);
+});
+
+test('preserves a shared caption claimed by two nearby groups', () => {
+    const markdown = [
+        '![](images/a.png)',
+        '',
+        '![](images/b.png)',
+        '',
+        'Figure 1. Shared caption.',
+    ].join('\n');
+    const block = (id, value) => ({
+        id, sourceOrdinal: Number(id.slice(1)), pageIndex: 0,
+        text: '', sourceRanges: [], rangeEvidence: 'unresolved', ...value,
+    });
+    const input = {
+        provider: 'mineru', markdown, assetBasePath: '',
+        assets: [
+            { path: 'images/a.png', mimeType: 'image/png', data: createTestPNG() },
+            { path: 'images/b.png', mimeType: 'image/png', data: createTestPNG() },
+        ],
+        blocks: [
+            block('b0', { type: 'image', role: 'panel', bboxKind: 'visual-body',
+                bbox: [100, 100, 300, 300], assetPath: 'images/a.png' }),
+            block('b1', { type: 'caption', role: 'caption', bboxKind: 'caption',
+                bbox: [100, 330, 300, 440], text: 'Figure 1. Shared caption.' }),
+            block('b2', { type: 'image', role: 'panel', bboxKind: 'visual-body',
+                bbox: [100, 470, 300, 670], assetPath: 'images/b.png' }),
+        ],
+        pages: [{ pageIndex: 0, width: 600, height: 800, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0, markdownRange: null }],
+        contentList: [], providerState: {},
+    };
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 2);
+    assert.ok(candidates.every(candidate => candidate.decision === 'preserve'));
+    assert.ok(candidates.every(candidate => candidate.reason === 'ambiguous-caption'));
 });

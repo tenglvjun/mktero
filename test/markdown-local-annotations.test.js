@@ -1223,3 +1223,61 @@ async function waitFor(predicate) {
     }
     assert.fail('Condition was not reached');
 }
+
+test('uses the stored text quote to disambiguate repeated Markdown text', async () => {
+    const phrase = 'while the harness controls procedure but does not supply domain content.';
+    const markdown = [
+        `The prior is broad but fixed, ${phrase} We call the missing layer operational knowledge.`,
+        '',
+        'Unrelated paragraph.',
+        '',
+        `The prior is broad but fixed, ${phrase} We call what is missing operational knowledge.`,
+    ].join('\n');
+    const secondFrom = markdown.lastIndexOf(phrase);
+    const store = createMemoryStore([{
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: phrase,
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 5 }],
+        textQuote: {
+            prefix: 'The prior is broad but fixed, ',
+            suffix: ' We call what is missing operational knowledge.',
+        },
+    }]);
+    const annotations = new MarkdownLocalAnnotations({ store });
+
+    const result = await annotations.resolve(42, markdown);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.matched[0].ranges, [{
+        from: secondFrom,
+        to: secondFrom + phrase.length,
+    }]);
+});
+
+test('keeps repeated Markdown text ambiguous without a matching quote', async () => {
+    const phrase = 'while the harness controls procedure but does not supply domain content.';
+    const markdown = `${phrase}\n\nUnrelated paragraph.\n\n${phrase}`;
+    const store = createMemoryStore([{
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: phrase,
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 5 }],
+        textQuote: {
+            prefix: 'Completely different context, ',
+            suffix: ' and a different ending.',
+        },
+    }]);
+    const annotations = new MarkdownLocalAnnotations({ store });
+
+    const result = await annotations.resolve(42, markdown);
+
+    assert.equal(result.matched.length, 0);
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+});

@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { strToU8, zipSync } from 'fflate';
 import {
     DEFAULT_MAX_ARCHIVE_BYTES,
     MinerUClient,
 } from '../src/mineru/mineru-client.js';
+import { decodeMinerUFigureInput } from '../src/mineru/figure-layout-adapter.js';
+import { createTestPNG } from './helpers/figure-fixtures.js';
 
 function jsonResponse(body, status = 200, headers = undefined) {
     return {
@@ -110,6 +113,61 @@ test('collects a previously uploaded task without uploading the PDF again', asyn
         'https://mineru.net/api/v4/extract-results/batch/batch-1',
         'https://download.example/result.zip',
     ]);
+});
+
+test('forwards the detailed layout that authorizes figure region geometry', async () => {
+    const middle = {
+        _backend: 'vlm', _version_name: '3.4.5',
+        pdf_info: [{
+            page_idx: 0, page_size: [600, 800],
+            para_blocks: [{
+                type: 'image', bbox: [60, 80, 540, 752],
+                blocks: [
+                    { type: 'image_body', bbox: [60, 80, 540, 640], lines: [{ spans: [{
+                        type: 'image', bbox: [60, 80, 540, 640], image_path: 'images/figure.png',
+                    }] }] },
+                    { type: 'image_caption', bbox: [60, 700, 540, 752], lines: [{ spans: [{
+                        type: 'text', content: 'Figure 1. Study flowchart.',
+                    }] }] },
+                ],
+            }],
+        }],
+    };
+    const archive = zipSync({
+        'result/full.md': strToU8('![](images/figure.png)\n\nFigure 1. Study flowchart.'),
+        'result/paper_middle.json': strToU8(JSON.stringify(middle)),
+        'result/images/figure.png': createTestPNG(),
+    });
+    const responses = [
+        jsonResponse({
+            code: 0,
+            data: {
+                extract_result: [{
+                    data_id: 'mktero-task-1',
+                    state: 'done',
+                    full_zip_url: 'https://download.example/result.zip',
+                }],
+            },
+        }),
+        {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => archive.slice().buffer,
+        },
+    ];
+    const client = new MinerUClient({ fetch: async () => responses.shift() });
+
+    const result = await client.collect({
+        apiKey: 'secret-token',
+        task: { batchID: 'batch-1', dataID: 'mktero-task-1' },
+    });
+
+    assert.equal(result.detailedLayout?.schema, 'mineru-middle-v1');
+    const input = decodeMinerUFigureInput(result);
+    assert.equal(input.pages[0].coordinateFrame, 'display-cropbox');
+    assert.ok(input.blocks.some(block => block.role === 'panel'
+        && block.bboxKind === 'visual-body' && block.parentId));
+    assert.ok(input.blocks.some(block => block.role === 'caption'));
 });
 
 test('uploads a local PDF and returns MinerU Markdown', async () => {

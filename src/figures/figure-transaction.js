@@ -4,7 +4,7 @@ import {
     normalizeFigureAssetPath,
     validateFigureCrop, validateFigureInput,
 } from './figure-model.js';
-import { escapeImageDescription } from '../markdown/markdown-figures.js';
+import { escapeImageDescription, parseAcademicFigureCaption } from '../markdown/markdown-figures.js';
 
 export function composeFigureDraft(input, completed, { limits: overrides } = {}) {
     const limits = { ...FIGURE_LIMITS, ...overrides };
@@ -101,12 +101,13 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
         throw transactionError('ambiguous-membership');
     }
     const members = ids.map(id => blocksByID.get(id));
+    const captionIDs = new Set(candidate.captionBlockIds);
     for (const block of members) {
         if (!block || block.pageIndex !== candidate.pageIndex
             || !block.sourceRanges?.length || block.rangeEvidence === 'unresolved') {
             throw transactionError('ambiguous-source-range');
         }
-        if (block.role !== 'caption' && (!contains(candidate.visualBBox, block.bbox)
+        if (!captionIDs.has(block.id) && (!contains(candidate.visualBBox, block.bbox)
             || ['body'].includes(block.role) || ['table', 'code', 'heading', 'equation'].includes(block.type))) {
             throw transactionError('foreign-content-overlap');
         }
@@ -117,14 +118,22 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
                 === normalizeFigureAssetPath(block.assetPath, input.assetBasePath)
         ))) throw transactionError('ambiguous-source-range');
     }
-    const caption = members.find(block => candidate.captionBlockIds.includes(block.id));
-    const captionText = caption ? caption.sourceRanges.map(range => (
+    const captionMembers = candidate.captionBlockIds.map(id => blocksByID.get(id))
+        .filter(Boolean)
+        .sort((left, right) => {
+            const leftBox = validBox(left.bbox) ? left.bbox : [Infinity, Infinity];
+            const rightBox = validBox(right.bbox) ? right.bbox : [Infinity, Infinity];
+            return leftBox[1] - rightBox[1] || leftBox[0] - rightBox[0];
+        });
+    const captionText = captionMembers.flatMap(block => block.sourceRanges.map(range => (
         input.markdown.slice(range.from, range.to)
-    )).join(' ').replace(/\s*\r?\n\s*/gu, ' ').trim() : '';
+    ))).join(' ').replace(/\s*\r?\n\s*/gu, ' ').trim();
     if (captionText.length > limits.maxCaptionLength) throw transactionError('resource-limit');
     const renderCaption = escapeImageDescription(captionText);
     const replacement = `![${renderCaption}](${destination})`;
-    const anchorBlock = caption || members.find(block => candidate.panelBlockIds.includes(block.id));
+    const anchorBlock = captionMembers.find(block => parseAcademicFigureCaption(block.text))
+        || captionMembers[0]
+        || members.find(block => candidate.panelBlockIds.includes(block.id));
     const anchor = anchorBlock.sourceRanges[0];
     const fragments = members.flatMap(block => block.sourceRanges.map(range => ({
         from: range.from,
@@ -199,6 +208,10 @@ function mapPoint(offset, edits, association) {
 function contains(outer, inner) {
     return Array.isArray(outer) && Array.isArray(inner)
         && inner[0] >= outer[0] && inner[1] >= outer[1] && inner[2] <= outer[2] && inner[3] <= outer[3];
+}
+
+function validBox(box) {
+    return Array.isArray(box) && box.length === 4 && box.every(Number.isFinite);
 }
 
 function transactionError(reason) {

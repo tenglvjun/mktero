@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeFigureInput } from './helpers/figure-fixtures.js';
+import { makeFigureInput, createTestPNG } from './helpers/figure-fixtures.js';
 import { bindFigureSourceRanges } from '../src/figures/figure-source-binding.js';
+import { resolveFigureCandidates } from '../src/figures/figure-region-resolver.js';
 
 test('binds duplicate axes to their own image windows and leaves prose independent', () => {
     const { input, label, bodyText } = makeFigureInput({ repeated: true });
@@ -60,13 +61,14 @@ test('preserves unbound text when source matching work is exhausted', () => {
     assert.equal(bound.markdown, input.markdown);
 });
 
-test('does not consume a unique paragraph outside its image anchor window', () => {
+test('binds a unique interior text block outside its image anchor window', () => {
     const { input } = makeFigureInput();
     const axis = input.blocks.find(block => block.role === 'figure-text');
     input.markdown = input.markdown.replace(axis.text, '') + '\n\n' + axis.text;
     input.pages[0].markdownRange = null;
     const bound = bindFigureSourceRanges(input);
-    assert.deepEqual(bound.blocks.find(block => block.id === axis.id).sourceRanges, []);
+    const range = bound.blocks.find(block => block.id === axis.id).sourceRanges[0];
+    assert.equal(input.markdown.slice(range.from, range.to), axis.text);
 });
 
 test('leaves duplicate provider blocks unresolved instead of consuming one image twice', () => {
@@ -78,7 +80,7 @@ test('leaves duplicate provider blocks unresolved instead of consuming one image
         .every(block => block.sourceRanges.length === 0));
 });
 
-test('does not bind missing figure text to a later page when only one image bounds it', () => {
+test('binds unique interior text whose only paragraph follows a later-page heading', () => {
     const { input } = makeFigureInput({ boxes: [[100, 100, 900, 800]] });
     const axis = input.blocks.find(block => block.role === 'figure-text');
     axis.text = 'Accuracy';
@@ -86,27 +88,84 @@ test('does not bind missing figure text to a later page when only one image boun
     input.pages[0].markdownRange = null;
     input.pages.push({ pageIndex: 1, coordinateFrame: 'unknown', markdownRange: null });
     const bound = bindFigureSourceRanges(input);
-    assert.deepEqual(bound.blocks.find(block => block.id === axis.id).sourceRanges, []);
+    const range = bound.blocks.find(block => block.id === axis.id).sourceRanges[0];
+    assert.equal(input.markdown.slice(range.from, range.to), 'Accuracy');
     assert.equal(bound.markdown, input.markdown);
 });
 
-test('uses a heading as a page boundary only when its source range is explicit', () => {
+test('binds a unique caption contained in its figure group without a page boundary', () => {
     const { input } = makeFigureInput({ boxes: [[100, 100, 900, 800]], interleave: false });
     const caption = input.blocks.find(block => block.role === 'caption');
     input.pages[0].markdownRange = null;
     input.markdown += '\n\n# Results';
     input.blocks.push({ id: 'heading', sourceOrdinal: 10, pageIndex: 0,
         type: 'heading', role: 'body', text: 'Results', sourceRanges: [] });
-    assert.deepEqual(bindFigureSourceRanges(input).blocks.find(block => block.id === caption.id).sourceRanges, []);
-    input.blocks.at(-1).sourceRanges = [{ from: input.markdown.indexOf('# Results'), to: input.markdown.length }];
     const bound = bindFigureSourceRanges(input);
     const range = bound.blocks.find(block => block.id === caption.id).sourceRanges[0];
     assert.equal(input.markdown.slice(range.from, range.to), caption.text);
+    assert.deepEqual(bound.blocks.find(block => block.id === 'heading').sourceRanges, []);
     input.blocks.at(-1).pageIndex = 1;
-    assert.deepEqual(bindFigureSourceRanges(input).blocks.find(block => block.id === caption.id).sourceRanges, []);
+    const moved = bindFigureSourceRanges(input);
+    const movedRange = moved.blocks.find(block => block.id === caption.id).sourceRanges[0];
+    assert.equal(input.markdown.slice(movedRange.from, movedRange.to), caption.text);
 });
 
-test('never uses a globally unique heading to bind later-page prose to missing figure text', () => {
+test('binds figure text contained in one image group when Markdown interleaves it', () => {
+    const markdown = [
+        'Figure 1. Study flowchart.',
+        '',
+        '68 women assessed for eligibility',
+        '',
+        '![](images/flowchart.png)',
+        '',
+        '66 women enrolled',
+        '',
+        'Body text outside the figure.',
+    ].join('\n');
+    const block = (sourceOrdinal, value) => ({
+        id: `mineru:p0:b${sourceOrdinal}`, sourceOrdinal, pageIndex: 0,
+        text: '', sourceRanges: [], rangeEvidence: 'unresolved', ...value,
+    });
+    const input = {
+        provider: 'mineru', markdown, assetBasePath: '',
+        assets: [{ path: 'images/flowchart.png', mimeType: 'image/png', data: createTestPNG() }],
+        blocks: [
+            block(0, { type: 'image', role: 'unknown', bboxKind: 'group',
+                bbox: [100, 100, 900, 900] }),
+            block(1, { type: 'caption', role: 'caption', bboxKind: 'caption',
+                bbox: [150, 100, 850, 150], parentId: 'mineru:p0:b0',
+                text: 'Figure 1. Study flowchart.' }),
+            block(2, { type: 'text', role: 'figure-text', bboxKind: 'text',
+                bbox: [200, 250, 800, 320], parentId: 'mineru:p0:b0',
+                text: '68 women assessed for eligibility' }),
+            block(3, { type: 'image', role: 'panel', bboxKind: 'visual-body',
+                bbox: [100, 200, 900, 800], parentId: 'mineru:p0:b0',
+                assetPath: 'images/flowchart.png' }),
+            block(4, { type: 'text', role: 'figure-text', bboxKind: 'text',
+                bbox: [300, 700, 700, 760], parentId: 'mineru:p0:b0',
+                text: '66 women enrolled' }),
+            block(5, { type: 'text', role: 'body', bboxKind: 'text',
+                bbox: [100, 930, 900, 970], text: 'Body text outside the figure.' }),
+        ],
+        pages: [{ pageIndex: 0, width: 600, height: 800, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0, markdownRange: null }],
+        contentList: [], providerState: {},
+    };
+    const bound = bindFigureSourceRanges(input);
+    const byId = new Map(bound.blocks.map(entry => [entry.id, entry]));
+    for (const id of ['mineru:p0:b1', 'mineru:p0:b2', 'mineru:p0:b4']) {
+        assert.equal(byId.get(id).rangeEvidence, 'unique-text', id);
+        const range = byId.get(id).sourceRanges[0];
+        assert.equal(markdown.slice(range.from, range.to), byId.get(id).text);
+    }
+    assert.deepEqual(byId.get('mineru:p0:b5').sourceRanges, []);
+    const candidates = resolveFigureCandidates(bound);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.deepEqual(candidates[0].ownedTextBlockIds, ['mineru:p0:b2', 'mineru:p0:b4']);
+    assert.deepEqual(candidates[0].captionBlockIds, ['mineru:p0:b1']);
+});
+
+test('does not use a globally unique heading to bind figure text or headings without page bounds', () => {
     const { input } = makeFigureInput({ boxes: [[100, 100, 900, 800]] });
     const axis = input.blocks.find(block => block.role === 'figure-text');
     axis.text = 'Accuracy';
@@ -116,6 +175,56 @@ test('never uses a globally unique heading to bind later-page prose to missing f
     input.blocks.push({ id: 'heading', sourceOrdinal: 10, pageIndex: 0,
         type: 'heading', role: 'body', text: 'Results', sourceRanges: [] });
     const bound = bindFigureSourceRanges(input);
-    assert.deepEqual(bound.blocks.find(block => block.id === axis.id).sourceRanges, []);
+    const range = bound.blocks.find(block => block.id === axis.id).sourceRanges[0];
+    assert.equal(input.markdown.slice(range.from, range.to), 'Accuracy');
     assert.deepEqual(bound.blocks.find(block => block.id === 'heading').sourceRanges, []);
+});
+
+test('binds a repeated panel label to the paragraph adjacent to its own panel', () => {
+    const markdown = [
+        'A',
+        '',
+        '![](images/a.png)',
+        '',
+        'Body text between figures.',
+        '',
+        'A',
+        '',
+        '![](images/b.png)',
+    ].join('\n');
+    const block = (id, sourceOrdinal, value) => ({
+        id, sourceOrdinal, pageIndex: 0,
+        text: '', sourceRanges: [], rangeEvidence: 'unresolved', ...value,
+    });
+    const input = {
+        provider: 'mineru', markdown, assetBasePath: '',
+        assets: [
+            { path: 'images/a.png', mimeType: 'image/png', data: createTestPNG() },
+            { path: 'images/b.png', mimeType: 'image/png', data: createTestPNG() },
+        ],
+        blocks: [
+            block('p0', 0, { type: 'image', role: 'unknown', bboxKind: 'group',
+                bbox: [100, 100, 400, 300] }),
+            block('label0', 1, { type: 'caption', role: 'caption', bboxKind: 'caption',
+                bbox: [110, 80, 130, 95], parentId: 'p0', text: 'A' }),
+            block('panel0', 2, { type: 'image', role: 'panel', bboxKind: 'visual-body',
+                bbox: [100, 100, 400, 300], assetPath: 'images/a.png', parentId: 'p0' }),
+            block('p1', 3, { type: 'image', role: 'unknown', bboxKind: 'group',
+                bbox: [100, 500, 400, 700] }),
+            block('label1', 4, { type: 'caption', role: 'caption', bboxKind: 'caption',
+                bbox: [110, 480, 130, 495], parentId: 'p1', text: 'A' }),
+            block('panel1', 5, { type: 'image', role: 'panel', bboxKind: 'visual-body',
+                bbox: [100, 500, 400, 700], assetPath: 'images/b.png', parentId: 'p1' }),
+        ],
+        pages: [{ pageIndex: 0, width: 600, height: 800, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0, markdownRange: null }],
+        contentList: [], providerState: {},
+    };
+    const bound = bindFigureSourceRanges(input);
+    const first = bound.blocks.find(entry => entry.id === 'label0');
+    const second = bound.blocks.find(entry => entry.id === 'label1');
+    assert.equal(first.rangeEvidence, 'anchored-sequence');
+    assert.equal(markdown.slice(first.sourceRanges[0].from, first.sourceRanges[0].to), 'A');
+    assert.equal(markdown.slice(second.sourceRanges[0].from, second.sourceRanges[0].to), 'A');
+    assert.ok(first.sourceRanges[0].to < second.sourceRanges[0].from);
 });

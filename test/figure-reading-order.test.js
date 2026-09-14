@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FigureReadingOrderService, collectFigureReadingOrderGroups } from '../src/figures/figure-reading-order.js';
 import { analyzeDocumentFigures } from '../src/figures/figure-analysis.js';
+import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
 import { collectFigureImageNodes, validateFigureMap } from '../src/figures/figure-model.js';
 import { sha256Hex } from '../src/core/sha256.js';
 import { createTestPNG } from './helpers/figure-fixtures.js';
@@ -53,7 +54,7 @@ function fixture({ count = 4, columns = 2, wholeRow = false, marker = false, emb
         document: { markdown, sourceMap, assets: ordered.map(panel => ({ path: panel.path,
             data: createTestPNG(), mimeType: 'image/png' })),
         chromeRanges: [{ from: bodyFrom, to: markdown.length - 1 }], assetBasePath: '',
-        figureMap: { version: 1, pipeline: 'figure-region-v1', markdownHash: null, figures: [], preserved: [] } } };
+        figureMap: { version: 1, pipeline: FIGURE_PIPELINE_PROFILE, markdownHash: null, figures: [], preserved: [] } } };
 }
 
 function harness({ verify = async () => ({ titleBBox: [120, 100, 850, 120],

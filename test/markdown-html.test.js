@@ -451,6 +451,41 @@ test('renders OCR-spaced cases math that nested math inside \\text', () => {
     assert.match(html, /<mi>𝒮<\/mi>|<mi>S<\/mi>/);
 });
 
+test('repairs an array end glued to OCR spacing commands', () => {
+    const html = renderMarkdownHTML([
+        '$$',
+        '\\begin{array}{l} M ^ {*} = \\arg \\max _ {M} \\mathcal {S} (M \\mid M _ {t}, L, \\mathcal {C}, E), '
+            + '\\\\ \\text { s.t. } M _ {i, j} ^ {*} = (M _ {t}) _ {i, j}, \\quad \\forall (i, j) '
+            + '\\text { where } L _ {i, j} = 1, \\\\ \\qend{array}',
+        '$$',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<mtable/);
+    assert.match(html, /\\end\{array\}/);
+    assert.doesNotMatch(html, /\\qend/);
+});
+
+test('drops OCR rows that only contain spacing commands', () => {
+    const spacing = '\\qquad '.repeat(40).trimEnd();
+    const html = renderMarkdownHTML([
+        '$$',
+        `\\begin{array}{l} a = b, \\\\ ${spacing} \\\\ ${spacing} \\end{array}`,
+        '$$',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.equal((html.match(/<mtr>/g) || []).length, 1);
+    assert.doesNotMatch(html, /(?:\\qquad){5}/);
+});
+
+test('keeps spacing commands inside rows that carry content', () => {
+    const html = renderMarkdownHTML('$a \\quad b$');
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<mspace width="1em"|<mtext|a/);
+});
+
 test('keeps ordinary \\text labels without math unchanged', () => {
     const html = renderMarkdownHTML('$\\text{otherwise}$');
 
@@ -542,6 +577,25 @@ test('renders a standalone academic image description as a visible figure captio
             + '<figcaption>'
             + '<span class="mktero-figure-label">Figure 1.</span>'
             + ' PRISMA flowchart of inclusion of studies.'
+            + '</figcaption>'
+            + '</figure>\n'
+    );
+});
+
+test('renders an unpunctuated academic image caption as a visible figure caption', () => {
+    const caption = 'Figure 1 The impact of reusable skills on autonomous research agents.';
+    const html = renderMarkdownHTML(
+        `![${caption}](images/figure.png)`,
+        { resolveImageURL: () => 'blob:mktero-figure' }
+    );
+
+    assert.equal(
+        html,
+        '<figure class="mktero-figure">'
+            + `<img src="blob:mktero-figure" alt="${caption}">`
+            + '<figcaption>'
+            + '<span class="mktero-figure-label">Figure 1</span>'
+            + ' The impact of reusable skills on autonomous research agents.'
             + '</figcaption>'
             + '</figure>\n'
     );

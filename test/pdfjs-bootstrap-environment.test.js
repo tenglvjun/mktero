@@ -69,3 +69,26 @@ test('adopts Path2D from the Zotero window for PDF.js rendering', async () => {
         else globalThis.Path2D = previousPath2D;
     }
 });
+
+test('adopts document and FontFace so PDF.js can load standard fonts', async () => {
+    const previousDocument = globalThis.document;
+    const previousFontFace = globalThis.FontFace;
+    function WindowFontFace() {}
+    const fakeDocument = { fonts: new Set() };
+    const { adoptPDFJSWindowGlobals } = await import(
+        '../src/pdf/pdfjs-bootstrap-environment.js?fonts'
+    );
+    try {
+        delete globalThis.document;
+        delete globalThis.FontFace;
+        adoptPDFJSWindowGlobals({ document: fakeDocument, FontFace: WindowFontFace });
+        assert.equal(globalThis.document, fakeDocument);
+        assert.equal(globalThis.FontFace, WindowFontFace);
+    }
+    finally {
+        if (previousDocument === undefined) delete globalThis.document;
+        else globalThis.document = previousDocument;
+        if (previousFontFace === undefined) delete globalThis.FontFace;
+        else globalThis.FontFace = previousFontFace;
+    }
+});

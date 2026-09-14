@@ -1,8 +1,9 @@
 import { GFM, parser } from '@lezer/markdown';
 import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
-import { normalizeText } from '../markdown/text-normalization.js';
+import { normalizeTolerantText, normalizeText } from '../markdown/text-normalization.js';
 import { FIGURE_LIMITS } from './figure-limits.js';
 import { collectFigureImageNodes, normalizeFigureAssetPath } from './figure-model.js';
+import { captionNear, isLooseFigureCaption, looksLikeGapLabel } from './figure-region-resolver.js';
 
 const MARKDOWN_PARSER = parser.configure(GFM);
 
@@ -32,9 +33,16 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
     }
     clearOverlappingBindings(blocks);
     const textIndex = collectTextNodes(input.markdown, images, limits);
+    const candidatesFor = (block, page) => {
+        const exact = textIndex.exact.get(normalizeText(block.text)) || [];
+        const nodes = exact.length ? exact
+            : textIndex.tolerant.get(normalizeTolerantText(block.text)) || [];
+        return nodes.filter(node => consume(budget) && insidePage(node, page)
+            && (!node.imageCaption || block.role === 'caption'));
+    };
     for (const block of blocks) {
         if (!['heading', 'title'].includes(block.type) || !block.text) continue;
-        const candidates = (textIndex.get(normalizeText(block.text)) || []).filter(node => (
+        const candidates = (textIndex.exact.get(normalizeText(block.text)) || []).filter(node => (
             consume(budget) && node.heading && insidePage(node, pages.get(block.pageIndex))
         ));
         const explicit = explicitMatch(sourceBlocks.get(block.id), candidates);
@@ -43,6 +51,10 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
             bind(block, candidates[0], 'anchored-sequence');
         }
     }
+    clearOverlappingBindings(blocks);
+    bindInteriorUniqueText(blocks, pages, limits, candidatesFor);
+    clearOverlappingBindings(blocks);
+    bindAdjacentPanelLabels(input.markdown, blocks, pages, limits, candidatesFor);
     clearOverlappingBindings(blocks);
     const ordered = blocks.slice().sort((a, b) => a.pageIndex - b.pageIndex
         || a.sourceOrdinal - b.sourceOrdinal);
@@ -61,10 +73,7 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
         }
         if (block.assetPath || !block.text || block.bboxKind === 'group') continue;
         const page = pages.get(block.pageIndex);
-        const candidates = (textIndex.get(normalizeText(block.text)) || []).filter(node => (
-            consume(budget) && insidePage(node, page)
-            && (!node.imageCaption || block.role === 'caption')
-        ));
+        const candidates = candidatesFor(block, page);
         const explicit = explicitMatch(sourceBlocks.get(block.id), candidates);
         if (explicit) {
             bind(block, explicit, 'explicit-range');
@@ -124,10 +133,16 @@ function isCaptionWithinImage(outer, inner) {
 }
 
 function collectTextNodes(markdown, images, limits) {
-    const index = new Map();
+    const exact = new Map();
+    const tolerant = new Map();
     const visible = createVisibleMarkdownTextIndex(markdown);
     const tree = MARKDOWN_PARSER.parse(markdown);
     let count = 0;
+    const add = (text, node) => {
+        if (!text) return;
+        append(exact, text, node);
+        append(tolerant, normalizeTolerantText(text), node);
+    };
     for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
         if (++count > limits.maxLayoutBlocks) break;
         if (node.name !== 'Paragraph' && !/^(?:ATX|Setext)Heading/u.test(node.name)) continue;
@@ -138,15 +153,123 @@ function collectTextNodes(markdown, images, limits) {
         } });
         if (hasImage) continue;
         const text = normalizeText(visible.textForSourceRange(node.from, node.to));
-        if (text) append(index, text, { from: node.from, to: node.to, heading: node.name !== 'Paragraph' });
+        add(text, { from: node.from, to: node.to, heading: node.name !== 'Paragraph' });
     }
     for (const image of images) {
         const range = image.captionRange;
         if (range.to <= range.from) continue;
         const text = normalizeText(visible.textForSourceRange(range.from, range.to));
-        if (text) append(index, text, { ...range, imageCaption: true });
+        add(text, { ...range, imageCaption: true });
     }
-    return index;
+    return { exact, tolerant };
+}
+
+function bindInteriorUniqueText(blocks, pages, limits, candidatesFor) {
+    const panels = [];
+    const panelsByPage = new Map();
+    const parents = new Set();
+    for (const block of blocks) {
+        if (!block.sourceRanges.length || block.bboxKind !== 'visual-body'
+            || !validBox(block.bbox)) continue;
+        panels.push(block);
+        if (block.parentId) parents.add(block.parentId);
+        if (!panelsByPage.has(block.pageIndex)) panelsByPage.set(block.pageIndex, []);
+        panelsByPage.get(block.pageIndex).push(block);
+    }
+    const bands = new Map();
+    for (const [pageIndex, pagePanels] of panelsByPage) {
+        bands.set(pageIndex, panelBand(pagePanels));
+    }
+    for (const block of blocks) {
+        if (block.sourceRanges.length || block.assetPath || !block.text
+            || block.bboxKind === 'group' || !validBox(block.bbox)) continue;
+        const insideParent = block.parentId && parents.has(block.parentId);
+        const insidePanel = panels.some(panel => panel.pageIndex === block.pageIndex
+            && containsBox(panel.bbox, block.bbox));
+        const inBand = intersectsBox(bands.get(block.pageIndex), block.bbox);
+        const nearPanel = (block.role === 'caption' || isLooseFigureCaption(block.text))
+            && captionNearBox(panelsByPage.get(block.pageIndex), block.bbox, limits);
+        if (!insideParent && !insidePanel && !inBand && !nearPanel) continue;
+        const candidates = candidatesFor(block, pages.get(block.pageIndex));
+        if (candidates.length === 1) bind(block, candidates[0], 'unique-text');
+    }
+}
+
+function bindAdjacentPanelLabels(markdown, blocks, pages, limits, candidatesFor) {
+    const panelsByPage = new Map();
+    for (const block of blocks) {
+        if (block.bboxKind !== 'visual-body' || !block.sourceRanges.length || !validBox(block.bbox)) {
+            continue;
+        }
+        if (!panelsByPage.has(block.pageIndex)) panelsByPage.set(block.pageIndex, []);
+        panelsByPage.get(block.pageIndex).push(block);
+    }
+    for (const block of blocks) {
+        if (block.sourceRanges.length || block.assetPath || !block.text
+            || block.bboxKind === 'group' || !looksLikeGapLabel(block.text, limits)) continue;
+        const pagePanels = panelsByPage.get(block.pageIndex) || [];
+        if (!pagePanels.length) continue;
+        if (block.parentId) {
+            if (block.role !== 'figure-text' && block.role !== 'caption') continue;
+        }
+        else if (!containsBox(panelBand(pagePanels), block.bbox)) continue;
+        const parentPanels = block.parentId
+            ? pagePanels.filter(candidate => candidate.parentId === block.parentId)
+            : pagePanels;
+        if (!parentPanels.length) continue;
+        const candidates = candidatesFor(block, pages.get(block.pageIndex));
+        const adjacent = block.parentId
+            ? candidates.find(node => adjacentToPanel(markdown, node, parentPanels))
+            : uniqueAdjacentNode(markdown, candidates, parentPanels);
+        if (adjacent) bind(block, adjacent, 'anchored-sequence');
+    }
+}
+
+function panelBand(panels) {
+    return panels.reduce((result, panel) => [
+        Math.min(result[0], panel.bbox[0]), Math.min(result[1], panel.bbox[1]),
+        Math.max(result[2], panel.bbox[2]), Math.max(result[3], panel.bbox[3]),
+    ], [1000, 1000, 0, 0]);
+}
+
+function adjacentToPanel(markdown, node, panels) {
+    return panels.some(panel => {
+        const range = panel.sourceRanges[0];
+        return (node.to <= range.from
+            && /^\s*$/u.test(markdown.slice(node.to, range.from)))
+            || (node.from >= range.to
+                && /^\s*$/u.test(markdown.slice(range.to, node.from)));
+    });
+}
+
+function uniqueAdjacentNode(markdown, candidates, panels) {
+    const matches = candidates.filter(node => adjacentToPanel(markdown, node, panels));
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function captionNearBox(panels, box, limits) {
+    if (!panels?.length) return false;
+    const panelBox = panels.reduce((result, panel) => [
+        Math.min(result[0], panel.bbox[0]), Math.min(result[1], panel.bbox[1]),
+        Math.max(result[2], panel.bbox[2]), Math.max(result[3], panel.bbox[3]),
+    ], [1000, 1000, 0, 0]);
+    return captionNear(box, panelBox, limits);
+}
+
+function containsBox(outer, inner) {
+    return inner[0] >= outer[0] && inner[1] >= outer[1]
+        && inner[2] <= outer[2] && inner[3] <= outer[3];
+}
+
+function intersectsBox(outer, inner) {
+    return Array.isArray(outer) && Array.isArray(inner)
+        && Math.min(outer[2], inner[2]) > Math.max(outer[0], inner[0])
+        && Math.min(outer[3], inner[3]) > Math.max(outer[1], inner[1]);
+}
+
+function validBox(box) {
+    return Array.isArray(box) && box.length === 4 && box.every(Number.isFinite)
+        && box[2] > box[0] && box[3] > box[1];
 }
 
 function bindUniqueSequence(entries, budget) {

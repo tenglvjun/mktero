@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeFigureInput, createTestPNG } from './helpers/figure-fixtures.js';
+import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
 import {
     validateFigureInput, validateFigureMap, cloneFigureMap, normalizeFigureAssetPath, validateFigureCrop,
 } from '../src/figures/figure-model.js';
@@ -60,7 +61,7 @@ test('binds persisted figure maps to their Markdown and local images', () => {
     const markdown = '![Figure 1. Results.](generated/f.png)';
     const asset = { path: 'generated/f.png', mimeType: 'image/png', data: createTestPNG() };
     const map = {
-        version: 1, pipeline: 'figure-region-v1', markdownHash: 'a'.repeat(64),
+        version: 1, pipeline: FIGURE_PIPELINE_PROFILE, markdownHash: 'a'.repeat(64),
         figures: [{ id: 'fig-p0-b0', label: 'Figure 1.', pageIndex: 0,
             visualBBox: [100, 100, 900, 800], captionBBox: [100, 850, 900, 900],
             memberBlockIds: ['b1'], panels: [{ blockId: 'b1', label: null,

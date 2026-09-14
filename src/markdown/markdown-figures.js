@@ -36,6 +36,16 @@ const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
     ),
 ];
 const ACADEMIC_TABLE_CAPTION_PATTERN = /^(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]+(\S[\s\S]*)$/iu;
+// Publisher captions such as "Figure 1 The impact of ..." omit the separator;
+// this relaxed form is only used where an image or caption geometry already
+// identifies a figure, never for bare prose.
+const LOOSE_ACADEMIC_FIGURE_CAPTION_PATTERN = new RegExp(
+    `^((?:(?:algorithm|chart|fig\\.?|figure|scheme)`
+        + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
+        + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}))`
+        + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+(\\S[\\s\\S]*)$`,
+    'iu'
+);
 const ACADEMIC_TABLE_HEADING_PATTERN = /^ {0,3}#{1,6}[ \t]+(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?(?:[ \t]+#+)?[ \t]*$/iu;
 const ACADEMIC_TABLE_PLAIN_HEADING_PATTERN = /^ {0,3}(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]*$/iu;
 const EMPTY_IMAGE_LINE_PATTERN = /^( {0,3})!\[[ \t]*\](\([^\r\n]+\))[ \t]*(?:\r?\n)?$/;
@@ -96,6 +106,17 @@ export function parseAcademicFigureCaption(value) {
     const match = ACADEMIC_FIGURE_CAPTION_PATTERNS
         .map(pattern => pattern.exec(text))
         .find(Boolean);
+    if (!match) return null;
+    return {
+        text,
+        label: match[1],
+        description: match[2],
+    };
+}
+
+export function parseLooseAcademicFigureCaption(value) {
+    const text = String(value || '').trim();
+    const match = LOOSE_ACADEMIC_FIGURE_CAPTION_PATTERN.exec(text);
     if (!match) return null;
     return {
         text,

@@ -17,7 +17,7 @@ const PAGE_UNITS = new Set(['pt', 'px', 'pdf-user-unit']);
 const ROLES = new Set(['panel', 'caption', 'figure-text', 'body', 'unknown']);
 const BBOX_KINDS = new Set(['visual-body', 'caption', 'text', 'group', 'unknown']);
 const RANGE_EVIDENCE = new Set([
-    'explicit-range', 'unique-asset', 'anchored-sequence', 'unresolved',
+    'explicit-range', 'unique-asset', 'unique-text', 'anchored-sequence', 'unresolved',
 ]);
 
 export function validateFigureInput(input) {
@@ -393,10 +393,13 @@ export function collectFigureImageNodes(markdown) {
                 let assetPath = markdown.slice(destination.from, destination.to);
                 if (assetPath.startsWith('<') && assetPath.endsWith('>')) assetPath = assetPath.slice(1, -1);
                 const captionRange = { from: marks[0].to, to: marks[1].from };
+                const parent = node.node.parent;
+                const standalone = parent?.name === 'Paragraph'
+                    && /^[ \t]*$/u.test(markdown.slice(parent.from, node.from))
+                    && /^[ \t]*$/u.test(markdown.slice(node.to, parent.to));
                 images.push({ from: node.from, to: node.to, assetPath, captionRange,
                     caption: markdown.slice(captionRange.from, captionRange.to),
-                    standalone: node.node.parent?.name === 'Paragraph'
-                        && node.node.parent.from === node.from && node.node.parent.to === node.to });
+                    standalone });
             }
             return false;
         },

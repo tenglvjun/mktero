@@ -3,6 +3,7 @@ import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-tex
 import {
     createNormalizedTextIndex,
     findTextOccurrences,
+    normalizeTolerantText,
     normalizeText,
 } from '../markdown/text-normalization.js';
 import { findDisplayMathMatches } from '../markdown/markdown-html.js';
@@ -232,22 +233,6 @@ function decodeImageDestination(destination) {
     catch {
         return destination;
     }
-}
-
-function normalizeTolerantText(value) {
-    return String(value)
-        .normalize('NFKC')
-        .replace(/[\u2018\u2019]/gu, '\'')
-        .replace(/[\u201c\u201d]/gu, '"')
-        .replace(/\\chi(?![\p{L}\p{N}])/gu, '\u03c7')
-        .replace(/\\([%$#&_{}])/gu, '$1')
-        .replace(/[$}{]/gu, '')
-        .replace(/\^(?=[\p{L}\p{N}])/gu, '')
-        .replace(/(\p{L}{2})[-\u2010\u2011](?=\p{L}{2})/gu, '$1')
-        .replace(/[\u2010-\u2014\u2212]/gu, '-')
-        .replace(/\s+([,.;:!?%)\]])/gu, '$1')
-        .replace(/\s+/gu, ' ')
-        .trim();
 }
 
 function findTolerantBlockMatch(blocks, blockTexts, target) {

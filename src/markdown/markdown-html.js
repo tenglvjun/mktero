@@ -12,6 +12,7 @@ import {
     normalizeMisassignedAcademicCaptions,
     parseFigureLayoutMarker,
     parseAcademicFigureCaption,
+    parseLooseAcademicFigureCaption,
 } from './markdown-figures.js';
 import { isNumericCitationContent } from './text-normalization.js';
 
@@ -150,8 +151,10 @@ function createSafeRenderer(
 
         paragraph({ tokens }) {
             const image = standaloneImageToken(tokens);
-            const caption = image
-                ? parseAcademicFigureCaption(imageTokenDescription(image))
+            const description = image ? imageTokenDescription(image) : '';
+            const caption = description
+                ? parseAcademicFigureCaption(description)
+                    || parseLooseAcademicFigureCaption(description)
                 : null;
             const content = this.parser.parseInline(tokens);
             if (!caption) return `<p>${content}</p>\n`;
@@ -1225,7 +1228,38 @@ function normalizeOcrMathSource(source) {
     let normalized = unescapeMathHTMLEntities(source);
     normalized = splitTextCommandsContainingMath(normalized);
     normalized = restoreOcrTextSubscripts(normalized);
-    return collapseOcrTeXSpacing(normalized);
+    normalized = collapseOcrTeXSpacing(normalized);
+    normalized = repairOcrMathCommands(normalized);
+    return dropOcrSpacingOnlyRows(normalized);
+}
+
+function repairOcrMathCommands(source) {
+    // MinerU occasionally glues a trailing spacing command onto \end (for
+    // example "\qquad\end{array}" becomes "\qend{array}"). KaTeX then rejects
+    // the whole environment and paints the raw source red.
+    return source.replace(/\\(?:q{1,3})end(?=\s*\{)/gu, '\\end');
+}
+
+const OCR_TEX_SPACING = '(?:[ \\t\\r\\n]|\\\\(?:qquad|quad|thinspace|medspace|thickspace|enspace|enskip)|\\\\[,;!:]|\\\\ )';
+const OCR_SPACING_ROW = new RegExp(`^(?:${OCR_TEX_SPACING})*$`, 'u');
+const OCR_SPACING_BEFORE_END = new RegExp(`^((?:${OCR_TEX_SPACING})*)(\\\\end(?:\\s*\\{[^{}]*\\})?)$`, 'u');
+
+function dropOcrSpacingOnlyRows(source) {
+    if (!source.includes('\\\\')) return source;
+    const parts = source.split('\\\\');
+    const kept = [];
+    for (const [index, part] of parts.entries()) {
+        const beforeEnd = OCR_SPACING_BEFORE_END.exec(part);
+        if (beforeEnd) {
+            kept.push(beforeEnd[2]);
+            continue;
+        }
+        // A row that only contains spacing macros is OCR noise from blank
+        // space inside a boxed equation; keeping it stretches the array.
+        if (index < parts.length - 1 && OCR_SPACING_ROW.test(part)) continue;
+        kept.push(part);
+    }
+    return kept.join('\\\\');
 }
 
 function splitTextCommandsContainingMath(source) {

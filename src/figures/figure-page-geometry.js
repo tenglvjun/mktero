@@ -21,7 +21,9 @@ export function alignFigureInputToPDF(input, pageGeometryByIndex, { limits = FIG
     const contentList = (input.contentList || []).map(transform);
     const pages = input.pages.map(page => {
         const alignment = alignments.get(page.pageIndex);
-        const geometryReason = alignment.reason || failures.get(page.pageIndex);
+        const geometryReason = alignment.reason === 'missing-geometry' && page.geometryReason
+            ? page.geometryReason
+            : alignment.reason || failures.get(page.pageIndex);
         if (geometryReason) {
             return { ...page, coordinateFrame: 'unknown', geometryReason };
         }

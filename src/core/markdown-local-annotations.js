@@ -530,6 +530,21 @@ function resolveAnnotations(markdown, annotations) {
             MAX_MATCH_CANDIDATES
         );
         let ambiguous = candidates.truncated || candidates.offsets.length > 1;
+        if (!candidates.truncated && candidates.offsets.length > 1) {
+            const selected = selectOffsetByTextQuote(
+                visibleIndex.text,
+                candidates.offsets,
+                annotation.text.length,
+                annotation.textQuote
+            );
+            if (selected !== null) {
+                matched.push(resolvedAnnotation(
+                    annotation,
+                    visibleIndex.sourceRange(selected, annotation.text.length)
+                ));
+                continue;
+            }
+        }
         if (!candidates.truncated && candidates.offsets.length === 1) {
             matched.push(resolvedAnnotation(
                 annotation,
@@ -573,6 +588,40 @@ function resolveAnnotations(markdown, annotations) {
         });
     }
     return { matched, unmatched };
+}
+
+function selectOffsetByTextQuote(text, offsets, length, quote) {
+    const prefix = normalizeVisibleText(quote?.prefix || '');
+    const suffix = normalizeVisibleText(quote?.suffix || '');
+    if (!prefix && !suffix) return null;
+    const prefixWindow = Math.max(prefix.length * 4, 64);
+    const suffixWindow = Math.max(suffix.length * 4, 64);
+    const scores = offsets.map(offset => {
+        const before = normalizeVisibleText(text.slice(
+            Math.max(0, offset - prefixWindow),
+            offset
+        ));
+        const after = normalizeVisibleText(text.slice(
+            offset + length,
+            Math.min(text.length, offset + length + suffixWindow)
+        ));
+        return (prefix && before.endsWith(prefix) ? prefix.length : 0)
+            + (suffix && after.startsWith(suffix) ? suffix.length : 0);
+    });
+    let best = 0;
+    let bestIndex = -1;
+    let runnerUp = 0;
+    for (const [index, score] of scores.entries()) {
+        if (score > best) {
+            runnerUp = best;
+            best = score;
+            bestIndex = index;
+        }
+        else if (score > runnerUp) {
+            runnerUp = score;
+        }
+    }
+    return best > 0 && best > runnerUp ? offsets[bestIndex] : null;
 }
 
 export function markdownAnnotationRangeMatchesSource(markdown, rangeOrRanges, text) {

@@ -20,6 +20,8 @@ const MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH = 12;
 const MIN_REPEATED_PAGE_HEADER_LENGTH = 20;
 const MISENCODED_PLUS_MINUS = /§(?=\d)/gu;
 const PLUS_MINUS_NUMBER = /±(?=\d)/u;
+const MISENCODED_MAPSTO = /\s*7\s*→/gu;
+const MAPSTO_TEXT = /↦/u;
 
 export class PDFAnnotationLocator {
     constructor({
@@ -300,39 +302,68 @@ function locateInIndex(index, text, {
         ? index.pages
         : index.pages.filter(page => page.pageIndex === pdfPageIndexHint);
     const quote = normalizePDFAnnotationTextQuote(textQuote);
-    let located = findMatchWithTextStrategies(pages, target, quote);
-    if (!located) {
-        located = findCrossPageMatch(
-            index.pages,
-            target,
-            quote,
-            pdfPageIndexHint
-        );
-    }
-    if (!located
-        && target.length >= MIN_GLYPH_FALLBACK_TEXT_LENGTH
-        && PLUS_MINUS_NUMBER.test(target)) {
-        located = findMatchWithTextStrategies(
-            pages,
-            target,
-            quote,
-            normalizedText => normalizedText.replace(
-                MISENCODED_PLUS_MINUS,
-                '±'
-            )
-        );
+    // A paragraph can span pages, so the hint may name its first page while
+    // the selected text sits on a later one. Retry without the hint when the
+    // hinted page yields nothing.
+    const attempts = pages === index.pages
+        ? [{ pages, hint: pdfPageIndexHint }]
+        : [{ pages, hint: pdfPageIndexHint }, { pages: index.pages, hint: undefined }];
+    let located = null;
+    for (const attempt of attempts) {
+        located = findMatchWithTextStrategies(attempt.pages, target, quote);
         if (!located) {
             located = findCrossPageMatch(
                 index.pages,
                 target,
                 quote,
-                pdfPageIndexHint,
+                attempt.hint
+            );
+        }
+        if (!located
+            && target.length >= MIN_GLYPH_FALLBACK_TEXT_LENGTH
+            && PLUS_MINUS_NUMBER.test(target)) {
+            located = findMatchWithTextStrategies(
+                attempt.pages,
+                target,
+                quote,
                 normalizedText => normalizedText.replace(
                     MISENCODED_PLUS_MINUS,
                     '±'
                 )
             );
+            if (!located) {
+                located = findCrossPageMatch(
+                    index.pages,
+                    target,
+                    quote,
+                    attempt.hint,
+                    normalizedText => normalizedText.replace(
+                        MISENCODED_PLUS_MINUS,
+                        '±'
+                    )
+                );
+            }
         }
+        if (!located
+            && target.length >= MIN_GLYPH_FALLBACK_TEXT_LENGTH
+            && MAPSTO_TEXT.test(target)) {
+            located = findMatchWithTextStrategies(
+                attempt.pages,
+                target,
+                quote,
+                normalizedText => normalizedText.replace(MISENCODED_MAPSTO, '↦')
+            );
+            if (!located) {
+                located = findCrossPageMatch(
+                    index.pages,
+                    target,
+                    quote,
+                    attempt.hint,
+                    normalizedText => normalizedText.replace(MISENCODED_MAPSTO, '↦')
+                );
+            }
+        }
+        if (located) break;
     }
     if (!located) throw notFoundError();
     if (located.segments) {
@@ -898,29 +929,54 @@ function selectUniqueIndexMatch(matches, targetLength, textQuote) {
 
 function findUniqueContextualMatch(matches, targetLength, textQuote) {
     if (!textQuote) return null;
-    const contextualMatches = matches.filter(match => textQuoteMatches(
-        match,
-        targetLength,
-        textQuote
-    ));
-    return contextualMatches.length === 1 ? contextualMatches[0] : null;
+    const prefixThreshold = Math.min(
+        textQuote.prefix.length,
+        MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH
+    );
+    const suffixThreshold = Math.min(
+        textQuote.suffix.length,
+        MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH
+    );
+    const scored = [];
+    for (const match of matches) {
+        const before = match.normalizedText
+            .slice(0, match.normalizedFrom)
+            .trimEnd();
+        const after = match.normalizedText
+            .slice(match.normalizedFrom + targetLength)
+            .trimStart();
+        const prefixScore = textQuote.prefix
+            ? commonSuffixLength(before, textQuote.prefix)
+            : 0;
+        const suffixScore = textQuote.suffix
+            ? commonPrefixLength(after, textQuote.suffix)
+            : 0;
+        if (prefixScore < prefixThreshold || suffixScore < suffixThreshold) {
+            continue;
+        }
+        scored.push({ match, score: prefixScore + suffixScore });
+    }
+    if (!scored.length) return null;
+    scored.sort((left, right) => right.score - left.score);
+    if (scored.length > 1 && scored[1].score === scored[0].score) return null;
+    return scored[0].match;
 }
 
-function textQuoteMatches(match, targetLength, textQuote) {
-    const before = match.normalizedText
-        .slice(0, match.normalizedFrom)
-        .trimEnd();
-    const after = match.normalizedText
-        .slice(match.normalizedFrom + targetLength)
-        .trimStart();
-    const comparisons = [];
-    if (textQuote.prefix.length >= MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH) {
-        comparisons.push(before.endsWith(textQuote.prefix));
+function commonPrefixLength(left, right) {
+    const limit = Math.min(left.length, right.length);
+    let index = 0;
+    while (index < limit && left[index] === right[index]) index++;
+    return index;
+}
+
+function commonSuffixLength(left, right) {
+    const limit = Math.min(left.length, right.length);
+    let index = 0;
+    while (index < limit
+        && left[left.length - 1 - index] === right[right.length - 1 - index]) {
+        index++;
     }
-    if (textQuote.suffix.length >= MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH) {
-        comparisons.push(after.startsWith(textQuote.suffix));
-    }
-    return comparisons.length > 0 && comparisons.every(Boolean);
+    return index;
 }
 
 function mapTextQuote(textQuote, transformText) {

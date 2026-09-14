@@ -91,6 +91,16 @@ test('refuses unknown frames, mismatched dimensions and unsupported MediaBox dat
     }
 });
 
+test('keeps the provider geometry reason instead of masking it as missing geometry', () => {
+    const { input } = makeFigureInput();
+    Object.assign(input.pages[0], {
+        coordinateFrame: 'unknown', geometryReason: 'unsupported-layout-schema',
+    });
+    const result = alignFigureInputToPDF(input, new Map([[0, geometry()]]));
+    assert.equal(result.pages[0].geometryReason, 'unsupported-layout-schema');
+    assert.equal(result.pages[0].coordinateFrame, 'unknown');
+});
+
 test('uses an independently supplied MediaBox and rejects boxes outside the visible page', () => {
     const { input } = makeFigureInput();
     Object.assign(input.pages[0], { width: 700, height: 900, coordinateFrame: 'unrotated-mediabox' });

@@ -174,6 +174,8 @@ export class MinerUClient {
             contentList: typeof extracted === 'string'
                 ? []
                 : extracted.contentList || [],
+            ...(typeof extracted === 'string' || !extracted.detailedLayout
+                ? {} : { detailedLayout: extracted.detailedLayout }),
             extractedPages: totalPages,
             totalPages,
         };

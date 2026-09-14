@@ -5,6 +5,7 @@ import { collectFigureLabelGroups, FigureLabelRecoveryService } from '../src/fig
 import { validateFigureMap } from '../src/figures/figure-model.js';
 import { mapFigureMapThroughEdits } from '../src/figures/figure-map-transforms.js';
 import { createTestPNG } from './helpers/figure-fixtures.js';
+import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
 
 function fixture(count = 2, fullwidth = false, { sameParagraph = false, figureNumber = 7, pageIndex = 3 } = {}) {
     let markdown = 'See Fig. 7(A).\n\n';
@@ -29,7 +30,7 @@ function fixture(count = 2, fullwidth = false, { sameParagraph = false, figureNu
     sourceMap.push({ type: 'text', markdownFrom: from, markdownTo: markdown.length - 1,
         locations: [{ pageIndex, bbox: [100, 900, 900, 950] }] });
     return { markdown, assets, sourceMap, assetBasePath: '', chromeRanges: [],
-        figureMap: { version: 1, pipeline: 'figure-region-v1', markdownHash: null,
+        figureMap: { version: 1, pipeline: FIGURE_PIPELINE_PROFILE, markdownHash: null,
             figures: [], preserved: [{ id: 'fig-p3-b1', pageIndex: 3, reason: 'missing-geometry' }] } };
 }
 

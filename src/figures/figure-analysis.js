@@ -3,7 +3,8 @@ import {
     assertFigureJSONBudget, collectFigureImageNodes, normalizeFigureAssetPath,
 } from './figure-model.js';
 import {
-    findAcademicFigures, parseAcademicFigureCaption, unescapeImageDescription,
+    findAcademicFigures, parseAcademicFigureCaption, parseLooseAcademicFigureCaption,
+    unescapeImageDescription,
 } from '../markdown/markdown-figures.js';
 
 export function analyzeDocumentFigures(markdown, {
@@ -32,7 +33,9 @@ export function analyzeDocumentFigures(markdown, {
         if (viewKind === 'original'
             && (image.from !== window.from || image.to !== window.to)) continue;
         const text = unescapeImageDescription(image.caption);
-        const caption = parseAcademicFigureCaption(text) || { label: '', text };
+        const caption = parseAcademicFigureCaption(text)
+            || parseLooseAcademicFigureCaption(text)
+            || { label: '', text };
         if (record.label && (!figureLabelKey(record.label)
             || figureLabelKey(record.label) !== figureLabelKey(caption.label))) continue;
         const translatedCaption = viewKind === 'comparison'
