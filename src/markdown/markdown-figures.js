@@ -273,6 +273,17 @@ export function findAcademicFigureGroups(markdown) {
             continue;
         }
 
+        const shiftedChain = shiftedABFigureCaptionChain(
+            lines,
+            index,
+            blockedLines
+        );
+        if (shiftedChain) {
+            groups.push(...shiftedChain.groups);
+            index = shiftedChain.trailingIndex;
+            continue;
+        }
+
         const verticalGroup = leadingVerticalABPanelGroup(
             lines,
             index,
@@ -292,6 +303,30 @@ export function findAcademicFigureGroups(markdown) {
         );
         if (labeledGroup) {
             const { captionIndex, ...group } = labeledGroup;
+            groups.push(group);
+            index = captionIndex;
+            continue;
+        }
+
+        const letteredRuns = letteredTrailingPanelFigure(
+            lines,
+            index,
+            blockedLines
+        );
+        if (letteredRuns) {
+            const { captionIndex, ...group } = letteredRuns;
+            groups.push(group);
+            index = captionIndex;
+            continue;
+        }
+
+        const tableFigure = figureImagesWithTrailingTables(
+            lines,
+            index,
+            blockedLines
+        );
+        if (tableFigure) {
+            const { captionIndex, ...group } = tableFigure;
             groups.push(group);
             index = captionIndex;
             continue;
@@ -368,6 +403,14 @@ export function findAcademicFigureGroups(markdown) {
         if (captionIndex >= lines.length || blockedLines.has(captionIndex)) continue;
         const trailingCaption = parseCaptionLine(lines[captionIndex].raw);
         if (!trailingCaption) continue;
+        const lastEmbeddedCaption = captionFromImageLine(
+            lines[images.at(-1).index].raw
+        );
+        if (lastEmbeddedCaption
+            && academicFigureNumber(lastEmbeddedCaption)
+                !== academicFigureNumber(trailingCaption)) {
+            continue;
+        }
 
         groups.push({
             from: lines[index].from,
@@ -461,6 +504,144 @@ function collectPackedImages(lines, startIndex, blockedLines) {
 function isIsolatedPanelLetter(line) {
     const text = String(line || '').replace(/\r?\n$/, '').trim();
     return ISOLATED_PANEL_LETTER_PATTERN.test(text);
+}
+
+function isIsolatedPanelMarker(line) {
+    const text = String(line || '').replace(/\r?\n$/, '').trim();
+    return isIsolatedPanelLetter(text)
+        || /^\(\s*[a-z]\s*\)\.?$/iu.test(text);
+}
+
+function previousNonBlankLine(lines, index) {
+    let cursor = index;
+    while (cursor >= 0 && BLANK_LINE_PATTERN.test(lines[cursor].raw)) {
+        cursor--;
+    }
+    return cursor;
+}
+
+function captionPanelLetters(caption) {
+    const letters = [];
+    const pattern = /\(\s*([a-z])\s*\)/giu;
+    for (const match of String(caption?.description || '').matchAll(pattern)) {
+        const letter = match[1].toLowerCase();
+        if (!letters.includes(letter)) letters.push(letter);
+    }
+    return letters;
+}
+
+function uncaptionedTableAt(lines, index, blockedLines) {
+    const table = academicTableAt(lines, index, blockedLines);
+    if (!table) return null;
+    const before = previousNonBlankLine(lines, index - 1);
+    if (before >= 0 && parseAcademicTableCaption(lines[before].text)) {
+        return null;
+    }
+    const after = nextNonBlankLine(lines, table.lastLineIndex + 1);
+    if (after < lines.length
+        && parseAcademicTableCaption(lines[after].text)
+        && !parseAcademicFigureCaption(lines[after].text)) {
+        return null;
+    }
+    return table;
+}
+
+function figureImagesWithTrailingTables(lines, startIndex, blockedLines) {
+    // OCR often emits a figure's last panel as one or more uncaptioned
+    // tables, then the Figure N. (a)...(e) caption. Keep those tables inside
+    // the figure and give them the caption's last panel letter.
+    if (blockedLines.has(startIndex)) return null;
+    const previous = previousNonBlankLine(lines, startIndex - 1);
+    if (previous >= 0
+        && !blockedLines.has(previous)
+        && (isMarkdownImageLine(lines[previous].raw)
+            || isIsolatedPanelMarker(lines[previous].raw))) {
+        return null;
+    }
+    if (!isMarkdownImageLine(lines[startIndex].raw)
+        && !isIsolatedPanelMarker(lines[startIndex].raw)) {
+        return null;
+    }
+
+    const images = [];
+    const tables = [];
+    let pendingLabel = null;
+    let pendingLabelIndex = null;
+    let index = startIndex;
+    while (index < lines.length && !blockedLines.has(index)) {
+        if (BLANK_LINE_PATTERN.test(lines[index].raw)) {
+            index++;
+            continue;
+        }
+        if (isIsolatedPanelMarker(lines[index].raw)) {
+            pendingLabel = lines[index].text.trim();
+            pendingLabelIndex = index;
+            index++;
+            continue;
+        }
+        if (isMarkdownImageLine(lines[index].raw)
+            && !captionFromImageLine(lines[index].raw)) {
+            images.push({
+                index,
+                source: lines[index].text.trim(),
+                ...(pendingLabel ? {
+                    panelLabel: pendingLabel,
+                    panelLabelPosition: 'before',
+                    labelIndex: pendingLabelIndex,
+                } : {}),
+            });
+            pendingLabel = null;
+            pendingLabelIndex = null;
+            index++;
+            continue;
+        }
+        break;
+    }
+    if (!images.length) return null;
+
+    index = nextNonBlankLine(lines, index);
+    while (index < lines.length && !blockedLines.has(index)) {
+        const table = uncaptionedTableAt(lines, index, blockedLines);
+        if (!table) break;
+        tables.push(table);
+        index = nextNonBlankLine(lines, table.lastLineIndex + 1);
+    }
+    if (!tables.length || index >= lines.length || blockedLines.has(index)) {
+        return null;
+    }
+    const caption = parseCaptionLine(lines[index].raw);
+    const letters = captionPanelLetters(caption);
+    if (!caption
+        || !describesSharedABFigurePanels(caption)
+        || letters.length < images.length + 1) {
+        return null;
+    }
+
+    const lastLetter = letters.at(-1);
+    const lastLabel = `(${lastLetter})`;
+    for (const image of images) {
+        if (panelLetter(image.panelLabel) === lastLetter) {
+            delete image.panelLabel;
+            delete image.panelLabelPosition;
+            delete image.labelIndex;
+        }
+    }
+    const fromIndex = Number.isInteger(images[0].labelIndex)
+        ? images[0].labelIndex
+        : images[0].index;
+    return {
+        from: lines[fromIndex].from,
+        to: lines[index].to,
+        caption,
+        captionIndex: index,
+        images,
+        ...(images.length > 1 ? { layout: 'horizontal' } : {}),
+        tablePanels: [{
+            panelLabel: lastLabel,
+            panelLabelPosition: 'before',
+            sources: tables.map(table => table.source),
+        }],
+    };
 }
 
 function isEmptyImageLine(line) {
@@ -601,14 +782,11 @@ export function normalizeMisassignedAcademicCaptions(markdown) {
         lines,
         findBlockedLines(lines)
     );
-    if (!groups.length) return source;
-
-    const edits = [];
-    for (const group of groups) {
+    const withTables = applyCaptionEdits(source, groups.map(group => {
         const tableLine = lines[group.table.lastLineIndex];
         const ending = lineEnding(tableLine.raw)
             || (source.includes('\r\n') ? '\r\n' : '\n');
-        edits.push({
+        return [{
             from: group.table.from,
             to: group.table.from,
             text: `${group.tableCaption.text}${ending}${ending}`,
@@ -624,11 +802,38 @@ export function normalizeMisassignedAcademicCaptions(markdown) {
             to: lines[group.figureCaptionIndex].to
                 + lineEnding(lines[group.figureCaptionIndex].raw).length,
             text: '',
+        }];
+    }).flat());
+    return applyShiftedABFigureCaptionEdits(withTables);
+}
+
+function applyShiftedABFigureCaptionEdits(source) {
+    const lines = markdownLineRecords(source);
+    const blockedLines = findBlockedLines(lines);
+    const edits = [];
+    for (let index = 0; index < lines.length; index++) {
+        const chain = shiftedABFigureCaptionChain(lines, index, blockedLines);
+        if (!chain) continue;
+        edits.push({
+            from: lines[chain.startIndex].from,
+            to: chain.trailingIndex + 1 < lines.length
+                ? lines[chain.trailingIndex + 1].from
+                : source.length,
+            text: chain.replacement,
         });
+        index = chain.trailingIndex;
     }
-    edits.sort((left, right) => right.from - left.from || right.to - left.to);
+    return applyCaptionEdits(source, edits);
+}
+
+function applyCaptionEdits(source, edits) {
+    if (!edits.length) return source;
+
+    const sorted = [...edits].sort(
+        (left, right) => right.from - left.from || right.to - left.to
+    );
     let normalized = source;
-    for (const edit of edits) {
+    for (const edit of sorted) {
         normalized = normalized.slice(0, edit.from)
             + edit.text
             + normalized.slice(edit.to);
@@ -804,6 +1009,7 @@ function collectNearbyImages(lines, startIndex, blockedLines) {
             index,
             source: lines[index].text.trim(),
         });
+        if (captionFromImageLine(lines[index].raw)) break;
         const nextIndex = nearbyLineIndex(lines, index + 1);
         if (nextIndex <= index) break;
         index = nextIndex;
@@ -943,11 +1149,16 @@ function trailingSharedPanelLabelGroup(lines, startIndex, blockedLines) {
             || !describesSharedABFigurePanels(caption))) {
         return null;
     }
-    const sharedLabel = images[0].panelLabel;
-    if (images.some(image => !panelLabelsMatch(
-        image.panelLabel,
-        sharedLabel
-    ))) return null;
+    const sequentialAB = sequentialABPanelLabels(
+        images.map(image => image.panelLabel)
+    );
+    if (!sequentialAB) {
+        const sharedLabel = images[0].panelLabel;
+        if (images.some(image => !panelLabelsMatch(
+            image.panelLabel,
+            sharedLabel
+        ))) return null;
+    }
 
     return {
         from: lines[startIndex].from,
@@ -955,7 +1166,245 @@ function trailingSharedPanelLabelGroup(lines, startIndex, blockedLines) {
         caption,
         captionIndex,
         images,
+        ...(sequentialAB ? { layout: 'horizontal' } : {}),
     };
+}
+
+function letteredTrailingPanelFigure(lines, startIndex, blockedLines) {
+    // OCR often splits panel (b) into several images, labels (a)/(b) after
+    // each run, and hangs the shared Figure N caption on the last image.
+    if (blockedLines.has(startIndex)
+        || !isMarkdownImageLine(lines[startIndex]?.raw)
+        || captionFromImageLine(lines[startIndex].raw)) {
+        return null;
+    }
+    const previous = previousNonBlankLine(lines, startIndex - 1);
+    if (previous >= 0 && !blockedLines.has(previous)) {
+        if (isIsolatedPanelMarker(lines[previous].raw)) return null;
+        if (isMarkdownImageLine(lines[previous].raw)
+            && !captionFromImageLine(lines[previous].raw)) {
+            return null;
+        }
+    }
+
+    const runs = [];
+    let index = startIndex;
+    let expected = 'a';
+    while (index < lines.length && !blockedLines.has(index) && runs.length < 26) {
+        const images = [];
+        while (index < lines.length
+            && !blockedLines.has(index)
+            && isMarkdownImageLine(lines[index].raw)
+            && !captionFromImageLine(lines[index].raw)) {
+            images.push({
+                index,
+                source: lines[index].text.trim(),
+            });
+            index = nextNonBlankLine(lines, index + 1);
+        }
+        if (!images.length
+            || index >= lines.length
+            || blockedLines.has(index)
+            || !isIsolatedPanelMarker(lines[index].raw)) {
+            break;
+        }
+        const letter = panelLetter(lines[index].text);
+        if (letter !== expected) return null;
+        runs.push({
+            images,
+            letter,
+            label: lines[index].text.trim(),
+        });
+        expected = String.fromCharCode(expected.charCodeAt(0) + 1);
+        index = nextNonBlankLine(lines, index + 1);
+    }
+    if (runs.length < 2) return null;
+    if (index >= lines.length || blockedLines.has(index)) return null;
+
+    let caption = parseCaptionLine(lines[index].raw);
+    let extraImage = null;
+    if (!caption && isMarkdownImageLine(lines[index].raw)) {
+        caption = captionFromImageLine(lines[index].raw);
+        if (caption) {
+            extraImage = {
+                index,
+                source: lines[index].text.trim(),
+            };
+        }
+    }
+    if (!caption || !describesSharedABFigurePanels(caption)) return null;
+    const letters = captionPanelLetters(caption);
+    if (runs.some(run => !letters.includes(run.letter))) return null;
+    if (extraImage) {
+        const next = nextNonBlankLine(lines, extraImage.index + 1);
+        const following = next < lines.length
+            ? parseCaptionLine(lines[next].raw)
+                || captionFromImageLine(lines[next].raw)
+            : null;
+        if (following
+            && academicFigureNumber(following)
+                === academicFigureNumber(caption) + 1) {
+            return null;
+        }
+        runs.at(-1).images.push(extraImage);
+    }
+
+    const images = runs.flatMap(run => run.images.map((image, offset) => ({
+        ...image,
+        panelRun: run.letter,
+        ...(offset === run.images.length - 1 ? {
+            panelLabel: run.label,
+            panelLabelPosition: 'after',
+        } : {}),
+    })));
+    return {
+        from: lines[startIndex].from,
+        to: lines[index].to,
+        caption,
+        captionIndex: index,
+        images,
+        layout: 'horizontal',
+    };
+}
+
+function shiftedABFigureCaptionChain(lines, startIndex, blockedLines) {
+    // MinerU often hangs Figure N's caption on the next image when (a)/(b)
+    // panels sit immediately before the following figures.
+    if (blockedLines.has(startIndex)
+        || !isMarkdownImageLine(lines[startIndex]?.raw)
+        || !MARKDOWN_HARD_BREAK_PATTERN.test(lines[startIndex].raw)
+        || captionFromImageLine(lines[startIndex].raw)) {
+        return null;
+    }
+    const firstLabelIndex = startIndex + 1;
+    const firstLabel = extractedPanelLabel(lines[firstLabelIndex]);
+    if (panelLetter(firstLabel) !== 'a' || blockedLines.has(firstLabelIndex)) {
+        return null;
+    }
+
+    const secondImageIndex = nearbyLineIndex(lines, firstLabelIndex + 1);
+    if (secondImageIndex >= lines.length
+        || blockedLines.has(secondImageIndex)
+        || !isMarkdownImageLine(lines[secondImageIndex].raw)
+        || !MARKDOWN_HARD_BREAK_PATTERN.test(lines[secondImageIndex].raw)
+        || captionFromImageLine(lines[secondImageIndex].raw)) {
+        return null;
+    }
+    const secondLabelIndex = secondImageIndex + 1;
+    const secondLabel = extractedPanelLabel(lines[secondLabelIndex]);
+    if (panelLetter(secondLabel) !== 'b' || blockedLines.has(secondLabelIndex)) {
+        return null;
+    }
+
+    const captioned = [];
+    let cursor = nearbyLineIndex(lines, secondLabelIndex + 1);
+    while (cursor < lines.length
+        && !blockedLines.has(cursor)
+        && isMarkdownImageLine(lines[cursor].raw)) {
+        const caption = captionFromImageLine(lines[cursor].raw);
+        if (!caption) break;
+        captioned.push({
+            index: cursor,
+            caption,
+            source: lines[cursor].text.trim(),
+        });
+        cursor = nearbyLineIndex(lines, cursor + 1);
+    }
+    if (!captioned.length) return null;
+    const trailingIndex = cursor;
+    if (trailingIndex >= lines.length || blockedLines.has(trailingIndex)) {
+        return null;
+    }
+    const trailingCaption = parseCaptionLine(lines[trailingIndex].raw);
+    if (!trailingCaption) return null;
+
+    const captions = [...captioned.map(item => item.caption), trailingCaption];
+    if (!describesSharedABFigurePanels(captions[0])) return null;
+    const numbers = captions.map(academicFigureNumber);
+    if (numbers.some(number => number == null)
+        || numbers.some((number, offset) => number !== numbers[0] + offset)) {
+        return null;
+    }
+
+    const ending = lineEnding(lines[startIndex].raw) || '\n';
+    const rewrittenImages = captioned.map((item, offset) => (
+        replaceImageDescription(item.source, captions[offset + 1].text)
+    ));
+    const replacement = [
+        lines[startIndex].text,
+        lines[firstLabelIndex].text,
+        '',
+        lines[secondImageIndex].text,
+        lines[secondLabelIndex].text,
+        captions[0].text,
+        '',
+        ...rewrittenImages,
+    ].join(ending) + (trailingIndex + 1 < lines.length ? ending : lineEnding(lines[trailingIndex].raw));
+
+    return {
+        startIndex,
+        trailingIndex,
+        replacement,
+        groups: [{
+            from: lines[startIndex].from,
+            to: lines[secondLabelIndex].to,
+            caption: captions[0],
+            images: [{
+                index: startIndex,
+                source: lines[startIndex].text.trim(),
+                panelLabel: firstLabel,
+            }, {
+                index: secondImageIndex,
+                source: lines[secondImageIndex].text.trim(),
+                panelLabel: secondLabel,
+            }],
+            layout: 'horizontal',
+            renderSource: [
+                lines[startIndex].text,
+                lines[firstLabelIndex].text,
+                '',
+                lines[secondImageIndex].text,
+                lines[secondLabelIndex].text,
+                captions[0].text,
+            ].join(ending),
+        }, ...captioned.map((item, offset) => {
+            const caption = captions[offset + 1];
+            const rewritten = rewrittenImages[offset];
+            const last = offset === captioned.length - 1;
+            return {
+                from: lines[item.index].from,
+                to: last ? lines[trailingIndex].to : lines[item.index].to,
+                caption,
+                images: [{
+                    index: item.index,
+                    source: rewritten,
+                }],
+                renderSource: rewritten,
+            };
+        })],
+    };
+}
+
+function sequentialABPanelLabels(labels) {
+    return labels.length === 2
+        && panelLetter(labels[0]) === 'a'
+        && panelLetter(labels[1]) === 'b';
+}
+
+function panelLetter(label) {
+    const text = String(label || '').trim();
+    const match = /^\(\s*([a-z])\s*\)(?:[ \t]+\S.*)?$/iu.exec(text)
+        || /^([a-z])\.(?:[ \t]+\S.*)?$/iu.exec(text);
+    return match ? match[1].toLowerCase() : null;
+}
+
+function academicFigureNumber(caption) {
+    const label = String(caption?.label || '');
+    const match = /(?:fig(?:ure)?\.?|图表|图)\s*(s?\d+[a-z]?|[ivxlcdm]+[a-z]?)/iu
+        .exec(label);
+    if (!match || !/^\d+$/u.test(match[1])) return null;
+    const number = Number(match[1]);
+    return number > 0 && number < 10_000 ? number : null;
 }
 
 function isTrailingCompositePanelLabel(label) {
