@@ -5,6 +5,7 @@ import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outl
 import {
     findAcademicFigures,
     normalizeMisassignedAcademicCaptions,
+    splitTrailingAcademicFigureCaption,
 } from '../src/markdown/markdown-figures.js';
 import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
 
@@ -343,5 +344,34 @@ test('does not absorb a captioned table into the preceding figure', () => {
             tables: figure.tablePanels?.length || 0,
         })),
         []
+    );
+});
+
+test('splits a trailing academic caption that MinerU merged into a paragraph', () => {
+    const body = 'A task is converted into executable evaluation examples by binding '
+        + 'its specification to a concrete data context. Each resulting instance identifies the dataset';
+    const caption = 'Figure 2: Construction of a reusable task and its data-bound '
+        + 'instances across heterogeneous recordings.';
+    const split = splitTrailingAcademicFigureCaption(`${body} ${caption}`);
+
+    assert.ok(split);
+    assert.equal(split.body, body);
+    assert.equal(split.caption.text, caption);
+    assert.equal(split.caption.label, 'Figure 2:');
+    assert.equal(split.from, body.length + 1);
+});
+
+test('does not split prose mentions, bare labels or short bodies', () => {
+    assert.equal(
+        splitTrailingAcademicFigureCaption('Body text for grid-2x2 page 1. See Fig. 1.'),
+        null
+    );
+    assert.equal(
+        splitTrailingAcademicFigureCaption('Figure 2: Only a caption.'),
+        null
+    );
+    assert.equal(
+        splitTrailingAcademicFigureCaption('Short prose Figure 2: A caption.'),
+        null
     );
 });

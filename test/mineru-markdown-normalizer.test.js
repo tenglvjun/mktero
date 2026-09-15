@@ -466,3 +466,23 @@ test('preserves line endings when no MinerU split is repaired', () => {
 
     assert.equal(normalizeMinerUMarkdown(markdown), markdown);
 });
+
+test('leaves a merged trailing figure caption inside its paragraph', () => {
+    const body = 'A task is converted into executable evaluation examples by binding '
+        + 'its specification to a concrete data context. Each resulting instance identifies the dataset';
+    const caption = 'Figure 2: Construction of a reusable task and its data-bound '
+        + 'instances across heterogeneous recordings.';
+    const continuation = 'and recording to be analyzed, together with the applicable '
+        + 'time window, signal selection, analysis parameters, and other task-specific conditions.';
+    const markdown = [
+        '![](images/figure2.png)',
+        '',
+        '## 3.2.2 INSTANCE CONSTRUCTION',
+        '',
+        `${body} ${caption}`,
+        '',
+        continuation,
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), markdown);
+});

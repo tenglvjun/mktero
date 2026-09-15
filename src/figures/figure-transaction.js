@@ -133,9 +133,15 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
     // Blank lines keep the generated image a standalone paragraph even when
     // neighbouring fragments are consumed down to its edges.
     const replacement = `\n\n![${renderCaption}](${destination})\n\n`;
-    const anchorBlock = captionMembers.find(block => parseAcademicFigureCaption(block.text))
-        || captionMembers[0]
-        || members.find(block => candidate.panelBlockIds.includes(block.id));
+    const embeddedCaption = captionMembers.some(block => block.embeddedCaption === true);
+    const panelAnchor = members.find(block => candidate.panelBlockIds.includes(block.id));
+    // An embedded caption sits inside body prose; anchoring the restored image
+    // at the panel keeps the surrounding sentences together.
+    const anchorBlock = embeddedCaption && panelAnchor
+        ? panelAnchor
+        : captionMembers.find(block => parseAcademicFigureCaption(block.text))
+            || captionMembers[0]
+            || panelAnchor;
     const anchor = anchorBlock.sourceRanges[0];
     const fragments = members.flatMap(block => block.sourceRanges.map(range => ({
         from: range.from,
@@ -170,10 +176,9 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
         blueprint, anchor, replacement,
         asset: { path, mimeType: 'image/png', data: crop.data },
         edits: members.flatMap(block => block.sourceRanges.map(range => {
-            let to = range.to;
-            if (range !== anchor) {
-                while (to < input.markdown.length && /[ \t\r\n]/u.test(input.markdown[to])) to++;
-            }
+            const to = range === anchor
+                ? range.to
+                : removalEnd(input.markdown, range, block.embeddedCaption === true);
             return { from: range.from, to, replacement: range === anchor ? replacement : '' };
         })),
         block: {
@@ -185,6 +190,21 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
             rangeEvidence: 'explicit-range',
         },
     };
+}
+
+function removalEnd(markdown, range, embedded) {
+    let to = range.to;
+    while (to < markdown.length && (embedded ? /[ \t]/u : /[ \t\r\n]/u).test(markdown[to])) to++;
+    if (!embedded || to >= markdown.length || !/[\r\n]/u.test(markdown[to])) return to;
+    // A caption wedged between two halves of one sentence rejoins them; a
+    // caption that ends its paragraph keeps the following blank line.
+    const before = markdown.slice(0, range.from).trimEnd();
+    let next = to;
+    while (next < markdown.length && /[ \t\r\n]/u.test(markdown[next])) next++;
+    const after = markdown[next] || '';
+    return before && /^\p{Ll}/u.test(after) && !/[.!?;:]/u.test(before.at(-1))
+        ? next
+        : to;
 }
 
 function contentRecord(block) {

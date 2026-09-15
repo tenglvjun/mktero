@@ -1,6 +1,9 @@
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { normalizeFigureAssetPath } from '../figures/figure-model.js';
-import { parseAcademicFigureCaption } from '../markdown/markdown-figures.js';
+import {
+    parseAcademicFigureCaption,
+    splitTrailingAcademicFigureCaption,
+} from '../markdown/markdown-figures.js';
 import { MINERU_FIGURE_LAYOUT_OPTIONS } from './parser-profile.js';
 
 export function decodeMinerUFigureInput(result) {
@@ -45,6 +48,7 @@ export function decodeMinerUFigureInput(result) {
 }
 
 const MARKDOWN_IMAGE_LINE = /^( {0,3})!\[[^\]\r\n]*\]\(\s*(<[^>\r\n]+>|[^)\s]+)(?:[^)]*)\)[ \t]*$/u;
+
 
 function separateFigureImageLines(markdown, assets) {
     if (!markdown) return markdown;
@@ -101,13 +105,17 @@ function decodeFlatBlocks(contentList, pageIndex) {
     for (const [sourceOrdinal, block] of contentList.entries()) {
         if (block.pageIndex !== pageIndex) continue;
         const image = ['image', 'chart'].includes(block.type);
+        const embedded = image ? null : splitTrailingAcademicFigureCaption(block.text);
         blocks.push({
             id: `mineru:p${pageIndex}:b${sourceOrdinal}`, sourceOrdinal, pageIndex,
             type: block.type, role: image ? 'panel'
-                : parseAcademicFigureCaption(block.text) ? 'caption' : 'unknown',
+                : embedded ? 'caption'
+                    : parseAcademicFigureCaption(block.text) ? 'caption' : 'unknown',
             bboxKind: image ? 'unknown' : 'text', bbox: block.bbox ? [...block.bbox] : null,
             ...(block.assetPath ? { assetPath: block.assetPath } : {}),
-            text: block.text || '', sourceRanges: [], rangeEvidence: 'unresolved',
+            ...(embedded ? { embeddedCaption: true } : {}),
+            text: embedded ? embedded.caption.text : block.text || '',
+            sourceRanges: [], rangeEvidence: 'unresolved',
         });
     }
     return blocks;
@@ -139,8 +147,16 @@ function decodeDetailedPages(pdfInfo, input, supported) {
             for (const para of raw.para_blocks) {
                 if (!['image', 'chart'].includes(para.type)) {
                     const text = blockText(para);
-                    add({ type: para.type === 'title' ? 'heading' : para.type || 'unknown', role: parseAcademicFigureCaption(text)
-                        ? 'caption' : 'unknown', bboxKind: 'text', bbox: box(para.bbox), text });
+                    const embedded = para.type === 'text'
+                        ? splitTrailingAcademicFigureCaption(text)
+                        : null;
+                    add({ type: para.type === 'title' ? 'heading' : para.type || 'unknown',
+                        role: embedded
+                            ? 'caption'
+                            : parseAcademicFigureCaption(text) ? 'caption' : 'unknown',
+                        bboxKind: 'text', bbox: box(para.bbox),
+                        ...(embedded ? { embeddedCaption: true } : {}),
+                        text: embedded ? embedded.caption.text : text });
                     continue;
                 }
                 const parent = add({ type: para.type, role: 'unknown', bboxKind: 'group', bbox: box(para.bbox) });

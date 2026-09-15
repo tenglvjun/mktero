@@ -45,14 +45,19 @@ const READING_ORDER_SOURCE_MAP_OPTIONS = Object.freeze({
     figureReadingOrder: 'verified-pdf-title-order-v1',
 });
 
-export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+const FIGURE_LAYOUT_SOURCE_MAP_OPTIONS = Object.freeze({
     ...READING_ORDER_SOURCE_MAP_OPTIONS,
     figureLayout: MINERU_FIGURE_LAYOUT_OPTIONS,
 });
 
+export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...FIGURE_LAYOUT_SOURCE_MAP_OPTIONS,
+    embeddedCaptions: 'trailing-figure-caption-v1',
+});
+
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
-    READING_ORDER_SOURCE_MAP_OPTIONS, LABEL_RECOVERY_SOURCE_MAP_OPTIONS,
-    PREVIOUS_SOURCE_MAP_OPTIONS,
+    FIGURE_LAYOUT_SOURCE_MAP_OPTIONS, READING_ORDER_SOURCE_MAP_OPTIONS,
+    LABEL_RECOVERY_SOURCE_MAP_OPTIONS, PREVIOUS_SOURCE_MAP_OPTIONS,
 ].map(sourceMap => JSON.stringify({
     batch: MINERU_BATCH_OPTIONS,
     file: MINERU_FILE_OPTIONS,

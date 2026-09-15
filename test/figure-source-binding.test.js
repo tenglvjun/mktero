@@ -228,3 +228,42 @@ test('binds a repeated panel label to the paragraph adjacent to its own panel', 
     assert.equal(markdown.slice(second.sourceRanges[0].from, second.sourceRanges[0].to), 'A');
     assert.ok(first.sourceRanges[0].to < second.sourceRanges[0].from);
 });
+
+test('binds a caption merged into the tail of a body paragraph without changing the Markdown', () => {
+    const caption = 'Figure 2: Construction of a reusable task and its data-bound '
+        + 'instances across heterogeneous recordings.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        'A task is converted into executable evaluation examples by binding its specification '
+            + 'to a concrete data context. Each resulting instance identifies the dataset ' + caption,
+        '',
+        'and recording to be analyzed, together with the applicable time window.',
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 950], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 400],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 420, 500, 450],
+                embeddedCaption: true, text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    const bound = bindFigureSourceRanges(input);
+    const range = bound.blocks.find(block => block.id === 'mineru:p0:b2').sourceRanges[0];
+    assert.equal(markdown.slice(range.from, range.to), caption);
+    assert.equal(bound.markdown, markdown);
+    const candidates = resolveFigureCandidates(bound);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.equal(candidates[0].label, 'Figure 2:');
+});

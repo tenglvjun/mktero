@@ -35,6 +35,15 @@ const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
         'iu'
     ),
 ];
+const EMBEDDED_FIGURE_CAPTION_START_SOURCE =
+    `(?:^|[^\\p{L}\\p{N}])`
+    + `((?:(?:algorithm|chart|fig\\.?|figure|scheme|table)`
+    + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
+    + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}`
+    + `${ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE}`
+    + `|(?:图表|图)${ACADEMIC_REFERENCE_SPACE_SOURCE}*`
+    + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}[.:：。]))`;
+const MIN_EMBEDDED_FIGURE_CAPTION_BODY_WORDS = 6;
 const ACADEMIC_TABLE_CAPTION_PATTERN = /^(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]+(\S[\s\S]*)$/iu;
 // Publisher captions such as "Figure 1 The impact of ..." omit the separator;
 // this relaxed form is only used where an image or caption geometry already
@@ -113,6 +122,34 @@ export function parseAcademicFigureCaption(value) {
         description: match[2],
     };
 }
+
+// A MinerU text block can merge a right-column figure caption into the tail of
+// a left-column paragraph. Split that trailing caption so figure restoration
+// can bind it back to its image while the body prose stays intact.
+export function splitTrailingAcademicFigureCaption(value) {
+    const text = String(value || '').trimEnd();
+    if (!text) return null;
+    const starts = [];
+    const pattern = new RegExp(EMBEDDED_FIGURE_CAPTION_START_SOURCE, 'giu');
+    let match;
+    while ((match = pattern.exec(text))) {
+        starts.push(match.index + match[0].length - match[1].length);
+    }
+    for (let index = starts.length - 1; index >= 0; index--) {
+        const from = starts[index];
+        const body = text.slice(0, from).trimEnd();
+        const words = body.match(/\p{L}[\p{L}\p{N}'’-]*/gu) || [];
+        if (words.length < MIN_EMBEDDED_FIGURE_CAPTION_BODY_WORDS) continue;
+        const caption = parseAcademicFigureCaption(text.slice(from).trim());
+        // A bare "Fig. 1." prose mention parses with a punctuation-only
+        // description; a real caption describes the figure with words.
+        if (!caption
+            || (caption.description.match(/\p{L}/gu) || []).length < 2) continue;
+        return { body, caption, from };
+    }
+    return null;
+}
+
 
 export function parseLooseAcademicFigureCaption(value) {
     const text = String(value || '').trim();

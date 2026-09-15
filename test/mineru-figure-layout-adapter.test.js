@@ -360,3 +360,118 @@ test('keeps validated page geometry when another detailed page is malformed', ()
     assert.ok(input.blocks.some(block => block.pageIndex === 0
         && block.bboxKind === 'visual-body'));
 });
+
+test('owns a caption merged into the tail of a body paragraph', () => {
+    const body = 'A task is converted into executable evaluation examples by binding its '
+        + 'specification to a concrete data context. Each resulting instance identifies the dataset';
+    const caption = 'Figure 2: Construction of a reusable task and its data-bound instances '
+        + 'across heterogeneous recordings.';
+    const continuation = 'and recording to be analyzed, together with the applicable time '
+        + 'window, signal selection, analysis parameters, and other task-specific conditions.';
+    const middle = {
+        _backend: 'hybrid', _version_name: '3.4.4',
+        pdf_info: [{
+            page_idx: 0, page_size: [612, 792],
+            para_blocks: [
+                { type: 'image', bbox: [338, 84, 503, 287], blocks: [
+                    { type: 'image_body', bbox: [338, 84, 503, 287], lines: [{ spans: [{
+                        type: 'image', bbox: [338, 84, 503, 287], image_path: 'images/figure2.png',
+                    }] }] }] },
+                { type: 'title', bbox: [105, 281, 255, 293], lines: [{ spans: [{
+                    type: 'text', content: '3.2.2 INSTANCE CONSTRUCTION', bbox: [105, 281, 255, 293],
+                }] }] },
+                { type: 'text', bbox: [105, 300, 505, 334], lines: [{ spans: [{
+                    type: 'text', content: `${body} ${caption}`, bbox: [105, 300, 505, 334],
+                }] }] },
+                { type: 'text', bbox: [104, 333, 506, 456], lines: [{ spans: [{
+                    type: 'text', content: continuation, bbox: [104, 333, 506, 456],
+                }] }] },
+            ],
+        }],
+    };
+    const markdown = [
+        '![](images/figure2.png)',
+        '',
+        '## 3.2.2 INSTANCE CONSTRUCTION',
+        '',
+        `${body} ${caption}`,
+        '',
+        continuation,
+    ].join('\n');
+    const archive = zipSync({
+        'full.md': strToU8(markdown),
+        'layout.json': strToU8(JSON.stringify(middle)),
+        'images/figure2.png': createTestPNG(),
+    });
+    const input = decodeMinerUFigureInput(extractMinerUResultFromZip(archive));
+    assert.ok(input.markdown.includes(`${body} ${caption}`));
+    const captionBlock = input.blocks.find(block => block.role === 'caption');
+    assert.equal(captionBlock.embeddedCaption, true);
+    assert.equal(captionBlock.text, caption);
+    const bound = bindFigureSourceRanges(input);
+    const candidates = resolveFigureCandidates(bound);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.equal(candidates[0].label, 'Figure 2:');
+    assert.equal(candidates[0].captionBlockIds.length, 1);
+    const draft = composeFigureDraft(bound, candidates.map(candidate => ({
+        candidate,
+        crop: { data: createTestPNG(400, 500), mimeType: 'image/png', width: 400, height: 500 },
+        assetPath: 'generated/figures/figure2.png',
+    })));
+    assert.equal(draft.preserved.length, 0);
+    assert.equal(draft.blueprints.length, 1);
+    assert.equal(draft.blueprints[0].renderCaption, caption);
+    const composed = draft.input.markdown;
+    assert.ok(composed.includes(`![${caption}](generated/figures/figure2.png)`));
+    assert.ok(!composed.includes('![](images/figure2.png)'));
+    assert.match(composed, /identifies the dataset and recording to be analyzed, together with/);
+    assert.ok(composed.indexOf('generated/figures/figure2.png') < composed.indexOf('## 3.2.2'));
+    assert.ok(!composed.includes(`${caption}\n`));
+    assert.equal(composed.split('\n').filter(line => (
+        line.startsWith('A task is converted')
+    )).length, 1);
+    assert.match(composed, /A task is converted[^\n]*identifies the dataset and recording to be analyzed/u);
+});
+
+test('keeps a complete paragraph separate when its embedded caption is removed', () => {
+    const caption = 'Figure 3: A shared legend.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        'Sentence one is complete here.',
+        caption,
+        '',
+        'Next paragraph starts fresh.',
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 950], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 400],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 420, 500, 450],
+                embeddedCaption: true, text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    const bound = bindFigureSourceRanges(input);
+    const candidates = resolveFigureCandidates(bound);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    const draft = composeFigureDraft(bound, candidates.map(candidate => ({
+        candidate,
+        crop: { data: createTestPNG(400, 300), mimeType: 'image/png', width: 400, height: 300 },
+        assetPath: 'generated/figures/panel.png',
+    })));
+    assert.equal(draft.preserved.length, 0);
+    assert.match(draft.input.markdown, /Sentence one is complete here\.\n+Next paragraph starts fresh\./);
+    assert.ok(!draft.input.markdown.includes(caption + '\n'));
+});

@@ -1,6 +1,7 @@
 import { GFM, parser } from '@lezer/markdown';
 import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
 import { normalizeTolerantText, normalizeText } from '../markdown/text-normalization.js';
+import { splitTrailingAcademicFigureCaption } from '../markdown/markdown-figures.js';
 import { FIGURE_LIMITS } from './figure-limits.js';
 import { collectFigureImageNodes, normalizeFigureAssetPath } from './figure-model.js';
 import { captionNear, isLooseFigureCaption, looksLikeGapLabel } from './figure-region-resolver.js';
@@ -152,8 +153,24 @@ function collectTextNodes(markdown, images, limits) {
             if (child.name === 'Image') hasImage = true;
         } });
         if (hasImage) continue;
-        const text = normalizeText(visible.textForSourceRange(node.from, node.to));
+        const nodeText = visible.textForSourceRange(node.from, node.to);
+        const text = normalizeText(nodeText);
         add(text, { from: node.from, to: node.to, heading: node.name !== 'Paragraph' });
+        // MinerU can merge a figure caption into the tail of a body paragraph,
+        // so index that trailing caption as its own bindable range.
+        if (node.name === 'Paragraph') {
+            const split = splitTrailingAcademicFigureCaption(nodeText);
+            if (split && split.from > 0
+                && !/\r?\n[ \t]*$/u.test(nodeText.slice(0, split.from))) {
+                const base = visible.visibleOffsetAt(node.from);
+                const captionEnd = split.from + split.caption.text.length;
+                add(split.caption.text, {
+                    from: visible.sourceOffsetAt(base + split.from),
+                    to: visible.sourceOffsetAt(base + captionEnd - 1) + 1,
+                    imageCaption: true,
+                });
+            }
+        }
         // MinerU often glues a panel label and its caption into one paragraph
         // without a blank line, so the caption only matches a single line.
         const lines = textLineRanges(markdown, node.from, node.to);
