@@ -12,6 +12,8 @@ export class MinerUConversion {
         pendingTasks,
         cache = null,
         prepareResult = prepareMinerUResult,
+        progressiveResult = null,
+        restoreCachedInput = null,
         recoverFigures = async result => result,
         createPreviousCacheKeys = null,
         createDataID = createTaskDataID,
@@ -31,6 +33,14 @@ export class MinerUConversion {
         this.cache = cache;
         if (typeof prepareResult !== 'function') throw new TypeError('A MinerU result preparer is required');
         this.prepareResult = prepareResult;
+        if (progressiveResult !== null && typeof progressiveResult !== 'function') {
+            throw new TypeError('A progressive result preparer must be a function');
+        }
+        this.progressiveResult = progressiveResult;
+        if (restoreCachedInput !== null && typeof restoreCachedInput !== 'function') {
+            throw new TypeError('A cached figure restoration runner must be a function');
+        }
+        this.restoreCachedInput = restoreCachedInput;
         this.recoverFigures = recoverFigures;
         this.createPreviousCacheKeys = createPreviousCacheKeys;
         this.createDataID = createDataID;
@@ -50,6 +60,7 @@ export class MinerUConversion {
         cacheEnabled = false,
         forceRefresh = false,
         onProgress = () => {},
+        onProgressiveFigures = null,
         signal,
     }) {
         throwIfAborted(signal);
@@ -60,10 +71,14 @@ export class MinerUConversion {
                 fileName,
                 fileData,
                 onProgress,
+                onProgressiveFigures,
                 signal,
             });
         }
 
+        const emitProgressive = typeof onProgressiveFigures === 'function'
+            ? event => onProgressiveFigures({ ...event, cacheKey: key })
+            : null;
         const selected = await this.#withKeyOperation(key, () => (
             this.#selectTask({
                 key,
@@ -73,6 +88,7 @@ export class MinerUConversion {
                 cacheEnabled,
                 forceRefresh,
                 onProgress: (progress, state) => onProgress(Math.min(96, progress), state),
+                onProgressiveFigures: emitProgressive,
                 signal,
                 warnings,
             })
@@ -98,7 +114,10 @@ export class MinerUConversion {
                 signal,
             });
             throwIfAborted(signal);
-            result = await this.prepareResult(raw, { fileData, signal, onProgress: reportProgress });
+            result = this.progressiveResult
+                ? await this.progressiveResult(raw, { fileData, signal,
+                    onProgress: reportProgress, onEvent: emitProgressive })
+                : await this.prepareResult(raw, { fileData, signal, onProgress: reportProgress });
             result = await this.#recoverFigures(result, { fileData, signal, onProgress: reportProgress });
             throwIfAborted(signal);
         }
@@ -127,6 +146,7 @@ export class MinerUConversion {
         fileName,
         fileData,
         onProgress,
+        onProgressiveFigures,
         signal,
     }) {
         const task = await this.client.submit({
@@ -145,7 +165,9 @@ export class MinerUConversion {
             signal,
         });
         throwIfAborted(signal);
-        const prepared = await this.prepareResult(raw, { fileData, signal, onProgress });
+        const prepared = this.progressiveResult
+            ? await this.progressiveResult(raw, { fileData, signal, onProgress, onEvent: onProgressiveFigures })
+            : await this.prepareResult(raw, { fileData, signal, onProgress });
         const result = await this.#recoverFigures(prepared, { fileData, signal, onProgress });
         throwIfAborted(signal);
         onProgress(CONVERSION_PROGRESS.COMPLETE);
@@ -160,6 +182,7 @@ export class MinerUConversion {
         cacheEnabled,
         forceRefresh,
         onProgress,
+        onProgressiveFigures,
         signal,
         warnings,
     }) {
@@ -193,9 +216,24 @@ export class MinerUConversion {
                 catch (error) { throwIfAborted(signal); this.#reportError(error); }
             }
             if (cached) {
-                const result = await this.#recoverFigures(cached, { fileData, signal, onProgress });
+                const wasPending = cached.figureRestoration?.status === 'pending';
+                let resolved = cached;
+                if (cached.figureRestoration?.status === 'pending'
+                    && cached.restorationInput && this.restoreCachedInput) {
+                    try {
+                        resolved = await this.restoreCachedInput(cached.restorationInput, {
+                            fileData, signal, onProgress, onEvent: onProgressiveFigures,
+                        });
+                    }
+                    catch (error) {
+                        throwIfAborted(signal);
+                        this.#reportError(error);
+                        resolved = cached;
+                    }
+                }
+                const result = await this.#recoverFigures(resolved, { fileData, signal, onProgress });
                 throwIfAborted(signal);
-                if (cacheEnabled && (migrated || result !== cached)) {
+                if (cacheEnabled && (migrated || result !== cached || wasPending)) {
                     try { await this.cache.put(key, result, { signal }); }
                     catch (error) {
                         throwIfAborted(signal);

@@ -23,6 +23,8 @@ export const FIGURE_LIMITS = Object.freeze({
     maxIntermediateCanvasPixels: 24_000_000,
     maxIntermediateCanvasEdge: 8_192,
     maxActiveCanvasPixels: 48_000_000,
+    maxPageCanvasPixels: 24_000_000,
+    maxPageCanvasEdge: 8_192,
     maxCropBytes: 12 * 1024 * 1024,
     maxGeneratedBytes: 64 * 1024 * 1024,
     maxTotalAssetBytes: 150 * 1024 * 1024,

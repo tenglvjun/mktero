@@ -238,8 +238,11 @@ async function renderPageCanvas(
     const canvas = createCanvas(width, height);
     canvas.width = width;
     canvas.height = height;
+    const context = canvas.getContext?.('2d');
+    if (!context) throw new Error('PDF canvas context is unavailable');
     const renderTask = page.render({
         canvas,
+        canvasContext: context,
         viewport,
         intent: 'print',
         annotationMode: 0,

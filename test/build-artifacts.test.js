@@ -43,6 +43,7 @@ test('builds reproducible release assets and Zotero update metadata', async () =
     assert.equal(packageNames.some(name => /(?:^|\/)(?:scripts|test|fixtures)\/|figure-validation|compound-figures/u.test(name)), false);
     for (const required of [
         'bootstrap.js',
+        'figure.worker.js',
         'licenses/d3-dispatch.txt',
         'licenses/d3-force.txt',
         'licenses/d3-quadtree.txt',

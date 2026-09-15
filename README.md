@@ -35,7 +35,16 @@ Useful links: [Product page](https://mktero.com/) ·
 - Reflow OCR output, multi-column text, formulas, tables, figures, lists, and
   code into a continuous academic reading document.
 - The figure pipeline restores a complete figure from the local PDF only when
-  layout evidence, page coordinates, and exact Markdown ranges agree. The
+  layout evidence, page coordinates, and exact Markdown ranges agree. Local PDF
+  rasterization for the figure pipeline runs in a background worker, so the
+  reader and the rest of Zotero stay responsive while figures are stitched, and
+  a page with several figures is rendered once. Reading starts as soon as the
+  conversion finishes: each pending figure shows an animated placeholder (a
+  lucide image with a spinner) and is replaced in place as soon
+  as its crop is ready, so one slow figure never delays the rest. Closing the
+  reader tab does not stop a running restoration; it finishes and updates the
+  cache. Export and snapshot stay disabled until every figure is resolved.
+  The
   generated local PNG preserves 2x2, 4x4, missing-cell, spanning, and irregular
   arrangements. Interior OCR leaves the reading flow only after a successful
   crop; captions remain selectable, searchable, and translatable. Uncertain

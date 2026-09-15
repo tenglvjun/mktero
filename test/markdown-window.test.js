@@ -2129,6 +2129,31 @@ test('exports the Markdown matching the active translation view through the real
     view.destroy();
 });
 
+test('disables export and snapshot while figures are still restoring', async () => {
+    let exports = 0;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        figureRestoration: { status: 'pending' },
+        onExportMarkdown: () => { exports++; return { status: 'success' }; },
+        onSaveSnapshot: () => ({ status: 'success' }),
+    });
+    const { view, shadow } = createView(model);
+    const exportButton = shadow.querySelector('#mktero-export-markdown');
+    const saveButton = shadow.querySelector('#mktero-save-snapshot');
+
+    assert.equal(exportButton.disabled, true);
+    assert.equal(saveButton.disabled, true);
+    assert.ok((exportButton.getAttribute('title') || '').length > 0);
+
+    shadow.querySelector('#mktero-document-actions').click();
+    exportButton.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(exports, 0);
+    view.destroy();
+});
+
 test('forwards code copy requests to the current tab model', async () => {
     let editorOptions;
     const copied = [];

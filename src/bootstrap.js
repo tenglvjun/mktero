@@ -1,3 +1,4 @@
+import { unzipSync } from 'fflate';
 import {
     getMinerUCacheEnabled,
     getMinerUApiKey,
@@ -105,7 +106,9 @@ import { FigureRestorationService } from './figures/figure-restoration-service.j
 import { FigureLabelRecoveryService } from './figures/figure-label-recovery.js';
 import { FigureReadingOrderService } from './figures/figure-reading-order.js';
 import { finalizeRestoredDocument } from './figures/figure-finalization.js';
+import { createProgressiveFigureRunner } from './figures/figure-progressive-runner.js';
 import { createPDFFigureRegionRenderer } from './pdf/pdfjs-figure-region.js';
+import { createWorkerFigureRegionRenderer } from './figures/figure-render-worker-client.js';
 import { createZoteroFigureCanvasEnvironment } from './platform/zotero-figure-canvas.js';
 import { MistralClient } from './mistral/mistral-client.js';
 import { MistralConversion } from './mistral/mistral-conversion.js';
@@ -180,6 +183,10 @@ import {
     createTranslationLoadingChanges,
     snapshotReadyResult,
 } from './ui/markdown-tab-state.js';
+
+// Conversions whose OCR is done and only local figure stitching remains must
+// keep running after the reader tab is closed, so the next open is instant.
+const backgroundFigureRestorations = new Set();
 
 const runtime = {
     id: null,
@@ -399,34 +406,59 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ioUtils: IOUtils,
         pathUtils: PathUtils,
     });
-    const figureRegionRenderer = createPDFFigureRegionRenderer({
-        createCanvas: (width, height) => createZoteroFigureCanvasEnvironment(Zotero).createCanvas(width, height),
-        encodePNG: (canvas, options) => createZoteroFigureCanvasEnvironment(Zotero).encodePNG(canvas, options),
+    const figureCanvasEnvironment = createZoteroFigureCanvasEnvironment(Zotero);
+    const figureFallbackRenderer = createPDFFigureRegionRenderer({
+        createCanvas: figureCanvasEnvironment.createCanvas,
+        encodePNG: figureCanvasEnvironment.encodePNG,
+        decodeImage: figureCanvasEnvironment.decodeImage,
         createAbortController: createZoteroAbortController,
         workerSrc: `${rootURI}pdf.worker.mjs`,
         cMapUrl: `${rootURI}pdfjs/cmaps/`,
         standardFontDataUrl: `${rootURI}pdfjs/standard_fonts/`,
         wasmUrl: `${rootURI}pdfjs/wasm/`,
+        readBinaryAsset: (kind, filename) => readFigureBinaryAsset(rootURI, kind, filename),
+    });
+    const figureRegionRenderer = createWorkerFigureRegionRenderer({
+        loadWorkerSource: () => loadFigureWorkerSource(rootURI).catch(error => {
+            Zotero.debug(`Mktero: figure worker unavailable, using main-thread rendering (${error.message})`);
+            throw error;
+        }),
+        createWorker: url => new (mainWindowWorker())(url),
+        createObjectURL: url => Zotero.getMainWindow().URL.createObjectURL(url),
+        revokeObjectURL: url => Zotero.getMainWindow().URL.revokeObjectURL(url),
+        loadPdfAssets: () => loadFigurePDFAssets(rootURI).then(assets => {
+            Zotero.debug(`Mktero: figure PDF assets loaded (${assets.size})`);
+            return assets;
+        }).catch(error => {
+            Zotero.debug(`Mktero: figure PDF assets unavailable (${error.message}); non-embedded fonts may render incorrectly`);
+            throw error;
+        }),
+        rendererOptions: {
+            cMapUrl: `${rootURI}pdfjs/cmaps/`,
+            standardFontDataUrl: `${rootURI}pdfjs/standard_fonts/`,
+            wasmUrl: `${rootURI}pdfjs/wasm/`,
+        },
+        fallback: {
+            open: (fileData, options) => figureFallbackRenderer.open(fileData, {
+                ...options, ...figureCanvasEnvironment,
+            }),
+        },
+        createAbortController: createZoteroAbortController,
     });
     runtime.figureRegionRenderer = figureRegionRenderer;
+    runtime.figureFallbackRenderer = figureFallbackRenderer;
     const figureRestoration = new FigureRestorationService({
-        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, {
-            ...options, ...createZoteroFigureCanvasEnvironment(Zotero),
-        }),
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, options),
         hash: sha256Hex,
         createAbortController: createZoteroAbortController,
     });
     const figureLabelRecovery = new FigureLabelRecoveryService({
-        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, {
-            ...options, ...createZoteroFigureCanvasEnvironment(Zotero),
-        }),
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, options),
         hash: sha256Hex,
         createAbortController: createZoteroAbortController,
     });
     const figureReadingOrder = new FigureReadingOrderService({
-        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, {
-            ...options, ...createZoteroFigureCanvasEnvironment(Zotero),
-        }),
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, options),
         hash: sha256Hex,
         createAbortController: createZoteroAbortController,
     });
@@ -440,6 +472,30 @@ globalThis.startup = async function startup({ id, rootURI }) {
             prepare, hash: sha256Hex, signal: context.signal,
         });
     };
+    const progressiveWithFigures = (decode, prepare) => async (raw, context) => {
+        const input = decode(raw);
+        const run = createProgressiveFigureRunner({
+            restoration: figureRestoration,
+            prepare,
+            finalize: finalizeRestoredDocument,
+            hash: sha256Hex,
+        });
+        return run(input, {
+            fileData: context.fileData,
+            signal: context.signal,
+            onEvent: context.onEvent,
+        });
+    };
+    const restoreCachedFigures = (input, context) => createProgressiveFigureRunner({
+        restoration: figureRestoration,
+        prepare: prepareMinerUResult,
+        finalize: finalizeRestoredDocument,
+        hash: sha256Hex,
+    })(input, {
+        fileData: context.fileData,
+        signal: context.signal,
+        onEvent: context.onEvent,
+    });
     const conversion = new MinerUConversion({
         client: new MinerUClient({
             createAbortController: createZoteroAbortController,
@@ -447,6 +503,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pendingTasks,
         cache,
         prepareResult: prepareWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
+        progressiveResult: progressiveWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
+        restoreCachedInput: restoreCachedFigures,
         recoverFigures,
         createPreviousCacheKeys: fileData => Promise.all(MINERU_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => (
             createMarkdownCacheKey(fileData, { parserProfile })
@@ -565,6 +623,129 @@ globalThis.startup = async function startup({ id, rootURI }) {
     Zotero.debug('Mktero: started');
 };
 
+function mainWindowWorker() {
+    const win = Zotero.getMainWindow();
+    const WorkerType = win?.Worker || globalThis.Worker;
+    if (typeof WorkerType !== 'function') throw new Error('Web Workers are unavailable');
+    return WorkerType;
+}
+
+function logFigureAssetSizes(label, document) {
+    const generated = (document?.assets || []).filter(asset => (
+        typeof asset?.path === 'string' && asset.path.startsWith('generated/figures/')
+    ));
+    if (!generated.length) return;
+    Zotero.debug(`Mktero: ${label}: figure assets ` + generated.map(asset => (
+        `${asset.path.split('/').pop()}=${asset.data?.byteLength ?? '?'}`
+    )).join(', '));
+}
+
+// PDF.js needs cMap/standard-font/WASM bytes that live inside the XPI. Read
+// them from the archive (or a plain directory) once and reuse the map.
+let figurePdfAssetsPromise = null;
+function loadFigurePDFAssets(rootURI) {
+    if (!figurePdfAssetsPromise) {
+        figurePdfAssetsPromise = readFigurePDFAssets(rootURI).catch(error => {
+            figurePdfAssetsPromise = null;
+            throw error;
+        });
+    }
+    return figurePdfAssetsPromise;
+}
+
+async function readFigurePDFAssets(rootURI) {
+    const directories = [
+        ['cMapUrl', 'pdfjs/cmaps/'],
+        ['standardFontDataUrl', 'pdfjs/standard_fonts/'],
+        ['wasmUrl', 'pdfjs/wasm/'],
+    ];
+    const assets = new Map();
+    if (rootURI.startsWith('jar:')) {
+        const inner = rootURI.slice('jar:'.length);
+        const separator = inner.indexOf('!/');
+        if (separator < 0) throw new Error('Unsupported extension root URI');
+        const archivePath = Services.io.newURI(inner.slice(0, separator))
+            .QueryInterface(Components.interfaces.nsIFileURL).file.path;
+        const base = decodeURIComponent(inner.slice(separator + 2)).replace(/^\/+/u, '');
+        const entries = unzipSync(await IOUtils.read(archivePath));
+        for (const [kind, directory] of directories) {
+            const prefix = base ? `${base}${directory}` : directory;
+            for (const [name, data] of Object.entries(entries)) {
+                if (name.startsWith(prefix) && !name.endsWith('/')) {
+                    assets.set(`${kind}:${name.slice(prefix.length)}`, data);
+                }
+            }
+        }
+        if (!assets.size) throw new Error('No PDF assets found in the extension archive');
+        return assets;
+    }
+    if (!rootURI.startsWith('file:')) throw new Error('Unsupported extension asset root');
+    const basePath = Services.io.newURI(rootURI)
+        .QueryInterface(Components.interfaces.nsIFileURL).file.path;
+    for (const [kind, directory] of directories) {
+        const path = PathUtils.join(basePath, directory.replace(/\/$/u, ''));
+        for (const child of await IOUtils.getChildren(path)) {
+            assets.set(`${kind}:${PathUtils.filename(child)}`, await IOUtils.read(child));
+        }
+    }
+    if (!assets.size) throw new Error('No PDF assets found in the extension directory');
+    return assets;
+}
+
+async function readFigureBinaryAsset(rootURI, kind, filename) {
+    const assets = await loadFigurePDFAssets(rootURI);
+    return assets.get(`${kind}:${filename}`) || null;
+}
+
+
+async function loadFigureWorkerSource(rootURI) {
+    const url = `${rootURI}figure.worker.js`;
+    const errors = [];
+    if (typeof Zotero.File?.getContentsFromURLAsync === 'function') {
+        try {
+            const contents = await Zotero.File.getContentsFromURLAsync(url);
+            if (typeof contents === 'string' && contents.length) return contents;
+            if (ArrayBuffer.isView(contents) && contents.byteLength) {
+                return new TextDecoder().decode(contents);
+            }
+            errors.push('URL read returned no data');
+        }
+        catch (error) { errors.push(String(error?.message || error)); }
+    }
+    if (url.startsWith('jar:')) {
+        try {
+            const inner = url.slice('jar:'.length);
+            const separator = inner.indexOf('!/');
+            if (separator > 0) {
+                const archivePath = Services.io.newURI(inner.slice(0, separator))
+                    .QueryInterface(Components.interfaces.nsIFileURL).file.path;
+                const entry = decodeURIComponent(inner.slice(separator + 2)).replace(/^\/+/u, '');
+                const archive = await IOUtils.read(archivePath);
+                const entries = unzipSync(archive);
+                const data = entries[entry];
+                if (data?.length) return new TextDecoder().decode(data);
+                errors.push(`XPI entry ${entry} is missing`);
+            }
+        }
+        catch (error) { errors.push(String(error?.message || error)); }
+    }
+    try {
+        const uri = Services.io.newURI(url);
+        if (uri.schemeIs?.('file')) {
+            const file = uri.QueryInterface(Components.interfaces.nsIFileURL).file;
+            const contents = await IOUtils.readUTF8(file.path);
+            if (contents.length) return contents;
+        }
+    }
+    catch (error) { errors.push(String(error?.message || error)); }
+    try {
+        const contents = await IOUtils.readUTF8(url);
+        if (typeof contents === 'string' && contents.length) return contents;
+    }
+    catch (error) { errors.push(String(error?.message || error)); }
+    throw new Error(`Figure worker source unavailable: ${errors.join('; ')}`);
+}
+
 globalThis.shutdown = function shutdown() {
     abortAllConversions();
     abortAllTranslations();
@@ -675,7 +856,7 @@ async function openItemAsMarkdown(itemID, {
     const presentation = runtime.presenter.open(itemID, {
         sourceItemID: itemID,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
-            abortConversion(itemID);
+            if (!backgroundFigureRestorations.has(itemID)) abortConversion(itemID);
             void runtime.sourcePeekRenderer?.dispose(itemID);
             abortDocumentTranslations(itemID);
             runtime.citationPresenter?.closeForItem(itemID);
@@ -782,10 +963,49 @@ async function openItemAsMarkdown(itemID, {
     );
 
     let lastLoggedProgress = null;
+    // Once the progressive document is published, later progress ticks must not
+    // flip the reader back to a content-clearing loading state.
+    let progressivePublished = false;
     try {
         const result = await runtime.service.convert(itemID, {
             signal: controller.signal,
             forceRefresh,
+            onProgressiveFigures(event) {
+                if (!event || controller.signal.aborted) return;
+                if (event.type === 'figure') {
+                    Zotero.debug(`Mktero: item ${itemID}: figure ${event.figure.id} ${event.figure.status}`);
+                    return;
+                }
+                if (event.type !== 'document') return;
+                progressivePublished = true;
+                backgroundFigureRestorations.add(itemID);
+                if (event.figureInput) {
+                    Zotero.debug(`Mktero: item ${itemID}: progressive figures started`);
+                }
+                logFigureAssetSizes(`item ${itemID}: progressive`, event.document);
+                runtime.presenter?.update(presentation, {
+                    ...event.document,
+                    status: 'ready',
+                    progress: 100,
+                    preserveContent: false,
+                    figureRestoration: { status: 'pending' },
+                    ...(event.pendingFigureAssets instanceof Map
+                        ? { pendingFigureAssets: event.pendingFigureAssets }
+                        : {}),
+                });
+                // Persist the readable provisional result so a reopen during a
+                // later extension restart can resume without re-uploading.
+                if (event.figureInput && event.cacheKey && runtime.cache
+                    && getMinerUCacheEnabled(Zotero)) {
+                    runtime.cache.put(event.cacheKey, event.document, {
+                        figureRestoration: {
+                            status: 'pending',
+                            input: event.figureInput,
+                            completedFigureIds: [],
+                        },
+                    }).catch(error => Zotero.logError?.(error));
+                }
+            },
             onProgress(progress, state) {
                 const normalizedProgress = normalizeConversionProgress(progress);
                 if (normalizedProgress !== lastLoggedProgress) {
@@ -799,6 +1019,7 @@ async function openItemAsMarkdown(itemID, {
                         + `(${normalizedProgress}%)`
                     );
                 }
+                if (progressivePublished) return;
                 runtime.presenter?.update(
                     presentation,
                     createConversionProgressChanges(normalizedProgress, state)
@@ -823,6 +1044,7 @@ async function openItemAsMarkdown(itemID, {
             positionedResult,
             controller.signal
         );
+        logFigureAssetSizes(`item ${itemID}: final`, readyResult);
         runtime.presenter?.update(
             presentation,
             createConversionReadyChanges(
@@ -857,6 +1079,7 @@ async function openItemAsMarkdown(itemID, {
         );
     }
     finally {
+        backgroundFigureRestorations.delete(itemID);
         runtime.pdfIndexOperations.finish(itemID, controller);
     }
 }

@@ -11,6 +11,10 @@ import {
 import { sha256Hex } from '../core/sha256.js';
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { serializeFigureMap, parseFigureMapJSON } from '../figures/figure-map-serialization.js';
+import {
+    serializeFigureRestorationInput,
+    parseFigureRestorationInputJSON,
+} from '../figures/figure-restoration-input-serialization.js';
 import { throwIfFigureAborted } from '../figures/figure-async.js';
 
 const CACHE_SCHEMA_VERSION = 1;
@@ -75,6 +79,7 @@ export class MarkdownCache {
         maxTranslationBytes = DEFAULT_MAX_TRANSLATION_BYTES,
         maxChromeRangesBytes = MAX_CHROME_RANGES_BYTES,
         maxFigureMapBytes = FIGURE_LIMITS.maxMapBytes,
+        maxFigureRestorationBytes = FIGURE_LIMITS.maxMapBytes,
         hash = sha256Hex,
     }) {
         if (!rootPath) throw new TypeError('A cache root path is required');
@@ -92,6 +97,7 @@ export class MarkdownCache {
         this.maxTranslationBytes = maxTranslationBytes;
         this.maxChromeRangesBytes = maxChromeRangesBytes;
         this.maxFigureMapBytes = maxFigureMapBytes;
+        this.maxFigureRestorationBytes = maxFigureRestorationBytes;
         this.hash = hash;
         this.operationTail = Promise.resolve();
     }
@@ -112,7 +118,8 @@ export class MarkdownCache {
                 metadata,
                 cacheKey,
                 this.maxSourceMapBytes,
-                this.maxChromeRangesBytes
+                this.maxChromeRangesBytes,
+                this.maxFigureRestorationBytes
             );
             metadata = await this.#repairInvalidTranslationMetadata(
                 entryPath,
@@ -180,6 +187,9 @@ export class MarkdownCache {
             const figureMap = await this.#readFigureMap(entryPath, metadata, {
                 markdown, assets, assetBasePath: metadata.assetBasePath,
             });
+            const restoration = await this.#readFigureRestoration(entryPath, metadata, {
+                markdown, assets, assetBasePath: metadata.assetBasePath,
+            });
             await this.#writeMetadata(metadataPath, metadata).catch(() => {});
 
             return {
@@ -191,6 +201,10 @@ export class MarkdownCache {
                 ...(sourceMap ? { sourceMap } : {}),
                 ...(chromeRanges ? { chromeRanges } : {}),
                 ...(figureMap ? { figureMap } : {}),
+                ...(restoration
+                    ? { figureRestoration: restoration.state,
+                        ...(restoration.input ? { restorationInput: restoration.input } : {}) }
+                    : {}),
                 ...(metadata.userEdited ? { userEdited: true } : {}),
             };
         }
@@ -201,15 +215,19 @@ export class MarkdownCache {
         }
     }
 
-    async put(cacheKey, result, { allowEmptyMarkdown = false, signal } = {}) {
+    async put(cacheKey, result, { allowEmptyMarkdown = false, signal, figureRestoration = null } = {}) {
         throwIfFigureAborted(signal);
         validateCacheKey(cacheKey);
         if (typeof result?.markdown !== 'string'
             || (!allowEmptyMarkdown && !result.markdown.trim())) {
             throw new TypeError('Cached Markdown must be a non-empty string');
         }
+        if (figureRestoration !== null && figureRestoration?.status !== 'pending'
+            && figureRestoration?.status !== 'complete') {
+            throw new TypeError('Cached figure restoration status is invalid');
+        }
 
-        return this.#withOperation(() => this.#put(cacheKey, result, signal));
+        return this.#withOperation(() => this.#put(cacheKey, result, signal, figureRestoration));
     }
 
     getTranslation(cacheKey, translationKey) {
@@ -232,7 +250,8 @@ export class MarkdownCache {
                 metadata,
                 cacheKey,
                 this.maxSourceMapBytes,
-                this.maxChromeRangesBytes
+                this.maxChromeRangesBytes,
+                this.maxFigureRestorationBytes
             );
             metadata = await this.#repairInvalidTranslationMetadata(
                 entryPath,
@@ -285,7 +304,8 @@ export class MarkdownCache {
                 metadata,
                 cacheKey,
                 this.maxSourceMapBytes,
-                this.maxChromeRangesBytes
+                this.maxChromeRangesBytes,
+                this.maxFigureRestorationBytes
             );
             metadata = await this.#repairInvalidTranslationMetadata(
                 entryPath,
@@ -429,7 +449,7 @@ export class MarkdownCache {
         await this.#scan({ removeInvalid: true, enforceLimits: true });
     }
 
-    async #put(cacheKey, result, signal) {
+    async #put(cacheKey, result, signal, figureRestoration) {
         throwIfFigureAborted(signal);
         const serializedFigureMap = await serializeFigureMap(result.figureMap, result, {
             hash: this.hash, maxBytes: this.maxFigureMapBytes,
@@ -452,6 +472,7 @@ export class MarkdownCache {
         const sourceMapFile = `source-map-${generation}.json`;
         const chromeRangesFile = `chrome-ranges-${generation}.json`;
         const figureMapFile = `figure-map-${generation}.json`;
+        const restorationFile = `restoration-${generation}.json`;
         const writtenPaths = [];
         const temporaryPaths = [];
         const assets = [];
@@ -532,6 +553,24 @@ export class MarkdownCache {
                 await this.io.writeUTF8(figureMapPath, serializedFigureMap.json, { tmpPath: temporaryPath });
                 writtenPaths.push(figureMapPath);
             }
+            let restorationInputBytes = 0;
+            let storedRestorationInput = false;
+            if (figureRestoration?.status === 'pending' && figureRestoration.input) {
+                throwIfFigureAborted(signal);
+                const serializedRestoration = serializeFigureRestorationInput(
+                    figureRestoration.input,
+                    { maxBytes: this.maxFigureRestorationBytes }
+                );
+                const restorationPath = this.path.join(entryPath, restorationFile);
+                const temporaryPath = `${restorationPath}.tmp`;
+                temporaryPaths.push(temporaryPath);
+                await this.io.writeUTF8(restorationPath, serializedRestoration.json, {
+                    tmpPath: temporaryPath,
+                });
+                writtenPaths.push(restorationPath);
+                restorationInputBytes = serializedRestoration.bytes;
+                storedRestorationInput = true;
+            }
             const metadata = {
                 schemaVersion: CACHE_SCHEMA_VERSION,
                 cacheKey,
@@ -544,6 +583,7 @@ export class MarkdownCache {
                 markdownBytes,
                 sizeBytes: markdownBytes + sourceMapBytes + chromeRangesBytes
                     + (serializedFigureMap?.bytes || 0)
+                    + restorationInputBytes
                     + assets.reduce((total, asset) => total + asset.size, 0),
                 assets,
             };
@@ -559,6 +599,22 @@ export class MarkdownCache {
             if (serializedFigureMap) {
                 metadata.figureMapFile = figureMapFile;
                 metadata.figureMapBytes = serializedFigureMap.bytes;
+            }
+            if (figureRestoration?.status === 'pending') {
+                const restoration = {
+                    status: 'pending',
+                    completedFigureIds: Array.isArray(figureRestoration.completedFigureIds)
+                        ? [...figureRestoration.completedFigureIds]
+                        : [],
+                };
+                if (storedRestorationInput) {
+                    restoration.inputFile = restorationFile;
+                    restoration.inputBytes = restorationInputBytes;
+                }
+                metadata.figureRestoration = restoration;
+            }
+            else if (figureRestoration?.status === 'complete') {
+                metadata.figureRestoration = { status: 'complete' };
             }
             temporaryPaths.push(`${metadataPath}.tmp`);
             throwIfFigureAborted(signal);
@@ -601,7 +657,8 @@ export class MarkdownCache {
                     metadata,
                     cacheKey,
                     this.maxSourceMapBytes,
-                    this.maxChromeRangesBytes
+                    this.maxChromeRangesBytes,
+                    this.maxFigureRestorationBytes
                 );
                 const repairedMetadata = await this.#repairInvalidTranslationMetadata(
                     entryPath,
@@ -696,6 +753,37 @@ export class MarkdownCache {
         }
     }
 
+    async #readFigureRestoration(entryPath, metadata, document) {
+        const state = metadata.figureRestoration;
+        if (state?.status !== 'pending') return null;
+        const normalized = {
+            status: 'pending',
+            completedFigureIds: Array.isArray(state.completedFigureIds)
+                ? [...state.completedFigureIds] : [],
+        };
+        if (!isSafeRestorationFile(state.inputFile)
+            || !Number.isSafeInteger(state.inputBytes)
+            || state.inputBytes < 1
+            || state.inputBytes > this.maxFigureRestorationBytes) {
+            return { state: normalized, input: null };
+        }
+        try {
+            const filePath = this.path.join(entryPath, state.inputFile);
+            const info = await this.io.stat(filePath);
+            if (info?.type !== 'regular' || info.size !== state.inputBytes) {
+                return { state: normalized, input: null };
+            }
+            const json = await this.io.readUTF8(filePath);
+            const input = parseFigureRestorationInputJSON(json, {
+                document, maxBytes: this.maxFigureRestorationBytes,
+            });
+            return { state: normalized, input };
+        }
+        catch {
+            return { state: normalized, input: null };
+        }
+    }
+
     async #readSourceMapJSON(entryPath, metadata) {
         const filePath = this.path.join(entryPath, metadata.sourceMapFile);
         const fileInfo = await this.io.stat(filePath);
@@ -731,7 +819,8 @@ export class MarkdownCache {
                 metadata,
                 cacheKey,
                 this.maxSourceMapBytes,
-                this.maxChromeRangesBytes
+                this.maxChromeRangesBytes,
+                this.maxFigureRestorationBytes
             );
             return this.#repairInvalidTranslationMetadata(
                 entryPath,
@@ -888,6 +977,9 @@ export class MarkdownCache {
                 : []),
             ...(validFigureMapFile(metadata.figureMapFile)
                 ? [this.path.join(entryPath, metadata.figureMapFile)] : []),
+            ...(isSafeRestorationFile(metadata.figureRestoration?.inputFile)
+                ? [this.path.join(entryPath, metadata.figureRestoration.inputFile)]
+                : []),
             ...(metadata.chromeRangesFile
                 ? [this.path.join(entryPath, metadata.chromeRangesFile)]
                 : []),
@@ -938,7 +1030,8 @@ function validateMetadata(
     metadata,
     cacheKey,
     maxSourceMapBytes,
-    maxChromeRangesBytes
+    maxChromeRangesBytes,
+    maxFigureRestorationBytes = FIGURE_LIMITS.maxMapBytes
 ) {
     if (metadata?.schemaVersion !== CACHE_SCHEMA_VERSION
         || metadata.cacheKey !== cacheKey
@@ -968,6 +1061,11 @@ function validateMetadata(
         || typeof metadata.assetBasePath !== 'string'
         || (metadata.userEdited !== undefined
             && typeof metadata.userEdited !== 'boolean')
+        || (metadata.figureRestoration !== undefined
+            && !isValidFigureRestorationMetadata(
+                metadata.figureRestoration,
+                maxFigureRestorationBytes
+            ))
         || !Array.isArray(metadata.assets)
         || metadata.assets.length > 1000) {
         throw new Error('Invalid cache metadata');
@@ -985,6 +1083,31 @@ function validateMetadata(
 
 function isSafeTranslationFile(file) {
     return /^translation-[a-z0-9-]+\.json$/.test(String(file || ''));
+}
+
+function isSafeRestorationFile(file) {
+    return /^restoration-[a-z0-9-]+\.json$/.test(String(file || ''));
+}
+
+function isValidFigureRestorationMetadata(state, maxBytes) {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
+    if (state.status === 'complete') {
+        return state.inputFile === undefined
+            && state.inputBytes === undefined
+            && state.completedFigureIds === undefined;
+    }
+    if (state.status !== 'pending') return false;
+    const ids = state.completedFigureIds;
+    const idsValid = ids === undefined || (Array.isArray(ids) && ids.every(id => (
+        typeof id === 'string' && id.length > 0 && id.length <= 200
+    )));
+    const inputValid = state.inputFile === undefined
+        ? state.inputBytes === undefined
+        : isSafeRestorationFile(state.inputFile)
+            && Number.isSafeInteger(state.inputBytes)
+            && state.inputBytes > 0
+            && state.inputBytes <= maxBytes;
+    return idsValid && inputValid;
 }
 
 function isValidTranslationDescriptor(descriptor, {
@@ -1041,6 +1164,10 @@ function cachedDocumentSize(metadata) {
         + (metadata.chromeRangesBytes || 0)
         + (Number.isSafeInteger(metadata.figureMapBytes) && metadata.figureMapBytes > 0
             && validFigureMapFile(metadata.figureMapFile) ? metadata.figureMapBytes : 0)
+        + (Number.isSafeInteger(metadata.figureRestoration?.inputBytes)
+            && metadata.figureRestoration.inputBytes > 0
+            && isSafeRestorationFile(metadata.figureRestoration.inputFile)
+            ? metadata.figureRestoration.inputBytes : 0)
         + metadata.assets.reduce((total, asset) => total + asset.size, 0);
 }
 

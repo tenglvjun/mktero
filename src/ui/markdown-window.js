@@ -692,6 +692,9 @@ class MarkdownTabView {
                 annotationOverlay,
                 sourceMap,
                 figureViews,
+                ...(model.pendingFigureAssets instanceof Map
+                    ? { pendingFigures: model.pendingFigureAssets }
+                    : {}),
                 chromeRanges: editorChromeRanges,
                 sourceActionRanges: translatedView
                     ? []
@@ -4480,11 +4483,14 @@ class MarkdownTabView {
 
     syncDocumentActions(model, loadingView) {
         const reparseAvailable = typeof model.onReparse === 'function';
+        const figureRestorationPending = model.figureRestoration?.status === 'pending';
         const saveAvailable = typeof model.onSaveSnapshot === 'function'
-            && model.renderMode !== 'html';
+            && model.renderMode !== 'html'
+            && !figureRestorationPending;
         const exportAvailable = model.status === 'ready'
             && model.renderMode !== 'html'
-            && typeof model.onExportMarkdown === 'function';
+            && typeof model.onExportMarkdown === 'function'
+            && !figureRestorationPending;
         const correctionAvailable = model.status === 'ready'
             && model.renderMode !== 'html'
             && Array.isArray(model.editableBlocks)
@@ -4556,6 +4562,11 @@ class MarkdownTabView {
         this.elements.exportMarkdown.disabled = !exportAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
+        if (figureRestorationPending) {
+            const pendingLabel = this.t('viewer.figureRestorationPending');
+            this.elements.saveSnapshot.setAttribute('title', pendingLabel);
+            this.elements.exportMarkdown.setAttribute('title', pendingLabel);
+        }
         this.elements.correctionToggle.disabled = !correctionAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
@@ -5641,7 +5652,11 @@ class MarkdownTabView {
             });
         }
         catch (error) {
-            this.zotero?.logError?.(error);
+            // The source peek is an optional preview; a failed render (for
+            // example a host without a 2D canvas) must not surface as an error.
+            this.zotero?.debug?.(
+                `Mktero: source peek render failed (${error?.message || error})`
+            );
             if (generation === this.sourcePeekGeneration
                 && !this.elements.sourcePeekImage.getAttribute('src')) {
                 this.hideSourcePeek();

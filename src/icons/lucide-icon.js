@@ -12,6 +12,7 @@ import {
     ExternalLink,
     FileText,
     GalleryThumbnails,
+    Image as ImageIcon,
     Languages,
     LoaderCircle,
     Maximize2,
@@ -117,6 +118,10 @@ export const LUCIDE_ICONS = Object.freeze({
     loaderCircle: Object.freeze({
         name: 'loader-circle',
         nodes: LoaderCircle,
+    }),
+    image: Object.freeze({
+        name: 'image',
+        nodes: ImageIcon,
     }),
     maximize2: Object.freeze({
         name: 'maximize-2',

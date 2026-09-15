@@ -22,7 +22,9 @@ export async function inspectPDFFigureImage(page, request, {
     canvas.width = width;
     canvas.height = height;
     try {
-        const task = page.render({ canvas, canvasContext: canvas.getContext('2d'),
+        const context = canvas.getContext?.('2d');
+        if (!context) return null;
+        const task = page.render({ canvas, canvasContext: context,
             viewport: renderViewport, recordImages: true, recordOperations: true,
             background: 'rgb(255,255,255)', intent: 'print', annotationMode: 0 });
         await waitForFigureOperation(task.promise, signal, () => task.cancel());

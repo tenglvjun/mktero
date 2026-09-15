@@ -270,3 +270,15 @@ function transactionError(reason) {
     error.preserveReason = reason;
     return error;
 }
+
+// Builds the replacement, asset and blueprint for a single completed candidate.
+// Used by incremental (progressive) figure replacement; composeFigureDraft
+// applies the same plan to the whole document in one transaction.
+export function planFigureReplacement(input, entry, { limits: overrides } = {}) {
+    const limits = { ...FIGURE_LIMITS, ...overrides };
+    validateFigureInput(input);
+    const blocksByID = new Map(input.blocks.map(block => [block.id, block]));
+    const pagesByIndex = new Map(input.pages.map(page => [page.pageIndex, page]));
+    const images = collectFigureImageNodes(input.markdown);
+    return createPlan(input, entry, blocksByID, pagesByIndex, images, limits);
+}

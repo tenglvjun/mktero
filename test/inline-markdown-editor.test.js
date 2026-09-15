@@ -247,6 +247,42 @@ test('marks translated lines and clears the marks with the next document', () =>
     dom.window.close();
 });
 
+test('swaps pending figure images for animated placeholders and restores them', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: source => source === 'images/panel.png'
+            ? 'blob:panel'
+            : null,
+    });
+    const markdown = 'Body text.\n\n![Figure 1](images/panel.png)';
+
+    editor.setDocument({
+        markdown,
+        pendingFigures: new Map([['images/panel.png', 'fig-p0-b0']]),
+    });
+    const placeholder = document.querySelector('.mktero-figure-placeholder');
+    assert.ok(placeholder, 'a figure placeholder is expected');
+    assert.equal(placeholder.getAttribute('data-figure-id'), 'fig-p0-b0');
+    assert.ok(placeholder.querySelector('svg.lucide-image'));
+    assert.ok(placeholder.querySelector('svg.lucide-loader-circle'));
+    assert.equal(
+        document.querySelector('img[data-mktero-asset="images/panel.png"]'),
+        null
+    );
+
+    editor.setDocument({ markdown });
+    assert.equal(document.querySelector('.mktero-figure-placeholder'), null);
+    assert.ok(document.querySelector('img[data-mktero-asset="images/panel.png"]'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('marks translated block widgets with their content language', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
