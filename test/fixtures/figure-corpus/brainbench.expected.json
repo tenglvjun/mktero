@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "id": "brainbench",
+  "archiveSha256": "aa6f6ed542cf63c4cf2ec1985b2dff55130ff4e6f0156d6218070127aa12142a",
+  "pages": 42,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 4,
+      "label": "Figure 3:",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        545,
+        613,
+        829,
+        869
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Figure 4:",
+      "panels": 2,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        173,
+        670,
+        826,
+        848
+      ]
+    },
+    {
+      "pageIndex": 27,
+      "label": "Figure 6:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        174,
+        99,
+        822,
+        271
+      ]
+    },
+    {
+      "pageIndex": 34,
+      "label": null,
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        170,
+        104,
+        826,
+        659
+      ]
+    },
+    {
+      "pageIndex": 38,
+      "label": "Figure 7:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        170,
+        333,
+        824,
+        667
+      ]
+    },
+    {
+      "pageIndex": 39,
+      "label": "Figure 8:",
+      "panels": 2,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        173,
+        158,
+        824,
+        366
+      ]
+    },
+    {
+      "pageIndex": 40,
+      "label": "Figure 9:",
+      "panels": 4,
+      "captions": 1,
+      "owned": 4,
+      "bbox": [
+        173,
+        161,
+        827,
+        301
+      ]
+    },
+    {
+      "pageIndex": 40,
+      "label": "Figure 10:",
+      "panels": 2,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        174,
+        528,
+        826,
+        790
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 1,
+      "reason": "ambiguous-source-range"
+    },
+    {
+      "pageIndex": 4,
+      "reason": "ambiguous-source-range"
+    },
+    {
+      "pageIndex": 8,
+      "reason": "ambiguous-source-range"
+    }
+  ]
+}
