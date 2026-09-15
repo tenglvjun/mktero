@@ -17,7 +17,8 @@ const PAGE_UNITS = new Set(['pt', 'px', 'pdf-user-unit']);
 const ROLES = new Set(['panel', 'caption', 'figure-text', 'body', 'unknown']);
 const BBOX_KINDS = new Set(['visual-body', 'caption', 'text', 'group', 'unknown']);
 const RANGE_EVIDENCE = new Set([
-    'explicit-range', 'unique-asset', 'anchored-sequence', 'unresolved',
+    'explicit-range', 'unique-asset', 'unique-text', 'anchored-sequence',
+    'contiguous-text', 'unresolved',
 ]);
 
 export function validateFigureInput(input) {
@@ -89,7 +90,8 @@ export function validateFigureInput(input) {
         }
         for (const range of block.sourceRanges || []) {
             validateRange(range, input.markdown.length);
-            consumed.push(range);
+            consumed.push({ from: range.from, to: range.to,
+                assetPath: block.assetPath, role: block.role });
         }
         if (block.assetPath) normalizeFigureAssetPath(block.assetPath, input.assetBasePath || '');
         if (block.text !== undefined && (typeof block.text !== 'string'
@@ -393,10 +395,13 @@ export function collectFigureImageNodes(markdown) {
                 let assetPath = markdown.slice(destination.from, destination.to);
                 if (assetPath.startsWith('<') && assetPath.endsWith('>')) assetPath = assetPath.slice(1, -1);
                 const captionRange = { from: marks[0].to, to: marks[1].from };
+                const parent = node.node.parent;
+                const standalone = parent?.name === 'Paragraph'
+                    && /^[ \t]*$/u.test(markdown.slice(parent.from, node.from))
+                    && /^[ \t]*$/u.test(markdown.slice(node.to, parent.to));
                 images.push({ from: node.from, to: node.to, assetPath, captionRange,
                     caption: markdown.slice(captionRange.from, captionRange.to),
-                    standalone: node.node.parent?.name === 'Paragraph'
-                        && node.node.parent.from === node.from && node.node.parent.to === node.to });
+                    standalone });
             }
             return false;
         },
@@ -420,11 +425,20 @@ function validateRange(range, length) {
 }
 
 function ensureNonOverlapping(ranges, code) {
-    const sorted = ranges.slice().sort((left, right) => left.from - right.from);
-    for (let index = 1; index < sorted.length; index++) {
-        if (sorted[index].from < sorted[index - 1].to) {
-            throw figureError(code, 'Figure source ranges overlap');
+    const sorted = ranges.slice().sort((left, right) => (
+        left.from - right.from || right.to - left.to
+    ));
+    let outer = null;
+    for (const range of sorted) {
+        if (outer && range.from < outer.to) {
+            // A caption attached inside an image description is nested, not a
+            // conflict; the transaction collapses the pair into one edit.
+            const nestedCaption = outer.assetPath && range.role === 'caption'
+                && range.from >= outer.from && range.to <= outer.to;
+            if (!nestedCaption) throw figureError(code, 'Figure source ranges overlap');
+            continue;
         }
+        outer = range;
     }
 }
 

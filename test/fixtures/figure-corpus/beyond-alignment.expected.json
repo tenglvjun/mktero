@@ -1,0 +1,283 @@
+{
+  "schema": 1,
+  "id": "beyond-alignment",
+  "archiveSha256": "2ecc6b24f696205a16a36d624669e3fe012ae9fa2edd4fd96b48c9f041dc82be",
+  "pages": 63,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 19,
+      "label": "Fig. 1",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        110,
+        183,
+        881,
+        615
+      ]
+    },
+    {
+      "pageIndex": 20,
+      "label": "Fig. 2",
+      "panels": 14,
+      "captions": 1,
+      "owned": 3,
+      "bbox": [
+        119,
+        78,
+        886,
+        693
+      ]
+    },
+    {
+      "pageIndex": 21,
+      "label": "Fig. 3",
+      "panels": 2,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        112,
+        264,
+        884,
+        561
+      ]
+    },
+    {
+      "pageIndex": 22,
+      "label": "Fig. 4",
+      "panels": 14,
+      "captions": 1,
+      "owned": 9,
+      "bbox": [
+        116,
+        81,
+        886,
+        642
+      ]
+    },
+    {
+      "pageIndex": 23,
+      "label": null,
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        590,
+        223,
+        640,
+        250
+      ]
+    },
+    {
+      "pageIndex": 23,
+      "label": "Fig. 5",
+      "panels": 10,
+      "captions": 1,
+      "owned": 4,
+      "bbox": [
+        112,
+        342,
+        886,
+        597
+      ]
+    },
+    {
+      "pageIndex": 24,
+      "label": "Fig. 6",
+      "panels": 10,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        116,
+        84,
+        877,
+        789
+      ]
+    },
+    {
+      "pageIndex": 42,
+      "label": "Fig. S1",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        121,
+        123,
+        874,
+        807
+      ]
+    },
+    {
+      "pageIndex": 43,
+      "label": "Fig. S2",
+      "panels": 3,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        126,
+        84,
+        881,
+        780
+      ]
+    },
+    {
+      "pageIndex": 44,
+      "label": "Fig. S3",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        112,
+        270,
+        888,
+        633
+      ]
+    },
+    {
+      "pageIndex": 45,
+      "label": "Fig. S4",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        112,
+        204,
+        884,
+        705
+      ]
+    },
+    {
+      "pageIndex": 46,
+      "label": "Fig. S5",
+      "panels": 4,
+      "captions": 1,
+      "owned": 3,
+      "bbox": [
+        112,
+        270,
+        881,
+        595
+      ]
+    },
+    {
+      "pageIndex": 47,
+      "label": "Fig. S6",
+      "panels": 10,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        112,
+        325,
+        884,
+        631
+      ]
+    },
+    {
+      "pageIndex": 48,
+      "label": "Fig. S7",
+      "panels": 1,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        112,
+        108,
+        877,
+        819
+      ]
+    },
+    {
+      "pageIndex": 49,
+      "label": "Fig. S8",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        112,
+        315,
+        884,
+        564
+      ]
+    },
+    {
+      "pageIndex": 50,
+      "label": "Fig. S9",
+      "panels": 2,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        119,
+        234,
+        877,
+        684
+      ]
+    },
+    {
+      "pageIndex": 51,
+      "label": "Fig. S10",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        114,
+        138,
+        879,
+        798
+      ]
+    },
+    {
+      "pageIndex": 53,
+      "label": "Fig. S11",
+      "panels": 4,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        153,
+        244,
+        861,
+        648
+      ]
+    },
+    {
+      "pageIndex": 54,
+      "label": "Fig. S12",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        306,
+        366,
+        690,
+        576
+      ]
+    },
+    {
+      "pageIndex": 55,
+      "label": "Fig. S13",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        276,
+        348,
+        683,
+        594
+      ]
+    },
+    {
+      "pageIndex": 56,
+      "label": "Fig. S14",
+      "panels": 8,
+      "captions": 1,
+      "owned": 4,
+      "bbox": [
+        110,
+        84,
+        856,
+        711
+      ]
+    }
+  ],
+  "preserved": []
+}

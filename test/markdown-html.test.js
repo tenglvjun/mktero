@@ -451,6 +451,41 @@ test('renders OCR-spaced cases math that nested math inside \\text', () => {
     assert.match(html, /<mi>𝒮<\/mi>|<mi>S<\/mi>/);
 });
 
+test('repairs an array end glued to OCR spacing commands', () => {
+    const html = renderMarkdownHTML([
+        '$$',
+        '\\begin{array}{l} M ^ {*} = \\arg \\max _ {M} \\mathcal {S} (M \\mid M _ {t}, L, \\mathcal {C}, E), '
+            + '\\\\ \\text { s.t. } M _ {i, j} ^ {*} = (M _ {t}) _ {i, j}, \\quad \\forall (i, j) '
+            + '\\text { where } L _ {i, j} = 1, \\\\ \\qend{array}',
+        '$$',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<mtable/);
+    assert.match(html, /\\end\{array\}/);
+    assert.doesNotMatch(html, /\\qend/);
+});
+
+test('drops OCR rows that only contain spacing commands', () => {
+    const spacing = '\\qquad '.repeat(40).trimEnd();
+    const html = renderMarkdownHTML([
+        '$$',
+        `\\begin{array}{l} a = b, \\\\ ${spacing} \\\\ ${spacing} \\end{array}`,
+        '$$',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.equal((html.match(/<mtr>/g) || []).length, 1);
+    assert.doesNotMatch(html, /(?:\\qquad){5}/);
+});
+
+test('keeps spacing commands inside rows that carry content', () => {
+    const html = renderMarkdownHTML('$a \\quad b$');
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<mspace width="1em"|<mtext|a/);
+});
+
 test('keeps ordinary \\text labels without math unchanged', () => {
     const html = renderMarkdownHTML('$\\text{otherwise}$');
 
@@ -542,6 +577,25 @@ test('renders a standalone academic image description as a visible figure captio
             + '<figcaption>'
             + '<span class="mktero-figure-label">Figure 1.</span>'
             + ' PRISMA flowchart of inclusion of studies.'
+            + '</figcaption>'
+            + '</figure>\n'
+    );
+});
+
+test('renders an unpunctuated academic image caption as a visible figure caption', () => {
+    const caption = 'Figure 1 The impact of reusable skills on autonomous research agents.';
+    const html = renderMarkdownHTML(
+        `![${caption}](images/figure.png)`,
+        { resolveImageURL: () => 'blob:mktero-figure' }
+    );
+
+    assert.equal(
+        html,
+        '<figure class="mktero-figure">'
+            + `<img src="blob:mktero-figure" alt="${caption}">`
+            + '<figcaption>'
+            + '<span class="mktero-figure-label">Figure 1</span>'
+            + ' The impact of reusable skills on autonomous research agents.'
             + '</figcaption>'
             + '</figure>\n'
     );
@@ -1244,4 +1298,75 @@ test('preserves safe table spans, formatting, and existing HTML entities', () =>
         '<td colspan="2"><em>Value</em></td></tr></table>',
     ].join(''));
     assert.doesNotMatch(html, /onclick|&amp;amp;/);
+});
+
+test('renders an OCR accent command that replaced a bold letter', () => {
+    const html = renderMarkdownHTML('where $[L_{\\mathbf{v}|\\u}\\phi](\\mathbf{v}) = '
+        + '\\int p(\\mathbf{v} \\mid \\mathbf{u})\\phi(\\mathbf{u}) \\, d\\mathbf{u}$');
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<mi>u<\/mi>/);
+    assert.doesNotMatch(html, /\|\\u/);
+});
+
+test('keeps accent commands that still carry their argument', () => {
+    const html = renderMarkdownHTML('$\\u{a} \\v{b}$');
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<math/);
+});
+
+test('renders a long OCR formula wrapped across a soft line break', () => {
+    const html = renderMarkdownHTML([
+        'where $L_{\\mathbf{v}|\\u}\\phi = \\int p(\\mathbf{v} \\mid \\mathbf{u})\\phi(\\mathbf{u}),',
+        'd\\mathbf{u}$ . Injectivity of L means that distinct latent states induce distinguishable futures.',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<math/);
+    assert.doesNotMatch(html, /\$L_/);
+});
+
+test('keeps dollar amounts in prose that wrap across lines as text', () => {
+    const html = renderMarkdownHTML('The budget grew from $5\nand later reached $10 today.');
+
+    assert.doesNotMatch(html, /<math/);
+    assert.match(html, /\$5/);
+    assert.match(html, /\$10/);
+});
+
+test('renders escaped significance markers in a figure caption', () => {
+    const caption = 'Figure 5. Ablation results. Significance markers from paired t-tests: '
+        + '\\\\* $p \\\\leq 0.05$ , \\\\*\\\\* $p \\\\leq 0.01$ , '
+        + '\\\\*\\\\*\\\\* $p < 0.001$ , and non-significant in absence.';
+    const html = renderMarkdownHTML(`![${caption}](images/f5.png)`, {
+        resolveImageURL: () => 'blob:f5',
+    });
+    const figcaption = html.slice(html.indexOf('<figcaption'), html.indexOf('</figcaption>'));
+    // Strip repeatedly: one pass can leave a tag behind ("<scr<script>ipt>").
+    let plain = figcaption;
+    let previous;
+    do {
+        previous = plain;
+        plain = plain
+            .replace(/<span class="math-inline">[\s\S]*?<\/span><\/span>/g, 'MATH')
+            .replace(/<[^>]+>/g, '');
+    } while (plain !== previous);
+
+    assert.match(plain, /t-tests: \* MATH , \*\* MATH , \*\*\* MATH ,/);
+    assert.doesNotMatch(plain, /\\[\\*]/);
+});
+
+test('renders a figure legend whose note precedes the academic label', () => {
+    const alt = 'Data were acquired from 12 odors presented at two concentrations. '
+        + 'Extended Data Fig. 5 | Odor-odor correlation at different level processing. '
+        + 'A. Glomerular odor-odor correlations.';
+    const html = renderMarkdownHTML(`![${alt}](images/f5.png)`, {
+        resolveImageURL: () => 'blob:f5',
+    });
+    const figcaption = html.slice(html.indexOf('<figcaption'), html.indexOf('</figcaption>'));
+
+    assert.match(figcaption, /<span class="mktero-figure-label">Extended Data Fig\. 5 \|<\/span>/);
+    assert.match(figcaption, /Data were acquired from 12 odors/);
+    assert.match(figcaption, /Odor-odor correlation at different level processing/);
 });

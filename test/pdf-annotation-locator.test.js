@@ -1867,6 +1867,41 @@ test('preserves selected Markdown text when using the Reader fallback', async ()
     locator.dispose();
 });
 
+test('searches all pages when a stale page hint misses a later page', async () => {
+    const locator = await createSyntheticLocator([
+        [createTextItem('Unrelated first page text.')],
+        [createTextItem('The selected sentence lives on the second page.')],
+    ]);
+
+    const located = await locator.locate(
+        42,
+        'The selected sentence lives on the second page.',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 1);
+    assert.equal(located.position.rects.length, 1);
+    locator.dispose();
+});
+
+test('uses tolerant quote context to disambiguate repeated PDF text', async () => {
+    const phrase = 'while the harness controls procedure but does not supply domain content.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(`The prior is broad but fixed, ${phrase} We call the missing layer operational knowledge.`)],
+        [createTextItem(`The prior is broad but fixed, ${phrase} We call what is missing operational knowledge, and write a research agent as Ar.`)],
+    ]);
+
+    const located = await locator.locate(42, phrase, {
+        textQuote: {
+            prefix: 'The prior is broad but fixed, ',
+            suffix: ' We call what is missing operational knowledge, and write a research agent $',
+        },
+    });
+
+    assert.equal(located.position.pageIndex, 1);
+    locator.dispose();
+});
+
 async function createSyntheticLocator(pageItems, {
     cache = null,
     onError = () => {},

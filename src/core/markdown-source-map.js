@@ -3,6 +3,8 @@ import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-tex
 import {
     createNormalizedTextIndex,
     findTextOccurrences,
+    normalizeCompactText,
+    normalizeTolerantText,
     normalizeText,
 } from '../markdown/text-normalization.js';
 import { findDisplayMathMatches } from '../markdown/markdown-html.js';
@@ -44,6 +46,17 @@ export function createMarkdownSourceMap(markdown, contentList, {
         }
         return tolerantBlockTexts;
     };
+    let compactBlockTexts;
+    const getCompactBlockTexts = () => {
+        if (!compactBlockTexts) {
+            compactBlockTexts = syntaxRanges.blocks.map(range => (
+                normalizeCompactText(
+                    visible.textForSourceRange(range.from, range.to)
+                )
+            ));
+        }
+        return compactBlockTexts;
+    };
     const entries = new Map();
     const matchBudget = { remaining: matchWorkLimit };
 
@@ -55,6 +68,7 @@ export function createMarkdownSourceMap(markdown, contentList, {
             markdown,
             visibleIndex,
             getTolerantBlockTexts,
+            getCompactBlockTexts,
             syntaxRanges,
             matchBudget
         );
@@ -139,6 +153,7 @@ function matchContentBlock(
     markdown,
     visibleIndex,
     getTolerantBlockTexts,
+    getCompactBlockTexts,
     syntaxRanges,
     matchBudget
 ) {
@@ -182,15 +197,64 @@ function matchContentBlock(
             return MATCH_BUDGET_EXHAUSTED;
         }
         const tolerantTarget = normalizeTolerantText(contentBlock.text);
-        if ([...tolerantTarget].length < MIN_TEXT_MATCH_LENGTH) return null;
-        matchedRange = findTolerantBlockMatch(
-            syntaxRanges.blocks,
-            getTolerantBlockTexts(),
-            tolerantTarget
-        );
+        matchedRange = [...tolerantTarget].length >= MIN_TEXT_MATCH_LENGTH
+            ? findTolerantBlockMatch(
+                syntaxRanges.blocks,
+                getTolerantBlockTexts(),
+                tolerantTarget
+            )
+            : null;
+        if (!matchedRange) {
+            // Math-bearing paragraphs differ between the layout JSON and the
+            // rendered Markdown in spacing, Greek glyphs and font commands;
+            // the compact key still matches them.
+            if (!consumeMatchWork(matchBudget, visibleIndex.text.length)) {
+                return MATCH_BUDGET_EXHAUSTED;
+            }
+            const compactTarget = normalizeCompactText(contentBlock.text);
+            if ([...compactTarget].length < MIN_TEXT_MATCH_LENGTH) return null;
+            matchedRange = findTolerantBlockMatch(
+                syntaxRanges.blocks,
+                getCompactBlockTexts(),
+                compactTarget
+            );
+        }
+        if (!matchedRange) {
+            // A figure MinerU exported as a table was rewritten into its
+            // extracted image; map the block to that image, not its text.
+            const tableFigure = matchTableFigureImage(
+                contentBlock,
+                markdown,
+                syntaxRanges,
+                matchBudget
+            );
+            if (tableFigure === MATCH_BUDGET_EXHAUSTED) return MATCH_BUDGET_EXHAUSTED;
+            if (tableFigure) return tableFigure;
+        }
         if (!matchedRange) return null;
     }
     return compatibleSyntaxRange(contentBlock.type, matchedRange, syntaxRanges)
+        ? matchedRange
+        : null;
+}
+
+function matchTableFigureImage(contentBlock, markdown, syntaxRanges, matchBudget) {
+    if (contentBlock.type !== 'table'
+        || typeof contentBlock.assetPath !== 'string'
+        || !contentBlock.assetPath) {
+        return null;
+    }
+    if (!consumeMatchWork(matchBudget, markdown.length)) {
+        return MATCH_BUDGET_EXHAUSTED;
+    }
+    const occurrences = findImageAssetOccurrences(
+        markdown,
+        contentBlock.assetPath,
+        syntaxRanges.image
+    );
+    if (occurrences.ranges.length !== 1 || occurrences.truncated) return null;
+    const matchedRange = occurrences.ranges[0];
+    return findContainingRange(syntaxRanges.image, matchedRange)
         ? matchedRange
         : null;
 }
@@ -232,22 +296,6 @@ function decodeImageDestination(destination) {
     catch {
         return destination;
     }
-}
-
-function normalizeTolerantText(value) {
-    return String(value)
-        .normalize('NFKC')
-        .replace(/[\u2018\u2019]/gu, '\'')
-        .replace(/[\u201c\u201d]/gu, '"')
-        .replace(/\\chi(?![\p{L}\p{N}])/gu, '\u03c7')
-        .replace(/\\([%$#&_{}])/gu, '$1')
-        .replace(/[$}{]/gu, '')
-        .replace(/\^(?=[\p{L}\p{N}])/gu, '')
-        .replace(/(\p{L}{2})[-\u2010\u2011](?=\p{L}{2})/gu, '$1')
-        .replace(/[\u2010-\u2014\u2212]/gu, '-')
-        .replace(/\s+([,.;:!?%)\]])/gu, '$1')
-        .replace(/\s+/gu, ' ')
-        .trim();
 }
 
 function findTolerantBlockMatch(blocks, blockTexts, target) {

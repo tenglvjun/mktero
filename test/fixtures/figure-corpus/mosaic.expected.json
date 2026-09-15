@@ -1,0 +1,138 @@
+{
+  "schema": 1,
+  "id": "mosaic",
+  "archiveSha256": "7926d173cf151da991e59d484c3ca007ae09dbe91363230c3efb3cd603a69008",
+  "pages": 29,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 1,
+      "label": "Fig. 1 |",
+      "panels": 6,
+      "captions": 2,
+      "owned": 3,
+      "bbox": [
+        59,
+        55,
+        950,
+        443
+      ]
+    },
+    {
+      "pageIndex": 2,
+      "label": "Fig. 2 |",
+      "panels": 3,
+      "captions": 2,
+      "owned": 1,
+      "bbox": [
+        62,
+        64,
+        947,
+        567
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Fig. 3 |",
+      "panels": 2,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        59,
+        54,
+        945,
+        336
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Fig. 4 |",
+      "panels": 3,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        59,
+        57,
+        945,
+        378
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Fig. 5 |",
+      "panels": 5,
+      "captions": 2,
+      "owned": 1,
+      "bbox": [
+        60,
+        57,
+        948,
+        578
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        513,
+        376,
+        583,
+        395
+      ]
+    },
+    {
+      "pageIndex": 19,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        69,
+        56,
+        926,
+        401
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 14,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 15,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 17,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 18,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 20,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 21,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 22,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 23,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 24,
+      "reason": "ambiguous-caption"
+    }
+  ]
+}

@@ -14,10 +14,12 @@ test('ships an accessible, visible loading UI for MinerU conversion', async () =
     assert.match(script, /id: 'mktero-loading-progress-label'/);
     assert.match(script, /attachShadow/);
     assert.match(styles, /@keyframes mktero-spin/);
-    assert.match(styles, /\.loading-state--inline/);
+    assert.match(styles, /\.loading-state--modal/);
+    assert.match(styles, /\.loading-card/);
     assert.match(styles, /\.mktero-tab-view/);
     assert.match(script, /createLoadingPresentation\(model, this\.t\)/);
-    assert.match(script, /loading-state--inline/);
+    assert.match(script, /loading-state--modal/);
+    assert.match(script, /workspace\.inert = modalLoading/);
     assert.doesNotMatch(script, /MinerU|loading-eyebrow/);
     assert.doesNotMatch(styles, /\.loading-eyebrow/);
 });

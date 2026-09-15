@@ -1,13 +1,19 @@
 import { parseGFMTableRow } from './markdown-tables.js';
 
 const ACADEMIC_REFERENCE_SPACE_SOURCE = '[\\p{Zs}\\t]';
+// Roman numerals, plain numbers, supplementary "S2" and appendix "A1"/"B.12"
+// labels share one identifier so captions from every section parse alike.
 const ACADEMIC_REFERENCE_IDENTIFIER_SOURCE =
-    '(?:s?\\d+[a-z]?|[ivxlcdm]+[a-z]?)';
+    '(?:(?:[a-z]{1,2}[.．]?[\\p{Zs}\\t]*)?\\d+[a-z]?|[ivxlcdm]+[a-z]?)';
 const ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE =
     '(?:[.:：。]|[\\p{Zs}\\t]*[|｜])';
+// Nature-style series labels ("Extended Data Fig. 1", "Supplementary Fig. 2")
+// share the academic figure caption grammar.
+const ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE =
+    '(?:(?:extended[\\p{Zs}\\t]+data|supplement(?:ary|al)?|suppl\\.?)[\\p{Zs}\\t]+)?';
 const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
     new RegExp(
-        `^((?:(?:algorithm|chart|fig\\.?|figure|scheme|table)`
+        `^((?:${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme|table)`
             + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
             + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}`
             + `${ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE}`
@@ -35,9 +41,37 @@ const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
         'iu'
     ),
 ];
-const ACADEMIC_TABLE_CAPTION_PATTERN = /^(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]+(\S[\s\S]*)$/iu;
-const ACADEMIC_TABLE_HEADING_PATTERN = /^ {0,3}#{1,6}[ \t]+(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?(?:[ \t]+#+)?[ \t]*$/iu;
-const ACADEMIC_TABLE_PLAIN_HEADING_PATTERN = /^ {0,3}(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]*$/iu;
+const EMBEDDED_FIGURE_CAPTION_START_SOURCE =
+    `(?:^|[^\\p{L}\\p{N}])`
+    + `((${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme|table)`
+    + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
+    + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}`
+    + `${ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE}`
+    + `|(?:图表|图)${ACADEMIC_REFERENCE_SPACE_SOURCE}*`
+    + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}[.:：。]))`;
+const MIN_EMBEDDED_FIGURE_CAPTION_BODY_WORDS = 6;
+const ACADEMIC_TABLE_CAPTION_PATTERN = new RegExp(
+    `^(table[ \\t]+${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE})([.:])?[ \\t]+(\\S[\\s\\S]*)$`,
+    'iu'
+);
+// Publisher captions such as "Figure 1 The impact of ..." omit the separator;
+// this relaxed form is only used where an image or caption geometry already
+// identifies a figure, never for bare prose.
+const LOOSE_ACADEMIC_FIGURE_CAPTION_PATTERN = new RegExp(
+    `^((?:${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme)`
+        + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
+        + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}))`
+        + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+(\\S[\\s\\S]*)$`,
+    'iu'
+);
+const ACADEMIC_TABLE_HEADING_PATTERN = new RegExp(
+    `^ {0,3}#{1,6}[ \\t]+(table[ \\t]+${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE})([.:])?(?:[ \\t]+#+)?[ \\t]*$`,
+    'iu'
+);
+const ACADEMIC_TABLE_PLAIN_HEADING_PATTERN = new RegExp(
+    `^ {0,3}(table[ \\t]+${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE})([.:])?[ \\t]*$`,
+    'iu'
+);
 const EMPTY_IMAGE_LINE_PATTERN = /^( {0,3})!\[[ \t]*\](\([^\r\n]+\))[ \t]*(?:\r?\n)?$/;
 const MARKDOWN_IMAGE_LINE_PATTERN = /^ {0,3}!\[[^\]\r\n]*\]\([^\r\n]+\)[ \t]*(?:\r?\n)?$/;
 const CAPTIONED_IMAGE_LINE_PATTERN = /^ {0,3}!\[((?:\\.|[^\]\\])*)\]\([^\r\n]+\)[ \t]*(?:\r?\n)?$/;
@@ -96,6 +130,45 @@ export function parseAcademicFigureCaption(value) {
     const match = ACADEMIC_FIGURE_CAPTION_PATTERNS
         .map(pattern => pattern.exec(text))
         .find(Boolean);
+    if (!match) return null;
+    return {
+        text,
+        label: match[1],
+        description: match[2],
+    };
+}
+
+// A MinerU text block can merge a right-column figure caption into the tail of
+// a left-column paragraph. Split that trailing caption so figure restoration
+// can bind it back to its image while the body prose stays intact.
+export function splitTrailingAcademicFigureCaption(value) {
+    const text = String(value || '').trimEnd();
+    if (!text) return null;
+    const starts = [];
+    const pattern = new RegExp(EMBEDDED_FIGURE_CAPTION_START_SOURCE, 'giu');
+    let match;
+    while ((match = pattern.exec(text))) {
+        starts.push(match.index + match[0].length - match[1].length);
+    }
+    for (let index = starts.length - 1; index >= 0; index--) {
+        const from = starts[index];
+        const body = text.slice(0, from).trimEnd();
+        const words = body.match(/\p{L}[\p{L}\p{N}'’-]*/gu) || [];
+        if (words.length < MIN_EMBEDDED_FIGURE_CAPTION_BODY_WORDS) continue;
+        const caption = parseAcademicFigureCaption(text.slice(from).trim());
+        // A bare "Fig. 1." prose mention parses with a punctuation-only
+        // description; a real caption describes the figure with words.
+        if (!caption
+            || (caption.description.match(/\p{L}/gu) || []).length < 2) continue;
+        return { body, caption, from };
+    }
+    return null;
+}
+
+
+export function parseLooseAcademicFigureCaption(value) {
+    const text = String(value || '').trim();
+    const match = LOOSE_ACADEMIC_FIGURE_CAPTION_PATTERN.exec(text);
     if (!match) return null;
     return {
         text,
@@ -1531,11 +1604,14 @@ function markdownFence(line) {
     };
 }
 
+// Caption text is Markdown, so existing escapes such as "\\*" stay single and
+// the renderer resolves them; only raw backslashes are doubled so the image
+// description round-trips unchanged.
 export function escapeImageDescription(value) {
     return String(value)
-        .replace(/\\/g, '\\\\')
-        .replace(/\[/g, '\\[')
-        .replace(/\]/g, '\\]');
+        .replace(/\\(?![!-/:-@[-`{-~])/gu, '\\\\')
+        .replace(/\[/gu, '\\[')
+        .replace(/\]/gu, '\\]');
 }
 
 function replaceImageDescription(line, caption) {

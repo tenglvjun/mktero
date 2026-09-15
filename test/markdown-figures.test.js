@@ -5,6 +5,10 @@ import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outl
 import {
     findAcademicFigures,
     normalizeMisassignedAcademicCaptions,
+    parseAcademicFigureCaption,
+    parseAcademicTableCaption,
+    parseLooseAcademicFigureCaption,
+    splitTrailingAcademicFigureCaption,
 } from '../src/markdown/markdown-figures.js';
 import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
 
@@ -343,5 +347,76 @@ test('does not absorb a captioned table into the preceding figure', () => {
             tables: figure.tablePanels?.length || 0,
         })),
         []
+    );
+});
+
+test('splits a trailing academic caption that MinerU merged into a paragraph', () => {
+    const body = 'A task is converted into executable evaluation examples by binding '
+        + 'its specification to a concrete data context. Each resulting instance identifies the dataset';
+    const caption = 'Figure 2: Construction of a reusable task and its data-bound '
+        + 'instances across heterogeneous recordings.';
+    const split = splitTrailingAcademicFigureCaption(`${body} ${caption}`);
+
+    assert.ok(split);
+    assert.equal(split.body, body);
+    assert.equal(split.caption.text, caption);
+    assert.equal(split.caption.label, 'Figure 2:');
+    assert.equal(split.from, body.length + 1);
+});
+
+test('does not split prose mentions, bare labels or short bodies', () => {
+    assert.equal(
+        splitTrailingAcademicFigureCaption('Body text for grid-2x2 page 1. See Fig. 1.'),
+        null
+    );
+    assert.equal(
+        splitTrailingAcademicFigureCaption('Figure 2: Only a caption.'),
+        null
+    );
+    assert.equal(
+        splitTrailingAcademicFigureCaption('Short prose Figure 2: A caption.'),
+        null
+    );
+});
+
+test('parses appendix, supplementary and dotted figure labels', () => {
+    assert.equal(parseAcademicFigureCaption('Figure A1: Graphical model.').label, 'Figure A1:');
+    assert.equal(parseAcademicFigureCaption('Figure A3: Open-loop rollouts.').label, 'Figure A3:');
+    assert.equal(parseAcademicFigureCaption('Figure B12: Something.').label, 'Figure B12:');
+    assert.equal(parseAcademicFigureCaption('Fig. A.1 Overview.').label, 'Fig. A.1');
+    assert.equal(parseAcademicFigureCaption('Figure 1a: Still numeric.').label, 'Figure 1a:');
+    assert.equal(parseAcademicTableCaption('Table A1: Metrics.').label, 'Table A1:');
+    assert.equal(parseAcademicFigureCaption('Figure 2: Plain.').label, 'Figure 2:');
+});
+
+test('renders an appendix figure caption below its image', () => {
+    const html = renderMarkdownHTML('![Figure A1: Graphical model of TC-WM.](images/f.png)', {
+        resolveImageURL: () => 'blob:f',
+    });
+
+    assert.match(html, /<figcaption>\s*<span class="mktero-figure-label">Figure A1:<\/span> Graphical model of TC-WM\./);
+    assert.doesNotMatch(html, /!\[Figure A1/);
+});
+
+test('parses publisher series figure captions', () => {
+    assert.equal(
+        parseAcademicFigureCaption('Extended Data Fig. 1 | Microscope design and characterization.').label,
+        'Extended Data Fig. 1 |'
+    );
+    assert.equal(
+        parseAcademicFigureCaption('Supplementary Fig. 2. Control experiment.').label,
+        'Supplementary Fig. 2.'
+    );
+    assert.equal(
+        parseLooseAcademicFigureCaption('Suppl. Fig. 3 Results of the control experiment.').label,
+        'Suppl. Fig. 3'
+    );
+    assert.equal(
+        parseLooseAcademicFigureCaption('Extended Data Figure 4 | Something.').label,
+        'Extended Data Figure 4'
+    );
+    assert.equal(
+        parseAcademicFigureCaption('B Camera 1 measurements, NxN mirrors ON'),
+        null
     );
 });

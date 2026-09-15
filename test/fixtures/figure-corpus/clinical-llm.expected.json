@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "id": "clinical-llm",
+  "archiveSha256": "776c3b6c051822ce4e017fc8a1239f75eacc32be0b3755b3861e3b5cd3e2068b",
+  "pages": 19,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 1,
+      "label": "Fig. 1 |",
+      "panels": 1,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        64,
+        74,
+        945,
+        474
+      ]
+    },
+    {
+      "pageIndex": 2,
+      "label": "Fig. 2 |",
+      "panels": 7,
+      "captions": 2,
+      "owned": 4,
+      "bbox": [
+        64,
+        61,
+        947,
+        735
+      ]
+    },
+    {
+      "pageIndex": 10,
+      "label": null,
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        74,
+        64,
+        931,
+        488
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": null,
+      "panels": 6,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        64,
+        55,
+        947,
+        435
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 9,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 12,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 15,
+      "reason": "foreign-content-overlap"
+    },
+    {
+      "pageIndex": 17,
+      "reason": "foreign-content-overlap"
+    }
+  ]
+}

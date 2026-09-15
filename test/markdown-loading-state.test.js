@@ -32,7 +32,7 @@ test('describes provider-neutral loading stages', () => {
     );
 });
 
-test('uses a compact loading presentation while reparsing existing Markdown', () => {
+test('uses a locked loading presentation while reparsing existing Markdown', () => {
     assert.deepEqual(createLoadingPresentation({
         status: 'loading',
         progress: 23.6,
@@ -44,7 +44,7 @@ test('uses a compact loading presentation while reparsing existing Markdown', ()
         progressLabel: '24%',
         title: 'Reparsing PDF…',
         detail: 'The PDF is being converted to Markdown.',
-        hint: 'The current Markdown remains available until the new result is ready.',
+        hint: 'This tab stays locked until the new result is ready.',
     });
     assert.doesNotMatch(
         JSON.stringify(createLoadingPresentation({ status: 'loading', progress: 42 })),

@@ -332,3 +332,38 @@ test('ignores figure references in code and links and rejects duplicate labels',
     assert.deepEqual(result.targets, []);
     assert.deepEqual(result.references, []);
 });
+
+test('resolves appendix figure references such as Figure A6 and Table A1', () => {
+    const markdown = [
+        '# Appendix',
+        '',
+        'Rollouts are shown in Figure A6 and horizons in Figure A7.',
+        '',
+        '![Figure A6: Wall and Maze rollouts.](images/a6.png)',
+        '',
+        '![Figure A7: Horizons.](images/a7.png)',
+    ].join('\n');
+
+    const result = analyzeMarkdownFigureReferences(markdown);
+
+    assert.deepEqual(result.targets.map(target => ({
+        id: target.id,
+        label: target.label,
+    })), [{
+        id: 'figure:a6',
+        label: 'Figure A6:',
+    }, {
+        id: 'figure:a7',
+        label: 'Figure A7:',
+    }]);
+    assert.deepEqual(result.references.map(reference => ({
+        text: markdown.slice(reference.from, reference.to),
+        targetId: reference.targetId,
+    })), [{
+        text: 'Figure A6',
+        targetId: 'figure:a6',
+    }, {
+        text: 'Figure A7',
+        targetId: 'figure:a7',
+    }]);
+});

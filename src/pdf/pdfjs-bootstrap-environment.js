@@ -9,6 +9,7 @@ const PDFJS_WINDOW_GLOBALS = [
     'DOMPoint',
     'DOMRect',
     'OffscreenCanvas',
+    'FontFace',
 ];
 
 const mainWindow = globalThis.Zotero?.getMainWindow?.();
@@ -24,6 +25,13 @@ export function adoptPDFJSWindowGlobals(view) {
         if (typeof view[name] === 'function') {
             globalThis[name] = view[name];
         }
+    }
+    // Zotero's plugin sandbox exposes neither document nor FontFace, but
+    // PDF.js loads standard font and cMap data through document.baseURI and
+    // binds fonts through FontFace. Without them non-embedded fonts fall back
+    // to unrelated system glyphs and figure crops become unreadable.
+    if (view.document && typeof globalThis.document === 'undefined') {
+        globalThis.document = view.document;
     }
 }
 

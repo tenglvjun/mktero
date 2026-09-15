@@ -521,3 +521,86 @@ test('bounds source-map memory and matching work independently of extraction', (
         maxMatchWork: tolerantMarkdown.length * 2,
     }).length, 1);
 });
+
+test('maps a math-bearing paragraph that differs in spacing and font commands', () => {
+    const markdown = 'A3 (Differentiability). A3 is satisfied by construction: the projector '
+        + 'and embedding decoder are smooth $C^{1}$ neural networks, and the conditional '
+        + 'density $p(\\mathbf{x}_t \\mid \\mathbf{z}_t)$ is differentiable.';
+
+    const map = createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: 'A3 (Differentiability). A3 is satisfied by construction: the projector '
+            + 'and embedding decoder are smooth $C ^ { 1 }$ neural networks, and the '
+            + 'conditional density $p ( \\mathbf { x } _ { t } \\mid \\mathbf { z } _ { t } )$ '
+            + 'is differentiable.',
+        pageIndex: 19,
+        bbox: [170, 624, 825, 681],
+    }]);
+
+    assert.equal(map.length, 1);
+    assert.equal(map[0].locations[0].pageIndex, 19);
+});
+
+test('maps a paragraph that differs only in Greek glyph encoding', () => {
+    const markdown = 'The probe reports Spearman ρ = 0.910 over the validation pairs.';
+
+    const map = createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: 'The probe reports Spearman \\rho = 0.910 over the validation pairs.',
+        pageIndex: 20,
+        bbox: [170, 460, 825, 516],
+    }]);
+
+    assert.equal(map.length, 1);
+    assert.equal(map[0].locations[0].pageIndex, 20);
+});
+
+test('maps formulas that differ in delimiter sizing and style commands', () => {
+    const markdown = 'We factorise $\\mathbf{z}_t = [\\mathbf{z}_t^s, \\mathbf{z}_t^c]$ and align the state-relevant block.';
+
+    const map = createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: 'We factorise $\\mathbf { z } _ { t } ~ = ~ \\left[ \\mathbf { z } _ { t } ^ { s } , '
+            + '\\mathbf { z } _ { t } ^ { c } \\right]$ and align the state-relevant block.',
+        pageIndex: 3,
+        bbox: [169, 250, 826, 334],
+    }]);
+
+    assert.equal(map.length, 1);
+    assert.equal(map[0].locations[0].pageIndex, 3);
+});
+
+test('maps a paragraph whose layout adds a styled period after a symbol', () => {
+    const markdown = 'A frozen encoder $f_{\\mathrm{emb}}^{o}$, such as DINOv2, maps the image.';
+
+    const map = createMarkdownSourceMap(markdown, [{
+        type: 'text',
+        text: 'A frozen encoder $f _ { \\mathrm { e m b } } ^ { o } { \\mathrm { . } }$, '
+            + 'such as DINOv2, maps the image.',
+        pageIndex: 3,
+        bbox: [169, 148, 825, 234],
+    }]);
+
+    assert.equal(map.length, 1);
+    assert.equal(map[0].locations[0].pageIndex, 3);
+});
+
+test('maps a figure-captioned table rewritten into its extracted image', () => {
+    const markdown = '![Fig. 4. Forest plot.](images/fig4.jpg)';
+
+    assert.deepEqual(
+        createMarkdownSourceMap(markdown, [{
+            type: 'table',
+            text: '<table><tr><td>Study</td></tr></table>',
+            assetPath: 'images/fig4.jpg',
+            pageIndex: 10,
+            bbox: [129, 119, 862, 406],
+        }]),
+        [{
+            type: 'table',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 10, bbox: [129, 119, 862, 406] }],
+        }]
+    );
+});

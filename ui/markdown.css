@@ -325,6 +325,10 @@ main {
     overflow: hidden;
 }
 
+#mktero-content {
+    position: relative;
+}
+
 .markdown-workspace {
     display: flex;
     width: 100%;
@@ -847,6 +851,11 @@ main {
 }
 
 .loading-state {
+    display: block;
+    min-width: 0;
+}
+
+.loading-card {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     gap: 20px;
@@ -859,12 +868,23 @@ main {
     box-shadow: var(--shadow-float);
 }
 
-.loading-state.loading-state--inline {
-    max-width: none;
-    margin: 18px 28px;
-    padding: 16px 18px;
-    border-radius: 10px;
-    box-shadow: none;
+.loading-state--modal {
+    display: grid;
+    position: absolute;
+    z-index: 900;
+    inset: 0;
+    padding: 24px;
+    background: rgb(20 27 36 / 44%);
+    place-items: center;
+}
+
+.loading-state--modal .loading-card {
+    width: min(380px, 100%);
+    margin: 0;
+    padding: 28px clamp(20px, 6vw, 32px);
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
 }
 
 .loading-spinner {
@@ -875,9 +895,14 @@ main {
     animation: mktero-spin 0.85s linear infinite;
 }
 
-.loading-state--inline .loading-spinner {
-    width: 28px;
-    height: 28px;
+.loading-state--modal .loading-spinner {
+    width: 44px;
+    height: 44px;
+    margin: 0 0 4px;
+}
+
+.loading-state--modal .loading-content {
+    width: 100%;
 }
 
 .loading-content { min-width: 0; }
@@ -4540,7 +4565,7 @@ main {
 }
 
 @container mktero-view (max-width: 720px) {
-    .loading-state { margin-top: 32px; padding: 20px; }
+    .loading-card { margin-top: 32px; padding: 20px; }
     .markdown-snapshot-host p,
     .markdown-editor-host > .cm-editor .cm-line {
         hyphens: manual;

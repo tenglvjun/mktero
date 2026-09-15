@@ -522,10 +522,9 @@ class MarkdownTabView {
         elements.progress.hidden = !loadingView.visible;
         elements.progress.value = loadingView.progress || 0;
         elements.loading.hidden = !loadingView.visible;
-        elements.loading.classList.toggle(
-            'loading-state--inline',
-            loadingView.preserveContent
-        );
+        const modalLoading = loadingView.visible && loadingView.preserveContent;
+        elements.loading.classList.toggle('loading-state--modal', modalLoading);
+        elements.workspace.inert = modalLoading;
         elements.content.setAttribute('aria-busy', String(loadingView.visible));
         elements.error.hidden = model.status !== 'error';
         elements.errorMessage.textContent = model.error || '';
@@ -1199,7 +1198,9 @@ class MarkdownTabView {
             'aria-live': 'polite',
             'aria-atomic': 'true',
         });
-        appendChildren(loading, spinner, loadingContent);
+        const loadingCard = this.createElement('div', { class: 'loading-card' });
+        appendChildren(loadingCard, spinner, loadingContent);
+        appendChildren(loading, loadingCard);
 
         const editorHost = this.createElement('div', {
             id: 'mktero-editor',

@@ -19,8 +19,8 @@ const OPENING_DELIMITER_SIGNED_NUMBER_WHITESPACE_PATTERN = /[([{](\s+)(?=(?:[+\-
 const SIGNED_NUMBER_WHITESPACE_PATTERN = /(?:[+\-−±]|(?<!\\)\\pm)(\s+)(?=\d)/gu;
 const DEGREE_SYMBOL_WHITESPACE_PATTERN = /([\p{N})\]}])(\s+)(?=°)/gu;
 const DEGREE_SYMBOL_UNIT_WHITESPACE_PATTERN = /°(\s+)(?=\p{L})/gu;
-const LATEX_TEXT_UNIT_PATTERN = /(?<!\\)\\mathrm\{([A-Za-z]{1,32})\}/gu;
-const LATEX_BRACED_SUBSCRIPT_PATTERN = /(?<!\\)_[ \t]*\{[ \t]*([A-Za-z0-9][A-Za-z0-9,.;:+-]{0,63})[ \t]*\}/gu;
+const LATEX_TEXT_WRAPPER_PATTERN = /(?<!\\)\\(?:mathcal|mathbb|mathbf|mathit|mathsf|mathtt|mathrm|text|textnormal)[ \t]*\{([^{}]{1,64})\}/gu;
+const LATEX_BRACED_SUBSCRIPT_PATTERN = /(?<!\\)_[ \t]*\{[ \t]*(\\(?:[A-Za-z]+)|[A-Za-z0-9][A-Za-z0-9,.;:+-]{0,63})[ \t]*\}/gu;
 const LATEX_TAG_PATTERN = /(?<!\\)\\tag\{([^}]{0,32})\}/gu;
 const EQUATION_NUMBER_WHITESPACE_PATTERN = /,(\s+)(?=\(\d{1,4}\))/gu;
 const LATEX_SINGLE_SUBSCRIPT_PATTERN = /(?<!\\)_([A-Za-z0-9])/gu;
@@ -79,50 +79,94 @@ const PDF_ANNOTATION_SYMBOL_REPLACEMENTS = [
     { pattern: /<=/gu, text: '≤' },
     { pattern: /!=/gu, text: '≠' },
 ];
-const LATEX_MATH_SYMBOL_REPLACEMENTS = [
-    { pattern: /(?<!\\)\\alpha(?![A-Za-z])/gu, text: 'α' },
-    { pattern: /(?<!\\)\\beta(?![A-Za-z])/gu, text: 'β' },
-    { pattern: /(?<!\\)\\gamma(?![A-Za-z])/gu, text: 'γ' },
-    { pattern: /(?<!\\)\\delta(?![A-Za-z])/gu, text: 'δ' },
-    { pattern: /(?<!\\)\\epsilon(?![A-Za-z])/gu, text: 'ε' },
-    { pattern: /(?<!\\)\\varepsilon(?![A-Za-z])/gu, text: 'ε' },
-    { pattern: /(?<!\\)\\zeta(?![A-Za-z])/gu, text: 'ζ' },
-    { pattern: /(?<!\\)\\eta(?![A-Za-z])/gu, text: 'η' },
-    { pattern: /(?<!\\)\\theta(?![A-Za-z])/gu, text: 'θ' },
-    { pattern: /(?<!\\)\\vartheta(?![A-Za-z])/gu, text: 'θ' },
-    { pattern: /(?<!\\)\\iota(?![A-Za-z])/gu, text: 'ι' },
-    { pattern: /(?<!\\)\\kappa(?![A-Za-z])/gu, text: 'κ' },
-    { pattern: /(?<!\\)\\varkappa(?![A-Za-z])/gu, text: 'κ' },
-    { pattern: /(?<!\\)\\lambda(?![A-Za-z])/gu, text: 'λ' },
-    { pattern: /(?<!\\)\\mu(?![A-Za-z])/gu, text: 'μ' },
-    { pattern: /(?<!\\)\\nu(?![A-Za-z])/gu, text: 'ν' },
-    { pattern: /(?<!\\)\\xi(?![A-Za-z])/gu, text: 'ξ' },
-    { pattern: /(?<!\\)\\pi(?![A-Za-z])/gu, text: 'π' },
-    { pattern: /(?<!\\)\\varpi(?![A-Za-z])/gu, text: 'π' },
-    { pattern: /(?<!\\)\\rho(?![A-Za-z])/gu, text: 'ρ' },
-    { pattern: /(?<!\\)\\varrho(?![A-Za-z])/gu, text: 'ρ' },
-    { pattern: /(?<!\\)\\sigma(?![A-Za-z])/gu, text: 'σ' },
-    { pattern: /(?<!\\)\\varsigma(?![A-Za-z])/gu, text: 'σ' },
-    { pattern: /(?<!\\)\\tau(?![A-Za-z])/gu, text: 'τ' },
-    { pattern: /(?<!\\)\\upsilon(?![A-Za-z])/gu, text: 'υ' },
-    { pattern: /(?<!\\)\\phi(?![A-Za-z])/gu, text: 'φ' },
-    { pattern: /(?<!\\)\\varphi(?![A-Za-z])/gu, text: 'φ' },
-    { pattern: /(?<!\\)\\chi(?![A-Za-z])/gu, text: 'χ' },
-    { pattern: /(?<!\\)\\psi(?![A-Za-z])/gu, text: 'ψ' },
-    { pattern: /(?<!\\)\\omega(?![A-Za-z])/gu, text: 'ω' },
-    { pattern: /(?<!\\)\\Gamma(?![A-Za-z])/gu, text: 'Γ' },
-    { pattern: /(?<!\\)\\Delta(?![A-Za-z])/gu, text: 'Δ' },
-    { pattern: /(?<!\\)\\Theta(?![A-Za-z])/gu, text: 'Θ' },
-    { pattern: /(?<!\\)\\Lambda(?![A-Za-z])/gu, text: 'Λ' },
-    { pattern: /(?<!\\)\\Xi(?![A-Za-z])/gu, text: 'Ξ' },
-    { pattern: /(?<!\\)\\Pi(?![A-Za-z])/gu, text: 'Π' },
-    { pattern: /(?<!\\)\\Sigma(?![A-Za-z])/gu, text: 'Σ' },
-    { pattern: /(?<!\\)\\Upsilon(?![A-Za-z])/gu, text: 'Υ' },
-    { pattern: /(?<!\\)\\Phi(?![A-Za-z])/gu, text: 'Φ' },
-    { pattern: /(?<!\\)\\Psi(?![A-Za-z])/gu, text: 'Ψ' },
-    { pattern: /(?<!\\)\\Omega(?![A-Za-z])/gu, text: 'Ω' },
-    { pattern: /(?<!\\)\\in(?![A-Za-z])/gu, text: '∈' },
-];
+const LATEX_MATH_SYMBOLS = new Map([
+    ['alpha', 'α'],
+    ['beta', 'β'],
+    ['gamma', 'γ'],
+    ['delta', 'δ'],
+    ['epsilon', 'ε'],
+    ['varepsilon', 'ε'],
+    ['zeta', 'ζ'],
+    ['eta', 'η'],
+    ['theta', 'θ'],
+    ['vartheta', 'θ'],
+    ['iota', 'ι'],
+    ['kappa', 'κ'],
+    ['varkappa', 'κ'],
+    ['lambda', 'λ'],
+    ['mu', 'μ'],
+    ['nu', 'ν'],
+    ['xi', 'ξ'],
+    ['pi', 'π'],
+    ['varpi', 'π'],
+    ['rho', 'ρ'],
+    ['varrho', 'ρ'],
+    ['sigma', 'σ'],
+    ['varsigma', 'σ'],
+    ['tau', 'τ'],
+    ['upsilon', 'υ'],
+    ['phi', 'φ'],
+    ['varphi', 'φ'],
+    ['chi', 'χ'],
+    ['psi', 'ψ'],
+    ['omega', 'ω'],
+    ['Gamma', 'Γ'],
+    ['Delta', 'Δ'],
+    ['Theta', 'Θ'],
+    ['Lambda', 'Λ'],
+    ['Xi', 'Ξ'],
+    ['Pi', 'Π'],
+    ['Sigma', 'Σ'],
+    ['Upsilon', 'Υ'],
+    ['Phi', 'Φ'],
+    ['Psi', 'Ψ'],
+    ['Omega', 'Ω'],
+    ['in', '∈'],
+    ['notin', '∉'],
+    ['mapsto', '↦'],
+    ['to', '→'],
+    ['rightarrow', '→'],
+    ['leftarrow', '←'],
+    ['leftrightarrow', '↔'],
+    ['Rightarrow', '⇒'],
+    ['Leftarrow', '⇐'],
+    ['times', '×'],
+    ['cdot', '·'],
+    ['approx', '≈'],
+    ['sim', '∼'],
+    ['simeq', '≃'],
+    ['propto', '∝'],
+    ['equiv', '≡'],
+    ['ll', '≪'],
+    ['gg', '≫'],
+    ['infty', '∞'],
+    ['partial', '∂'],
+    ['nabla', '∇'],
+    ['forall', '∀'],
+    ['exists', '∃'],
+    ['emptyset', '∅'],
+    ['cup', '∪'],
+    ['cap', '∩'],
+    ['subset', '⊂'],
+    ['supset', '⊃'],
+    ['subseteq', '⊆'],
+    ['supseteq', '⊇'],
+    ['setminus', '∖'],
+    ['ell', 'ℓ'],
+    ['hbar', 'ℏ'],
+    ['sum', 'Σ'],
+    ['prod', 'Π'],
+    ['int', '∫'],
+    ['angle', '∠'],
+    ['cdots', '⋯'],
+    ['ldots', '…'],
+    ['dots', '…'],
+]);
+const LATEX_MATH_SYMBOL_REPLACEMENTS = [...LATEX_MATH_SYMBOLS]
+    .map(([name, text]) => ({
+        pattern: new RegExp(`(?<!\\\\)\\\\${name}(?![A-Za-z])`, 'gu'),
+        text,
+    }));
 const MATH_SYMBOL_CANONICAL_FORMS = new Map([
     ['ϵ', 'ε'],
     ['ϑ', 'θ'],
@@ -132,6 +176,9 @@ const MATH_SYMBOL_CANONICAL_FORMS = new Map([
     ['ς', 'σ'],
     ['ϕ', 'φ'],
     ['∆', 'Δ'],
+]);
+const WHITESPACE_FOLDING_MATH_SYMBOLS = new Set([
+    '↦', '→', '←', '↔', '⇒', '⇐',
 ]);
 const ALL_PDF_ANNOTATION_SYMBOL_REPLACEMENTS = [
     ...PDF_ANNOTATION_SYMBOL_REPLACEMENTS,
@@ -470,7 +517,7 @@ function markAnnotationSymbols(text, ignoredOffsets, replacements) {
             }
         }
     }
-    for (const match of text.matchAll(LATEX_TEXT_UNIT_PATTERN)) {
+    for (const match of text.matchAll(LATEX_TEXT_WRAPPER_PATTERN)) {
         replacements.set(match.index, {
             from: match.index,
             to: match.index + match[0].length,
@@ -506,15 +553,23 @@ function markLatexSubscripts(text, ignoredOffsets, replacements) {
             replacements.set(match.index, {
                 from: match.index,
                 to: match.index + match[0].length,
-                text: match[1],
+                text: latexSubscriptValue(match[1]),
             });
-            markOffsetRange(
-                ignoredOffsets,
-                match.index + 1,
-                match[0].length - 1
-            );
+            for (
+                let offset = match.index + 1;
+                offset < match.index + match[0].length;
+                offset++
+            ) {
+                replacements.delete(offset);
+                ignoredOffsets.add(offset);
+            }
         }
     }
+}
+
+function latexSubscriptValue(value) {
+    const command = /^\\([A-Za-z]+)$/u.exec(value);
+    return command ? LATEX_MATH_SYMBOLS.get(command[1]) || value : value;
 }
 
 function markLatexTags(text, ignoredOffsets, replacements) {
@@ -600,6 +655,13 @@ function isPdfAnnotationMathLetter(character) {
     return /^\p{Script=Greek}$/u.test(mapped);
 }
 
+function isWhitespaceFoldingSymbol(character) {
+    const mapped = MATH_SYMBOL_CANONICAL_FORMS.get(character)
+        || MATH_SYMBOL_CANONICAL_FORMS.get(character.normalize('NFKC'))
+        || character.normalize('NFKC');
+    return WHITESPACE_FOLDING_MATH_SYMBOLS.has(mapped);
+}
+
 function markMathLetterWhitespace(text, ignoredOffsets) {
     for (let offset = 0; offset < text.length;) {
         const character = String.fromCodePoint(text.codePointAt(offset));
@@ -612,16 +674,38 @@ function markMathLetterWhitespace(text, ignoredOffsets) {
         while (end < text.length && /^\s$/u.test(text[end])) end++;
         let previous = offset;
         while (previous > 0 && /[ \t]/u.test(text[previous - 1])) previous--;
-        const before = previous > 0
-            ? String.fromCodePoint(
-                text.codePointAt(previousCodePointOffset(text, previous))
-            )
+        const beforeOffset = previous > 0
+            ? previousCodePointOffset(text, previous)
+            : -1;
+        const before = beforeOffset >= 0
+            ? String.fromCodePoint(text.codePointAt(beforeOffset))
+            : '';
+        const beforePrefixOffset = beforeOffset > 0
+            ? previousCodePointOffset(text, beforeOffset)
+            : -1;
+        const beforePrefix = beforePrefixOffset >= 0
+            ? String.fromCodePoint(text.codePointAt(beforePrefixOffset))
             : '';
         const after = end < text.length
             ? String.fromCodePoint(text.codePointAt(end))
             : '';
-        if (isPdfAnnotationMathLetter(before)
-            && isPdfAnnotationMathLetter(after)) {
+        // A space between a standalone formula variable and a Greek letter
+        // comes from a subscript such as "M_{\theta}" in the Markdown source.
+        const standaloneLetter = /\p{L}$/u.test(before)
+            && !/[\p{L}\p{N}]/u.test(beforePrefix);
+        if ((isPdfAnnotationMathLetter(before)
+            && isPdfAnnotationMathLetter(after))
+            || (standaloneLetter
+                && isPdfAnnotationMathLetter(after))) {
+            markOffsetRange(ignoredOffsets, offset, end - offset);
+        }
+        else if (isWhitespaceFoldingSymbol(before)
+            && (isPdfAnnotationMathLetter(after)
+                || isWhitespaceFoldingSymbol(after))) {
+            markOffsetRange(ignoredOffsets, offset, end - offset);
+        }
+        else if (isWhitespaceFoldingSymbol(after)
+            && isPdfAnnotationMathLetter(before)) {
             markOffsetRange(ignoredOffsets, offset, end - offset);
         }
         offset = end;

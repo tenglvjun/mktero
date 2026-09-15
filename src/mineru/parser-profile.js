@@ -10,9 +10,15 @@ export const MINERU_FILE_OPTIONS = Object.freeze({
     is_ocr: true,
 });
 
-export const MINERU_FIGURE_LAYOUT_OPTIONS = Object.freeze({
+const VERIFIED_VLM_FIGURE_LAYOUT_OPTIONS = Object.freeze({
     backend: 'vlm',
     versions: Object.freeze(['3.4.5']),
+    unit: 'pdf-user-unit',
+});
+
+export const MINERU_FIGURE_LAYOUT_OPTIONS = Object.freeze({
+    backends: Object.freeze(['vlm', 'hybrid']),
+    versions: Object.freeze(['3.4.4', '3.4.5']),
     unit: 'pdf-user-unit',
 });
 
@@ -26,7 +32,7 @@ const PREVIOUS_SOURCE_MAP_OPTIONS = Object.freeze({
     blockFlow: 'misplaced-code-page-order-v2',
     chrome: 'page-edge-repeated-v1',
     figureStructure: FIGURE_PIPELINE_PROFILE,
-    figureLayout: MINERU_FIGURE_LAYOUT_OPTIONS,
+    figureLayout: VERIFIED_VLM_FIGURE_LAYOUT_OPTIONS,
 });
 
 const LABEL_RECOVERY_SOURCE_MAP_OPTIONS = Object.freeze({
@@ -34,13 +40,42 @@ const LABEL_RECOVERY_SOURCE_MAP_OPTIONS = Object.freeze({
     figureLabelRecovery: 'verified-pdf-image-v1',
 });
 
-export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+const READING_ORDER_SOURCE_MAP_OPTIONS = Object.freeze({
     ...LABEL_RECOVERY_SOURCE_MAP_OPTIONS,
     figureReadingOrder: 'verified-pdf-title-order-v1',
 });
 
+const FIGURE_LAYOUT_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...READING_ORDER_SOURCE_MAP_OPTIONS,
+    figureLayout: MINERU_FIGURE_LAYOUT_OPTIONS,
+});
+
+const EMBEDDED_CAPTION_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...FIGURE_LAYOUT_SOURCE_MAP_OPTIONS,
+    embeddedCaptions: 'trailing-figure-caption-v1',
+});
+
+const TEXT_MATCHING_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...EMBEDDED_CAPTION_SOURCE_MAP_OPTIONS,
+    textMatching: 'exact-then-academic-v4',
+});
+
+const STANDALONE_LINK_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...TEXT_MATCHING_SOURCE_MAP_OPTIONS,
+    standaloneLinks: 'bare-address-lines-v1',
+});
+
+export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...STANDALONE_LINK_SOURCE_MAP_OPTIONS,
+    figureTables: 'figure-captioned-tables-v1',
+});
+
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
-    LABEL_RECOVERY_SOURCE_MAP_OPTIONS, PREVIOUS_SOURCE_MAP_OPTIONS,
+    STANDALONE_LINK_SOURCE_MAP_OPTIONS,
+    TEXT_MATCHING_SOURCE_MAP_OPTIONS,
+    EMBEDDED_CAPTION_SOURCE_MAP_OPTIONS, FIGURE_LAYOUT_SOURCE_MAP_OPTIONS,
+    READING_ORDER_SOURCE_MAP_OPTIONS, LABEL_RECOVERY_SOURCE_MAP_OPTIONS,
+    PREVIOUS_SOURCE_MAP_OPTIONS,
 ].map(sourceMap => JSON.stringify({
     batch: MINERU_BATCH_OPTIONS,
     file: MINERU_FILE_OPTIONS,

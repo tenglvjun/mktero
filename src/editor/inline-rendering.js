@@ -17,6 +17,7 @@ import { translateEnglish } from '../i18n/localization.js';
 import {
     findAcademicTableGroups,
     findConsecutiveImagePacks,
+    parseFigureLayoutMarker,
 } from '../markdown/markdown-figures.js';
 import {
     analyzeMarkdownCitations,
@@ -53,6 +54,7 @@ import {
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
+import { collectFigureImageNodes } from '../figures/figure-model.js';
 import {
     subtractChromeRanges,
 } from '../markdown/chrome-ranges.js';
@@ -1757,6 +1759,17 @@ function selectedRenderedMarkdownAnnotation(
     const text = selectedText.trim();
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     const source = view.state.sliceDoc(sourceFrom, sourceTo);
+    // A figure caption is rendered from the image description; selecting it
+    // annotates the caption range instead of trying to match the rendered
+    // text (which includes math) against the Markdown source.
+    const captionRange = renderedFigureCaptionRange(range, source);
+    if (captionRange) {
+        const ranges = subtractChromeRanges({
+            from: sourceFrom + captionRange.from,
+            to: sourceFrom + captionRange.to,
+        }, chromeRanges);
+        return ranges.length ? { text, ranges } : null;
+    }
     const content = renderedMarkdownContentContainer(start);
     const renderedOffset = renderedSelectionTextOffset(
         content,
@@ -1791,6 +1804,16 @@ function selectedRenderedMarkdownAnnotation(
     }, chromeRanges);
     if (!ranges.length) return null;
     return { text, ranges };
+}
+
+function renderedFigureCaptionRange(range, source) {
+    const node = range.startContainer;
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    if (!element?.closest?.('figcaption')) return null;
+    const captioned = collectFigureImageNodes(source).filter(image => (
+        image.captionRange.to > image.captionRange.from
+    ));
+    return captioned.length === 1 ? captioned[0].captionRange : null;
 }
 
 function renderedSelectionTextOffset(container, range, selectedText) {
@@ -2088,6 +2111,13 @@ function decorateSyntaxNode(node, state, decorations, context) {
         return false;
     }
 
+    if (node.name === 'CommentBlock'
+        && parseFigureLayoutMarker(state.sliceDoc(node.from, node.to))) {
+        // Layout markers only drive the renderer; never show the raw comment.
+        decorations.push(Decoration.replace({}).range(node.from, node.to));
+        return false;
+    }
+
     if (isHeadingNode(node.name)) {
         const level = Number(node.name.at(-1));
         decorations.push(Decoration.line({
@@ -2306,8 +2336,11 @@ function decorateMath(
     for (const match of findInlineMathMatches(source)) {
         const matchFrom = node.from + match.start;
         const matchTo = node.from + match.end;
+        // A formula may contain link-like source such as "[L_{v|u}\phi](v)".
+        // Exclude it only when the math is inside code/image/URL syntax, never
+        // when the parser merely found a link inside the formula.
         if (rangeOverlapsAny(matchFrom, matchTo, displayRanges)
-            || rangeOverlapsAny(matchFrom, matchTo, excludedRanges)) continue;
+            || rangeInsideAny(matchFrom, matchTo, excludedRanges)) continue;
         if (hasSuperscriptCitationMarkup(
             state,
             context,
@@ -2878,6 +2911,10 @@ function findAncestorAt(state, position, name) {
 
 function rangeOverlapsAny(from, to, ranges) {
     return ranges.some(range => range.from < to && range.to > from);
+}
+
+function rangeInsideAny(from, to, ranges) {
+    return ranges.some(range => range.from <= from && range.to >= to);
 }
 
 function shouldRenderHTMLBlock(source) {

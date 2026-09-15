@@ -235,6 +235,9 @@ export function createPDFFigureRegionRenderer({
                     });
                     await waitForFigureOperation(task.promise, operationSignal, () => task.cancel());
                     throwIfFigureAborted(operationSignal);
+                    if (!canvasHasInk(context, rect.width, rect.height)) {
+                        throw new Error('Figure region rendered empty');
+                    }
                     const data = await waitForFigureOperation(
                         sessionEncodePNG(canvas, { signal: operationSignal }), operationSignal
                     );
@@ -281,6 +284,28 @@ function validateRegion(request) {
         || bbox[0] < 0 || bbox[1] < 0 || bbox[2] > 1000 || bbox[3] > 1000
         || bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) {
         throw new TypeError('Figure crop coordinates are invalid');
+    }
+}
+
+function canvasHasInk(context, width, height) {
+    if (typeof context?.getImageData !== 'function') return true;
+    try {
+        const rows = Math.min(48, height);
+        const step = Math.max(1, Math.floor(height / rows));
+        for (let y = 0; y < height; y += step) {
+            const pixels = context.getImageData(0, y, width, 1).data;
+            for (let index = 0; index < pixels.length; index += 4) {
+                if (pixels[index + 3] > 8
+                    && (pixels[index] < 250 || pixels[index + 1] < 250 || pixels[index + 2] < 250)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    catch {
+        // A canvas that cannot be read back is treated as rendered content.
+        return true;
     }
 }
 

@@ -12,6 +12,8 @@ import {
     normalizeMisassignedAcademicCaptions,
     parseFigureLayoutMarker,
     parseAcademicFigureCaption,
+    parseLooseAcademicFigureCaption,
+    splitTrailingAcademicFigureCaption,
 } from './markdown-figures.js';
 import { isNumericCitationContent } from './text-normalization.js';
 
@@ -150,9 +152,31 @@ function createSafeRenderer(
 
         paragraph({ tokens }) {
             const image = standaloneImageToken(tokens);
-            const caption = image
-                ? parseAcademicFigureCaption(imageTokenDescription(image))
+            // Captions are rendered from the raw description so escape
+            // sequences and math delimiters survive the Markdown tokenizer.
+            const description = image
+                ? (image.text || imageTokenDescription(image))
+                : '';
+            let caption = description
+                ? parseAcademicFigureCaption(description)
+                    || parseLooseAcademicFigureCaption(description)
                 : null;
+            if (!caption && description) {
+                // A legend can lead with a note before its academic label (for
+                // example a data-acquisition note in a side column); keep the
+                // label and the whole legend instead of dropping the caption.
+                const trailing = splitTrailingAcademicFigureCaption(description);
+                if (trailing) {
+                    caption = {
+                        text: description,
+                        label: trailing.caption.label,
+                        description: [
+                            description.slice(0, trailing.from).trim(),
+                            trailing.caption.description.trim(),
+                        ].filter(Boolean).join(' '),
+                    };
+                }
+            }
             const content = this.parser.parseInline(tokens);
             if (!caption) return `<p>${content}</p>\n`;
             return '<figure class="mktero-figure">'
@@ -404,50 +428,51 @@ function renderImageToken(
 }
 
 function renderFigureCaption(caption, mathBudget, tokens = null, target = 'mktero') {
-    if (!caption?.label) return '';
+    if (!caption) return '';
+    if (caption.label) {
+        return '<figcaption>'
+            + `<span class="mktero-figure-label">${escapeHTML(caption.label)}</span>`
+            + ` ${renderFigureCaptionDescription(caption, mathBudget, tokens, target)}`
+            + '</figcaption>';
+    }
+    // A legend can lead with a note before its academic label (for example a
+    // data-acquisition note in a side column); show the label and the whole
+    // legend instead of dropping the caption.
+    const trailing = splitTrailingAcademicFigureCaption(caption.text || '');
+    if (!trailing) return '';
+    const leading = caption.text.slice(0, trailing.from).trim();
+    const description = [leading, trailing.caption.description.trim()]
+        .filter(Boolean).join(' ');
     return '<figcaption>'
-        + `<span class="mktero-figure-label">${escapeHTML(caption.label)}</span>`
-        + ` ${renderFigureCaptionDescription(caption, mathBudget, tokens, target)}`
+        + `<span class="mktero-figure-label">${escapeHTML(trailing.caption.label)}</span>`
+        + ` ${renderFigureCaptionDescription({ ...caption, description }, mathBudget, tokens, target)}`
         + '</figcaption>';
 }
 
 function renderFigureCaptionDescription(caption, mathBudget, tokens, target) {
-    if (!tokens) {
-        return renderCaptionMathSource(caption.description, mathBudget, target);
-    }
-    const segments = inlineTokenTextSegments(tokens);
-    const text = segments.map(segment => segment.text).join('');
-    const captionFrom = text.indexOf(caption.text);
-    if (captionFrom < 0) return escapeHTML(caption.description);
-    const descriptionFrom = captionFrom
-        + caption.text.length
-        - caption.description.length;
-    return renderCaptionTokenSegments(
-        segments,
-        descriptionFrom,
-        descriptionFrom + caption.description.length,
-        mathBudget,
-        target
-    );
+    // The description is rendered as text plus math; token rendering loses
+    // escape pairs and significance markers to emphasis parsing. Image
+    // descriptions carry the alt escaping, so collapse that extra level.
+    const source = tokens
+        ? unescapeImageMathSource(caption.description)
+        : caption.description;
+    return renderCaptionMathSource(source, mathBudget, target);
 }
 
-function renderCaptionTokenSegments(segments, from, to, mathBudget, target) {
-    let offset = 0;
-    let html = '';
-    for (const segment of segments) {
-        const segmentFrom = offset;
-        const segmentTo = segmentFrom + segment.text.length;
-        offset = segmentTo;
-        if (segmentTo <= from || segmentFrom >= to) continue;
-        const text = segment.text.slice(
-            Math.max(0, from - segmentFrom),
-            Math.min(segment.text.length, to - segmentFrom)
-        );
-        html += segment.math
-            ? renderCaptionMath(text, mathBudget, target)
-            : escapeHTML(text);
+const MARKDOWN_ESCAPE_PATTERN = /\\([!-/:-@[-`{-~])/gu;
+
+// Caption text travels through the image alt, where Markdown punctuation is
+// escaped. Resolve the escapes (including captions stored by older versions
+// with one extra escaping pass) so the caption shows the original characters,
+// for example the significance markers "\*", "\*\*" and "\*\*\*".
+export function unescapeCaptionText(value) {
+    let text = String(value);
+    for (let pass = 0; pass < 3; pass++) {
+        const next = text.replace(MARKDOWN_ESCAPE_PATTERN, '$1');
+        if (next === text) break;
+        text = next;
     }
-    return html;
+    return text;
 }
 
 function renderCaptionMathSource(source, mathBudget, target = 'mktero') {
@@ -455,11 +480,11 @@ function renderCaptionMathSource(source, mathBudget, target = 'mktero') {
     let html = '';
     let offset = 0;
     for (const match of matches) {
-        html += escapeHTML(source.slice(offset, match.start));
+        html += escapeHTML(unescapeCaptionText(source.slice(offset, match.start)));
         html += renderCaptionMath(match.text, mathBudget, target);
         offset = match.end;
     }
-    return html + escapeHTML(source.slice(offset));
+    return html + escapeHTML(unescapeCaptionText(source.slice(offset)));
 }
 
 function renderCaptionMath(source, mathBudget, target = 'mktero') {
@@ -937,7 +962,13 @@ export function findInlineMathMatches(source) {
 
     for (let index = 0; index < source.length; index++) {
         if (source[index] === '\n') {
-            dollarOpener = -1;
+            // OCR can wrap a long formula across a soft line break. Keep the
+            // opener only while the pending content already looks like math,
+            // so dollar amounts in prose still cannot pair across lines.
+            if (dollarOpener >= 0
+                && !pendingInlineDollarIsMath(source, dollarOpener, index)) {
+                dollarOpener = -1;
+            }
             parenthesisOpener = -1;
             continue;
         }
@@ -994,6 +1025,20 @@ export function findInlineMathMatches(source) {
     }
 
     return selectNonOverlappingRanges(dollarMatches, parenthesisMatches);
+}
+
+// A pending "$" may cross a soft line break only when the text between the
+// delimiters already carries a TeX command and balanced braces.
+function pendingInlineDollarIsMath(source, openerIndex, endIndex) {
+    const text = source.slice(openerIndex + 1, endIndex);
+    if (!text || text.includes('$')) return false;
+    if (!/\\(?:[a-zA-Z]+|[,;:!])/u.test(text)) return false;
+    let depth = 0;
+    for (const character of text) {
+        if (character === '{') depth++;
+        else if (character === '}' && --depth < 0) return false;
+    }
+    return depth === 0;
 }
 
 function createDollarWrappedNumericCitationMatch(
@@ -1225,7 +1270,43 @@ function normalizeOcrMathSource(source) {
     let normalized = unescapeMathHTMLEntities(source);
     normalized = splitTextCommandsContainingMath(normalized);
     normalized = restoreOcrTextSubscripts(normalized);
-    return collapseOcrTeXSpacing(normalized);
+    normalized = collapseOcrTeXSpacing(normalized);
+    normalized = repairOcrMathCommands(normalized);
+    return dropOcrSpacingOnlyRows(normalized);
+}
+
+function repairOcrMathCommands(source) {
+    // MinerU occasionally glues a trailing spacing command onto \end (for
+    // example "\qquad\end{array}" becomes "\qend{array}"). KaTeX then rejects
+    // the whole environment and paints the raw source red.
+    const withEnd = source.replace(/\\(?:q{1,3})end(?=\s*\{)/gu, '\\end');
+    // OCR sometimes drops the \mathbf group and leaves an orphaned accent
+    // command where a bold letter was typeset (for example "|\u}" for
+    // "|\mathbf{u}"). KaTeX rejects the missing argument, so render the letter
+    // the command was named after instead.
+    return withEnd.replace(/\\(u|v|c|r|H|d|b|t|k)(?=[}_^]|\s*$)/gu, '$1');
+}
+
+const OCR_TEX_SPACING = '(?:[ \\t\\r\\n]|\\\\(?:qquad|quad|thinspace|medspace|thickspace|enspace|enskip)|\\\\[,;!:]|\\\\ )';
+const OCR_SPACING_ROW = new RegExp(`^(?:${OCR_TEX_SPACING})*$`, 'u');
+const OCR_SPACING_BEFORE_END = new RegExp(`^((?:${OCR_TEX_SPACING})*)(\\\\end(?:\\s*\\{[^{}]*\\})?)$`, 'u');
+
+function dropOcrSpacingOnlyRows(source) {
+    if (!source.includes('\\\\')) return source;
+    const parts = source.split('\\\\');
+    const kept = [];
+    for (const [index, part] of parts.entries()) {
+        const beforeEnd = OCR_SPACING_BEFORE_END.exec(part);
+        if (beforeEnd) {
+            kept.push(beforeEnd[2]);
+            continue;
+        }
+        // A row that only contains spacing macros is OCR noise from blank
+        // space inside a boxed equation; keeping it stretches the array.
+        if (index < parts.length - 1 && OCR_SPACING_ROW.test(part)) continue;
+        kept.push(part);
+    }
+    return kept.join('\\\\');
 }
 
 function splitTextCommandsContainingMath(source) {

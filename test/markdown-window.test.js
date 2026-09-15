@@ -5,6 +5,7 @@ import { parseHTML } from 'linkedom';
 import { createLocalization } from '../src/i18n/localization.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
 import { createEvidenceSnippet } from '../src/markdown/markdown-evidence.js';
+import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
 import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.js';
 import {
     collectMarkdownTranslationBlocks,
@@ -2486,7 +2487,7 @@ test('keeps preserved figures silent while showing other warning toasts', () => 
         markdown: '# Cached paper',
         figureMap: {
             version: 1,
-            pipeline: 'figure-region-v1',
+            pipeline: FIGURE_PIPELINE_PROFILE,
             markdownHash: 'b'.repeat(64),
             figures: [],
             preserved: [{ id: 'fig-p0-b1', pageIndex: 0, reason: 'resource-limit' }],
@@ -5585,6 +5586,51 @@ test('updates conversion progress directly in the inline view', () => {
     );
     assert.equal(shadow.querySelector('#mktero-loading-progress').value, 10);
     assert.equal(shadow.querySelector('#mktero-loading-progress-label').textContent, '10%');
+});
+
+test('locks the workspace behind a modal loader while reparsing', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Example',
+        sourceKind: 'markdown',
+    }));
+    const workspace = shadow.querySelector('.markdown-workspace');
+
+    view.render(createModel({
+        status: 'loading',
+        progress: 30,
+        markdown: '# Example',
+        sourceKind: 'markdown',
+        preserveContent: true,
+    }));
+
+    const loading = shadow.querySelector('#mktero-loading');
+    assert.equal(loading.hidden, false);
+    assert.ok(loading.classList.contains('loading-state--modal'));
+    assert.equal(loading.querySelectorAll('.loading-card').length, 1);
+    assert.equal(workspace.inert, true);
+    assert.equal(workspace.hidden, false);
+    assert.equal(shadow.querySelector('#mktero-loading-progress').value, 30);
+
+    view.render(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Example',
+        sourceKind: 'markdown',
+    }));
+    assert.equal(loading.classList.contains('loading-state--modal'), false);
+    assert.equal(workspace.inert, false);
+    view.destroy();
+});
+
+test('keeps the initial conversion loader inline without locking the workspace', () => {
+    const { view, shadow } = createView();
+
+    const loading = shadow.querySelector('#mktero-loading');
+    assert.equal(loading.classList.contains('loading-state--modal'), false);
+    assert.equal(shadow.querySelector('.markdown-workspace').inert, false);
+    view.destroy();
 });
 
 test('localizes the Markdown viewer chrome from the Zotero locale', () => {

@@ -466,3 +466,151 @@ test('preserves line endings when no MinerU split is repaired', () => {
 
     assert.equal(normalizeMinerUMarkdown(markdown), markdown);
 });
+
+test('leaves a merged trailing figure caption inside its paragraph', () => {
+    const body = 'A task is converted into executable evaluation examples by binding '
+        + 'its specification to a concrete data context. Each resulting instance identifies the dataset';
+    const caption = 'Figure 2: Construction of a reusable task and its data-bound '
+        + 'instances across heterogeneous recordings.';
+    const continuation = 'and recording to be analyzed, together with the applicable '
+        + 'time window, signal selection, analysis parameters, and other task-specific conditions.';
+    const markdown = [
+        '![](images/figure2.png)',
+        '',
+        '## 3.2.2 INSTANCE CONSTRUCTION',
+        '',
+        `${body} ${caption}`,
+        '',
+        continuation,
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), markdown);
+});
+
+test('turns standalone web-address lines into Markdown links', () => {
+    const markdown = [
+        'Introduction paragraph.',
+        '',
+        'github.com/google-research/envharness',
+        '',
+        'www.envharness.com',
+        '',
+        'Next paragraph.',
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), [
+        'Introduction paragraph.',
+        '',
+        '[github.com/google-research/envharness](https://github.com/google-research/envharness)',
+        '',
+        '[www.envharness.com](https://www.envharness.com)',
+        '',
+        'Next paragraph.',
+    ].join('\n'));
+    assert.equal(
+        normalizeMinerUMarkdown(normalizeMinerUMarkdown(markdown)),
+        normalizeMinerUMarkdown(markdown)
+    );
+});
+
+test('links an address line glued to the chart image below it', () => {
+    const markdown = [
+        'Introduction paragraph.',
+        '',
+        'github.com/google-research/envharness  ',
+        '![](images/panel.jpg)',
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), [
+        'Introduction paragraph.',
+        '',
+        '[github.com/google-research/envharness](https://github.com/google-research/envharness)  ',
+        '![](images/panel.jpg)',
+    ].join('\n'));
+});
+
+test('leaves inline, indented, and fenced addresses as plain text', () => {
+    const markdown = [
+        'See github.com/google-research/envharness for details.',
+        '',
+        '    github.com/google-research/envharness',
+        '',
+        '```',
+        'github.com/google-research/envharness',
+        '```',
+        '',
+        'appendix.pdf',
+        '',
+        'Figure 1 | Overall performance.',
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), markdown);
+});
+
+test('preserves CRLF when linking a standalone address line', () => {
+    const markdown = 'Intro.\r\n\r\ngithub.com/owner/repo\r\n\r\nOutro.';
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown),
+        'Intro.\r\n\r\n[github.com/owner/repo](https://github.com/owner/repo)\r\n\r\nOutro.'
+    );
+});
+
+test('restores a figure that MinerU exported as a table', () => {
+    const body = '<table><tr><td>Study</td><td>N</td></tr>'
+        + '<tr><td>Dufour &amp; Tzanetakis (2021)</td><td>564</td></tr></table>';
+    const caption = 'Fig. 4. Forest plot of the best classification models from all MER studies.';
+    const markdown = ['Intro paragraph.', '', body, '', caption].join('\n');
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureBlocks: [{
+                type: 'table',
+                text: body,
+                captions: [caption],
+                assetPath: 'images/fig4.jpg',
+            }],
+        }),
+        `Intro paragraph.\n\n![${caption}](images/fig4.jpg)`
+    );
+});
+
+test('keeps a table with a table caption and a figure-captioned table without an image', () => {
+    const body = '<table><tr><td>Study</td><td>N</td></tr></table>';
+    const markdown = [body, '', 'Table 4. Meta-analytic diagnostic.'].join('\n');
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureBlocks: [{
+                type: 'table',
+                text: body,
+                captions: ['Table 4. Meta-analytic diagnostic.'],
+                assetPath: 'images/table4.jpg',
+            }],
+        }),
+        markdown
+    );
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureBlocks: [{
+                type: 'table',
+                text: body,
+                captions: ['Fig. 4. Forest plot.'],
+            }],
+        }),
+        markdown
+    );
+});
+
+test('restores a figure table from decoded figure-table hints', () => {
+    const body = '<table><tr><td>Study</td></tr></table>';
+    const caption = 'Fig. 4. Forest plot.';
+    const markdown = ['Intro paragraph.', '', body, '', caption].join('\n');
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureTables: [{ text: body, assetPath: 'images/fig4.jpg', captions: [caption] }],
+        }),
+        `Intro paragraph.\n\n![${caption}](images/fig4.jpg)`
+    );
+});
