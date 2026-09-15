@@ -17,7 +17,8 @@ const PAGE_UNITS = new Set(['pt', 'px', 'pdf-user-unit']);
 const ROLES = new Set(['panel', 'caption', 'figure-text', 'body', 'unknown']);
 const BBOX_KINDS = new Set(['visual-body', 'caption', 'text', 'group', 'unknown']);
 const RANGE_EVIDENCE = new Set([
-    'explicit-range', 'unique-asset', 'unique-text', 'anchored-sequence', 'unresolved',
+    'explicit-range', 'unique-asset', 'unique-text', 'anchored-sequence',
+    'contiguous-text', 'unresolved',
 ]);
 
 export function validateFigureInput(input) {

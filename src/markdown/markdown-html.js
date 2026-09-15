@@ -13,6 +13,7 @@ import {
     parseFigureLayoutMarker,
     parseAcademicFigureCaption,
     parseLooseAcademicFigureCaption,
+    splitTrailingAcademicFigureCaption,
 } from './markdown-figures.js';
 import { isNumericCitationContent } from './text-normalization.js';
 
@@ -156,10 +157,26 @@ function createSafeRenderer(
             const description = image
                 ? (image.text || imageTokenDescription(image))
                 : '';
-            const caption = description
+            let caption = description
                 ? parseAcademicFigureCaption(description)
                     || parseLooseAcademicFigureCaption(description)
                 : null;
+            if (!caption && description) {
+                // A legend can lead with a note before its academic label (for
+                // example a data-acquisition note in a side column); keep the
+                // label and the whole legend instead of dropping the caption.
+                const trailing = splitTrailingAcademicFigureCaption(description);
+                if (trailing) {
+                    caption = {
+                        text: description,
+                        label: trailing.caption.label,
+                        description: [
+                            description.slice(0, trailing.from).trim(),
+                            trailing.caption.description.trim(),
+                        ].filter(Boolean).join(' '),
+                    };
+                }
+            }
             const content = this.parser.parseInline(tokens);
             if (!caption) return `<p>${content}</p>\n`;
             return '<figure class="mktero-figure">'
@@ -411,10 +428,24 @@ function renderImageToken(
 }
 
 function renderFigureCaption(caption, mathBudget, tokens = null, target = 'mktero') {
-    if (!caption?.label) return '';
+    if (!caption) return '';
+    if (caption.label) {
+        return '<figcaption>'
+            + `<span class="mktero-figure-label">${escapeHTML(caption.label)}</span>`
+            + ` ${renderFigureCaptionDescription(caption, mathBudget, tokens, target)}`
+            + '</figcaption>';
+    }
+    // A legend can lead with a note before its academic label (for example a
+    // data-acquisition note in a side column); show the label and the whole
+    // legend instead of dropping the caption.
+    const trailing = splitTrailingAcademicFigureCaption(caption.text || '');
+    if (!trailing) return '';
+    const leading = caption.text.slice(0, trailing.from).trim();
+    const description = [leading, trailing.caption.description.trim()]
+        .filter(Boolean).join(' ');
     return '<figcaption>'
-        + `<span class="mktero-figure-label">${escapeHTML(caption.label)}</span>`
-        + ` ${renderFigureCaptionDescription(caption, mathBudget, tokens, target)}`
+        + `<span class="mktero-figure-label">${escapeHTML(trailing.caption.label)}</span>`
+        + ` ${renderFigureCaptionDescription({ ...caption, description }, mathBudget, tokens, target)}`
         + '</figcaption>';
 }
 

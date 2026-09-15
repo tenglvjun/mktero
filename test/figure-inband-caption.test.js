@@ -403,3 +403,221 @@ test('owns a label row above a chart when it is not a link', () => {
     assert.ok(candidate.ownedTextBlockIds.includes(row));
     assert.ok(candidate.visualBBox[1] <= 104);
 });
+
+test('keeps the labelled caption ahead of a side-column note', () => {
+    const captionText = 'Extended Data Fig. 5 | Odor-odor correlation at different level processing.';
+    const noteText = 'Data were acquired from 12 odors presented at two concentrations.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({ id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block });
+        return id;
+    };
+    const parent = add({ type: 'chart', role: 'unknown', bboxKind: 'group', bbox: [100, 130, 700, 400] });
+    const path = 'images/side-note.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    add({ type: 'chart', role: 'panel', bboxKind: 'visual-body', bbox: [100, 130, 700, 350],
+        assetPath: path, parentId: parent });
+    const caption = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: captionText, bbox: [100, 420, 400, 470], parentId: parent });
+    const note = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: noteText, bbox: [410, 419, 700, 460], parentId: parent });
+    const markdown = [`![](${path})`, '', captionText, '', noteText].join('\n');
+
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges({
+        provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+        contentList: [], providerState: {},
+    }))[0];
+
+    assert.equal(candidate.decision, 'compose');
+    assert.equal(candidate.label, 'Extended Data Fig. 5 |');
+    assert.equal(candidate.captionBlockIds[0], caption);
+    assert.equal(candidate.captionBlockIds[1], note);
+});
+
+test('joins a nearby caption with its below-panel continuation text', () => {
+    const captionText = 'Extended Data Fig. 6 | M72 glomerulus response to different odorants. '
+        + 'A. Temporal profiles. (Top row) Latency maps showing';
+    const continuationText = 'response latencies (ms) for lower BENZ, low BENZ, and high BENZ '
+        + 'conditions. (Bottom row) Amplitude maps showing response amplitudes.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({ id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block });
+        return id;
+    };
+    const parent = add({ type: 'image', role: 'unknown', bboxKind: 'group', bbox: [100, 130, 700, 400] });
+    const path = 'images/composite.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    add({ type: 'image', role: 'panel', bboxKind: 'visual-body', bbox: [100, 130, 700, 350],
+        assetPath: path, parentId: parent });
+    const caption = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: captionText, bbox: [100, 356, 400, 406] });
+    const continuation = add({ type: 'text', role: 'figure-text', bboxKind: 'text',
+        text: continuationText, bbox: [410, 355, 700, 400], parentId: parent });
+    const markdown = [`![](${path})`, '', captionText, '', continuationText].join('\n');
+
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges({
+        provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+        contentList: [], providerState: {},
+    }))[0];
+
+    assert.equal(candidate.decision, 'compose');
+    assert.equal(candidate.label, 'Extended Data Fig. 6 |');
+    assert.deepEqual(candidate.captionBlockIds, [caption, continuation]);
+});
+
+test('captures a panel whose letter sits above the detected panels', () => {
+    const captionText = 'Extended Data Fig. 8 | Tufted vs mitral cells. A. Cumulative distribution.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({ id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block });
+        return id;
+    };
+    const parent = add({ type: 'image', role: 'unknown', bboxKind: 'group', bbox: [100, 60, 700, 500] });
+    const label = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: 'A', bbox: [100, 64, 118, 80], parentId: parent });
+    add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: 'Bi', bbox: [102, 356, 126, 374], parentId: parent });
+    const path = 'images/panel.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    add({ type: 'image', role: 'panel', bboxKind: 'visual-body', bbox: [110, 360, 500, 500],
+        assetPath: path, parentId: parent });
+    const caption = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: captionText, bbox: [100, 510, 500, 560] });
+    const markdown = ['A', 'Bi', '', `![](${path})`, '', captionText].join('\n');
+
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges({
+        provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+        contentList: [], providerState: {},
+    }))[0];
+
+    assert.equal(candidate.decision, 'compose');
+    assert.ok(candidate.ownedTextBlockIds.includes(label));
+    assert.ok(candidate.visualBBox[1] <= 64);
+});
+
+test('does not extend the crop across prose above the panels', () => {
+    const captionText = 'Extended Data Fig. 8 | Tufted vs mitral cells. A. Cumulative distribution.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({ id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block });
+        return id;
+    };
+    const parent = add({ type: 'image', role: 'unknown', bboxKind: 'group', bbox: [100, 60, 700, 500] });
+    const label = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: 'A', bbox: [100, 64, 118, 80], parentId: parent });
+    add({ type: 'text', role: 'body', bboxKind: 'text',
+        text: 'Prose that sits in the band above the panel.', bbox: [100, 200, 400, 240] });
+    const path = 'images/panel.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    add({ type: 'image', role: 'panel', bboxKind: 'visual-body', bbox: [110, 360, 500, 500],
+        assetPath: path, parentId: parent });
+    const caption = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: captionText, bbox: [100, 510, 500, 560] });
+    const markdown = [
+        'A', '',
+        'Prose that sits in the band above the panel.', '',
+        `![](${path})`, '', captionText,
+    ].join('\n');
+
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges({
+        provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+        contentList: [], providerState: {},
+    }))[0];
+
+    assert.equal(candidate.decision, 'compose');
+    assert.ok(!candidate.ownedTextBlockIds.includes(label));
+    assert.ok(candidate.visualBBox[1] >= 350);
+});
+
+function makeNextPageCaptionInput() {
+    const placeholder = 'Extended Data Fig. 9 | See next page for caption.';
+    const caption = 'Extended Data Fig. 9 | Odor delivery system and experimental timing. '
+        + 'A. Odors were delivered using a multi-cassette air dilution olfactometer.';
+    const continuation = 'further dilution of the odor concentration up to 20-fold. '
+        + 'The airflow from the FV was directed to the odor port.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p${block.pageIndex}:b${sourceOrdinal}`;
+        blocks.push({ id, sourceOrdinal, sourceRanges: [], rangeEvidence: 'unresolved', ...block });
+        return id;
+    };
+    const path = 'images/ed9.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    const parent = add({ pageIndex: 0, type: 'image', role: 'unknown',
+        bboxKind: 'group', bbox: [100, 60, 900, 700] });
+    add({ pageIndex: 0, type: 'image', role: 'panel', bboxKind: 'visual-body',
+        bbox: [110, 68, 880, 663], assetPath: path, parentId: parent });
+    const placeholderID = add({ pageIndex: 0, type: 'caption', role: 'caption',
+        bboxKind: 'caption', text: placeholder, bbox: [62, 676, 329, 690], parentId: parent });
+    const leadID = add({ pageIndex: 1, type: 'text', role: 'caption',
+        bboxKind: 'text', text: caption, bbox: [61, 58, 494, 238] });
+    const continuationID = add({ pageIndex: 1, type: 'text', role: 'unknown',
+        bboxKind: 'text', text: continuation, bbox: [509, 58, 943, 238] });
+    const markdown = [
+        `![](${path})`, '', placeholder, '', caption, '', continuation,
+    ].join('\n');
+    return {
+        placeholderID, leadID, continuationID,
+        input: {
+            provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+            contentList: [], providerState: {},
+            pages: [0, 1].map(pageIndex => ({
+                pageIndex, width: 1000, height: 1000, unit: 'pt', dpi: null,
+                coordinateFrame: 'display-cropbox', rotation: 0,
+                geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length },
+            })),
+        },
+    };
+}
+
+test('replaces a see-next-page caption with the following page legend', () => {
+    const { input, placeholderID, leadID, continuationID } = makeNextPageCaptionInput();
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+
+    assert.equal(candidates.length, 1);
+    const candidate = candidates[0];
+    assert.equal(candidate.decision, 'compose');
+    assert.equal(candidate.label, 'Extended Data Fig. 9 |');
+    assert.deepEqual(candidate.captionBlockIds, [leadID, continuationID, placeholderID]);
+    assert.ok(candidate.visualBBox[1] <= 68);
+    assert.ok(candidate.visualBBox[1] >= 60);
+});
+
+test('keeps the placeholder legend when the next page has no matching caption', () => {
+    const { input, placeholderID } = makeNextPageCaptionInput();
+    input.blocks = input.blocks.filter(block => block.pageIndex === 0);
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges(input))[0];
+
+    assert.equal(candidate.decision, 'compose');
+    assert.deepEqual(candidate.captionBlockIds, [placeholderID]);
+});

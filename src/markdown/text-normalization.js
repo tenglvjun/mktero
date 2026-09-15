@@ -63,7 +63,7 @@ export function normalizeTolerantText(value) {
         .replace(/[\u2018\u2019]/gu, '\'')
         .replace(/[\u201c\u201d]/gu, '"')
         .replace(/\\chi(?![\p{L}\p{N}])/gu, '\u03c7')
-        .replace(/\\([%$#&_{}])/gu, '$1')
+        .replace(/\\([%$#&_{}~])/gu, '$1')
         .replace(/[$}{]/gu, '')
         .replace(/\^(?=[\p{L}\p{N}])/gu, '')
         .replace(/(\p{L}{2})[-\u2010\u2011](?=\p{L}{2})/gu, '$1')

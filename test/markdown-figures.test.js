@@ -7,6 +7,7 @@ import {
     normalizeMisassignedAcademicCaptions,
     parseAcademicFigureCaption,
     parseAcademicTableCaption,
+    parseLooseAcademicFigureCaption,
     splitTrailingAcademicFigureCaption,
 } from '../src/markdown/markdown-figures.js';
 import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
@@ -395,4 +396,27 @@ test('renders an appendix figure caption below its image', () => {
 
     assert.match(html, /<figcaption>\s*<span class="mktero-figure-label">Figure A1:<\/span> Graphical model of TC-WM\./);
     assert.doesNotMatch(html, /!\[Figure A1/);
+});
+
+test('parses publisher series figure captions', () => {
+    assert.equal(
+        parseAcademicFigureCaption('Extended Data Fig. 1 | Microscope design and characterization.').label,
+        'Extended Data Fig. 1 |'
+    );
+    assert.equal(
+        parseAcademicFigureCaption('Supplementary Fig. 2. Control experiment.').label,
+        'Supplementary Fig. 2.'
+    );
+    assert.equal(
+        parseLooseAcademicFigureCaption('Suppl. Fig. 3 Results of the control experiment.').label,
+        'Suppl. Fig. 3'
+    );
+    assert.equal(
+        parseLooseAcademicFigureCaption('Extended Data Figure 4 | Something.').label,
+        'Extended Data Figure 4'
+    );
+    assert.equal(
+        parseAcademicFigureCaption('B Camera 1 measurements, NxN mirrors ON'),
+        null
+    );
 });

@@ -1350,3 +1350,17 @@ test('renders escaped significance markers in a figure caption', () => {
     assert.match(plain, /t-tests: \* MATH , \*\* MATH , \*\*\* MATH ,/);
     assert.doesNotMatch(plain, /\\[\\*]/);
 });
+
+test('renders a figure legend whose note precedes the academic label', () => {
+    const alt = 'Data were acquired from 12 odors presented at two concentrations. '
+        + 'Extended Data Fig. 5 | Odor-odor correlation at different level processing. '
+        + 'A. Glomerular odor-odor correlations.';
+    const html = renderMarkdownHTML(`![${alt}](images/f5.png)`, {
+        resolveImageURL: () => 'blob:f5',
+    });
+    const figcaption = html.slice(html.indexOf('<figcaption'), html.indexOf('</figcaption>'));
+
+    assert.match(figcaption, /<span class="mktero-figure-label">Extended Data Fig\. 5 \|<\/span>/);
+    assert.match(figcaption, /Data were acquired from 12 odors/);
+    assert.match(figcaption, /Odor-odor correlation at different level processing/);
+});

@@ -362,3 +362,155 @@ test('binds a caption whose Greek glyphs and math fonts differ from the layout',
     assert.equal(markdown.slice(range.from, range.to),
         'Spearman ρ = 0.910, Δx and z_t values.');
 });
+
+test('binds a multi-paragraph caption to its contiguous Markdown slice', () => {
+    const caption = 'Fig. 3 | Consistency and timing of odor responses across concentrations.\n\n'
+        + 'a, Odor responses of 95 glomeruli across 3 concentrations.\n\n'
+        + 'b, Fluorescence traces for the three glomeruli marked by arrows in a.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        caption,
+        '',
+        'Body text follows the figure.',
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 400], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 900, 330],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'caption',
+                role: 'caption', bboxKind: 'caption', bbox: [100, 340, 900, 390],
+                text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+
+    const bound = bindFigureSourceRanges(input);
+    const range = bound.blocks.find(block => block.id === 'mineru:p0:b2').sourceRanges[0];
+
+    assert.equal(markdown.slice(range.from, range.to), caption);
+    const candidates = resolveFigureCandidates(bound);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.deepEqual(candidates[0].captionBlockIds, ['mineru:p0:b2']);
+});
+
+test('leaves a repeated multi-paragraph caption unresolved', () => {
+    const caption = 'Fig. 4 | Consistency and timing of odor responses across concentrations.\n\n'
+        + 'a, Odor responses of 95 glomeruli across 3 concentrations.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        caption,
+        '',
+        caption,
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 400], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 900, 330],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'caption',
+                role: 'caption', bboxKind: 'caption', bbox: [100, 340, 900, 390],
+                text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+
+    const bound = bindFigureSourceRanges(input);
+    const captionBlock = bound.blocks.find(block => block.id === 'mineru:p0:b2');
+
+    assert.deepEqual(captionBlock.sourceRanges, []);
+    assert.equal(captionBlock.rangeEvidence, 'unresolved');
+});
+
+test('binds a panel label across a sibling panel title', () => {
+    const markdown = [
+        'Body text before the figure.',
+        '',
+        'A',
+        'B Camera 1 measurements, NxN mirrors ON',
+        '',
+        '![](images/panel-a.png)',
+        '',
+        '![](images/panel-b.png)',
+        '',
+        'Extended Data Fig. 1 | Microscope design and characterization.',
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [
+            { path: 'images/panel-a.png', mimeType: 'image/png', data: createTestPNG() },
+            { path: 'images/panel-b.png', mimeType: 'image/png', data: createTestPNG() },
+        ],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 500], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'caption',
+                role: 'caption', bboxKind: 'caption', bbox: [124, 106, 146, 121],
+                parentId: 'mineru:p0:b0', text: 'A' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'caption',
+                role: 'caption', bboxKind: 'caption', bbox: [324, 104, 613, 119],
+                parentId: 'mineru:p0:b0', text: 'B Camera 1 measurements, NxN mirrors ON' },
+            { id: 'mineru:p0:b3', sourceOrdinal: 3, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [350, 107, 624, 186],
+                assetPath: 'images/panel-a.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b4', sourceOrdinal: 4, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [128, 205, 887, 432],
+                assetPath: 'images/panel-b.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b5', sourceOrdinal: 5, pageIndex: 0, type: 'caption',
+                role: 'caption', bboxKind: 'caption', bbox: [61, 441, 934, 543],
+                text: 'Extended Data Fig. 1 | Microscope design and characterization.' },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+
+    const bound = bindFigureSourceRanges(input);
+    const label = bound.blocks.find(block => block.id === 'mineru:p0:b1');
+
+    assert.equal(
+        bound.markdown.slice(label.sourceRanges[0].from, label.sourceRanges[0].to),
+        'A'
+    );
+});
+
+test('binds a unique caption paragraph without panel anchors', () => {
+    const caption = 'Extended Data Fig. 9 | Odor delivery system and experimental timing. '
+        + 'A. Odors were delivered using a multi-cassette air dilution olfactometer.';
+    const markdown = ['Another paragraph on the page.', '', caption].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [], assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p1:b0', sourceOrdinal: 0, pageIndex: 1, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [61, 58, 494, 238], text: caption },
+        ],
+        pages: [{ pageIndex: 1, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+
+    const bound = bindFigureSourceRanges(input);
+    const range = bound.blocks[0].sourceRanges[0];
+
+    assert.equal(bound.markdown.slice(range.from, range.to), caption);
+    assert.equal(bound.blocks[0].rangeEvidence, 'unique-text');
+});

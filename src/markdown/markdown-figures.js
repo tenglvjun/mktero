@@ -7,9 +7,13 @@ const ACADEMIC_REFERENCE_IDENTIFIER_SOURCE =
     '(?:(?:[a-z]{1,2}[.．]?[\\p{Zs}\\t]*)?\\d+[a-z]?|[ivxlcdm]+[a-z]?)';
 const ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE =
     '(?:[.:：。]|[\\p{Zs}\\t]*[|｜])';
+// Nature-style series labels ("Extended Data Fig. 1", "Supplementary Fig. 2")
+// share the academic figure caption grammar.
+const ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE =
+    '(?:(?:extended[\\p{Zs}\\t]+data|supplement(?:ary|al)?|suppl\\.?)[\\p{Zs}\\t]+)?';
 const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
     new RegExp(
-        `^((?:(?:algorithm|chart|fig\\.?|figure|scheme|table)`
+        `^((?:${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme|table)`
             + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
             + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}`
             + `${ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE}`
@@ -39,7 +43,7 @@ const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
 ];
 const EMBEDDED_FIGURE_CAPTION_START_SOURCE =
     `(?:^|[^\\p{L}\\p{N}])`
-    + `((?:(?:algorithm|chart|fig\\.?|figure|scheme|table)`
+    + `((${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme|table)`
     + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
     + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}`
     + `${ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE}`
@@ -54,7 +58,7 @@ const ACADEMIC_TABLE_CAPTION_PATTERN = new RegExp(
 // this relaxed form is only used where an image or caption geometry already
 // identifies a figure, never for bare prose.
 const LOOSE_ACADEMIC_FIGURE_CAPTION_PATTERN = new RegExp(
-    `^((?:(?:algorithm|chart|fig\\.?|figure|scheme)`
+    `^((?:${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme)`
         + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
         + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}))`
         + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+(\\S[\\s\\S]*)$`,

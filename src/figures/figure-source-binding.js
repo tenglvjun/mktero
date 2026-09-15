@@ -14,6 +14,7 @@ import { collectFigureImageNodes, normalizeFigureAssetPath } from './figure-mode
 import { captionNear, isLooseFigureCaption, looksLikeGapLabel } from './figure-region-resolver.js';
 
 const MARKDOWN_PARSER = parser.configure(GFM);
+const MIN_CONTIGUOUS_TEXT_LENGTH = 32;
 
 export function bindFigureSourceRanges(input, { limits: overrides, budget: sharedBudget } = {}) {
     const limits = { ...FIGURE_LIMITS, ...overrides };
@@ -69,6 +70,10 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
     clearOverlappingBindings(blocks);
     bindAdjacentPanelLabels(input.markdown, blocks, pages, limits, candidatesFor);
     clearOverlappingBindings(blocks);
+    bindContiguousCaptionText(input.markdown, blocks, budget);
+    clearOverlappingBindings(blocks);
+    bindUniqueCaptionText(blocks, candidatesFor);
+    clearOverlappingBindings(blocks);
     const ordered = blocks.slice().sort((a, b) => a.pageIndex - b.pageIndex
         || a.sourceOrdinal - b.sourceOrdinal);
     const nextAnchors = new Map();
@@ -115,6 +120,34 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
         }
     }
     return output;
+}
+
+// Captions and figure text can sit on a different page than their figure;
+// the anchor windows cannot reach them, so a unique text lookup binds them.
+function bindUniqueCaptionText(blocks, candidatesFor) {
+    for (const block of blocks) {
+        if (block.sourceRanges.length || block.assetPath || block.bboxKind === 'group') continue;
+        if (!['caption', 'figure-text', 'unknown'].includes(block.role)) continue;
+        const text = String(block.text || '');
+        if (text.length < MIN_CONTIGUOUS_TEXT_LENGTH) continue;
+        const candidates = candidatesFor(block, null);
+        if (candidates.length === 1) bind(block, candidates[0], 'unique-text');
+    }
+}
+
+// A caption can span several Markdown paragraphs (the panel descriptions
+// under the caption line). The text index is keyed per node, so bind those
+// captions to their unique contiguous Markdown slice instead.
+function bindContiguousCaptionText(markdown, blocks, budget) {
+    for (const block of blocks) {
+        if (block.sourceRanges.length || block.assetPath || block.bboxKind === 'group') continue;
+        const text = String(block.text || '');
+        if (text.length < MIN_CONTIGUOUS_TEXT_LENGTH || !text.includes('\n')) continue;
+        if (!consume(budget)) return;
+        const from = markdown.indexOf(text);
+        if (from < 0 || markdown.indexOf(text, from + 1) >= 0) continue;
+        bind(block, { from, to: from + text.length }, 'contiguous-text');
+    }
 }
 
 function clearOverlappingBindings(blocks) {
@@ -267,12 +300,19 @@ function bindInteriorUniqueText(blocks, pages, limits, candidatesFor) {
 
 function bindAdjacentPanelLabels(markdown, blocks, pages, limits, candidatesFor) {
     const panelsByPage = new Map();
+    const captionsByPage = new Map();
     for (const block of blocks) {
         if (block.bboxKind !== 'visual-body' || !block.sourceRanges.length || !validBox(block.bbox)) {
             continue;
         }
         if (!panelsByPage.has(block.pageIndex)) panelsByPage.set(block.pageIndex, []);
         panelsByPage.get(block.pageIndex).push(block);
+    }
+    for (const block of blocks) {
+        if (block.assetPath || !block.sourceRanges.length || !block.text
+            || (block.role !== 'caption' && block.role !== 'figure-text')) continue;
+        if (!captionsByPage.has(block.pageIndex)) captionsByPage.set(block.pageIndex, []);
+        captionsByPage.get(block.pageIndex).push(block.sourceRanges[0]);
     }
     for (const block of blocks) {
         if (block.sourceRanges.length || block.assetPath || !block.text
@@ -287,10 +327,13 @@ function bindAdjacentPanelLabels(markdown, blocks, pages, limits, candidatesFor)
             ? pagePanels.filter(candidate => candidate.parentId === block.parentId)
             : pagePanels;
         if (!parentPanels.length) continue;
+        // Sibling panel titles between a label and its panel are figure
+        // furniture too, so they do not break the adjacency.
+        const transparent = captionsByPage.get(block.pageIndex) || [];
         const candidates = candidatesFor(block, pages.get(block.pageIndex));
         const adjacent = block.parentId
-            ? candidates.find(node => adjacentToPanel(markdown, node, parentPanels))
-            : uniqueAdjacentNode(markdown, candidates, parentPanels);
+            ? candidates.find(node => adjacentToPanel(markdown, node, parentPanels, transparent))
+            : uniqueAdjacentNode(markdown, candidates, parentPanels, transparent);
         if (adjacent) bind(block, adjacent, 'anchored-sequence');
     }
 }
@@ -302,18 +345,29 @@ function panelBand(panels) {
     ], [1000, 1000, 0, 0]);
 }
 
-function adjacentToPanel(markdown, node, panels) {
+function adjacentToPanel(markdown, node, panels, transparent = []) {
     return panels.some(panel => {
         const range = panel.sourceRanges[0];
-        return (node.to <= range.from
-            && /^\s*$/u.test(markdown.slice(node.to, range.from)))
-            || (node.from >= range.to
-                && /^\s*$/u.test(markdown.slice(range.to, node.from)));
+        if (node.to <= range.from) return gapHoldsOnlyFurniture(markdown, node.to, range.from, transparent);
+        if (node.from >= range.to) return gapHoldsOnlyFurniture(markdown, range.to, node.from, transparent);
+        return false;
     });
 }
 
-function uniqueAdjacentNode(markdown, candidates, panels) {
-    const matches = candidates.filter(node => adjacentToPanel(markdown, node, panels));
+function gapHoldsOnlyFurniture(markdown, from, to, transparent) {
+    const covered = transparent
+        .filter(range => range.from >= from && range.to <= to)
+        .sort((left, right) => left.from - right.from);
+    let cursor = from;
+    for (const range of covered) {
+        if (!/^\s*$/u.test(markdown.slice(cursor, range.from))) return false;
+        cursor = Math.max(cursor, range.to);
+    }
+    return /^\s*$/u.test(markdown.slice(cursor, to));
+}
+
+function uniqueAdjacentNode(markdown, candidates, panels, transparent) {
+    const matches = candidates.filter(node => adjacentToPanel(markdown, node, panels, transparent));
     return matches.length === 1 ? matches[0] : null;
 }
 

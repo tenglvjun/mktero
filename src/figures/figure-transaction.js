@@ -1,4 +1,5 @@
 import { FIGURE_LIMITS } from './figure-limits.js';
+import { isNextPageCaptionPlaceholder } from './figure-region-resolver.js';
 import {
     assertFigureJSONBudget, collectFigureImageNodes, normalizeFigureAssetDestination,
     normalizeFigureAssetPath,
@@ -103,7 +104,8 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
     const members = ids.map(id => blocksByID.get(id));
     const captionIDs = new Set(candidate.captionBlockIds);
     for (const block of members) {
-        if (!block || block.pageIndex !== candidate.pageIndex
+        // A "see next page" caption lives on the following page.
+        if (!block || (!captionIDs.has(block.id) && block.pageIndex !== candidate.pageIndex)
             || !block.sourceRanges?.length || block.rangeEvidence === 'unresolved') {
             throw transactionError('ambiguous-source-range');
         }
@@ -121,13 +123,21 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
     const captionMembers = candidate.captionBlockIds.map(id => blocksByID.get(id))
         .filter(Boolean)
         .sort((left, right) => {
+            // The labelled academic caption opens the figure legend; notes in
+            // a side column follow it instead of pushing it back.
+            const leftLabeled = parseAcademicFigureCaption(left.text) ? 0 : 1;
+            const rightLabeled = parseAcademicFigureCaption(right.text) ? 0 : 1;
+            if (leftLabeled !== rightLabeled) return leftLabeled - rightLabeled;
             const leftBox = validBox(left.bbox) ? left.bbox : [Infinity, Infinity];
             const rightBox = validBox(right.bbox) ? right.bbox : [Infinity, Infinity];
             return leftBox[1] - rightBox[1] || leftBox[0] - rightBox[0];
         });
-    const captionText = captionMembers.flatMap(block => block.sourceRanges.map(range => (
-        input.markdown.slice(range.from, range.to)
-    ))).join(' ').replace(/\s*\r?\n\s*/gu, ' ').trim();
+    // A "see next page" placeholder is consumed but never shown as legend.
+    const legendMembers = captionMembers.filter(block => !isNextPageCaptionPlaceholder(block.text));
+    const captionText = (legendMembers.length ? legendMembers : captionMembers)
+        .flatMap(block => block.sourceRanges.map(range => (
+            input.markdown.slice(range.from, range.to)
+        ))).join(' ').replace(/\s*\r?\n\s*/gu, ' ').trim();
     if (captionText.length > limits.maxCaptionLength) throw transactionError('resource-limit');
     const renderCaption = escapeImageDescription(captionText);
     // Blank lines keep the generated image a standalone paragraph even when

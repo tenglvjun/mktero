@@ -34,7 +34,8 @@ export function resolveFigureCandidates(input, { limits: overrides, budget: shar
                 pageCandidates.push(preservedCandidate(group.panels[0], pageIndex, 'resource-limit'));
                 break;
             }
-            pageCandidates.push(resolveGroup(group, blocks, pageInfo.get(pageIndex), limits, budget));
+            pageCandidates.push(resolveGroup(group, blocks, pageInfo.get(pageIndex), limits, budget,
+                input.blocks));
         }
         const owners = new Map();
         for (const candidate of pageCandidates) {
@@ -178,7 +179,7 @@ function groupBox(group) {
     return union(group.panels.map(panel => panel.bbox));
 }
 
-function resolveGroup(group, blocks, page, limits, budget) {
+function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
     const { panels } = group;
     const parents = group.parents || (group.parent ? [group.parent] : []);
     const parent = parents[0] || null;
@@ -235,10 +236,15 @@ function resolveGroup(group, blocks, page, limits, budget) {
     if (explicitCaptions.length) {
         const labeled = explicitCaptions.filter(block => isFigureCaptionText(block.text));
         if (labeled.length === 1) {
-            const parts = explicitCaptions.filter(block => block.id !== labeled[0].id
+            const parts = [
+                ...explicitCaptions,
+                ...captionContinuationText(blocks, parents, labeled[0], panelBox, limits),
+            ].filter(block => block.id !== labeled[0].id
                 && !looksLikeGapLabel(block.text, limits)
                 && captionContinues(labeled[0], block, limits));
-            captions = orderCaptionParts([labeled[0], ...parts]);
+            // Keep the labelled academic caption first: a side-column note can
+            // start a few units higher and must not take over the label.
+            captions = [labeled[0], ...orderCaptionParts(parts)];
             mergedContinuation = parts.length > 0;
         }
         else if (labeled.length) {
@@ -253,7 +259,22 @@ function resolveGroup(group, blocks, page, limits, budget) {
         }
     }
     else {
-        captions = nearbyCaptions.filter(block => !hasForeignPanelClaim(block, panels, blocks, limits));
+        const nearby = nearbyCaptions.filter(block => !hasForeignPanelClaim(block, panels, blocks, limits));
+        const primary = nearby.find(block => isFigureCaptionText(block.text)) || nearby[0];
+        const continuations = primary
+            ? captionContinuationText(blocks, parents, primary, panelBox, limits)
+            : [];
+        if (continuations.length) {
+            captions = [
+                primary,
+                ...orderCaptionParts(nearby.filter(block => block !== primary)),
+                ...orderCaptionParts(continuations),
+            ];
+            mergedContinuation = true;
+        }
+        else {
+            captions = nearby;
+        }
     }
     if (captions.length > 1 && !mergedContinuation) {
         return preserve(candidate, 'ambiguous-caption');
@@ -261,13 +282,23 @@ function resolveGroup(group, blocks, page, limits, budget) {
     if (!captions.length && !parents.length) {
         return preserve(candidate, 'ambiguous-caption');
     }
+    if (captions.length === 1 && isNextPageCaptionPlaceholder(captions[0].text)) {
+        // "See next page for caption." placeholders point at the real legend
+        // printed on the following page; keep the placeholder as a consumed
+        // member but never as the legend text or the caption box.
+        const full = nextPageCaptionParts(allBlocks, captions[0], limits);
+        if (full) captions = [...full, captions[0]];
+    }
     const caption = captions[0];
     candidate.captionBlockIds = captions.map(part => part.id);
-    candidate.captionBBox = captions.length ? union(captions.map(part => part.bbox)) : null;
+    const legendCaptions = captions.filter(part => !isNextPageCaptionPlaceholder(part.text));
+    candidate.captionBBox = legendCaptions.length
+        ? union(legendCaptions.map(part => part.bbox)) : null;
     candidate.label = parseAcademicFigureCaption(caption?.text)?.label
         || parseLooseAcademicFigureCaption(caption?.text)?.label || null;
     if (captions.some(part => !validBox(part.bbox))) return candidate;
-    if (caption && intersectionArea(panelBox, caption.bbox) > 0) {
+    if (caption && caption.pageIndex === candidate.pageIndex
+        && intersectionArea(panelBox, caption.bbox) > 0) {
         return preserve(candidate, 'caption-overlap');
     }
     const members = new Set(panels.map(block => block.id));
@@ -325,9 +356,18 @@ function resolveGroup(group, blocks, page, limits, budget) {
             members.add(block.id);
         }
     }
+    // MinerU can drop a panel image body while keeping its letter above the
+    // detected panels. Own that letter and extend the crop over the otherwise
+    // block-free band so the missing panel is still captured from the PDF.
+    const missingPanel = missingPanelLabel(blocks, panels, parents, captions, panelBox, limits);
+    if (missingPanel && !members.has(missingPanel.id)) {
+        owned.push(missingPanel);
+        members.add(missingPanel.id);
+    }
     const visualBox = union([...panels, ...owned].map(block => block.bbox));
     let paddedBox = padded(visualBox, limits.padding);
-    if (captions.some(part => intersectionArea(visualBox, part.bbox) > 0)) {
+    if (captions.some(part => part.pageIndex === candidate.pageIndex
+        && intersectionArea(visualBox, part.bbox) > 0)) {
         return preserve(candidate, 'caption-overlap');
     }
     for (const block of blocks) {
@@ -484,6 +524,84 @@ function orderCaptionParts(parts) {
         left.bbox[1] - right.bbox[1]
         || left.bbox[0] - right.bbox[0]
         || left.sourceOrdinal - right.sourceOrdinal));
+}
+
+// A note in the band below the panels can continue the caption in a second
+// column even when MinerU records it as figure text.
+function captionContinuationText(blocks, parents, caption, panelBox, limits) {
+    return blocks.filter(block => (
+        block.role === 'figure-text'
+        && parents.some(parentBlock => block.parentId === parentBlock.id)
+        && validBox(block.bbox)
+        && block.bbox[1] >= panelBox[3]
+        && !isFigureCaptionText(block.text)
+        && captionContinues(caption, block, limits)
+    ));
+}
+
+const NEXT_PAGE_CAPTION_PATTERN = /see (?:the )?next page/iu;
+
+export function isNextPageCaptionPlaceholder(text) {
+    return NEXT_PAGE_CAPTION_PATTERN.test(String(text || ''));
+}
+
+function nextPageCaptionParts(blocks, placeholder, limits) {
+    const label = parseAcademicFigureCaption(placeholder?.text)?.label
+        || parseLooseAcademicFigureCaption(placeholder?.text)?.label || null;
+    if (!label || !validBox(placeholder.bbox)) return null;
+    const pageIndex = placeholder.pageIndex + 1;
+    const normalized = label.trim().toLowerCase();
+    const lead = blocks.find(block => (
+        block.pageIndex === pageIndex
+        && validBox(block.bbox)
+        && block.sourceRanges?.length
+        && String(block.text || '').trim().toLowerCase().startsWith(normalized)
+    ));
+    if (!lead) return null;
+    const continuations = blocks.filter(block => (
+        block.pageIndex === pageIndex
+        && block.id !== lead.id
+        && validBox(block.bbox)
+        && block.sourceRanges?.length
+        && !isFigureCaptionText(block.text)
+        && captionContinues(lead, block, limits)
+    ));
+    return [lead, ...orderCaptionParts(continuations)];
+}
+
+function missingPanelLabel(blocks, panels, parents, captions, panelBox, limits) {
+    const span = padded(panelBox, limits.ownedTextPadding);
+    const pageIndex = panels[0].pageIndex;
+    const label = blocks.find(block => (
+        block.pageIndex === pageIndex
+        && block.role === 'caption'
+        && block.id !== captions[0]?.id
+        && looksLikeGapLabel(block.text, limits)
+        && parents.some(parent => block.parentId === parent.id)
+        && validBox(block.bbox)
+        && block.bbox[3] <= panelBox[1]
+        && overlap(block.bbox[0], block.bbox[2], span[0], span[2]) > 0
+    ));
+    if (!label) return null;
+    const members = new Set([...panels, ...parents, ...captions].map(block => block.id));
+    const blocked = blocks.some(block => (
+        block.pageIndex === pageIndex
+        && block.id !== label.id
+        && !members.has(block.id)
+        && block.bboxKind !== 'group'
+        && !looksLikePanelMarker(block.text, limits)
+        && validBox(block.bbox)
+        && block.bbox[1] < panelBox[1] && block.bbox[3] > label.bbox[3]
+        && overlap(block.bbox[0], block.bbox[2], span[0], span[2]) > 0
+    ));
+    return blocked ? null : label;
+}
+
+// Panel markers such as "A", "Bi" or "iii" are figure furniture and do not
+// prove that content fills the band above the detected panels.
+function looksLikePanelMarker(text, limits) {
+    const value = String(text || '').trim();
+    return looksLikeGapLabel(value, limits) || /^[A-Za-z]{1,4}\d?$/u.test(value);
 }
 
 function isInBandAnnotationText(block, panelBox, captions, limits) {
