@@ -151,7 +151,11 @@ function createSafeRenderer(
 
         paragraph({ tokens }) {
             const image = standaloneImageToken(tokens);
-            const description = image ? imageTokenDescription(image) : '';
+            // Captions are rendered from the raw description so escape
+            // sequences and math delimiters survive the Markdown tokenizer.
+            const description = image
+                ? (image.text || imageTokenDescription(image))
+                : '';
             const caption = description
                 ? parseAcademicFigureCaption(description)
                     || parseLooseAcademicFigureCaption(description)
@@ -415,42 +419,29 @@ function renderFigureCaption(caption, mathBudget, tokens = null, target = 'mkter
 }
 
 function renderFigureCaptionDescription(caption, mathBudget, tokens, target) {
-    if (!tokens) {
-        return renderCaptionMathSource(caption.description, mathBudget, target);
-    }
-    const segments = inlineTokenTextSegments(tokens);
-    const text = segments.map(segment => segment.text).join('');
-    const captionFrom = text.indexOf(caption.text);
-    if (captionFrom < 0) return escapeHTML(caption.description);
-    const descriptionFrom = captionFrom
-        + caption.text.length
-        - caption.description.length;
-    return renderCaptionTokenSegments(
-        segments,
-        descriptionFrom,
-        descriptionFrom + caption.description.length,
-        mathBudget,
-        target
-    );
+    // The description is rendered as text plus math; token rendering loses
+    // escape pairs and significance markers to emphasis parsing. Image
+    // descriptions carry the alt escaping, so collapse that extra level.
+    const source = tokens
+        ? unescapeImageMathSource(caption.description)
+        : caption.description;
+    return renderCaptionMathSource(source, mathBudget, target);
 }
 
-function renderCaptionTokenSegments(segments, from, to, mathBudget, target) {
-    let offset = 0;
-    let html = '';
-    for (const segment of segments) {
-        const segmentFrom = offset;
-        const segmentTo = segmentFrom + segment.text.length;
-        offset = segmentTo;
-        if (segmentTo <= from || segmentFrom >= to) continue;
-        const text = segment.text.slice(
-            Math.max(0, from - segmentFrom),
-            Math.min(segment.text.length, to - segmentFrom)
-        );
-        html += segment.math
-            ? renderCaptionMath(text, mathBudget, target)
-            : escapeHTML(text);
+const MARKDOWN_ESCAPE_PATTERN = /\\([!-/:-@[-`{-~])/gu;
+
+// Caption text travels through the image alt, where Markdown punctuation is
+// escaped. Resolve the escapes (including captions stored by older versions
+// with one extra escaping pass) so the caption shows the original characters,
+// for example the significance markers "\*", "\*\*" and "\*\*\*".
+export function unescapeCaptionText(value) {
+    let text = String(value);
+    for (let pass = 0; pass < 3; pass++) {
+        const next = text.replace(MARKDOWN_ESCAPE_PATTERN, '$1');
+        if (next === text) break;
+        text = next;
     }
-    return html;
+    return text;
 }
 
 function renderCaptionMathSource(source, mathBudget, target = 'mktero') {
@@ -458,11 +449,11 @@ function renderCaptionMathSource(source, mathBudget, target = 'mktero') {
     let html = '';
     let offset = 0;
     for (const match of matches) {
-        html += escapeHTML(source.slice(offset, match.start));
+        html += escapeHTML(unescapeCaptionText(source.slice(offset, match.start)));
         html += renderCaptionMath(match.text, mathBudget, target);
         offset = match.end;
     }
-    return html + escapeHTML(source.slice(offset));
+    return html + escapeHTML(unescapeCaptionText(source.slice(offset)));
 }
 
 function renderCaptionMath(source, mathBudget, target = 'mktero') {

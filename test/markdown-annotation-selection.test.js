@@ -317,3 +317,42 @@ test('creates a bilingual highlight from the SKILL.state schema paragraph', asyn
     editor.destroy();
     dom.window.close();
 });
+
+test('creates a highlight from a figure caption selection', async () => {
+    const caption = 'Figure 5. Ablation results for PaIRSet augmentation strategies. '
+        + 'Significance markers: \\* p \\leq 0.05 , \\*\\* p \\leq 0.01 .';
+    const markdown = `![${caption}](generated/figures/fig-1.png)`;
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    const figcaption = document.querySelector('figcaption');
+    assert.ok(figcaption);
+    const markerNode = textNodeContaining(figcaption, 'Significance markers');
+    assert.ok(markerNode);
+    selectAndHighlight(document, dom.window, range => {
+        range.setStart(markerNode, 0);
+        range.setEnd(markerNode, markerNode.textContent.length);
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].ranges.length, 1);
+    const [{ from, to }] = created[0].ranges;
+    assert.ok(markdown.slice(from, to).includes('Significance markers'));
+    assert.ok(markdown.slice(from, to).includes('non-significant') === false);
+
+    editor.destroy();
+    dom.window.close();
+});

@@ -1334,3 +1334,19 @@ test('keeps dollar amounts in prose that wrap across lines as text', () => {
     assert.match(html, /\$5/);
     assert.match(html, /\$10/);
 });
+
+test('renders escaped significance markers in a figure caption', () => {
+    const caption = 'Figure 5. Ablation results. Significance markers from paired t-tests: '
+        + '\\\\* $p \\\\leq 0.05$ , \\\\*\\\\* $p \\\\leq 0.01$ , '
+        + '\\\\*\\\\*\\\\* $p < 0.001$ , and non-significant in absence.';
+    const html = renderMarkdownHTML(`![${caption}](images/f5.png)`, {
+        resolveImageURL: () => 'blob:f5',
+    });
+    const figcaption = html.slice(html.indexOf('<figcaption'), html.indexOf('</figcaption>'));
+    const plain = figcaption
+        .replace(/<span class="math-inline">[\s\S]*?<\/span><\/span>/g, 'MATH')
+        .replace(/<[^>]+>/g, '');
+
+    assert.match(plain, /t-tests: \* MATH , \*\* MATH , \*\*\* MATH ,/);
+    assert.doesNotMatch(plain, /\\[\\*]/);
+});

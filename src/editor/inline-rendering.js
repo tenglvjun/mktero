@@ -54,6 +54,7 @@ import {
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
+import { collectFigureImageNodes } from '../figures/figure-model.js';
 import {
     subtractChromeRanges,
 } from '../markdown/chrome-ranges.js';
@@ -1758,6 +1759,17 @@ function selectedRenderedMarkdownAnnotation(
     const text = selectedText.trim();
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     const source = view.state.sliceDoc(sourceFrom, sourceTo);
+    // A figure caption is rendered from the image description; selecting it
+    // annotates the caption range instead of trying to match the rendered
+    // text (which includes math) against the Markdown source.
+    const captionRange = renderedFigureCaptionRange(range, source);
+    if (captionRange) {
+        const ranges = subtractChromeRanges({
+            from: sourceFrom + captionRange.from,
+            to: sourceFrom + captionRange.to,
+        }, chromeRanges);
+        return ranges.length ? { text, ranges } : null;
+    }
     const content = renderedMarkdownContentContainer(start);
     const renderedOffset = renderedSelectionTextOffset(
         content,
@@ -1792,6 +1804,16 @@ function selectedRenderedMarkdownAnnotation(
     }, chromeRanges);
     if (!ranges.length) return null;
     return { text, ranges };
+}
+
+function renderedFigureCaptionRange(range, source) {
+    const node = range.startContainer;
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    if (!element?.closest?.('figcaption')) return null;
+    const captioned = collectFigureImageNodes(source).filter(image => (
+        image.captionRange.to > image.captionRange.from
+    ));
+    return captioned.length === 1 ? captioned[0].captionRange : null;
 }
 
 function renderedSelectionTextOffset(container, range, selectedText) {

@@ -1600,11 +1600,14 @@ function markdownFence(line) {
     };
 }
 
+// Caption text is Markdown, so existing escapes such as "\\*" stay single and
+// the renderer resolves them; only raw backslashes are doubled so the image
+// description round-trips unchanged.
 export function escapeImageDescription(value) {
     return String(value)
-        .replace(/\\/g, '\\\\')
-        .replace(/\[/g, '\\[')
-        .replace(/\]/g, '\\]');
+        .replace(/\\(?![!-/:-@[-`{-~])/gu, '\\\\')
+        .replace(/\[/gu, '\\[')
+        .replace(/\]/gu, '\\]');
 }
 
 function replaceImageDescription(line, caption) {
