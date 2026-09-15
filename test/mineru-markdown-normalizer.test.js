@@ -486,3 +486,72 @@ test('leaves a merged trailing figure caption inside its paragraph', () => {
 
     assert.equal(normalizeMinerUMarkdown(markdown), markdown);
 });
+
+test('turns standalone web-address lines into Markdown links', () => {
+    const markdown = [
+        'Introduction paragraph.',
+        '',
+        'github.com/google-research/envharness',
+        '',
+        'www.envharness.com',
+        '',
+        'Next paragraph.',
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), [
+        'Introduction paragraph.',
+        '',
+        '[github.com/google-research/envharness](https://github.com/google-research/envharness)',
+        '',
+        '[www.envharness.com](https://www.envharness.com)',
+        '',
+        'Next paragraph.',
+    ].join('\n'));
+    assert.equal(
+        normalizeMinerUMarkdown(normalizeMinerUMarkdown(markdown)),
+        normalizeMinerUMarkdown(markdown)
+    );
+});
+
+test('links an address line glued to the chart image below it', () => {
+    const markdown = [
+        'Introduction paragraph.',
+        '',
+        'github.com/google-research/envharness  ',
+        '![](images/panel.jpg)',
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), [
+        'Introduction paragraph.',
+        '',
+        '[github.com/google-research/envharness](https://github.com/google-research/envharness)  ',
+        '![](images/panel.jpg)',
+    ].join('\n'));
+});
+
+test('leaves inline, indented, and fenced addresses as plain text', () => {
+    const markdown = [
+        'See github.com/google-research/envharness for details.',
+        '',
+        '    github.com/google-research/envharness',
+        '',
+        '```',
+        'github.com/google-research/envharness',
+        '```',
+        '',
+        'appendix.pdf',
+        '',
+        'Figure 1 | Overall performance.',
+    ].join('\n');
+
+    assert.equal(normalizeMinerUMarkdown(markdown), markdown);
+});
+
+test('preserves CRLF when linking a standalone address line', () => {
+    const markdown = 'Intro.\r\n\r\ngithub.com/owner/repo\r\n\r\nOutro.';
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown),
+        'Intro.\r\n\r\n[github.com/owner/repo](https://github.com/owner/repo)\r\n\r\nOutro.'
+    );
+});

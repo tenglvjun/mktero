@@ -55,12 +55,18 @@ const EMBEDDED_CAPTION_SOURCE_MAP_OPTIONS = Object.freeze({
     embeddedCaptions: 'trailing-figure-caption-v1',
 });
 
-export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+const TEXT_MATCHING_SOURCE_MAP_OPTIONS = Object.freeze({
     ...EMBEDDED_CAPTION_SOURCE_MAP_OPTIONS,
     textMatching: 'exact-then-academic-v4',
 });
 
+export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...TEXT_MATCHING_SOURCE_MAP_OPTIONS,
+    standaloneLinks: 'bare-address-lines-v1',
+});
+
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    TEXT_MATCHING_SOURCE_MAP_OPTIONS,
     EMBEDDED_CAPTION_SOURCE_MAP_OPTIONS, FIGURE_LAYOUT_SOURCE_MAP_OPTIONS,
     READING_ORDER_SOURCE_MAP_OPTIONS, LABEL_RECOVERY_SOURCE_MAP_OPTIONS,
     PREVIOUS_SOURCE_MAP_OPTIONS,
