@@ -940,7 +940,13 @@ export function findInlineMathMatches(source) {
 
     for (let index = 0; index < source.length; index++) {
         if (source[index] === '\n') {
-            dollarOpener = -1;
+            // OCR can wrap a long formula across a soft line break. Keep the
+            // opener only while the pending content already looks like math,
+            // so dollar amounts in prose still cannot pair across lines.
+            if (dollarOpener >= 0
+                && !pendingInlineDollarIsMath(source, dollarOpener, index)) {
+                dollarOpener = -1;
+            }
             parenthesisOpener = -1;
             continue;
         }
@@ -997,6 +1003,20 @@ export function findInlineMathMatches(source) {
     }
 
     return selectNonOverlappingRanges(dollarMatches, parenthesisMatches);
+}
+
+// A pending "$" may cross a soft line break only when the text between the
+// delimiters already carries a TeX command and balanced braces.
+function pendingInlineDollarIsMath(source, openerIndex, endIndex) {
+    const text = source.slice(openerIndex + 1, endIndex);
+    if (!text || text.includes('$')) return false;
+    if (!/\\(?:[a-zA-Z]+|[,;:!])/u.test(text)) return false;
+    let depth = 0;
+    for (const character of text) {
+        if (character === '{') depth++;
+        else if (character === '}' && --depth < 0) return false;
+    }
+    return depth === 0;
 }
 
 function createDollarWrappedNumericCitationMatch(
@@ -1237,7 +1257,12 @@ function repairOcrMathCommands(source) {
     // MinerU occasionally glues a trailing spacing command onto \end (for
     // example "\qquad\end{array}" becomes "\qend{array}"). KaTeX then rejects
     // the whole environment and paints the raw source red.
-    return source.replace(/\\(?:q{1,3})end(?=\s*\{)/gu, '\\end');
+    const withEnd = source.replace(/\\(?:q{1,3})end(?=\s*\{)/gu, '\\end');
+    // OCR sometimes drops the \mathbf group and leaves an orphaned accent
+    // command where a bold letter was typeset (for example "|\u}" for
+    // "|\mathbf{u}"). KaTeX rejects the missing argument, so render the letter
+    // the command was named after instead.
+    return withEnd.replace(/\\(u|v|c|r|H|d|b|t|k)(?=[}_^]|\s*$)/gu, '$1');
 }
 
 const OCR_TEX_SPACING = '(?:[ \\t\\r\\n]|\\\\(?:qquad|quad|thinspace|medspace|thickspace|enspace|enskip)|\\\\[,;!:]|\\\\ )';

@@ -2314,8 +2314,11 @@ function decorateMath(
     for (const match of findInlineMathMatches(source)) {
         const matchFrom = node.from + match.start;
         const matchTo = node.from + match.end;
+        // A formula may contain link-like source such as "[L_{v|u}\phi](v)".
+        // Exclude it only when the math is inside code/image/URL syntax, never
+        // when the parser merely found a link inside the formula.
         if (rangeOverlapsAny(matchFrom, matchTo, displayRanges)
-            || rangeOverlapsAny(matchFrom, matchTo, excludedRanges)) continue;
+            || rangeInsideAny(matchFrom, matchTo, excludedRanges)) continue;
         if (hasSuperscriptCitationMarkup(
             state,
             context,
@@ -2886,6 +2889,10 @@ function findAncestorAt(state, position, name) {
 
 function rangeOverlapsAny(from, to, ranges) {
     return ranges.some(range => range.from < to && range.to > from);
+}
+
+function rangeInsideAny(from, to, ranges) {
+    return ranges.some(range => range.from <= from && range.to >= to);
 }
 
 function shouldRenderHTMLBlock(source) {

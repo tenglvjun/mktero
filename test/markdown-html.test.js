@@ -1299,3 +1299,38 @@ test('preserves safe table spans, formatting, and existing HTML entities', () =>
     ].join(''));
     assert.doesNotMatch(html, /onclick|&amp;amp;/);
 });
+
+test('renders an OCR accent command that replaced a bold letter', () => {
+    const html = renderMarkdownHTML('where $[L_{\\mathbf{v}|\\u}\\phi](\\mathbf{v}) = '
+        + '\\int p(\\mathbf{v} \\mid \\mathbf{u})\\phi(\\mathbf{u}) \\, d\\mathbf{u}$');
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<mi>u<\/mi>/);
+    assert.doesNotMatch(html, /\|\\u/);
+});
+
+test('keeps accent commands that still carry their argument', () => {
+    const html = renderMarkdownHTML('$\\u{a} \\v{b}$');
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<math/);
+});
+
+test('renders a long OCR formula wrapped across a soft line break', () => {
+    const html = renderMarkdownHTML([
+        'where $L_{\\mathbf{v}|\\u}\\phi = \\int p(\\mathbf{v} \\mid \\mathbf{u})\\phi(\\mathbf{u}),',
+        'd\\mathbf{u}$ . Injectivity of L means that distinct latent states induce distinguishable futures.',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /katex-error/);
+    assert.match(html, /<math/);
+    assert.doesNotMatch(html, /\$L_/);
+});
+
+test('keeps dollar amounts in prose that wrap across lines as text', () => {
+    const html = renderMarkdownHTML('The budget grew from $5\nand later reached $10 today.');
+
+    assert.doesNotMatch(html, /<math/);
+    assert.match(html, /\$5/);
+    assert.match(html, /\$10/);
+});

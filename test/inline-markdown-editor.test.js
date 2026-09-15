@@ -9095,3 +9095,28 @@ test('observes editor visibility through the owning Zotero window', () => {
 
     assert.equal(observedEditorContent, true);
 });
+
+test('renders inline math that contains link-like brackets instead of raw source', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'where $[L_{\\mathbf{v}|u}\\phi](\\mathbf{v}) = '
+        + '\\int p(\\mathbf{v} \\mid \\mathbf{u})\\phi(\\mathbf{u}) \\, d\\mathbf{u}$ . '
+        + 'Injectivity of L means that distinct latent states induce distinguishable futures.';
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+    });
+    const inlineMath = [...document.querySelectorAll('.cm-mktero-math')];
+
+    assert.equal(inlineMath.length, 1);
+    assert.ok(inlineMath[0].querySelector('math'));
+    assert.doesNotMatch(document.querySelector('.cm-content').textContent, /\$\[/);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
