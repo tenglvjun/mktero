@@ -584,3 +584,23 @@ test('maps a paragraph whose layout adds a styled period after a symbol', () => 
     assert.equal(map.length, 1);
     assert.equal(map[0].locations[0].pageIndex, 3);
 });
+
+test('maps a figure-captioned table rewritten into its extracted image', () => {
+    const markdown = '![Fig. 4. Forest plot.](images/fig4.jpg)';
+
+    assert.deepEqual(
+        createMarkdownSourceMap(markdown, [{
+            type: 'table',
+            text: '<table><tr><td>Study</td></tr></table>',
+            assetPath: 'images/fig4.jpg',
+            pageIndex: 10,
+            bbox: [129, 119, 862, 406],
+        }]),
+        [{
+            type: 'table',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 10, bbox: [129, 119, 862, 406] }],
+        }]
+    );
+});

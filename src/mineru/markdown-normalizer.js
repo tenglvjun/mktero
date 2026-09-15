@@ -1,6 +1,7 @@
 import {
     normalizeMarkdownFigureCaptions,
     normalizeMisassignedAcademicCaptions,
+    parseAcademicFigureCaption,
 } from '../markdown/markdown-figures.js';
 import { normalizeFigureLayouts } from '../markdown/figure-layout-normalizer.js';
 import { normalizeOutsideRestoredFigures } from '../figures/figure-normalization.js';
@@ -33,11 +34,15 @@ const OCR_BULLET_ITEM_PATTERN = /^[ \t]*(?:\\-|•)[ \t]+\S[^\r\n]*[ \t]*$/u;
 const OCR_BULLET_PREFIX_PATTERN = /^([ \t]*)(?:\\-|•)(?=[ \t]+)/u;
 const MIN_PRECEDING_WORDS = 6;
 
-export function normalizeMinerUMarkdown(markdown, { figureBlocks = [] } = {}) {
+export function normalizeMinerUMarkdown(markdown, { figureBlocks = [], figureTables = [] } = {}) {
     if (typeof markdown !== 'string') return markdown;
 
-    const withFigureCaptions = normalizeOutsideRestoredFigures(
+    const withFigureImages = replaceFigureCaptionedTables(
         markdown,
+        figureTables.length ? figureTables : figureBlocks
+    );
+    const withFigureCaptions = normalizeOutsideRestoredFigures(
+        withFigureImages,
         figureBlocks,
         source => normalizeMisassignedAcademicCaptions(
             normalizeMarkdownFigureCaptions(source)
@@ -79,6 +84,29 @@ export function normalizeMinerUFigureLayouts(markdown, imageBlocks = []) {
 // MinerU emits source-URL lines flush after the paragraph above them (and
 // sometimes glued to the chart image below), so only lines that start a new
 // paragraph outside a fenced code block are converted.
+// MinerU classifies figures that contain a table (for example a forest plot
+// with its study table) as tables. When the caption is an academic figure
+// caption, restore the figure image so the plot is not lost.
+function replaceFigureCaptionedTables(markdown, figureBlocks) {
+    let output = markdown;
+    for (const block of figureBlocks || []) {
+        if (block?.type && block.type !== 'table') continue;
+        if (typeof block?.assetPath !== 'string' || !block.assetPath) continue;
+        const captions = Array.isArray(block.captions) ? block.captions : [];
+        if (!captions.some(caption => /^(?:fig|figure)\b/iu.test(
+            parseAcademicFigureCaption(caption)?.label || ''
+        ))) {
+            continue;
+        }
+        const body = typeof block.text === 'string' ? block.text : '';
+        if (!body) continue;
+        const index = output.indexOf(body);
+        if (index < 0) continue;
+        output = `${output.slice(0, index)}![](${block.assetPath})${output.slice(index + body.length)}`;
+    }
+    return output;
+}
+
 function linkifyStandaloneAddressLines(markdown) {
     const lines = markdown.split(/(\r?\n)/u);
     let inFence = false;

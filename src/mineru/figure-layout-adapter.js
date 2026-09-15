@@ -16,6 +16,9 @@ export function decodeMinerUFigureInput(result) {
         ),
         assets, assetBasePath: result.assetBasePath || '',
         contentList: result.contentList || [], pages: [], blocks: [], providerState: {},
+        // Detailed layout tables carry no image path, so keep the flat
+        // content-list entries that identify figures exported as tables.
+        figureTables: collectFigureTables(result.contentList),
         extractedPages: result.extractedPages, totalPages: result.totalPages,
         warnings: Array.isArray(result.warnings) ? [...result.warnings] : [],
     };
@@ -85,6 +88,46 @@ function separateFigureImageLines(markdown, assets) {
     return changed ? output.join('\n') : markdown;
 }
 
+function findFlatContentBlock(contentList, pageIndex, type, bbox) {
+    let best = null;
+    let bestOverlap = 0;
+    for (const block of contentList || []) {
+        if (block?.pageIndex !== pageIndex || block.type !== type
+            || !Array.isArray(block.bbox) || block.bbox.length !== 4) {
+            continue;
+        }
+        const overlapWidth = Math.min(block.bbox[2], bbox[2])
+            - Math.max(block.bbox[0], bbox[0]);
+        const overlapHeight = Math.min(block.bbox[3], bbox[3])
+            - Math.max(block.bbox[1], bbox[1]);
+        if (overlapWidth <= 0 || overlapHeight <= 0) continue;
+        const overlap = overlapWidth * overlapHeight;
+        if (overlap > bestOverlap) {
+            bestOverlap = overlap;
+            best = block;
+        }
+    }
+    return best;
+}
+
+function collectFigureTables(contentList) {
+    const tables = [];
+    for (const block of contentList || []) {
+        if (block?.type !== 'table' || typeof block.assetPath !== 'string'
+            || !block.assetPath || typeof block.text !== 'string' || !block.text) {
+            continue;
+        }
+        const captions = Array.isArray(block.captions) ? block.captions : [];
+        if (!captions.some(caption => /^(?:fig|figure)\b/iu.test(
+            parseAcademicFigureCaption(caption)?.label || ''
+        ))) {
+            continue;
+        }
+        tables.push({ text: block.text, assetPath: block.assetPath, captions });
+    }
+    return tables;
+}
+
 function markdownImageDestination(line) {
     const match = MARKDOWN_IMAGE_LINE.exec(line);
     if (!match) return null;
@@ -146,7 +189,11 @@ function decodeDetailedPages(pdfInfo, input, supported) {
             const box = value => normalizedBox(value, width, height);
             for (const para of raw.para_blocks) {
                 if (!['image', 'chart'].includes(para.type)) {
-                    const text = blockText(para);
+                    const bbox = box(para.bbox);
+                    // The detailed layout drops compact fields such as a table
+                    // image path; inherit them from the flat content list.
+                    const flat = findFlatContentBlock(input.contentList, pageIndex, para.type, bbox);
+                    const text = blockText(para) || flat?.text || '';
                     const embedded = para.type === 'text'
                         ? splitTrailingAcademicFigureCaption(text)
                         : null;
@@ -154,7 +201,9 @@ function decodeDetailedPages(pdfInfo, input, supported) {
                         role: embedded
                             ? 'caption'
                             : parseAcademicFigureCaption(text) ? 'caption' : 'unknown',
-                        bboxKind: 'text', bbox: box(para.bbox),
+                        bboxKind: 'text', bbox,
+                        ...(flat?.assetPath ? { assetPath: flat.assetPath } : {}),
+                        ...(flat?.captions?.length ? { captions: [...flat.captions] } : {}),
                         ...(embedded ? { embeddedCaption: true } : {}),
                         text: embedded ? embedded.caption.text : text });
                     continue;

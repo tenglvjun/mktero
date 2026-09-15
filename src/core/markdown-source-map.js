@@ -219,9 +219,42 @@ function matchContentBlock(
                 compactTarget
             );
         }
+        if (!matchedRange) {
+            // A figure MinerU exported as a table was rewritten into its
+            // extracted image; map the block to that image, not its text.
+            const tableFigure = matchTableFigureImage(
+                contentBlock,
+                markdown,
+                syntaxRanges,
+                matchBudget
+            );
+            if (tableFigure === MATCH_BUDGET_EXHAUSTED) return MATCH_BUDGET_EXHAUSTED;
+            if (tableFigure) return tableFigure;
+        }
         if (!matchedRange) return null;
     }
     return compatibleSyntaxRange(contentBlock.type, matchedRange, syntaxRanges)
+        ? matchedRange
+        : null;
+}
+
+function matchTableFigureImage(contentBlock, markdown, syntaxRanges, matchBudget) {
+    if (contentBlock.type !== 'table'
+        || typeof contentBlock.assetPath !== 'string'
+        || !contentBlock.assetPath) {
+        return null;
+    }
+    if (!consumeMatchWork(matchBudget, markdown.length)) {
+        return MATCH_BUDGET_EXHAUSTED;
+    }
+    const occurrences = findImageAssetOccurrences(
+        markdown,
+        contentBlock.assetPath,
+        syntaxRanges.image
+    );
+    if (occurrences.ranges.length !== 1 || occurrences.truncated) return null;
+    const matchedRange = occurrences.ranges[0];
+    return findContainingRange(syntaxRanges.image, matchedRange)
         ? matchedRange
         : null;
 }

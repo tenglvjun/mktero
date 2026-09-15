@@ -33,7 +33,10 @@ export function prepareMinerUResult(result) {
         };
     }
 
-    let markdown = normalizeMinerUMarkdown(prepared.markdown, { figureBlocks: contentList });
+    let markdown = normalizeMinerUMarkdown(prepared.markdown, {
+        figureBlocks: contentList,
+        figureTables: prepared.figureTables,
+    });
     let sourceMap = existingSourceMap;
     if (!Array.isArray(sourceMap) && Array.isArray(contentList)) {
         const initialSourceMap = createMarkdownSourceMap(markdown, contentList);

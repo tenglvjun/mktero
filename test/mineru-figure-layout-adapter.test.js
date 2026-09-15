@@ -475,3 +475,52 @@ test('keeps a complete paragraph separate when its embedded caption is removed',
     assert.match(draft.input.markdown, /Sentence one is complete here\.\n+Next paragraph starts fresh\./);
     assert.ok(!draft.input.markdown.includes(caption + '\n'));
 });
+
+test('keeps figure-captioned table images from the flat content list', () => {
+    const tableBody = '<table><tr><td>Study</td></tr></table>';
+    const archive = zipSync({
+        'result/full.md': strToU8(`# Paper\n\n${tableBody}\n\nFig. 4. Forest plot.`),
+        'result/paper_content_list.json': strToU8(JSON.stringify([{
+            type: 'table', table_body: tableBody, table_caption: ['Fig. 4. Forest plot.'],
+            img_path: 'images/fig4.png', page_idx: 0, bbox: [100, 100, 900, 500],
+        }, {
+            type: 'table', table_body: '<table><tr><td>A</td></tr></table>',
+            table_caption: ['Table 2. Values.'], img_path: 'images/table2.png',
+            page_idx: 0, bbox: [100, 520, 900, 700],
+        }])),
+        'result/images/fig4.png': createTestPNG(),
+        'result/images/table2.png': createTestPNG(),
+    });
+
+    const input = decodeMinerUFigureInput(extractMinerUResultFromZip(archive));
+
+    assert.deepEqual(input.figureTables, [{
+        text: tableBody,
+        assetPath: 'images/fig4.png',
+        captions: ['Fig. 4. Forest plot.'],
+    }]);
+});
+
+test('inherits compact flat fields into detailed layout blocks', () => {
+    const tableBody = '<table><tr><td>Study</td></tr></table>';
+    const middle = { _backend: 'vlm', _version_name: '3.4.5', pdf_info: [{ page_idx: 0,
+        page_size: [600, 800], para_blocks: [{
+            type: 'table', bbox: [60, 80, 540, 500], blocks: [],
+        }] }] };
+    const archive = zipSync({
+        'result/full.md': strToU8(`# Paper\n\n${tableBody}\n\nFig. 4. Forest plot.`),
+        'result/paper_content_list.json': strToU8(JSON.stringify([{
+            type: 'table', table_body: tableBody, table_caption: ['Fig. 4. Forest plot.'],
+            img_path: 'images/fig4.png', page_idx: 0, bbox: [100, 100, 900, 620],
+        }])),
+        'result/paper_middle.json': strToU8(JSON.stringify(middle)),
+        'result/images/fig4.png': createTestPNG(),
+    });
+
+    const input = decodeMinerUFigureInput(extractMinerUResultFromZip(archive));
+    const table = input.blocks.find(block => block.type === 'table');
+
+    assert.equal(table.assetPath, 'images/fig4.png');
+    assert.deepEqual(table.captions, ['Fig. 4. Forest plot.']);
+    assert.equal(table.text, tableBody);
+});

@@ -109,3 +109,16 @@ test('composes a caption nested inside its panel image description', () => {
     assert.match(draft.input.markdown,
         /\n\n!\[Figure A2: Empirical verification of assumptions A1, A2, and A4 on Lift\.\]\(generated\/figures\/a2\.png\)\n\nProse after\./);
 });
+
+test('keeps figure-table hints when the figure transaction rewrites the input', () => {
+    const { input, completed } = fixture();
+    input.figureTables = [{
+        text: '<table><tr><td>Study</td></tr></table>',
+        assetPath: 'images/fig4.jpg',
+        captions: ['Fig. 4. Forest plot.'],
+    }];
+
+    const draft = composeFigureDraft(input, completed);
+
+    assert.deepEqual(draft.input.figureTables, input.figureTables);
+});

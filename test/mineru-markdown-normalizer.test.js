@@ -555,3 +555,62 @@ test('preserves CRLF when linking a standalone address line', () => {
         'Intro.\r\n\r\n[github.com/owner/repo](https://github.com/owner/repo)\r\n\r\nOutro.'
     );
 });
+
+test('restores a figure that MinerU exported as a table', () => {
+    const body = '<table><tr><td>Study</td><td>N</td></tr>'
+        + '<tr><td>Dufour &amp; Tzanetakis (2021)</td><td>564</td></tr></table>';
+    const caption = 'Fig. 4. Forest plot of the best classification models from all MER studies.';
+    const markdown = ['Intro paragraph.', '', body, '', caption].join('\n');
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureBlocks: [{
+                type: 'table',
+                text: body,
+                captions: [caption],
+                assetPath: 'images/fig4.jpg',
+            }],
+        }),
+        `Intro paragraph.\n\n![${caption}](images/fig4.jpg)`
+    );
+});
+
+test('keeps a table with a table caption and a figure-captioned table without an image', () => {
+    const body = '<table><tr><td>Study</td><td>N</td></tr></table>';
+    const markdown = [body, '', 'Table 4. Meta-analytic diagnostic.'].join('\n');
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureBlocks: [{
+                type: 'table',
+                text: body,
+                captions: ['Table 4. Meta-analytic diagnostic.'],
+                assetPath: 'images/table4.jpg',
+            }],
+        }),
+        markdown
+    );
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureBlocks: [{
+                type: 'table',
+                text: body,
+                captions: ['Fig. 4. Forest plot.'],
+            }],
+        }),
+        markdown
+    );
+});
+
+test('restores a figure table from decoded figure-table hints', () => {
+    const body = '<table><tr><td>Study</td></tr></table>';
+    const caption = 'Fig. 4. Forest plot.';
+    const markdown = ['Intro paragraph.', '', body, '', caption].join('\n');
+
+    assert.equal(
+        normalizeMinerUMarkdown(markdown, {
+            figureTables: [{ text: body, assetPath: 'images/fig4.jpg', captions: [caption] }],
+        }),
+        `Intro paragraph.\n\n![${caption}](images/fig4.jpg)`
+    );
+});

@@ -248,6 +248,9 @@ function normalizeContentBlock(block) {
         if (typeof text === 'string') normalized.text = text;
         if (block.type === 'table') {
             normalized.captions = normalizeStringList(block.table_caption);
+            // MinerU also crops the table region; figures that contain a table
+            // (for example a forest plot) keep their graphic in this image.
+            if (typeof block.img_path === 'string') normalized.assetPath = block.img_path;
         }
         else if (block.type === 'code') {
             normalized.captions = normalizeStringList(block.code_caption);
