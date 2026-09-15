@@ -28,6 +28,7 @@ const xpiName = `mktero-${manifest.version}.xpi`;
 const xpiPath = path.join(buildRoot, xpiName);
 const requiredPackageFiles = [
     'bootstrap.js',
+    'figure.worker.js',
     'licenses/d3-dispatch.txt',
     'licenses/d3-force.txt',
     'licenses/d3-quadtree.txt',
@@ -90,6 +91,17 @@ await Promise.all([
     build({
         entryPoints: [path.join(projectRoot, 'src/ui/preferences.js')],
         outfile: path.join(packageRoot, 'ui/preferences.js'),
+        bundle: true,
+        format: 'iife',
+        platform: 'browser',
+        target: ['firefox115'],
+        legalComments: 'none',
+        define: { process: 'undefined', Buffer: 'undefined' },
+    }),
+    build({
+        entryPoints: [path.join(projectRoot, 'src/figures/figure-render-worker-entry.js')],
+        outfile: path.join(packageRoot, 'figure.worker.js'),
+        inject: [path.join(projectRoot, 'src/pdf/pdfjs-runtime-compat.js')],
         bundle: true,
         format: 'iife',
         platform: 'browser',

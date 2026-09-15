@@ -45,6 +45,7 @@ import {
     installRenderedImagePreview,
     openRenderedLink,
 } from './rendered-markdown-dom.js';
+import { replacePendingFigureImages } from './figure-placeholder.js';
 import {
     annotationHasComment,
     annotationAttributes,
@@ -82,6 +83,7 @@ export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
 export const setFigureViews = StateEffect.define();
+export const setPendingFigures = StateEffect.define();
 export const setAnnotationOverlay = StateEffect.define();
 export const setChromeRanges = StateEffect.define();
 export const setTranslationRanges = StateEffect.define();
@@ -108,6 +110,7 @@ class RenderedMarkdownWidget extends WidgetType {
         tableCaption = null,
         translationPresentation = {},
         translate = translateEnglish,
+        pendingFigures = null,
     }) {
         super();
         this.source = source;
@@ -129,6 +132,7 @@ class RenderedMarkdownWidget extends WidgetType {
             translationPresentation
         );
         this.translate = translate;
+        this.pendingFigures = pendingFigures;
     }
 
     eq(other) {
@@ -140,6 +144,7 @@ class RenderedMarkdownWidget extends WidgetType {
             && this.citationKey === other.citationKey
             && this.annotationKey === other.annotationKey
             && this.extraClassName === other.extraClassName
+            && this.pendingFigures === other.pendingFigures
             && this.tableCaption?.text === other.tableCaption?.text
             && sameTranslationPresentation(
                 this.translationPresentation,
@@ -196,6 +201,9 @@ class RenderedMarkdownWidget extends WidgetType {
             this.openImagePreview,
             this.translate
         );
+        if (this.pendingFigures?.size) {
+            replacePendingFigureImages(container, this.pendingFigures, this.translate);
+        }
         if (this.display === 'code-block') {
             enhanceRenderedCodeBlock(container, document, {
                 copyCode: this.copyCode,
@@ -604,6 +612,7 @@ export function createInlineRenderingExtension({
         highlightedTableID: null,
         highlightedFigureID: null,
         figureViews: null,
+        pendingFigures: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
         chromeRanges: [],
         translationRanges: [],
@@ -640,6 +649,7 @@ export function createInlineRenderingExtension({
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
             let figureViewsChanged = false;
+            let pendingFiguresChanged = false;
             let annotationOverlayChanged = false;
             let chromeRangesChanged = false;
             let translationRangesChanged = false;
@@ -666,6 +676,12 @@ export function createInlineRenderingExtension({
                     context.figureViews = Array.isArray(effect.value) ? effect.value : null;
                     context.figureReferences.document = null;
                     figureViewsChanged = true;
+                }
+                else if (effect.is(setPendingFigures)) {
+                    context.pendingFigures = effect.value instanceof Map
+                        ? effect.value
+                        : null;
+                    pendingFiguresChanged = true;
                 }
                 else if (effect.is(setAnnotationOverlay)) {
                     context.annotationOverlay = effect.value
@@ -738,6 +754,7 @@ export function createInlineRenderingExtension({
                 || tableHighlightChanged
                 || figureHighlightChanged
                 || figureViewsChanged
+                || pendingFiguresChanged
                 || annotationOverlayChanged
                 || chromeRangesChanged
                 || translationRangesChanged

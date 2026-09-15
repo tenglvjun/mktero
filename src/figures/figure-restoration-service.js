@@ -5,7 +5,7 @@ import {
 } from './figure-model.js';
 import { bindFigureSourceRanges } from './figure-source-binding.js';
 import { resolveFigureCandidates } from './figure-region-resolver.js';
-import { composeFigureDraft } from './figure-transaction.js';
+import { composeFigureDraft, planFigureReplacement } from './figure-transaction.js';
 import { createFigureAbortScope, throwIfFigureAborted, waitForFigureOperation } from './figure-async.js';
 
 export class FigureRestorationService {
@@ -21,7 +21,7 @@ export class FigureRestorationService {
         this.abortOptions = { setTimeout, clearTimeout, createAbortController };
     }
 
-    async restore(input, { fileData, signal, onProgress } = {}) {
+    async restore(input, { fileData, signal, onProgress, onFigure, mode = 'render' } = {}) {
         throwIfFigureAborted(signal);
         try {
             validateFigureInput(input);
@@ -83,9 +83,17 @@ export class FigureRestorationService {
                 }
             }
             const candidates = resolveFigureCandidates(bound, { limits, budget });
+            if (mode === 'plan') {
+                throwIfFigureAborted(signal);
+                return {
+                    input: bound, candidates, preserved: [],
+                    placeholders: buildFigurePlaceholders(bound, candidates),
+                };
+            }
             const paths = new Set(bound.assets.map(asset => normalizeFigureAssetPath(asset.path)));
             let generatedBytes = 0;
             const originalBytes = bound.assets.reduce((total, asset) => total + asset.data.byteLength, 0);
+            const pageCrops = await this.#renderPageCrops(bound, candidates, session, scope.signal);
             for (const [index, candidate] of candidates.entries()) {
                 throwIfFigureAborted(signal);
                 onProgress?.(97 + 2 * index / Math.max(1, candidates.length));
@@ -98,44 +106,44 @@ export class FigureRestorationService {
                         || originalBytes + generatedBytes >= limits.maxTotalAssetBytes
                         || generatedBytes >= limits.maxGeneratedBytes) reason = 'resource-limit';
                     else {
-                        const operation = createFigureAbortScope([scope.signal], {
-                            ...this.abortOptions, timeoutMs: limits.cropTimeoutMs,
+                        const outcome = await this.#composeCandidate({
+                            candidate, bound, session, limits, scope,
+                            sharedCrop: pageCrops.get(candidate.id), paths,
                         });
-                        try {
-                            const page = bound.pages.find(page => page.pageIndex === candidate.pageIndex);
-                            const crop = await waitForFigureOperation(session.renderRegion({
-                                pageIndex: candidate.pageIndex, bbox: candidate.visualBBox,
-                                coordinateFrame: 'display-cropbox', rotation: page.rotation, dpi: limits.defaultDpi,
-                            }, { signal: operation.signal }), operation.signal);
-                            validateFigureCrop(crop, limits);
-                            if (originalBytes + generatedBytes + crop.data.byteLength > limits.maxTotalAssetBytes
-                                || generatedBytes + crop.data.byteLength > limits.maxGeneratedBytes) {
-                                reason = 'resource-limit';
+                        if (outcome.error) reason = outcome.reason;
+                        else {
+                            const { crop, assetPath } = outcome;
+                            let plan;
+                            try {
+                                plan = planFigureReplacement(bound, { candidate, crop, assetPath }, { limits });
                             }
-                            else {
-                                const digest = await waitForFigureOperation(this.hash(crop.data), operation.signal);
-                                if (!/^[a-f0-9]{64}$/u.test(digest)) throw new Error('Figure image digest is invalid');
-                                const stem = `generated/figures/${candidate.id}-${digest.slice(0, 16)}`;
-                                let assetPath = normalizeFigureAssetDestination(`${stem}.png`, bound.assetBasePath);
-                                for (let suffix = 1; paths.has(normalizeFigureAssetPath(assetPath, bound.assetBasePath)); suffix++) {
-                                    assetPath = normalizeFigureAssetDestination(`${stem}-${suffix}.png`, bound.assetBasePath);
+                            catch (error) {
+                                reason = error.preserveReason || 'render-failed';
+                            }
+                            if (!reason) {
+                                if (originalBytes + generatedBytes + crop.data.byteLength > limits.maxTotalAssetBytes
+                                    || generatedBytes + crop.data.byteLength > limits.maxGeneratedBytes) {
+                                    reason = 'resource-limit';
                                 }
-                                paths.add(normalizeFigureAssetPath(assetPath, bound.assetBasePath));
-                                generatedBytes += crop.data.byteLength;
-                                completed.push({ candidate, crop, assetPath });
+                                else {
+                                    generatedBytes += crop.data.byteLength;
+                                    completed.push({ candidate, crop, assetPath });
+                                    await onFigure?.({
+                                        id: candidate.id, status: 'composed', candidate,
+                                        pageIndex: candidate.pageIndex,
+                                        assetPath, crop, replacement: plan.replacement,
+                                        asset: plan.asset, blueprint: plan.blueprint,
+                                    });
+                                }
                             }
-                        }
-                        catch (error) {
-                            throwIfFigureAborted(signal);
-                            if (error.name === 'AbortError') throw error;
-                            reason = error.code === 'FIGURE_RENDER_TIMEOUT' ? 'render-timeout' : 'render-failed';
-                        }
-                        finally {
-                            operation.dispose();
                         }
                     }
                 }
-                if (reason) preserved.push({ id: candidate.id, pageIndex: candidate.pageIndex, reason });
+                if (reason) {
+                    preserved.push({ id: candidate.id, pageIndex: candidate.pageIndex, reason });
+                    await onFigure?.({ id: candidate.id, status: 'preserved',
+                        pageIndex: candidate.pageIndex, reason });
+                }
             }
             throwIfFigureAborted(signal);
             const draft = composeFigureDraft(bound, completed, { limits });
@@ -148,4 +156,93 @@ export class FigureRestorationService {
             scope.dispose();
         }
     }
+
+    async #renderPageCrops(bound, candidates, session, signal) {
+        const crops = new Map();
+        if (!session || typeof session.renderPageCrops !== 'function') return crops;
+        const byPage = new Map();
+        for (const candidate of candidates) {
+            if (candidate.decision !== 'compose') continue;
+            if (!byPage.has(candidate.pageIndex)) byPage.set(candidate.pageIndex, []);
+            byPage.get(candidate.pageIndex).push(candidate);
+        }
+        for (const [pageIndex, pageCandidates] of byPage) {
+            throwIfFigureAborted(signal);
+            const page = bound.pages.find(value => value.pageIndex === pageIndex);
+            if (!page || page.coordinateFrame === 'unknown') continue;
+            const operation = createFigureAbortScope([signal], {
+                ...this.abortOptions, timeoutMs: this.limits.cropTimeoutMs,
+            });
+            try {
+                const result = await waitForFigureOperation(session.renderPageCrops({
+                    pageIndex, coordinateFrame: 'display-cropbox', rotation: page.rotation,
+                    dpi: this.limits.defaultDpi,
+                    regions: pageCandidates.map(candidate => ({ id: candidate.id, bbox: candidate.visualBBox })),
+                }, { signal: operation.signal }), operation.signal);
+                for (const item of result?.crops || []) {
+                    try { crops.set(item.id, validateFigureCrop(item.crop, this.limits)); }
+                    catch { /* A bad crop falls back to per-candidate rendering. */ }
+                }
+            }
+            catch (error) {
+                throwIfFigureAborted(signal);
+                if (error.name === 'AbortError') throw error;
+                // Page-once failed; candidates fall back to per-candidate rendering.
+            }
+            finally {
+                operation.dispose();
+            }
+        }
+        return crops;
+    }
+
+    async #composeCandidate({ candidate, bound, session, limits, scope, sharedCrop, paths }) {
+        try {
+            let crop = sharedCrop;
+            if (crop) {
+                crop = validateFigureCrop(crop, limits);
+            }
+            else {
+                const operation = createFigureAbortScope([scope.signal], {
+                    ...this.abortOptions, timeoutMs: limits.cropTimeoutMs,
+                });
+                try {
+                    const page = bound.pages.find(value => value.pageIndex === candidate.pageIndex);
+                    crop = await waitForFigureOperation(session.renderRegion({
+                        pageIndex: candidate.pageIndex, bbox: candidate.visualBBox,
+                        coordinateFrame: 'display-cropbox', rotation: page.rotation, dpi: limits.defaultDpi,
+                    }, { signal: operation.signal }), operation.signal);
+                    validateFigureCrop(crop, limits);
+                }
+                finally {
+                    operation.dispose();
+                }
+            }
+            const digest = await waitForFigureOperation(this.hash(crop.data), scope.signal);
+            if (!/^[a-f0-9]{64}$/u.test(digest)) throw new Error('Figure image digest is invalid');
+            const stem = `generated/figures/${candidate.id}-${digest.slice(0, 16)}`;
+            let assetPath = normalizeFigureAssetDestination(`${stem}.png`, bound.assetBasePath);
+            for (let suffix = 1; paths.has(normalizeFigureAssetPath(assetPath, bound.assetBasePath)); suffix++) {
+                assetPath = normalizeFigureAssetDestination(`${stem}-${suffix}.png`, bound.assetBasePath);
+            }
+            paths.add(normalizeFigureAssetPath(assetPath, bound.assetBasePath));
+            return { crop, assetPath };
+        }
+        catch (error) {
+            throwIfFigureAborted(scope.signal);
+            if (error.name === 'AbortError') throw error;
+            return { error: true, reason: error.code === 'FIGURE_RENDER_TIMEOUT' ? 'render-timeout' : 'render-failed' };
+        }
+    }
+}
+
+function buildFigurePlaceholders(input, candidates) {
+    const blocks = new Map(input.blocks.map(block => [block.id, block]));
+    return candidates.filter(candidate => candidate.decision === 'compose').map(candidate => ({
+        id: candidate.id,
+        pageIndex: candidate.pageIndex,
+        label: candidate.label || null,
+        ranges: [...candidate.panelBlockIds, ...candidate.ownedTextBlockIds, ...candidate.captionBlockIds]
+            .flatMap(id => (blocks.get(id)?.sourceRanges || []).map(range => ({ from: range.from, to: range.to }))),
+    }));
 }

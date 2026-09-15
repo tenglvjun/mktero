@@ -691,6 +691,68 @@ test('migrates and reads legacy single-translation metadata', async t => {
     assert.equal('translationFile' in migrated, false);
 });
 
+test('persists a pending figure restoration input and rehydrates it from cached assets', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-restoration-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+        now: () => 1_700_000_000_000,
+    };
+    const { input } = makeFigureInput();
+    const document = prepareMinerUResult(input);
+    await new MarkdownCache(options).put(CACHE_KEY, document, {
+        figureRestoration: { status: 'pending', input, completedFigureIds: ['fig-p0-b0'] },
+    });
+    const restored = await new MarkdownCache(options).get(CACHE_KEY);
+    assert.equal(restored.markdown, document.markdown);
+    assert.equal(restored.figureRestoration.status, 'pending');
+    assert.deepEqual(restored.figureRestoration.completedFigureIds, ['fig-p0-b0']);
+    assert.equal(restored.restorationInput.provider, input.provider);
+    assert.equal(restored.restorationInput.markdown, input.markdown);
+    assert.equal(restored.restorationInput.blocks.length, input.blocks.length);
+    assert.equal(restored.restorationInput.assets.length, input.assets.length);
+    assert.equal(restored.restorationInput.assets[0].path, input.assets[0].path);
+    assert.ok(restored.restorationInput.assets[0].data.byteLength > 0);
+});
+
+test('keeps the readable document when the stored restoration input is corrupted', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-restoration-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    };
+    const { input } = makeFigureInput();
+    const document = prepareMinerUResult(input);
+    await new MarkdownCache(options).put(CACHE_KEY, document, {
+        figureRestoration: { status: 'pending', input },
+    });
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    const restorationFile = (await readdir(entryPath)).find(file => file.startsWith('restoration-'));
+    await writeFile(path.join(entryPath, restorationFile), '{}');
+    const restored = await new MarkdownCache(options).get(CACHE_KEY);
+    assert.equal(restored.markdown, document.markdown);
+    assert.equal(restored.figureRestoration.status, 'pending');
+    assert.equal('restorationInput' in restored, false);
+});
+
+test('writes a completed figure restoration status without an input file', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-restoration-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = { rootPath, ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename } };
+    await new MarkdownCache(options).put(CACHE_KEY, { markdown: '# Paper' }, {
+        figureRestoration: { status: 'complete' },
+    });
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    assert.equal((await readdir(entryPath)).some(file => file.startsWith('restoration-')), false);
+    const restored = await new MarkdownCache(options).get(CACHE_KEY);
+    assert.equal('figureRestoration' in restored, false);
+});
+
 test('restores cached chromeRanges next to the source map', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));

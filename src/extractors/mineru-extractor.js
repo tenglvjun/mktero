@@ -43,7 +43,7 @@ export class MinerUDocumentExtractor {
         this.onPDFIndexError = onPDFIndexError;
     }
 
-    async extract(itemID, { onProgress, signal, forceRefresh = false } = {}) {
+    async extract(itemID, { onProgress, onProgressiveFigures = null, signal, forceRefresh = false } = {}) {
         throwIfAborted(signal);
         const item = await this.zotero.Items.getAsync(itemID);
         if (!item?.isPDFAttachment?.()) {
@@ -141,6 +141,7 @@ export class MinerUDocumentExtractor {
                 cacheEnabled,
                 forceRefresh,
                 onProgress,
+                onProgressiveFigures,
                 signal,
             });
         }

@@ -12,6 +12,7 @@ export function appendRenderedMarkdown(
     const html = renderMarkdownHTML(source, {
         resolveImageURL,
         translate,
+        exposeImageAssetPath: true,
     });
     const DOMParserType = document.defaultView.DOMParser;
     const parsed = new DOMParserType().parseFromString(

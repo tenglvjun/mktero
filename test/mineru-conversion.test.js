@@ -85,6 +85,87 @@ test('marks progress while collecting a resumed MinerU task', async () => {
     ]);
 });
 
+test('resumes a pending cached figure restoration without re-uploading', async () => {
+    const puts = [];
+    const resolvedDocument = { markdown: '# Final', assets: [], sourceMap: [] };
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() { throw new Error('must not upload'); },
+            async collect() { throw new Error('must not collect'); },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            async get() {
+                return {
+                    markdown: '# Provisional', assets: [], sourceMap: [],
+                    figureRestoration: { status: 'pending' },
+                    restorationInput: { marker: true },
+                };
+            },
+            async put(key, result, options) { puts.push({ key, result, options }); },
+        },
+        restoreCachedInput: async (input, context) => {
+            assert.equal(input.marker, true);
+            assert.equal(context.fileData.byteLength, 1);
+            return resolvedDocument;
+        },
+        recoverFigures: async result => result,
+        now: () => 1_700_000_000_000,
+    });
+
+    const result = await conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+
+    assert.equal(result.origin, 'cache');
+    assert.equal(result.result.markdown, '# Final');
+    assert.equal(puts.length, 1);
+    assert.equal(puts[0].result.markdown, '# Final');
+    assert.equal('figureRestoration' in (puts[0].options || {}), false);
+});
+
+test('uses the progressive result preparer and streams its events', async () => {
+    const events = [];
+    let progressiveContext = null;
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() {
+                return { batchID: 'batch-progressive', dataID: 'mktero-progressive', fileName: 'paper.pdf' };
+            },
+            async collect() {
+                return { markdown: '# Raw result' };
+            },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        prepareResult: async () => {
+            throw new Error('the synchronous preparer must not run in progressive mode');
+        },
+        progressiveResult: async (raw, context) => {
+            progressiveContext = context;
+            context.onEvent?.({ type: 'document', document: { markdown: '# Provisional' } });
+            return { markdown: '# Final' };
+        },
+        createDataID: () => 'mktero-progressive',
+        now: () => 1_700_000_000_000,
+    });
+
+    const result = await conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        onProgressiveFigures: event => events.push(event),
+    });
+
+    assert.equal(progressiveContext.fileData.byteLength, 1);
+    assert.deepEqual(events, [{ type: 'document', document: { markdown: '# Provisional' }, cacheKey: CONVERSION_KEY }]);
+    assert.equal(result.origin, 'fresh');
+});
+
 test('resumes an uploaded MinerU task across conversion instances', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-conversion-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));

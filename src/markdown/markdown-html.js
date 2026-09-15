@@ -54,6 +54,7 @@ export function renderMarkdownHTML(
         resolveImageAttachmentKey = null,
         target = 'mktero',
         translate = translateEnglish,
+        exposeImageAssetPath = false,
     } = {}
 ) {
     if (typeof markdown !== 'string') {
@@ -66,6 +67,7 @@ export function renderMarkdownHTML(
         resolveImageAttachmentKey,
         target,
         translate,
+        exposeImageAssetPath,
     });
     const parser = new Marked({
         gfm: true,
@@ -89,6 +91,7 @@ export function renderMarkdownHTML(
         mathBudget,
         target,
         translate,
+        exposeImageAssetPath,
     );
     if (figureGroupHTML) return figureGroupHTML;
     return renderParsedMarkdown(
@@ -128,6 +131,7 @@ function createSafeRenderer(
         resolveImageAttachmentKey = null,
         target = 'mktero',
         translate = translateEnglish,
+        exposeImageAssetPath = false,
     } = {}
 ) {
     return {
@@ -190,7 +194,8 @@ function createSafeRenderer(
                 token,
                 resolveImageURL,
                 resolveImageAttachmentKey,
-                translate
+                translate,
+                exposeImageAssetPath
             );
         },
     };
@@ -204,6 +209,7 @@ function renderStandaloneAcademicFigureGroup(
     mathBudget,
     target,
     translate,
+    exposeImageAssetPath = false,
 ) {
     const groups = findAcademicFigureGroups(markdown);
     const packs = groups.length === 1
@@ -251,6 +257,7 @@ function renderStandaloneAcademicFigureGroup(
             translate,
             grid ? group.gridSpans?.[index] : null,
             grid ? group.gridColumns : null,
+            exposeImageAssetPath,
         )
     )).join('');
     const panelHTML = horizontal
@@ -302,6 +309,7 @@ function renderFigurePanelRun(
     translate,
     gridColumnSpan = null,
     gridColumns = null,
+    exposeImageAssetPath = false,
 ) {
     if (run.panels.length === 1) {
         return renderFigurePanel(
@@ -313,6 +321,7 @@ function renderFigurePanelRun(
             translate,
             gridColumnSpan,
             gridColumns,
+            exposeImageAssetPath,
         );
     }
     const inner = run.panels.map(panel => renderImageToken(
@@ -320,6 +329,7 @@ function renderFigurePanelRun(
         resolveImageURL,
         resolveImageAttachmentKey,
         translate,
+        exposeImageAssetPath,
     )).join('');
     const content = `<div class="mktero-figure-panels-horizontal">${inner}</div>`;
     const before = run.panelLabelPosition === 'before';
@@ -346,12 +356,14 @@ function renderFigurePanel(
     translate,
     gridColumnSpan = null,
     gridColumns = null,
+    exposeImageAssetPath = false,
 ) {
     const image = renderImageToken(
         panel.imageToken,
         resolveImageURL,
         resolveImageAttachmentKey,
-        translate
+        translate,
+        exposeImageAssetPath,
     );
     if (!panel.panelLabel && !gridColumnSpan) return image;
     const before = panel.panelLabelPosition === 'before';
@@ -404,7 +416,8 @@ function renderImageToken(
     { href, title, text, tokens },
     resolveImageURL,
     resolveImageAttachmentKey = null,
-    translate = translateEnglish
+    translate = translateEnglish,
+    exposeImageAssetPath = false
 ) {
     const alt = imageTokenDescription({ text, tokens });
     const attachmentKey = resolveImageAttachmentKey?.(href);
@@ -424,7 +437,11 @@ function renderImageToken(
     const titleAttribute = title
         ? ` title="${escapeAttribute(title)}"`
         : '';
-    return `<img src="${escapeAttribute(resolved)}" alt="${escapeAttribute(alt)}"${titleAttribute}>`;
+    const assetAttribute = exposeImageAssetPath && href
+        ? ` data-mktero-asset="${escapeAttribute(href)}"`
+        : '';
+    return `<img src="${escapeAttribute(resolved)}" alt="${escapeAttribute(alt)}"`
+        + `${assetAttribute}${titleAttribute}>`;
 }
 
 function renderFigureCaption(caption, mathBudget, tokens = null, target = 'mktero') {

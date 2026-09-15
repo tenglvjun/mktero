@@ -1,6 +1,7 @@
 import {
     adoptPDFJSWindowGlobals, createMkteroCanvasFactory, MkteroFilterFactory,
 } from './pdfjs-bootstrap-environment.js';
+import { createBinaryDataFactory } from './pdfjs-binary-data-factory.js';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { validateFigureCrop } from '../figures/figure-model.js';
@@ -22,6 +23,7 @@ export function createPDFFigureRegionRenderer({
     cMapUrl = '',
     standardFontDataUrl = '',
     wasmUrl = '',
+    readBinaryAsset = null,
     limits: overrides,
     createAbortController,
     setTimeout,
@@ -151,6 +153,29 @@ export function createPDFFigureRegionRenderer({
                     jobs.add(result);
                     return result;
                 },
+                renderPageCrops(request, { signal: operationSignal } = {}) {
+                    const operation = createFigureAbortScope([scope.signal, operationSignal], {
+                        ...abortOptions, timeoutMs: limits.cropTimeoutMs,
+                    });
+                    const queued = renderQueue.then(async () => {
+                        throwIfFigureAborted(operation.signal);
+                        validatePageCropsRequest(request, limits);
+                        const page = await getPage(request.pageIndex, operation.signal);
+                        try {
+                            return await renderPageCrops(page, request, operation.signal);
+                        }
+                        finally {
+                            page.cleanup?.();
+                        }
+                    });
+                    renderQueue = queued.catch(() => {});
+                    const result = waitForFigureOperation(queued, operation.signal).finally(() => {
+                        operation.dispose();
+                        jobs.delete(result);
+                    });
+                    jobs.add(result);
+                    return result;
+                },
                 close() {
                     if (!closePromise) {
                         scope.abort();
@@ -177,6 +202,9 @@ export function createPDFFigureRegionRenderer({
                         maxEdge: limits.maxIntermediateCanvasEdge,
                         maxTotalPixels: limits.maxActiveCanvasPixels,
                     }), FilterFactory: MkteroFilterFactory,
+                    ...(readBinaryAsset
+                        ? { BinaryDataFactory: createBinaryDataFactory(readBinaryAsset) }
+                        : {}),
                     cMapUrl: cMapUrl || undefined, cMapPacked: true,
                     standardFontDataUrl: standardFontDataUrl || undefined, wasmUrl: wasmUrl || undefined,
                     useWorkerFetch: false, isOffscreenCanvasSupported: false,
@@ -248,6 +276,63 @@ export function createPDFFigureRegionRenderer({
                 finally {
                     canvas.width = 0;
                     canvas.height = 0;
+                }
+            }
+
+            async function renderPageCrops(page, request, operationSignal) {
+                throwIfFigureAborted(operationSignal);
+                const geometry = pageGeometry(page, request.pageIndex);
+                if (request.rotation !== geometry.rotation) {
+                    throw new TypeError('Figure page rotation does not match');
+                }
+                const scale = pageCropScale(geometry, request.dpi ?? limits.defaultDpi, request.regions, limits);
+                const pageWidth = Math.ceil(geometry.width * scale);
+                const pageHeight = Math.ceil(geometry.height * scale);
+                const pageCanvas = sessionCreateCanvas(pageWidth, pageHeight);
+                pageCanvas.width = pageWidth;
+                pageCanvas.height = pageHeight;
+                try {
+                    const context = pageCanvas.getContext?.('2d');
+                    if (!context) throw new Error('Figure canvas context is unavailable');
+                    const task = page.render({
+                        canvas: pageCanvas, canvasContext: context,
+                        viewport: page.getViewport({ scale }),
+                        background: 'rgb(255,255,255)', intent: 'print', annotationMode: 0,
+                    });
+                    await waitForFigureOperation(task.promise, operationSignal, () => task.cancel());
+                    throwIfFigureAborted(operationSignal);
+                    const crops = [];
+                    for (const region of request.regions) {
+                        throwIfFigureAborted(operationSignal);
+                        const rect = cropRectangleAtScale(geometry, region.bbox, scale, limits);
+                        const canvas = sessionCreateCanvas(rect.width, rect.height);
+                        canvas.width = rect.width;
+                        canvas.height = rect.height;
+                        try {
+                            const cropContext = canvas.getContext?.('2d');
+                            if (!cropContext) throw new Error('Figure canvas context is unavailable');
+                            cropContext.drawImage(pageCanvas, rect.x, rect.y, rect.width, rect.height,
+                                0, 0, rect.width, rect.height);
+                            if (!canvasHasInk(cropContext, rect.width, rect.height)) {
+                                throw new Error('Figure region rendered empty');
+                            }
+                            const data = await waitForFigureOperation(
+                                sessionEncodePNG(canvas, { signal: operationSignal }), operationSignal
+                            );
+                            throwIfFigureAborted(operationSignal);
+                            crops.push({ id: region.id, crop: validateFigureCrop({
+                                data, mimeType: 'image/png', width: rect.width, height: rect.height }, limits) });
+                        }
+                        finally {
+                            canvas.width = 0;
+                            canvas.height = 0;
+                        }
+                    }
+                    return { dpi: scale * 72, width: pageWidth, height: pageHeight, crops };
+                }
+                finally {
+                    pageCanvas.width = 0;
+                    pageCanvas.height = 0;
                 }
             }
         },
@@ -326,4 +411,65 @@ function cropRectangle(geometry, request, limits) {
             Math.sqrt(limits.maxCropPixels / ((width + 1) * (height + 1))));
     }
     throw new RangeError('Figure crop exceeds the pixel budget');
+}
+
+function validatePageCropsRequest(request, limits) {
+    if (request?.coordinateFrame !== 'display-cropbox'
+        || !Number.isSafeInteger(request.pageIndex) || request.pageIndex < 0
+        || !Array.isArray(request.regions) || !request.regions.length
+        || request.regions.length > limits.maxFiguresPerPage
+        || ![0, 90, 180, 270].includes(request.rotation)
+        || (request.dpi !== undefined && (!Number.isFinite(request.dpi) || request.dpi <= 0))) {
+        throw new TypeError('Figure page crop request is invalid');
+    }
+    const ids = new Set();
+    for (const region of request.regions) {
+        const bbox = region?.bbox;
+        if (typeof region?.id !== 'string' || !region.id || region.id.length > 128 || ids.has(region.id)
+            || !Array.isArray(bbox) || bbox.length !== 4 || !bbox.every(Number.isFinite)
+            || bbox[0] < 0 || bbox[1] < 0 || bbox[2] > 1000 || bbox[3] > 1000
+            || bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) {
+            throw new TypeError('Figure page crop region is invalid');
+        }
+        ids.add(region.id);
+    }
+}
+
+function pageCropScale(geometry, dpi, regions, limits) {
+    if (!Number.isFinite(dpi) || dpi <= 0) throw new TypeError('Figure DPI is invalid');
+    let scale = Math.min(dpi / 72,
+        limits.maxPageCanvasEdge / geometry.width,
+        limits.maxPageCanvasEdge / geometry.height,
+        Math.sqrt(limits.maxPageCanvasPixels / (geometry.width * geometry.height)));
+    const maxWidth = Math.max(...regions.map(region => (region.bbox[2] - region.bbox[0]) * geometry.width / 1000));
+    const maxHeight = Math.max(...regions.map(region => (region.bbox[3] - region.bbox[1]) * geometry.height / 1000));
+    if (maxWidth > 0 && maxHeight > 0) {
+        scale = Math.min(scale,
+            (limits.maxCropEdge - 1) / maxWidth,
+            (limits.maxCropEdge - 1) / maxHeight,
+            Math.sqrt(limits.maxCropPixels / ((maxWidth + 1) * (maxHeight + 1))));
+    }
+    if (!Number.isFinite(scale) || scale <= 0) throw new RangeError('Figure page crop exceeds the pixel budget');
+    const pageWidth = Math.ceil(geometry.width * scale);
+    const pageHeight = Math.ceil(geometry.height * scale);
+    if (pageWidth < 1 || pageHeight < 1
+        || pageWidth > limits.maxPageCanvasEdge || pageHeight > limits.maxPageCanvasEdge
+        || pageWidth * pageHeight > limits.maxPageCanvasPixels) {
+        throw new RangeError('Figure page crop exceeds the pixel budget');
+    }
+    return scale;
+}
+
+function cropRectangleAtScale(geometry, bbox, scale, limits) {
+    const [x0, y0, x1, y1] = bbox;
+    const x = Math.floor(x0 * geometry.width * scale / 1000);
+    const y = Math.floor(y0 * geometry.height * scale / 1000);
+    const width = Math.ceil(x1 * geometry.width * scale / 1000) - x;
+    const height = Math.ceil(y1 * geometry.height * scale / 1000) - y;
+    if (![x, y, width, height].every(Number.isSafeInteger) || width < 1 || height < 1
+        || width > limits.maxCropEdge || height > limits.maxCropEdge
+        || width * height > limits.maxCropPixels) {
+        throw new RangeError('Figure crop exceeds the pixel budget');
+    }
+    return { x, y, width, height, scale };
 }
