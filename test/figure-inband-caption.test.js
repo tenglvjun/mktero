@@ -355,3 +355,51 @@ test('owns multi-line legend rows next to the figure band', () => {
     assert.ok(candidate.ownedTextBlockIds.includes(footnote));
     assert.ok(candidate.ownedTextBlockIds.includes(legend));
 });
+
+function makeAboveBandRowInput({ rowText = 'github.com/google-research/envharness' } = {}) {
+    const captionText = 'Figure 1 | Overall performance of the system.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({ id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block });
+        return id;
+    };
+    const parent = add({ type: 'chart', role: 'unknown', bboxKind: 'group', bbox: [100, 130, 500, 400] });
+    const row = add({ type: 'caption', role: 'caption', bboxKind: 'caption', text: rowText,
+        bbox: [200, 104, 420, 120], parentId: parent });
+    const path = 'images/above-row.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    add({ type: 'chart', role: 'panel', bboxKind: 'visual-body', bbox: [100, 130, 500, 400],
+        assetPath: path, parentId: parent });
+    const caption = add({ type: 'caption', role: 'caption', bboxKind: 'caption',
+        text: captionText, bbox: [100, 430, 500, 470], parentId: parent });
+    const markdown = [rowText, `![](${path})`, captionText].join('\n\n');
+    return {
+        row, caption,
+        input: { provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+            pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+                coordinateFrame: 'display-cropbox', rotation: 0,
+                geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+            contentList: [], providerState: {} },
+    };
+}
+
+test('leaves a source-URL row above a chart as page text', () => {
+    const { input, row, caption } = makeAboveBandRowInput();
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges(input))[0];
+    assert.equal(candidate.decision, 'compose');
+    assert.deepEqual(candidate.captionBlockIds, [caption]);
+    assert.ok(!candidate.ownedTextBlockIds.includes(row));
+    assert.ok(candidate.visualBBox[1] > 120);
+});
+
+test('owns a label row above a chart when it is not a link', () => {
+    const { input, row } = makeAboveBandRowInput({ rowText: 'Externalized State: Memory' });
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges(input))[0];
+    assert.equal(candidate.decision, 'compose');
+    assert.ok(candidate.ownedTextBlockIds.includes(row));
+    assert.ok(candidate.visualBBox[1] <= 104);
+});

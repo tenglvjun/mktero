@@ -409,6 +409,9 @@ export function captionNear(caption, box, limits) {
 }
 
 const GAP_PROSE_END_PATTERN = /[.!?。！？](?:["'’”)\]]|\s|$)/u;
+// A line that is nothing but a web address (with or without scheme), for
+// example "www.example.com" or "github.com/org/repo".
+const LINK_ROW_PATTERN = /^(?:(?:https?:\/\/|www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?)$/iu;
 const MAX_FIGURE_GAP_CODE_POINTS = 2_000;
 
 function figureGapBlocks(blocks, panels, caption, limits) {
@@ -492,6 +495,10 @@ function isInBandAnnotationText(block, panelBox, captions, limits) {
         : limits.ownedTextCodePoints;
     if (!value || [...value].length > codePointLimit) return false;
     if (value.split(/\r?\n/u).length > limits.maxGapTextLines) return false;
+    // A lone source-URL row MinerU attached to a chart above the panel band is
+    // page text (a hyperlink line), not figure content.
+    if (block.role === 'caption' && block.bbox[3] <= panelBox[1]
+        && LINK_ROW_PATTERN.test(value)) return false;
     // Panel sub-captions such as "(c) Routing and failure isolation." sit a
     // few units below their panel, beyond the generic in-band tolerance.
     const padding = block.role === 'caption'
