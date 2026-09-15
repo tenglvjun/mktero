@@ -1606,12 +1606,33 @@ function markdownFence(line) {
 
 // Caption text is Markdown, so existing escapes such as "\\*" stay single and
 // the renderer resolves them; only raw backslashes are doubled so the image
-// description round-trips unchanged.
+// description round-trips unchanged. A single pass keeps every metacharacter
+// handled explicitly instead of relying on chained String.replace escaping.
 export function escapeImageDescription(value) {
-    return String(value)
-        .replace(/\\(?![!-/:-@[-`{-~])/gu, '\\\\')
-        .replace(/\[/gu, '\\[')
-        .replace(/\]/gu, '\\]');
+    const source = String(value);
+    let escaped = '';
+    for (let index = 0; index < source.length; index++) {
+        const character = source[index];
+        if (character === '\\') {
+            escaped += isMarkdownEscapablePunctuation(source[index + 1])
+                ? '\\'
+                : '\\\\';
+        }
+        else if (character === '[') escaped += '\\[';
+        else if (character === ']') escaped += '\\]';
+        else escaped += character;
+    }
+    return escaped;
+}
+
+// CommonMark treats a backslash before ASCII punctuation as an escape.
+function isMarkdownEscapablePunctuation(character) {
+    if (!character) return false;
+    const code = character.codePointAt(0);
+    return code >= 0x21 && code <= 0x2f
+        || code >= 0x3a && code <= 0x40
+        || code >= 0x5b && code <= 0x60
+        || code >= 0x7b && code <= 0x7e;
 }
 
 function replaceImageDescription(line, caption) {
