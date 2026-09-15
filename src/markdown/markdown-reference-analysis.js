@@ -1,7 +1,9 @@
 import { parser as markdownParser } from '@lezer/markdown';
 
+// Roman numerals, plain numbers, supplementary "S2" and appendix "A1"/"B.12"
+// labels share one identifier so references resolve in every section.
 export const ACADEMIC_REFERENCE_IDENTIFIER_SOURCE =
-    '(?:s?\\d{1,4}[a-z]?|[ivxlcdm]{1,12}[a-z]?)';
+    '(?:(?:[a-z]{1,2}[.．]?[\\p{Zs}\\t]*)?\\d{1,4}[a-z]?|[ivxlcdm]{1,12}[a-z]?)';
 
 const IGNORED_REFERENCE_NODES = new Set([
     'InlineCode',

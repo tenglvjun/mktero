@@ -3,6 +3,7 @@ import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-tex
 import {
     createNormalizedTextIndex,
     findTextOccurrences,
+    normalizeCompactText,
     normalizeTolerantText,
     normalizeText,
 } from '../markdown/text-normalization.js';
@@ -45,6 +46,17 @@ export function createMarkdownSourceMap(markdown, contentList, {
         }
         return tolerantBlockTexts;
     };
+    let compactBlockTexts;
+    const getCompactBlockTexts = () => {
+        if (!compactBlockTexts) {
+            compactBlockTexts = syntaxRanges.blocks.map(range => (
+                normalizeCompactText(
+                    visible.textForSourceRange(range.from, range.to)
+                )
+            ));
+        }
+        return compactBlockTexts;
+    };
     const entries = new Map();
     const matchBudget = { remaining: matchWorkLimit };
 
@@ -56,6 +68,7 @@ export function createMarkdownSourceMap(markdown, contentList, {
             markdown,
             visibleIndex,
             getTolerantBlockTexts,
+            getCompactBlockTexts,
             syntaxRanges,
             matchBudget
         );
@@ -140,6 +153,7 @@ function matchContentBlock(
     markdown,
     visibleIndex,
     getTolerantBlockTexts,
+    getCompactBlockTexts,
     syntaxRanges,
     matchBudget
 ) {
@@ -183,12 +197,28 @@ function matchContentBlock(
             return MATCH_BUDGET_EXHAUSTED;
         }
         const tolerantTarget = normalizeTolerantText(contentBlock.text);
-        if ([...tolerantTarget].length < MIN_TEXT_MATCH_LENGTH) return null;
-        matchedRange = findTolerantBlockMatch(
-            syntaxRanges.blocks,
-            getTolerantBlockTexts(),
-            tolerantTarget
-        );
+        matchedRange = [...tolerantTarget].length >= MIN_TEXT_MATCH_LENGTH
+            ? findTolerantBlockMatch(
+                syntaxRanges.blocks,
+                getTolerantBlockTexts(),
+                tolerantTarget
+            )
+            : null;
+        if (!matchedRange) {
+            // Math-bearing paragraphs differ between the layout JSON and the
+            // rendered Markdown in spacing, Greek glyphs and font commands;
+            // the compact key still matches them.
+            if (!consumeMatchWork(matchBudget, visibleIndex.text.length)) {
+                return MATCH_BUDGET_EXHAUSTED;
+            }
+            const compactTarget = normalizeCompactText(contentBlock.text);
+            if ([...compactTarget].length < MIN_TEXT_MATCH_LENGTH) return null;
+            matchedRange = findTolerantBlockMatch(
+                syntaxRanges.blocks,
+                getCompactBlockTexts(),
+                compactTarget
+            );
+        }
         if (!matchedRange) return null;
     }
     return compatibleSyntaxRange(contentBlock.type, matchedRange, syntaxRanges)
