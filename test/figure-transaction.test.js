@@ -70,3 +70,42 @@ test('refuses consumption outside the crop and never invents a caption for an ex
     assert.equal(draft.blueprints[0].label, null);
     assert.ok(draft.input.markdown.includes('![](generated/figures/restored.png)'));
 });
+
+test('composes a caption nested inside its panel image description', () => {
+    const caption = 'Figure A2: Empirical verification of assumptions A1, A2, and A4 on Lift.';
+    const markdown = [
+        `![${caption}](images/panel.png)`,
+        '',
+        'Prose after.',
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [0, 0, 1000, 1000], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 400],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 410, 500, 440],
+                parentId: 'mineru:p0:b0', text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    const bound = bindFigureSourceRanges(input);
+    const candidates = resolveFigureCandidates(bound);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    const draft = composeFigureDraft(bound, [{
+        candidate: candidates[0],
+        crop: { data: createTestPNG(400, 320), mimeType: 'image/png', width: 400, height: 320 },
+        assetPath: 'generated/figures/a2.png',
+    }]);
+    assert.equal(draft.preserved.length, 0);
+    assert.match(draft.input.markdown,
+        /\n\n!\[Figure A2: Empirical verification of assumptions A1, A2, and A4 on Lift\.\]\(generated\/figures\/a2\.png\)\n\nProse after\./);
+});

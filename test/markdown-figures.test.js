@@ -5,6 +5,8 @@ import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outl
 import {
     findAcademicFigures,
     normalizeMisassignedAcademicCaptions,
+    parseAcademicFigureCaption,
+    parseAcademicTableCaption,
     splitTrailingAcademicFigureCaption,
 } from '../src/markdown/markdown-figures.js';
 import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
@@ -374,4 +376,23 @@ test('does not split prose mentions, bare labels or short bodies', () => {
         splitTrailingAcademicFigureCaption('Short prose Figure 2: A caption.'),
         null
     );
+});
+
+test('parses appendix, supplementary and dotted figure labels', () => {
+    assert.equal(parseAcademicFigureCaption('Figure A1: Graphical model.').label, 'Figure A1:');
+    assert.equal(parseAcademicFigureCaption('Figure A3: Open-loop rollouts.').label, 'Figure A3:');
+    assert.equal(parseAcademicFigureCaption('Figure B12: Something.').label, 'Figure B12:');
+    assert.equal(parseAcademicFigureCaption('Fig. A.1 Overview.').label, 'Fig. A.1');
+    assert.equal(parseAcademicFigureCaption('Figure 1a: Still numeric.').label, 'Figure 1a:');
+    assert.equal(parseAcademicTableCaption('Table A1: Metrics.').label, 'Table A1:');
+    assert.equal(parseAcademicFigureCaption('Figure 2: Plain.').label, 'Figure 2:');
+});
+
+test('renders an appendix figure caption below its image', () => {
+    const html = renderMarkdownHTML('![Figure A1: Graphical model of TC-WM.](images/f.png)', {
+        resolveImageURL: () => 'blob:f',
+    });
+
+    assert.match(html, /<figcaption>\s*<span class="mktero-figure-label">Figure A1:<\/span> Graphical model of TC-WM\./);
+    assert.doesNotMatch(html, /!\[Figure A1/);
 });

@@ -89,7 +89,8 @@ export function validateFigureInput(input) {
         }
         for (const range of block.sourceRanges || []) {
             validateRange(range, input.markdown.length);
-            consumed.push(range);
+            consumed.push({ from: range.from, to: range.to,
+                assetPath: block.assetPath, role: block.role });
         }
         if (block.assetPath) normalizeFigureAssetPath(block.assetPath, input.assetBasePath || '');
         if (block.text !== undefined && (typeof block.text !== 'string'
@@ -423,11 +424,20 @@ function validateRange(range, length) {
 }
 
 function ensureNonOverlapping(ranges, code) {
-    const sorted = ranges.slice().sort((left, right) => left.from - right.from);
-    for (let index = 1; index < sorted.length; index++) {
-        if (sorted[index].from < sorted[index - 1].to) {
-            throw figureError(code, 'Figure source ranges overlap');
+    const sorted = ranges.slice().sort((left, right) => (
+        left.from - right.from || right.to - left.to
+    ));
+    let outer = null;
+    for (const range of sorted) {
+        if (outer && range.from < outer.to) {
+            // A caption attached inside an image description is nested, not a
+            // conflict; the transaction collapses the pair into one edit.
+            const nestedCaption = outer.assetPath && range.role === 'caption'
+                && range.from >= outer.from && range.to <= outer.to;
+            if (!nestedCaption) throw figureError(code, 'Figure source ranges overlap');
+            continue;
         }
+        outer = range;
     }
 }
 

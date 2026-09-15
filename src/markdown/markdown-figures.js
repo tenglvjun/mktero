@@ -1,8 +1,10 @@
 import { parseGFMTableRow } from './markdown-tables.js';
 
 const ACADEMIC_REFERENCE_SPACE_SOURCE = '[\\p{Zs}\\t]';
+// Roman numerals, plain numbers, supplementary "S2" and appendix "A1"/"B.12"
+// labels share one identifier so captions from every section parse alike.
 const ACADEMIC_REFERENCE_IDENTIFIER_SOURCE =
-    '(?:s?\\d+[a-z]?|[ivxlcdm]+[a-z]?)';
+    '(?:(?:[a-z]{1,2}[.．]?[\\p{Zs}\\t]*)?\\d+[a-z]?|[ivxlcdm]+[a-z]?)';
 const ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE =
     '(?:[.:：。]|[\\p{Zs}\\t]*[|｜])';
 const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
@@ -44,7 +46,10 @@ const EMBEDDED_FIGURE_CAPTION_START_SOURCE =
     + `|(?:图表|图)${ACADEMIC_REFERENCE_SPACE_SOURCE}*`
     + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}[.:：。]))`;
 const MIN_EMBEDDED_FIGURE_CAPTION_BODY_WORDS = 6;
-const ACADEMIC_TABLE_CAPTION_PATTERN = /^(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]+(\S[\s\S]*)$/iu;
+const ACADEMIC_TABLE_CAPTION_PATTERN = new RegExp(
+    `^(table[ \\t]+${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE})([.:])?[ \\t]+(\\S[\\s\\S]*)$`,
+    'iu'
+);
 // Publisher captions such as "Figure 1 The impact of ..." omit the separator;
 // this relaxed form is only used where an image or caption geometry already
 // identifies a figure, never for bare prose.
@@ -55,8 +60,14 @@ const LOOSE_ACADEMIC_FIGURE_CAPTION_PATTERN = new RegExp(
         + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+(\\S[\\s\\S]*)$`,
     'iu'
 );
-const ACADEMIC_TABLE_HEADING_PATTERN = /^ {0,3}#{1,6}[ \t]+(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?(?:[ \t]+#+)?[ \t]*$/iu;
-const ACADEMIC_TABLE_PLAIN_HEADING_PATTERN = /^ {0,3}(table[ \t]+(?:s?\d+[a-z]?|[ivxlcdm]+[a-z]?))([.:])?[ \t]*$/iu;
+const ACADEMIC_TABLE_HEADING_PATTERN = new RegExp(
+    `^ {0,3}#{1,6}[ \\t]+(table[ \\t]+${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE})([.:])?(?:[ \\t]+#+)?[ \\t]*$`,
+    'iu'
+);
+const ACADEMIC_TABLE_PLAIN_HEADING_PATTERN = new RegExp(
+    `^ {0,3}(table[ \\t]+${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE})([.:])?[ \\t]*$`,
+    'iu'
+);
 const EMPTY_IMAGE_LINE_PATTERN = /^( {0,3})!\[[ \t]*\](\([^\r\n]+\))[ \t]*(?:\r?\n)?$/;
 const MARKDOWN_IMAGE_LINE_PATTERN = /^ {0,3}!\[[^\]\r\n]*\]\([^\r\n]+\)[ \t]*(?:\r?\n)?$/;
 const CAPTIONED_IMAGE_LINE_PATTERN = /^ {0,3}!\[((?:\\.|[^\]\\])*)\]\([^\r\n]+\)[ \t]*(?:\r?\n)?$/;

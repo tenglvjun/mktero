@@ -172,15 +172,16 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
             ...(page.pdfGeometry ? { pdfGeometry: JSON.parse(JSON.stringify(page.pdfGeometry)) } : {}),
         },
     };
+    const edits = members.flatMap(block => block.sourceRanges.map(range => {
+        const to = range === anchor
+            ? range.to
+            : removalEnd(input.markdown, range, block.embeddedCaption === true);
+        return { from: range.from, to, replacement: range === anchor ? replacement : '' };
+    }));
     return {
         blueprint, anchor, replacement,
         asset: { path, mimeType: 'image/png', data: crop.data },
-        edits: members.flatMap(block => block.sourceRanges.map(range => {
-            const to = range === anchor
-                ? range.to
-                : removalEnd(input.markdown, range, block.embeddedCaption === true);
-            return { from: range.from, to, replacement: range === anchor ? replacement : '' };
-        })),
+        edits: collapseNestedEdits(edits),
         block: {
             id: `${candidate.id}:composite`, sourceOrdinal: anchorBlock.sourceOrdinal,
             type: 'image', role: 'panel', bboxKind: 'visual-body',
@@ -190,6 +191,24 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
             rangeEvidence: 'explicit-range',
         },
     };
+}
+
+// A caption range nested inside a panel image range must not produce two
+// overlapping edits; the outer edit carries the composed replacement.
+function collapseNestedEdits(edits) {
+    const sorted = [...edits].sort((left, right) => (
+        left.from - right.from || right.to - left.to
+    ));
+    const collapsed = [];
+    for (const edit of sorted) {
+        const outer = collapsed.at(-1);
+        if (outer && edit.from >= outer.from && edit.to <= outer.to) {
+            if (edit.replacement) outer.replacement = edit.replacement;
+            continue;
+        }
+        collapsed.push({ ...edit });
+    }
+    return collapsed;
 }
 
 function removalEnd(markdown, range, embedded) {

@@ -1,7 +1,14 @@
 import { GFM, parser } from '@lezer/markdown';
 import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
-import { normalizeTolerantText, normalizeText } from '../markdown/text-normalization.js';
-import { splitTrailingAcademicFigureCaption } from '../markdown/markdown-figures.js';
+import {
+    normalizeCompactText,
+    normalizeText,
+    normalizeTolerantText,
+} from '../markdown/text-normalization.js';
+import {
+    parseAcademicFigureCaption,
+    splitTrailingAcademicFigureCaption,
+} from '../markdown/markdown-figures.js';
 import { FIGURE_LIMITS } from './figure-limits.js';
 import { collectFigureImageNodes, normalizeFigureAssetPath } from './figure-model.js';
 import { captionNear, isLooseFigureCaption, looksLikeGapLabel } from './figure-region-resolver.js';
@@ -36,8 +43,13 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
     const textIndex = collectTextNodes(input.markdown, images, limits);
     const candidatesFor = (block, page) => {
         const exact = textIndex.exact.get(normalizeText(block.text)) || [];
-        const nodes = exact.length ? exact
+        const tolerantMatches = exact.length ? exact
             : textIndex.tolerant.get(normalizeTolerantText(block.text)) || [];
+        // OCR spacing around braces, parentheses and case differences can make
+        // long captions miss both exact and tolerant keys; whitespace-only
+        // differences are still the same caption.
+        const nodes = tolerantMatches.length ? tolerantMatches
+            : textIndex.compact.get(normalizeCompactText(block.text)) || [];
         return nodes.filter(node => consume(budget) && insidePage(node, page)
             && (!node.imageCaption || block.role === 'caption'));
     };
@@ -136,6 +148,7 @@ function isCaptionWithinImage(outer, inner) {
 function collectTextNodes(markdown, images, limits) {
     const exact = new Map();
     const tolerant = new Map();
+    const compact = new Map();
     const visible = createVisibleMarkdownTextIndex(markdown);
     const tree = MARKDOWN_PARSER.parse(markdown);
     let count = 0;
@@ -143,6 +156,7 @@ function collectTextNodes(markdown, images, limits) {
         if (!text) return;
         append(exact, text, node);
         append(tolerant, normalizeTolerantText(text), node);
+        append(compact, normalizeCompactText(text), node);
     };
     for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
         if (++count > limits.maxLayoutBlocks) break;
@@ -176,7 +190,7 @@ function collectTextNodes(markdown, images, limits) {
         const lines = textLineRanges(markdown, node.from, node.to);
         if (lines.length < 2) continue;
         for (const range of lines) {
-            if (++count > limits.maxLayoutBlocks) return { exact, tolerant };
+            if (++count > limits.maxLayoutBlocks) return { exact, tolerant, compact };
             const lineText = normalizeText(visible.textForSourceRange(range.from, range.to));
             if (lineText && lineText !== text) add(lineText, range);
         }
@@ -187,7 +201,7 @@ function collectTextNodes(markdown, images, limits) {
         const text = normalizeText(visible.textForSourceRange(range.from, range.to));
         add(text, { ...range, imageCaption: true });
     }
-    return { exact, tolerant };
+    return { exact, tolerant, compact };
 }
 
 function textLineRanges(markdown, from, to) {
@@ -239,7 +253,13 @@ function bindInteriorUniqueText(blocks, pages, limits, candidatesFor) {
         const inBand = intersectsBox(bands.get(block.pageIndex), block.bbox);
         const nearPanel = (block.role === 'caption' || isLooseFigureCaption(block.text))
             && captionNearBox(panelsByPage.get(block.pageIndex), block.bbox, limits);
-        if (!insideParent && !insidePanel && !inBand && !nearPanel) continue;
+        // A real academic caption can sit well below its figure when MinerU
+        // captured panel labels as the explicit captions instead.
+        const academicCaption = block.role === 'caption'
+            && Boolean(parseAcademicFigureCaption(block.text))
+            && captionBelowBand(block, bands.get(block.pageIndex), limits);
+        if (!insideParent && !insidePanel && !inBand && !nearPanel
+            && !academicCaption) continue;
         const candidates = candidatesFor(block, pages.get(block.pageIndex));
         if (candidates.length === 1) bind(block, candidates[0], 'unique-text');
     }
@@ -297,6 +317,14 @@ function uniqueAdjacentNode(markdown, candidates, panels) {
     return matches.length === 1 ? matches[0] : null;
 }
 
+function captionBelowBand(block, band, limits) {
+    if (!band || !validBox(band)) return false;
+    if (block.bbox[1] < band[3]) return false;
+    const width = Math.min(block.bbox[2], band[2]) - Math.max(block.bbox[0], band[0]);
+    const minimum = Math.min(block.bbox[2] - block.bbox[0], band[2] - band[0]);
+    return minimum > 0 && width / minimum >= limits.captionProjectionOverlap;
+}
+
 function captionNearBox(panels, box, limits) {
     if (!panels?.length) return false;
     const panelBox = panels.reduce((result, panel) => [
@@ -327,18 +355,21 @@ function bindUniqueSequence(entries, budget) {
     let end = -1;
     for (const entry of entries) {
         const node = entry.candidates.find(candidate => consume(budget) && candidate.from >= end);
-        if (!node) return;
-        earliest.push(node);
-        end = node.to;
+        earliest.push(node || null);
+        if (node) end = node.to;
     }
     let start = Infinity;
     for (let index = entries.length - 1; index >= 0; index--) {
+        if (!earliest[index]) continue;
         const node = entries[index].candidates.slice().reverse()
             .find(candidate => consume(budget) && candidate.to <= start);
         if (!node || node.from !== earliest[index].from || node.to !== earliest[index].to) return;
         start = node.from;
     }
     for (let index = 0; index < entries.length; index++) {
+        // OCR noise that never appears in the Markdown does not break the
+        // reading-order anchor for the blocks that do.
+        if (!earliest[index]) continue;
         bind(entries[index].block, earliest[index], 'anchored-sequence');
     }
 }

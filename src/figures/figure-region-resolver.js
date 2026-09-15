@@ -241,8 +241,15 @@ function resolveGroup(group, blocks, page, limits, budget) {
             captions = orderCaptionParts([labeled[0], ...parts]);
             mergedContinuation = parts.length > 0;
         }
+        else if (labeled.length) {
+            captions = labeled;
+        }
         else {
-            captions = labeled.length ? labeled : explicitCaptions;
+            // MinerU sometimes records a panel label as the only explicit
+            // caption while the real academic caption is a sibling block
+            // further below the figure.
+            const sibling = academicCaptionBelow(blocks, panels, panelBox, limits);
+            captions = sibling ? [sibling] : explicitCaptions;
         }
     }
     else {
@@ -267,9 +274,19 @@ function resolveGroup(group, blocks, page, limits, budget) {
     for (const part of captions) members.add(part.id);
     for (const parentBlock of parents) members.add(parentBlock.id);
     const owned = [];
+    // Legend rows and panel letters between the panels and a lower caption are
+    // part of the figure area; owning them extends the PDF crop over content
+    // MinerU failed to detect as an image (for example a second panel).
+    const gapBlocks = figureGapBlocks(blocks, panels, caption, limits);
+    const gapIDs = new Set(gapBlocks.map(block => block.id));
     for (const block of blocks) {
         if (!consume(budget)) return preserve(candidate, 'resource-limit');
         if (members.has(block.id) || block.bboxKind === 'group') continue;
+        if (gapIDs.has(block.id)) {
+            owned.push(block);
+            members.add(block.id);
+            continue;
+        }
         const owner = parents.find(parentBlock => block.parentId === parentBlock.id);
         const explicitText = owner && block.role === 'figure-text';
         const explicitLabel = owner && block.role === 'caption' && block.id !== caption?.id
@@ -329,10 +346,18 @@ function resolveGroup(group, blocks, page, limits, budget) {
     }
     const consumedOwned = owned.filter(block => block.sourceRanges?.length
         && block.rangeEvidence !== 'unresolved');
+    // A caption can live inside a panel's image range when MinerU attached it
+    // as the image description; nested ranges are unambiguous and the
+    // transaction collapses them into one edit.
     const ranges = [...panels, ...consumedOwned, ...captions].flatMap(block => block.sourceRanges)
-        .sort((left, right) => left.from - right.from);
-    if (ranges.some((range, index) => index > 0 && range.from < ranges[index - 1].to)) {
-        return preserve(candidate, 'ambiguous-source-range');
+        .sort((left, right) => left.from - right.from || right.to - left.to);
+    let outerRange = null;
+    for (const range of ranges) {
+        if (outerRange && range.from < outerRange.to) {
+            if (range.from >= outerRange.from && range.to <= outerRange.to) continue;
+            return preserve(candidate, 'ambiguous-source-range');
+        }
+        outerRange = range;
     }
     candidate.ownedTextBlockIds = consumedOwned.map(block => block.id);
     candidate.visualBBox = paddedBox;
@@ -381,6 +406,50 @@ export function captionNear(caption, box, limits) {
     return gap >= 0 && gap <= Math.min(limits.captionMaxGap,
         Math.max(limits.captionMinGap, limits.captionGapFactor * (box[3] - box[1])))
         && overlap(caption[0], caption[2], box[0], box[2]) >= limits.captionProjectionOverlap;
+}
+
+const GAP_PROSE_END_PATTERN = /[.!?。！？](?:["'’”)\]]|\s|$)/u;
+const MAX_FIGURE_GAP_CODE_POINTS = 2_000;
+
+function figureGapBlocks(blocks, panels, caption, limits) {
+    if (!caption || !validBox(caption.bbox)) return [];
+    const panelBox = union(panels.map(panel => panel.bbox));
+    const gap = [];
+    let codePoints = 0;
+    for (const block of blocks) {
+        if (block.id === caption.id) continue;
+        if (block.pageIndex !== panels[0].pageIndex || !validBox(block.bbox)) continue;
+        if (block.bbox[3] > caption.bbox[1] || block.bbox[1] < panelBox[3]) continue;
+        if (overlap(block.bbox[0], block.bbox[2], panelBox[0], panelBox[2])
+            < limits.captionProjectionOverlap) continue;
+        if (block.role !== undefined && block.role !== 'unknown') continue;
+        if (block.type !== 'text' && block.type !== 'caption') continue;
+        if (!block.sourceRanges?.length || block.rangeEvidence === 'unresolved') return [];
+        const text = String(block.text || '');
+        if (!text.trim() || GAP_PROSE_END_PATTERN.test(text)) return [];
+        codePoints += [...text].length;
+        if (codePoints > MAX_FIGURE_GAP_CODE_POINTS) return [];
+        gap.push(block);
+    }
+    return gap;
+}
+
+// A sibling academic caption below the panel union can replace panel labels
+// that MinerU attached as explicit captions. Only resolved blocks qualify so a
+// missing Markdown range cannot turn a composed figure into a preserved one.
+function academicCaptionBelow(blocks, panels, panelBox, limits) {
+    const ordinalMin = Math.max(...panels.map(panel => panel.sourceOrdinal));
+    const candidates = blocks.filter(block => (
+        block.role === 'caption'
+        && isFigureCaptionText(block.text)
+        && block.sourceRanges?.length
+        && validBox(block.bbox)
+        && block.sourceOrdinal > ordinalMin
+        && block.bbox[1] >= panelBox[3]
+        && overlap(block.bbox[0], block.bbox[2], panelBox[0], panelBox[2])
+            >= limits.captionProjectionOverlap
+    ));
+    return candidates.length === 1 ? candidates[0] : null;
 }
 
 function hasForeignPanelClaim(caption, panels, blocks, limits) {

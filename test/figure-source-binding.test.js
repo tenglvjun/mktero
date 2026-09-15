@@ -267,3 +267,98 @@ test('binds a caption merged into the tail of a body paragraph without changing 
     assert.equal(candidates[0].decision, 'compose');
     assert.equal(candidates[0].label, 'Figure 2:');
 });
+
+test('binds a caption glued to its image line despite OCR spacing differences', () => {
+    const blockCaption = 'Figure A5: Training dynamics term( \\mathcal L ) on Lift.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        'Figure A5: Training dynamics term ( \\mathcal L ) on Lift.',
+        '',
+        'Prose continues here.',
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 950], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 400],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 410, 500, 430],
+                text: blockCaption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    const bound = bindFigureSourceRanges(input);
+    const range = bound.blocks.find(block => block.id === 'mineru:p0:b2').sourceRanges[0];
+    assert.equal(markdown.slice(range.from, range.to),
+        'Figure A5: Training dynamics term ( \\mathcal L ) on Lift.');
+});
+
+test('binds an academic caption that sits far below the figure band', () => {
+    const caption = 'Figure A6: Open-loop rollouts on Wall and Maze tasks.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        'A paragraph of prose sits between the figure and its caption.',
+        '',
+        caption,
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 950], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 300],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 560, 500, 580], text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    const bound = bindFigureSourceRanges(input);
+    const range = bound.blocks.find(block => block.id === 'mineru:p0:b2').sourceRanges[0];
+    assert.equal(markdown.slice(range.from, range.to), caption);
+});
+
+test('binds a caption whose Greek glyphs and math fonts differ from the layout', () => {
+    const blockCaption = 'Spearman \\rho = 0.910, $\\Delta x$ and \\mathbf{z}_t values.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        'Spearman ρ = 0.910, Δx and z_t values.',
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [0, 0, 1000, 1000], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 400],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 410, 500, 440],
+                parentId: 'mineru:p0:b0', text: blockCaption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    const bound = bindFigureSourceRanges(input);
+    const range = bound.blocks.find(block => block.id === 'mineru:p0:b2').sourceRanges[0];
+    assert.equal(markdown.slice(range.from, range.to),
+        'Spearman ρ = 0.910, Δx and z_t values.');
+});

@@ -159,3 +159,101 @@ test('preserves a shared caption claimed by two nearby groups', () => {
     assert.ok(candidates.every(candidate => candidate.decision === 'preserve'));
     assert.ok(candidates.every(candidate => candidate.reason === 'ambiguous-caption'));
 });
+
+test('prefers a sibling academic caption over an explicit panel label', () => {
+    const caption = 'Figure A6: Open-loop rollouts on Wall and Maze tasks.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        caption,
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 950], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 300],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [110, 306, 200, 318],
+                parentId: 'mineru:p0:b0', text: '(a) Wall' },
+            { id: 'mineru:p0:b3', sourceOrdinal: 3, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 560, 500, 580], text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.equal(candidates[0].label, 'Figure A6:');
+    assert.deepEqual(candidates[0].captionBlockIds, ['mineru:p0:b3']);
+});
+
+function makeGapFixture(middleLine) {
+    const caption = 'Figure A6: Open-loop rollouts on Wall and Maze tasks for offline model comparison.';
+    const markdown = [
+        '![](images/panel.png)',
+        '',
+        '(a) Wall',
+        '',
+        middleLine,
+        '',
+        '(b) Maze',
+        '',
+        caption,
+    ].join('\n');
+    const input = {
+        provider: 'mineru', markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'mineru:p0:b0', sourceOrdinal: 0, pageIndex: 0, type: 'image',
+                role: 'unknown', bboxKind: 'group', bbox: [100, 100, 900, 950], text: '' },
+            { id: 'mineru:p0:b1', sourceOrdinal: 1, pageIndex: 0, type: 'image',
+                role: 'panel', bboxKind: 'visual-body', bbox: [100, 100, 500, 300],
+                assetPath: 'images/panel.png', parentId: 'mineru:p0:b0', text: '' },
+            { id: 'mineru:p0:b2', sourceOrdinal: 2, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [110, 306, 200, 318],
+                parentId: 'mineru:p0:b0', text: '(a) Wall' },
+            { id: 'mineru:p0:b3', sourceOrdinal: 3, pageIndex: 0, type: 'text',
+                role: 'unknown', bboxKind: 'text', bbox: [110, 400, 490, 430],
+                text: middleLine },
+            { id: 'mineru:p0:b4', sourceOrdinal: 4, pageIndex: 0, type: 'text',
+                role: 'unknown', bboxKind: 'text', bbox: [110, 500, 200, 512],
+                text: '(b) Maze' },
+            { id: 'mineru:p0:b5', sourceOrdinal: 5, pageIndex: 0, type: 'text',
+                role: 'caption', bboxKind: 'text', bbox: [100, 600, 500, 620], text: caption },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length } }],
+    };
+    return { input, markdown };
+}
+
+test('owns legend rows between the panels and a lower caption', () => {
+    const { input } = makeGapFixture('TD-MPC2\nDreamerV3');
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.equal(candidates[0].label, 'Figure A6:');
+    assert.deepEqual(candidates[0].ownedTextBlockIds,
+        ['mineru:p0:b2', 'mineru:p0:b3', 'mineru:p0:b4']);
+    assert.ok(candidates[0].visualBBox[3] >= 510,
+        JSON.stringify(candidates[0].visualBBox));
+});
+
+test('keeps prose between a figure and its caption out of the crop', () => {
+    const { input } = makeGapFixture('The model predicts the next frame accurately.');
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose');
+    assert.deepEqual(candidates[0].ownedTextBlockIds, ['mineru:p0:b2']);
+    assert.ok(candidates[0].visualBBox[3] < 400,
+        JSON.stringify(candidates[0].visualBBox));
+});
