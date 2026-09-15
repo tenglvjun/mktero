@@ -2,4 +2,16 @@ node_modules/
 build/
 *.xpi
 .DS_Store
-docs/
+docs/*
+!docs/configuration.md
+!docs/configuration.zh-CN.md
+!docs/development.md
+!docs/development.zh-CN.md
+!docs/figure-pipeline.md
+!docs/figure-pipeline.zh-CN.md
+!docs/limitations.md
+!docs/limitations.zh-CN.md
+!docs/privacy.md
+!docs/privacy.zh-CN.md
+!docs/workflows.md
+!docs/workflows.zh-CN.md
