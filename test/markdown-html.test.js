@@ -1343,9 +1343,15 @@ test('renders escaped significance markers in a figure caption', () => {
         resolveImageURL: () => 'blob:f5',
     });
     const figcaption = html.slice(html.indexOf('<figcaption'), html.indexOf('</figcaption>'));
-    const plain = figcaption
-        .replace(/<span class="math-inline">[\s\S]*?<\/span><\/span>/g, 'MATH')
-        .replace(/<[^>]+>/g, '');
+    // Strip repeatedly: one pass can leave a tag behind ("<scr<script>ipt>").
+    let plain = figcaption;
+    let previous;
+    do {
+        previous = plain;
+        plain = plain
+            .replace(/<span class="math-inline">[\s\S]*?<\/span><\/span>/g, 'MATH')
+            .replace(/<[^>]+>/g, '');
+    } while (plain !== previous);
 
     assert.match(plain, /t-tests: \* MATH , \*\* MATH , \*\*\* MATH ,/);
     assert.doesNotMatch(plain, /\\[\\*]/);

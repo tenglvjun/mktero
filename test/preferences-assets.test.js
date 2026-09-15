@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
+// Strip repeatedly: one pass can leave a tag behind ("<scr<script>ipt>").
+function stripMarkup(value) {
+    let text = String(value);
+    let previous;
+    do {
+        previous = text;
+        text = text.replace(/<[^>]*>/gu, ' ');
+    } while (text !== previous);
+    return text;
+}
+
 test('ships conversion, AI, cache preferences, and localized Markdown UI assets', async () => {
     const [
         prefs,
@@ -147,7 +158,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(pane, /id="mktero-clear-cache"/);
     assert.doesNotMatch(pane, /onload=/);
     assert.match(script, /registerPreferencesPaneLoader/);
-    const visiblePreferenceText = pane.replace(/<[^>]+>/g, ' ');
+    const visiblePreferenceText = stripMarkup(pane);
     assert.doesNotMatch(visiblePreferenceText, /mineru/i);
     assert.match(script, /createZoteroMarkdownCache/);
     assert.match(script, /createZoteroPDFTextIndexCache/);
