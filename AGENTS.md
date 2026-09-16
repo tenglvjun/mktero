@@ -56,7 +56,8 @@ documentation-only. Report any command that could not be run.
   and reading-position stores under the active Zotero profile.
 - `src/citations/`: citation-graph building and the Semantic Scholar,
   OpenCitations, and OpenAlex clients.
-- `src/config/`: preference keys and preference-pane registration.
+- `src/config/`: preference keys, preference-pane registration, and the
+  session-only models.dev reasoning catalog used by the AI reasoning menu.
 - `src/core/`: provider-independent conversion orchestration and progress.
 - `src/extractors/`: adapters from Zotero items or provider results to the core
   document shape.
