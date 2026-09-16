@@ -1,4 +1,3 @@
-export const AI_ENABLED_PREF = 'extensions.mktero.aiEnabled';
 export const AI_PROVIDER_PREF = 'extensions.mktero.aiProvider';
 export const AI_PROTOCOL_PREF = 'extensions.mktero.aiProtocol';
 export const AI_API_BASE_PREF = 'extensions.mktero.aiApiBase';
@@ -11,6 +10,7 @@ export const AI_MAX_OUTPUT_TOKENS_PREF = 'extensions.mktero.aiMaxOutputTokens';
 export const AI_STREAMING_PREF = 'extensions.mktero.aiStreaming';
 export const AI_AUTO_TRANSLATE_SELECTION_PREF =
     'extensions.mktero.aiAutoTranslateSelection';
+export const AI_PROVIDER_PROFILES_PREF = 'extensions.mktero.aiProviderProfiles';
 
 export const AI_PROVIDER_OPENAI = 'openai';
 export const AI_PROVIDER_ANTHROPIC = 'anthropic';
@@ -56,6 +56,7 @@ export const AI_MAX_OUTPUT_TOKENS = 262_144;
 const MAX_AI_API_BASE_LENGTH = 2_048;
 const MAX_AI_API_KEY_LENGTH = 16_384;
 const MAX_AI_MODEL_LENGTH = 512;
+const MAX_AI_PROVIDER_PROFILES_LENGTH = 262_144;
 export const AI_REASONING_ON = 'on';
 const AI_REASONING_LEVELS = new Set([
     AI_DEFAULT_REASONING,
@@ -104,7 +105,7 @@ export function getAISettings(zotero) {
     const rawProvider = String(get(AI_PROVIDER_PREF) || '').trim();
     const provider = normalizeProvider(rawProvider);
     return {
-        enabled: get(AI_ENABLED_PREF) === true,
+        enabled: true,
         autoTranslateSelection: get(AI_AUTO_TRANSLATE_SELECTION_PREF) === true,
         provider,
         protocol: normalizeProtocol(get(AI_PROTOCOL_PREF), provider, {
@@ -135,6 +136,49 @@ export function getAISettings(zotero) {
     };
 }
 
+export function emptyAIProviderProfile(providerValue) {
+    const provider = normalizeProvider(providerValue);
+    return {
+        protocol: getAIProtocolsForProvider(provider)[0] || AI_PROTOCOL_OPENAI_CHAT,
+        apiBase: defaultAIApiBaseForProvider(provider),
+        apiKey: '',
+        model: '',
+        reasoning: AI_DEFAULT_REASONING,
+        requestTimeoutMs: AI_DEFAULT_REQUEST_TIMEOUT_MS,
+        maxOutputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS,
+        streaming: true,
+    };
+}
+
+export function readAIProviderProfiles(zotero) {
+    return parseAIProviderProfiles(
+        zotero?.Prefs?.get?.(AI_PROVIDER_PROFILES_PREF, true)
+    );
+}
+
+export function syncCurrentAIProviderProfile(zotero) {
+    const settings = getAISettings(zotero);
+    const profiles = readAIProviderProfiles(zotero);
+    profiles[settings.provider] = profileFromSettings(settings);
+    writeAIProviderProfiles(zotero, profiles);
+    return settings;
+}
+
+export function switchAIProvider(zotero, currentSettings, nextProviderValue) {
+    const fromProvider = normalizeProvider(currentSettings?.provider);
+    const toProvider = normalizeProvider(nextProviderValue);
+    const profiles = readAIProviderProfiles(zotero);
+    profiles[fromProvider] = profileFromSettings({
+        ...getAISettings(zotero),
+        ...currentSettings,
+        provider: fromProvider,
+    });
+    const nextProfile = profiles[toProvider] || emptyAIProviderProfile(toProvider);
+    writeAIProviderProfiles(zotero, profiles);
+    applyAIProviderProfile(zotero, toProvider, nextProfile);
+    return getAISettings(zotero);
+}
+
 export function observeAITargetLanguage(zotero, onChange) {
     if (typeof zotero?.Prefs?.registerObserver !== 'function'
         || typeof onChange !== 'function') {
@@ -148,10 +192,7 @@ export function observeAITargetLanguage(zotero, onChange) {
     return () => zotero.Prefs.unregisterObserver?.(observer);
 }
 
-export function validateAISettings(settings) {
-    if (!settings?.enabled) {
-        throw aiConfigurationError('AI features are disabled');
-    }
+export function validateAISettings(settings = {}) {
     const rawProvider = String(settings.provider || '').trim();
     if (rawProvider
         && rawProvider !== AI_PROVIDER_OPENAI_COMPATIBLE
@@ -196,6 +237,7 @@ export function validateAISettings(settings) {
     }
     return {
         ...settings,
+        enabled: true,
         provider,
         protocol,
         apiBase,
@@ -304,11 +346,101 @@ export function aiRequestTimeoutMsFromSeconds(value) {
     );
 }
 
+function profileFromSettings(settings) {
+    const provider = normalizeProvider(settings?.provider);
+    return normalizeStoredProfile(provider, settings);
+}
+
+function applyAIProviderProfile(zotero, provider, profile) {
+    const next = normalizeStoredProfile(provider, profile);
+    const set = (key, value) => zotero?.Prefs?.set?.(key, value, true);
+    set(AI_PROVIDER_PREF, provider);
+    set(AI_PROTOCOL_PREF, next.protocol);
+    set(AI_API_BASE_PREF, next.apiBase);
+    set(AI_API_KEY_PREF, next.apiKey);
+    set(AI_MODEL_PREF, next.model);
+    set(AI_REASONING_PREF, next.reasoning);
+    set(AI_REQUEST_TIMEOUT_PREF, next.requestTimeoutMs);
+    set(AI_MAX_OUTPUT_TOKENS_PREF, next.maxOutputTokens);
+    set(AI_STREAMING_PREF, next.streaming);
+}
+
+function parseAIProviderProfiles(value) {
+    const source = String(value || '').trim();
+    if (!source || source.length > MAX_AI_PROVIDER_PROFILES_LENGTH) return {};
+    let parsed;
+    try {
+        parsed = JSON.parse(source);
+    }
+    catch {
+        return {};
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return {};
+    }
+    const profiles = {};
+    for (const [key, profile] of Object.entries(parsed)) {
+        const provider = profileProviderKey(key);
+        if (!provider || profiles[provider]) continue;
+        profiles[provider] = normalizeStoredProfile(provider, profile);
+    }
+    return profiles;
+}
+
+function writeAIProviderProfiles(zotero, profiles) {
+    const payload = {};
+    for (const [provider, profile] of Object.entries(profiles || {})) {
+        const id = profileProviderKey(provider);
+        if (!id) continue;
+        payload[id] = normalizeStoredProfile(id, profile);
+    }
+    const serialized = JSON.stringify(payload);
+    if (serialized.length > MAX_AI_PROVIDER_PROFILES_LENGTH) return;
+    zotero?.Prefs?.set?.(AI_PROVIDER_PROFILES_PREF, serialized, true);
+}
+
+function normalizeStoredProfile(provider, profile) {
+    const source = profile && typeof profile === 'object' ? profile : {};
+    const fallback = emptyAIProviderProfile(provider);
+    const apiBase = source.apiBase == null
+        ? fallback.apiBase
+        : trimTrailingSlash(String(source.apiBase).trim()).slice(
+            0,
+            MAX_AI_API_BASE_LENGTH
+        );
+    return {
+        protocol: normalizeProtocol(source.protocol, provider),
+        apiBase,
+        apiKey: String(source.apiKey || '').trim().slice(0, MAX_AI_API_KEY_LENGTH),
+        model: String(source.model || '').trim().slice(0, MAX_AI_MODEL_LENGTH),
+        reasoning: normalizeStoredReasoning(source.reasoning),
+        requestTimeoutMs: normalizeInteger(
+            source.requestTimeoutMs,
+            AI_DEFAULT_REQUEST_TIMEOUT_MS,
+            1_000,
+            AI_MAX_REQUEST_TIMEOUT_MS
+        ),
+        maxOutputTokens: normalizeInteger(
+            source.maxOutputTokens,
+            AI_DEFAULT_MAX_OUTPUT_TOKENS,
+            0,
+            AI_MAX_OUTPUT_TOKENS
+        ),
+        streaming: source.streaming !== false,
+    };
+}
+
 function getKnownAIApiBases() {
     return new Set([
         ...Object.values(AI_PROVIDER_API_BASES).map(trimTrailingSlash),
         ...AI_KNOWN_API_BASE_ALIASES.map(trimTrailingSlash),
     ]);
+}
+
+function profileProviderKey(value) {
+    const provider = String(value || '').trim();
+    if (provider === AI_PROVIDER_OPENAI_COMPATIBLE) return AI_PROVIDER_CUSTOM;
+    return Object.hasOwn(AI_PROTOCOLS_BY_PROVIDER, provider) ? provider : '';
 }
 
 function normalizeProvider(value) {

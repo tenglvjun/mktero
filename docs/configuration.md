@@ -8,7 +8,7 @@ Open `Settings -> Mktero` after installation.
 | --- | --- | --- |
 | Conversion provider | Yes | Select MinerU or Mistral OCR 4.1 |
 | API key | Required for a cache miss | Enter the key for the selected provider; use the adjacent manage link to create or update it |
-| AI features and provider settings | Optional | Enable AI to reveal streaming, provider, model, key, reasoning, timeout, and token limits; reasoning options follow the selected model when known; a custom URL and protocol appear only for Custom |
+| AI features and provider settings | Optional | Configure streaming, provider, model, key, reasoning, timeout, and token limits per provider; switching providers restores that provider's last settings or an empty profile; reasoning options follow the selected model when known; a custom URL and protocol appear only for Custom |
 | Translation language | Optional | Choose Simplified/Traditional Chinese, Japanese, Korean, Spanish, French, or Brazilian Portuguese |
 | Automatically translate Markdown selections | Optional, off by default | Translate a stable selection without an extra click; disabling it keeps the manual popup action |
 | Body text font and size | Optional | Choose the reading font and a 14–28 px body size |

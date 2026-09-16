@@ -49,7 +49,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         /pref\("extensions\.mktero\.openCitationsAccessToken", ""\)/
     );
     assert.match(prefs, /pref\("extensions\.mktero\.readerFontSize", 18\)/);
-    assert.match(prefs, /pref\("extensions\.mktero\.aiEnabled", false\)/);
+    assert.doesNotMatch(prefs, /extensions\.mktero\.aiEnabled/);
     assert.match(prefs, /pref\("extensions\.mktero\.aiProvider", "openai"\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.aiProtocol", "openai-responses"\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.aiApiKey", ""\)/);
@@ -60,6 +60,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         /pref\("extensions\.mktero\.aiAutoTranslateSelection", false\)/
     );
     assert.match(prefs, /pref\("extensions\.mktero\.aiReasoning", "none"\)/);
+    assert.match(prefs, /pref\("extensions\.mktero\.aiProviderProfiles", "\{\}"\)/);
     assert.doesNotMatch(prefs, /extensions\.mktero\.aiCacheEnabled/);
     assert.doesNotMatch(
         pane,
@@ -114,7 +115,8 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(pane, /preference="extensions\.mktero\.readerAlignment"/);
     assert.match(pane, /min="14"/);
     assert.match(pane, /max="28"/);
-    assert.match(pane, /preference="extensions\.mktero\.aiEnabled"/);
+    assert.doesNotMatch(pane, /preference="extensions\.mktero\.aiEnabled"/);
+    assert.doesNotMatch(pane, /id="mktero-ai-enabled"/);
     assert.match(pane, /preference="extensions\.mktero\.aiProvider"/);
     assert.match(pane, /preference="extensions\.mktero\.aiProtocol"/);
     assert.match(pane, /preference="extensions\.mktero\.aiApiBase"/);
@@ -126,7 +128,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.doesNotMatch(pane, /id="mktero-ai-test-status"/);
     assert.match(
         pane,
-        /id="mktero-ai-enabled"[\s\S]*?id="mktero-ai-streaming"[\s\S]*?id="mktero-ai-provider"/
+        /id="mktero-ai-streaming"[\s\S]*?id="mktero-ai-provider"/
     );
     assert.match(pane, /class="mktero-field-control mktero-provider-control"/);
     assert.match(pane, /class="mktero-ai-test-icon"/);
@@ -199,9 +201,9 @@ test('ships responsive settings cards and a cache switch', async () => {
     ]);
 
     assert.match(pane, /class="mktero-settings-card"/);
-    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 5);
-    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 5);
-    assert.equal((pane.match(/role="switch"/g) || []).length, 5);
+    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 4);
+    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 4);
+    assert.equal((pane.match(/role="switch"/g) || []).length, 4);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionLabel"/);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionHelp"/);
     assert.match(pane, /id="mktero-ai-streaming"/);

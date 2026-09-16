@@ -89,7 +89,8 @@ prereleases are not offered as automatic updates.
 ### Configure
 
 Open `Settings -> Mktero` after installation, choose a conversion provider, and
-enter its API key. AI features and reading options are optional. Credentials are
+enter its API key. AI features and reading options are optional; each AI
+provider keeps its own model, key, and related settings. Credentials are
 stored as ordinary, unencrypted preferences in the active Zotero profile.
 
 See [Configuration](./docs/configuration.md) for every setting and

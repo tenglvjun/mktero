@@ -320,7 +320,6 @@ test('aborts live AI SDK requests across bootstrap translation lifecycles', {
     };
     const preferences = new Map([
         ['extensions.mktero.cacheEnabled', true],
-        ['extensions.mktero.aiEnabled', true],
         ['extensions.mktero.aiProvider', 'custom'],
         ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
         ['extensions.mktero.aiApiBase', 'https://ai.example.com/v1'],
@@ -508,7 +507,6 @@ test('uses the language menu without changing the default translation language',
     };
     const preferences = new Map([
         ['extensions.mktero.cacheEnabled', true],
-        ['extensions.mktero.aiEnabled', true],
         ['extensions.mktero.aiProvider', 'custom'],
         ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
         ['extensions.mktero.aiApiBase', 'https://ai.example.com/v1'],

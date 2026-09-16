@@ -365,7 +365,6 @@ test('switches one conversion API key field with the selected provider', async (
 test('tests the current AI SDK settings without exposing the key', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
-            <input id="mktero-ai-enabled" type="checkbox" checked>
             <select id="mktero-ai-provider">
                 <option value="custom">Custom</option>
             </select>
@@ -634,47 +633,22 @@ test('switches preference sections with the tab list', async () => {
     controller.destroy();
 });
 
-test('hides AI connection settings until AI features are enabled', async () => {
+test('isolates AI connection settings per provider and restores the previous slot', async () => {
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'openai'],
+        ['extensions.mktero.aiProtocol', 'openai-responses'],
+        ['extensions.mktero.aiApiBase', 'https://api.openai.com/v1'],
+        ['extensions.mktero.aiApiKey', 'openai-secret'],
+        ['extensions.mktero.aiModel', 'gpt-5-pro'],
+        ['extensions.mktero.aiReasoning', 'high'],
+        ['extensions.mktero.aiRequestTimeoutMs', 45_000],
+        ['extensions.mktero.aiMaxOutputTokens', 3_000],
+        ['extensions.mktero.aiStreaming', false],
+    ]);
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
-            <input id="mktero-ai-enabled" type="checkbox">
-            <div id="mktero-ai-settings" hidden></div>
-            <span id="mktero-cache-status"></span>
-            <button id="mktero-clear-cache"></button>
-        </section>
-    </body>`);
-    const controller = createPreferencesController({
-        document: dom.window.document,
-        zotero: {
-            Prefs: { get: () => undefined },
-            logError: assert.fail,
-        },
-        cache: {
-            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
-            clear: async () => {},
-        },
-    });
-
-    await controller.init();
-    const settings = dom.window.document.getElementById('mktero-ai-settings');
-    const enabled = dom.window.document.getElementById('mktero-ai-enabled');
-    assert.equal(settings.hidden, true);
-
-    enabled.checked = true;
-    enabled.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(settings.hidden, false);
-
-    enabled.checked = false;
-    enabled.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(settings.hidden, true);
-    controller.destroy();
-});
-
-test('fills a known provider API base when the current URL is still a default', async () => {
-    const dom = new JSDOM(`<!doctype html><body>
-        <section id="mktero-preferences-pane">
-            <input id="mktero-ai-enabled" type="checkbox" checked>
             <div id="mktero-ai-settings">
+                <input id="mktero-ai-streaming" type="checkbox">
                 <select id="mktero-ai-provider">
                     <option value="openai">OpenAI</option>
                     <option value="deepseek">DeepSeek</option>
@@ -687,21 +661,26 @@ test('fills a known provider API base when the current URL is still a default', 
                 <div id="mktero-ai-api-base-row" hidden>
                     <input id="mktero-ai-api-base" value="https://api.openai.com/v1">
                 </div>
+                <input id="mktero-ai-model" value="gpt-5-pro">
+                <input id="mktero-ai-api-key" value="openai-secret">
                 <div id="mktero-ai-protocol-row" hidden></div>
+                <select id="mktero-ai-reasoning">
+                    <option value="none">Off</option>
+                    <option value="high">High</option>
+                </select>
+                <input id="mktero-ai-request-timeout" value="45">
+                <input id="mktero-ai-max-output-tokens" value="3000">
             </div>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
         </section>
     </body>`);
-    const writes = [];
     const controller = createPreferencesController({
         document: dom.window.document,
         zotero: {
             Prefs: {
-                get: key => (
-                    key === 'extensions.mktero.aiProvider' ? 'openai' : undefined
-                ),
-                set: (key, value, global) => writes.push({ key, value, global }),
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
             },
             logError: assert.fail,
         },
@@ -712,31 +691,50 @@ test('fills a known provider API base when the current URL is still a default', 
     });
 
     await controller.init();
-    const provider = dom.window.document.getElementById('mktero-ai-provider');
-    const apiBase = dom.window.document.getElementById('mktero-ai-api-base');
-    const apiBaseRow = dom.window.document.getElementById('mktero-ai-api-base-row');
-    const protocolRow = dom.window.document.getElementById('mktero-ai-protocol-row');
+    const document = dom.window.document;
+    const provider = document.getElementById('mktero-ai-provider');
+    const apiBase = document.getElementById('mktero-ai-api-base');
+    const apiBaseRow = document.getElementById('mktero-ai-api-base-row');
+    const protocolRow = document.getElementById('mktero-ai-protocol-row');
+    const model = document.getElementById('mktero-ai-model');
+    const apiKey = document.getElementById('mktero-ai-api-key');
+    const streaming = document.getElementById('mktero-ai-streaming');
+    const timeout = document.getElementById('mktero-ai-request-timeout');
     assert.equal(apiBaseRow.hidden, true);
     assert.equal(protocolRow.hidden, true);
+
     provider.value = 'deepseek';
     provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(model.value, '');
+    assert.equal(apiKey.value, '');
+    assert.equal(streaming.checked, true);
+    assert.equal(timeout.value, '600');
     assert.equal(apiBase.value, 'https://api.deepseek.com');
     assert.equal(apiBaseRow.hidden, true);
-    assert.deepEqual(writes.at(-1), {
-        key: 'extensions.mktero.aiApiBase',
-        value: 'https://api.deepseek.com',
-        global: true,
-    });
 
-    apiBase.value = 'https://api.example.com/v1';
+    model.value = 'deepseek-v4-pro';
+    apiKey.value = 'deepseek-secret';
+    streaming.checked = false;
     provider.value = 'openai';
     provider.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(apiBase.value, 'https://api.example.com/v1');
+    assert.equal(model.value, 'gpt-5-pro');
+    assert.equal(apiKey.value, 'openai-secret');
+    assert.equal(streaming.checked, false);
+    assert.equal(timeout.value, '45');
+    assert.equal(apiBase.value, 'https://api.openai.com/v1');
+
+    provider.value = 'deepseek';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(model.value, 'deepseek-v4-pro');
+    assert.equal(apiKey.value, 'deepseek-secret');
+    assert.equal(streaming.checked, false);
 
     provider.value = 'custom';
     provider.dispatchEvent(new dom.window.Event('change'));
     assert.equal(apiBaseRow.hidden, false);
     assert.equal(protocolRow.hidden, false);
+    assert.equal(apiBase.value, '');
+    assert.equal(model.value, '');
     controller.destroy();
 });
 
@@ -836,11 +834,13 @@ test('adapts the reasoning menu to the selected model', async () => {
     const model = dom.window.document.getElementById('mktero-ai-model');
     assert.deepEqual([...select.options].map(option => option.value), ['high']);
     assert.equal(select.value, 'high');
-    assert.deepEqual(writes, [{
-        key: 'extensions.mktero.aiReasoning',
-        value: 'high',
-        global: true,
-    }]);
+    assert.equal(
+        writes.some(write => (
+            write.key === 'extensions.mktero.aiReasoning'
+            && write.value === 'high'
+        )),
+        true
+    );
 
     model.value = 'gpt-4o';
     model.dispatchEvent(new dom.window.Event('change'));
