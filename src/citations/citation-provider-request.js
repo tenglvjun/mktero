@@ -1,7 +1,6 @@
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 6_000;
-const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RETRY_ATTEMPTS = 2;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 const MAX_RETRY_AFTER_MS = 60_000;
@@ -17,7 +16,6 @@ export class CitationProviderRequest {
         setTimer = globalThis.setTimeout?.bind(globalThis),
         clearTimer = globalThis.clearTimeout?.bind(globalThis),
         requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-        maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
         maxRetryAttempts = DEFAULT_MAX_RETRY_ATTEMPTS,
         retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
     }) {
@@ -49,12 +47,6 @@ export class CitationProviderRequest {
             1_000,
             60_000,
             DEFAULT_REQUEST_TIMEOUT_MS
-        );
-        this.maxResponseBytes = boundedInteger(
-            maxResponseBytes,
-            1,
-            64 * 1024 * 1024,
-            DEFAULT_MAX_RESPONSE_BYTES
         );
         this.maxRetryAttempts = boundedInteger(
             maxRetryAttempts,
@@ -106,12 +98,7 @@ export class CitationProviderRequest {
                 signal: controller.signal,
             });
             if (!response?.ok) throw this.#httpError(response);
-            const bytes = await readBoundedResponse(
-                response,
-                this.maxResponseBytes,
-                controller.signal,
-                () => this.#responseTooLargeError()
-            );
+            const bytes = await readResponse(response, controller.signal);
             try {
                 return JSON.parse(new TextDecoder().decode(bytes));
             }
@@ -183,13 +170,6 @@ export class CitationProviderRequest {
         return error;
     }
 
-    #responseTooLargeError() {
-        return providerError(
-            `${this.providerName} response exceeds the size limit`,
-            `${this.errorPrefix}_RESPONSE_TOO_LARGE`
-        );
-    }
-
     #isRetryable(error) {
         return error?.code === `${this.errorPrefix}_NETWORK_ERROR`
             || error?.code === `${this.errorPrefix}_REQUEST_TIMEOUT`
@@ -203,21 +183,10 @@ export class CitationProviderRequest {
     }
 }
 
-async function readBoundedResponse(
-    response,
-    maximum,
-    signal,
-    createSizeError
-) {
-    const declared = Number(response?.headers?.get?.('Content-Length'));
-    if (Number.isFinite(declared) && declared > maximum) {
-        throw createSizeError();
-    }
+async function readResponse(response, signal) {
     const reader = response?.body?.getReader?.();
     if (!reader) {
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.length > maximum) throw createSizeError();
-        return bytes;
+        return new Uint8Array(await response.arrayBuffer());
     }
     const chunks = [];
     let total = 0;
@@ -230,10 +199,6 @@ async function readBoundedResponse(
                 ? value
                 : new Uint8Array(value);
             total += chunk.length;
-            if (total > maximum) {
-                cancelReader(reader);
-                throw createSizeError();
-            }
             chunks.push(chunk);
         }
     }

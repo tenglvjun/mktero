@@ -37,10 +37,6 @@ import {
 } from '../platform/abort-controller.js';
 
 const MAX_AI_MESSAGES = 100;
-const DEFAULT_MAX_AI_INPUT_BYTES = 256 * 1024;
-const DEFAULT_MAX_AI_RESPONSE_BYTES = 1024 * 1024;
-const MAX_AI_INPUT_BYTES = 4 * 1024 * 1024 + 256 * 1024;
-const MAX_AI_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_REASONING_FALLBACKS = 64;
 const MAX_SESSION_ID_LENGTH = 128;
 const LOCAL_PROVIDER_API_KEY = 'mktero-local';
@@ -85,19 +81,13 @@ export class AISDKGateway {
         signal,
         sessionId,
         maxOutputTokens,
-        maxInputBytes,
-        maxResponseBytes,
         acceptNonTextResponse = false,
     }) {
         const configuration = applyRememberedReasoningFallback(
             validateAISettings(settings),
             this.reasoningFallbacks
         );
-        const limits = normalizeRequestByteLimits({
-            maxInputBytes,
-            maxResponseBytes,
-        });
-        const prompt = validateMessages(messages, limits.input);
+        const prompt = validateMessages(messages);
         throwIfAborted(signal);
         const controller = this.createAbortController();
         let timedOut = false;
@@ -111,9 +101,8 @@ export class AISDKGateway {
             }, configuration.requestTimeoutMs)
             : null;
         try {
-            const boundedFetch = createBoundedFetch(
+            const providerFetch = wrapProviderFetch(
                 this.fetch,
-                limits.response,
                 providerSessionHeaders(configuration.apiBase, sessionId)
             );
             const outputTokens = normalizeOutputTokens(
@@ -130,7 +119,7 @@ export class AISDKGateway {
                 request: attemptConfiguration => this.generate(
                     createAIRequestOptions({
                         configuration: attemptConfiguration,
-                        boundedFetch,
+                        providerFetch,
                         prompt,
                         outputTokens,
                         signal: controller.signal,
@@ -144,9 +133,6 @@ export class AISDKGateway {
                     'The AI provider returned an invalid response',
                     'AI_INVALID_RESPONSE'
                 );
-            }
-            if (byteLength(text) > limits.response) {
-                throw responseTooLargeError();
             }
             return {
                 text,
@@ -181,18 +167,12 @@ export class AISDKGateway {
         maxOutputTokens,
         onTextDelta,
         onStreamEvent,
-        maxInputBytes,
-        maxResponseBytes,
     }) {
         const configuration = applyRememberedReasoningFallback(
             validateAISettings(settings),
             this.reasoningFallbacks
         );
-        const limits = normalizeRequestByteLimits({
-            maxInputBytes,
-            maxResponseBytes,
-        });
-        const prompt = validateMessages(messages, limits.input);
+        const prompt = validateMessages(messages);
         throwIfAborted(signal);
         const controller = this.createAbortController();
         let timedOut = false;
@@ -206,9 +186,8 @@ export class AISDKGateway {
             }, configuration.requestTimeoutMs)
             : null;
         try {
-            const boundedFetch = createBoundedFetch(
+            const providerFetch = wrapProviderFetch(
                 this.fetch,
-                limits.response,
                 providerSessionHeaders(configuration.apiBase, sessionId)
             );
             const outputTokens = normalizeOutputTokens(
@@ -230,7 +209,7 @@ export class AISDKGateway {
                     const result = await this.stream({
                         ...createAIRequestOptions({
                             configuration: attemptConfiguration,
-                            boundedFetch,
+                            providerFetch,
                             prompt,
                             outputTokens,
                             signal: controller.signal,
@@ -242,7 +221,6 @@ export class AISDKGateway {
                     return consumeAIStreamResult({
                         result,
                         getStreamError: () => streamError,
-                        maxResponseBytes: limits.response,
                         fallbackModel: attemptConfiguration.model,
                         onStreamEvent,
                         onTextDelta: (chunk, accumulated) => {
@@ -333,13 +311,13 @@ function reasoningFallbackKey(configuration) {
 
 function createAIRequestOptions({
     configuration,
-    boundedFetch,
+    providerFetch,
     prompt,
     outputTokens,
     signal,
 }) {
     return {
-        model: createLanguageModel(configuration, boundedFetch),
+        model: createLanguageModel(configuration, providerFetch),
         messages: prompt.messages,
         ...(prompt.instructions
             ? { instructions: prompt.instructions }
@@ -356,7 +334,6 @@ function createAIRequestOptions({
 async function consumeAIStreamResult({
     result,
     getStreamError,
-    maxResponseBytes,
     fallbackModel,
     onStreamEvent,
     onTextDelta,
@@ -366,7 +343,6 @@ async function consumeAIStreamResult({
     const consumed = await consumeAIStreamEvents({
         stream,
         fullStream,
-        maxResponseBytes,
         onStreamEvent,
         onTextDelta,
     });
@@ -406,7 +382,6 @@ function resolveAIResultStream(result) {
 async function consumeAIStreamEvents({
     stream,
     fullStream,
-    maxResponseBytes,
     onStreamEvent,
     onTextDelta,
 }) {
@@ -418,7 +393,6 @@ async function consumeAIStreamEvents({
         response: null,
         finishReason: null,
     };
-    const responseBytes = createIncrementalByteCounter();
     for await (const event of stream) {
         if (fullStream) {
             const action = consumeAIStreamMetadataEvent(
@@ -438,14 +412,8 @@ async function consumeAIStreamEvents({
             emitStreamEvent(onStreamEvent, 'text-start');
         }
         state.accumulated += chunk;
-        if (responseBytes.add(chunk) > maxResponseBytes) {
-            throw responseTooLargeError();
-        }
         onTextDelta?.(chunk, state.accumulated);
         emitStreamEvent(onStreamEvent, 'text-delta');
-    }
-    if (responseBytes.finish() > maxResponseBytes) {
-        throw responseTooLargeError();
     }
     return {
         ...state,
@@ -648,7 +616,7 @@ function providerApiKey(configuration) {
         : undefined);
 }
 
-function validateMessages(messages, maxInputBytes) {
+function validateMessages(messages) {
     if (!Array.isArray(messages)
         || !messages.length
         || messages.length > MAX_AI_MESSAGES) {
@@ -662,9 +630,6 @@ function validateMessages(messages, maxInputBytes) {
         }
         return { role, content };
     });
-    if (byteLength(JSON.stringify(normalized)) > maxInputBytes) {
-        throw aiError('The AI input is too large', 'AI_INPUT_TOO_LARGE');
-    }
     const firstNonSystem = normalized.findIndex(message => (
         message.role !== 'system'
     ));
@@ -681,21 +646,14 @@ function validateMessages(messages, maxInputBytes) {
     };
 }
 
-function createBoundedFetch(fetch, maxResponseBytes, extraHeaders) {
+function wrapProviderFetch(fetch, extraHeaders) {
     return async (input, init) => {
         const response = await fetch(input, withExtraHeaders(init, extraHeaders));
-        const declaredLength = Number(response?.headers?.get?.('Content-Length'));
-        if (Number.isFinite(declaredLength)
-            && declaredLength > maxResponseBytes) {
-            await response?.body?.cancel?.().catch?.(() => {});
-            throw responseTooLargeError();
-        }
         if (!response?.body?.getReader) return response;
         const reader = response.body.getReader();
         const sseDoneDetector = isEventStream(response)
             ? createSSEDoneDetector()
             : null;
-        let totalBytes = 0;
         const stream = new ReadableStream({
             async pull(controller) {
                 try {
@@ -706,11 +664,6 @@ function createBoundedFetch(fetch, maxResponseBytes, extraHeaders) {
                     }
                     if (!isByteView(value)) {
                         throw invalidResponseError();
-                    }
-                    totalBytes += value.byteLength;
-                    if (totalBytes > maxResponseBytes) {
-                        await reader.cancel?.().catch?.(() => {});
-                        throw responseTooLargeError();
                     }
                     controller.enqueue(value);
                     if (sseDoneDetector?.add(value)) {
@@ -866,49 +819,6 @@ function normalizeFinishReason(value) {
     ].includes(reason) ? reason : null;
 }
 
-function createIncrementalByteCounter() {
-    let total = 0;
-    let pendingHighSurrogate = '';
-    return {
-        add(value) {
-            let chunk = pendingHighSurrogate + String(value || '');
-            pendingHighSurrogate = '';
-            if (/[\uD800-\uDBFF]$/.test(chunk)) {
-                pendingHighSurrogate = chunk.at(-1);
-                chunk = chunk.slice(0, -1);
-            }
-            total += byteLength(chunk);
-            return total;
-        },
-        finish() {
-            total += byteLength(pendingHighSurrogate);
-            pendingHighSurrogate = '';
-            return total;
-        },
-    };
-}
-
-function normalizeByteLimit(value, fallback, maximum) {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return fallback;
-    return Math.max(1, Math.min(maximum, Math.round(number)));
-}
-
-function normalizeRequestByteLimits({ maxInputBytes, maxResponseBytes }) {
-    return {
-        input: normalizeByteLimit(
-            maxInputBytes,
-            DEFAULT_MAX_AI_INPUT_BYTES,
-            MAX_AI_INPUT_BYTES
-        ),
-        response: normalizeByteLimit(
-            maxResponseBytes,
-            DEFAULT_MAX_AI_RESPONSE_BYTES,
-            MAX_AI_RESPONSE_BYTES
-        ),
-    };
-}
-
 function normalizeUsage(usage) {
     if (!usage || typeof usage !== 'object') return null;
     const inputTokens = nonNegativeInteger(usage.inputTokens);
@@ -973,10 +883,6 @@ function aiStatusError(message, code, status) {
     return error;
 }
 
-function byteLength(value) {
-    return new TextEncoder().encode(String(value || '')).length;
-}
-
 function emitStreamEvent(listener, type) {
     if (typeof listener !== 'function') return;
     try {
@@ -985,10 +891,6 @@ function emitStreamEvent(listener, type) {
     catch {
         // Progress reporting must never interrupt a provider response.
     }
-}
-
-function responseTooLargeError() {
-    return aiError('The AI provider response is too large', 'AI_RESPONSE_TOO_LARGE');
 }
 
 function invalidResponseError() {

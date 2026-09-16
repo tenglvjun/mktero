@@ -712,20 +712,6 @@ test('accepts a Markdown paragraph over the removed 64 KB block limit', async ()
     assert.equal(providerCalls, 1);
 });
 
-test('counts protected content toward the 4 MB document input limit', async () => {
-    let providerCalls = 0;
-    const service = createBoundaryService({
-        output: '译文。',
-        onProviderCall: () => { providerCalls++; },
-    });
-
-    await assert.rejects(() => service.translateDocument({
-        documentKey: 'a'.repeat(64),
-        markdown: `Translate \`${'x'.repeat(4 * 1024 * 1024)}\`.`,
-    }), error => error?.code === 'AI_INPUT_TOO_LARGE');
-    assert.equal(providerCalls, 0);
-});
-
 test('rejects more than 2,000 translatable blocks before calling the provider', async () => {
     let providerCalls = 0;
     const service = createBoundaryService({
@@ -743,21 +729,6 @@ test('rejects more than 2,000 translatable blocks before calling the provider', 
     assert.equal(providerCalls, 0);
 });
 
-test('rejects cumulative translation input over 4 MB before calling the provider', async () => {
-    let providerCalls = 0;
-    const service = createBoundaryService({
-        output: '译文。',
-        onProviderCall: () => { providerCalls++; },
-    });
-    const paragraph = `Paragraph ${'x'.repeat(60 * 1024)}.`;
-
-    await assert.rejects(() => service.translateDocument({
-        documentKey: 'a'.repeat(64),
-        markdown: Array.from({ length: 69 }, () => paragraph).join('\n\n'),
-    }), error => error?.code === 'AI_INPUT_TOO_LARGE');
-    assert.equal(providerCalls, 0);
-});
-
 test('accepts a translated document over the removed 256 KB block limit', async () => {
     const output = `译文${'x'.repeat(256 * 1024)}`;
     const service = createBoundaryService({
@@ -770,110 +741,6 @@ test('accepts a translated document over the removed 256 KB block limit', async 
     });
 
     assert.equal(result.translatedMarkdown, output);
-});
-
-test('rejects a document translation over 4 MB without caching it', async () => {
-    let providerCalls = 0;
-    const service = createBoundaryService({
-        output: `译${'x'.repeat(4 * 1024 * 1024)}`,
-        onProviderCall: () => { providerCalls++; },
-    });
-    service.cache.putTranslation = assert.fail;
-
-    await assert.rejects(() => service.translateDocument({
-        documentKey: 'a'.repeat(64),
-        markdown: 'Translate this paragraph.',
-    }), error => error?.code === 'AI_RESPONSE_TOO_LARGE');
-    assert.equal(providerCalls, 1);
-});
-
-test('counts restored protected content toward the document output limit', async () => {
-    const protectedContent = 'x'.repeat(4 * 1024 * 1024 - 1_024);
-    const source = `Translate \`${protectedContent}\`.`;
-    let requestMarkdown;
-    const service = new MarkdownTranslationService({
-        aiGateway: {
-            async generateText(request) {
-                requestMarkdown = request.messages[1].content;
-                const placeholder = parseTranslationRequest(requestMarkdown)[0]
-                    .sourceMarkdown.match(
-                    /MKTEROPROTECTED\d+PLACEHOLDER/
-                )?.[0];
-                return {
-                    text: translateSingleBlockRequest(
-                        requestMarkdown,
-                        `${'译'.repeat(1_024)} ${placeholder}`
-                    ),
-                };
-            },
-        },
-        cache: {
-            getTranslation: async () => null,
-            putTranslation: assert.fail,
-        },
-        getSettings: () => ({ ...SETTINGS, streaming: false }),
-        createCacheKey: async () => 'c'.repeat(64),
-    });
-
-    await assert.rejects(() => service.translateDocument({
-        documentKey: 'a'.repeat(64),
-        markdown: source,
-    }), error => error?.code === 'AI_RESPONSE_TOO_LARGE');
-    assert.match(requestMarkdown, /MKTEROPROTECTED\d+PLACEHOLDER/);
-});
-
-test('cancels active batches when completed translations exceed 4 MB', async () => {
-    let calls = 0;
-    let aborted = 0;
-    const oversizedParagraph = `译文${'x'.repeat(1_100_000)}`;
-    const service = new MarkdownTranslationService({
-        aiGateway: {
-            async generateText(request) {
-                calls++;
-                const entries = parseTranslationRequest(
-                    request.messages[1].content
-                );
-                const heading = entries.find(entry => (
-                    entry.sourceMarkdown.startsWith('# ')
-                ));
-                if (heading?.sourceMarkdown === '# Section 4') {
-                    await new Promise((resolve, reject) => {
-                        request.signal.addEventListener('abort', () => {
-                            aborted++;
-                            reject(Object.assign(new Error('aborted'), {
-                                name: 'AbortError',
-                            }));
-                        }, { once: true });
-                    });
-                }
-                return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: entry === heading
-                            ? entry.sourceMarkdown
-                            : oversizedParagraph,
-                    }))),
-                };
-            },
-        },
-        cache: {
-            getTranslation: async () => null,
-            putTranslation: assert.fail,
-        },
-        getSettings: () => ({ ...SETTINGS, streaming: false }),
-        createCacheKey: async () => 'c'.repeat(64),
-    });
-    const source = Array.from({ length: 5 }, (_, index) => (
-        `# Section ${index}\n\nParagraph ${index}.`
-    )).join('\n\n');
-
-    await assert.rejects(() => service.translateDocument({
-        documentKey: 'a'.repeat(64),
-        markdown: source,
-    }), error => error?.code === 'AI_RESPONSE_TOO_LARGE');
-
-    assert.equal(calls, 5);
-    assert.equal(aborted, 1);
 });
 
 test('loads a complete document translation without calling the provider', async () => {
@@ -3301,8 +3168,6 @@ test('translates one bounded selection without using document cache', async () =
         usage: { totalTokens: 8 },
     });
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].maxInputBytes, 64 * 1024);
-    assert.equal(requests[0].maxResponseBytes, 128 * 1024);
     assert.equal(requests[0].messages.length, 2);
     assert.equal(requests[0].messages[0].role, 'system');
     assert.match(requests[0].messages[0].content, /academic text/);
@@ -3402,37 +3267,10 @@ test('rejects empty or invalid selection requests before calling the provider', 
     assert.equal(calls, 0);
 });
 
-test('rejects selection, context, and request data above UTF-8 byte limits', async () => {
-    let calls = 0;
-    const service = new MarkdownTranslationService({
-        aiGateway: {
-            async generateText() {
-                calls++;
-                return { text: 'unreachable' };
-            },
-        },
-        getSettings: () => ({ ...SETTINGS, streaming: false }),
-    });
-
-    await assert.rejects(
-        () => service.translateSelection({ text: '选'.repeat(32 * 1024) }),
-        error => error?.code === 'AI_INPUT_TOO_LARGE'
-    );
-    await assert.rejects(
-        () => service.translateSelection({
-            text: 'A sentence.',
-            context: '语境'.repeat(8 * 1024),
-        }),
-        error => error?.code === 'AI_INPUT_TOO_LARGE'
-    );
-    assert.equal(calls, 0);
-});
-
-test('rejects empty, truncated, and oversized selection responses with stable codes', async () => {
+test('rejects empty and truncated selection responses with stable codes', async () => {
     const outputs = [
         { text: '  ', code: 'AI_INVALID_RESPONSE' },
         { text: '截断的翻译', finishReason: 'length', code: 'AI_INVALID_RESPONSE' },
-        { text: '翻译'.repeat(128 * 1024), code: 'AI_RESPONSE_TOO_LARGE' },
     ];
 
     for (const output of outputs) {

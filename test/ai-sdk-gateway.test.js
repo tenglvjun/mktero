@@ -194,7 +194,7 @@ test('passes a full-document output token budget to AI SDK Core', async () => {
     assert.equal(request.maxOutputTokens, 65_536);
 });
 
-test('accepts explicit full-document input and response byte budgets', async () => {
+test('accepts large AI input and response without a byte budget', async () => {
     const input = 'x'.repeat(256 * 1024);
     const output = 'y'.repeat(1024 * 1024 + 1);
     const gateway = new AISDKGateway({
@@ -205,8 +205,6 @@ test('accepts explicit full-document input and response byte budgets', async () 
     const result = await gateway.generateText({
         settings: SETTINGS,
         messages: [{ role: 'user', content: input }],
-        maxInputBytes: 512 * 1024,
-        maxResponseBytes: 2 * 1024 * 1024,
     });
 
     assert.equal(result.text.length, output.length);
@@ -1312,7 +1310,7 @@ test('keeps trusted instructions separate from untrusted messages', async () => 
     }]);
 });
 
-test('rejects invalid and oversized AI messages before calling the SDK', async () => {
+test('rejects invalid AI messages before calling the SDK', async () => {
     let calls = 0;
     const gateway = new AISDKGateway({
         fetch: async () => assert.fail(),
@@ -1323,29 +1321,7 @@ test('rejects invalid and oversized AI messages before calling the SDK', async (
         gateway.generateText({ settings: SETTINGS, messages: [] }),
         error => error?.code === 'AI_INVALID_REQUEST'
     );
-    await assert.rejects(
-        gateway.generateText({
-            settings: SETTINGS,
-            messages: [{ role: 'user', content: 'x'.repeat(257 * 1024) }],
-        }),
-        error => error?.code === 'AI_INPUT_TOO_LARGE'
-    );
     assert.equal(calls, 0);
-});
-
-test('enforces output budgets after AI SDK generation', async () => {
-    const gateway = new AISDKGateway({
-        fetch: async () => assert.fail(),
-        generate: async () => ({ text: 'x'.repeat(1024 * 1024 + 1) }),
-    });
-
-    await assert.rejects(
-        gateway.generateText({
-            settings: SETTINGS,
-            messages: [{ role: 'user', content: 'Test' }],
-        }),
-        error => error?.code === 'AI_RESPONSE_TOO_LARGE'
-    );
 });
 
 test('maps AI SDK HTTP errors without exposing provider response data', async () => {

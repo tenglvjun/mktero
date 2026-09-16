@@ -9,7 +9,6 @@ import {
 } from './ai-preferences.js';
 
 export const MODELS_DEV_REASONING_CATALOG_URL = 'https://models.dev/api.json';
-export const MAX_MODELS_DEV_REASONING_CATALOG_BYTES = 8 * 1024 * 1024;
 export const MODELS_DEV_REASONING_CATALOG_TIMEOUT_MS = 30_000;
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -55,7 +54,6 @@ export function createAIReasoningCatalogStore({
     setTimer,
     clearTimer,
     url = MODELS_DEV_REASONING_CATALOG_URL,
-    maxBytes = MAX_MODELS_DEV_REASONING_CATALOG_BYTES,
     timeoutMs = MODELS_DEV_REASONING_CATALOG_TIMEOUT_MS,
 } = {}) {
     let catalog = null;
@@ -99,10 +97,8 @@ export function createAIReasoningCatalogStore({
                     abortPromise(signal),
                 ]);
                 if (!response?.ok || signal.aborted) return catalog;
-                const length = Number(response.headers?.get?.('content-length'));
-                if (Number.isFinite(length) && length > maxBytes) return catalog;
                 const text = await response.text();
-                if (signal.aborted || byteLength(text) > maxBytes) return catalog;
+                if (signal.aborted) return catalog;
                 catalog = compactAIReasoningCatalog(JSON.parse(text));
                 return catalog;
             }
@@ -214,10 +210,6 @@ function hostnameFromApi(value) {
     catch {
         return '';
     }
-}
-
-function byteLength(value) {
-    return new TextEncoder().encode(String(value || '')).length;
 }
 
 function abortPromise(signal) {
