@@ -14,17 +14,16 @@ import {
     createZoteroMarkdownReadingPositionStore,
 } from '../cache/markdown-reading-position-store.js';
 import {
-    AI_API_BASE_PREF,
     AI_PROTOCOL_PREF,
     AI_PROVIDER_CUSTOM,
     AI_REASONING_PREF,
     AI_REQUEST_TIMEOUT_PREF,
     aiRequestTimeoutMsFromSeconds,
     aiRequestTimeoutSecondsFromMs,
-    defaultAIApiBaseForProvider,
     getAIProtocolsForProvider,
     getAISettings,
-    isReplaceableAIApiBase,
+    switchAIProvider,
+    syncCurrentAIProviderProfile,
 } from '../config/ai-preferences.js';
 import {
     resolveAIReasoningLevels,
@@ -161,8 +160,6 @@ export function createPreferencesController({
     const conversionApiKeyManage = document.getElementById(
         'mktero-api-key-manage'
     );
-    const aiEnabledInput = document.getElementById('mktero-ai-enabled');
-    const aiSettings = document.getElementById('mktero-ai-settings');
     const aiTestButton = document.getElementById('mktero-ai-test');
     const aiProviderInput = document.getElementById('mktero-ai-provider');
     const aiProtocolInput = document.getElementById('mktero-ai-protocol');
@@ -180,6 +177,7 @@ export function createPreferencesController({
     const tabList = document.getElementById('mktero-pref-tablist');
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
+    let activeAIProvider = '';
     let aiTestController = null;
     let unsubscribeReasoningCatalog = null;
     let reasoningOptionsTimer = null;
@@ -435,24 +433,6 @@ export function createPreferencesController({
         aiProtocolInput.disabled = protocols.length < 2;
     }
 
-    function updateAISettingsVisibility() {
-        if (!aiSettings) return;
-        aiSettings.hidden = aiEnabledInput?.checked !== true;
-    }
-
-    function updateAIApiBaseForProvider({ persist = true } = {}) {
-        if (!aiProviderInput || !aiApiBaseInput) return;
-        const provider = aiProviderInput.value;
-        const next = defaultAIApiBaseForProvider(provider);
-        if (next && isReplaceableAIApiBase(aiApiBaseInput.value)) {
-            aiApiBaseInput.value = next;
-            if (persist) {
-                zotero?.Prefs?.set?.(AI_API_BASE_PREF, next, true);
-            }
-        }
-        updateAICustomFieldVisibility();
-    }
-
     function updateAICustomFieldVisibility() {
         const custom = aiProviderInput?.value === AI_PROVIDER_CUSTOM;
         if (aiApiBaseRow) aiApiBaseRow.hidden = !custom;
@@ -474,14 +454,10 @@ export function createPreferencesController({
     }
 
     function initializeAIProvider() {
-        const settings = getAISettings(zotero);
-        if (aiEnabledInput) {
-            aiEnabledInput.checked = settings.enabled;
-            aiEnabledInput.addEventListener('change', updateAISettingsVisibility);
-        }
-        updateAISettingsVisibility();
         initializeAITestButton();
         if (!aiProviderInput || !aiProtocolInput) return;
+        const settings = syncCurrentAIProviderProfile(zotero);
+        activeAIProvider = settings.provider;
         aiProviderInput.value = settings.provider;
         aiProtocolInput.value = settings.protocol;
         updateAIProtocolOptions({ persist: false });
@@ -501,9 +477,46 @@ export function createPreferencesController({
     }
 
     function handleAIProviderChange() {
-        updateAIProtocolOptions();
-        updateAIApiBaseForProvider();
-        updateAIReasoningOptions();
+        const nextProvider = aiProviderInput?.value;
+        if (!nextProvider || nextProvider === activeAIProvider) {
+            updateAIProtocolOptions();
+            updateAICustomFieldVisibility();
+            updateAIReasoningOptions();
+            return;
+        }
+        const nextSettings = switchAIProvider(
+            zotero,
+            {
+                ...readAISettingsFromControls(document, zotero),
+                provider: activeAIProvider,
+            },
+            nextProvider
+        );
+        applyAISettingsToControls(nextSettings);
+        activeAIProvider = nextSettings.provider;
+        updateAIProtocolOptions({ persist: false });
+        updateAICustomFieldVisibility();
+        updateAIReasoningOptions({ persist: false });
+    }
+
+    function applyAISettingsToControls(settings) {
+        if (aiProviderInput) aiProviderInput.value = settings.provider;
+        if (aiProtocolInput) aiProtocolInput.value = settings.protocol;
+        if (aiApiBaseInput) aiApiBaseInput.value = settings.apiBase || '';
+        if (aiModelInput) aiModelInput.value = settings.model || '';
+        const apiKeyInput = document.getElementById('mktero-ai-api-key');
+        if (apiKeyInput) apiKeyInput.value = settings.apiKey || '';
+        if (aiReasoningInput) aiReasoningInput.value = settings.reasoning;
+        if (aiRequestTimeoutInput) {
+            aiRequestTimeoutInput.value = String(
+                aiRequestTimeoutSecondsFromMs(settings.requestTimeoutMs)
+            );
+        }
+        if (aiMaxOutputTokensInput) {
+            aiMaxOutputTokensInput.value = String(settings.maxOutputTokens);
+        }
+        const streamingInput = document.getElementById('mktero-ai-streaming');
+        if (streamingInput) streamingInput.checked = settings.streaming !== false;
     }
 
     function updateAIReasoningOptions({ persist = true } = {}) {
@@ -694,10 +707,6 @@ export function createPreferencesController({
             aiTestButton?.removeEventListener('click', testAI);
             aiTestController?.abort?.();
             aiTestController = null;
-            aiEnabledInput?.removeEventListener(
-                'change',
-                updateAISettingsVisibility
-            );
             aiProviderInput?.removeEventListener(
                 'change',
                 handleAIProviderChange
@@ -755,8 +764,7 @@ export function readAISettingsFromControls(document, zotero) {
     const value = id => document.getElementById(id)?.value;
     return {
         ...settings,
-        enabled: document.getElementById('mktero-ai-enabled')?.checked
-            ?? settings.enabled,
+        enabled: true,
         autoTranslateSelection: document.getElementById(
             'mktero-ai-auto-translate-selection'
         )?.checked ?? settings.autoTranslateSelection,

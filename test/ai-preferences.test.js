@@ -4,7 +4,6 @@ import {
     AI_API_BASE_PREF,
     AI_API_KEY_PREF,
     AI_AUTO_TRANSLATE_SELECTION_PREF,
-    AI_ENABLED_PREF,
     AI_MAX_OUTPUT_TOKENS_PREF,
     AI_MODEL_PREF,
     AI_REASONING_PREF,
@@ -12,11 +11,16 @@ import {
     AI_PROTOCOL_OPENAI_RESPONSES,
     AI_PROTOCOL_PREF,
     AI_PROVIDER_PREF,
+    AI_PROVIDER_PROFILES_PREF,
     AI_REQUEST_TIMEOUT_PREF,
     AI_STREAMING_PREF,
     AI_TARGET_LANGUAGES,
     AI_TARGET_LANGUAGE_PREF,
+    emptyAIProviderProfile,
     getAISettings,
+    readAIProviderProfiles,
+    switchAIProvider,
+    syncCurrentAIProviderProfile,
     isReplaceableAIApiBase,
     isSupportedAITargetLanguage,
     normalizeAIBaseURL,
@@ -29,7 +33,6 @@ import {
 
 test('reads and normalizes the configured AI settings', () => {
     const values = new Map([
-        [AI_ENABLED_PREF, true],
         [AI_PROVIDER_PREF, 'openai'],
         [AI_PROTOCOL_PREF, AI_PROTOCOL_OPENAI_RESPONSES],
         [AI_API_BASE_PREF, ' https://example.com/v1/ '],
@@ -64,6 +67,12 @@ test('reads and normalizes the configured AI settings', () => {
 
 test('uses full-document request defaults and preserves a streaming opt-out', () => {
     const defaults = getAISettings({ Prefs: { get: () => undefined } });
+    assert.equal(defaults.enabled, true);
+    assert.equal(getAISettings({
+        Prefs: {
+            get: key => key === 'extensions.mktero.aiEnabled' ? false : undefined,
+        },
+    }).enabled, true);
     assert.equal(defaults.streaming, true);
     assert.equal(defaults.autoTranslateSelection, false);
     assert.equal(defaults.requestTimeoutMs, 600_000);
@@ -242,10 +251,17 @@ test('allows HTTPS providers and local HTTP model servers', () => {
     }).apiBase, '');
 });
 
-test('requires an enabled supported provider, protocol, model, and remote API key', () => {
-    assert.throws(
-        () => validateAISettings({ enabled: false }),
-        error => error?.code === 'AI_CONFIGURATION_ERROR'
+test('requires a supported provider, protocol, model, and remote API key', () => {
+    assert.equal(
+        validateAISettings({
+            enabled: false,
+            provider: 'custom',
+            protocol: AI_PROTOCOL_OPENAI_CHAT,
+            apiBase: 'http://localhost:11434/v1',
+            apiKey: '',
+            model: 'qwen3',
+        }).enabled,
+        true
     );
     assert.throws(
         () => validateAISettings({
@@ -306,7 +322,6 @@ test('migrates the legacy OpenAI-compatible provider to Chat Completions', () =>
     const settings = getAISettings({
         Prefs: {
             get: key => ({
-                [AI_ENABLED_PREF]: true,
                 [AI_PROVIDER_PREF]: 'openai-compatible',
                 [AI_PROTOCOL_PREF]: AI_PROTOCOL_OPENAI_RESPONSES,
                 [AI_API_BASE_PREF]: 'https://api.example.com/v1',
@@ -357,3 +372,147 @@ test('converts the AI request timeout between seconds and milliseconds', () => {
     assert.equal(aiRequestTimeoutMsFromSeconds(3_600), 3_600_000);
     assert.equal(aiRequestTimeoutMsFromSeconds(0), 1_000);
 });
+
+test('uses empty per-provider defaults for a never-configured provider', () => {
+    assert.deepEqual(emptyAIProviderProfile('deepseek'), {
+        protocol: AI_PROTOCOL_OPENAI_CHAT,
+        apiBase: 'https://api.deepseek.com',
+        apiKey: '',
+        model: '',
+        reasoning: 'none',
+        requestTimeoutMs: 600_000,
+        maxOutputTokens: 0,
+        streaming: true,
+    });
+    assert.deepEqual(emptyAIProviderProfile('custom'), {
+        protocol: AI_PROTOCOL_OPENAI_CHAT,
+        apiBase: '',
+        apiKey: '',
+        model: '',
+        reasoning: 'none',
+        requestTimeoutMs: 600_000,
+        maxOutputTokens: 0,
+        streaming: true,
+    });
+});
+
+test('copies live settings into the current provider slot on first sync', () => {
+    const zotero = createAIPrefsZotero({
+        [AI_PROVIDER_PREF]: 'openai',
+        [AI_PROTOCOL_PREF]: AI_PROTOCOL_OPENAI_RESPONSES,
+        [AI_API_BASE_PREF]: 'https://api.openai.com/v1',
+        [AI_API_KEY_PREF]: 'openai-secret',
+        [AI_MODEL_PREF]: 'gpt-5-pro',
+        [AI_REASONING_PREF]: 'high',
+        [AI_REQUEST_TIMEOUT_PREF]: 45_000,
+        [AI_MAX_OUTPUT_TOKENS_PREF]: 3_000,
+        [AI_STREAMING_PREF]: false,
+        [AI_TARGET_LANGUAGE_PREF]: 'ja-JP',
+    });
+
+    syncCurrentAIProviderProfile(zotero);
+
+    assert.deepEqual(readAIProviderProfiles(zotero).openai, {
+        protocol: AI_PROTOCOL_OPENAI_RESPONSES,
+        apiBase: 'https://api.openai.com/v1',
+        apiKey: 'openai-secret',
+        model: 'gpt-5-pro',
+        reasoning: 'high',
+        requestTimeoutMs: 45_000,
+        maxOutputTokens: 3_000,
+        streaming: false,
+    });
+    assert.equal(readAIProviderProfiles(zotero).deepseek, undefined);
+    assert.equal(getAISettings(zotero).targetLanguage, 'ja-JP');
+});
+
+test('switches to an empty profile and restores the previous provider', () => {
+    const zotero = createAIPrefsZotero({
+        [AI_PROVIDER_PREF]: 'openai',
+        [AI_PROTOCOL_PREF]: AI_PROTOCOL_OPENAI_RESPONSES,
+        [AI_API_BASE_PREF]: 'https://api.openai.com/v1',
+        [AI_API_KEY_PREF]: 'openai-secret',
+        [AI_MODEL_PREF]: 'gpt-5-pro',
+        [AI_REASONING_PREF]: 'high',
+        [AI_REQUEST_TIMEOUT_PREF]: 45_000,
+        [AI_MAX_OUTPUT_TOKENS_PREF]: 3_000,
+        [AI_STREAMING_PREF]: false,
+        [AI_TARGET_LANGUAGE_PREF]: 'ja-JP',
+    });
+    const current = getAISettings(zotero);
+
+    const deepseek = switchAIProvider(zotero, current, 'deepseek');
+    assert.equal(deepseek.provider, 'deepseek');
+    assert.equal(deepseek.model, '');
+    assert.equal(deepseek.apiKey, '');
+    assert.equal(deepseek.streaming, true);
+    assert.equal(deepseek.reasoning, 'none');
+    assert.equal(deepseek.requestTimeoutMs, 600_000);
+    assert.equal(deepseek.apiBase, 'https://api.deepseek.com');
+    assert.equal(deepseek.targetLanguage, 'ja-JP');
+
+    const restored = switchAIProvider(zotero, deepseek, 'openai');
+    assert.equal(restored.provider, 'openai');
+    assert.equal(restored.model, 'gpt-5-pro');
+    assert.equal(restored.apiKey, 'openai-secret');
+    assert.equal(restored.streaming, false);
+    assert.equal(restored.reasoning, 'high');
+    assert.equal(restored.requestTimeoutMs, 45_000);
+    assert.equal(restored.maxOutputTokens, 3_000);
+    assert.equal(restored.targetLanguage, 'ja-JP');
+});
+
+test('keeps a single custom provider slot', () => {
+    const zotero = createAIPrefsZotero({
+        [AI_PROVIDER_PREF]: 'custom',
+        [AI_PROTOCOL_PREF]: AI_PROTOCOL_OPENAI_CHAT,
+        [AI_API_BASE_PREF]: 'http://localhost:11434/v1',
+        [AI_API_KEY_PREF]: '',
+        [AI_MODEL_PREF]: 'qwen3',
+        [AI_STREAMING_PREF]: true,
+    });
+
+    switchAIProvider(zotero, getAISettings(zotero), 'openai');
+    const restored = switchAIProvider(
+        zotero,
+        getAISettings(zotero),
+        'openai-compatible'
+    );
+
+    assert.equal(restored.provider, 'custom');
+    assert.equal(restored.model, 'qwen3');
+    assert.equal(restored.apiBase, 'http://localhost:11434/v1');
+    assert.equal(
+        Object.keys(readAIProviderProfiles(zotero)).includes('openai-compatible'),
+        false
+    );
+});
+
+test('ignores malformed provider profile JSON and unknown provider keys', () => {
+    const zotero = createAIPrefsZotero({
+        [AI_PROVIDER_PROFILES_PREF]: '{not-json',
+    });
+    assert.deepEqual(readAIProviderProfiles(zotero), {});
+
+    zotero.Prefs.set(
+        AI_PROVIDER_PROFILES_PREF,
+        JSON.stringify({
+            unknown: { model: 'x' },
+            openai: { model: 'gpt-4o', apiKey: 'token' },
+        }),
+        true
+    );
+    assert.deepEqual(readAIProviderProfiles(zotero).openai.model, 'gpt-4o');
+    assert.equal(readAIProviderProfiles(zotero).unknown, undefined);
+    assert.equal(readAIProviderProfiles(zotero).custom, undefined);
+});
+
+function createAIPrefsZotero(initial = {}) {
+    const values = new Map(Object.entries(initial));
+    return {
+        Prefs: {
+            get: key => values.get(key),
+            set: (key, value) => values.set(key, value),
+        },
+    };
+}
