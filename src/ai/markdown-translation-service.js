@@ -28,6 +28,24 @@ const MAX_TRANSLATION_IDENTIFIER_LENGTH = 512;
 const CACHE_KEY_PATTERN = /^[a-f0-9]{64}$/;
 export const MAX_TRANSLATION_CONCURRENCY = 5;
 const MAX_TRANSLATION_RETRIES = 2;
+const MIN_TRANSLATION_REQUEST_INTERVAL_MS = 200;
+
+function createRateLimitedAIGateway(aiGateway) {
+    let nextAvailableAt = 0;
+    let gate = Promise.resolve();
+    const throttledGenerateText = async request => {
+        gate = gate.then(async () => {
+            const wait = nextAvailableAt - Date.now();
+            if (wait > 0) {
+                await new Promise(resolve => setTimeout(resolve, wait));
+            }
+            nextAvailableAt = Date.now() + MIN_TRANSLATION_REQUEST_INTERVAL_MS;
+        });
+        await gate;
+        return aiGateway.generateText(request);
+    };
+    return { ...aiGateway, generateText: throttledGenerateText };
+}
 const TARGET_LANGUAGE_NAMES = Object.freeze({
     'zh-CN': 'Simplified Chinese',
     'zh-TW': 'Traditional Chinese',
@@ -63,7 +81,7 @@ export class MarkdownTranslationService {
         if (typeof createSessionId !== 'function') {
             throw new TypeError('A session ID factory is required');
         }
-        this.aiGateway = aiGateway;
+        this.aiGateway = createRateLimitedAIGateway(aiGateway);
         this.cache = cache;
         this.getSettings = getSettings;
         this.createCacheKey = createCacheKey;
