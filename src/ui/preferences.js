@@ -566,10 +566,9 @@ export function createPreferencesController({
         }
         const nextSettings = switchAIProvider(
             zotero,
-            {
-                ...readAISettingsFromControls(document, zotero),
+            readAISettingsFromControls(document, zotero, {
                 provider: activeAIProvider,
-            },
+            }),
             nextProvider
         );
         applyAISettingsToControls(nextSettings);
@@ -854,41 +853,37 @@ export function createPreferencesController({
     };
 }
 
-function moonshotEndpointApiBaseFromControls(document) {
-    const provider = document.getElementById('mktero-ai-provider')?.value;
-    const region = document.getElementById('mktero-ai-moonshot-endpoint')?.value;
-    if (provider !== AI_PROVIDER_MOONSHOT || !region) return undefined;
-    return moonshotApiBaseForRegion(region);
+function regionalEndpointApiBaseFromControls(document, provider) {
+    if (provider === AI_PROVIDER_MOONSHOT) {
+        const region = document.getElementById('mktero-ai-moonshot-endpoint')?.value;
+        return region ? moonshotApiBaseForRegion(region) : undefined;
+    }
+    if (provider === AI_PROVIDER_MINIMAX) {
+        const region = document.getElementById('mktero-ai-minimax-endpoint')?.value;
+        return region ? miniMaxApiBaseForRegion(region) : undefined;
+    }
+    if (provider === AI_PROVIDER_ALIBABA) {
+        const region = document.getElementById('mktero-ai-alibaba-endpoint')?.value;
+        return region ? alibabaApiBaseForRegion(region) : undefined;
+    }
+    return undefined;
 }
 
-function miniMaxEndpointApiBaseFromControls(document) {
-    const provider = document.getElementById('mktero-ai-provider')?.value;
-    const region = document.getElementById('mktero-ai-minimax-endpoint')?.value;
-    if (provider !== AI_PROVIDER_MINIMAX || !region) return undefined;
-    return miniMaxApiBaseForRegion(region);
-}
-
-function alibabaEndpointApiBaseFromControls(document) {
-    const provider = document.getElementById('mktero-ai-provider')?.value;
-    const region = document.getElementById('mktero-ai-alibaba-endpoint')?.value;
-    if (provider !== AI_PROVIDER_ALIBABA || !region) return undefined;
-    return alibabaApiBaseForRegion(region);
-}
-
-export function readAISettingsFromControls(document, zotero) {
+export function readAISettingsFromControls(document, zotero, overrides = {}) {
     const settings = getAISettings(zotero);
     const value = id => document.getElementById(id)?.value;
+    const provider = overrides.provider
+        ?? value('mktero-ai-provider')
+        ?? settings.provider;
     return {
         ...settings,
         enabled: true,
         autoTranslateSelection: document.getElementById(
             'mktero-ai-auto-translate-selection'
         )?.checked ?? settings.autoTranslateSelection,
-        provider: value('mktero-ai-provider') ?? settings.provider,
+        provider,
         protocol: value('mktero-ai-protocol') ?? settings.protocol,
-        apiBase: moonshotEndpointApiBaseFromControls(document)
-            ?? miniMaxEndpointApiBaseFromControls(document)
-            ?? alibabaEndpointApiBaseFromControls(document)
+        apiBase: regionalEndpointApiBaseFromControls(document, provider)
             ?? value('mktero-ai-api-base')
             ?? settings.apiBase,
         apiKey: value('mktero-ai-api-key') ?? settings.apiKey,

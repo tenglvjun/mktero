@@ -532,10 +532,105 @@ test('logs provider, model, and reasoning before each model request', async () =
     });
 
     assert.deepEqual(logs, [
-        'Mktero: AI request provider=openai model=gpt-5 reasoning=high',
-        'Mktero: AI request provider=anthropic model=claude-sonnet-4-5 reasoning=low',
+        'Mktero: AI request provider=openai model=gpt-5 reasoning=high apiBase=https://api.example.com/v1',
+        'Mktero: AI request provider=anthropic model=claude-sonnet-4-5 reasoning=low apiBase=https://api.anthropic.com/v1',
     ]);
     assert.equal(logs.join('\n').includes('secret-token'), false);
+});
+
+test('logs HTTP status without secrets when a provider request fails', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        generate: async () => {
+            throw new APICallError({
+                message: 'rate limited https://api.example.com/v1?token=secret-token',
+                url: 'https://api.example.com/v1?token=secret-token',
+                requestBodyValues: { prompt: 'secret-token' },
+                statusCode: 429,
+                responseBody: '{"error":{"message":"secret-token"}}',
+            });
+        },
+        onDebug: message => logs.push(message),
+    });
+
+    await assert.rejects(() => gateway.generateText({
+        settings: {
+            ...SETTINGS,
+            provider: 'moonshotai',
+            protocol: 'openai-chat-completions',
+            apiBase: 'https://api.moonshot.cn/v1',
+            model: 'kimi-k3',
+            apiKey: 'secret-token',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    }), error => error?.code === 'AI_RATE_LIMITED' && error?.status === 429);
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=moonshotai model=kimi-k3 reasoning=none apiBase=https://api.moonshot.cn/v1',
+        'Mktero: AI error provider=moonshotai model=kimi-k3 apiBase=https://api.moonshot.cn/v1 status=429 name=AI_APICallError detail=none code=AI_RATE_LIMITED',
+    ]);
+    assert.equal(logs.join('\n').includes('secret-token'), false);
+});
+
+test('logs a missing HTTP status for unreachable provider errors', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        stream: async () => {
+            throw Object.assign(new TypeError('Failed to fetch'), {
+                message: 'Failed to fetch https://api.example.com/v1?token=secret-token',
+            });
+        },
+        onDebug: message => logs.push(message),
+    });
+
+    await assert.rejects(() => gateway.streamText({
+        settings: {
+            ...SETTINGS,
+            provider: 'moonshotai',
+            protocol: 'openai-chat-completions',
+            apiBase: 'https://api.moonshot.cn/v1',
+            model: 'kimi-k3',
+            apiKey: 'secret-token',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    }), error => error?.code === 'AI_NETWORK_ERROR');
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=moonshotai model=kimi-k3 reasoning=none apiBase=https://api.moonshot.cn/v1',
+        'Mktero: AI error provider=moonshotai model=kimi-k3 apiBase=https://api.moonshot.cn/v1 status=none name=TypeError detail=none code=AI_NETWORK_ERROR',
+    ]);
+    assert.equal(logs.join('\n').includes('secret-token'), false);
+});
+
+test('logs the missing identifier for a streaming ReferenceError', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        stream: async () => {
+            throw Object.assign(new ReferenceError('ReadableStream is not defined'), {
+                name: 'ReferenceError',
+            });
+        },
+        onDebug: message => logs.push(message),
+    });
+
+    await assert.rejects(() => gateway.streamText({
+        settings: {
+            ...SETTINGS,
+            provider: 'moonshotai',
+            protocol: 'openai-chat-completions',
+            apiBase: 'https://api.moonshot.cn/v1',
+            model: 'kimi-k3',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    }), error => error?.code === 'AI_INVALID_RESPONSE');
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=moonshotai model=kimi-k3 reasoning=none apiBase=https://api.moonshot.cn/v1',
+        'Mktero: AI error provider=moonshotai model=kimi-k3 apiBase=https://api.moonshot.cn/v1 status=none name=ReferenceError detail=ReadableStream code=AI_INVALID_RESPONSE',
+    ]);
 });
 
 test('logs fallback reasoning when a model cannot disable it', async () => {
@@ -573,8 +668,8 @@ test('logs fallback reasoning when a model cannot disable it', async () => {
     });
 
     assert.deepEqual(logs, [
-        'Mktero: AI request provider=openai model=o3 reasoning=none',
-        'Mktero: AI request provider=openai model=o3 reasoning=provider-default',
+        'Mktero: AI request provider=openai model=o3 reasoning=none apiBase=https://api.example.com/v1',
+        'Mktero: AI request provider=openai model=o3 reasoning=provider-default apiBase=https://api.example.com/v1',
     ]);
 });
 

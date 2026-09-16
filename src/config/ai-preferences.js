@@ -376,7 +376,15 @@ function normalizeProviderApiBase(provider, apiBase) {
     if (provider === AI_PROVIDER_MINIMAX) {
         return normalizeMiniMaxApiBase(apiBase);
     }
-    return apiBase;
+    const current = trimTrailingSlash(String(apiBase || '').trim());
+    const own = defaultAIApiBaseForProvider(provider);
+    if (provider !== AI_PROVIDER_CUSTOM
+        && current
+        && current !== own
+        && getKnownAIApiBases().has(current)) {
+        return own;
+    }
+    return current;
 }
 
 function normalizeAlibabaApiBase(value) {

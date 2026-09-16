@@ -462,6 +462,31 @@ test('keeps MiniMax on the international or China API base', () => {
     );
 });
 
+test('does not keep another provider API base on DeepSeek', () => {
+    assert.equal(
+        getAISettings({
+            Prefs: {
+                get: key => ({
+                    [AI_PROVIDER_PREF]: 'deepseek',
+                    [AI_API_BASE_PREF]: 'https://api.moonshot.cn/v1',
+                    [AI_API_KEY_PREF]: 'token',
+                    [AI_MODEL_PREF]: 'deepseek-v4-pro',
+                })[key],
+            },
+        }).apiBase,
+        'https://api.deepseek.com'
+    );
+    assert.equal(
+        validateAISettings({
+            provider: 'deepseek',
+            apiBase: 'https://api.moonshot.ai/v1',
+            apiKey: 'token',
+            model: 'deepseek-v4-pro',
+        }).apiBase,
+        'https://api.deepseek.com'
+    );
+});
+
 test('keeps Alibaba on the international or China API base', () => {
     assert.equal(
         alibabaApiBaseRegion('https://dashscope.aliyuncs.com/compatible-mode/v1/'),

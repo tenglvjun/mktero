@@ -1062,6 +1062,88 @@ test('lets Alibaba use the China API endpoint', async () => {
     controller.destroy();
 });
 
+test('does not copy a regional endpoint into another provider profile', async () => {
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'deepseek'],
+        ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
+        ['extensions.mktero.aiApiBase', 'https://api.deepseek.com'],
+        ['extensions.mktero.aiApiKey', 'deepseek-secret'],
+        ['extensions.mktero.aiModel', 'deepseek-v4-pro'],
+    ]);
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="deepseek">DeepSeek</option>
+                <option value="moonshotai">Moonshot</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-chat-completions">Chat</option>
+            </select>
+            <div id="mktero-ai-moonshot-endpoint-row" hidden>
+                <select id="mktero-ai-moonshot-endpoint">
+                    <option value="international">International</option>
+                    <option value="china">China</option>
+                </select>
+            </div>
+            <div id="mktero-ai-api-base-row" hidden>
+                <input id="mktero-ai-api-base" value="https://api.deepseek.com">
+            </div>
+            <div id="mktero-ai-protocol-row" hidden></div>
+            <input id="mktero-ai-model" value="deepseek-v4-pro">
+            <input id="mktero-ai-api-key" value="deepseek-secret">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const document = dom.window.document;
+    const provider = document.getElementById('mktero-ai-provider');
+    const endpoint = document.getElementById('mktero-ai-moonshot-endpoint');
+    endpoint.value = 'china';
+    provider.value = 'moonshotai';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    const profiles = JSON.parse(
+        values.get('extensions.mktero.aiProviderProfiles') || '{}'
+    );
+    assert.equal(profiles.deepseek.apiBase, 'https://api.deepseek.com');
+    assert.equal(profiles.deepseek.apiKey, 'deepseek-secret');
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.moonshot.ai/v1'
+    );
+
+    provider.value = 'deepseek';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.deepseek.com'
+    );
+    assert.equal(
+        document.getElementById('mktero-ai-api-key').value,
+        'deepseek-secret'
+    );
+
+    controller.destroy();
+});
+
 test('does not clear the cache when confirmation is cancelled', async () => {
     const status = createControl({ textContent: '' });
     const button = {
