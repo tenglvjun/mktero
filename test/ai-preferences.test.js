@@ -120,6 +120,21 @@ test('reads reasoning effort and maps the legacy automatic value to off', () => 
     assert.equal(getAISettings({
         Prefs: { get: () => undefined },
     }).reasoning, 'none');
+    assert.equal(getAISettings({
+        Prefs: {
+            get: key => key === AI_REASONING_PREF ? 'on' : undefined,
+        },
+    }).reasoning, 'on');
+    assert.equal(getAISettings({
+        Prefs: {
+            get: key => key === AI_REASONING_PREF ? 'minimal' : undefined,
+        },
+    }).reasoning, 'minimal');
+    assert.equal(getAISettings({
+        Prefs: {
+            get: key => key === AI_REASONING_PREF ? 'max' : undefined,
+        },
+    }).reasoning, 'max');
 });
 
 test('supports non-English targets and normalizes legacy English to Chinese', () => {

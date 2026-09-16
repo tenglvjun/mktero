@@ -29,6 +29,7 @@ import {
     AI_PROVIDER_MINIMAX,
     AI_PROVIDER_MOONSHOT,
     AI_PROVIDER_OPENAI,
+    AI_REASONING_ON,
     validateAISettings,
 } from '../config/ai-preferences.js';
 import {
@@ -529,7 +530,9 @@ function bindRuntimeMethod(runtimeWindow, method) {
 }
 
 function reasoningRequestPolicy(configuration) {
-    const reasoning = configuration.reasoning;
+    const reasoning = configuration.reasoning === AI_REASONING_ON
+        ? AI_PROVIDER_DEFAULT_REASONING
+        : configuration.reasoning;
     if (reasoning === AI_PROVIDER_DEFAULT_REASONING) return { reasoning };
     if (configuration.provider === AI_PROVIDER_CUSTOM
         && reasoning === 'none'

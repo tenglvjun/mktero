@@ -33,6 +33,11 @@ import {
     isSupportedAITargetLanguage,
     observeAITargetLanguage,
 } from './config/ai-preferences.js';
+import {
+    attachAIReasoningCatalogHost,
+    bindZoteroWindowFetch,
+    createAIReasoningCatalogStore,
+} from './config/ai-reasoning-catalog.js';
 import { CitationGraph } from './citations/citation-graph.js';
 import { OpenAlexClient } from './citations/openalex-client.js';
 import { OpenCitationsClient } from './citations/open-citations-client.js';
@@ -601,6 +606,22 @@ globalThis.startup = async function startup({ id, rootURI }) {
             }
         }
     );
+    const runtimeWindow = Zotero.getMainWindow?.();
+    runtime.reasoningCatalogStore = createAIReasoningCatalogStore({
+        fetch: bindZoteroWindowFetch(Zotero),
+        createAbortController: createZoteroAbortController,
+        setTimer: typeof runtimeWindow?.setTimeout === 'function'
+            ? runtimeWindow.setTimeout.bind(runtimeWindow)
+            : undefined,
+        clearTimer: typeof runtimeWindow?.clearTimeout === 'function'
+            ? runtimeWindow.clearTimeout.bind(runtimeWindow)
+            : undefined,
+    });
+    runtime.disposeReasoningCatalogHost = attachAIReasoningCatalogHost(
+        Zotero,
+        runtime.reasoningCatalogStore
+    );
+    void runtime.reasoningCatalogStore.load();
     cache.prune().catch(error => Zotero.logError(error));
     runtime.citationCache?.prune().catch(error => Zotero.logError(error));
     pdfTextIndexCache.prune().catch(error => Zotero.logError(error));
@@ -750,6 +771,8 @@ globalThis.shutdown = function shutdown() {
     abortAllConversions();
     abortAllTranslations();
     destroyAllRevisionSessions();
+    runtime.reasoningCatalogStore?.dispose();
+    runtime.disposeReasoningCatalogHost?.();
     runtime.disposeAnnotationObserver?.();
     runtime.disposeReferenceObserver?.();
     runtime.referenceImportService?.dispose?.();
@@ -804,6 +827,8 @@ globalThis.shutdown = function shutdown() {
     runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
     runtime.preferencePaneID = null;
+    runtime.reasoningCatalogStore = null;
+    runtime.disposeReasoningCatalogHost = null;
     runtime.id = null;
 };
 

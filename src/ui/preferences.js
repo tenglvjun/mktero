@@ -17,6 +17,7 @@ import {
     AI_API_BASE_PREF,
     AI_PROTOCOL_PREF,
     AI_PROVIDER_CUSTOM,
+    AI_REASONING_PREF,
     AI_REQUEST_TIMEOUT_PREF,
     aiRequestTimeoutMsFromSeconds,
     aiRequestTimeoutSecondsFromMs,
@@ -25,6 +26,10 @@ import {
     getAISettings,
     isReplaceableAIApiBase,
 } from '../config/ai-preferences.js';
+import {
+    resolveAIReasoningLevels,
+    selectAIReasoningValue,
+} from '../config/ai-reasoning-options.js';
 import { AISDKGateway } from '../ai/ai-sdk-gateway.js';
 import {
     MarkdownTranslationService,
@@ -118,6 +123,7 @@ export function createPreferencesController({
     localization = createLocalization({
         zoteroLocale: getZoteroLocale(zotero, services),
     }),
+    reasoningCatalog = null,
     testAIConnection = null,
     notifyAITestResult = null,
     confirmClearCache = null,
@@ -163,6 +169,8 @@ export function createPreferencesController({
     const aiApiBaseInput = document.getElementById('mktero-ai-api-base');
     const aiApiBaseRow = document.getElementById('mktero-ai-api-base-row');
     const aiProtocolRow = document.getElementById('mktero-ai-protocol-row');
+    const aiModelInput = document.getElementById('mktero-ai-model');
+    const aiReasoningInput = document.getElementById('mktero-ai-reasoning');
     const aiRequestTimeoutInput = document.getElementById(
         'mktero-ai-request-timeout'
     );
@@ -173,6 +181,22 @@ export function createPreferencesController({
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
     let aiTestController = null;
+    let unsubscribeReasoningCatalog = null;
+    let reasoningOptionsTimer = null;
+
+    function currentReasoningCatalog() {
+        if (reasoningCatalog) return reasoningCatalog;
+        return zotero?.Mktero?.getAIReasoningCatalog?.() || null;
+    }
+
+    function currentAIReasoningSettings() {
+        const settings = getAISettings(zotero);
+        return {
+            provider: aiProviderInput?.value || settings.provider,
+            model: String(aiModelInput?.value || settings.model || '').trim(),
+            apiBase: String(aiApiBaseInput?.value || settings.apiBase || '').trim(),
+        };
+    }
 
     function localize() {
         localizePreferencesDocument(document, localization);
@@ -463,11 +487,52 @@ export function createPreferencesController({
         updateAIProtocolOptions({ persist: false });
         updateAICustomFieldVisibility();
         aiProviderInput.addEventListener('change', handleAIProviderChange);
+        aiModelInput?.addEventListener('input', updateAIReasoningOptions);
+        aiModelInput?.addEventListener('change', updateAIReasoningOptions);
+        aiApiBaseInput?.addEventListener('input', updateAIReasoningOptions);
+        aiApiBaseInput?.addEventListener('change', updateAIReasoningOptions);
+        updateAIReasoningOptions();
+        if (!reasoningCatalog && zotero?.Mktero?.subscribeAIReasoningCatalog) {
+            unsubscribeReasoningCatalog = zotero.Mktero.subscribeAIReasoningCatalog(
+                () => updateAIReasoningOptions()
+            );
+        }
+        scheduleAIReasoningOptionsUpdate();
     }
 
     function handleAIProviderChange() {
         updateAIProtocolOptions();
         updateAIApiBaseForProvider();
+        updateAIReasoningOptions();
+    }
+
+    function updateAIReasoningOptions({ persist = true } = {}) {
+        if (!aiReasoningInput) return;
+        const levels = resolveAIReasoningLevels(
+            currentAIReasoningSettings(),
+            currentReasoningCatalog()
+        );
+        const current = aiReasoningInput.value;
+        const next = selectAIReasoningValue(levels, current);
+        rebuildAIReasoningOptions(aiReasoningInput, levels, t);
+        aiReasoningInput.value = next;
+        if (persist && next !== current) {
+            zotero?.Prefs?.set?.(AI_REASONING_PREF, next, true);
+        }
+    }
+
+    function scheduleAIReasoningOptionsUpdate() {
+        const view = document.defaultView;
+        if (typeof view?.setTimeout !== 'function') {
+            updateAIReasoningOptions();
+            return;
+        }
+        if (reasoningOptionsTimer != null) view.clearTimeout(reasoningOptionsTimer);
+        reasoningOptionsTimer = view.setTimeout(() => {
+            reasoningOptionsTimer = null;
+            if (!initialized) return;
+            updateAIReasoningOptions();
+        }, 0);
     }
 
     function saveAIRequestTimeout() {
@@ -619,6 +684,12 @@ export function createPreferencesController({
         destroy() {
             if (!initialized) return;
             initialized = false;
+            unsubscribeReasoningCatalog?.();
+            unsubscribeReasoningCatalog = null;
+            if (reasoningOptionsTimer != null) {
+                document.defaultView?.clearTimeout?.(reasoningOptionsTimer);
+                reasoningOptionsTimer = null;
+            }
             clearButton.removeEventListener('click', clear);
             aiTestButton?.removeEventListener('click', testAI);
             aiTestController?.abort?.();
@@ -630,6 +701,16 @@ export function createPreferencesController({
             aiProviderInput?.removeEventListener(
                 'change',
                 handleAIProviderChange
+            );
+            aiModelInput?.removeEventListener('input', updateAIReasoningOptions);
+            aiModelInput?.removeEventListener('change', updateAIReasoningOptions);
+            aiApiBaseInput?.removeEventListener(
+                'input',
+                updateAIReasoningOptions
+            );
+            aiApiBaseInput?.removeEventListener(
+                'change',
+                updateAIReasoningOptions
             );
             aiRequestTimeoutInput?.removeEventListener(
                 'change',
@@ -709,6 +790,25 @@ function aiTestErrorKey(error) {
         return 'preferences.ai.testConfigurationFailed';
     }
     return 'preferences.ai.testFailed';
+}
+
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+
+function rebuildAIReasoningOptions(select, levels, translate) {
+    while (select.firstChild) select.removeChild(select.firstChild);
+    for (const value of levels) {
+        const option = createHTMLElement(select.ownerDocument, 'option');
+        option.value = value;
+        option.setAttribute('data-i18n', `preferences.ai.reasoning.${value}`);
+        option.textContent = translate(`preferences.ai.reasoning.${value}`);
+        select.appendChild(option);
+    }
+}
+
+function createHTMLElement(document, tagName) {
+    return typeof document.createElementNS === 'function'
+        ? document.createElementNS(XHTML_NAMESPACE, tagName)
+        : document.createElement(tagName);
 }
 
 export function localizePreferencesDocument(document, localization) {

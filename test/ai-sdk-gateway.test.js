@@ -476,6 +476,42 @@ test('passes the configured reasoning level to AI SDK Core', async () => {
     assert.equal(request.reasoning, 'high');
 });
 
+test('maps toggle-on reasoning to the provider default', async () => {
+    let request;
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        generate: async value => {
+            request = value;
+            return { text: 'Completed' };
+        },
+    });
+
+    await gateway.generateText({
+        settings: { ...SETTINGS, reasoning: 'on' },
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.equal(request.reasoning, 'provider-default');
+});
+
+test('passes catalog-only reasoning values to AI SDK Core', async () => {
+    let request;
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        generate: async value => {
+            request = value;
+            return { text: 'Completed' };
+        },
+    });
+
+    await gateway.generateText({
+        settings: { ...SETTINGS, reasoning: 'minimal' },
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.equal(request.reasoning, 'minimal');
+});
+
 test('falls back to provider reasoning when a model cannot disable it', async () => {
     const attempts = [];
     const gateway = new AISDKGateway({

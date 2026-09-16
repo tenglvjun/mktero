@@ -771,6 +771,239 @@ test('does not clear the cache when confirmation is cancelled', async () => {
     assert.equal(status.textContent, '2 local cache entries, 1.5 KB');
 });
 
+test('adapts the reasoning menu to the selected model', async () => {
+    const writes = [];
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'openai'],
+        ['extensions.mktero.aiModel', 'gpt-5-pro'],
+        ['extensions.mktero.aiReasoning', 'none'],
+    ]);
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="openai">OpenAI</option>
+                <option value="custom">Custom</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-responses">OpenAI Responses</option>
+            </select>
+            <input id="mktero-ai-api-base" value="https://api.openai.com/v1">
+            <input id="mktero-ai-model" value="gpt-5-pro">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => {
+                    writes.push({ key, value, global });
+                    values.set(key, value);
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        reasoningCatalog: {
+            labProviders: ['openai'],
+            hosts: { 'api.openai.com': 'openai' },
+            providers: {
+                openai: {
+                    'gpt-5-pro': {
+                        reasoning: true,
+                        options: [{ type: 'effort', values: ['high'] }],
+                    },
+                    'gpt-4o': { reasoning: false },
+                },
+            },
+        },
+    });
+
+    await controller.init();
+    const select = dom.window.document.getElementById('mktero-ai-reasoning');
+    const model = dom.window.document.getElementById('mktero-ai-model');
+    assert.deepEqual([...select.options].map(option => option.value), ['high']);
+    assert.equal(select.value, 'high');
+    assert.deepEqual(writes, [{
+        key: 'extensions.mktero.aiReasoning',
+        value: 'high',
+        global: true,
+    }]);
+
+    model.value = 'gpt-4o';
+    model.dispatchEvent(new dom.window.Event('change'));
+    assert.deepEqual([...select.options].map(option => option.value), ['none']);
+    assert.equal(select.value, 'none');
+
+    model.value = 'unknown-chat';
+    model.dispatchEvent(new dom.window.Event('change'));
+    assert.deepEqual(
+        [...select.options].map(option => option.value),
+        ['none', 'low', 'medium', 'high', 'xhigh']
+    );
+    controller.destroy();
+});
+
+test('filters reasoning options from saved settings before the model field is bound', async () => {
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'deepseek'],
+        ['extensions.mktero.aiModel', 'deepseek-v4-pro'],
+        ['extensions.mktero.aiReasoning', 'none'],
+    ]);
+    const catalog = {
+        labProviders: ['deepseek'],
+        hosts: {},
+        providers: {
+            deepseek: {
+                'deepseek-v4-pro': {
+                    reasoning: true,
+                    options: [
+                        { type: 'toggle' },
+                        { type: 'effort', values: ['high', 'max'] },
+                    ],
+                },
+            },
+        },
+    };
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="deepseek">DeepSeek</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-chat-completions">Chat</option>
+            </select>
+            <input id="mktero-ai-model">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Mktero: {
+                getAIReasoningCatalog: () => catalog,
+                subscribeAIReasoningCatalog: listener => {
+                    listener(catalog);
+                    return () => {};
+                },
+            },
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const select = dom.window.document.getElementById('mktero-ai-reasoning');
+    assert.deepEqual(
+        [...select.options].map(option => option.value),
+        ['none', 'high', 'max']
+    );
+    controller.destroy();
+});
+
+test('refreshes reasoning options when the in-memory catalog arrives', async () => {
+    const listeners = new Set();
+    let catalog = null;
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'openai'],
+        ['extensions.mktero.aiModel', 'gpt-5-pro'],
+        ['extensions.mktero.aiReasoning', 'none'],
+    ]);
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="openai">OpenAI</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-responses">OpenAI Responses</option>
+            </select>
+            <input id="mktero-ai-model" value="gpt-5-pro">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Mktero: {
+                getAIReasoningCatalog: () => catalog,
+                subscribeAIReasoningCatalog: listener => {
+                    listeners.add(listener);
+                    return () => listeners.delete(listener);
+                },
+            },
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const select = dom.window.document.getElementById('mktero-ai-reasoning');
+    assert.deepEqual(
+        [...select.options].map(option => option.value),
+        ['none', 'low', 'medium', 'high', 'xhigh']
+    );
+
+    catalog = {
+        labProviders: ['openai'],
+        hosts: {},
+        providers: {
+            openai: {
+                'gpt-5-pro': {
+                    reasoning: true,
+                    options: [{ type: 'effort', values: ['high'] }],
+                },
+            },
+        },
+    };
+    for (const listener of listeners) listener(catalog);
+    assert.deepEqual([...select.options].map(option => option.value), ['high']);
+    assert.equal(select.value, 'high');
+    controller.destroy();
+    assert.equal(listeners.size, 0);
+});
+
 function createControl(properties = {}) {
     const listeners = new Map();
     return {

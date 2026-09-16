@@ -56,13 +56,17 @@ export const AI_MAX_OUTPUT_TOKENS = 262_144;
 const MAX_AI_API_BASE_LENGTH = 2_048;
 const MAX_AI_API_KEY_LENGTH = 16_384;
 const MAX_AI_MODEL_LENGTH = 512;
+export const AI_REASONING_ON = 'on';
 const AI_REASONING_LEVELS = new Set([
     AI_DEFAULT_REASONING,
     AI_PROVIDER_DEFAULT_REASONING,
+    AI_REASONING_ON,
+    'minimal',
     'low',
     'medium',
     'high',
     'xhigh',
+    'max',
 ]);
 export const AI_TARGET_LANGUAGES = Object.freeze([
     'zh-CN',

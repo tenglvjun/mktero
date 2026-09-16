@@ -10,6 +10,7 @@
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
 | 用户为只有标题的文献点击“导入文献”后发送的受限引用文本 | OpenAlex | Mktero 不同步 |
 | 用户点击导入后发送的规范化 DOI、arXiv ID、PMID 或 OpenAlex 工作 ID、已确认的元数据，以及可选的公开 PDF 请求 | 选定的元数据/PDF Provider | Mktero 不同步 |
+| Zotero 启动时匿名请求的 models.dev 模型目录 | models.dev，只保存在内存中，退出后释放 | 否 |
 | 受保护的 Markdown 翻译批次 | 你配置的 AI Provider | Mktero 不同步 |
 | 选区翻译使用的选中文本和附近受限长度的原文上下文 | 你配置的 AI Provider | Mktero 不同步 |
 | Zotero PDF 标注 | 本地 Zotero 文库 | 取决于 Zotero 设置 |

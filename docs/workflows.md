@@ -92,9 +92,13 @@ Alibaba Cloud Model Studio, Moonshot/Kimi, MiniMax, and custom OpenAI-compatible
 or Open Responses services through Vercel AI SDK Core. Remote endpoints must
 use HTTPS; loopback services such as Ollama or LM Studio may use HTTP. Custom
 OpenCode Go bases such as `https://opencode.ai/zen/go/v1` also receive a
-per-conversation `x-opencode-session` header. Reasoning effort can be set to
-`none`, `low`, `medium`, `high`, or `xhigh`; reasoning output is not saved as
-translation text.
+per-conversation `x-opencode-session` header. Reasoning effort follows the selected model when Mktero knows it from
+[models.dev](https://models.dev): Mktero fetches that catalog once when Zotero
+starts, keeps it in memory, and drops it when Zotero quits. Unsupported models
+only offer `none`, models that cannot disable thinking omit `none`, and other
+known models list their supported levels, which may include `on`, `minimal`, or
+`max`. Unknown models, or a failed catalog fetch, keep `none`, `low`, `medium`,
+`high`, and `xhigh`. Reasoning output is not saved as translation text.
 
 ## Explore the citation graph
 
