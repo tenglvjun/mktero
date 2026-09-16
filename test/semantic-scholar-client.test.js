@@ -56,16 +56,7 @@ test('treats missing or malformed open-access PDF fields as a normal miss', asyn
     assert.equal(await client.resolveOpenAccessPDF({ doi: '10.1000/unsafe' }), '');
 });
 
-test('enforces response limits and request timeouts for open-access lookup', async () => {
-    const oversized = new SemanticScholarClient({
-        maxResponseBytes: 8,
-        fetch: async () => jsonResponse({ openAccessPdf: { url: 'https://example.org/paper.pdf' } }),
-    });
-    await assert.rejects(
-        () => oversized.resolveOpenAccessPDF({ doi: '10.1000/large' }),
-        error => error.code === 'S2_RESPONSE_TOO_LARGE'
-    );
-
+test('enforces request timeouts for open-access lookup', async () => {
     const timedOut = new SemanticScholarClient({
         maxRetryAttempts: 1,
         setTimer(callback) {
@@ -346,27 +337,6 @@ test('rejects malformed JSON and keeps provider errors free of secrets', async (
             assert.doesNotMatch(exposed, /raw-response/);
             return true;
         }
-    );
-});
-
-test('rejects an oversized response before parsing it', async () => {
-    const client = new SemanticScholarClient({
-        maxResponseBytes: 10,
-        fetch: async () => ({
-            ok: true,
-            status: 200,
-            headers: {
-                get: name => name.toLowerCase() === 'content-length'
-                    ? '11'
-                    : null,
-            },
-            arrayBuffer: async () => assert.fail('body must not be read'),
-        }),
-    });
-
-    await assert.rejects(
-        () => client.fetchReferences({ doi: '10.1000/source' }),
-        error => error.code === 'S2_RESPONSE_TOO_LARGE'
     );
 });
 

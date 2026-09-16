@@ -104,29 +104,13 @@ test('retries one transient failure and reports bounded retry metadata', async (
     }]);
 });
 
-test('rejects malformed, oversized, and secret-bearing failures safely', async () => {
+test('rejects malformed and secret-bearing failures safely', async () => {
     const malformed = new OpenCitationsClient({
         fetch: async () => jsonResponse({ citations: [] }),
     });
     await assert.rejects(
         () => malformed.fetchReferences({ doi: '10.1000/source' }),
         error => error.code === 'OC_INVALID_RESPONSE'
-    );
-
-    const oversized = new OpenCitationsClient({
-        maxResponseBytes: 10,
-        fetch: async () => ({
-            ok: true,
-            status: 200,
-            headers: { get: name => name.toLowerCase() === 'content-length'
-                ? '11'
-                : null },
-            arrayBuffer: async () => assert.fail('body must not be read'),
-        }),
-    });
-    await assert.rejects(
-        () => oversized.fetchReferences({ doi: '10.1000/source' }),
-        error => error.code === 'OC_RESPONSE_TOO_LARGE'
     );
 
     const denied = new OpenCitationsClient({

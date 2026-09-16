@@ -91,16 +91,6 @@ test('keeps the menu static when the catalog request fails', async () => {
     assert.equal(store.getCatalog(), null);
 });
 
-test('rejects an oversized catalog response before parsing it', async () => {
-    const store = createAIReasoningCatalogStore({
-        createAbortController: () => new AbortController(),
-        maxBytes: 8,
-        fetch: async () => jsonResponse(API),
-    });
-    await store.load();
-    assert.equal(store.getCatalog(), null);
-});
-
 test('aborts an in-flight catalog fetch on dispose', async () => {
     let signal;
     const store = createAIReasoningCatalogStore({

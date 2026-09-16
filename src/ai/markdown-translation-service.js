@@ -24,17 +24,8 @@ import {
 export const TRANSLATION_PROMPT_VERSION = 'mktero-translation-v7';
 
 const MAX_DOCUMENT_TRANSLATION_BLOCKS = 2_000;
-const MAX_DOCUMENT_TRANSLATION_INPUT_BYTES = 4 * 1024 * 1024;
-const MAX_DOCUMENT_REQUEST_BYTES = MAX_DOCUMENT_TRANSLATION_INPUT_BYTES
-    + 256 * 1024;
-const MAX_DOCUMENT_TRANSLATION_BYTES = 4 * 1024 * 1024;
-const MAX_DOCUMENT_PROVIDER_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_TRANSLATION_IDENTIFIER_LENGTH = 512;
 const CACHE_KEY_PATTERN = /^[a-f0-9]{64}$/;
-const MAX_SELECTION_TRANSLATION_TEXT_BYTES = 32 * 1024;
-const MAX_SELECTION_TRANSLATION_CONTEXT_BYTES = 8 * 1024;
-const MAX_SELECTION_TRANSLATION_REQUEST_BYTES = 64 * 1024;
-const MAX_SELECTION_TRANSLATION_RESPONSE_BYTES = 128 * 1024;
 export const MAX_TRANSLATION_CONCURRENCY = 5;
 const MAX_TRANSLATION_RETRIES = 2;
 const TARGET_LANGUAGE_NAMES = Object.freeze({
@@ -100,9 +91,7 @@ export class MarkdownTranslationService {
         if (!this.cache?.getTranslation) return null;
         const source = String(markdown || '');
         const normalizedDocumentKey = translationIdentifier(documentKey);
-        if (!normalizedDocumentKey
-            || !source.trim()
-            || !isDocumentTranslationSourceWithinLimit(source)) {
+        if (!normalizedDocumentKey || !source.trim()) {
             return null;
         }
         return this.#getCachedDocumentTranslationForSettings(
@@ -123,9 +112,7 @@ export class MarkdownTranslationService {
         if (!this.cache?.getTranslation) return [];
         const source = String(markdown || '');
         const normalizedDocumentKey = translationIdentifier(documentKey);
-        if (!normalizedDocumentKey
-            || !source.trim()
-            || !isDocumentTranslationSourceWithinLimit(source)) {
+        if (!normalizedDocumentKey || !source.trim()) {
             return [];
         }
         const configuredSettings = this.getSettings();
@@ -168,9 +155,7 @@ export class MarkdownTranslationService {
         };
         const source = String(markdown || '');
         const normalizedDocumentKey = translationIdentifier(documentKey);
-        if (!normalizedDocumentKey
-            || !source.trim()
-            || !isDocumentTranslationSourceWithinLimit(source)) {
+        if (!normalizedDocumentKey || !source.trim()) {
             return null;
         }
         const settingsIdentity = createDocumentTranslationSettingsIdentity(
@@ -309,7 +294,6 @@ export class MarkdownTranslationService {
         if (!source.trim()) {
             throw aiError('The translation source is empty', 'AI_INVALID_REQUEST');
         }
-        validateDocumentTranslationSource(source);
         const normalizedDocumentKey = translationIdentifier(documentKey);
         if (!normalizedDocumentKey) {
             throw aiError(
@@ -400,7 +384,7 @@ export class MarkdownTranslationService {
             requestBlocks
         );
         const batches = sections.flatMap(createMarkdownTranslationBatches);
-        const initialTranslationBytes = validateDocumentTranslationOutput(
+        validateDocumentTranslationOutput(
             blocks,
             retainedTranslations
         );
@@ -419,7 +403,6 @@ export class MarkdownTranslationService {
                 onProgress: reportProgress,
                 createAbortController: this.createAbortController,
                 initialCompletedBlocks: retainedCompletedBlocks,
-                initialTranslationBytes,
                 progressTotalBlocks: translatableBlocks.length,
             });
         const translations = mergeDocumentTranslations(
@@ -522,28 +505,17 @@ export class MarkdownTranslationService {
                 'AI_INVALID_REQUEST'
             );
         }
-        if (byteLength(source) > MAX_SELECTION_TRANSLATION_TEXT_BYTES
-            || byteLength(surroundingContext)
-                > MAX_SELECTION_TRANSLATION_CONTEXT_BYTES) {
-            throw selectionTranslationInputTooLargeError();
-        }
         throwIfDocumentAborted(signal);
         const messages = selectionTranslationMessages(
             source,
             surroundingContext,
             settings.targetLanguage
         );
-        if (byteLength(JSON.stringify(messages))
-            > MAX_SELECTION_TRANSLATION_REQUEST_BYTES) {
-            throw selectionTranslationInputTooLargeError();
-        }
         const request = {
             settings,
             messages,
             sessionId: this.createSessionId(),
             signal,
-            maxInputBytes: MAX_SELECTION_TRANSLATION_REQUEST_BYTES,
-            maxResponseBytes: MAX_SELECTION_TRANSLATION_RESPONSE_BYTES,
         };
         const result = settings.streaming !== false
             && typeof this.aiGateway.streamText === 'function'
@@ -565,9 +537,6 @@ export class MarkdownTranslationService {
                 'The AI provider returned an empty selection translation',
                 'AI_INVALID_RESPONSE'
             );
-        }
-        if (byteLength(translated) > MAX_SELECTION_TRANSLATION_RESPONSE_BYTES) {
-            throw selectionTranslationResponseTooLargeError();
         }
         return {
             text: translated,
@@ -883,7 +852,6 @@ async function requestDocumentTranslationBatches({
     onProgress,
     createAbortController,
     initialCompletedBlocks = 0,
-    initialTranslationBytes = 0,
     progressTotalBlocks,
 }) {
     const translatableBatches = batches.filter(
@@ -914,7 +882,6 @@ async function requestDocumentTranslationBatches({
     const batchResults = new Array(translatableBatches.length);
     let nextIndex = 0;
     let completedBlocks = initialCompletedBlocks;
-    let completedTranslationBytes = initialTranslationBytes;
     let firstError = null;
     const worker = async () => {
         try {
@@ -931,12 +898,6 @@ async function requestDocumentTranslationBatches({
                     signal: controller.signal,
                     onProgress,
                 });
-                const nextTranslationBytes = completedTranslationBytes
-                    + result.translatedBytes;
-                if (nextTranslationBytes > MAX_DOCUMENT_TRANSLATION_BYTES) {
-                    throw documentTranslationTooLargeError();
-                }
-                completedTranslationBytes = nextTranslationBytes;
                 batchResults[index] = {
                     results: result.results,
                     translations: result.translations,
@@ -1012,8 +973,6 @@ async function requestDocumentTranslationBatch({
                 onProgress('translating');
             }
         },
-        maxInputBytes: MAX_DOCUMENT_REQUEST_BYTES,
-        maxResponseBytes: MAX_DOCUMENT_PROVIDER_RESPONSE_BYTES,
     };
     let result = null;
     let response = null;
@@ -1033,9 +992,6 @@ async function requestDocumentTranslationBatch({
         );
     }
     const translated = String(result?.text || '').trim();
-    if (byteLength(translated) > MAX_DOCUMENT_TRANSLATION_BYTES) {
-        throw documentTranslationTooLargeError();
-    }
     if (!response && result?.finishReason === 'length') {
         response = failedBatchResponse(
             batch,
@@ -1072,7 +1028,7 @@ async function requestDocumentTranslationBatch({
         ...response.translations,
         ...retryResult.translations,
     ];
-    const translatedBytes = validateDocumentTranslationOutput(
+    validateDocumentTranslationOutput(
         batch.translatableBlocks,
         translations
     );
@@ -1080,7 +1036,6 @@ async function requestDocumentTranslationBatch({
         translations,
         failures: retryResult.failures,
         results: [result, ...retryResult.results].filter(Boolean),
-        translatedBytes,
     };
 }
 
@@ -1166,8 +1121,6 @@ async function translateBlockWithRetries({
             }]), settings.targetLanguage, failure.message),
             sessionId,
             signal,
-            maxInputBytes: MAX_DOCUMENT_REQUEST_BYTES,
-            maxResponseBytes: MAX_DOCUMENT_PROVIDER_RESPONSE_BYTES,
         };
         let result;
         try {
@@ -1259,8 +1212,6 @@ async function translateProtectedTextSegments({
         ),
         sessionId,
         signal,
-        maxInputBytes: MAX_DOCUMENT_REQUEST_BYTES,
-        maxResponseBytes: MAX_DOCUMENT_PROVIDER_RESPONSE_BYTES,
     };
     let result;
     try {
@@ -1287,9 +1238,6 @@ async function translateProtectedTextSegments({
         };
     }
     const translated = String(result?.text || '').trim();
-    if (byteLength(translated) > MAX_DOCUMENT_TRANSLATION_BYTES) {
-        throw documentTranslationTooLargeError();
-    }
     if (!translated) {
         return {
             translation: null,
@@ -1359,16 +1307,12 @@ function createTranslationProgressReporter(onProgress) {
 
 function validateDocumentTranslationOutput(blocks, translations) {
     const blocksByID = new Map(blocks.map(block => [block.id, block]));
-    const translatedBytes = translations.reduce((total, translation) => (
-        total + byteLength(validateTranslatedBlock(
+    for (const translation of translations) {
+        validateTranslatedBlock(
             blocksByID.get(translation.id),
             translation.markdown
-        ))
-    ), 0);
-    if (translatedBytes > MAX_DOCUMENT_TRANSLATION_BYTES) {
-        throw documentTranslationTooLargeError();
+        );
     }
-    return translatedBytes;
 }
 
 function mergeDocumentTranslations(blocks, retained, requested) {
@@ -1380,13 +1324,6 @@ function mergeDocumentTranslations(blocks, retained, requested) {
         translationsByID.set(translation.id, translation);
     }
     return blocks.map(block => translationsByID.get(block.id));
-}
-
-function documentTranslationTooLargeError() {
-    return aiError(
-        'The AI document translation is too large',
-        'AI_RESPONSE_TOO_LARGE'
-    );
 }
 
 function isRetryableTranslationError(error) {
@@ -1401,26 +1338,8 @@ function createRandomSessionId() {
     return crypto.randomUUID();
 }
 
-function byteLength(value) {
-    return new TextEncoder().encode(value).length;
-}
-
 function selectionFinishReason(value) {
     return String(value?.unified || value || '').trim().toLowerCase();
-}
-
-function selectionTranslationInputTooLargeError() {
-    return aiError(
-        'The AI selection translation input is too large',
-        'AI_INPUT_TOO_LARGE'
-    );
-}
-
-function selectionTranslationResponseTooLargeError() {
-    return aiError(
-        'The AI selection translation response is too large',
-        'AI_RESPONSE_TOO_LARGE'
-    );
 }
 
 function validateDocumentTranslationInput(blocks) {
@@ -1430,29 +1349,6 @@ function validateDocumentTranslationInput(blocks) {
             'AI_INPUT_TOO_LARGE'
         );
     }
-    const totalBytes = blocks.reduce(
-        (total, block) => total + byteLength(block.markdown),
-        0
-    );
-    if (totalBytes > MAX_DOCUMENT_TRANSLATION_INPUT_BYTES) {
-        throw aiError(
-            'The Markdown document is too large to translate',
-            'AI_INPUT_TOO_LARGE'
-        );
-    }
-}
-
-function validateDocumentTranslationSource(source) {
-    if (!isDocumentTranslationSourceWithinLimit(source)) {
-        throw aiError(
-            'The Markdown document is too large to translate',
-            'AI_INPUT_TOO_LARGE'
-        );
-    }
-}
-
-function isDocumentTranslationSourceWithinLimit(source) {
-    return byteLength(source) <= MAX_DOCUMENT_TRANSLATION_INPUT_BYTES;
 }
 
 function translationIdentifier(value) {

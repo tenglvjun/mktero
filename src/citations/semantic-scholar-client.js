@@ -7,7 +7,6 @@ import { createRuntimeAbortController } from '../platform/abort-controller.js';
 
 const DEFAULT_API_BASE = 'https://api.semanticscholar.org/graph/v1';
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RETRY_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
 const MAX_RETRY_AFTER_MS = 60_000;
@@ -27,7 +26,6 @@ export class SemanticScholarClient {
         clearTimer = globalThis.clearTimeout?.bind(globalThis),
         apiBase = DEFAULT_API_BASE,
         requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-        maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
         maxRetryAttempts = DEFAULT_MAX_RETRY_ATTEMPTS,
         retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
     } = {}) {
@@ -52,12 +50,6 @@ export class SemanticScholarClient {
             1_000,
             60_000,
             DEFAULT_REQUEST_TIMEOUT_MS
-        );
-        this.maxResponseBytes = boundedInteger(
-            maxResponseBytes,
-            1,
-            64 * 1024 * 1024,
-            DEFAULT_MAX_RESPONSE_BYTES
         );
         this.maxRetryAttempts = boundedInteger(
             maxRetryAttempts,
@@ -232,11 +224,7 @@ export class SemanticScholarClient {
             signal,
             async (response, requestSignal) => {
                 if (!response?.ok) throw httpError(response, this.now());
-                const bytes = await readBoundedResponse(
-                    response,
-                    this.maxResponseBytes,
-                    requestSignal
-                );
+                const bytes = await readResponse(response, requestSignal);
                 try {
                     return JSON.parse(new TextDecoder().decode(bytes));
                 }
@@ -317,16 +305,10 @@ function requestHeaders(apiKey, includeJSON = false) {
     return headers;
 }
 
-async function readBoundedResponse(response, maximum, signal) {
-    const declared = Number(response?.headers?.get?.('Content-Length'));
-    if (Number.isFinite(declared) && declared > maximum) {
-        throw responseTooLargeError();
-    }
+async function readResponse(response, signal) {
     const reader = response?.body?.getReader?.();
     if (!reader) {
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.length > maximum) throw responseTooLargeError();
-        return bytes;
+        return new Uint8Array(await response.arrayBuffer());
     }
     const chunks = [];
     let total = 0;
@@ -339,10 +321,6 @@ async function readBoundedResponse(response, maximum, signal) {
                 ? value
                 : new Uint8Array(value);
             total += chunk.length;
-            if (total > maximum) {
-                cancelReader(reader);
-                throw responseTooLargeError();
-            }
             chunks.push(chunk);
         }
     }
@@ -405,12 +383,6 @@ function parseRetryAfter(value, now) {
     const timestamp = Date.parse(value);
     if (!Number.isFinite(timestamp)) return undefined;
     return Math.min(Math.max(0, timestamp - now), MAX_RETRY_AFTER_MS);
-}
-
-function responseTooLargeError() {
-    const error = new Error('Semantic Scholar response exceeds the size limit');
-    error.code = 'S2_RESPONSE_TOO_LARGE';
-    return error;
 }
 
 function invalidResponseError() {

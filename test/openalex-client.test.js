@@ -30,22 +30,13 @@ test('resolves the best OpenAlex open-access PDF from a DOI-only request', async
     assert.deepEqual(request.options.headers, {});
 });
 
-test('rejects malformed and oversized OpenAlex open-access responses', async () => {
+test('rejects malformed OpenAlex open-access responses', async () => {
     const malformed = new OpenAlexClient({
         fetch: async () => jsonResponse({ results: {} }),
     });
     await assert.rejects(
         () => malformed.resolveOpenAccessPDF({ doi: '10.1000/malformed' }),
         error => error.code === 'OPENALEX_INVALID_RESPONSE'
-    );
-
-    const oversized = new OpenAlexClient({
-        maxResponseBytes: 8,
-        fetch: async () => jsonResponse({ results: [{ best_oa_location: {} }] }),
-    });
-    await assert.rejects(
-        () => oversized.resolveOpenAccessPDF({ doi: '10.1000/large' }),
-        error => error.code === 'OPENALEX_RESPONSE_TOO_LARGE'
     );
 });
 
