@@ -418,7 +418,10 @@
 }
 
 #mktero-ai-api-base-row[hidden],
-#mktero-ai-protocol-row[hidden] {
+#mktero-ai-protocol-row[hidden],
+#mktero-ai-moonshot-endpoint-row[hidden],
+#mktero-ai-minimax-endpoint-row[hidden],
+#mktero-ai-alibaba-endpoint-row[hidden] {
     display: none;
 }
 

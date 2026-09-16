@@ -4,12 +4,17 @@ import {
     AI_API_BASE_PREF,
     AI_API_KEY_PREF,
     AI_AUTO_TRANSLATE_SELECTION_PREF,
-    AI_MAX_OUTPUT_TOKENS_PREF,
     AI_MODEL_PREF,
     AI_REASONING_PREF,
     AI_PROTOCOL_OPENAI_CHAT,
     AI_PROTOCOL_OPENAI_RESPONSES,
     AI_PROTOCOL_PREF,
+    AI_ALIBABA_API_BASE_CHINA,
+    AI_ALIBABA_API_BASE_INTERNATIONAL,
+    AI_MINIMAX_API_BASE_CHINA,
+    AI_MINIMAX_API_BASE_INTERNATIONAL,
+    AI_MOONSHOT_API_BASE_CHINA,
+    AI_MOONSHOT_API_BASE_INTERNATIONAL,
     AI_PROVIDER_PREF,
     AI_PROVIDER_PROFILES_PREF,
     AI_REQUEST_TIMEOUT_PREF,
@@ -29,6 +34,12 @@ import {
     aiRequestTimeoutMsFromSeconds,
     aiRequestTimeoutSecondsFromMs,
     defaultAIApiBaseForProvider,
+    alibabaApiBaseForRegion,
+    alibabaApiBaseRegion,
+    miniMaxApiBaseForRegion,
+    miniMaxApiBaseRegion,
+    moonshotApiBaseForRegion,
+    moonshotApiBaseRegion,
 } from '../src/config/ai-preferences.js';
 
 test('reads and normalizes the configured AI settings', () => {
@@ -42,7 +53,6 @@ test('reads and normalizes the configured AI settings', () => {
         [AI_REASONING_PREF, 'high'],
         [AI_TARGET_LANGUAGE_PREF, 'zh-CN'],
         [AI_REQUEST_TIMEOUT_PREF, 45_000],
-        [AI_MAX_OUTPUT_TOKENS_PREF, 3_000],
         [AI_STREAMING_PREF, false],
     ]);
     const settings = getAISettings({
@@ -60,7 +70,7 @@ test('reads and normalizes the configured AI settings', () => {
         reasoning: 'high',
         targetLanguage: 'zh-CN',
         requestTimeoutMs: 45_000,
-        maxOutputTokens: 3_000,
+        maxOutputTokens: 0,
         streaming: false,
     });
 });
@@ -99,18 +109,17 @@ test('uses full-document request defaults and preserves a streaming opt-out', ()
     }).streaming, true);
 });
 
-test('allows full-document timeout and output token budgets', () => {
+test('allows a full-document timeout budget', () => {
     const settings = getAISettings({
         Prefs: {
             get: key => ({
                 [AI_REQUEST_TIMEOUT_PREF]: 3_600_001,
-                [AI_MAX_OUTPUT_TOKENS_PREF]: 262_145,
             })[key],
         },
     });
 
     assert.equal(settings.requestTimeoutMs, 3_600_000);
-    assert.equal(settings.maxOutputTokens, 262_144);
+    assert.equal(settings.maxOutputTokens, 0);
 });
 
 test('reads reasoning effort and maps the legacy automatic value to off', () => {
@@ -364,6 +373,131 @@ test('fills known provider API bases and treats them as replaceable defaults', (
         isReplaceableAIApiBase('https://api.example.com/v1'),
         false
     );
+    assert.equal(
+        isReplaceableAIApiBase('https://api.moonshot.cn/v1'),
+        true
+    );
+    assert.equal(
+        isReplaceableAIApiBase('https://api.minimax.cn/anthropic/v1'),
+        true
+    );
+    assert.equal(
+        isReplaceableAIApiBase('https://dashscope.aliyuncs.com/compatible-mode/v1'),
+        true
+    );
+});
+
+test('keeps Moonshot on the international or China API base', () => {
+    assert.equal(
+        moonshotApiBaseRegion('https://api.moonshot.cn/v1/'),
+        'china'
+    );
+    assert.equal(
+        moonshotApiBaseForRegion('china'),
+        AI_MOONSHOT_API_BASE_CHINA
+    );
+    assert.equal(
+        moonshotApiBaseForRegion('international'),
+        AI_MOONSHOT_API_BASE_INTERNATIONAL
+    );
+    assert.equal(
+        getAISettings({
+            Prefs: {
+                get: key => ({
+                    [AI_PROVIDER_PREF]: 'moonshotai',
+                    [AI_API_BASE_PREF]: 'https://api.moonshot.cn/v1',
+                    [AI_API_KEY_PREF]: 'token',
+                    [AI_MODEL_PREF]: 'kimi-k3',
+                })[key],
+            },
+        }).apiBase,
+        AI_MOONSHOT_API_BASE_CHINA
+    );
+    assert.equal(
+        validateAISettings({
+            provider: 'moonshotai',
+            apiBase: 'https://api.openai.com/v1',
+            apiKey: 'token',
+            model: 'kimi-k3',
+        }).apiBase,
+        AI_MOONSHOT_API_BASE_INTERNATIONAL
+    );
+});
+
+test('keeps MiniMax on the international or China API base', () => {
+    assert.equal(
+        miniMaxApiBaseRegion('https://api.minimax.cn/anthropic'),
+        'china'
+    );
+    assert.equal(
+        miniMaxApiBaseForRegion('china'),
+        AI_MINIMAX_API_BASE_CHINA
+    );
+    assert.equal(
+        miniMaxApiBaseForRegion('international'),
+        AI_MINIMAX_API_BASE_INTERNATIONAL
+    );
+    assert.equal(
+        getAISettings({
+            Prefs: {
+                get: key => ({
+                    [AI_PROVIDER_PREF]: 'minimax',
+                    [AI_API_BASE_PREF]: 'https://api.minimax.cn/anthropic',
+                    [AI_API_KEY_PREF]: 'token',
+                    [AI_MODEL_PREF]: 'MiniMax-M3',
+                })[key],
+            },
+        }).apiBase,
+        AI_MINIMAX_API_BASE_CHINA
+    );
+    assert.equal(
+        validateAISettings({
+            provider: 'minimax',
+            protocol: 'anthropic-messages',
+            apiBase: 'https://api.minimax.io/anthropic/v1',
+            apiKey: 'token',
+            model: 'MiniMax-M3',
+        }).apiBase,
+        AI_MINIMAX_API_BASE_INTERNATIONAL
+    );
+});
+
+test('keeps Alibaba on the international or China API base', () => {
+    assert.equal(
+        alibabaApiBaseRegion('https://dashscope.aliyuncs.com/compatible-mode/v1/'),
+        'china'
+    );
+    assert.equal(
+        alibabaApiBaseForRegion('china'),
+        AI_ALIBABA_API_BASE_CHINA
+    );
+    assert.equal(
+        alibabaApiBaseForRegion('international'),
+        AI_ALIBABA_API_BASE_INTERNATIONAL
+    );
+    assert.equal(
+        getAISettings({
+            Prefs: {
+                get: key => ({
+                    [AI_PROVIDER_PREF]: 'alibaba',
+                    [AI_API_BASE_PREF]:
+                        'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                    [AI_API_KEY_PREF]: 'token',
+                    [AI_MODEL_PREF]: 'qwen-plus',
+                })[key],
+            },
+        }).apiBase,
+        AI_ALIBABA_API_BASE_CHINA
+    );
+    assert.equal(
+        validateAISettings({
+            provider: 'alibaba',
+            apiBase: 'https://api.openai.com/v1',
+            apiKey: 'token',
+            model: 'qwen-plus',
+        }).apiBase,
+        AI_ALIBABA_API_BASE_INTERNATIONAL
+    );
 });
 
 test('converts the AI request timeout between seconds and milliseconds', () => {
@@ -405,7 +539,6 @@ test('copies live settings into the current provider slot on first sync', () => 
         [AI_MODEL_PREF]: 'gpt-5-pro',
         [AI_REASONING_PREF]: 'high',
         [AI_REQUEST_TIMEOUT_PREF]: 45_000,
-        [AI_MAX_OUTPUT_TOKENS_PREF]: 3_000,
         [AI_STREAMING_PREF]: false,
         [AI_TARGET_LANGUAGE_PREF]: 'ja-JP',
     });
@@ -419,7 +552,7 @@ test('copies live settings into the current provider slot on first sync', () => 
         model: 'gpt-5-pro',
         reasoning: 'high',
         requestTimeoutMs: 45_000,
-        maxOutputTokens: 3_000,
+        maxOutputTokens: 0,
         streaming: false,
     });
     assert.equal(readAIProviderProfiles(zotero).deepseek, undefined);
@@ -435,7 +568,6 @@ test('switches to an empty profile and restores the previous provider', () => {
         [AI_MODEL_PREF]: 'gpt-5-pro',
         [AI_REASONING_PREF]: 'high',
         [AI_REQUEST_TIMEOUT_PREF]: 45_000,
-        [AI_MAX_OUTPUT_TOKENS_PREF]: 3_000,
         [AI_STREAMING_PREF]: false,
         [AI_TARGET_LANGUAGE_PREF]: 'ja-JP',
     });
@@ -458,7 +590,7 @@ test('switches to an empty profile and restores the previous provider', () => {
     assert.equal(restored.streaming, false);
     assert.equal(restored.reasoning, 'high');
     assert.equal(restored.requestTimeoutMs, 45_000);
-    assert.equal(restored.maxOutputTokens, 3_000);
+    assert.equal(restored.maxOutputTokens, 0);
     assert.equal(restored.targetLanguage, 'ja-JP');
 });
 

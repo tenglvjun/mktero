@@ -382,7 +382,6 @@ test('tests the current AI SDK settings without exposing the key', async () => {
                 <option value="zh-CN">Simplified Chinese</option>
             </select>
             <input id="mktero-ai-request-timeout" value="600">
-            <input id="mktero-ai-max-output-tokens" value="0">
             <input id="mktero-ai-streaming" type="checkbox" checked>
             <input id="mktero-ai-auto-translate-selection" type="checkbox" checked>
             <button id="mktero-ai-test"></button>
@@ -395,7 +394,11 @@ test('tests the current AI SDK settings without exposing the key', async () => {
     const controller = createPreferencesController({
         document: dom.window.document,
         zotero: {
-            Prefs: { get: () => undefined },
+            Prefs: {
+                get: key => (
+                    key === 'extensions.mktero.aiReasoning' ? 'high' : undefined
+                ),
+            },
             logError: () => {},
         },
         cache: {
@@ -420,7 +423,7 @@ test('tests the current AI SDK settings without exposing the key', async () => {
     assert.equal(testedSettings.model, 'example-chat');
     assert.equal(testedSettings.reasoning, 'high');
     assert.equal(testedSettings.requestTimeoutMs, 600_000);
-    assert.equal(testedSettings.maxOutputTokens, '0');
+    assert.equal(testedSettings.maxOutputTokens, 0);
     assert.equal(
         dom.window.document.getElementById('mktero-ai-request-timeout').max,
         '3600'
@@ -428,10 +431,6 @@ test('tests the current AI SDK settings without exposing the key', async () => {
     assert.equal(
         dom.window.document.getElementById('mktero-ai-request-timeout').value,
         '600'
-    );
-    assert.equal(
-        dom.window.document.getElementById('mktero-ai-max-output-tokens').max,
-        '262144'
     );
     assert.equal(testedSettings.streaming, true);
     assert.equal(testedSettings.autoTranslateSelection, true);
@@ -642,7 +641,6 @@ test('isolates AI connection settings per provider and restores the previous slo
         ['extensions.mktero.aiModel', 'gpt-5-pro'],
         ['extensions.mktero.aiReasoning', 'high'],
         ['extensions.mktero.aiRequestTimeoutMs', 45_000],
-        ['extensions.mktero.aiMaxOutputTokens', 3_000],
         ['extensions.mktero.aiStreaming', false],
     ]);
     const dom = new JSDOM(`<!doctype html><body>
@@ -669,7 +667,6 @@ test('isolates AI connection settings per provider and restores the previous slo
                     <option value="high">High</option>
                 </select>
                 <input id="mktero-ai-request-timeout" value="45">
-                <input id="mktero-ai-max-output-tokens" value="3000">
             </div>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
@@ -735,6 +732,333 @@ test('isolates AI connection settings per provider and restores the previous slo
     assert.equal(protocolRow.hidden, false);
     assert.equal(apiBase.value, '');
     assert.equal(model.value, '');
+    controller.destroy();
+});
+
+test('lets Moonshot use the China API endpoint', async () => {
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'moonshotai'],
+        ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
+        ['extensions.mktero.aiApiBase', 'https://api.moonshot.ai/v1'],
+        ['extensions.mktero.aiApiKey', 'moonshot-secret'],
+        ['extensions.mktero.aiModel', 'kimi-k3'],
+    ]);
+    const writes = [];
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="openai">OpenAI</option>
+                <option value="moonshotai">Moonshot</option>
+                <option value="minimax">MiniMax</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-chat-completions">Chat</option>
+            </select>
+            <div id="mktero-ai-moonshot-endpoint-row" hidden>
+                <select id="mktero-ai-moonshot-endpoint">
+                    <option value="international">International</option>
+                    <option value="china">China</option>
+                </select>
+            </div>
+            <div id="mktero-ai-api-base-row" hidden>
+                <input id="mktero-ai-api-base" value="https://api.moonshot.ai/v1">
+            </div>
+            <div id="mktero-ai-protocol-row" hidden></div>
+            <input id="mktero-ai-model" value="kimi-k3">
+            <input id="mktero-ai-api-key" value="moonshot-secret">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => {
+                    writes.push({ key, value, global });
+                    values.set(key, value);
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const document = dom.window.document;
+    const row = document.getElementById('mktero-ai-moonshot-endpoint-row');
+    const endpoint = document.getElementById('mktero-ai-moonshot-endpoint');
+    const provider = document.getElementById('mktero-ai-provider');
+    assert.equal(row.hidden, false);
+    assert.equal(endpoint.value, 'international');
+
+    endpoint.value = 'china';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.moonshot.cn/v1'
+    );
+    assert.equal(
+        document.getElementById('mktero-ai-api-base').value,
+        'https://api.moonshot.cn/v1'
+    );
+
+    provider.value = 'minimax';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(row.hidden, true);
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.minimax.io/anthropic/v1'
+    );
+
+    endpoint.value = 'international';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.minimax.io/anthropic/v1'
+    );
+
+    provider.value = 'moonshotai';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(row.hidden, false);
+    assert.equal(endpoint.value, 'china');
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.moonshot.cn/v1'
+    );
+
+    controller.destroy();
+});
+
+test('lets MiniMax use the China API endpoint', async () => {
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'minimax'],
+        ['extensions.mktero.aiProtocol', 'anthropic-messages'],
+        ['extensions.mktero.aiApiBase', 'https://api.minimax.io/anthropic/v1'],
+        ['extensions.mktero.aiApiKey', 'minimax-secret'],
+        ['extensions.mktero.aiModel', 'MiniMax-M3'],
+    ]);
+    const writes = [];
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="openai">OpenAI</option>
+                <option value="moonshotai">Moonshot</option>
+                <option value="minimax">MiniMax</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-chat-completions">Chat</option>
+                <option value="anthropic-messages">Anthropic</option>
+            </select>
+            <div id="mktero-ai-moonshot-endpoint-row" hidden>
+                <select id="mktero-ai-moonshot-endpoint">
+                    <option value="international">International</option>
+                    <option value="china">China</option>
+                </select>
+            </div>
+            <div id="mktero-ai-minimax-endpoint-row" hidden>
+                <select id="mktero-ai-minimax-endpoint">
+                    <option value="international">International</option>
+                    <option value="china">China</option>
+                </select>
+            </div>
+            <div id="mktero-ai-api-base-row" hidden>
+                <input id="mktero-ai-api-base" value="https://api.minimax.io/anthropic/v1">
+            </div>
+            <div id="mktero-ai-protocol-row" hidden></div>
+            <input id="mktero-ai-model" value="MiniMax-M3">
+            <input id="mktero-ai-api-key" value="minimax-secret">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => {
+                    writes.push({ key, value, global });
+                    values.set(key, value);
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const document = dom.window.document;
+    const moonshotRow = document.getElementById('mktero-ai-moonshot-endpoint-row');
+    const row = document.getElementById('mktero-ai-minimax-endpoint-row');
+    const endpoint = document.getElementById('mktero-ai-minimax-endpoint');
+    const provider = document.getElementById('mktero-ai-provider');
+    assert.equal(moonshotRow.hidden, true);
+    assert.equal(row.hidden, false);
+    assert.equal(endpoint.value, 'international');
+
+    endpoint.value = 'china';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.minimax.cn/anthropic/v1'
+    );
+    assert.equal(
+        document.getElementById('mktero-ai-api-base').value,
+        'https://api.minimax.cn/anthropic/v1'
+    );
+
+    provider.value = 'openai';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(row.hidden, true);
+    assert.equal(moonshotRow.hidden, true);
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.openai.com/v1'
+    );
+
+    endpoint.value = 'international';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.openai.com/v1'
+    );
+
+    provider.value = 'minimax';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(row.hidden, false);
+    assert.equal(moonshotRow.hidden, true);
+    assert.equal(endpoint.value, 'china');
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.minimax.cn/anthropic/v1'
+    );
+
+    controller.destroy();
+});
+
+test('lets Alibaba use the China API endpoint', async () => {
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'alibaba'],
+        ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
+        ['extensions.mktero.aiApiBase',
+            'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'],
+        ['extensions.mktero.aiApiKey', 'alibaba-secret'],
+        ['extensions.mktero.aiModel', 'qwen-plus'],
+    ]);
+    const writes = [];
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="openai">OpenAI</option>
+                <option value="alibaba">Alibaba</option>
+                <option value="minimax">MiniMax</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-chat-completions">Chat</option>
+            </select>
+            <div id="mktero-ai-alibaba-endpoint-row" hidden>
+                <select id="mktero-ai-alibaba-endpoint">
+                    <option value="international">International</option>
+                    <option value="china">China</option>
+                </select>
+            </div>
+            <div id="mktero-ai-minimax-endpoint-row" hidden>
+                <select id="mktero-ai-minimax-endpoint">
+                    <option value="international">International</option>
+                    <option value="china">China</option>
+                </select>
+            </div>
+            <div id="mktero-ai-api-base-row" hidden>
+                <input id="mktero-ai-api-base" value="https://dashscope-intl.aliyuncs.com/compatible-mode/v1">
+            </div>
+            <div id="mktero-ai-protocol-row" hidden></div>
+            <input id="mktero-ai-model" value="qwen-plus">
+            <input id="mktero-ai-api-key" value="alibaba-secret">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => {
+                    writes.push({ key, value, global });
+                    values.set(key, value);
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const document = dom.window.document;
+    const miniMaxRow = document.getElementById('mktero-ai-minimax-endpoint-row');
+    const row = document.getElementById('mktero-ai-alibaba-endpoint-row');
+    const endpoint = document.getElementById('mktero-ai-alibaba-endpoint');
+    const provider = document.getElementById('mktero-ai-provider');
+    assert.equal(miniMaxRow.hidden, true);
+    assert.equal(row.hidden, false);
+    assert.equal(endpoint.value, 'international');
+
+    endpoint.value = 'china';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    );
+    assert.equal(
+        document.getElementById('mktero-ai-api-base').value,
+        'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    );
+
+    provider.value = 'openai';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(row.hidden, true);
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.openai.com/v1'
+    );
+
+    endpoint.value = 'international';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://api.openai.com/v1'
+    );
+
+    provider.value = 'alibaba';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(row.hidden, false);
+    assert.equal(miniMaxRow.hidden, true);
+    assert.equal(endpoint.value, 'china');
+    assert.equal(
+        values.get('extensions.mktero.aiApiBase'),
+        'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    );
+
     controller.destroy();
 });
 
@@ -852,6 +1176,87 @@ test('adapts the reasoning menu to the selected model', async () => {
     assert.deepEqual(
         [...select.options].map(option => option.value),
         ['none', 'low', 'medium', 'high', 'xhigh']
+    );
+    controller.destroy();
+});
+
+test('keeps a stored reasoning level when the unbound menu still shows off', async () => {
+    const writes = [];
+    const values = new Map([
+        ['extensions.mktero.aiProvider', 'custom'],
+        ['extensions.mktero.aiProtocol', 'openai-responses'],
+        ['extensions.mktero.aiApiBase', 'https://gateway.example.com/v1'],
+        ['extensions.mktero.aiModel', 'grok-4.6'],
+        ['extensions.mktero.aiReasoning', 'low'],
+    ]);
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-ai-provider">
+                <option value="custom">Custom</option>
+            </select>
+            <select id="mktero-ai-protocol">
+                <option value="openai-responses">OpenAI Responses</option>
+            </select>
+            <input id="mktero-ai-api-base" value="https://gateway.example.com/v1">
+            <input id="mktero-ai-model" value="grok-4.6">
+            <select id="mktero-ai-reasoning">
+                <option value="none">Off</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="xhigh">Extra high</option>
+            </select>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => {
+                    writes.push({ key, value, global });
+                    values.set(key, value);
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        reasoningCatalog: {
+            labProviders: ['openai'],
+            hosts: {},
+            providers: {
+                xai: {
+                    'grok-4.6': {
+                        reasoning: true,
+                        options: [{
+                            type: 'effort',
+                            values: ['low', 'medium', 'high', 'xhigh'],
+                        }],
+                    },
+                },
+            },
+        },
+    });
+
+    await controller.init();
+    const select = dom.window.document.getElementById('mktero-ai-reasoning');
+    assert.deepEqual(
+        [...select.options].map(option => option.value),
+        ['low', 'medium', 'high', 'xhigh']
+    );
+    assert.equal(select.value, 'low');
+    assert.equal(values.get('extensions.mktero.aiReasoning'), 'low');
+    assert.equal(
+        writes.some(write => (
+            write.key === 'extensions.mktero.aiReasoning'
+            && write.value === 'medium'
+        )),
+        false
     );
     controller.destroy();
 });

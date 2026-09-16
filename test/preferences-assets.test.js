@@ -54,7 +54,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(prefs, /pref\("extensions\.mktero\.aiProtocol", "openai-responses"\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.aiApiKey", ""\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.aiRequestTimeoutMs", 600000\)/);
-    assert.match(prefs, /pref\("extensions\.mktero\.aiMaxOutputTokens", 0\)/);
+    assert.doesNotMatch(prefs, /extensions\.mktero\.aiMaxOutputTokens/);
     assert.match(
         prefs,
         /pref\("extensions\.mktero\.aiAutoTranslateSelection", false\)/
@@ -132,7 +132,14 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     );
     assert.match(pane, /class="mktero-field-control mktero-provider-control"/);
     assert.match(pane, /class="mktero-ai-test-icon"/);
-    assert.match(pane, /preference="extensions\.mktero\.aiMaxOutputTokens"/);
+    assert.match(pane, /id="mktero-ai-moonshot-endpoint-row"/);
+    assert.match(pane, /id="mktero-ai-moonshot-endpoint"/);
+    assert.match(pane, /id="mktero-ai-minimax-endpoint-row"/);
+    assert.match(pane, /id="mktero-ai-minimax-endpoint"/);
+    assert.match(pane, /id="mktero-ai-alibaba-endpoint-row"/);
+    assert.match(pane, /id="mktero-ai-alibaba-endpoint"/);
+    assert.doesNotMatch(pane, /mktero-ai-max-output-tokens/);
+    assert.doesNotMatch(pane, /extensions\.mktero\.aiMaxOutputTokens/);
     assert.match(
         pane,
         /id="mktero-ai-auto-translate-selection"[\s\S]*?preference="extensions\.mktero\.aiAutoTranslateSelection"/
@@ -140,10 +147,6 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(
         pane,
         /id="mktero-ai-request-timeout"[\s\S]*?max="3600"/
-    );
-    assert.match(
-        pane,
-        /id="mktero-ai-max-output-tokens"[\s\S]*?max="262144"/
     );
     assert.match(pane, /preference="extensions\.mktero\.aiReasoning"/);
     assert.match(pane, /id="mktero-ai-reasoning"/);
@@ -211,6 +214,10 @@ test('ships responsive settings cards and a cache switch', async () => {
     assert.match(styles, /\.mktero-settings-card\s*\{[\s\S]*border-radius:/);
     assert.match(styles, /\.mktero-switch-input:checked\s*\+\s*\.mktero-switch/);
     assert.match(styles, /\.mktero-switch::before/);
+    assert.match(
+        styles,
+        /#mktero-ai-moonshot-endpoint-row\[hidden\][\s\S]*#mktero-ai-minimax-endpoint-row\[hidden\][\s\S]*#mktero-ai-alibaba-endpoint-row\[hidden\]\s*\{[\s\S]*display:\s*none/
+    );
     assert.doesNotMatch(
         styles,
         /#mktero-semantic-scholar-api-key\s*\{[\s\S]*?font-variant-ligatures:\s*none/s
@@ -309,13 +316,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row"/g
         ) || []).length,
-        16
+        18
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-(?:field|reader-font)-control(?: [^"]+)?">/g
         ) || []).length,
-        16
+        18
     );
 });
 
@@ -333,7 +340,7 @@ test('keeps right-side preference controls aligned at one width without native s
         (pane.match(
             /class="mktero-field-control mktero-field-control-compact mktero-field-control-numeric"/g
         ) || []).length,
-        2
+        1
     );
     assert.match(
         styles,

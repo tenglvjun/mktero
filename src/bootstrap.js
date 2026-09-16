@@ -287,6 +287,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         aiGateway: new AISDKGateway({
             createAbortController: createZoteroAbortController,
             runtimeWindow: Zotero.getMainWindow?.(),
+            onDebug: message => Zotero.debug(message),
         }),
         cache,
         getSettings: () => getAISettings(Zotero),
@@ -905,8 +906,8 @@ async function openItemAsMarkdown(itemID, {
         onRestoreAllCorrections: () => restoreAllCorrections(itemID),
         onTranslateDocument: options => translateDocument(itemID, options),
         onCancelDocumentTranslation: () => cancelDocumentTranslation(itemID),
-        onTranslateSelection: ({ text, context, onTextDelta } = {}) => (
-            translateSelection(itemID, { text, context, onTextDelta })
+        onTranslateSelection: ({ text, onTextDelta } = {}) => (
+            translateSelection(itemID, { text, onTextDelta })
         ),
         onCancelSelectionTranslation: () => cancelSelectionTranslation(itemID),
         shouldAutoTranslateSelection: () => isAutoSelectionTranslationEnabled(),
@@ -1205,8 +1206,8 @@ function createSavedMarkdownActions(noteID, sourceItem) {
             copySourcedMarkdown(itemID, target)
         )),
         onCopyCode: code => copyCode(code),
-        onTranslateSelection: ({ text, context, onTextDelta } = {}) => (
-            translateSelection(noteID, { text, context, onTextDelta })
+        onTranslateSelection: ({ text, onTextDelta } = {}) => (
+            translateSelection(noteID, { text, onTextDelta })
         ),
         onCancelSelectionTranslation: () => cancelSelectionTranslation(noteID),
         shouldAutoTranslateSelection: () => isAutoSelectionTranslationEnabled(),
@@ -1561,7 +1562,6 @@ async function translateDocument(documentID, {
 
 async function translateSelection(documentID, {
     text,
-    context = '',
     targetLanguage: requestedTargetLanguage,
     onTextDelta,
 } = {}) {
@@ -1597,7 +1597,6 @@ async function translateSelection(documentID, {
         'selection',
         signal => service.translateSelection({
             text,
-            context,
             signal,
             targetLanguage,
             onTextDelta,

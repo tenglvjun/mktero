@@ -12,7 +12,7 @@
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
 | Anonymous models.dev catalog request on Zotero startup | models.dev, kept only in memory until Zotero quits | No |
 | Protected Markdown translation batches | AI provider configured by you | Not by Mktero |
-| Selected Markdown text and bounded surrounding source context for selection translation | AI provider configured by you | Not by Mktero |
+| Selected Markdown text for selection translation | AI provider configured by you | Not by Mktero |
 | Zotero PDF annotations | Local Zotero library | According to Zotero settings |
 | Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
 | Exported Markdown and figures | User-selected local path | No |
@@ -30,7 +30,7 @@ Translation requests contain protected Markdown and instructions; if
 placeholder validation repeatedly fails, the final retry contains only the
 affected block's ordinary text segments. API Tokens, presigned URLs, PDF bytes,
 and authenticated responses are not written to logs. Selection translation
-requests contain only the selected text and bounded nearby source context; they
+requests contain only the selected text; they
 are not written to the full-document translation cache.
 
 Review the privacy policy of MinerU and any AI or citation provider Mktero uses.

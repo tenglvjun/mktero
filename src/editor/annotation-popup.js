@@ -180,11 +180,11 @@ export function createAnnotationPopup(parent, {
                             typeof translateSelection === 'function'
                                 ? (
                                     text,
-                                    translationContext,
+                                    selectionContext,
                                     options,
                                 ) => translateSelection(
                                     text,
-                                    translationContext,
+                                    selectionContext,
                                     options,
                                 )
                             : undefined,
@@ -551,7 +551,8 @@ function createMarkdownSelectionActions(
                 'ai.selectionTranslationFailed'
             );
             translationButtons.appendChild(retryTranslationButton);
-            translationError.hidden = false;
+            translationError.hidden = !translationError.textContent
+                || translationError.textContent === translationStatus.textContent;
         }
         else if (status === 'success') {
             translationStatus.textContent = translate(
@@ -594,8 +595,10 @@ function createMarkdownSelectionActions(
                 },
             );
             if (requestID !== translationRequestID) return;
-            const text = typeof result === 'string' ? result : result?.text;
-            if (typeof text !== 'string' || !text.trim()) {
+            const text = String(
+                (typeof result === 'string' ? result : result?.text) || ''
+            ).trim() || String(translatedText || '').trim();
+            if (!text) {
                 const emptyError = new Error('Selection translation was empty');
                 emptyError.code = 'MKTERO_AI_SELECTION_TRANSLATION_EMPTY';
                 throw emptyError;
@@ -608,6 +611,15 @@ function createMarkdownSelectionActions(
         }
         catch (cause) {
             if (requestID !== translationRequestID) return;
+            const streamed = String(translatedText || '').trim();
+            if (streamed && !isFatalSelectionTranslationError(cause)) {
+                translationRequestID += 1;
+                translatedText = streamed;
+                translationResult.textContent = streamed;
+                setExistingControlsBusy(false);
+                setTranslationStatus('success');
+                return;
+            }
             translationRequestID += 1;
             translatedText = '';
             translationResult.textContent = '';
@@ -909,6 +921,11 @@ function createAnnotationActions(
     content.appendChild(deleteButton);
     content.appendChild(error);
     return content;
+}
+
+function isFatalSelectionTranslationError(error) {
+    if (error?.name === 'AbortError') return true;
+    return SELECTION_TRANSLATION_ERROR_KEYS.has(error?.code);
 }
 
 function annotationErrorMessage(error, translate, fallbackKey) {

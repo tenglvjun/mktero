@@ -444,7 +444,6 @@ class MarkdownTabView {
                     { onTextDelta } = {},
                 ) => this.model.onTranslateSelection({
                     text,
-                    context: selectionContext?.translationContext || '',
                     onTextDelta,
                 })
                 : null,

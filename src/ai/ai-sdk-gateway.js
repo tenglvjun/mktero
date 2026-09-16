@@ -51,6 +51,7 @@ export class AISDKGateway {
         clearTimer,
         generate = generateText,
         stream = streamTextResult,
+        onDebug,
     } = {}) {
         if (typeof fetch !== 'function') {
             throw new TypeError('A fetch implementation is required');
@@ -72,6 +73,7 @@ export class AISDKGateway {
             || bindRuntimeMethod(runtimeWindow, 'clearTimeout');
         this.generate = generate;
         this.stream = stream;
+        this.onDebug = typeof onDebug === 'function' ? onDebug : null;
         this.reasoningFallbacks = new Set();
     }
 
@@ -105,13 +107,11 @@ export class AISDKGateway {
                 this.fetch,
                 providerSessionHeaders(configuration.apiBase, sessionId)
             );
-            const outputTokens = normalizeOutputTokens(
-                maxOutputTokens,
-                configuration.maxOutputTokens
-            );
+            const outputTokens = normalizeOutputTokens(maxOutputTokens);
             const result = await requestWithReasoningFallback({
                 configuration,
                 canFallback: () => !timedOut && !signal?.aborted,
+                onDebug: this.onDebug,
                 onFallback: () => rememberReasoningFallback(
                     this.reasoningFallbacks,
                     configuration
@@ -190,16 +190,14 @@ export class AISDKGateway {
                 this.fetch,
                 providerSessionHeaders(configuration.apiBase, sessionId)
             );
-            const outputTokens = normalizeOutputTokens(
-                maxOutputTokens,
-                configuration.maxOutputTokens
-            );
+            const outputTokens = normalizeOutputTokens(maxOutputTokens);
             let emittedText = false;
             return await requestWithReasoningFallback({
                 configuration,
                 canFallback: () => !emittedText
                     && !timedOut
                     && !signal?.aborted,
+                onDebug: this.onDebug,
                 onFallback: () => rememberReasoningFallback(
                     this.reasoningFallbacks,
                     configuration
@@ -264,7 +262,9 @@ async function requestWithReasoningFallback({
     request,
     canFallback = () => true,
     onFallback,
+    onDebug,
 }) {
+    debugAIRequest(onDebug, configuration);
     try {
         return await request(configuration);
     }
@@ -274,11 +274,23 @@ async function requestWithReasoningFallback({
             throw error;
         }
         onFallback?.();
-        return request({
+        const fallbackConfiguration = {
             ...configuration,
             reasoning: AI_PROVIDER_DEFAULT_REASONING,
-        });
+        };
+        debugAIRequest(onDebug, fallbackConfiguration);
+        return request(fallbackConfiguration);
     }
+}
+
+function debugAIRequest(onDebug, configuration) {
+    if (typeof onDebug !== 'function') return;
+    onDebug(
+        'Mktero: AI request '
+        + `provider=${configuration.provider} `
+        + `model=${configuration.model} `
+        + `reasoning=${configuration.reasoning}`
+    );
 }
 
 function applyRememberedReasoningFallback(configuration, fallbacks) {
@@ -533,6 +545,15 @@ function reasoningRequestPolicy(configuration) {
                             : 'adaptive',
                     },
                 },
+            },
+        };
+    }
+    if (configuration.provider === AI_PROVIDER_CUSTOM
+        && configuration.protocol === AI_PROTOCOL_OPENAI_RESPONSES) {
+        return {
+            reasoning,
+            providerOptions: {
+                openai: { forceReasoning: true },
             },
         };
     }
@@ -801,8 +822,8 @@ function isLoopbackURL(value) {
     }
 }
 
-function normalizeOutputTokens(value, fallback) {
-    const number = Number(value ?? fallback);
+function normalizeOutputTokens(value) {
+    const number = Number(value);
     if (!Number.isFinite(number) || number <= 0) return null;
     return Math.max(1, Math.min(AI_MAX_OUTPUT_TOKENS, Math.round(number)));
 }

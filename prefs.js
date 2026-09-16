@@ -16,7 +16,6 @@ pref("extensions.mktero.aiModel", "");
 pref("extensions.mktero.aiReasoning", "none");
 pref("extensions.mktero.aiTargetLanguage", "zh-CN");
 pref("extensions.mktero.aiRequestTimeoutMs", 600000);
-pref("extensions.mktero.aiMaxOutputTokens", 0);
 pref("extensions.mktero.aiStreaming", true);
 pref("extensions.mktero.aiAutoTranslateSelection", false);
 pref("extensions.mktero.aiProviderProfiles", "{}");

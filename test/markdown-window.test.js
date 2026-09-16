@@ -2213,7 +2213,7 @@ test('forwards selection translation callbacks through the current reader model'
         view.render(secondModel);
         await editorOptions.translateSelection(
             'Selected text.',
-            { translationContext: 'Before selected text. Selected text. After.' },
+            { side: 'source' },
             { onTextDelta },
         );
         editorOptions.cancelSelectionTranslation();
@@ -2223,7 +2223,6 @@ test('forwards selection translation callbacks through the current reader model'
         assert.deepEqual(calls, [
             ['second', {
                 text: 'Selected text.',
-                context: 'Before selected text. Selected text. After.',
                 onTextDelta,
             }],
             ['cancel-second'],

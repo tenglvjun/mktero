@@ -49,7 +49,6 @@ import {
 } from './document-search-highlight.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
-const SELECTION_TRANSLATION_CONTEXT_RADIUS = 800;
 const editorNavigationMeasureKey = {};
 const DOM_GLOBAL_NAMES = [
     'document',
@@ -834,10 +833,6 @@ export function createInlineMarkdownEditor({
             selection,
             selectionContext: {
                 side: 'source',
-                translationContext: boundedSelectionTranslationContext(
-                    view,
-                    selection
-                ),
             },
             copyTarget,
             sourceLocation: selectionSourceLocation(
@@ -1172,28 +1167,6 @@ function markdownSelectionKey(selection) {
         String(selection?.text || ''),
         ...ranges.map(range => `${range?.from}:${range?.to}`),
     ].join('|');
-}
-
-function boundedSelectionTranslationContext(view, selection) {
-    const ranges = Array.isArray(selection?.ranges)
-        ? selection.ranges.filter(range => (
-            Number.isSafeInteger(range?.from)
-            && Number.isSafeInteger(range?.to)
-            && range.to > range.from
-            && range.from >= 0
-            && range.to <= view.state.doc.length
-        ))
-        : [];
-    if (!ranges.length) return '';
-    const from = Math.min(...ranges.map(range => range.from));
-    const to = Math.max(...ranges.map(range => range.to));
-    return view.state.sliceDoc(
-        Math.max(0, from - SELECTION_TRANSLATION_CONTEXT_RADIUS),
-        Math.min(
-            view.state.doc.length,
-            to + SELECTION_TRANSLATION_CONTEXT_RADIUS
-        )
-    );
 }
 
 function withoutSelectionTranslationContext(selectionContext) {
