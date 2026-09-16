@@ -595,7 +595,6 @@ test('exposes and refreshes selection translation actions on the tab model', asy
 
     await second.model.onTranslateSelection({
         text: 'Selected text.',
-        context: 'Surrounding text.',
     });
     second.model.onCancelSelectionTranslation();
     assert.equal(second.model.shouldAutoTranslateSelection(), true);
@@ -605,7 +604,6 @@ test('exposes and refreshes selection translation actions on the tab model', asy
     assert.deepEqual(calls, [
         ['translate-second', {
             text: 'Selected text.',
-            context: 'Surrounding text.',
         }],
         ['cancel-second'],
         ['copy-second', '已翻译文本'],

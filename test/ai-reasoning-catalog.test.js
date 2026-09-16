@@ -53,6 +53,8 @@ test('compacts models.dev payloads into reasoning options and hosts', () => {
     assert.equal(catalog.hosts['api.openai.com'], 'openai');
     assert.equal(catalog.hosts['openrouter.ai'], 'openrouter');
     assert.equal(catalog.hosts['api.minimax.io'], 'minimax');
+    assert.equal(catalog.hosts['api.minimax.cn'], 'minimax');
+    assert.equal(catalog.hosts['api.minimaxi.com'], 'minimax');
     assert.equal(catalog.hosts['127.0.0.1'], undefined);
     assert.deepEqual(catalog.providers.openai['gpt-4o'], { reasoning: false });
     assert.deepEqual(

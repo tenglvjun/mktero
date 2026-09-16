@@ -313,6 +313,54 @@
                     </html:div>
                 </html:div>
 
+                <html:div id="mktero-ai-moonshot-endpoint-row"
+                          class="mktero-setting-row mktero-field-row"
+                          hidden="hidden">
+                    <html:div class="mktero-setting-copy">
+                        <html:label for="mktero-ai-moonshot-endpoint"><html:strong data-i18n="preferences.ai.moonshotEndpointLabel"></html:strong></html:label>
+                        <html:small id="mktero-ai-moonshot-endpoint-help" data-i18n="preferences.ai.moonshotEndpointHelp"></html:small>
+                    </html:div>
+                    <html:div class="mktero-field-control mktero-field-control-compact">
+                        <html:select id="mktero-ai-moonshot-endpoint"
+                                     aria-describedby="mktero-ai-moonshot-endpoint-help">
+                            <html:option value="international" data-i18n="preferences.ai.moonshotEndpoint.international"></html:option>
+                            <html:option value="china" data-i18n="preferences.ai.moonshotEndpoint.china"></html:option>
+                        </html:select>
+                    </html:div>
+                </html:div>
+
+                <html:div id="mktero-ai-minimax-endpoint-row"
+                          class="mktero-setting-row mktero-field-row"
+                          hidden="hidden">
+                    <html:div class="mktero-setting-copy">
+                        <html:label for="mktero-ai-minimax-endpoint"><html:strong data-i18n="preferences.ai.miniMaxEndpointLabel"></html:strong></html:label>
+                        <html:small id="mktero-ai-minimax-endpoint-help" data-i18n="preferences.ai.miniMaxEndpointHelp"></html:small>
+                    </html:div>
+                    <html:div class="mktero-field-control mktero-field-control-compact">
+                        <html:select id="mktero-ai-minimax-endpoint"
+                                     aria-describedby="mktero-ai-minimax-endpoint-help">
+                            <html:option value="international" data-i18n="preferences.ai.miniMaxEndpoint.international"></html:option>
+                            <html:option value="china" data-i18n="preferences.ai.miniMaxEndpoint.china"></html:option>
+                        </html:select>
+                    </html:div>
+                </html:div>
+
+                <html:div id="mktero-ai-alibaba-endpoint-row"
+                          class="mktero-setting-row mktero-field-row"
+                          hidden="hidden">
+                    <html:div class="mktero-setting-copy">
+                        <html:label for="mktero-ai-alibaba-endpoint"><html:strong data-i18n="preferences.ai.alibabaEndpointLabel"></html:strong></html:label>
+                        <html:small id="mktero-ai-alibaba-endpoint-help" data-i18n="preferences.ai.alibabaEndpointHelp"></html:small>
+                    </html:div>
+                    <html:div class="mktero-field-control mktero-field-control-compact">
+                        <html:select id="mktero-ai-alibaba-endpoint"
+                                     aria-describedby="mktero-ai-alibaba-endpoint-help">
+                            <html:option value="international" data-i18n="preferences.ai.alibabaEndpoint.international"></html:option>
+                            <html:option value="china" data-i18n="preferences.ai.alibabaEndpoint.china"></html:option>
+                        </html:select>
+                    </html:div>
+                </html:div>
+
                 <html:div id="mktero-ai-api-base-row"
                           class="mktero-setting-row mktero-field-row"
                           hidden="hidden">
@@ -412,22 +460,6 @@
                                     max="3600"
                                     step="1"
                                     aria-describedby="mktero-ai-request-timeout-help" />
-                    </html:div>
-                </html:div>
-
-                <html:div class="mktero-setting-row mktero-field-row">
-                    <html:div class="mktero-setting-copy">
-                        <html:label for="mktero-ai-max-output-tokens"><html:strong data-i18n="preferences.ai.maxOutputTokensLabel"></html:strong></html:label>
-                        <html:small id="mktero-ai-max-output-tokens-help" data-i18n="preferences.ai.maxOutputTokensHelp"></html:small>
-                    </html:div>
-                    <html:div class="mktero-field-control mktero-field-control-compact mktero-field-control-numeric">
-                        <html:input id="mktero-ai-max-output-tokens"
-                                    type="number"
-                                    min="0"
-                                    max="262144"
-                                    step="1024"
-                                    preference="extensions.mktero.aiMaxOutputTokens"
-                                    aria-describedby="mktero-ai-max-output-tokens-help" />
                     </html:div>
                 </html:div>
             </html:div>

@@ -158,7 +158,7 @@ test('rejects a connection probe when the provider returns no data', async () =>
     );
 });
 
-test('omits the output token limit when the provider should choose it', async () => {
+test('omits the output token limit unless a caller sets one', async () => {
     let request;
     const gateway = new AISDKGateway({
         fetch: async () => assert.fail('provider fetch should be lazy'),
@@ -169,29 +169,11 @@ test('omits the output token limit when the provider should choose it', async ()
     });
 
     await gateway.generateText({
-        settings: { ...SETTINGS, maxOutputTokens: 0 },
+        settings: SETTINGS,
         messages: [{ role: 'user', content: 'Test' }],
     });
 
     assert.equal(Object.hasOwn(request, 'maxOutputTokens'), false);
-});
-
-test('passes a full-document output token budget to AI SDK Core', async () => {
-    let request;
-    const gateway = new AISDKGateway({
-        fetch: async () => assert.fail('provider fetch should be lazy'),
-        generate: async value => {
-            request = value;
-            return { text: 'Completed' };
-        },
-    });
-
-    await gateway.generateText({
-        settings: { ...SETTINGS, maxOutputTokens: 65_536 },
-        messages: [{ role: 'user', content: 'Test' }],
-    });
-
-    assert.equal(request.maxOutputTokens, 65_536);
 });
 
 test('accepts large AI input and response without a byte budget', async () => {
@@ -508,6 +490,187 @@ test('passes catalog-only reasoning values to AI SDK Core', async () => {
     });
 
     assert.equal(request.reasoning, 'minimal');
+});
+
+test('logs provider, model, and reasoning before each model request', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        generate: async () => ({ text: 'Completed' }),
+        stream: async () => ({
+            textStream: {
+                async *[Symbol.asyncIterator]() {
+                    yield 'Completed';
+                },
+            },
+        }),
+        onDebug: message => logs.push(message),
+    });
+
+    await gateway.generateText({
+        settings: {
+            ...SETTINGS,
+            provider: 'openai',
+            protocol: 'openai-chat-completions',
+            model: 'gpt-5',
+            reasoning: 'high',
+            apiKey: 'secret-token',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+    await gateway.streamText({
+        settings: {
+            ...SETTINGS,
+            provider: 'anthropic',
+            protocol: 'anthropic-messages',
+            apiBase: 'https://api.anthropic.com/v1',
+            model: 'claude-sonnet-4-5',
+            reasoning: 'low',
+            apiKey: 'secret-token',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=openai model=gpt-5 reasoning=high apiBase=https://api.example.com/v1',
+        'Mktero: AI request provider=anthropic model=claude-sonnet-4-5 reasoning=low apiBase=https://api.anthropic.com/v1',
+    ]);
+    assert.equal(logs.join('\n').includes('secret-token'), false);
+});
+
+test('logs HTTP status without secrets when a provider request fails', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        generate: async () => {
+            throw new APICallError({
+                message: 'rate limited https://api.example.com/v1?token=secret-token',
+                url: 'https://api.example.com/v1?token=secret-token',
+                requestBodyValues: { prompt: 'secret-token' },
+                statusCode: 429,
+                responseBody: '{"error":{"message":"secret-token"}}',
+            });
+        },
+        onDebug: message => logs.push(message),
+    });
+
+    await assert.rejects(() => gateway.generateText({
+        settings: {
+            ...SETTINGS,
+            provider: 'moonshotai',
+            protocol: 'openai-chat-completions',
+            apiBase: 'https://api.moonshot.cn/v1',
+            model: 'kimi-k3',
+            apiKey: 'secret-token',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    }), error => error?.code === 'AI_RATE_LIMITED' && error?.status === 429);
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=moonshotai model=kimi-k3 reasoning=none apiBase=https://api.moonshot.cn/v1',
+        'Mktero: AI error provider=moonshotai model=kimi-k3 apiBase=https://api.moonshot.cn/v1 status=429 name=AI_APICallError detail=none code=AI_RATE_LIMITED',
+    ]);
+    assert.equal(logs.join('\n').includes('secret-token'), false);
+});
+
+test('logs a missing HTTP status for unreachable provider errors', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        stream: async () => {
+            throw Object.assign(new TypeError('Failed to fetch'), {
+                message: 'Failed to fetch https://api.example.com/v1?token=secret-token',
+            });
+        },
+        onDebug: message => logs.push(message),
+    });
+
+    await assert.rejects(() => gateway.streamText({
+        settings: {
+            ...SETTINGS,
+            provider: 'moonshotai',
+            protocol: 'openai-chat-completions',
+            apiBase: 'https://api.moonshot.cn/v1',
+            model: 'kimi-k3',
+            apiKey: 'secret-token',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    }), error => error?.code === 'AI_NETWORK_ERROR');
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=moonshotai model=kimi-k3 reasoning=none apiBase=https://api.moonshot.cn/v1',
+        'Mktero: AI error provider=moonshotai model=kimi-k3 apiBase=https://api.moonshot.cn/v1 status=none name=TypeError detail=none code=AI_NETWORK_ERROR',
+    ]);
+    assert.equal(logs.join('\n').includes('secret-token'), false);
+});
+
+test('logs the missing identifier for a streaming ReferenceError', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        stream: async () => {
+            throw Object.assign(new ReferenceError('ReadableStream is not defined'), {
+                name: 'ReferenceError',
+            });
+        },
+        onDebug: message => logs.push(message),
+    });
+
+    await assert.rejects(() => gateway.streamText({
+        settings: {
+            ...SETTINGS,
+            provider: 'moonshotai',
+            protocol: 'openai-chat-completions',
+            apiBase: 'https://api.moonshot.cn/v1',
+            model: 'kimi-k3',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    }), error => error?.code === 'AI_INVALID_RESPONSE');
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=moonshotai model=kimi-k3 reasoning=none apiBase=https://api.moonshot.cn/v1',
+        'Mktero: AI error provider=moonshotai model=kimi-k3 apiBase=https://api.moonshot.cn/v1 status=none name=ReferenceError detail=ReadableStream code=AI_INVALID_RESPONSE',
+    ]);
+});
+
+test('logs fallback reasoning when a model cannot disable it', async () => {
+    const logs = [];
+    const gateway = new AISDKGateway({
+        fetch: async () => assert.fail('provider fetch should be lazy'),
+        generate: async request => {
+            if (request.reasoning === 'none') {
+                throw new APICallError({
+                    message: 'reasoning cannot be disabled for this model',
+                    url: 'https://api.example.com/v1',
+                    requestBodyValues: {},
+                    statusCode: 400,
+                    responseBody: JSON.stringify({
+                        error: {
+                            param: 'reasoning_effort',
+                            code: 'unsupported_value',
+                        },
+                    }),
+                });
+            }
+            return { text: 'Completed' };
+        },
+        onDebug: message => logs.push(message),
+    });
+
+    await gateway.generateText({
+        settings: {
+            ...SETTINGS,
+            provider: 'openai',
+            protocol: 'openai-chat-completions',
+            model: 'o3',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.deepEqual(logs, [
+        'Mktero: AI request provider=openai model=o3 reasoning=none apiBase=https://api.example.com/v1',
+        'Mktero: AI request provider=openai model=o3 reasoning=provider-default apiBase=https://api.example.com/v1',
+    ]);
 });
 
 test('falls back to provider reasoning when a model cannot disable it', async () => {
@@ -1012,6 +1175,48 @@ test('uses the OpenAI Responses wire protocol through AI SDK Core', async () => 
     assert.equal(JSON.parse(request.init.body).model, 'o3');
     assert.equal(JSON.parse(request.init.body).reasoning.effort, 'high');
     assert.equal(result.text, 'Responses result');
+});
+
+test('sends reasoning effort for custom OpenAI Responses models', async () => {
+    let request;
+    const gateway = new AISDKGateway({
+        fetch: async (url, init) => {
+            request = { url: String(url), init };
+            return jsonResponse({
+                id: 'resp-test',
+                object: 'response',
+                created_at: 1,
+                model: 'grok-4.6',
+                output: [{
+                    id: 'msg-test',
+                    type: 'message',
+                    role: 'assistant',
+                    status: 'completed',
+                    content: [{
+                        type: 'output_text',
+                        text: 'Responses result',
+                        annotations: [],
+                    }],
+                }],
+                status: 'completed',
+            });
+        },
+    });
+
+    await gateway.generateText({
+        settings: {
+            ...SETTINGS,
+            provider: 'custom',
+            protocol: 'openai-responses',
+            model: 'grok-4.6',
+            reasoning: 'low',
+        },
+        messages: [{ role: 'user', content: 'Test' }],
+    });
+
+    assert.equal(request.url, 'https://api.example.com/v1/responses');
+    assert.equal(JSON.parse(request.init.body).model, 'grok-4.6');
+    assert.equal(JSON.parse(request.init.body).reasoning.effort, 'low');
 });
 
 test('uses the Anthropic Messages wire protocol through AI SDK Core', async () => {

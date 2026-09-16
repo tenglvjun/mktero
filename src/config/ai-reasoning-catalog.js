@@ -32,6 +32,8 @@ const CURATED_HOSTS = Object.freeze({
     'api.moonshot.ai': AI_PROVIDER_MOONSHOT,
     'api.moonshot.cn': AI_PROVIDER_MOONSHOT,
     'api.minimax.io': AI_PROVIDER_MINIMAX,
+    'api.minimax.cn': AI_PROVIDER_MINIMAX,
+    'api.minimaxi.com': AI_PROVIDER_MINIMAX,
 });
 
 export function compactAIReasoningCatalog(data) {

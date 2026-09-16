@@ -222,6 +222,43 @@ test('bridges Web Streams from the hidden DOM window when the main window is una
     assert.equal(context.TextDecoderStream, streams.TextDecoderStream);
 });
 
+test('bridges console from the Zotero main window before AI SDK loading', async () => {
+    const source = await readFile(
+        path.join(projectRoot, 'src', 'platform', 'web-streams.js'),
+        'utf8'
+    );
+    const windowConsole = {
+        warn() {},
+        log() {},
+    };
+    const context = vm.createContext({
+        console: undefined,
+        Zotero: {
+            getMainWindow: () => ({ console: windowConsole }),
+        },
+    });
+    vm.runInContext(source, context);
+    assert.equal(vm.runInContext('console', context), windowConsole);
+});
+
+test('installs a console stub when the sandbox has none', async () => {
+    const source = await readFile(
+        path.join(projectRoot, 'src', 'platform', 'web-streams.js'),
+        'utf8'
+    );
+    const logged = [];
+    const context = vm.createContext({
+        console: undefined,
+        Zotero: {
+            getMainWindow: () => null,
+            debug: message => logged.push(message),
+        },
+    });
+    vm.runInContext(source, context);
+    vm.runInContext('console.warn("console is not defined")', context);
+    assert.deepEqual(logged, ['console is not defined']);
+});
+
 async function buildProject() {
     await execFileAsync(process.execPath, ['scripts/build.mjs'], {
         cwd: projectRoot,

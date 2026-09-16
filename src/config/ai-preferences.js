@@ -6,7 +6,6 @@ export const AI_MODEL_PREF = 'extensions.mktero.aiModel';
 export const AI_REASONING_PREF = 'extensions.mktero.aiReasoning';
 export const AI_TARGET_LANGUAGE_PREF = 'extensions.mktero.aiTargetLanguage';
 export const AI_REQUEST_TIMEOUT_PREF = 'extensions.mktero.aiRequestTimeoutMs';
-export const AI_MAX_OUTPUT_TOKENS_PREF = 'extensions.mktero.aiMaxOutputTokens';
 export const AI_STREAMING_PREF = 'extensions.mktero.aiStreaming';
 export const AI_AUTO_TRANSLATE_SELECTION_PREF =
     'extensions.mktero.aiAutoTranslateSelection';
@@ -39,11 +38,28 @@ export const AI_PROVIDER_API_BASES = Object.freeze({
     [AI_PROVIDER_MOONSHOT]: 'https://api.moonshot.ai/v1',
     [AI_PROVIDER_MINIMAX]: 'https://api.minimax.io/anthropic/v1',
 });
+export const AI_ALIBABA_API_BASE_INTERNATIONAL =
+    AI_PROVIDER_API_BASES[AI_PROVIDER_ALIBABA];
+export const AI_ALIBABA_API_BASE_CHINA =
+    'https://dashscope.aliyuncs.com/compatible-mode/v1';
+export const AI_MOONSHOT_API_BASE_INTERNATIONAL =
+    AI_PROVIDER_API_BASES[AI_PROVIDER_MOONSHOT];
+export const AI_MOONSHOT_API_BASE_CHINA = 'https://api.moonshot.cn/v1';
+export const AI_MINIMAX_API_BASE_INTERNATIONAL =
+    AI_PROVIDER_API_BASES[AI_PROVIDER_MINIMAX];
+export const AI_MINIMAX_API_BASE_CHINA = 'https://api.minimax.cn/anthropic/v1';
+const AI_MINIMAX_API_BASE_CHINA_ALIASES = Object.freeze([
+    AI_MINIMAX_API_BASE_CHINA,
+    'https://api.minimax.cn/anthropic',
+    'https://api.minimaxi.com/anthropic/v1',
+    'https://api.minimaxi.com/anthropic',
+]);
 const AI_KNOWN_API_BASE_ALIASES = Object.freeze([
     'https://api.anthropic.com',
-    'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    AI_ALIBABA_API_BASE_CHINA,
     'https://api.moonshot.cn/v1',
     'https://api.minimax.io/anthropic',
+    ...AI_MINIMAX_API_BASE_CHINA_ALIASES,
 ]);
 export const AI_DEFAULT_TARGET_LANGUAGE = 'zh-CN';
 export const AI_DEFAULT_REASONING = 'none';
@@ -111,8 +127,9 @@ export function getAISettings(zotero) {
         protocol: normalizeProtocol(get(AI_PROTOCOL_PREF), provider, {
             legacyOpenAICompatible: rawProvider === AI_PROVIDER_OPENAI_COMPATIBLE,
         }),
-        apiBase: trimTrailingSlash(
-            String(apiBase ?? AI_DEFAULT_API_BASE).trim()
+        apiBase: normalizeProviderApiBase(
+            provider,
+            trimTrailingSlash(String(apiBase ?? AI_DEFAULT_API_BASE).trim())
         ),
         apiKey: String(get(AI_API_KEY_PREF) || '').trim(),
         model: String(get(AI_MODEL_PREF) || '').trim(),
@@ -126,12 +143,7 @@ export function getAISettings(zotero) {
             1_000,
             AI_MAX_REQUEST_TIMEOUT_MS
         ),
-        maxOutputTokens: normalizeInteger(
-            get(AI_MAX_OUTPUT_TOKENS_PREF),
-            AI_DEFAULT_MAX_OUTPUT_TOKENS,
-            0,
-            AI_MAX_OUTPUT_TOKENS
-        ),
+        maxOutputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS,
         streaming: get(AI_STREAMING_PREF) !== false,
     };
 }
@@ -222,7 +234,10 @@ export function validateAISettings(settings = {}) {
         error.code = 'AI_PROVIDER_UNSUPPORTED';
         throw error;
     }
-    const apiBase = normalizeAIBaseURL(settings.apiBase);
+    const apiBase = normalizeProviderApiBase(
+        provider,
+        normalizeAIBaseURL(settings.apiBase)
+    );
     const model = String(settings.model || '').trim();
     if (!model) throw aiConfigurationError('An AI model is required');
     if (model.length > MAX_AI_MODEL_LENGTH || hasControlCharacters(model)) {
@@ -251,12 +266,7 @@ export function validateAISettings(settings = {}) {
             1_000,
             AI_MAX_REQUEST_TIMEOUT_MS
         ),
-        maxOutputTokens: normalizeInteger(
-            settings.maxOutputTokens,
-            AI_DEFAULT_MAX_OUTPUT_TOKENS,
-            0,
-            AI_MAX_OUTPUT_TOKENS
-        ),
+        maxOutputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS,
         streaming: settings.streaming !== false,
     };
 }
@@ -320,6 +330,84 @@ export function defaultAIApiBaseForProvider(provider) {
     return AI_PROVIDER_API_BASES[normalizeProvider(provider)] || '';
 }
 
+export function alibabaApiBaseRegion(value) {
+    return normalizeAlibabaApiBase(value) === AI_ALIBABA_API_BASE_CHINA
+        ? 'china'
+        : 'international';
+}
+
+export function alibabaApiBaseForRegion(region) {
+    return region === 'china'
+        ? AI_ALIBABA_API_BASE_CHINA
+        : AI_ALIBABA_API_BASE_INTERNATIONAL;
+}
+
+export function moonshotApiBaseRegion(value) {
+    return normalizeMoonshotApiBase(value) === AI_MOONSHOT_API_BASE_CHINA
+        ? 'china'
+        : 'international';
+}
+
+export function moonshotApiBaseForRegion(region) {
+    return region === 'china'
+        ? AI_MOONSHOT_API_BASE_CHINA
+        : AI_MOONSHOT_API_BASE_INTERNATIONAL;
+}
+
+export function miniMaxApiBaseRegion(value) {
+    return normalizeMiniMaxApiBase(value) === AI_MINIMAX_API_BASE_CHINA
+        ? 'china'
+        : 'international';
+}
+
+export function miniMaxApiBaseForRegion(region) {
+    return region === 'china'
+        ? AI_MINIMAX_API_BASE_CHINA
+        : AI_MINIMAX_API_BASE_INTERNATIONAL;
+}
+
+function normalizeProviderApiBase(provider, apiBase) {
+    if (provider === AI_PROVIDER_ALIBABA) {
+        return normalizeAlibabaApiBase(apiBase);
+    }
+    if (provider === AI_PROVIDER_MOONSHOT) {
+        return normalizeMoonshotApiBase(apiBase);
+    }
+    if (provider === AI_PROVIDER_MINIMAX) {
+        return normalizeMiniMaxApiBase(apiBase);
+    }
+    const current = trimTrailingSlash(String(apiBase || '').trim());
+    const own = defaultAIApiBaseForProvider(provider);
+    if (provider !== AI_PROVIDER_CUSTOM
+        && current
+        && current !== own
+        && getKnownAIApiBases().has(current)) {
+        return own;
+    }
+    return current;
+}
+
+function normalizeAlibabaApiBase(value) {
+    const current = trimTrailingSlash(String(value || '').trim());
+    return current === AI_ALIBABA_API_BASE_CHINA
+        ? AI_ALIBABA_API_BASE_CHINA
+        : AI_ALIBABA_API_BASE_INTERNATIONAL;
+}
+
+function normalizeMoonshotApiBase(value) {
+    const current = trimTrailingSlash(String(value || '').trim());
+    return current === AI_MOONSHOT_API_BASE_CHINA
+        ? AI_MOONSHOT_API_BASE_CHINA
+        : AI_MOONSHOT_API_BASE_INTERNATIONAL;
+}
+
+function normalizeMiniMaxApiBase(value) {
+    const current = trimTrailingSlash(String(value || '').trim());
+    return AI_MINIMAX_API_BASE_CHINA_ALIASES.includes(current)
+        ? AI_MINIMAX_API_BASE_CHINA
+        : AI_MINIMAX_API_BASE_INTERNATIONAL;
+}
+
 export function isReplaceableAIApiBase(value) {
     const current = trimTrailingSlash(String(value || '').trim());
     if (!current) return true;
@@ -361,7 +449,6 @@ function applyAIProviderProfile(zotero, provider, profile) {
     set(AI_MODEL_PREF, next.model);
     set(AI_REASONING_PREF, next.reasoning);
     set(AI_REQUEST_TIMEOUT_PREF, next.requestTimeoutMs);
-    set(AI_MAX_OUTPUT_TOKENS_PREF, next.maxOutputTokens);
     set(AI_STREAMING_PREF, next.streaming);
 }
 
@@ -410,7 +497,7 @@ function normalizeStoredProfile(provider, profile) {
         );
     return {
         protocol: normalizeProtocol(source.protocol, provider),
-        apiBase,
+        apiBase: normalizeProviderApiBase(provider, apiBase),
         apiKey: String(source.apiKey || '').trim().slice(0, MAX_AI_API_KEY_LENGTH),
         model: String(source.model || '').trim().slice(0, MAX_AI_MODEL_LENGTH),
         reasoning: normalizeStoredReasoning(source.reasoning),
@@ -420,12 +507,7 @@ function normalizeStoredProfile(provider, profile) {
             1_000,
             AI_MAX_REQUEST_TIMEOUT_MS
         ),
-        maxOutputTokens: normalizeInteger(
-            source.maxOutputTokens,
-            AI_DEFAULT_MAX_OUTPUT_TOKENS,
-            0,
-            AI_MAX_OUTPUT_TOKENS
-        ),
+        maxOutputTokens: AI_DEFAULT_MAX_OUTPUT_TOKENS,
         streaming: source.streaming !== false,
     };
 }

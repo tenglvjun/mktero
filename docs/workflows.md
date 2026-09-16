@@ -83,9 +83,8 @@ selection starts one bounded request automatically after a short delay. The
 translated side of `Bilingual`, `Translation` reading, and saved HTML snapshots
 do not offer selection translation. Selection results stay in the popup, do not
 modify Markdown or notes, and are not added to the full-document translation
-cache. Each selection request sends the selected text and a bounded amount of
-nearby source context to the configured AI provider and may incur provider
-usage costs.
+cache. Each selection request sends only the selected text to the configured
+AI provider and may incur provider usage costs.
 
 Mktero includes adapters for OpenAI, Anthropic, Google Gemini, DeepSeek,
 Alibaba Cloud Model Studio, Moonshot/Kimi, MiniMax, and custom OpenAI-compatible

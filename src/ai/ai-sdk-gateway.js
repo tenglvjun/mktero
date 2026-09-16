@@ -51,6 +51,7 @@ export class AISDKGateway {
         clearTimer,
         generate = generateText,
         stream = streamTextResult,
+        onDebug,
     } = {}) {
         if (typeof fetch !== 'function') {
             throw new TypeError('A fetch implementation is required');
@@ -72,6 +73,7 @@ export class AISDKGateway {
             || bindRuntimeMethod(runtimeWindow, 'clearTimeout');
         this.generate = generate;
         this.stream = stream;
+        this.onDebug = typeof onDebug === 'function' ? onDebug : null;
         this.reasoningFallbacks = new Set();
     }
 
@@ -105,13 +107,11 @@ export class AISDKGateway {
                 this.fetch,
                 providerSessionHeaders(configuration.apiBase, sessionId)
             );
-            const outputTokens = normalizeOutputTokens(
-                maxOutputTokens,
-                configuration.maxOutputTokens
-            );
+            const outputTokens = normalizeOutputTokens(maxOutputTokens);
             const result = await requestWithReasoningFallback({
                 configuration,
                 canFallback: () => !timedOut && !signal?.aborted,
+                onDebug: this.onDebug,
                 onFallback: () => rememberReasoningFallback(
                     this.reasoningFallbacks,
                     configuration
@@ -142,14 +142,13 @@ export class AISDKGateway {
             };
         }
         catch (error) {
-            if (timedOut) {
-                throw aiError('The AI request timed out', 'AI_REQUEST_TIMEOUT');
-            }
-            if (signal?.aborted) throw abortReason(signal);
-            if (isAIError(error)) throw error;
-            if (APICallError.isInstance(error)) throw apiCallError(error);
-            if (isAbortError(error)) throw error;
-            throw aiError('The AI provider could not be reached', 'AI_NETWORK_ERROR');
+            throwMappedAIError({
+                onDebug: this.onDebug,
+                configuration,
+                error,
+                timedOut,
+                signal,
+            });
         }
         finally {
             if (timeoutID !== null && typeof this.clearTimer === 'function') {
@@ -190,16 +189,14 @@ export class AISDKGateway {
                 this.fetch,
                 providerSessionHeaders(configuration.apiBase, sessionId)
             );
-            const outputTokens = normalizeOutputTokens(
-                maxOutputTokens,
-                configuration.maxOutputTokens
-            );
+            const outputTokens = normalizeOutputTokens(maxOutputTokens);
             let emittedText = false;
             return await requestWithReasoningFallback({
                 configuration,
                 canFallback: () => !emittedText
                     && !timedOut
                     && !signal?.aborted,
+                onDebug: this.onDebug,
                 onFallback: () => rememberReasoningFallback(
                     this.reasoningFallbacks,
                     configuration
@@ -241,14 +238,13 @@ export class AISDKGateway {
             });
         }
         catch (error) {
-            if (timedOut) {
-                throw aiError('The AI request timed out', 'AI_REQUEST_TIMEOUT');
-            }
-            if (signal?.aborted) throw abortReason(signal);
-            if (isAIError(error)) throw error;
-            if (APICallError.isInstance(error)) throw apiCallError(error);
-            if (isAbortError(error)) throw error;
-            throw aiError('The AI provider could not be reached', 'AI_NETWORK_ERROR');
+            throwMappedAIError({
+                onDebug: this.onDebug,
+                configuration,
+                error,
+                timedOut,
+                signal,
+            });
         }
         finally {
             if (timeoutID !== null && typeof this.clearTimer === 'function') {
@@ -264,7 +260,9 @@ async function requestWithReasoningFallback({
     request,
     canFallback = () => true,
     onFallback,
+    onDebug,
 }) {
+    debugAIRequest(onDebug, configuration);
     try {
         return await request(configuration);
     }
@@ -274,10 +272,128 @@ async function requestWithReasoningFallback({
             throw error;
         }
         onFallback?.();
-        return request({
+        const fallbackConfiguration = {
             ...configuration,
             reasoning: AI_PROVIDER_DEFAULT_REASONING,
-        });
+        };
+        debugAIRequest(onDebug, fallbackConfiguration);
+        return request(fallbackConfiguration);
+    }
+}
+
+function debugAIRequest(onDebug, configuration) {
+    if (typeof onDebug !== 'function') return;
+    onDebug(
+        'Mktero: AI request '
+        + `provider=${configuration.provider} `
+        + `model=${configuration.model} `
+        + `reasoning=${configuration.reasoning} `
+        + `apiBase=${debugAIApiBase(configuration.apiBase)}`
+    );
+}
+
+function throwMappedAIError({
+    onDebug,
+    configuration,
+    error,
+    timedOut,
+    signal,
+}) {
+    if (timedOut) {
+        throwLoggedAIError(
+            onDebug,
+            configuration,
+            error,
+            aiError('The AI request timed out', 'AI_REQUEST_TIMEOUT')
+        );
+    }
+    if (signal?.aborted) throw abortReason(signal);
+    if (isAIError(error)) {
+        throwLoggedAIError(onDebug, configuration, error, error);
+    }
+    if (APICallError.isInstance(error)) {
+        throwLoggedAIError(onDebug, configuration, error, apiCallError(error));
+    }
+    if (isAbortError(error)) throw error;
+    throwLoggedAIError(
+        onDebug,
+        configuration,
+        error,
+        isProgrammingError(error)
+            ? aiError(
+                'The AI request failed internally',
+                'AI_INVALID_RESPONSE'
+            )
+            : aiError(
+                'The AI provider could not be reached',
+                'AI_NETWORK_ERROR'
+            )
+    );
+}
+
+function isProgrammingError(error) {
+    const name = error?.name;
+    if (name === 'ReferenceError') return true;
+    if (name !== 'TypeError') return false;
+    return / is not (?:defined|a function)/.test(String(error?.message || ''));
+}
+
+function throwLoggedAIError(onDebug, configuration, error, mapped) {
+    debugAIError(onDebug, configuration, error, mapped);
+    throw mapped;
+}
+
+function debugAIError(onDebug, configuration, error, mapped) {
+    if (typeof onDebug !== 'function') return;
+    onDebug(
+        'Mktero: AI error '
+        + `provider=${configuration.provider} `
+        + `model=${configuration.model} `
+        + `apiBase=${debugAIApiBase(configuration.apiBase)} `
+        + `status=${debugAIStatus(error, mapped)} `
+        + `name=${debugAIToken(error?.name)} `
+        + `detail=${debugAIErrorDetail(error)} `
+        + `code=${debugAIToken(mapped?.code)}`
+    );
+}
+
+function debugAIStatus(error, mapped) {
+    const status = Number(error?.statusCode ?? error?.status ?? mapped?.status);
+    if (!Number.isInteger(status) || status < 100 || status > 599) return 'none';
+    return String(status);
+}
+
+function debugAIToken(value) {
+    const token = String(value || '').trim();
+    if (!token || token.length > 64 || !/^[A-Za-z0-9._-]+$/.test(token)) {
+        return 'none';
+    }
+    return token;
+}
+
+function debugAIErrorDetail(error) {
+    const message = String(error?.message || '');
+    const undefinedName = message.match(
+        /([A-Za-z_$][\w$]{0,63}) is not defined/
+    );
+    if (undefinedName) return undefinedName[1];
+    const notAFunction = message.match(
+        /([A-Za-z_$][\w$]{0,63}) is not a function/
+    );
+    if (notAFunction) return notAFunction[1];
+    return 'none';
+}
+
+function debugAIApiBase(value) {
+    try {
+        const url = new URL(String(value || '').trim());
+        if (url.username || url.password || url.search || url.hash) return 'none';
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'none';
+        const origin = `${url.origin}${url.pathname}`.replace(/\/+$/, '');
+        return origin && origin.length <= 256 ? origin : 'none';
+    }
+    catch {
+        return 'none';
     }
 }
 
@@ -533,6 +649,15 @@ function reasoningRequestPolicy(configuration) {
                             : 'adaptive',
                     },
                 },
+            },
+        };
+    }
+    if (configuration.provider === AI_PROVIDER_CUSTOM
+        && configuration.protocol === AI_PROTOCOL_OPENAI_RESPONSES) {
+        return {
+            reasoning,
+            providerOptions: {
+                openai: { forceReasoning: true },
             },
         };
     }
@@ -801,8 +926,8 @@ function isLoopbackURL(value) {
     }
 }
 
-function normalizeOutputTokens(value, fallback) {
-    const number = Number(value ?? fallback);
+function normalizeOutputTokens(value) {
+    const number = Number(value);
     if (!Number.isFinite(number) || number <= 0) return null;
     return Math.max(1, Math.min(AI_MAX_OUTPUT_TOKENS, Math.round(number)));
 }

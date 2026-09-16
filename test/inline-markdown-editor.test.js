@@ -6679,6 +6679,78 @@ test('shows a localized error when a selection exceeds the translation limit', a
     dom.window.close();
 });
 
+test('keeps streamed selection text when the finished response is invalid', async () => {
+    const dom = new JSDOM('<!doctype html><div id="popup-parent"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const parent = document.querySelector('#popup-parent');
+    const anchor = document.createElement('span');
+    parent.appendChild(anchor);
+    const popup = createAnnotationPopup(parent, {
+        translateSelection: async (_text, _context, { onTextDelta } = {}) => {
+            onTextDelta('已译', '已译出的句子');
+            const error = new Error('invalid');
+            error.code = 'AI_INVALID_RESPONSE';
+            throw error;
+        },
+    });
+
+    popup.openSelection({
+        anchor,
+        selection: { text: 'Selected sentence' },
+        selectionContext: { side: 'source' },
+    });
+    parent.querySelector('[data-action="translate-selection"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const actions = parent.querySelector('.mktero-markdown-selection-actions');
+    const result = actions.querySelector('.mktero-selection-translation-result');
+    assert.equal(actions.dataset.translationStatus, 'success');
+    assert.equal(result.hidden, false);
+    assert.equal(result.textContent, '已译出的句子');
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('does not repeat the generic selection translation failure', async () => {
+    const dom = new JSDOM('<!doctype html><div id="popup-parent"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const parent = document.querySelector('#popup-parent');
+    const anchor = document.createElement('span');
+    parent.appendChild(anchor);
+    const popup = createAnnotationPopup(parent, {
+        translateSelection: async () => {
+            const error = new Error('empty');
+            error.code = 'AI_INVALID_RESPONSE';
+            throw error;
+        },
+    });
+
+    popup.openSelection({
+        anchor,
+        selection: { text: 'Selected text' },
+        selectionContext: { side: 'source' },
+    });
+    parent.querySelector('[data-action="translate-selection"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const actions = parent.querySelector('.mktero-markdown-selection-actions');
+    const status = actions.querySelector('.mktero-selection-translation-status');
+    const error = actions.querySelector('.mktero-selection-translation-error');
+    assert.equal(actions.dataset.translationStatus, 'error');
+    assert.equal(status.textContent, 'The selection could not be translated.');
+    assert.equal(error.hidden, true);
+
+    popup.destroy();
+    dom.window.close();
+});
+
 test('clears streamed selection text on cancellation and ignores late deltas', () => {
     const dom = new JSDOM('<!doctype html><div id="popup-parent"></div>', {
         pretendToBeVisual: true,
@@ -6868,7 +6940,7 @@ test('allows annotations only from original bilingual selections', async () => {
     dom.window.close();
 });
 
-test('passes selection translation callbacks and bounded raw-source context', async () => {
+test('passes selection translation callbacks without surrounding source', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
@@ -6926,13 +6998,7 @@ test('passes selection translation callbacks and bounded raw-source context', as
 
     assert.deepEqual(calls, [{
         text: selectedText,
-        selectionContext: {
-            side: 'source',
-            translationContext: markdown.slice(
-                Math.max(0, markdown.indexOf(selectedText) - 800),
-                markdown.indexOf(selectedText) + selectedText.length + 800
-            ),
-        },
+        selectionContext: { side: 'source' },
     }]);
     assert.equal(
         actions.querySelector('.mktero-selection-translation-result').textContent,

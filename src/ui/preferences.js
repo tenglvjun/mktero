@@ -14,14 +14,24 @@ import {
     createZoteroMarkdownReadingPositionStore,
 } from '../cache/markdown-reading-position-store.js';
 import {
+    AI_API_BASE_PREF,
     AI_PROTOCOL_PREF,
+    AI_PROVIDER_ALIBABA,
     AI_PROVIDER_CUSTOM,
+    AI_PROVIDER_MINIMAX,
+    AI_PROVIDER_MOONSHOT,
     AI_REASONING_PREF,
     AI_REQUEST_TIMEOUT_PREF,
     aiRequestTimeoutMsFromSeconds,
     aiRequestTimeoutSecondsFromMs,
     getAIProtocolsForProvider,
     getAISettings,
+    alibabaApiBaseForRegion,
+    alibabaApiBaseRegion,
+    miniMaxApiBaseForRegion,
+    miniMaxApiBaseRegion,
+    moonshotApiBaseForRegion,
+    moonshotApiBaseRegion,
     switchAIProvider,
     syncCurrentAIProviderProfile,
 } from '../config/ai-preferences.js';
@@ -165,14 +175,29 @@ export function createPreferencesController({
     const aiProtocolInput = document.getElementById('mktero-ai-protocol');
     const aiApiBaseInput = document.getElementById('mktero-ai-api-base');
     const aiApiBaseRow = document.getElementById('mktero-ai-api-base-row');
+    const aiMoonshotEndpointInput = document.getElementById(
+        'mktero-ai-moonshot-endpoint'
+    );
+    const aiMoonshotEndpointRow = document.getElementById(
+        'mktero-ai-moonshot-endpoint-row'
+    );
+    const aiMiniMaxEndpointInput = document.getElementById(
+        'mktero-ai-minimax-endpoint'
+    );
+    const aiMiniMaxEndpointRow = document.getElementById(
+        'mktero-ai-minimax-endpoint-row'
+    );
+    const aiAlibabaEndpointInput = document.getElementById(
+        'mktero-ai-alibaba-endpoint'
+    );
+    const aiAlibabaEndpointRow = document.getElementById(
+        'mktero-ai-alibaba-endpoint-row'
+    );
     const aiProtocolRow = document.getElementById('mktero-ai-protocol-row');
     const aiModelInput = document.getElementById('mktero-ai-model');
     const aiReasoningInput = document.getElementById('mktero-ai-reasoning');
     const aiRequestTimeoutInput = document.getElementById(
         'mktero-ai-request-timeout'
-    );
-    const aiMaxOutputTokensInput = document.getElementById(
-        'mktero-ai-max-output-tokens'
     );
     const tabList = document.getElementById('mktero-pref-tablist');
     const t = (key, variables) => localization.t(key, variables);
@@ -435,8 +460,56 @@ export function createPreferencesController({
 
     function updateAICustomFieldVisibility() {
         const custom = aiProviderInput?.value === AI_PROVIDER_CUSTOM;
+        const moonshot = aiProviderInput?.value === AI_PROVIDER_MOONSHOT;
+        const miniMax = aiProviderInput?.value === AI_PROVIDER_MINIMAX;
+        const alibaba = aiProviderInput?.value === AI_PROVIDER_ALIBABA;
         if (aiApiBaseRow) aiApiBaseRow.hidden = !custom;
         if (aiProtocolRow) aiProtocolRow.hidden = !custom;
+        if (aiMoonshotEndpointRow) aiMoonshotEndpointRow.hidden = !moonshot;
+        if (aiMiniMaxEndpointRow) aiMiniMaxEndpointRow.hidden = !miniMax;
+        if (aiAlibabaEndpointRow) aiAlibabaEndpointRow.hidden = !alibaba;
+    }
+
+    function applyMoonshotEndpointToControls(apiBase) {
+        if (!aiMoonshotEndpointInput) return;
+        aiMoonshotEndpointInput.value = moonshotApiBaseRegion(apiBase);
+    }
+
+    function applyMiniMaxEndpointToControls(apiBase) {
+        if (!aiMiniMaxEndpointInput) return;
+        aiMiniMaxEndpointInput.value = miniMaxApiBaseRegion(apiBase);
+    }
+
+    function saveMoonshotEndpoint() {
+        if (!aiMoonshotEndpointInput) return;
+        if (aiProviderInput?.value !== AI_PROVIDER_MOONSHOT) return;
+        const apiBase = moonshotApiBaseForRegion(aiMoonshotEndpointInput.value);
+        if (aiApiBaseInput) aiApiBaseInput.value = apiBase;
+        zotero?.Prefs?.set?.(AI_API_BASE_PREF, apiBase, true);
+        updateAIReasoningOptions();
+    }
+
+    function saveMiniMaxEndpoint() {
+        if (!aiMiniMaxEndpointInput) return;
+        if (aiProviderInput?.value !== AI_PROVIDER_MINIMAX) return;
+        const apiBase = miniMaxApiBaseForRegion(aiMiniMaxEndpointInput.value);
+        if (aiApiBaseInput) aiApiBaseInput.value = apiBase;
+        zotero?.Prefs?.set?.(AI_API_BASE_PREF, apiBase, true);
+        updateAIReasoningOptions();
+    }
+
+    function applyAlibabaEndpointToControls(apiBase) {
+        if (!aiAlibabaEndpointInput) return;
+        aiAlibabaEndpointInput.value = alibabaApiBaseRegion(apiBase);
+    }
+
+    function saveAlibabaEndpoint() {
+        if (!aiAlibabaEndpointInput) return;
+        if (aiProviderInput?.value !== AI_PROVIDER_ALIBABA) return;
+        const apiBase = alibabaApiBaseForRegion(aiAlibabaEndpointInput.value);
+        if (aiApiBaseInput) aiApiBaseInput.value = apiBase;
+        zotero?.Prefs?.set?.(AI_API_BASE_PREF, apiBase, true);
+        updateAIReasoningOptions();
     }
 
     function initializeAITestButton() {
@@ -467,6 +540,13 @@ export function createPreferencesController({
         aiModelInput?.addEventListener('change', updateAIReasoningOptions);
         aiApiBaseInput?.addEventListener('input', updateAIReasoningOptions);
         aiApiBaseInput?.addEventListener('change', updateAIReasoningOptions);
+        aiMoonshotEndpointInput?.addEventListener('change', saveMoonshotEndpoint);
+        aiMiniMaxEndpointInput?.addEventListener('change', saveMiniMaxEndpoint);
+        aiAlibabaEndpointInput?.addEventListener('change', saveAlibabaEndpoint);
+        applyMoonshotEndpointToControls(settings.apiBase);
+        applyMiniMaxEndpointToControls(settings.apiBase);
+        applyAlibabaEndpointToControls(settings.apiBase);
+        aiReasoningInput?.addEventListener('change', saveAIReasoning);
         updateAIReasoningOptions();
         if (!reasoningCatalog && zotero?.Mktero?.subscribeAIReasoningCatalog) {
             unsubscribeReasoningCatalog = zotero.Mktero.subscribeAIReasoningCatalog(
@@ -486,10 +566,9 @@ export function createPreferencesController({
         }
         const nextSettings = switchAIProvider(
             zotero,
-            {
-                ...readAISettingsFromControls(document, zotero),
+            readAISettingsFromControls(document, zotero, {
                 provider: activeAIProvider,
-            },
+            }),
             nextProvider
         );
         applyAISettingsToControls(nextSettings);
@@ -503,6 +582,9 @@ export function createPreferencesController({
         if (aiProviderInput) aiProviderInput.value = settings.provider;
         if (aiProtocolInput) aiProtocolInput.value = settings.protocol;
         if (aiApiBaseInput) aiApiBaseInput.value = settings.apiBase || '';
+        applyMoonshotEndpointToControls(settings.apiBase);
+        applyMiniMaxEndpointToControls(settings.apiBase);
+        applyAlibabaEndpointToControls(settings.apiBase);
         if (aiModelInput) aiModelInput.value = settings.model || '';
         const apiKeyInput = document.getElementById('mktero-ai-api-key');
         if (apiKeyInput) apiKeyInput.value = settings.apiKey || '';
@@ -511,9 +593,6 @@ export function createPreferencesController({
             aiRequestTimeoutInput.value = String(
                 aiRequestTimeoutSecondsFromMs(settings.requestTimeoutMs)
             );
-        }
-        if (aiMaxOutputTokensInput) {
-            aiMaxOutputTokensInput.value = String(settings.maxOutputTokens);
         }
         const streamingInput = document.getElementById('mktero-ai-streaming');
         if (streamingInput) streamingInput.checked = settings.streaming !== false;
@@ -525,13 +604,24 @@ export function createPreferencesController({
             currentAIReasoningSettings(),
             currentReasoningCatalog()
         );
-        const current = aiReasoningInput.value;
-        const next = selectAIReasoningValue(levels, current);
+        const stored = String(getAISettings(zotero).reasoning || '').trim();
+        const next = selectAIReasoningValue(levels, stored);
         rebuildAIReasoningOptions(aiReasoningInput, levels, t);
         aiReasoningInput.value = next;
-        if (persist && next !== current) {
+        if (persist && next !== stored) {
             zotero?.Prefs?.set?.(AI_REASONING_PREF, next, true);
         }
+    }
+
+    function saveAIReasoning() {
+        if (!aiReasoningInput) return;
+        const levels = resolveAIReasoningLevels(
+            currentAIReasoningSettings(),
+            currentReasoningCatalog()
+        );
+        const next = selectAIReasoningValue(levels, aiReasoningInput.value);
+        aiReasoningInput.value = next;
+        zotero?.Prefs?.set?.(AI_REASONING_PREF, next, true);
     }
 
     function scheduleAIReasoningOptionsUpdate() {
@@ -571,14 +661,6 @@ export function createPreferencesController({
             aiRequestTimeoutSecondsFromMs(timeoutMs)
         );
         aiRequestTimeoutInput.addEventListener('change', saveAIRequestTimeout);
-    }
-
-    function initializePreferenceControlLimits() {
-        if (aiMaxOutputTokensInput) {
-            aiMaxOutputTokensInput.max = String(
-                PREFERENCE_CONTROL_LIMITS.aiMaxOutputTokens
-            );
-        }
     }
 
     async function refresh() {
@@ -685,7 +767,6 @@ export function createPreferencesController({
             initializeConversionProvider();
             initializeAIProvider();
             initializeAIRequestTimeout();
-            initializePreferenceControlLimits();
             initializeReaderFont();
             initializeReaderFontSize();
             initializeReaderLineHeight();
@@ -721,6 +802,19 @@ export function createPreferencesController({
                 'change',
                 updateAIReasoningOptions
             );
+            aiMoonshotEndpointInput?.removeEventListener(
+                'change',
+                saveMoonshotEndpoint
+            );
+            aiMiniMaxEndpointInput?.removeEventListener(
+                'change',
+                saveMiniMaxEndpoint
+            );
+            aiAlibabaEndpointInput?.removeEventListener(
+                'change',
+                saveAlibabaEndpoint
+            );
+            aiReasoningInput?.removeEventListener('change', saveAIReasoning);
             aiRequestTimeoutInput?.removeEventListener(
                 'change',
                 saveAIRequestTimeout
@@ -759,18 +853,39 @@ export function createPreferencesController({
     };
 }
 
-export function readAISettingsFromControls(document, zotero) {
+function regionalEndpointApiBaseFromControls(document, provider) {
+    if (provider === AI_PROVIDER_MOONSHOT) {
+        const region = document.getElementById('mktero-ai-moonshot-endpoint')?.value;
+        return region ? moonshotApiBaseForRegion(region) : undefined;
+    }
+    if (provider === AI_PROVIDER_MINIMAX) {
+        const region = document.getElementById('mktero-ai-minimax-endpoint')?.value;
+        return region ? miniMaxApiBaseForRegion(region) : undefined;
+    }
+    if (provider === AI_PROVIDER_ALIBABA) {
+        const region = document.getElementById('mktero-ai-alibaba-endpoint')?.value;
+        return region ? alibabaApiBaseForRegion(region) : undefined;
+    }
+    return undefined;
+}
+
+export function readAISettingsFromControls(document, zotero, overrides = {}) {
     const settings = getAISettings(zotero);
     const value = id => document.getElementById(id)?.value;
+    const provider = overrides.provider
+        ?? value('mktero-ai-provider')
+        ?? settings.provider;
     return {
         ...settings,
         enabled: true,
         autoTranslateSelection: document.getElementById(
             'mktero-ai-auto-translate-selection'
         )?.checked ?? settings.autoTranslateSelection,
-        provider: value('mktero-ai-provider') ?? settings.provider,
+        provider,
         protocol: value('mktero-ai-protocol') ?? settings.protocol,
-        apiBase: value('mktero-ai-api-base') ?? settings.apiBase,
+        apiBase: regionalEndpointApiBaseFromControls(document, provider)
+            ?? value('mktero-ai-api-base')
+            ?? settings.apiBase,
         apiKey: value('mktero-ai-api-key') ?? settings.apiKey,
         model: value('mktero-ai-model') ?? settings.model,
         reasoning: value('mktero-ai-reasoning') ?? settings.reasoning,
@@ -779,8 +894,7 @@ export function readAISettingsFromControls(document, zotero) {
         requestTimeoutMs: value('mktero-ai-request-timeout') == null
             ? settings.requestTimeoutMs
             : aiRequestTimeoutMsFromSeconds(value('mktero-ai-request-timeout')),
-        maxOutputTokens: value('mktero-ai-max-output-tokens')
-            ?? settings.maxOutputTokens,
+        maxOutputTokens: settings.maxOutputTokens,
         streaming: document.getElementById('mktero-ai-streaming')
             ?.checked ?? settings.streaming,
     };
@@ -930,6 +1044,7 @@ globalThis.MkteroPreferences = {
         const aiGateway = new AISDKGateway({
             createAbortController: createRuntimeAbortController,
             runtimeWindow: document?.defaultView,
+            onDebug: message => Zotero.debug(message),
         });
         const translationService = new MarkdownTranslationService({
             aiGateway,
