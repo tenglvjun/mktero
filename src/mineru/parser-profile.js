@@ -65,12 +65,26 @@ const STANDALONE_LINK_SOURCE_MAP_OPTIONS = Object.freeze({
     standaloneLinks: 'bare-address-lines-v1',
 });
 
-export const MINERU_SOURCE_MAP_OPTIONS = Object.freeze({
+const FIGURE_TABLE_SOURCE_MAP_OPTIONS = Object.freeze({
     ...STANDALONE_LINK_SOURCE_MAP_OPTIONS,
     figureTables: 'figure-captioned-tables-v1',
 });
 
+const FIGURE_CAPTION_SHIFT_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...FIGURE_TABLE_SOURCE_MAP_OPTIONS,
+    figureCaptions: 'shifted-panel-run-v1',
+});
+
+const FIGURE_PANEL_PAIR_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...FIGURE_CAPTION_SHIFT_SOURCE_MAP_OPTIONS,
+    figureCaptions: 'panel-pair-captions-v2',
+});
+
+export const MINERU_SOURCE_MAP_OPTIONS = FIGURE_PANEL_PAIR_SOURCE_MAP_OPTIONS;
+
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    FIGURE_CAPTION_SHIFT_SOURCE_MAP_OPTIONS,
+    FIGURE_TABLE_SOURCE_MAP_OPTIONS,
     STANDALONE_LINK_SOURCE_MAP_OPTIONS,
     TEXT_MATCHING_SOURCE_MAP_OPTIONS,
     EMBEDDED_CAPTION_SOURCE_MAP_OPTIONS, FIGURE_LAYOUT_SOURCE_MAP_OPTIONS,

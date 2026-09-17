@@ -26,11 +26,29 @@ const LABEL_RECOVERY_PARSER_OPTIONS = Object.freeze({
     figureLabelRecovery: 'verified-pdf-image-v1',
 });
 
+const FIGURE_CAPTION_SHIFT_PARSER_OPTIONS = Object.freeze({
+    ...LABEL_RECOVERY_PARSER_OPTIONS,
+    figureCaptions: 'shifted-panel-run-v1',
+});
+
+const FIGURE_PANEL_PAIR_PARSER_OPTIONS = Object.freeze({
+    ...FIGURE_CAPTION_SHIFT_PARSER_OPTIONS,
+    figureCaptions: 'panel-pair-captions-v2',
+});
+
 export const MISTRAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    JSON.stringify({
+        ...FIGURE_CAPTION_SHIFT_PARSER_OPTIONS,
+        figureReadingOrder: 'verified-pdf-title-order-v1',
+    }),
+    JSON.stringify({
+        ...LABEL_RECOVERY_PARSER_OPTIONS,
+        figureReadingOrder: 'verified-pdf-title-order-v1',
+    }),
     JSON.stringify(LABEL_RECOVERY_PARSER_OPTIONS), JSON.stringify(PREVIOUS_PARSER_OPTIONS),
 ]);
 
 export const MISTRAL_PARSER_PROFILE_ID = JSON.stringify({
-    ...LABEL_RECOVERY_PARSER_OPTIONS,
+    ...FIGURE_PANEL_PAIR_PARSER_OPTIONS,
     figureReadingOrder: 'verified-pdf-title-order-v1',
 });

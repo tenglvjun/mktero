@@ -471,6 +471,22 @@ export function findAcademicFigureGroups(markdown) {
             index = images.at(-1).index;
             continue;
         }
+        // A composed figure keeps its provider image when the provider
+        // detected only one of its side-by-side panels; the shared caption
+        // naming the left and right halves still joins both panels.
+        if (images.length === 2
+            && embeddedCaptions.length === 1
+            && describesLeftRightFigurePanels(embeddedCaptions[0])) {
+            groups.push({
+                from: lines[index].from,
+                to: lines[images.at(-1).index].to,
+                caption: embeddedCaptions[0],
+                images,
+                layout: 'horizontal',
+            });
+            index = images.at(-1).index;
+            continue;
+        }
 
         const captionIndex = nearbyLineIndex(lines, images.at(-1).index + 1);
         if (captionIndex >= lines.length || blockedLines.has(captionIndex)) continue;
@@ -1074,7 +1090,7 @@ function findBlockedLines(lines) {
 
 function collectNearbyImages(lines, startIndex, blockedLines) {
     const images = [];
-    let index = nearbyLineIndex(lines, startIndex);
+    let index = nextNonBlankLine(lines, startIndex);
     while (index < lines.length
         && !blockedLines.has(index)
         && isMarkdownImageLine(lines[index].raw)) {
@@ -1083,9 +1099,9 @@ function collectNearbyImages(lines, startIndex, blockedLines) {
             source: lines[index].text.trim(),
         });
         if (captionFromImageLine(lines[index].raw)) break;
-        const nextIndex = nearbyLineIndex(lines, index + 1);
-        if (nextIndex <= index) break;
-        index = nextIndex;
+        // Figure composition can leave several blank lines between the panel
+        // images; only non-blank content ends the run.
+        index = nextNonBlankLine(lines, index + 1);
     }
     return images;
 }
@@ -1342,14 +1358,15 @@ function letteredTrailingPanelFigure(lines, startIndex, blockedLines) {
 
 function shiftedABFigureCaptionChain(lines, startIndex, blockedLines) {
     // MinerU often hangs Figure N's caption on the next image when (a)/(b)
-    // panels sit immediately before the following figures.
+    // panels sit before the following figures. Panel labels may be separated
+    // from their image by a blank line.
     if (blockedLines.has(startIndex)
         || !isMarkdownImageLine(lines[startIndex]?.raw)
         || !MARKDOWN_HARD_BREAK_PATTERN.test(lines[startIndex].raw)
         || captionFromImageLine(lines[startIndex].raw)) {
         return null;
     }
-    const firstLabelIndex = startIndex + 1;
+    const firstLabelIndex = nearbyLineIndex(lines, startIndex + 1);
     const firstLabel = extractedPanelLabel(lines[firstLabelIndex]);
     if (panelLetter(firstLabel) !== 'a' || blockedLines.has(firstLabelIndex)) {
         return null;
@@ -1363,7 +1380,7 @@ function shiftedABFigureCaptionChain(lines, startIndex, blockedLines) {
         || captionFromImageLine(lines[secondImageIndex].raw)) {
         return null;
     }
-    const secondLabelIndex = secondImageIndex + 1;
+    const secondLabelIndex = nearbyLineIndex(lines, secondImageIndex + 1);
     const secondLabel = extractedPanelLabel(lines[secondLabelIndex]);
     if (panelLetter(secondLabel) !== 'b' || blockedLines.has(secondLabelIndex)) {
         return null;
@@ -1384,7 +1401,15 @@ function shiftedABFigureCaptionChain(lines, startIndex, blockedLines) {
         cursor = nearbyLineIndex(lines, cursor + 1);
     }
     if (!captioned.length) return null;
-    const trailingIndex = cursor;
+    let trailingIndex = cursor;
+    // Bare panel letters between the captioned run and the shared caption are
+    // furniture of the following figure (its own (a)/(b) sub-panels), not part
+    // of the caption paragraph; the rewrite below drops them.
+    while (trailingIndex < lines.length
+        && !blockedLines.has(trailingIndex)
+        && isIsolatedPanelMarker(lines[trailingIndex].raw)) {
+        trailingIndex = nearbyLineIndex(lines, trailingIndex + 1);
+    }
     if (trailingIndex >= lines.length || blockedLines.has(trailingIndex)) {
         return null;
     }
@@ -1392,7 +1417,10 @@ function shiftedABFigureCaptionChain(lines, startIndex, blockedLines) {
     if (!trailingCaption) return null;
 
     const captions = [...captioned.map(item => item.caption), trailingCaption];
-    if (!describesSharedABFigurePanels(captions[0])) return null;
+    if (!describesSharedABFigurePanels(captions[0])
+        && !describesSharedABFigurePanels(trailingCaption)) {
+        return null;
+    }
     const numbers = captions.map(academicFigureNumber);
     if (numbers.some(number => number == null)
         || numbers.some((number, offset) => number !== numbers[0] + offset)) {
@@ -1570,6 +1598,11 @@ function tableCaptionFromImageLine(line) {
 export function describesSharedABFigurePanels(caption) {
     return /\(\s*a\s*\)/iu.test(caption?.description || '')
         && /\(\s*b\s*\)/iu.test(caption?.description || '');
+}
+
+export function describesLeftRightFigurePanels(caption) {
+    const description = String(caption?.description || '');
+    return /\bleft\b/iu.test(description) && /\bright\b/iu.test(description);
 }
 
 function isIndentedCodeLine(line) {
