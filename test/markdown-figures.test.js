@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
 import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outline.js';
 import {
+    findAcademicFigureGroups,
     findAcademicFigures,
     normalizeMisassignedAcademicCaptions,
     parseAcademicFigureCaption,
@@ -145,6 +146,195 @@ test('reassigns shifted (a)/(b) figure captions during MinerU preparation', () =
     assert.doesNotMatch(
         result.markdown,
         /!\[Figure 4\.[\s\S]*\]\(images\/figure5\.jpg\)/
+    );
+});
+
+function blankSeparatedABFigureMarkdown() {
+    return [
+        '![](images/theta.jpg)  ',
+        '',
+        '(a)',
+        '',
+        '![](images/alpha.jpg)  ',
+        '',
+        '(b)',
+        '',
+        '![Fig. 7. Changes in coherence within the prefrontal region of interest '
+            + '(ROI) across time points in the theta and alpha frequency bands.]'
+            + '(images/bar.jpg)',
+        '',
+        '(a)  ',
+        '(b)  ',
+        'Fig. 8. Pre- and post-intervention changes in theta (a) and alpha '
+            + '(b) band coherence across three time points.',
+    ].join('\n');
+}
+
+function blankSeparatedABFigureRawMarkdown() {
+    return [
+        '![](images/theta.jpg)  ',
+        '',
+        '(a)',
+        '',
+        '![](images/alpha.jpg)  ',
+        '',
+        '(b)',
+        '',
+        'Fig. 7. Changes in coherence within the prefrontal region of interest '
+            + '(ROI) across time points in the theta and alpha frequency bands.',
+        '',
+        '![](images/bar.jpg)',
+        '',
+        '(a)  ',
+        '(b)  ',
+        'Fig. 8. Pre- and post-intervention changes in theta (a) and alpha '
+            + '(b) band coherence across three time points.',
+    ].join('\n');
+}
+
+test('reassigns a caption shifted past blank-separated (a)/(b) panels', () => {
+    const normalized = normalizeMisassignedAcademicCaptions(
+        blankSeparatedABFigureMarkdown()
+    );
+    const figures = findAcademicFigures(normalized);
+
+    assert.deepEqual(
+        figures.map(figure => ({
+            label: figure.caption.label,
+            images: figure.images.map(
+                image => image.source.replace(/^!\[[^\]]*\]/u, '![]')
+            ),
+            layout: figure.layout || '',
+        })),
+        [{
+            label: 'Fig. 7.',
+            images: ['![](images/theta.jpg)', '![](images/alpha.jpg)'],
+            layout: 'horizontal',
+        }, {
+            label: 'Fig. 8.',
+            images: ['![](images/bar.jpg)'],
+            layout: '',
+        }]
+    );
+    assert.match(
+        normalized,
+        /!\[\]\(images\/theta\.jpg\)[^\n]*\n\(a\)[\s\S]*!\[\]\(images\/alpha\.jpg\)[^\n]*\n\(b\)[\s\S]*Fig\. 7\. Changes in coherence/
+    );
+    assert.match(
+        normalized,
+        /!\[Fig\. 8\. Pre- and post-intervention changes[\s\S]*\]\(images\/bar\.jpg\)/
+    );
+    assert.doesNotMatch(normalized, /!\[Fig\. 7\.[\s\S]*\]\(images\/bar\.jpg\)/);
+    assert.doesNotMatch(normalized, /\(a\)  \n\(b\)  \nFig\. 8\./);
+});
+
+test('renders blank-separated (a)/(b) panels under the shifted figure captions', () => {
+    const figures = findAcademicFigures(blankSeparatedABFigureMarkdown());
+    const panelHTML = renderMarkdownHTML(
+        figures[0].renderSource || figures[0].source,
+        { resolveImageURL: path => `blob:mktero-${path}` }
+    );
+
+    assert.match(panelHTML, /mktero-figure-group-horizontal/);
+    assert.match(panelHTML, /blob:mktero-images\/theta\.jpg/);
+    assert.match(panelHTML, /blob:mktero-images\/alpha\.jpg/);
+    assert.match(panelHTML, /mktero-figure-panel-label">\(a\)</);
+    assert.match(panelHTML, /mktero-figure-panel-label">\(b\)</);
+    assert.match(panelHTML, /<span class="mktero-figure-label">Fig\. 7\.<\/span>/);
+    assert.doesNotMatch(panelHTML, /bar\.jpg/);
+
+    const barHTML = renderMarkdownHTML(
+        figures[1].renderSource || figures[1].source,
+        { resolveImageURL: path => `blob:mktero-${path}` }
+    );
+    assert.match(barHTML, /blob:mktero-images\/bar\.jpg/);
+    assert.match(barHTML, /<span class="mktero-figure-label">Fig\. 8\.<\/span>/);
+    assert.doesNotMatch(barHTML, /Fig\. 7\./);
+});
+
+test('prepares blank-separated (a)/(b) caption shifts from raw MinerU Markdown', () => {
+    const result = prepareMinerUResult({
+        markdown: blankSeparatedABFigureRawMarkdown(),
+    });
+
+    assert.deepEqual(
+        findAcademicFigures(result.markdown).map(figure => figure.caption.label),
+        ['Fig. 7.', 'Fig. 8.']
+    );
+    assert.match(result.markdown, /\(b\)\nFig\. 7\. Changes in coherence/);
+    assert.match(
+        result.markdown,
+        /!\[Fig\. 8\. Pre- and post-intervention[\s\S]*\]\(images\/bar\.jpg\)/
+    );
+    assert.doesNotMatch(result.markdown, /\(a\)  \n\(b\)  \nFig\. 8\./);
+});
+
+test('keeps a shifted chain when no caption describes the (a)/(b) panels', () => {
+    const markdown = [
+        '![](images/one.jpg)  ',
+        '',
+        '(a)',
+        '',
+        '![](images/two.jpg)  ',
+        '',
+        '(b)',
+        '',
+        '![Fig. 1. First result.](images/three.jpg)',
+        '',
+        'Fig. 2. Second result.',
+    ].join('\n');
+
+    assert.equal(normalizeMisassignedAcademicCaptions(markdown), markdown);
+    assert.deepEqual(
+        findAcademicFigures(markdown).map(figure => figure.caption.label),
+        ['Fig. 1.']
+    );
+});
+
+test('joins a bare panel with the left/right captioned figure below it', () => {
+    const caption = 'Figure 13: The beliefs of the characters from elite universities '
+        + 'transfer to the Assistant. Left: fraction of future-focused answers on 16 '
+        + 'free-form questions. Right: normalized probability of choosing the '
+        + 'future-focused charity across 24 binary questions.';
+    const markdown = [
+        '![](images/left.jpg)',
+        '',
+        '',
+        `![${caption}](generated/figures/fig-p11-b5.png)`,
+    ].join('\n');
+    const groups = findAcademicFigureGroups(markdown);
+
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].caption.label, 'Figure 13:');
+    assert.equal(groups[0].layout, 'horizontal');
+    assert.deepEqual(groups[0].images.map(image => image.source), [
+        '![](images/left.jpg)',
+        `![${caption}](generated/figures/fig-p11-b5.png)`,
+    ]);
+
+    const html = renderMarkdownHTML(markdown.slice(groups[0].from, groups[0].to), {
+        resolveImageURL: path => `blob:mktero-${path}`,
+    });
+    assert.match(html, /mktero-figure-group-horizontal/);
+    assert.match(html, /blob:mktero-images\/left\.jpg/);
+    assert.match(html, /blob:mktero-generated\/figures\/fig-p11-b5\.png/);
+    assert.equal((html.match(/<figcaption>/g) || []).length, 1);
+});
+
+test('does not join a bare panel without a left/right panel caption', () => {
+    const markdown = [
+        '![](images/left.jpg)',
+        '',
+        '![Figure 13: The beliefs transfer across conditions.]'
+            + '(generated/figures/fig-p11-b5.png)',
+    ].join('\n');
+
+    assert.deepEqual(
+        findAcademicFigures(markdown).map(figure => ({
+            label: figure.caption.label,
+            images: figure.images.length,
+        })),
+        [{ label: 'Figure 13:', images: 1 }]
     );
 });
 

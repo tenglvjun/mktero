@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js';
 import { analyzeDocumentFigures } from '../src/figures/figure-analysis.js';
+import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
 import { analyzeMarkdownFigureReferences } from '../src/markdown/markdown-figure-references.js';
 import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outline.js';
 import { createEvidenceSnippet } from '../src/markdown/markdown-evidence.js';
@@ -83,6 +84,85 @@ test('ignores corrupt metadata and refuses duplicate image anchors or stale capt
     const duplicate = document.markdown + '\n\n' + document.markdown;
     assert.ok(analyzeDocumentFigures(duplicate, { figureMap: document.figureMap })
         .every(figure => figure.sourceId === null));
+});
+
+function leftRightFigureFixture(caption) {
+    const assetPath = 'generated/figures/fig-p0-b0-abcd1234.png';
+    const imageLine = `![${caption}](${assetPath})`;
+    const markdown = [
+        '![](images/left.png)',
+        '',
+        '',
+        imageLine,
+        '',
+        'Body text follows.',
+    ].join('\n');
+    const from = markdown.indexOf(imageLine);
+    return {
+        assetPath, imageLine, markdown,
+        figureMap: {
+            version: 1, pipeline: FIGURE_PIPELINE_PROFILE, markdownHash: '',
+            figures: [{
+                id: 'fig-p0-b0', label: 'Figure 13:', pageIndex: 0,
+                visualBBox: [500, 200, 880, 400], captionBBox: null,
+                memberBlockIds: ['parent', 'panel'],
+                panels: [{ blockId: 'panel', label: null, bbox: [500, 220, 878, 380],
+                    originalAssetPath: 'images/right.png' }],
+                provenance: { coordinateFrame: 'display-cropbox', rotation: 0,
+                    evidence: ['explicit-parent'], fragments: [] },
+                render: { mode: 'pdf-region', assetPath, width: 624, height: 359,
+                    range: { from, to: from + imageLine.length }, captionRanges: [] },
+            }],
+        },
+    };
+}
+
+test('keeps the bare panel beside its left/right captioned restored figure', () => {
+    const caption = 'Figure 13: The beliefs of the characters from elite universities '
+        + 'transfer to the Assistant. Left: fraction of future-focused answers. '
+        + 'Right: normalized probability of choosing the future-focused charity.';
+    const fixture = leftRightFigureFixture(caption);
+    const views = analyzeDocumentFigures(fixture.markdown, {
+        figureMap: fixture.figureMap,
+    });
+
+    assert.equal(views.length, 1);
+    assert.equal(views[0].sourceId, 'fig-p0-b0');
+    assert.equal(views[0].from, 0);
+    assert.ok(views[0].source.includes('images/left.png'));
+    assert.ok(views[0].source.includes(fixture.imageLine));
+    assert.equal(views[0].imageRange.from, fixture.markdown.indexOf(fixture.imageLine));
+});
+
+test('leaves an unrelated image outside a restored figure without panel wording', () => {
+    const caption = 'Figure 13: The beliefs of the characters transfer across conditions.';
+    const fixture = leftRightFigureFixture(caption);
+    const views = analyzeDocumentFigures(fixture.markdown, {
+        figureMap: fixture.figureMap,
+    });
+
+    assert.equal(views[0].from, fixture.markdown.indexOf(fixture.imageLine));
+    assert.ok(!views[0].source.includes('images/left.png'));
+});
+
+test('does not reach a bare panel across intervening prose', () => {
+    const caption = 'Figure 13: Transfer across conditions. Left: free-form answers. '
+        + 'Right: binary charity choices.';
+    const fixture = leftRightFigureFixture(caption);
+    fixture.markdown = fixture.markdown.replace(
+        '![](images/left.png)\n\n\n',
+        '![](images/left.png)\n\nIntervening prose.\n\n'
+    );
+    const imageLine = fixture.markdown.indexOf(fixture.imageLine);
+    fixture.figureMap.figures[0].render.range = {
+        from: imageLine, to: imageLine + fixture.imageLine.length,
+    };
+    const views = analyzeDocumentFigures(fixture.markdown, {
+        figureMap: fixture.figureMap,
+    });
+
+    assert.equal(views[0].from, imageLine);
+    assert.ok(!views[0].source.includes('images/left.png'));
 });
 
 test('binds translated and comparison captions to actual output ranges with one complete image', async () => {

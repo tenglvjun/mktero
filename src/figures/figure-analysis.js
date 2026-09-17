@@ -5,6 +5,7 @@ import {
 import {
     findAcademicFigures, parseAcademicFigureCaption, parseLooseAcademicFigureCaption,
     unescapeImageDescription,
+    describesLeftRightFigurePanels, describesSharedABFigurePanels,
 } from '../markdown/markdown-figures.js';
 
 export function analyzeDocumentFigures(markdown, {
@@ -41,10 +42,16 @@ export function analyzeDocumentFigures(markdown, {
         const translatedCaption = viewKind === 'comparison'
             ? comparisonCaption(source, record, block, image) : null;
         const to = translatedCaption?.to ?? image.to;
+        // The provider can leave the sibling panel of a composed figure as an
+        // adjacent uncaptioned image; keep it inside the same view so the
+        // reader renders the panel pair under their shared caption.
+        const from = viewKind === 'original'
+            ? precedingPanelStart(source, images, image, caption)
+            : image.from;
         restored.push({
             id: `${record.id}:${viewKind}`, sourceId: record.id, viewKind,
-            from: image.from, to, label: caption.label, caption,
-            source: source.slice(image.from, to),
+            from, to, label: caption.label, caption,
+            source: source.slice(from, to),
             assetPath: image.assetPath,
             imageRange: { from: image.from, to: image.to },
             translatedCaption,
@@ -64,6 +71,22 @@ export function analyzeDocumentFigures(markdown, {
     }
     figures.push(...legacyViews(source.slice(from), from, viewKind));
     return figures;
+}
+
+function precedingPanelStart(source, images, image, caption) {
+    if (!describesSharedABFigurePanels(caption)
+        && !describesLeftRightFigurePanels(caption)) {
+        return image.from;
+    }
+    let start = image.from;
+    for (let index = images.indexOf(image) - 1; index >= 0; index--) {
+        const previous = images[index];
+        if (!previous.standalone || previous.to > start) break;
+        if (previous.caption.trim()) break;
+        if (source.slice(previous.to, start).trim()) break;
+        start = previous.from;
+    }
+    return start;
 }
 
 export function figureLabelKey(label) {
