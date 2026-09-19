@@ -80,10 +80,19 @@ const FIGURE_PANEL_PAIR_SOURCE_MAP_OPTIONS = Object.freeze({
     figureCaptions: 'panel-pair-captions-v2',
 });
 
-export const MINERU_SOURCE_MAP_OPTIONS = FIGURE_PANEL_PAIR_SOURCE_MAP_OPTIONS;
+const PAGE_BANNER_TEXT_FLOW_SOURCE_MAP_OPTIONS = Object.freeze({
+    ...FIGURE_PANEL_PAIR_SOURCE_MAP_OPTIONS,
+    textFlow: 'cross-page-continuation-v2',
+});
+
+export const MINERU_SOURCE_MAP_OPTIONS = PAGE_BANNER_TEXT_FLOW_SOURCE_MAP_OPTIONS;
+
+// Completed results from older text-flow profiles need the provider layout
+// data again, but their identities remain valid for user correction lookup.
+export const MINERU_COMPATIBLE_CACHE_PROFILE_IDS = Object.freeze([]);
 
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
-    FIGURE_CAPTION_SHIFT_SOURCE_MAP_OPTIONS,
+    FIGURE_PANEL_PAIR_SOURCE_MAP_OPTIONS, FIGURE_CAPTION_SHIFT_SOURCE_MAP_OPTIONS,
     FIGURE_TABLE_SOURCE_MAP_OPTIONS,
     STANDALONE_LINK_SOURCE_MAP_OPTIONS,
     TEXT_MATCHING_SOURCE_MAP_OPTIONS,

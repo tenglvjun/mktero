@@ -4,7 +4,11 @@ import { findAcademicFigureGroups } from '../src/markdown/markdown-figures.js';
 import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
 import { reassembleMinerUColumnFlow } from '../src/mineru/column-flow-normalizer.js';
 import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
-import { MINERU_SOURCE_MAP_OPTIONS } from '../src/mineru/parser-profile.js';
+import {
+    MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_SOURCE_MAP_OPTIONS,
+} from '../src/mineru/parser-profile.js';
 
 test('includes figure panel reassembly in the MinerU parser profile', () => {
     assert.equal(
@@ -17,7 +21,7 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
     );
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.textFlow,
-        'cross-page-continuation-v1'
+        'cross-page-continuation-v2'
     );
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.prose,
@@ -35,6 +39,10 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
         MINERU_SOURCE_MAP_OPTIONS.chrome,
         'page-edge-repeated-v1'
     );
+    assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, []);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.some(profile => (
+        JSON.parse(profile).sourceMap.textFlow === 'cross-page-continuation-v1'
+    )), true);
 });
 
 test('reassembles side-by-side MinerU panels separated by upper-page prose', () => {
@@ -331,6 +339,122 @@ test('does not reorder an apparent continuation without layout evidence', () => 
             text: continuation,
             pageIndex: 4,
             bbox: [87, 107, 489, 154],
+        }],
+    });
+
+    assert.equal(result.markdown, markdown);
+});
+
+test('joins prose split by a next-page publisher banner', () => {
+    const first = 'Despite the technology\'s promise, a decade or so on from this '
+        + 'surge of interest, the vision of wearables as a key clinical aid is '
+        + 'still some way from becoming a reality. Although their';
+    const heading = '# Digital wearables spotlight';
+    const continuation = 'use in trials has increased, it has been a gradual change. '
+        + 'When researchers reviewed the registry, they found more wearable trials.';
+    const following = 'Some researchers expect adoption to continue.';
+    const markdown = [first, heading, continuation, following].join('\n\n');
+    const result = prepareMinerUResult({
+        markdown,
+        contentList: [{
+            type: 'text',
+            text: first,
+            pageIndex: 0,
+            bbox: [657, 887, 945, 943],
+        }, {
+            type: 'heading',
+            text: 'Digital wearables spotlight',
+            pageIndex: 1,
+            bbox: [62, 32, 240, 87],
+        }, {
+            type: 'text',
+            text: continuation,
+            pageIndex: 1,
+            bbox: [61, 114, 348, 209],
+        }, {
+            type: 'text',
+            text: following,
+            pageIndex: 1,
+            bbox: [61, 209, 348, 300],
+        }],
+    });
+
+    assert.equal(result.markdown, [
+        heading,
+        `${first} ${continuation}`,
+        following,
+    ].join('\n\n'));
+    assert.deepEqual(result.sourceMap.slice(0, 2).map(entry => ({
+        type: entry.type,
+        source: result.markdown.slice(entry.markdownFrom, entry.markdownTo),
+        locations: entry.locations,
+    })), [{
+        type: 'heading',
+        source: heading,
+        locations: [{ pageIndex: 1, bbox: [62, 32, 240, 87] }],
+    }, {
+        type: 'text',
+        source: `${first} ${continuation}`,
+        locations: [{
+            pageIndex: 0,
+            bbox: [657, 887, 945, 943],
+        }, {
+            pageIndex: 1,
+            bbox: [61, 114, 348, 209],
+        }],
+    }]);
+});
+
+test('keeps a genuine next-page heading after complete prose', () => {
+    const first = 'This paragraph is complete and remains before the next section.';
+    const heading = '# Results';
+    const next = 'lowercase text can intentionally begin a new section.';
+    const markdown = [first, heading, next].join('\n\n');
+    const result = prepareMinerUResult({
+        markdown,
+        contentList: [{
+            type: 'text',
+            text: first,
+            pageIndex: 0,
+            bbox: [650, 880, 945, 945],
+        }, {
+            type: 'heading',
+            text: 'Results',
+            pageIndex: 1,
+            bbox: [60, 40, 300, 90],
+        }, {
+            type: 'text',
+            text: next,
+            pageIndex: 1,
+            bbox: [60, 120, 350, 220],
+        }],
+    });
+
+    assert.equal(result.markdown, markdown);
+});
+
+test('does not join banner-separated prose without a dangling anchor word', () => {
+    const first = 'A standalone label at the page bottom has no terminal punctuation';
+    const heading = '# Methods overview';
+    const next = 'lowercase text beneath the banner belongs to a separate paragraph.';
+    const markdown = [first, heading, next].join('\n\n');
+    const result = prepareMinerUResult({
+        markdown,
+        contentList: [{
+            type: 'text',
+            text: first,
+            pageIndex: 0,
+            bbox: [650, 880, 945, 945],
+        }, {
+            type: 'heading',
+            text: 'Methods overview',
+            pageIndex: 1,
+            bbox: [60, 40, 300, 90],
+        }, {
+            type: 'text',
+            text: next,
+            pageIndex: 1,
+            bbox: [60, 120, 350, 220],
         }],
     });
 

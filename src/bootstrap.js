@@ -61,7 +61,11 @@ import {
 import {
     createSavedMarkdownOpenResolver,
 } from './core/saved-markdown-open-resolver.js';
-import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS } from './mineru/parser-profile.js';
+import {
+    MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_PARSER_PROFILE_ID,
+    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+} from './mineru/parser-profile.js';
 import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_IDS } from './mistral/parser-profile.js';
 import {
     createZoteroBlobFactory,
@@ -512,9 +516,11 @@ globalThis.startup = async function startup({ id, rootURI }) {
         progressiveResult: progressiveWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
         restoreCachedInput: restoreCachedFigures,
         recoverFigures,
-        createPreviousCacheKeys: fileData => Promise.all(MINERU_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => (
-            createMarkdownCacheKey(fileData, { parserProfile })
-        ))),
+        createPreviousCacheKeys: fileData => Promise.all(
+            MINERU_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
+                createMarkdownCacheKey(fileData, { parserProfile })
+            ))
+        ),
         onError: error => Zotero.logError?.(error),
     });
     const mineruExtractor = new MinerUDocumentExtractor({
