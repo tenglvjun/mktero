@@ -43,8 +43,21 @@ function paperTitleHeadingOffset(markdown, itemTitle) {
     const matches = collectTitleHeadings(markdown).filter(heading => (
         heading.key === itemKey
     ));
-    if (matches.length >= 2) return matches[1].from;
+    if (matches.length >= 2
+        && isCoverTitleDuplicate(markdown, matches[0].from, matches[1].from)) {
+        return matches[1].from;
+    }
     return matches[0]?.from ?? null;
+}
+
+function isCoverTitleDuplicate(markdown, firstFrom, secondFrom) {
+    if (secondFrom <= firstFrom) return false;
+    const body = markdown.slice(lineEnd(markdown, firstFrom), secondFrom);
+    const paragraphs = body.split(/\n\s*\n/)
+        .map(part => part.trim())
+        .filter(Boolean);
+    if (paragraphs.length >= 2) return false;
+    return body.replace(/\s+/g, '').length <= 400;
 }
 
 function collectTitleHeadings(markdown) {
@@ -80,6 +93,8 @@ function collectTitleHeadings(markdown) {
 function titleHeadingKey(text) {
     return stripHeadingMarks(text)
         .replace(/[ \t]+#+$/u, '')
+        .replace(/\u00ad/gu, '')
+        .replace(/[\u2010-\u2015\u2212]/gu, '-')
         .replace(/\s+/gu, ' ')
         .trim()
         .toLowerCase();

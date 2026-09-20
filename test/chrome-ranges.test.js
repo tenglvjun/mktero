@@ -262,6 +262,64 @@ test('hides content before the second copy of a repeated paper title', () => {
     );
 });
 
+test('matches a paper title across ASCII hyphen and en dash', () => {
+    const itemTitle = 'Sleep need–dependent plasticity of a thalamic circuit';
+    const markdown = [
+        'Check for updates',
+        '',
+        'Journal masthead',
+        '',
+        '# Sleep need-dependent plasticity of a thalamic circuit',
+        '',
+        'Body paragraph that must remain visible.',
+    ].join('\n');
+    const visible = visibleDocumentText(markdown, [], itemTitle);
+    assert.equal(visible.includes('Check for updates'), false);
+    assert.equal(visible.includes('Journal masthead'), false);
+    assert.equal(visible.includes('Body paragraph that must remain visible.'), true);
+    assert.equal(
+        visible.trimStart().startsWith(
+            '# Sleep need-dependent plasticity of a thalamic circuit'
+        ),
+        true
+    );
+});
+
+test('does not hide the article when a reprint title follows a long body', () => {
+    const itemTitle = 'Sleep need–dependent plasticity of a thalamic circuit promotes homeostatic recovery sleep';
+    const openingTitle = '# Sleep need-dependent plasticity of a thalamic circuit promotes homeostatic recovery sleep';
+    const markdown = [
+        openingTitle,
+        '',
+        'INTRODUCTION: Sleep is under homeostatic control after prolonged wakefulness.',
+        '',
+        'RATIONALE: The goal of this study was to identify a neural circuit.',
+        '',
+        openingTitle,
+        '',
+        'Sleep is an essential, conserved behavior that is tightly regulated.',
+        '',
+        '## Discussion',
+        '',
+        'These findings reveal a circuit mechanism for recovery sleep.',
+        '',
+        `# ${itemTitle}`,
+        '',
+        "## Editor's summary",
+        '',
+        'Sleep is tightly regulated by homeostatic forces.',
+    ].join('\n');
+    const visible = visibleDocumentText(markdown, [], itemTitle);
+    assert.equal(visible.includes('INTRODUCTION:'), true);
+    assert.equal(
+        visible.includes('Sleep is an essential, conserved behavior'),
+        true
+    );
+    assert.equal(visible.includes('## Discussion'), true);
+    assert.equal(visible.includes("## Editor's summary"), true);
+    assert.equal(visible.trimStart().startsWith(openingTitle), true);
+});
+
 test('treats a repeated title as the same heading across # and ##', () => {
     const markdown = [
         '## Systematic review and meta-analysis',
