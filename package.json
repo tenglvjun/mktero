@@ -15,7 +15,7 @@
   "devDependencies": {
     "@napi-rs/canvas": "1.0.9",
     "esbuild": "^0.28.2",
-    "jsdom": "30.0.1",
+    "jsdom": "30.1.0",
     "linkedom": "0.18.13"
   },
   "dependencies": {
