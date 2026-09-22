@@ -52,11 +52,20 @@ import {
     CONVERSION_PROVIDER_MINERU,
     CONVERSION_PROVIDER_MISTRAL,
     MISTRAL_API_KEY_PREF,
+    DEFAULT_MINERU_LOCAL_API_BASE,
     MINERU_API_KEY_PREF,
+    MINERU_ENDPOINT_LOCAL,
+    MINERU_ENDPOINT_PREF,
+    MINERU_LOCAL_API_BASE_PREF,
+    MINERU_LOCAL_API_KEY_PREF,
     getConversionProvider,
     getMinerUApiKey,
+    getMinerUEndpoint,
+    getMinerULocalApiBase,
+    getMinerULocalApiKey,
     getMistralApiKey,
     normalizeConversionProvider,
+    normalizeMinerUEndpoint,
 } from '../config/conversion-preferences.js';
 import {
     getMarkdownReaderAlignment,
@@ -164,11 +173,20 @@ export function createPreferencesController({
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
     );
+    const conversionApiKeyRow = document.getElementById('mktero-api-key-row');
     const conversionApiKeyInput = document.getElementById(
         'mktero-api-key'
     );
     const conversionApiKeyManage = document.getElementById(
         'mktero-api-key-manage'
+    );
+    const conversionApiKeyHelp = document.getElementById('mktero-api-key-help');
+    const mineruEndpointRow = document.getElementById('mktero-mineru-endpoint-row');
+    const mineruEndpointInput = document.getElementById('mktero-mineru-endpoint');
+    const mineruLocalBaseRow = document.getElementById('mktero-mineru-local-base-row');
+    const mineruLocalBaseInput = document.getElementById('mktero-mineru-local-base');
+    const conversionPrivacyNote = document.getElementById(
+        'mktero-conversion-privacy-note'
     );
     const aiTestButton = document.getElementById('mktero-ai-test');
     const aiProviderInput = document.getElementById('mktero-ai-provider');
@@ -386,30 +404,87 @@ export function createPreferencesController({
         );
     }
 
+    function selectedMinerUEndpoint() {
+        return normalizeMinerUEndpoint(
+            mineruEndpointInput?.value || getMinerUEndpoint(zotero)
+        );
+    }
+
     function getConversionApiKeyConfig(provider) {
         if (provider === CONVERSION_PROVIDER_MISTRAL) {
             return {
                 preference: MISTRAL_API_KEY_PREF,
                 value: getMistralApiKey(zotero),
                 manageURL: 'https://console.mistral.ai/api-keys/',
+                helpKey: 'preferences.conversion.apiKeyHelp',
+                privacyKey: 'preferences.conversion.privacyNote',
+            };
+        }
+        if (provider === CONVERSION_PROVIDER_MINERU
+            && selectedMinerUEndpoint() === MINERU_ENDPOINT_LOCAL) {
+            return {
+                preference: MINERU_LOCAL_API_KEY_PREF,
+                value: getMinerULocalApiKey(zotero),
+                manageURL: '',
+                helpKey: 'preferences.conversion.apiKeyHelpLocal',
+                privacyKey: 'preferences.conversion.privacyNoteLocal',
             };
         }
         return {
             preference: MINERU_API_KEY_PREF,
             value: getMinerUApiKey(zotero),
             manageURL: 'https://mineru.net/apiManage/token',
+            helpKey: 'preferences.conversion.apiKeyHelp',
+            privacyKey: 'preferences.conversion.privacyNote',
         };
     }
 
     function updateConversionApiKeyControl() {
+        const provider = getSelectedConversionProvider();
+        const local = provider === CONVERSION_PROVIDER_MINERU
+            && selectedMinerUEndpoint() === MINERU_ENDPOINT_LOCAL;
+        if (mineruEndpointRow) {
+            mineruEndpointRow.hidden = provider !== CONVERSION_PROVIDER_MINERU;
+        }
+        if (mineruLocalBaseRow) mineruLocalBaseRow.hidden = !local;
+        if (conversionApiKeyRow) conversionApiKeyRow.hidden = local;
+        if (mineruEndpointInput && !mineruEndpointInput.value) {
+            mineruEndpointInput.value = getMinerUEndpoint(zotero);
+        }
         if (!conversionApiKeyInput) return;
-        const config = getConversionApiKeyConfig(
-            getSelectedConversionProvider()
-        );
+        const config = getConversionApiKeyConfig(provider);
         conversionApiKeyInput.value = config.value;
         if (conversionApiKeyManage) {
-            conversionApiKeyManage.setAttribute('href', config.manageURL);
+            conversionApiKeyManage.hidden = !config.manageURL;
+            if (config.manageURL) {
+                conversionApiKeyManage.setAttribute('href', config.manageURL);
+            }
         }
+        if (conversionApiKeyHelp) {
+            conversionApiKeyHelp.setAttribute('data-i18n', config.helpKey);
+            conversionApiKeyHelp.textContent = localization.t(config.helpKey);
+        }
+        if (conversionPrivacyNote) {
+            conversionPrivacyNote.setAttribute('data-i18n', config.privacyKey);
+            conversionPrivacyNote.textContent = localization.t(config.privacyKey);
+        }
+    }
+
+    function saveMinerUEndpoint() {
+        if (!mineruEndpointInput) return;
+        const endpoint = normalizeMinerUEndpoint(mineruEndpointInput.value);
+        mineruEndpointInput.value = endpoint;
+        zotero?.Prefs?.set?.(MINERU_ENDPOINT_PREF, endpoint, true);
+        updateConversionApiKeyControl();
+    }
+
+    function saveMinerULocalApiBase() {
+        if (!mineruLocalBaseInput) return;
+        zotero?.Prefs?.set?.(
+            MINERU_LOCAL_API_BASE_PREF,
+            mineruLocalBaseInput.value,
+            true
+        );
     }
 
     function saveConversionApiKey() {
@@ -426,11 +501,20 @@ export function createPreferencesController({
             return;
         }
         conversionProviderInput.value = getConversionProvider(zotero);
+        if (mineruEndpointInput) {
+            mineruEndpointInput.value = getMinerUEndpoint(zotero);
+        }
+        if (mineruLocalBaseInput) {
+            mineruLocalBaseInput.value = getMinerULocalApiBase(zotero)
+                || DEFAULT_MINERU_LOCAL_API_BASE;
+        }
         updateConversionApiKeyControl();
         conversionProviderInput.addEventListener(
             'change',
             updateConversionApiKeyControl
         );
+        mineruEndpointInput?.addEventListener('change', saveMinerUEndpoint);
+        mineruLocalBaseInput?.addEventListener('change', saveMinerULocalApiBase);
         conversionApiKeyInput?.addEventListener(
             'change',
             saveConversionApiKey
@@ -822,6 +906,11 @@ export function createPreferencesController({
             conversionProviderInput?.removeEventListener(
                 'change',
                 updateConversionApiKeyControl
+            );
+            mineruEndpointInput?.removeEventListener('change', saveMinerUEndpoint);
+            mineruLocalBaseInput?.removeEventListener(
+                'change',
+                saveMinerULocalApiBase
             );
             conversionApiKeyInput?.removeEventListener(
                 'change',

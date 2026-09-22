@@ -2,8 +2,12 @@ import { unzipSync } from 'fflate';
 import {
     getMinerUCacheEnabled,
     getMinerUApiKey,
+    getMinerUEndpoint,
+    getMinerULocalApiBase,
+    getMinerULocalApiKey,
     getConversionProvider,
     getMistralApiKey,
+    MINERU_ENDPOINT_LOCAL,
     getZoteroLocale,
     openMinerUPreferences,
     registerMinerUPreferencesPane,
@@ -63,6 +67,7 @@ import {
 } from './core/saved-markdown-open-resolver.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
 } from './mineru/parser-profile.js';
@@ -108,6 +113,9 @@ import {
 import { ZoteroAnnotationExtractor } from './extractors/zotero-annotation-extractor.js';
 import { MinerUClient } from './mineru/mineru-client.js';
 import { MinerUConversion } from './mineru/mineru-conversion.js';
+import { MinerULocalClient } from './mineru/local-client.js';
+import { MinerULocalConversion } from './mineru/local-conversion.js';
+import { LEGACY_FIGURE_PROFILES } from './figures/legacy-figure-profiles.js';
 import { decodeMinerUFigureInput } from './mineru/figure-layout-adapter.js';
 import { prepareMinerUResult } from './mineru/mineru-result.js';
 import { decodeMistralResult, prepareMistralResult } from './mistral/mistral-result.js';
@@ -371,6 +379,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             cache,
             parserProfiles: [
                 MINERU_PARSER_PROFILE_ID,
+                MINERU_LOCAL_PARSER_PROFILE_ID,
                 MISTRAL_PARSER_PROFILE_ID,
             ],
             resolveSourceItem: manifest => (
@@ -523,10 +532,44 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ),
         onError: error => Zotero.logError?.(error),
     });
+    const localConversion = new MinerULocalConversion({
+        client: new MinerULocalClient({
+            createAbortController: createZoteroAbortController,
+        }),
+        cache,
+        onError: error => Zotero.logError?.(error),
+    });
+    const mineruConversion = {
+        convert(options) {
+            if (getMinerUEndpoint(Zotero) !== MINERU_ENDPOINT_LOCAL) {
+                return conversion.convert(options);
+            }
+            return localConversion.convert({
+                ...options,
+                apiKey: getMinerULocalApiKey(Zotero),
+                apiBase: getMinerULocalApiBase(Zotero),
+            });
+        },
+    };
     const mineruExtractor = new MinerUDocumentExtractor({
         zotero: Zotero,
-        conversion,
-        getApiKey: () => getMinerUApiKey(Zotero),
+        conversion: mineruConversion,
+        getApiKey: () => getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
+            ? getMinerULocalApiKey(Zotero)
+            : getMinerUApiKey(Zotero),
+        getParserProfile: () => currentMinerUParserProfile(),
+        getPreviousParserProfiles: () => (
+            getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
+                ? []
+                : [
+                    ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+                    LEGACY_FIGURE_PROFILES.mineru,
+                ]
+        ),
+        prepareResult: result => getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
+            && !result?.userEdited
+            ? result
+            : prepareMinerUResult(result),
         readFile: path => IOUtils.read(path),
         preparePDFIndex: (itemID, options) => preparePDFIndexForItem(
             itemID,
@@ -2140,13 +2183,19 @@ async function loadRevisionSessionForItem(itemID) {
         ? modelProfile
         : getConversionProvider(Zotero) === 'mistral'
             ? MISTRAL_PARSER_PROFILE_ID
-            : MINERU_PARSER_PROFILE_ID;
+            : currentMinerUParserProfile();
     const cacheKey = await createMarkdownCacheKey(await IOUtils.read(filePath), {
         parserProfile,
     });
     const saved = await runtime.revisionStore.load(cacheKey);
     if (!saved) return null;
     return replaceRevisionSession(itemID, saved.base);
+}
+
+function currentMinerUParserProfile() {
+    return getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
+        ? MINERU_LOCAL_PARSER_PROFILE_ID
+        : MINERU_PARSER_PROFILE_ID;
 }
 
 function throwIfRevisionAborted(signal) {
@@ -2194,7 +2243,7 @@ async function saveSnapshotForModel(pdfItemOrID, model) {
         : await Zotero.Items.getAsync(pdfItemOrID);
     const parserProfile = validParserProfile(model.parserProfile)
         ? model.parserProfile
-        : MINERU_PARSER_PROFILE_ID;
+        : currentMinerUParserProfile();
     let cacheKey = model.cacheKey;
     if (!cacheKey) {
         const filePath = await pdfItem?.getFilePathAsync?.();

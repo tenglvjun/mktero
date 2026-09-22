@@ -19,8 +19,14 @@ export class MinerUDocumentExtractor {
         preparePDFIndex = null,
         createCacheKey = null,
         createSourceHash = null,
+        getParserProfile = () => MINERU_PARSER_PROFILE_ID,
+        getPreviousParserProfiles = () => [
+            ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+            LEGACY_FIGURE_PROFILES.mineru,
+        ],
         readRevision = null,
         isCacheEnabled = () => false,
+        prepareResult = prepareMinerUResult,
         onCacheError = error => zotero.logError?.(error),
         onPDFIndexError = error => zotero.logError?.(error),
     }) {
@@ -37,8 +43,11 @@ export class MinerUDocumentExtractor {
         this.preparePDFIndex = preparePDFIndex;
         this.createCacheKey = createCacheKey;
         this.createSourceHash = createSourceHash;
+        this.getParserProfile = getParserProfile;
+        this.getPreviousParserProfiles = getPreviousParserProfiles;
         this.readRevision = readRevision;
         this.isCacheEnabled = isCacheEnabled;
+        this.prepareResult = prepareResult;
         this.onCacheError = onCacheError;
         this.onPDFIndexError = onPDFIndexError;
     }
@@ -63,11 +72,12 @@ export class MinerUDocumentExtractor {
             || 'Untitled PDF';
         const cacheEnabled = Boolean(this.isCacheEnabled());
         const warnings = [];
+        const parserProfile = this.#parserProfile();
         let cacheKey = null;
         let sourceHash = null;
         if (this.createCacheKey) {
             try {
-                cacheKey = await this.createCacheKey(fileData, { parserProfile: MINERU_PARSER_PROFILE_ID });
+                cacheKey = await this.createCacheKey(fileData, { parserProfile });
             }
             catch (error) {
                 this.#reportCacheError(error);
@@ -81,7 +91,7 @@ export class MinerUDocumentExtractor {
         );
         if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
             let revisionKey = cacheKey;
-            let revisionProfile = MINERU_PARSER_PROFILE_ID;
+            let revisionProfile = parserProfile;
             let revision = await this.readRevision({
                 itemID,
                 cacheKey,
@@ -91,8 +101,10 @@ export class MinerUDocumentExtractor {
             if (!revision && this.createCacheKey) {
                 try {
                     const visited = new Set([cacheKey]);
-                    for (const parserProfile of [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru]) {
-                        const legacyKey = await this.createCacheKey(fileData, { parserProfile });
+                    for (const previousProfile of this.#previousParserProfiles()) {
+                        const legacyKey = await this.createCacheKey(fileData, {
+                            parserProfile: previousProfile,
+                        });
                         throwIfAborted(signal);
                         if (legacyKey && !visited.has(legacyKey)) {
                             visited.add(legacyKey);
@@ -100,7 +112,7 @@ export class MinerUDocumentExtractor {
                             throwIfAborted(signal);
                             if (revision) {
                                 revisionKey = legacyKey;
-                                revisionProfile = parserProfile;
+                                revisionProfile = previousProfile;
                                 break;
                             }
                         }
@@ -114,7 +126,7 @@ export class MinerUDocumentExtractor {
             throwIfAborted(signal);
             if (revision) {
                 onProgress?.(100);
-                const result = prepareMinerUResult({
+                const result = this.prepareResult({
                     ...revision,
                     userEdited: true,
                 });
@@ -152,7 +164,7 @@ export class MinerUDocumentExtractor {
             throw error;
         }
         warnings.push(...(converted.warnings || []));
-        const result = prepareMinerUResult(converted.result);
+        const result = this.prepareResult(converted.result);
         return createResult(
             title,
             result,
@@ -160,8 +172,23 @@ export class MinerUDocumentExtractor {
             warnings,
             cacheKey,
             converted.origin === 'resumed',
-            sourceHash
+            sourceHash,
+            parserProfile
         );
+    }
+
+    #parserProfile() {
+        const profile = this.getParserProfile();
+        return typeof profile === 'string' && profile
+            ? profile
+            : MINERU_PARSER_PROFILE_ID;
+    }
+
+    #previousParserProfiles() {
+        const profiles = this.getPreviousParserProfiles();
+        return Array.isArray(profiles)
+            ? profiles.filter(profile => typeof profile === 'string' && profile)
+            : [];
     }
 
     #reportCacheError(error) {

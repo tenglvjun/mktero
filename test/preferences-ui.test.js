@@ -1491,6 +1491,88 @@ test('refreshes reasoning options when the in-memory catalog arrives', async () 
     assert.equal(listeners.size, 0);
 });
 
+test('switches MinerU between cloud and a local service without mixing keys', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider">
+                <option value="mineru">MinerU</option>
+                <option value="mistral">Mistral OCR 4.1</option>
+            </select>
+            <div id="mktero-mineru-endpoint-row">
+                <select id="mktero-mineru-endpoint">
+                    <option value="cloud">Cloud</option>
+                    <option value="local">Local</option>
+                </select>
+            </div>
+            <div id="mktero-mineru-local-base-row">
+                <input id="mktero-mineru-local-base">
+            </div>
+            <div id="mktero-api-key-row">
+                <input id="mktero-api-key">
+                <small id="mktero-api-key-help"></small>
+                <a id="mktero-api-key-manage"></a>
+            </div>
+            <small id="mktero-conversion-privacy-note"></small>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mineru'],
+        ['extensions.mktero.mineruEndpoint', 'cloud'],
+        ['extensions.mktero.mineruApiKey', 'cloud-secret'],
+        ['extensions.mktero.mineruLocalApiKey', 'local-secret'],
+        ['extensions.mktero.mineruLocalApiBase', 'http://10.0.0.8:8000'],
+    ]);
+    const writes = [];
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => {
+                    values.set(key, value);
+                    writes.push({ key, value, global });
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const endpoint = dom.window.document.getElementById('mktero-mineru-endpoint');
+    const baseRow = dom.window.document.getElementById('mktero-mineru-local-base-row');
+    const apiKeyRow = dom.window.document.getElementById('mktero-api-key-row');
+    assert.equal(endpoint.value, 'cloud');
+    assert.equal(baseRow.hidden, true);
+    assert.equal(apiKeyRow.hidden, false);
+    assert.equal(dom.window.document.getElementById('mktero-api-key').value, 'cloud-secret');
+
+    endpoint.value = 'local';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(baseRow.hidden, false);
+    assert.equal(apiKeyRow.hidden, true);
+    assert.equal(
+        dom.window.document.getElementById('mktero-mineru-local-base').value,
+        'http://10.0.0.8:8000'
+    );
+    assert.match(
+        dom.window.document.getElementById('mktero-conversion-privacy-note').textContent,
+        /local MinerU address/i
+    );
+    assert.deepEqual(writes[0], {
+        key: 'extensions.mktero.mineruEndpoint',
+        value: 'local',
+        global: true,
+    });
+
+    controller.destroy();
+});
+
 function createControl(properties = {}) {
     const listeners = new Map();
     return {

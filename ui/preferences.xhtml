@@ -240,7 +240,43 @@
                 </html:div>
             </html:div>
 
-            <html:div class="mktero-setting-row mktero-field-row">
+            <html:div id="mktero-mineru-endpoint-row"
+                      class="mktero-setting-row mktero-field-row"
+                      hidden="hidden">
+                <html:div class="mktero-setting-copy">
+                    <html:label for="mktero-mineru-endpoint"><html:strong data-i18n="preferences.conversion.mineruEndpointLabel"></html:strong></html:label>
+                    <html:small id="mktero-mineru-endpoint-help"
+                                data-i18n="preferences.conversion.mineruEndpointHelp"></html:small>
+                </html:div>
+                <html:div class="mktero-field-control mktero-field-control-compact">
+                    <html:select id="mktero-mineru-endpoint"
+                                 preference="extensions.mktero.mineruEndpoint"
+                                 aria-describedby="mktero-mineru-endpoint-help">
+                        <html:option value="cloud" data-i18n="preferences.conversion.mineruEndpoint.cloud"></html:option>
+                        <html:option value="local" data-i18n="preferences.conversion.mineruEndpoint.local"></html:option>
+                    </html:select>
+                </html:div>
+            </html:div>
+
+            <html:div id="mktero-mineru-local-base-row"
+                      class="mktero-setting-row mktero-field-row"
+                      hidden="hidden">
+                <html:div class="mktero-setting-copy">
+                    <html:label for="mktero-mineru-local-base"><html:strong data-i18n="preferences.conversion.localApiBaseLabel"></html:strong></html:label>
+                    <html:small id="mktero-mineru-local-base-help"
+                                data-i18n="preferences.conversion.localApiBaseHelp"></html:small>
+                </html:div>
+                <html:div class="mktero-field-control">
+                    <html:input id="mktero-mineru-local-base"
+                                type="url"
+                                autocomplete="off"
+                                spellcheck="false"
+                                aria-describedby="mktero-mineru-local-base-help" />
+                </html:div>
+            </html:div>
+
+            <html:div id="mktero-api-key-row"
+                      class="mktero-setting-row mktero-field-row">
                 <html:div class="mktero-setting-copy">
                     <html:label for="mktero-api-key"><html:strong data-i18n="preferences.conversion.apiKeyLabel"></html:strong></html:label>
                     <html:small id="mktero-api-key-help"
@@ -263,7 +299,8 @@
                 </html:div>
             </html:div>
 
-            <html:small class="mktero-card-note"
+            <html:small id="mktero-conversion-privacy-note"
+                        class="mktero-card-note"
                         data-i18n="preferences.conversion.privacyNote"></html:small>
         </html:div>
     </html:div>

@@ -1,4 +1,7 @@
 pref("extensions.mktero.mineruApiKey", "");
+pref("extensions.mktero.mineruEndpoint", "cloud");
+pref("extensions.mktero.mineruLocalApiBase", "http://127.0.0.1:8000");
+pref("extensions.mktero.mineruLocalApiKey", "");
 pref("extensions.mktero.conversionProvider", "mineru");
 pref("extensions.mktero.mistralApiKey", "");
 pref("extensions.mktero.cacheEnabled", true);

@@ -4,8 +4,8 @@
 
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
-| Complete PDF on a cache miss | Selected MinerU or Mistral provider | Not by Mktero |
-| MinerU/Mistral API credentials and AI credentials | Active Zotero profile, unencrypted | No |
+| Complete PDF on a cache miss | Selected MinerU cloud, the configured local MinerU service, or Mistral | Not by Mktero |
+| MinerU cloud token, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
