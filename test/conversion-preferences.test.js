@@ -7,11 +7,18 @@ import {
     getConversionProvider,
     getMinerUApiKey,
     getMinerUCacheEnabled,
+    getMinerUEndpoint,
+    getMinerULocalApiBase,
+    getMinerULocalApiKey,
     getMistralApiKey,
     MINERU_API_KEY_PREF,
     MINERU_CACHE_ENABLED_PREF,
+    MINERU_ENDPOINT_PREF,
+    MINERU_LOCAL_API_BASE_PREF,
+    MINERU_LOCAL_API_KEY_PREF,
     MISTRAL_API_KEY_PREF,
     normalizeConversionProvider,
+    normalizeMinerUEndpoint,
 } from '../src/config/conversion-preferences.js';
 
 test('normalizes conversion providers to the supported values', () => {
@@ -87,5 +94,26 @@ test('defaults cache reuse to enabled unless explicitly disabled', () => {
     assert.equal(
         getMinerUCacheEnabled({ Prefs: { get: () => undefined } }),
         true
+    );
+});
+
+test('keeps the MinerU local endpoint separate from the cloud token', () => {
+    assert.equal(normalizeMinerUEndpoint('local'), 'local');
+    assert.equal(normalizeMinerUEndpoint('unsupported'), 'cloud');
+    const values = new Map([
+        [MINERU_ENDPOINT_PREF, 'local'],
+        [MINERU_LOCAL_API_BASE_PREF, ' http://10.0.0.8:8000 '],
+        [MINERU_LOCAL_API_KEY_PREF, ' local-secret '],
+    ]);
+    const zotero = {
+        Prefs: { get: key => values.get(key) },
+    };
+
+    assert.equal(getMinerUEndpoint(zotero), 'local');
+    assert.equal(getMinerULocalApiBase(zotero), 'http://10.0.0.8:8000');
+    assert.equal(getMinerULocalApiKey(zotero), 'local-secret');
+    assert.equal(
+        getMinerULocalApiBase({ Prefs: { get: () => '' } }),
+        'http://127.0.0.1:8000'
     );
 });

@@ -66,9 +66,9 @@ Useful links: [Product page](https://mktero.com/) ·
 
 - Desktop Zotero `7.0` through `10.0.*`
 - A PDF attachment downloaded and available as a local file
-- An API key for the selected conversion provider: [MinerU](https://mineru.net/apiManage/token)
-  or [Mistral](https://console.mistral.ai/api-keys/)
-- Network access to the selected conversion API
+- An API key for MinerU cloud or [Mistral](https://console.mistral.ai/api-keys/).
+  MinerU can instead use a self-hosted MinerU 4.0 service; its API key is optional
+- Network access to the selected conversion API, or to the configured local MinerU service
 
 MinerU and Mistral control file-size, page-count, quota, and service-availability
 limits. See the [MinerU API documentation](https://mineru.net/apiManage/docs) or
@@ -126,8 +126,8 @@ last reading paragraph.
 
 ## Privacy
 
-- On a cache miss, the complete PDF is sent to the selected MinerU or Mistral
-  provider.
+- On a cache miss, the complete PDF is sent to the selected MinerU cloud,
+  configured local MinerU service, or Mistral provider.
 - Credentials, cached Markdown and figures, corrections, translations, and
   reading positions are stored unencrypted in the active Zotero profile and are
   not synced by Mktero.

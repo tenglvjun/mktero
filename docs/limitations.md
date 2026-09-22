@@ -5,8 +5,11 @@
 - Only local PDF attachments are supported. A scanned PDF may convert through
   OCR but still lacks the text layer needed for precise Zotero highlights.
 - Source navigation depends on provider blocks and coordinates; older cached
-  results may remain readable without source links. MinerU and Mistral results
-  have independent parser profiles and caches.
+  results may remain readable without source links. MinerU cloud, local MinerU,
+  and Mistral results have independent parser profiles and caches.
+- Local MinerU mode talks to a MinerU 4.0 V1 service. It does not restore
+  figures from that service's result, and a restarted local service cannot
+  resume an earlier job.
 - Navigation currently goes from Markdown to PDF. Reverse navigation is not
   implemented.
 - Mktero displays text highlights and underlines, not standalone notes,

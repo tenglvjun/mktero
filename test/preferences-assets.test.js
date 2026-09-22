@@ -316,13 +316,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row"/g
         ) || []).length,
-        18
+        20
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-(?:field|reader-font)-control(?: [^"]+)?">/g
         ) || []).length,
-        18
+        20
     );
 });
 

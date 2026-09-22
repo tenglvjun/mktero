@@ -110,3 +110,11 @@ export const MINERU_PARSER_PROFILE_ID = JSON.stringify({
     file: MINERU_FILE_OPTIONS,
     sourceMap: MINERU_SOURCE_MAP_OPTIONS,
 });
+
+// Local V1 results do not share the hosted batch contract or figure layout.
+export const MINERU_LOCAL_PARSER_PROFILE_ID = JSON.stringify({
+    transport: 'local-v1',
+    tier: 'standard',
+    ocrMode: 'auto',
+    output: 'zip-markdown-v1',
+});

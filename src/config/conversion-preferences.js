@@ -1,11 +1,22 @@
 export const CONVERSION_PROVIDER_MINERU = 'mineru';
 export const CONVERSION_PROVIDER_MISTRAL = 'mistral';
+export const MINERU_ENDPOINT_CLOUD = 'cloud';
+export const MINERU_ENDPOINT_LOCAL = 'local';
+export const DEFAULT_MINERU_LOCAL_API_BASE = 'http://127.0.0.1:8000';
 
 export const CONVERSION_PROVIDER_PREF =
     'extensions.mktero.conversionProvider';
 export const MINERU_API_KEY_PREF = 'extensions.mktero.mineruApiKey';
+export const MINERU_ENDPOINT_PREF = 'extensions.mktero.mineruEndpoint';
+export const MINERU_LOCAL_API_BASE_PREF = 'extensions.mktero.mineruLocalApiBase';
+export const MINERU_LOCAL_API_KEY_PREF = 'extensions.mktero.mineruLocalApiKey';
 export const MISTRAL_API_KEY_PREF = 'extensions.mktero.mistralApiKey';
 export const MINERU_CACHE_ENABLED_PREF = 'extensions.mktero.cacheEnabled';
+
+const SUPPORTED_MINERU_ENDPOINTS = new Set([
+    MINERU_ENDPOINT_CLOUD,
+    MINERU_ENDPOINT_LOCAL,
+]);
 
 const SUPPORTED_CONVERSION_PROVIDERS = new Set([
     CONVERSION_PROVIDER_MINERU,
@@ -25,8 +36,30 @@ export function getConversionProvider(zotero) {
     );
 }
 
+export function normalizeMinerUEndpoint(value) {
+    const endpoint = String(value || '').trim();
+    return SUPPORTED_MINERU_ENDPOINTS.has(endpoint)
+        ? endpoint
+        : MINERU_ENDPOINT_CLOUD;
+}
+
+export function getMinerUEndpoint(zotero) {
+    return normalizeMinerUEndpoint(
+        zotero?.Prefs?.get?.(MINERU_ENDPOINT_PREF, true)
+    );
+}
+
 export function getMinerUApiKey(zotero) {
     return readPreferenceString(zotero, MINERU_API_KEY_PREF);
+}
+
+export function getMinerULocalApiKey(zotero) {
+    return readPreferenceString(zotero, MINERU_LOCAL_API_KEY_PREF);
+}
+
+export function getMinerULocalApiBase(zotero) {
+    const value = readPreferenceString(zotero, MINERU_LOCAL_API_BASE_PREF);
+    return value || DEFAULT_MINERU_LOCAL_API_BASE;
 }
 
 export function getMistralApiKey(zotero) {

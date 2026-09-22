@@ -3,7 +3,8 @@
 [English](./limitations.md) · [简体中文](./limitations.zh-CN.md) · [返回 README](../README.zh-CN.md)
 
 - 仅支持本地 PDF 附件。扫描版 PDF 可以通过 OCR 转换，但没有文字层时无法生成精确的 Zotero 高亮。
-- 来源跳转依赖 Provider 返回的内容块和坐标；MinerU 与 Mistral 使用独立的解析配置和缓存，旧缓存可能仍可阅读但没有来源链接。
+- 来源跳转依赖 Provider 返回的内容块和坐标；MinerU 云端、本地 MinerU 和 Mistral 使用独立的解析配置和缓存，旧缓存可能仍可阅读但没有来源链接。
+- 本地 MinerU 模式连接 MinerU 4.0 V1 服务。它不会从该服务的结果还原图片，本地服务重启后也不能恢复之前的任务。
 - 当前只支持从 Markdown 跳转到 PDF，不支持反向跳转。
 - 目前显示文本高亮和下划线，不显示独立便签、图片/区域标注或手写标注。
 - Markdown 图片仅限当前结果压缩包中的 GIF、JPEG、PNG 和 WebP；远程图片会被阻止。

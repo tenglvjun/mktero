@@ -46,8 +46,8 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 
 - 桌面版 Zotero `7.0` 至 `10.0.*`
 - 已下载并可在本机访问的 PDF 附件
-- 需要所选转换服务的 API key：[MinerU](https://mineru.net/apiManage/token) 或 [Mistral](https://console.mistral.ai/api-keys/)
-- 能够访问所选转换 API 的网络环境
+- MinerU 云端或 [Mistral](https://console.mistral.ai/api-keys/) 需要 API key。MinerU 也可以改用自部署的 MinerU 4.0 服务，此时 API key 可选
+- 能够访问所选转换 API，或能够访问配置的本地 MinerU 服务
 
 文件大小、页数、账户额度和服务可用性由各服务控制，请以
 [MinerU API 文档](https://mineru.net/apiManage/docs)或
@@ -89,7 +89,7 @@ Mktero 标签页是会话级的，Zotero 重启后不会恢复。关闭标签页
 
 ## 数据与隐私
 
-- 缓存未命中时，完整 PDF 会发送到所选的 MinerU 或 Mistral 服务。
+- 缓存未命中时，完整 PDF 会发送到所选的 MinerU 云端、配置的本地 MinerU 服务或 Mistral 服务。
 - 凭据、缓存的 Markdown 和图片、校对、译文和阅读位置会以未加密形式存储在当前 Zotero 配置文件中，Mktero 不会同步这些数据。
 - 引用、文献和翻译请求都是受限且本地优先的；日志不会包含 API Token、预签名地址、PDF 字节或带认证的响应。
 
