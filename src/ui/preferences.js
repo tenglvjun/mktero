@@ -173,6 +173,7 @@ export function createPreferencesController({
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
     );
+    const conversionApiKeyRow = document.getElementById('mktero-api-key-row');
     const conversionApiKeyInput = document.getElementById(
         'mktero-api-key'
     );
@@ -446,6 +447,7 @@ export function createPreferencesController({
             mineruEndpointRow.hidden = provider !== CONVERSION_PROVIDER_MINERU;
         }
         if (mineruLocalBaseRow) mineruLocalBaseRow.hidden = !local;
+        if (conversionApiKeyRow) conversionApiKeyRow.hidden = local;
         if (mineruEndpointInput && !mineruEndpointInput.value) {
             mineruEndpointInput.value = getMinerUEndpoint(zotero);
         }

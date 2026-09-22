@@ -216,7 +216,7 @@ test('ships responsive settings cards and a cache switch', async () => {
     assert.match(styles, /\.mktero-switch::before/);
     assert.match(
         styles,
-        /#mktero-ai-moonshot-endpoint-row\[hidden\][\s\S]*#mktero-ai-minimax-endpoint-row\[hidden\][\s\S]*#mktero-ai-alibaba-endpoint-row\[hidden\]\s*\{[\s\S]*display:\s*none/
+        /#mktero-ai-moonshot-endpoint-row\[hidden\][\s\S]*#mktero-ai-minimax-endpoint-row\[hidden\][\s\S]*#mktero-ai-alibaba-endpoint-row\[hidden\][\s\S]*#mktero-mineru-local-base-row\[hidden\][\s\S]*#mktero-api-key-row\[hidden\]\s*\{[\s\S]*display:\s*none/
     );
     assert.doesNotMatch(
         styles,

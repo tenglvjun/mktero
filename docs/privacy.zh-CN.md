@@ -5,7 +5,7 @@
 | 数据 | 发送到或存储在 | Zotero 同步 |
 | --- | --- | --- |
 | 缓存未命中时的完整 PDF | 所选 MinerU 云端、配置的本地 MinerU 服务或 Mistral | Mktero 不同步 |
-| MinerU 云端 Token、可选的本地 MinerU 地址和密钥、Mistral API key，以及 AI 凭据 | 当前 Zotero 配置文件，未加密 | 否 |
+| MinerU 云端 Token、本地 MinerU 地址、Mistral API key，以及 AI 凭据 | 当前 Zotero 配置文件，未加密 | 否 |
 | 缓存的 Markdown、图片、图表元数据（含 OCR 片段）、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
 | 用户为只有标题的文献点击“导入文献”后发送的受限引用文本 | OpenAlex | Mktero 不同步 |

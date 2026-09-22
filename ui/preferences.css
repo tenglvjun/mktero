@@ -421,7 +421,10 @@
 #mktero-ai-protocol-row[hidden],
 #mktero-ai-moonshot-endpoint-row[hidden],
 #mktero-ai-minimax-endpoint-row[hidden],
-#mktero-ai-alibaba-endpoint-row[hidden] {
+#mktero-ai-alibaba-endpoint-row[hidden],
+#mktero-mineru-endpoint-row[hidden],
+#mktero-mineru-local-base-row[hidden],
+#mktero-api-key-row[hidden] {
     display: none;
 }
 

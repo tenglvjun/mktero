@@ -1507,9 +1507,11 @@ test('switches MinerU between cloud and a local service without mixing keys', as
             <div id="mktero-mineru-local-base-row">
                 <input id="mktero-mineru-local-base">
             </div>
-            <input id="mktero-api-key">
-            <small id="mktero-api-key-help"></small>
-            <a id="mktero-api-key-manage"></a>
+            <div id="mktero-api-key-row">
+                <input id="mktero-api-key">
+                <small id="mktero-api-key-help"></small>
+                <a id="mktero-api-key-manage"></a>
+            </div>
             <small id="mktero-conversion-privacy-note"></small>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache"></button>
@@ -1544,19 +1546,20 @@ test('switches MinerU between cloud and a local service without mixing keys', as
     await controller.init();
     const endpoint = dom.window.document.getElementById('mktero-mineru-endpoint');
     const baseRow = dom.window.document.getElementById('mktero-mineru-local-base-row');
+    const apiKeyRow = dom.window.document.getElementById('mktero-api-key-row');
     assert.equal(endpoint.value, 'cloud');
     assert.equal(baseRow.hidden, true);
+    assert.equal(apiKeyRow.hidden, false);
     assert.equal(dom.window.document.getElementById('mktero-api-key').value, 'cloud-secret');
 
     endpoint.value = 'local';
     endpoint.dispatchEvent(new dom.window.Event('change'));
     assert.equal(baseRow.hidden, false);
+    assert.equal(apiKeyRow.hidden, true);
     assert.equal(
         dom.window.document.getElementById('mktero-mineru-local-base').value,
         'http://10.0.0.8:8000'
     );
-    assert.equal(dom.window.document.getElementById('mktero-api-key').value, 'local-secret');
-    assert.equal(dom.window.document.getElementById('mktero-api-key-manage').hidden, true);
     assert.match(
         dom.window.document.getElementById('mktero-conversion-privacy-note').textContent,
         /local MinerU address/i
