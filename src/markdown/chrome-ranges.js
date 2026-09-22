@@ -10,16 +10,41 @@ const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})/;
 
 export function visibleDocumentChromeRanges(markdown, storedRanges, itemTitle) {
     if (typeof markdown !== 'string') return [];
-    const titleFrom = paperTitleHeadingOffset(markdown, itemTitle);
+    const title = findPaperTitleHeading(markdown, itemTitle);
     return clipChromeAwayFromHeading(
         markdown,
         normalizeChromeRanges([
             ...normalizeChromeRanges(storedRanges, markdown.length),
             ...findLeadingPublisherChromeRanges(markdown),
-            ...findLeadingPreambleChromeRanges(markdown, titleFrom),
+            ...findLeadingPreambleChromeRanges(markdown, title?.from ?? null),
         ], markdown.length),
-        titleFrom
+        title
     );
+}
+
+// OCR often splits "Title: subtitle" across consecutive headings and drops
+// the joining punctuation. A run matches only when rejoining it reproduces
+// the bibliographic title.
+export function findPaperTitleHeading(markdown, itemTitle) {
+    if (typeof markdown !== 'string' || !markdown) return null;
+    const itemKey = titleHeadingKey(itemTitle);
+    if (!itemKey) return null;
+    const headings = collectTitleHeadings(markdown);
+    const singles = headings.filter(heading => heading.key === itemKey);
+    const chosen = chooseCoverTitle(
+        markdown,
+        singles.map(heading => [heading])
+    ) || chooseCoverTitle(
+        markdown,
+        collectSplitTitleGroups(markdown, headings, itemKey)
+    );
+    if (!chosen) return null;
+    return {
+        from: chosen[0].from,
+        to: lineEnd(markdown, chosen.at(-1).from),
+        partOffsets: chosen.map(part => part.from),
+        text: String(itemTitle).replace(/\s+/gu, ' ').trim(),
+    };
 }
 
 function findLeadingPreambleChromeRanges(markdown, titleFrom) {
@@ -37,17 +62,61 @@ function lineBreakBefore(markdown, offset) {
     return to;
 }
 
-function paperTitleHeadingOffset(markdown, itemTitle) {
-    const itemKey = titleHeadingKey(itemTitle);
-    if (!itemKey) return null;
-    const matches = collectTitleHeadings(markdown).filter(heading => (
-        heading.key === itemKey
-    ));
-    if (matches.length >= 2
-        && isCoverTitleDuplicate(markdown, matches[0].from, matches[1].from)) {
-        return matches[1].from;
+const MAX_SPLIT_TITLE_PARTS = 4;
+const SPLIT_TITLE_SEPARATORS = [': ', ' - ', ' \u2014 ', ' \u2013 ', ':'];
+
+function collectSplitTitleGroups(markdown, headings, itemKey) {
+    const groups = [];
+    for (let start = 0; start < headings.length; start++) {
+        const limit = Math.min(
+            headings.length,
+            start + MAX_SPLIT_TITLE_PARTS
+        );
+        for (let end = start + 2; end <= limit; end++) {
+            const parts = headings.slice(start, end);
+            if (!titlePartsAreContiguous(markdown, parts)) break;
+            if (!splitTitleMatches(parts, itemKey)) continue;
+            groups.push(parts);
+            break;
+        }
     }
-    return matches[0]?.from ?? null;
+    return groups;
+}
+
+function chooseCoverTitle(markdown, groups) {
+    if (!groups.length) return null;
+    if (groups.length >= 2
+        && isCoverTitleDuplicate(
+            markdown,
+            groups[0].at(-1).from,
+            groups[1][0].from
+        )) {
+        return groups[1];
+    }
+    return groups[0];
+}
+
+function titlePartsAreContiguous(markdown, parts) {
+    for (let index = 1; index < parts.length; index++) {
+        const between = markdown.slice(
+            lineEnd(markdown, parts[index - 1].from),
+            parts[index].from
+        );
+        if (between.trim()) return false;
+    }
+    return true;
+}
+
+function splitTitleMatches(parts, itemKey) {
+    const keys = parts.map(part => part.key);
+    const rest = keys.slice(1).join(' ');
+    const candidates = [
+        keys.join(' '),
+        ...SPLIT_TITLE_SEPARATORS.map(separator => (
+            `${keys[0]}${separator}${rest}`
+        )),
+    ];
+    return candidates.some(candidate => titleHeadingKey(candidate) === itemKey);
 }
 
 function isCoverTitleDuplicate(markdown, firstFrom, secondFrom) {
@@ -132,14 +201,17 @@ export function findLeadingPublisherChromeRanges(markdown) {
     );
 }
 
-function clipChromeAwayFromHeading(markdown, ranges, headingFrom) {
+function clipChromeAwayFromHeading(markdown, ranges, title) {
+    const headingFrom = title?.from;
+    const headingTo = title?.to;
     if (!Number.isSafeInteger(headingFrom)
+        || !Number.isSafeInteger(headingTo)
         || headingFrom < 0
+        || headingTo <= headingFrom
         || headingFrom >= markdown.length) {
         return normalizeChromeRanges(ranges, markdown.length);
     }
     const protectedFrom = lineBreakBefore(markdown, headingFrom);
-    const headingTo = lineEnd(markdown, headingFrom);
     if (headingTo <= protectedFrom) {
         return normalizeChromeRanges(ranges, markdown.length);
     }

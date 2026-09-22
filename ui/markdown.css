@@ -1226,17 +1226,20 @@ main {
 }
 
 .markdown-correction-banner {
+    flex: 0 0 auto;
     width: 100%;
-    flex: 1 0 100%;
-    order: 10;
-    padding: 7px 12px;
-    border-top: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+    padding: 6px 16px;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
     color: var(--reader-text);
-    background: color-mix(in srgb, var(--accent) 9%, var(--reader-background));
+    background: color-mix(in srgb, var(--accent) 8%, var(--reader-background));
     font-family: var(--ui-font);
     font-size: 12px;
-    line-height: 1.45;
+    line-height: 1.4;
     text-align: center;
+}
+
+.markdown-correction-banner[hidden] {
+    display: none;
 }
 
 .markdown-correction-undo {
@@ -2751,6 +2754,15 @@ main {
     padding-bottom: 0.45em;
     border-bottom: 1px solid var(--border-subtle);
     font-size: 1.95em;
+}
+
+.markdown-editor-host > .cm-editor .cm-line.cm-mktero-document-title {
+    border-bottom: none;
+    padding-bottom: 0.04em;
+}
+
+.markdown-editor-host > .cm-editor .cm-line.cm-mktero-document-title-continued {
+    padding-top: 0.02em;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-heading-2 { font-size: 1.5em; }

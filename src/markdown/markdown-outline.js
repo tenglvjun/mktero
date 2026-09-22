@@ -1,5 +1,8 @@
 import { GFM, parser as markdownParser } from '@lezer/markdown';
-import { normalizeChromeRanges } from './chrome-ranges.js';
+import {
+    findPaperTitleHeading,
+    normalizeChromeRanges,
+} from './chrome-ranges.js';
 
 const OUTLINE_PARSER = markdownParser.configure(GFM);
 const HEADING_NODE = /^(?:ATXHeading|SetextHeading)([1-6])$/;
@@ -9,7 +12,11 @@ const MIN_PDF_OUTLINE_MATCHES = 3;
 const SECTION_NUMBER_PREFIX_PATTERN =
     /^(?:\d{1,2}(?:\.\d+)*\.?\s+|[ivxlcdm]{1,6}\.\s+|[a-z]\.\s+)/i;
 
-export function extractMarkdownOutline(markdown, chromeRanges = []) {
+export function extractMarkdownOutline(
+    markdown,
+    chromeRanges = [],
+    itemTitle = ''
+) {
     const source = String(markdown || '');
     const hidden = normalizeChromeRanges(chromeRanges, source.length);
     const headings = [];
@@ -34,18 +41,28 @@ export function extractMarkdownOutline(markdown, chromeRanges = []) {
             });
         },
     });
-    return assignOutlineLevels(
-        omitNonSectionHeadings(source, headings),
-        source
+    // Level the original headings first. Collapsing the split title earlier
+    // makes its body include the following section and flattens the outline.
+    return collapseSplitPaperTitle(
+        assignOutlineLevels(
+            omitNonSectionHeadings(source, headings),
+            source
+        ),
+        findPaperTitleHeading(source, itemTitle)
     );
 }
 
 export function extractAlignedMarkdownOutline(
     markdown,
     chromeRanges = [],
-    pdfOutline = []
+    pdfOutline = [],
+    itemTitle = ''
 ) {
-    const headings = extractMarkdownOutline(markdown, chromeRanges);
+    const headings = extractMarkdownOutline(
+        markdown,
+        chromeRanges,
+        itemTitle
+    );
     const bookmarks = flattenPdfOutline(pdfOutline);
     if (!bookmarks.length) return headings;
 
@@ -109,6 +126,25 @@ const KEYWORD_HEADING_PATTERN = /^(keywords?|关键词|highlights?)\s*:?\s*$/i;
 const LIST_ITEM_PATTERN = /^\s*(?:[-*]|[0-9]+\.)\s+/;
 const SENTENCE_END_PATTERN = /[.!?。！？]\s*$/;
 const LOWERCASE_PROSE_PATTERN = /^\p{Ll}/u;
+
+function collapseSplitPaperTitle(headings, title) {
+    if (!title || title.partOffsets.length < 2) return headings;
+    const offsets = new Set(title.partOffsets);
+    const indexes = [];
+    headings.forEach((heading, index) => {
+        if (offsets.has(heading.offset)) indexes.push(index);
+    });
+    if (indexes.length !== title.partOffsets.length) return headings;
+    const first = indexes[0];
+    if (indexes.at(-1) - first + 1 !== indexes.length) return headings;
+    const next = headings.slice();
+    next.splice(first, indexes.length, {
+        ...headings[first],
+        text: title.text,
+        level: Math.min(...indexes.map(index => headings[index].level)),
+    });
+    return next;
+}
 
 function omitNonSectionHeadings(markdown, headings) {
     return headings.filter((heading, index) => {
