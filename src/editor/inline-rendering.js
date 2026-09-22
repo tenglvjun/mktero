@@ -57,6 +57,7 @@ import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import { collectFigureImageNodes } from '../figures/figure-model.js';
 import {
+    findPaperTitleHeading,
     subtractChromeRanges,
 } from '../markdown/chrome-ranges.js';
 import {
@@ -86,6 +87,7 @@ export const setFigureViews = StateEffect.define();
 export const setPendingFigures = StateEffect.define();
 export const setAnnotationOverlay = StateEffect.define();
 export const setChromeRanges = StateEffect.define();
+export const setDocumentTitle = StateEffect.define();
 export const setTranslationRanges = StateEffect.define();
 export const setTranslationFailures = StateEffect.define();
 export const setTranslationPairs = StateEffect.define();
@@ -615,6 +617,8 @@ export function createInlineRenderingExtension({
         pendingFigures: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
         chromeRanges: [],
+        documentTitle: '',
+        paperTitleHeading: null,
         translationRanges: [],
         translationFailures: [],
         translationPairs: [],
@@ -652,6 +656,7 @@ export function createInlineRenderingExtension({
             let pendingFiguresChanged = false;
             let annotationOverlayChanged = false;
             let chromeRangesChanged = false;
+            let documentTitleChanged = false;
             let translationRangesChanged = false;
             let translationFailuresChanged = false;
             let translationPairsChanged = false;
@@ -699,6 +704,10 @@ export function createInlineRenderingExtension({
                         : [];
                     chromeRangesChanged = true;
                 }
+                else if (effect.is(setDocumentTitle)) {
+                    context.documentTitle = String(effect.value || '');
+                    documentTitleChanged = true;
+                }
                 else if (effect.is(setTranslationRanges)) {
                     context.translationRanges = normalizeTranslationRanges(
                         effect.value,
@@ -744,6 +753,36 @@ export function createInlineRenderingExtension({
                     correctionStateChanged = true;
                 }
             }
+            // Typing inside the open correction block only shifts later
+            // decorations. Rebuilding the whole paper here re-runs citation
+            // and figure analysis on every keystroke.
+            if (correctionEditCanReuseDecorations(
+                transaction,
+                context,
+                {
+                    shouldRefresh,
+                    referenceHighlightChanged,
+                    tableHighlightChanged,
+                    figureHighlightChanged,
+                    figureViewsChanged,
+                    pendingFiguresChanged,
+                    annotationOverlayChanged,
+                    chromeRangesChanged,
+                    documentTitleChanged,
+                    translationRangesChanged,
+                    translationFailuresChanged,
+                    translationPairsChanged,
+                    translationPairHighlightChanged,
+                    editingRangeChanged,
+                    correctionStateChanged,
+                }
+            )) {
+                context.editingRange = mapRangeThroughChanges(
+                    context.editingRange,
+                    transaction.changes
+                );
+                return decorations.map(transaction.changes);
+            }
             if (transaction.docChanged && !figureViewsChanged) {
                 context.figureViews = null;
                 context.figureReferences.document = null;
@@ -757,6 +796,7 @@ export function createInlineRenderingExtension({
                 || pendingFiguresChanged
                 || annotationOverlayChanged
                 || chromeRangesChanged
+                || documentTitleChanged
                 || translationRangesChanged
                 || translationFailuresChanged
                 || translationPairsChanged
@@ -930,7 +970,37 @@ function normalizeLinkLabel(label) {
         .toLowerCase();
 }
 
+function correctionEditCanReuseDecorations(transaction, context, flags) {
+    if (!context.editingRange || !transaction.docChanged) return false;
+    if (Object.values(flags).some(Boolean)) return false;
+    return changesStayInside(transaction.changes, context.editingRange);
+}
+
+function changesStayInside(changes, range) {
+    let inside = true;
+    changes.iterChanges((from, to) => {
+        if (from < range.from || to > range.to) inside = false;
+    });
+    return inside;
+}
+
+function mapRangeThroughChanges(range, changes) {
+    if (!range) return null;
+    const from = changes.mapPos(range.from, 1);
+    const to = changes.mapPos(range.to, -1);
+    if (!Number.isSafeInteger(from)
+        || !Number.isSafeInteger(to)
+        || to < from) {
+        return null;
+    }
+    return { from, to };
+}
+
 function buildDecorations(state, context) {
+    context.paperTitleHeading = findPaperTitleHeading(
+        state.doc.toString(),
+        context.documentTitle
+    );
     const decorations = [];
     const excludedMathRanges = collectExcludedMathRanges(state);
     const renderedMathRanges = [];
@@ -2137,8 +2207,15 @@ function decorateSyntaxNode(node, state, decorations, context) {
 
     if (isHeadingNode(node.name)) {
         const level = Number(node.name.at(-1));
+        const title = context.paperTitleHeading;
+        const titleIndex = title?.partOffsets.indexOf(node.from) ?? -1;
         decorations.push(Decoration.line({
-            class: `cm-mktero-heading cm-mktero-heading-${level}`,
+            class: [
+                'cm-mktero-heading',
+                `cm-mktero-heading-${level}`,
+                titleIndex >= 0 ? 'cm-mktero-document-title' : '',
+                titleIndex > 0 ? 'cm-mktero-document-title-continued' : '',
+            ].filter(Boolean).join(' '),
         }).range(node.from));
         return;
     }

@@ -22,6 +22,7 @@ import {
     selectionAnchor,
     setAnnotationOverlay,
     setChromeRanges,
+    setDocumentTitle,
     setCorrectionRenderingState,
     setFigureHighlight,
     setFigureViews,
@@ -135,6 +136,7 @@ export function createInlineMarkdownEditor({
     onCommitCorrection,
     onRestoreCorrection,
     onCorrectionError,
+    onActiveCorrectionChange,
     localization = createLocalization(),
 }) {
     const t = localization.t.bind(localization);
@@ -344,13 +346,17 @@ export function createInlineMarkdownEditor({
             }
             const isEditorScroll = event.type === 'scroll'
                 && event.target === view.scrollDOM;
+            // An open correction already owns the caret. scrollIntoView plus
+            // a synchronous measure here fights that caret on every scroll.
             const viewportRepaired = isEditorScroll
+                && !activeCorrection
                 && repairViewport();
-            view.requestMeasure();
+            if (!activeCorrection) view.requestMeasure();
             if (isEditorScroll) {
                 onViewportChange?.(editorViewportOffset(view));
             }
             if (isEditorScroll
+                && !activeCorrection
                 && !viewportRepaired
                 && typeof ownerWindow.IntersectionObserver !== 'function') {
                 view.measure();
@@ -646,6 +652,7 @@ export function createInlineMarkdownEditor({
                 }),
             ],
         });
+        onActiveCorrectionChange?.(true);
         view.focus();
         return true;
     };
@@ -673,6 +680,7 @@ export function createInlineMarkdownEditor({
             ],
         });
         correctionToolbar?.hide();
+        onActiveCorrectionChange?.(false);
     };
     const cancelActiveCorrection = ({ force = false } = {}) => {
         if (correctionBusy && !force) return false;
@@ -901,6 +909,7 @@ export function createInlineMarkdownEditor({
         figureViews = null,
         pendingFigures = null,
         chromeRanges,
+        documentTitle = '',
         sourceActionRanges,
         translationRanges,
         translationFailures,
@@ -949,6 +958,7 @@ export function createInlineMarkdownEditor({
                 annotationOverlay || createEmptyAnnotationOverlay()
             ),
             setChromeRanges.of(currentChromeRanges),
+            setDocumentTitle.of(documentTitle),
             setFigureViews.of(currentFigureViews),
             setPendingFigures.of(pendingFigures instanceof Map ? pendingFigures : null),
             setTranslationRanges.of(translationRanges || []),
@@ -977,6 +987,9 @@ export function createInlineMarkdownEditor({
     return {
         getMarkdown() {
             return view.state.doc.toString();
+        },
+        hasActiveCorrection() {
+            return Boolean(activeCorrection);
         },
         setDocument,
         setMarkdown(markdown) {

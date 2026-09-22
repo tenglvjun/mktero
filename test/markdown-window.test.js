@@ -449,9 +449,18 @@ test('toggles block correction mode and restores all saved corrections', async (
     view.render({ ...model, correctionMode: true });
     assert.equal(editorStates.at(-1).enabled, true);
     assert.match(toggle.textContent, /Finish correction/);
+    const correctionBanner = shadow.querySelector('.markdown-correction-banner');
     assert.match(
-        shadow.querySelector('.markdown-correction-banner').textContent,
+        correctionBanner.textContent,
         /double-click text or a table cell/i
+    );
+    assert.equal(
+        correctionBanner.parentElement.classList.contains('markdown-reader-toolbar'),
+        false
+    );
+    assert.equal(
+        correctionBanner.previousElementSibling?.classList.contains('markdown-reader-toolbar'),
+        true
     );
 
     restoreAll.click();
@@ -470,6 +479,55 @@ test('toggles block correction mode and restores all saved corrections', async (
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(restoreCalls, 1);
 
+    view.destroy();
+});
+
+test('defers document replacement until the open correction block closes', () => {
+    const markdown = 'Editable paragraph.';
+    const documents = [];
+    let active = false;
+    let notify = () => {};
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+        correctionMode: true,
+        editableBlocks: [{
+            id: 'paragraph-1',
+            type: 'paragraph',
+            from: 0,
+            to: markdown.length,
+        }],
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            notify = options.onActiveCorrectionChange;
+            return {
+                hasActiveCorrection: () => active,
+                setDocument(document) {
+                    documents.push(document.markdown);
+                },
+                setCorrectionState() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+    const appliedBeforeEdit = documents.length;
+    active = true;
+    view.render({
+        ...model,
+        markdown: 'Editable paragraph.\n\n![figure](figures/a.png)',
+    });
+    assert.equal(documents.length, appliedBeforeEdit);
+
+    active = false;
+    notify(false);
+    assert.equal(
+        documents.at(-1),
+        'Editable paragraph.\n\n![figure](figures/a.png)'
+    );
     view.destroy();
 });
 
@@ -1587,12 +1645,13 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         annotationOverlay,
         sourceMap,
         chromeRanges: [],
-            sourceActionRanges: null,
-            figureViews: [],
-            translationRanges: [],
-            translationFailures: [],
-            translationPairs: [],
-        }]);
+        documentTitle: 'Converting PDF…',
+        sourceActionRanges: null,
+        figureViews: [],
+        translationRanges: [],
+        translationFailures: [],
+        translationPairs: [],
+    }]);
     view.destroy();
 });
 
@@ -2777,8 +2836,10 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
             toolbar?.getAttribute('aria-label'),
             'Markdown reading toolbar'
         );
+        const correctionBanner = shadow.querySelector('.markdown-correction-banner');
+        assert.equal(toolbar?.nextElementSibling, correctionBanner);
         assert.equal(
-            toolbar?.nextElementSibling,
+            correctionBanner?.nextElementSibling,
             shadow.querySelector('.markdown-translation-progress')
         );
         assert.equal(

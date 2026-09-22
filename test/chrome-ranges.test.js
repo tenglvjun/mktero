@@ -401,6 +401,44 @@ test('does not treat a fenced code heading as the paper title', () => {
     );
 });
 
+test('hides preamble before a title split across consecutive headings', () => {
+    const itemTitle = 'Heart rate variability: Standards of measurement, physiological interpretation, and clinical use';
+    const markdown = [
+        'Guidelines',
+        '',
+        '# Heart rate variability',
+        '',
+        '# Standards of measurement, physiological interpretation, and clinical use',
+        '',
+        'Task Force of The European Society of Cardiology.',
+    ].join('\n');
+    const visible = visibleDocumentText(markdown, [], itemTitle);
+    assert.equal(visible.includes('Guidelines'), false);
+    assert.equal(visible.includes('# Heart rate variability'), true);
+    assert.equal(
+        visible.includes('# Standards of measurement, physiological interpretation, and clinical use'),
+        true
+    );
+    assert.equal(
+        visible.includes('Task Force of The European Society of Cardiology.'),
+        true
+    );
+});
+
+test('does not treat unrelated consecutive headings as a split paper title', () => {
+    const itemTitle = 'Heart rate variability: Standards of measurement, physiological interpretation, and clinical use';
+    const markdown = [
+        'Guidelines',
+        '',
+        '# Heart rate variability',
+        '',
+        '# Introduction',
+    ].join('\n');
+    const visible = visibleDocumentText(markdown, [], itemTitle);
+    assert.equal(visible.includes('Guidelines'), true);
+    assert.equal(visible.includes('# Introduction'), true);
+});
+
 function visibleDocumentText(markdown, storedRanges = [], itemTitle = PAPER_TITLE) {
     const chrome = visibleDocumentChromeRanges(markdown, storedRanges, itemTitle);
     return visibleTextForRanges(

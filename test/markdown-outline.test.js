@@ -467,3 +467,25 @@ test('falls back when too few PDF bookmarks uniquely match headings', () => {
         extractMarkdownOutline(markdown)
     );
 });
+
+test('collapses a bibliographic title split across consecutive headings', () => {
+    const itemTitle = 'Heart rate variability: Standards of measurement, physiological interpretation, and clinical use';
+    const markdown = [
+        '# Heart rate variability',
+        '',
+        '# Standards of measurement, physiological interpretation, and clinical use',
+        '',
+        '## Introduction',
+        '',
+        'Body.',
+    ].join('\n');
+    const outline = extractMarkdownOutline(markdown, [], itemTitle);
+    assert.deepEqual(
+        outline.map(heading => [heading.text, heading.level]),
+        [
+            [itemTitle, 1],
+            ['Introduction', 2],
+        ]
+    );
+    assert.equal(outline[0].offset, 0);
+});

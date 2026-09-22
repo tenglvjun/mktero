@@ -358,6 +358,7 @@ class MarkdownTabView {
         this.outlineChromeRanges = [];
         this.outlinePdfOutline = [];
         this.renderedChromeRanges = [];
+        this.deferredRenderModel = null;
         this.documentSearchOpen = false;
         this.documentSearchQuery = '';
         this.documentSearchComposing = false;
@@ -501,6 +502,12 @@ class MarkdownTabView {
                 this.restoreCorrection(blockID)
             ),
             onCorrectionError: error => this.reportCorrectionError(error),
+            onActiveCorrectionChange: active => {
+                if (active || !this.deferredRenderModel) return;
+                const model = this.deferredRenderModel;
+                this.deferredRenderModel = null;
+                this.render(model);
+            },
             localization: this.localization,
         });
         this.syncOutline('');
@@ -624,6 +631,13 @@ class MarkdownTabView {
                 : comparisonView
                     ? model.comparisonMarkdown || ''
                     : model.markdown || '';
+            // Figure restoration republishes the whole Markdown as each
+            // figure finishes. Applying that while a block is open replaces
+            // the caret and the unsaved text.
+            if (this.editor.hasActiveCorrection?.()) {
+                this.deferredRenderModel = model;
+                return;
+            }
             const figureViews = analyzeDocumentFigures(markdown, {
                 figureMap: model.figureMap,
                 viewRanges: model.translationBlockRanges,
@@ -695,6 +709,9 @@ class MarkdownTabView {
                     ? { pendingFigures: model.pendingFigureAssets }
                     : {}),
                 chromeRanges: editorChromeRanges,
+                documentTitle: translatedView || comparisonView
+                    ? ''
+                    : model.title,
                 sourceActionRanges: translatedView
                     ? []
                     : comparisonView
@@ -763,7 +780,8 @@ class MarkdownTabView {
                 translatedView && !comparisonView ? [] : model.pdfOutline,
                 comparisonView
                     ? analyzeDocumentFigures(model.markdown, { figureMap: model.figureMap })
-                    : figureViews
+                    : figureViews,
+                translatedView ? '' : model.title
             );
             this.syncNotes(annotationOverlay, markdown.length);
             if (assetsChanged) this.editor.refreshRendering();
@@ -1282,7 +1300,6 @@ class MarkdownTabView {
         }, this.t('revision.undoDelete'));
         appendChildren(correctionUndo, correctionUndoMessage, correctionUndoButton);
         correctionUndo.hidden = true;
-        documentActions.toolbar.appendChild(correctionBanner);
         documentActions.toolbar.appendChild(focusExit);
         const editorSection = this.createElement('section', {
             class: 'markdown-editor',
@@ -1291,6 +1308,7 @@ class MarkdownTabView {
         appendChildren(
             editorSection,
             documentActions.toolbar,
+            correctionBanner,
             documentActions.translationProgress,
             readingLayout,
             sourcePeek,
@@ -5363,7 +5381,8 @@ class MarkdownTabView {
         sourceRanges = null,
         chromeRanges = [],
         pdfOutline = [],
-        figureViews = null
+        figureViews = null,
+        itemTitle = ''
     ) {
         this.outlineMarkdown = String(markdown || '');
         this.outlineSourceRanges = sourceRanges;
@@ -5372,6 +5391,7 @@ class MarkdownTabView {
             : [];
         this.outlinePdfOutline = Array.isArray(pdfOutline) ? pdfOutline : [];
         this.outlineFigureViews = figureViews;
+        this.outlineItemTitle = String(itemTitle || '');
         this.renderOutlineList();
     }
 
@@ -5432,7 +5452,8 @@ class MarkdownTabView {
         return extractAlignedMarkdownOutline(
             this.outlineMarkdown,
             this.outlineChromeRanges,
-            this.outlinePdfOutline
+            this.outlinePdfOutline,
+            this.outlineItemTitle
         ).map(heading => ({
             text: heading.text,
             offset: mapSourceOffsetToComparison(

@@ -2375,3 +2375,65 @@ test('ignores unresolved tags, Markdown links, and numbers inside references', (
     assert.equal(result.references.length, 1);
     assert.deepEqual(result.citations, []);
 });
+
+test('maps bracketed LaTeX superscripts to numbered references', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        '## Introduction',
+        '',
+        'Sudden cardiac death $^{[1-4]}$ remains associated with HRV $^{[5]}$.',
+        'A table cell cites Counihan 1993[159] without hiding the superscripts.',
+        'Reprinted with permission $^{\\[39\\]}$ .',
+        '',
+        '## References',
+        '',
+        '[1] Lown B. First paper. 1978.',
+        '[2] Corr PB. Second paper. 1986.',
+        '[3] Schwartz PJ. Third paper. 1990.',
+        '[4] Kleiger RE. Fourth paper. 1987.',
+        '[5] Malik M. Fifth paper. 1993.',
+        '[39] Reprinted source. 1991.',
+        '[159] Counihan PJ. Table source. 1993.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+    const citations = result.citations.map(citation => ({
+        text: markdown.slice(citation.from, citation.to),
+        ids: citation.referenceIds,
+        raised: Boolean(citation.superscriptMarkup?.raiseContent),
+        wrapper: citation.superscriptMarkup
+            ? markdown.slice(
+                citation.superscriptMarkup.wrapperFrom,
+                citation.superscriptMarkup.wrapperTo
+            )
+            : '',
+    }));
+
+    assert.deepEqual(citations, [
+        {
+            text: '1-4',
+            ids: ['number:1', 'number:2', 'number:3', 'number:4'],
+            raised: true,
+            wrapper: '$^{[1-4]}$',
+        },
+        {
+            text: '5',
+            ids: ['number:5'],
+            raised: true,
+            wrapper: '$^{[5]}$',
+        },
+        {
+            text: '159',
+            ids: ['number:159'],
+            raised: false,
+            wrapper: '',
+        },
+        {
+            text: '39',
+            ids: ['number:39'],
+            raised: true,
+            wrapper: '$^{\\[39\\]}$',
+        },
+    ]);
+});

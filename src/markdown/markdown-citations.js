@@ -1,5 +1,6 @@
 import {
     isLikelyNumericSuperscriptExponent,
+    isNumericCitationContent,
 } from './text-normalization.js';
 import { extractReferenceIdentifiers } from './markdown-reference-identifiers.js';
 
@@ -764,7 +765,8 @@ function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
             if (squareBrackets
                 && (before === '!'
                     || ['(', '[', ':'].includes(after)
-                    || squareBracketLooksStatistical(body, match))) {
+                    || squareBracketLooksStatistical(body, match)
+                    || squareBracketIsSuperscriptContent(body, match))) {
                 continue;
             }
             if (!squareBrackets
@@ -786,27 +788,48 @@ function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
             }
         }
     }
-    if (hasBracketCitationStyle(bracketCitationContainers)) {
-        return squareBracketCitations;
-    }
-
-    const superscriptCitations = [];
-    let superscriptCitationContainers = 0;
+    const bareSuperscriptCitations = [];
+    const bracketedSuperscriptCitations = [];
+    let bareSuperscriptContainers = 0;
+    let bracketedSuperscriptContainers = 0;
     for (const marker of findSuperscriptMarkers(
         markdown,
         bodyFrom,
         bodyEnd,
         { includeYearAdjacentMarkers: true }
     )) {
+        const source = superscriptCitationSource(marker);
+        if (!source) continue;
         const matched = numericCitationsInText(
-            marker.value,
-            marker.from,
+            source.value,
+            source.from,
             byNumber,
             marker.markup
         );
-        superscriptCitations.push(...matched);
-        if (matched.length) superscriptCitationContainers++;
+        if (!matched.length) continue;
+        if (source.bracketed) {
+            bracketedSuperscriptCitations.push(...matched);
+            bracketedSuperscriptContainers++;
+        }
+        else {
+            bareSuperscriptCitations.push(...matched);
+            bareSuperscriptContainers++;
+        }
     }
+    // $^{[1-4]}$ is the citation, not a bracket-style marker wrapped in math.
+    // Bare $^{1}$ footnotes stay non-interactive once real [n] citations win.
+    if (hasBracketCitationStyle(bracketCitationContainers)) {
+        return [
+            ...squareBracketCitations,
+            ...bracketedSuperscriptCitations,
+        ];
+    }
+    const superscriptCitations = [
+        ...bracketedSuperscriptCitations,
+        ...bareSuperscriptCitations,
+    ];
+    const superscriptCitationContainers = bracketedSuperscriptContainers
+        + bareSuperscriptContainers;
     if (hasParentheticalCitationStyle(parentheticalCitationContainers)
         && parentheticalCitationContainers >= superscriptCitationContainers) {
         return [...squareBracketCitations, ...parentheticalCitations];
@@ -835,6 +858,32 @@ function hasParentheticalCitationStyle(containerCount) {
 
 function hasNumericCitationStyle(containerCount) {
     return containerCount >= MIN_NUMERIC_CITATION_STYLE_CONTAINERS;
+}
+
+function squareBracketIsSuperscriptContent(body, match) {
+    const before = body.slice(Math.max(0, match.index - 16), match.index);
+    const after = body.slice(
+        match.index + match[0].length,
+        match.index + match[0].length + 12
+    );
+    return /(?:\$\^\{|<sup\b[^>\n]*>)\s*$/i.test(before)
+        && /^\s*(?:\}\$|<\/sup>)/i.test(after);
+}
+
+function superscriptCitationSource(marker) {
+    const raw = String(marker?.value || '');
+    const unescaped = raw.replace(/\\([[\]])/g, '$1');
+    const bracketed = /^\[([\s\S]*)\]$/.exec(unescaped.trim());
+    if (!bracketed) return { value: raw, from: marker.from, bracketed: false };
+    const value = bracketed[1].trim();
+    if (!value || !isNumericCitationContent(value)) return null;
+    const rawIndex = raw.indexOf(value);
+    if (rawIndex >= 0) {
+        return { value, from: marker.from + rawIndex, bracketed: true };
+    }
+    const digitIndex = raw.search(/\d/u);
+    if (digitIndex < 0) return null;
+    return { value, from: marker.from + digitIndex, bracketed: true };
 }
 
 function squareBracketLooksStatistical(body, match) {

@@ -2042,6 +2042,57 @@ test('renders inline math followed immediately by CJK prose', () => {
     dom.window.close();
 });
 
+test('keeps later rendered widgets while typing in a correction block', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        'Editable paragraph before the formula.',
+        '',
+        'Area is $x^2$ after the edit.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async onCommitCorrection() {},
+    });
+    editor.setCorrectionState({
+        enabled: true,
+        blocks: [{
+            id: 'paragraph-1',
+            type: 'paragraph',
+            from: 0,
+            to: markdown.indexOf('\n'),
+        }],
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    const content = document.querySelector('.cm-content');
+    const formula = document.querySelector('.cm-mktero-math');
+    assert.ok(formula);
+
+    view.posAtCoords = () => 4;
+    content.dispatchEvent(new dom.window.MouseEvent('dblclick', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 8,
+        clientY: 8,
+    }));
+    view.dispatch({
+        changes: { from: 4, insert: ' edited' },
+    });
+
+    assert.equal(document.querySelector('.cm-mktero-math'), formula);
+    assert.match(editor.getMarkdown(), /Edit editedable paragraph/);
+    editor.destroy();
+    dom.window.close();
+});
+
 test('keeps Markdown escape slashes hidden in the read-only view', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -4992,6 +5043,52 @@ test('renders HTML superscript citations as interactive reference links', () => 
     );
     assert.match(popup?.textContent || '', /Beta B\. Second paper\. 2020\./);
     assert.match(popup?.textContent || '', /Delta D\. Fourth paper\. 2022\./);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('renders bracketed LaTeX superscripts as citation superscripts', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Paper',
+        '',
+        'Sudden cardiac death $^{[1-4]}$ . Studies $^{[5]}$ .',
+        '',
+        '## References',
+        '',
+        '[1] Lown B. First paper. 1978.',
+        '[2] Corr PB. Second paper. 1986.',
+        '[3] Schwartz PJ. Third paper. 1990.',
+        '[4] Kleiger RE. Fourth paper. 1987.',
+        '[5] Malik M. Fifth paper. 1993.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+
+    const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+    assert.deepEqual(citations.map(citation => citation.textContent), ['1-4', '5']);
+    assert.ok(citations.every(citation => (
+        citation.classList.contains('cm-mktero-citation-superscript')
+    )));
+    assert.equal(document.querySelector('.cm-mktero-math'), null);
+    assert.match(
+        document.querySelector('.cm-content')?.textContent || '',
+        /death \[1-4\] \. Studies \[5\] \./
+    );
+    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.equal(
+        document.querySelectorAll('.mktero-citation-popup-item').length,
+        4
+    );
     assert.equal(editor.getMarkdown(), markdown);
 
     editor.destroy();
@@ -8339,6 +8436,51 @@ test('keeps the paper title styled after hiding leading preamble chrome', () => 
     assert.ok(titleLine?.className.includes('cm-mktero-heading-1'));
     assert.equal(
         renderedLineTexts(document).some(text => text.includes('MDPI')),
+        false
+    );
+    editor.destroy();
+    dom.window.close();
+});
+
+test('styles a bibliographic title split across consecutive headings as one title', () => {
+    const itemTitle = 'Heart rate variability: Standards of measurement, physiological interpretation, and clinical use';
+    const markdown = [
+        '# Heart rate variability',
+        '',
+        '# Standards of measurement, physiological interpretation, and clinical use',
+        '',
+        '## Introduction',
+    ].join('\n');
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        documentTitle: itemTitle,
+    });
+    const lines = [...document.querySelectorAll('.cm-line')];
+    const first = lines.find(line => (
+        line.textContent.includes('Heart rate variability')
+        && !line.textContent.includes('Standards')
+    ));
+    const second = lines.find(line => (
+        line.textContent.includes('Standards of measurement')
+    ));
+    const introduction = lines.find(line => line.textContent.includes('Introduction'));
+    assert.ok(first?.className.includes('cm-mktero-document-title'));
+    assert.equal(
+        first?.className.includes('cm-mktero-document-title-continued'),
+        false
+    );
+    assert.ok(second?.className.includes('cm-mktero-document-title'));
+    assert.ok(second?.className.includes('cm-mktero-document-title-continued'));
+    assert.equal(
+        introduction?.className.includes('cm-mktero-document-title'),
         false
     );
     editor.destroy();
