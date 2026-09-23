@@ -166,11 +166,11 @@ remembered.
 
 Select several library items or PDF attachments and choose `Prepare selected
 Markdown`, or right-click one collection and choose `Prepare collection
-Markdown`, to queue up to 50 PDFs. Both actions start conversion and do not
+Markdown`. Both actions queue every selected PDF and do not
 open a reader tab. A collection action includes only that collection's own
 items, not items that belong only to a subcollection. Right-clicking one paper
 still opens it for reading. Already cached or already preparing items
-are skipped. Preparation does not open a reader tab. Zotero's progress window
+are skipped. Zotero's progress window
 shows each item; minimizing it continues the queue, and Cancel stops items
 that have not finished. Opening one of those PDFs joins the existing
 preparation instead of uploading it again. Closing a tab during conversion

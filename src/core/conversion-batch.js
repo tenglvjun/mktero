@@ -1,9 +1,7 @@
-export const CONVERSION_BATCH_LIMIT = 50;
 // Concurrent conversions, not OS threads. Figure rendering shares one worker.
 export const CONVERSION_BATCH_CONCURRENCY = 3;
 
 export function createConversionBatch({
-    limit = CONVERSION_BATCH_LIMIT,
     concurrency = CONVERSION_BATCH_CONCURRENCY,
     isReady = () => false,
     isActive = () => false,
@@ -12,9 +10,6 @@ export function createConversionBatch({
     onEvent = () => {},
     createController = () => new AbortController(),
 } = {}) {
-    if (!Number.isSafeInteger(limit) || limit <= 0) {
-        throw new TypeError('A positive batch limit is required');
-    }
     if (!Number.isSafeInteger(concurrency) || concurrency <= 0) {
         throw new TypeError('A positive batch concurrency is required');
     }
@@ -39,7 +34,6 @@ export function createConversionBatch({
                 skippedReady: [],
                 skippedActive: [],
                 skippedQueued: [],
-                truncated: [],
             };
             const seen = new Set();
             for (const candidate of candidates || []) {
@@ -57,10 +51,6 @@ export function createConversionBatch({
                 }
                 if (safeCheck(isReady, item)) {
                     summary.skippedReady.push(item);
-                    continue;
-                }
-                if (summary.accepted.length >= limit) {
-                    summary.truncated.push(item);
                     continue;
                 }
                 const record = {

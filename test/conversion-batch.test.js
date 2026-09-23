@@ -49,11 +49,10 @@ function item(itemID, title = `Paper ${itemID}`) {
     return { itemID, title };
 }
 
-test('skips ready, active, and already queued items and caps one request', () => {
+test('skips ready, active, and duplicate items without capping the queue', () => {
     const { batch, events } = createHarness({
         isReady: candidate => candidate.itemID === 2,
         isActive: candidate => candidate.itemID === 3,
-        limit: 1,
     });
     const summary = batch.enqueue([
         item(1),
@@ -64,11 +63,10 @@ test('skips ready, active, and already queued items and caps one request', () =>
         { itemID: 0 },
     ]);
 
-    assert.deepEqual(summary.accepted.map(entry => entry.itemID), [1]);
+    assert.deepEqual(summary.accepted.map(entry => entry.itemID), [1, 4]);
     assert.deepEqual(summary.skippedReady.map(entry => entry.itemID), [2]);
     assert.deepEqual(summary.skippedActive.map(entry => entry.itemID), [3]);
-    assert.deepEqual(summary.truncated.map(entry => entry.itemID), [4]);
-    assert.equal(events.filter(event => event.type === 'queued').length, 1);
+    assert.equal(events.filter(event => event.type === 'queued').length, 2);
     const again = batch.enqueue([item(1)]);
     assert.deepEqual(again.skippedQueued.map(entry => entry.itemID), [1]);
 });

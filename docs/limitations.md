@@ -8,7 +8,7 @@
   scan the library, modify the item, or sync. Clearing the cache, expiry, or a
   different parser profile turns the ready mark off. Items converted before the
   column existed stay unmarked until that cache is opened or written again.
-  Batch preparation accepts at most 50 PDFs per request and converts three at a time.
+  Batch preparation queues every selected PDF after skipping duplicates, and converts three at a time.
 - Only local PDF attachments are supported. A scanned PDF may convert through
   OCR but still lacks the text layer needed for precise Zotero highlights.
 - Source navigation depends on provider blocks and coordinates; older cached

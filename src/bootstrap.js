@@ -66,10 +66,7 @@ import {
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import { ConversionProviderRouter } from './core/conversion-provider.js';
 import { createConversionActivity } from './core/conversion-activity.js';
-import {
-    CONVERSION_BATCH_LIMIT,
-    createConversionBatch,
-} from './core/conversion-batch.js';
+import { createConversionBatch } from './core/conversion-batch.js';
 import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
     collectMatchedAnnotationRanges,
@@ -1489,8 +1486,7 @@ function prepareSelectedMarkdown(targets) {
     if (summary.accepted.length
         || summary.skippedReady.length
         || summary.skippedActive.length
-        || summary.skippedQueued.length
-        || summary.truncated.length) {
+        || summary.skippedQueued.length) {
         runtime.conversionProgress?.open();
     }
     refreshMarkdownReadinessColumn(Zotero);
@@ -1645,11 +1641,6 @@ function batchStatusMessage(summary) {
     const preparing = summary.skippedActive.length + summary.skippedQueued.length;
     if (preparing) {
         parts.push(runtimeTranslate('batch.skippedActive', { count: preparing }));
-    }
-    if (summary.truncated.length) {
-        parts.push(runtimeTranslate('batch.truncated', {
-            count: CONVERSION_BATCH_LIMIT,
-        }));
     }
     return parts.join(' ');
 }
