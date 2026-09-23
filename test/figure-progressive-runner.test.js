@@ -39,6 +39,8 @@ test('publishes one provisional document, patches each figure, and prepares twic
     });
     await runner(input, { fileData: Uint8Array.of(1), onEvent: event => events.push(event) });
     assert.equal(events.filter(event => event.type === 'document').length, 1);
+    assert.equal(events.some((event, index) => event.type === 'document'
+        && events.slice(0, index).some(earlier => earlier.type === 'figure')), false);
     const composed = events.find(event => event.type === 'figure' && event.figure.status === 'composed');
     assert.ok(composed.figure.crop?.data);
     assert.ok(composed.figure.panelAssetPaths.includes(
@@ -48,7 +50,7 @@ test('publishes one provisional document, patches each figure, and prepares twic
     assert.equal(prepares, 2);
 });
 
-test('emits one provisional document and completes when the first prepare throws', async () => {
+test('rejects when plan prepare throws and does not emit a document after a figure', async () => {
     const { input } = makeFigureInput();
     let prepares = 0;
     const events = [];
@@ -61,10 +63,35 @@ test('emits one provisional document and completes when the first prepare throws
         },
         hash,
     });
+    await assert.rejects(
+        () => runner(input, { fileData: Uint8Array.of(1), onEvent: event => events.push(event) }),
+        { message: 'transient prepare failure' },
+    );
+    assert.ok(events.some(event => event.type === 'figure'));
+    assert.equal(events.some((event, index) => event.type === 'document'
+        && events.slice(0, index).some(earlier => earlier.type === 'figure')), false);
+    assert.equal(events.filter(event => event.type === 'document').length, 0);
+    assert.equal(events.some(event => event.type === 'complete'), false);
+    assert.equal(prepares, 1);
+});
+
+test('emits one provisional document from the original input when onPlan is never called', async () => {
+    const { input } = makeFigureInput();
+    let prepares = 0;
+    const events = [];
+    const restoration = new FigureRestorationService({
+        hash,
+        openPDF: async () => { throw new Error('pdf open failed'); },
+    });
+    const runner = createProgressiveFigureRunner({
+        restoration,
+        prepare: value => { prepares += 1; return prepareMinerUResult(value); },
+        hash,
+    });
     await runner(input, { fileData: Uint8Array.of(1), onEvent: event => events.push(event) });
-    assert.equal(events.filter(event => event.type === 'document').length, 1);
-    assert.equal(events.at(-1).type, 'complete');
-    assert.ok(prepares >= 2);
+    assert.deepEqual(events.map(event => event.type), ['document', 'complete']);
+    assert.equal(events[0].figureInput, input);
+    assert.equal(prepares, 2);
 });
 
 test('progressive final document matches the synchronous restoration path', async () => {

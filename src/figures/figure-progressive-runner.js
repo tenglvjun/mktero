@@ -33,15 +33,23 @@ export function createProgressiveFigureRunner({
             });
         };
         let planned = false;
+        let planError = null;
         let source = input;
         const completed = [];
         const draft = await restoration.restore(input, {
             fileData, signal,
             onPlan: async plan => {
-                source = plan.input || input;
-                await publishProvisional(source, plan.candidates || []);
-                // The service swallows onPlan throws, so mark planned only after publish.
+                // Mark the call before publish. The service swallows onPlan throws
+                // and keeps rendering, so a failed publish must not fall through to
+                // a second document after figure events.
                 planned = true;
+                source = plan.input || input;
+                try {
+                    await publishProvisional(source, plan.candidates || []);
+                }
+                catch (error) {
+                    if (!planError) planError = error;
+                }
             },
             onFigure: event => {
                 if (event.status === 'composed' && event.candidate) {
@@ -64,6 +72,7 @@ export function createProgressiveFigureRunner({
             error.name = 'AbortError';
             throw error;
         }
+        if (planError) throw planError;
         // Invalid input and a failed PDF open return before onPlan.
         if (!planned) await publishProvisional(input, []);
         const document = await finalize(input, draft, { prepare, hash, signal });
