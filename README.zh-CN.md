@@ -38,6 +38,7 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 - 在 Markdown 引用弹窗中检查文献是否存在于可访问的 Zotero 文库，复制其他文库中的文献，并导入缺失的元数据和公开 PDF。
 - 只在当前 Zotero 文库内展示可匹配的直接引用关系，并在支持时使用 Semantic Scholar、OpenCitations 和 OpenAlex 刷新数据。
 - 保存便携 Zotero 快照，或将修正后的原文 Markdown 和提取图片导出到本地文件夹。
+- 在文献列表中显示 Markdown 列。只有这台电脑、当前转换设置下仍有可阅读的缓存时才会点亮。标记保存在 Zotero 配置文件中，不修改条目，也不会同步。
 - 界面跟随 Zotero 的英文或简体中文显示语言，其他语言回退为英文。
 
 ## 快速开始

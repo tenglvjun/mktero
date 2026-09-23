@@ -7,6 +7,7 @@
 | 缓存未命中时的完整 PDF | 所选 MinerU 云端、配置的本地 MinerU 服务或 Mistral | Mktero 不同步 |
 | MinerU 云端 Token、本地 MinerU 地址、Mistral API key，以及 AI 凭据 | 当前 Zotero 配置文件，未加密 | 否 |
 | 缓存的 Markdown、图片、图表元数据（含 OCR 片段）、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
+| Markdown 可用索引：文库 ID、条目 key、附件 key、缓存键、解析配置和过期时间 | 当前 Zotero 配置文件，未加密 | 否 |
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
 | 用户为只有标题的文献点击“导入文献”后发送的受限引用文本 | OpenAlex | Mktero 不同步 |
 | 用户点击导入后发送的规范化 DOI、arXiv ID、PMID 或 OpenAlex 工作 ID、已确认的元数据，以及可选的公开 PDF 请求 | 选定的元数据/PDF Provider | Mktero 不同步 |

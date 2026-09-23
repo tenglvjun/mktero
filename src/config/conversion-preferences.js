@@ -70,6 +70,23 @@ export function getMinerUCacheEnabled(zotero) {
     return zotero?.Prefs?.get?.(MINERU_CACHE_ENABLED_PREF, true) !== false;
 }
 
+export function observeConversionProfile(zotero, onChange) {
+    if (typeof onChange !== 'function') return () => {};
+    const stops = [
+        observePreference(zotero, CONVERSION_PROVIDER_PREF, onChange),
+        observePreference(zotero, MINERU_ENDPOINT_PREF, onChange),
+    ];
+    return () => {
+        for (const stop of stops) stop();
+    };
+}
+
+function observePreference(zotero, pref, onChange) {
+    if (typeof zotero?.Prefs?.registerObserver !== 'function') return () => {};
+    const observer = zotero.Prefs.registerObserver(pref, onChange, true);
+    return () => zotero.Prefs.unregisterObserver?.(observer);
+}
+
 function readPreferenceString(zotero, key) {
     return String(zotero?.Prefs?.get?.(key, true) || '').trim();
 }
