@@ -83,3 +83,10 @@ test('binds persisted figure maps to their Markdown and local images', () => {
     assert.throws(() => validateFigureMap({ ...map, version: 2 }, document));
     assert.throws(() => validateFigureMap({ ...map, figures: [map.figures[0], map.figures[0]] }, document));
 });
+
+test('a 1601 pixel crop is still a valid PNG for cached images', () => {
+    const data = createTestPNG(1601, 8);
+    assert.doesNotThrow(() => validateFigureCrop({
+        data, mimeType: 'image/png', width: 1601, height: 8,
+    }));
+});

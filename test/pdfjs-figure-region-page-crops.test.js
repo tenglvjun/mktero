@@ -27,7 +27,7 @@ function harness() {
     const page = {
         view: [0, 0, 1000, 1000], rotate: 0, userUnit: 1,
         getViewport({ scale }) {
-            return { width: 1000 * scale, height: 1000 * scale,
+            return { width: 1000 * scale, height: 1000 * scale, scale,
                 transform: [scale, 0, 0, -scale, 0, 1000 * scale] };
         },
         render(request) {
@@ -94,5 +94,30 @@ test('caps the page scale so the largest region stays inside the crop budget', a
         regions: [{ id: 'a', bbox: [0, 0, 1000, 1000] }],
     });
     assert.ok(result.dpi <= 72 * 4096 / 1000 + 1);
+    await session.close();
+});
+
+test('defaults to 144 DPI for a small crop', async () => {
+    const h = harness();
+    const session = await h.renderer.open(Uint8Array.of(1));
+    await session.getPageGeometry(0);
+    await session.renderPageCrops({
+        pageIndex: 0, rotation: 0, coordinateFrame: 'display-cropbox',
+        regions: [{ id: 'small', bbox: [0, 0, 100, 100] }],
+    });
+    assert.equal(h.pageRenders[0].viewport.scale, 144 / 72);
+    await session.close();
+});
+
+test('caps a wide crop long edge at 1600 pixels', async () => {
+    const h = harness();
+    const session = await h.renderer.open(Uint8Array.of(1));
+    await session.getPageGeometry(0);
+    const result = await session.renderPageCrops({
+        pageIndex: 0, rotation: 0, coordinateFrame: 'display-cropbox',
+        regions: [{ id: 'wide', bbox: [0, 0, 1000, 100] }],
+    });
+    assert.ok(result.crops[0].crop.width <= 1600);
+    assert.ok(result.crops[0].crop.width >= 1400);
     await session.close();
 });
