@@ -48,6 +48,25 @@ test('publishes one provisional document, patches each figure, and prepares twic
     assert.equal(prepares, 2);
 });
 
+test('emits one provisional document and completes when the first prepare throws', async () => {
+    const { input } = makeFigureInput();
+    let prepares = 0;
+    const events = [];
+    const runner = createProgressiveFigureRunner({
+        restoration: progressiveService(),
+        prepare: value => {
+            prepares += 1;
+            if (prepares === 1) throw new Error('transient prepare failure');
+            return prepareMinerUResult(value);
+        },
+        hash,
+    });
+    await runner(input, { fileData: Uint8Array.of(1), onEvent: event => events.push(event) });
+    assert.equal(events.filter(event => event.type === 'document').length, 1);
+    assert.equal(events.at(-1).type, 'complete');
+    assert.ok(prepares >= 2);
+});
+
 test('progressive final document matches the synchronous restoration path', async () => {
     const { input } = makeFigureInput();
     const syncDraft = await progressiveService().restore(input, { fileData: Uint8Array.of(1) });

@@ -38,9 +38,10 @@ export function createProgressiveFigureRunner({
         const draft = await restoration.restore(input, {
             fileData, signal,
             onPlan: async plan => {
-                planned = true;
                 source = plan.input || input;
                 await publishProvisional(source, plan.candidates || []);
+                // The service swallows onPlan throws, so mark planned only after publish.
+                planned = true;
             },
             onFigure: event => {
                 if (event.status === 'composed' && event.candidate) {
