@@ -123,3 +123,81 @@ test('allocates a readable noncolliding image beneath every supported archive ro
         assert.deepEqual(input, before);
     }
 });
+
+test('plans and renders with one PDF open and ignores a throwing plan listener', async () => {
+    let opens = 0;
+    let crops = 0;
+    let closed = 0;
+    let planned = null;
+    const session = {
+        async getPageGeometry() {
+            return { pageIndex: 0, width: 1000, height: 1000, rotation: 0, userUnit: 1,
+                coordinateFrame: 'display-cropbox', viewBox: [0, 0, 1000, 1000],
+                mediaBox: null, viewportTransform: [1, 0, 0, -1, 0, 1000] };
+        },
+        async renderPageCrops(request) {
+            crops += 1;
+            assert.equal(closed, 0);
+            return { dpi: request.dpi, crops: request.regions.map(region => ({
+                id: region.id, crop: { data: createTestPNG(), mimeType: 'image/png', width: 8, height: 8 },
+            })) };
+        },
+        async close() { closed += 1; },
+    };
+    const service = new FigureRestorationService({
+        hash, openPDF: async () => { opens += 1; return session; },
+    });
+    const { input } = makeFigureInput();
+    const draft = await service.restore(input, {
+        fileData: Uint8Array.of(1),
+        onPlan(plan) {
+            planned = plan;
+            assert.equal(crops, 0);
+            assert.equal(closed, 0);
+            throw new Error('listener failed');
+        },
+    });
+    assert.equal(opens, 1);
+    assert.equal(crops, 1);
+    assert.equal(closed, 1);
+    assert.equal(planned.input.markdown, input.markdown);
+    assert.ok(planned.candidates.some(candidate => candidate.decision === 'compose'));
+    assert.ok(draft.blueprints.length >= 1);
+});
+
+test('plan mode returns before rendering and does not call onPlan', async () => {
+    let crops = 0;
+    let planned = 0;
+    const session = {
+        async getPageGeometry() {
+            return { pageIndex: 0, width: 1000, height: 1000, rotation: 0, userUnit: 1,
+                coordinateFrame: 'display-cropbox', viewBox: [0, 0, 1000, 1000],
+                mediaBox: null, viewportTransform: [1, 0, 0, -1, 0, 1000] };
+        },
+        async renderPageCrops() { crops += 1; return { dpi: 144, crops: [] }; },
+        async close() {},
+    };
+    const restoration = new FigureRestorationService({
+        hash, openPDF: async () => session,
+    });
+    const { input } = makeFigureInput();
+    const plan = await restoration.restore(input, {
+        fileData: Uint8Array.of(1), mode: 'plan',
+        onPlan() { planned += 1; },
+    });
+    assert.equal(planned, 0);
+    assert.equal(crops, 0);
+    assert.ok(plan.candidates.length >= 1);
+    assert.equal(plan.placeholders.length, 1);
+    assert.equal(plan.blueprints, undefined);
+});
+
+test('ignores a throwing figure listener without failing restore', async () => {
+    const { input } = makeFigureInput();
+    const { restoration } = service();
+    const draft = await restoration.restore(input, {
+        fileData: Uint8Array.of(1),
+        onFigure() { throw new Error('figure listener failed'); },
+    });
+    assert.ok(draft.blueprints.length >= 1);
+});
