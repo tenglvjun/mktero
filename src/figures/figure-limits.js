@@ -1,4 +1,4 @@
-export const FIGURE_PIPELINE_PROFILE = 'figure-region-v14';
+export const FIGURE_PIPELINE_PROFILE = 'figure-region-v15';
 
 export const FIGURE_LIMITS = Object.freeze({
     maxPDFBytes: 256 * 1024 * 1024,
