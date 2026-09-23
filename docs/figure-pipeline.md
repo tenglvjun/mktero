@@ -3,8 +3,9 @@
 [English](./figure-pipeline.md) · [简体中文](./figure-pipeline.zh-CN.md) · [Back to README](../README.md)
 
 Mktero does not simply display whatever the OCR provider returns for a figure.
-When the evidence is strong enough, it rebuilds a complete, high-resolution
-figure from the local PDF and replaces the OCR fragments in the reading flow.
+When the evidence is strong enough, it rebuilds a complete figure from the
+local PDF at reading resolution (144 DPI and a 1600-pixel long edge, not print
+resolution) and replaces the OCR fragments in the reading flow.
 When the evidence is weak, it keeps the provider's original images and text
 instead of guessing.
 
@@ -20,7 +21,8 @@ Interior OCR (labels and text that belong to the figure) leaves the reading
 flow only after a successful crop. Captions remain selectable, searchable, and
 translatable, and body references to the figure are untouched. A local pass
 also upgrades compatible cached results without another OCR upload and leaves
-user corrections intact.
+user corrections intact. A compatible cache upgrade does not rasterize
+completed figures again.
 
 Ambiguous, rotated, or unverifiable groups retain their original images and
 text.
@@ -32,10 +34,11 @@ of Zotero stay responsive while figures are stitched, and a page with several
 figures is rendered once.
 
 Reading starts as soon as the conversion finishes. Each pending figure shows an
-animated placeholder (a lucide image with a spinner) and is replaced in place as
-soon as its crop is ready, so one slow figure never delays the rest. Closing the
-reader tab does not stop a running restoration; it finishes and updates the
-cache. Export and snapshot stay disabled until every figure is resolved.
+animated placeholder (a lucide image with a spinner). The reader replaces one
+finished figure without rebuilding the article, so one slow figure never delays
+the rest. Closing the reader tab does not stop a running restoration; it
+finishes and updates the cache. Export and snapshot stay disabled until every
+figure is resolved.
 
 ## Labeled panels
 
