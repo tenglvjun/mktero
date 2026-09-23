@@ -352,6 +352,74 @@ test('showRestoredFigure swaps one finished crop without resetting the document'
     dom.window.close();
 });
 
+test('setDocument keeps a stitched figure only while the pending map is unchanged', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: source => source.startsWith('images/')
+            ? `blob:${source}`
+            : null,
+        resolveRestoredFigureURL: figure => `blob:${figure.assetPath}`,
+    });
+    const markdown = '![Figure A](images/a.png)';
+    const replacedMarkdown = 'Replacement.\n\n![Figure A](images/a.png)';
+    const pending = new Map([['images/a.png', 'fig-p0-b0']]);
+    const stitched = 'blob:generated/figures/fig-p0-b0.png';
+    const restored = {
+        id: 'fig-p0-b0',
+        assetPath: 'generated/figures/fig-p0-b0.png',
+        data: Uint8Array.of(1, 2, 3),
+        mimeType: 'image/png',
+    };
+    const stitchedSrc = () => document.querySelector(
+        'img[data-figure-id="fig-p0-b0"]'
+    )?.getAttribute('src') ?? null;
+
+    editor.setDocument({ markdown, pendingFigures: pending });
+    editor.showRestoredFigure(restored);
+    assert.equal(stitchedSrc(), stitched);
+
+    editor.setDocument({ markdown, pendingFigures: pending });
+    assert.equal(stitchedSrc(), stitched);
+
+    editor.setDocument({
+        markdown,
+        pendingFigures: new Map([['images/a.png', 'fig-p0-b0']]),
+    });
+    assert.equal(stitchedSrc(), null);
+    assert.equal(
+        document.querySelector('[data-figure-id="fig-p0-b0"]')
+            ?.classList.contains('mktero-figure-placeholder'),
+        true,
+    );
+
+    editor.setDocument({ markdown, pendingFigures: pending });
+    editor.showRestoredFigure(restored);
+    assert.equal(stitchedSrc(), stitched);
+    editor.setDocument({ markdown: replacedMarkdown });
+    assert.equal(
+        document.querySelector(`img[src="${stitched}"]`),
+        null,
+    );
+    editor.setDocument({
+        markdown: replacedMarkdown,
+        pendingFigures: pending,
+    });
+    assert.equal(stitchedSrc(), null);
+    assert.equal(
+        document.querySelector('[data-figure-id="fig-p0-b0"]')
+            ?.classList.contains('mktero-figure-placeholder'),
+        true,
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('marks translated block widgets with their content language', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
