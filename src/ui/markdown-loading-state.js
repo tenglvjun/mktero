@@ -10,25 +10,50 @@ export function createLoadingPresentation(model = {}, translate = translateEngli
     const progress = normalizeConversionProgress(model.progress);
     const preserveContent = Boolean(model.preserveContent);
     const resumingTask = Boolean(model.resumingTask);
+    const batchOwned = Boolean(model.batchOwned);
+    const queueAhead = Number.isInteger(model.queueAhead) && model.queueAhead >= 0
+        ? model.queueAhead
+        : null;
+    const waiting = batchOwned
+        && queueAhead !== null
+        && progress < CONVERSION_PROGRESS.PREPARING;
     return {
         visible: true,
         preserveContent,
         progress,
         progressLabel: `${progress}%`,
-        title: translate(resumingTask
-            ? 'loading.resumingTitle'
-            : preserveContent
-                ? 'loading.reparsingTitle'
-                : 'loading.convertingTitle'),
-        detail: resumingTask && progress < CONVERSION_PROGRESS.DOWNLOADING
-            ? translate('loading.resuming')
-            : progressDetail(progress, translate),
-        hint: translate(resumingTask
-            ? 'loading.resumeHint'
-            : preserveContent
-                ? 'loading.reparseHint'
-                : 'loading.defaultHint'),
+        title: translate(waiting
+            ? 'loading.preparingTitle'
+            : resumingTask
+                ? 'loading.resumingTitle'
+                : preserveContent
+                    ? 'loading.reparsingTitle'
+                    : 'loading.convertingTitle'),
+        detail: waiting
+            ? queueDetail(queueAhead, translate)
+            : conversionStageDetail(progress, { resumingTask }, translate),
+        hint: translate(batchOwned && !preserveContent
+            ? 'loading.batchOwnedHint'
+            : resumingTask
+                ? 'loading.resumeHint'
+                : preserveContent
+                    ? 'loading.reparseHint'
+                    : 'loading.defaultHint'),
     };
+}
+
+export function conversionStageDetail(progress, state = {}, translate = translateEnglish) {
+    const normalized = normalizeConversionProgress(progress);
+    if (state?.resumingTask && normalized < CONVERSION_PROGRESS.DOWNLOADING) {
+        return translate('loading.resuming');
+    }
+    return progressDetail(normalized, translate);
+}
+
+function queueDetail(queueAhead, translate) {
+    return queueAhead > 0
+        ? translate('loading.queueAhead', { count: queueAhead })
+        : translate('loading.queued');
 }
 
 function progressDetail(progress, translate) {

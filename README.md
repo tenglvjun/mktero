@@ -58,8 +58,9 @@ Useful links: [Product page](https://mktero.com/) ·
 - Save a portable Zotero snapshot, or export corrected Markdown and its
   extracted figures to a local folder.
 - Show a Markdown column in the item list when this computer still has a
-  readable cached conversion for the current settings. The marker stays in
-  the Zotero profile, does not modify the item, and does not sync.
+  readable cached conversion for the current settings. While a PDF is queued
+  or converting, that column shows a session-only spinner. The ready marker
+  stays in the Zotero profile, does not modify the item, and does not sync.
 - Follow Zotero's English or Simplified Chinese display language; other locales
   fall back to English.
 
@@ -103,15 +104,22 @@ See [Configuration](./docs/configuration.md) for every setting and
 
 1. Open a PDF in Zotero and click the Mktero file icon in the reader toolbar, or
    right-click a PDF or library item and choose `Read as Markdown with Mktero`.
+   Select several items and choose `Prepare selected Markdown` to queue them
+   without opening a tab for each one. Right-click a collection and choose
+   `Prepare collection Markdown` to prepare only that collection's own PDFs,
+   not its subcollections. A single item still uses `Read as Markdown with Mktero`.
 2. Follow the upload, conversion, and download progress in the temporary Mktero
-   tab. A valid cache entry skips the remote conversion.
+   tab. A valid cache entry skips the remote conversion. A batch uses Zotero's
+   progress window; minimizing it keeps preparation running.
 3. Use the outline, find, citations, figure/table previews, source links, and
    Zotero notes panel to navigate the document.
 
 Mktero tabs are session-only and are not restored after Zotero restarts. Closing
-the tab or shutting down the extension cancels active conversion and
-translation requests. Reopening the same PDF and conversion profile restores the
-last reading paragraph.
+a tab does not cancel an in-progress conversion; it continues in the background
+and appears in the preparation window. Shutting down the extension cancels
+active conversion and translation requests. Each uncached PDF in a
+batch is sent the same way as a single conversion. Reopening the same PDF and
+conversion profile restores the last reading paragraph.
 
 ## Documentation
 

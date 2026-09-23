@@ -157,11 +157,24 @@ standalone PDF without a parent library item cannot save a snapshot.
 ## See which items already have Markdown
 
 The item list has a Markdown column. A mark means this computer can open that
-PDF's cached Markdown with the current conversion settings. It is stored only
-in the Zotero profile. Clearing the cache, letting a result expire, or
-switching provider or MinerU service turns the mark off. It does not sync, and
-it does not change the Zotero item. You can hide the column from the item-list
-column picker; that choice is remembered.
+PDF's cached Markdown with the current conversion settings. A spinner means
+the PDF is queued or converting in this session; it is not stored. Clearing
+the cache, letting a result expire, or switching provider or MinerU service
+turns the ready mark off. It does not sync, and it does not change the Zotero
+item. You can hide the column from the item-list column picker; that choice is
+remembered.
+
+Select several library items or PDF attachments and choose `Prepare selected
+Markdown`, or right-click one collection and choose `Prepare collection
+Markdown`. Both actions queue every selected PDF and do not
+open a reader tab. A collection action includes only that collection's own
+items, not items that belong only to a subcollection. Right-clicking one paper
+still opens it for reading. Already cached or already preparing items
+are skipped. Zotero's progress window
+shows each item; minimizing it continues the queue, and Cancel stops items
+that have not finished. Opening one of those PDFs joins the existing
+preparation instead of uploading it again. Closing a tab during conversion
+does not cancel it; the PDF continues in the background queue.
 
 ## Export Markdown
 
