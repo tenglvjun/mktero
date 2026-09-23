@@ -6361,3 +6361,123 @@ test('leaves focus mode from Escape when the Markdown tab is visible', () => {
         view.destroy();
     }
 });
+
+test('showRestoredFigure reuses crop bytes and refreshes the object URL without rewriting the document', () => {
+    const created = [];
+    const revoked = [];
+    let nextID = 0;
+    const pending = new Map([['images/a.png', 'fig-a']]);
+    const assets = [{
+        path: 'images/a.png',
+        mimeType: 'image/png',
+        data: Uint8Array.of(9),
+    }];
+    const figure = {
+        id: 'fig-a',
+        status: 'composed',
+        assetPath: 'generated/figures/fig-a.png',
+        crop: {
+            data: Uint8Array.of(1, 2, 3),
+            mimeType: 'image/png',
+            width: 2,
+            height: 2,
+        },
+    };
+    const shown = [];
+    let setDocumentCalls = 0;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '![Figure](images/a.png)',
+        assets,
+        pendingFigureAssets: pending,
+        sourceKind: 'markdown',
+    });
+    const { view } = createView(model, {}, {
+        configureWindow(ownerWindow) {
+            ownerWindow.URL = {
+                createObjectURL(blob) {
+                    const url = `blob:mktero-${nextID++}`;
+                    created.push({ url, type: blob.type, parts: blob.parts });
+                    return url;
+                },
+                revokeObjectURL(url) {
+                    revoked.push(url);
+                },
+            };
+            ownerWindow.Blob = class Blob {
+                constructor(parts, options) {
+                    this.parts = parts;
+                    this.type = options?.type || '';
+                }
+            };
+        },
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            const setDocument = editor.setDocument.bind(editor);
+            editor.setDocument = value => {
+                setDocumentCalls += 1;
+                setDocument(value);
+            };
+            editor.showRestoredFigure = restored => {
+                shown.push(restored);
+                options.resolveRestoredFigureURL?.(restored);
+            };
+            return editor;
+        },
+    });
+
+    try {
+        const documentCallsAfterRender = setDocumentCalls;
+        assert.equal(view.resolveRestoredFigureURL({
+            id: 'fig-a',
+            crop: {
+                data: figure.crop.data,
+                mimeType: figure.crop.mimeType,
+            },
+        }), null);
+
+        view.showRestoredFigure(figure);
+        const first = view.resolveRestoredFigureURL(figure);
+        const second = view.resolveRestoredFigureURL(figure);
+        assert.equal(first, second);
+        assert.equal(shown.length, 1);
+        assert.equal(shown[0], figure);
+        assert.equal(
+            created.find(entry => entry.url === first)?.parts?.[0],
+            figure.crop.data
+        );
+        assert.equal(
+            created.find(entry => entry.url === first)?.type,
+            'image/png'
+        );
+        assert.equal(view.model.markdown, '![Figure](images/a.png)');
+        assert.equal(view.model.assets, assets);
+        assert.equal(setDocumentCalls, documentCallsAfterRender);
+
+        model.assets = [{
+            path: 'images/a.png',
+            mimeType: 'image/png',
+            data: Uint8Array.of(8),
+        }];
+        view.render(model);
+        assert.equal(revoked.includes(first), true);
+        assert.equal(shown.at(-1), figure);
+        assert.equal(shown.length, 2);
+        const refreshed = view.resolveRestoredFigureURL(figure);
+        assert.notEqual(refreshed, first);
+
+        model.pendingFigureAssets = null;
+        model.assets = [{
+            path: 'images/a.png',
+            mimeType: 'image/png',
+            data: Uint8Array.of(7),
+        }];
+        const shownBeforeDrop = shown.length;
+        view.render(model);
+        assert.equal(shown.length, shownBeforeDrop);
+    }
+    finally {
+        view.destroy();
+    }
+});

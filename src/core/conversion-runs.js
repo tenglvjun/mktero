@@ -37,6 +37,8 @@ export function createConversionRunRegistry({
                 owners: new Set([owner]),
                 listeners: new Set(pendingListeners.get(itemID) || []),
                 lastProgress: null,
+                provisionalDocument: null,
+                figurePatches: [],
                 settled: false,
                 abortReason: null,
                 promise: null,
@@ -59,6 +61,16 @@ export function createConversionRunRegistry({
                     },
                     onProgressiveFigures(event) {
                         if (entry.settled || !event) return;
+                        if (event.type === 'document' && !entry.provisionalDocument) {
+                            entry.provisionalDocument = event;
+                        }
+                        else if (
+                            event.type === 'figure'
+                            && event.figure?.status === 'composed'
+                            && event.figure.crop
+                        ) {
+                            entry.figurePatches.push(event);
+                        }
                         emit(entry, { type: 'progressive', event });
                     },
                 });
@@ -107,6 +119,19 @@ export function createConversionRunRegistry({
             pending.add(listener);
             const entry = runs.get(itemID);
             if (entry && !entry.settled) {
+                // Replay before the listener can observe live events. Document
+                // first, even when a composed figure was stored earlier.
+                for (const progressiveEvent of storedProgressiveEvents(entry)) {
+                    try {
+                        listener({
+                            type: 'progressive',
+                            event: progressiveEvent,
+                        });
+                    }
+                    catch {
+                        // A progress listener must not affect the conversion.
+                    }
+                }
                 entry.listeners.add(listener);
                 if (entry.lastProgress) {
                     listener({
@@ -185,6 +210,13 @@ function abortEntry(entry, reason) {
     catch {
         entry.controller.abort();
     }
+}
+
+function storedProgressiveEvents(entry) {
+    return [
+        ...(entry.provisionalDocument ? [entry.provisionalDocument] : []),
+        ...entry.figurePatches,
+    ];
 }
 
 function emit(entry, event) {

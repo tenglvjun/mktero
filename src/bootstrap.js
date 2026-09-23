@@ -216,6 +216,7 @@ import {
     createAnnotationOverlayRefresher,
 } from './ui/annotation-overlay-refresher.js';
 import { conversionStageDetail } from './ui/markdown-loading-state.js';
+import { applyProgressiveFigureUpdate } from './ui/figure-restoration-progress.js';
 import {
     createConversionFailureChanges,
     createConversionLoadingChanges,
@@ -1320,26 +1321,34 @@ function subscribeTabConversion(presentation, itemID, { batchOwned }) {
             });
             return;
         }
-        if (event.type !== 'progressive' || event.event?.type !== 'document') {
-            return;
-        }
-        progressivePublished = true;
-        const documentEvent = event.event;
-        logFigureAssetSizes(
-            `item ${itemID}: progressive`,
-            documentEvent.document
-        );
-        runtime.presenter?.update(presentation, {
-            ...documentEvent.document,
-            status: 'ready',
-            progress: 100,
-            preserveContent: false,
-            batchOwned,
-            queueAhead: null,
-            figureRestoration: { status: 'pending' },
-            ...(documentEvent.pendingFigureAssets instanceof Map
-                ? { pendingFigureAssets: documentEvent.pendingFigureAssets }
-                : {}),
+        if (event.type !== 'progressive') return;
+        applyProgressiveFigureUpdate(presentation, event.event, {
+            updateDocument(_presentation, documentEvent) {
+                if (progressivePublished) return;
+                progressivePublished = true;
+                logFigureAssetSizes(
+                    `item ${itemID}: progressive`,
+                    documentEvent.document
+                );
+                runtime.presenter?.update(presentation, {
+                    ...documentEvent.document,
+                    status: 'ready',
+                    progress: 100,
+                    preserveContent: false,
+                    batchOwned,
+                    queueAhead: null,
+                    figureRestoration: { status: 'pending' },
+                    ...(documentEvent.pendingFigureAssets instanceof Map
+                        ? {
+                            pendingFigureAssets:
+                                documentEvent.pendingFigureAssets,
+                        }
+                        : {}),
+                });
+            },
+            showRestoredFigure(_presentation, figure) {
+                presentation.view.showRestoredFigure(figure);
+            },
         });
     });
 }
@@ -1380,9 +1389,10 @@ async function executeItemConversion(itemID, {
                 if (!event || signal.aborted) return;
                 if (event.type === 'figure') {
                     Zotero.debug(
-                        `Mktero: item ${itemID}: figure ${event.figure.id} `
-                        + `${event.figure.status}`
+                        `Mktero: item ${itemID}: figure ${event.figure?.id} `
+                        + `${event.figure?.status}`
                     );
+                    onProgressiveFigures(event);
                     return;
                 }
                 noteProgressiveDocument(itemID, event);
