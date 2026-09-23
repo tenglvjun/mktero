@@ -183,22 +183,6 @@
                 </html:span>
             </html:label>
 
-            <html:label class="mktero-setting-row mktero-switch-row"
-                        for="mktero-cache-enabled">
-                <html:span class="mktero-setting-copy">
-                    <html:strong data-i18n="preferences.cache.reuseLabel"></html:strong>
-                    <html:small data-i18n="preferences.cache.reuseHelp"></html:small>
-                </html:span>
-                <html:span class="mktero-switch-control">
-                    <html:input id="mktero-cache-enabled"
-                                class="mktero-switch-input"
-                                type="checkbox"
-                                role="switch"
-                                preference="extensions.mktero.cacheEnabled" />
-                    <html:span class="mktero-switch" aria-hidden="true"></html:span>
-                </html:span>
-            </html:label>
-
             <html:div class="mktero-setting-row mktero-cache-usage-row">
                 <html:div class="mktero-setting-copy">
                     <html:strong data-i18n="preferences.cache.usageLabel"></html:strong>
@@ -224,6 +208,22 @@
               aria-labelledby="mktero-tab-conversion"
               hidden="hidden">
         <html:div class="mktero-settings-card">
+            <html:label class="mktero-setting-row mktero-switch-row"
+                        for="mktero-cache-enabled">
+                <html:span class="mktero-setting-copy">
+                    <html:strong data-i18n="preferences.cache.reuseLabel"></html:strong>
+                    <html:small data-i18n="preferences.cache.reuseHelp"></html:small>
+                </html:span>
+                <html:span class="mktero-switch-control">
+                    <html:input id="mktero-cache-enabled"
+                                class="mktero-switch-input"
+                                type="checkbox"
+                                role="switch"
+                                preference="extensions.mktero.cacheEnabled" />
+                    <html:span class="mktero-switch" aria-hidden="true"></html:span>
+                </html:span>
+            </html:label>
+
             <html:div class="mktero-setting-row mktero-field-row">
                 <html:div class="mktero-setting-copy">
                     <html:label for="mktero-conversion-provider"><html:strong data-i18n="preferences.conversion.providerLabel"></html:strong></html:label>

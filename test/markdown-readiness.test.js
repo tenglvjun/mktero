@@ -249,6 +249,31 @@ test('uses the Zotero 7 registerColumns fallback and ignores a missing column AP
     }).dataKey, 'markdownReady');
 });
 
+test('shows a preparing spinner ahead of the ready mark', () => {
+    const options = markdownReadinessColumnOptions({
+        pluginID: 'mktero@example.test',
+        isReady: () => true,
+        isPreparing: item => item.key === 'PARENT01',
+        translate: key => key,
+    });
+    const { document } = parseHTML('<html><body></body></html>');
+    assert.equal(options.dataProvider({ libraryID: 1, key: 'PARENT01' }), 'loading');
+    const cell = options.renderCell(
+        0,
+        'loading',
+        { className: 'column' },
+        false,
+        document
+    );
+    assert.equal(cell.getAttribute('aria-label'), 'column.markdownPreparingTooltip');
+    assert.equal(
+        cell.querySelector('svg')?.getAttribute('data-lucide'),
+        'loader-circle'
+    );
+    assert.equal(document.getElementById('mktero-markdown-readiness-style')?.textContent.includes('prefers-reduced-motion'), true);
+    assert.equal(options.renderCell(0, '', {}, false, document), null);
+});
+
 test('notifies readiness when a cache entry is written, expires, or cleared', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-readiness-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));

@@ -65,6 +65,12 @@ import {
 } from './ai/translation-request-tracker.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import { ConversionProviderRouter } from './core/conversion-provider.js';
+import { createConversionActivity } from './core/conversion-activity.js';
+import {
+    CONVERSION_BATCH_LIMIT,
+    createConversionBatch,
+} from './core/conversion-batch.js';
+import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
     collectMatchedAnnotationRanges,
     createMarkdownRevisionSessionRegistry,
@@ -141,6 +147,10 @@ import {
 } from './mineru/pending-task-store.js';
 import { createRuntimeAbortController } from './platform/abort-controller.js';
 import {
+    createZoteroConversionProgress,
+    installZoteroConversionProgressButton,
+} from './platform/zotero-conversion-progress.js';
+import {
     createZoteroAnnotationActions,
     createZoteroPDFTextLocator,
 } from './platform/zotero-annotation-actions.js';
@@ -193,7 +203,10 @@ import {
     localizeConversionError,
     localizeConversionResult,
 } from './ui/provider-neutral-copy.js';
-import { registerItemContextMenu } from './ui/item-context-menu.js';
+import {
+    registerCollectionContextMenu,
+    registerItemContextMenu,
+} from './ui/item-context-menu.js';
 import { registerReaderToolbar } from './ui/reader-toolbar.js';
 import {
     MARKDOWN_TAB_CLOSE_REASONS,
@@ -205,6 +218,7 @@ import {
 import {
     createAnnotationOverlayRefresher,
 } from './ui/annotation-overlay-refresher.js';
+import { conversionStageDetail } from './ui/markdown-loading-state.js';
 import {
     createConversionFailureChanges,
     createConversionLoadingChanges,
@@ -218,6 +232,10 @@ import {
 // Conversions whose OCR is done and only local figure stitching remains must
 // keep running after the reader tab is closed, so the next open is instant.
 const backgroundFigureRestorations = new Set();
+const batchItemWatchers = new Map();
+const backgroundContinuations = new Map();
+const progressButtonDisposers = new Map();
+const cancelledPreparations = new Set();
 
 const runtime = {
     id: null,
@@ -262,6 +280,10 @@ const runtime = {
     contextMenus: new Map(),
     translationRequests: null,
     pdfIndexOperations: new PDFIndexOperationTracker(),
+    conversionActivity: null,
+    conversionRuns: null,
+    conversionBatch: null,
+    conversionProgress: null,
 };
 
 globalThis.install = async function install() {};
@@ -310,6 +332,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.cache = cache;
+    runtime.conversionActivity = createConversionActivity();
     const readinessReady = initializeMarkdownReadiness(cache, id, rootURI);
     initializeCitationGraph(localization);
     initializeReferenceImport();
@@ -646,6 +669,18 @@ globalThis.startup = async function startup({ id, rootURI }) {
         savedResolver: runtime.savedMarkdownResolver,
         translate: runtimeTranslate,
     });
+    runtime.conversionRuns = createConversionRunRegistry({
+        createController: createZoteroAbortController,
+        execute: executeItemConversion,
+    });
+    runtime.conversionBatch = createConversionBatch({
+        isReady: candidate => itemHasReadableMarkdown(candidate.itemID),
+        isActive: candidate => runtime.conversionRuns.isActive(candidate.itemID),
+        isBlockedError: conversionNeedsSettings,
+        convert: convertBatchItem,
+        onEvent: handleBatchEvent,
+        createController: createZoteroAbortController,
+    });
     runtime.annotationOverlayRefresher = createAnnotationOverlayRefresher({
         presenter,
         service: runtime.service,
@@ -661,7 +696,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     );
     runtime.disposeCacheObserver = observeLocalCacheCleared(
         typeof Services === 'undefined' ? null : Services,
-        resetOpenDocumentTranslations
+        handleLocalCacheCleared
     );
     runtime.disposeAITargetLanguageObserver = observeAITargetLanguage(
         Zotero,
@@ -877,6 +912,10 @@ globalThis.shutdown = function shutdown() {
     runtime.referenceLibrary = null;
     runtime.referenceImportService = null;
     runtime.service = null;
+    runtime.conversionRuns = null;
+    runtime.conversionBatch = null;
+    runtime.conversionActivity = null;
+    runtime.conversionProgress = null;
     runtime.cache = null;
     runtime.readiness = null;
     runtime.readinessColumn = null;
@@ -915,9 +954,11 @@ globalThis.shutdown = function shutdown() {
 globalThis.uninstall = async function uninstall() {};
 globalThis.onMainWindowLoad = function onMainWindowLoad({ window }) {
     registerMainWindowContextMenu(window);
+    installProgressButton(window);
 };
 globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
     disposeMainWindowContextMenu(window);
+    disposeProgressButton(window);
     runtime.citationPresenter?.closeForWindow(window);
 };
 
@@ -961,7 +1002,7 @@ async function openItemAsMarkdown(itemID, {
     const presentation = runtime.presenter.open(itemID, {
         sourceItemID: itemID,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
-            if (!backgroundFigureRestorations.has(itemID)) abortConversion(itemID);
+            releaseTabConversion(itemID, reason);
             void runtime.sourcePeekRenderer?.dispose(itemID);
             abortDocumentTranslations(itemID);
             runtime.citationPresenter?.closeForItem(itemID);
@@ -1048,6 +1089,13 @@ async function openItemAsMarkdown(itemID, {
             entryPoint,
         });
     }
+    if (!forceRefresh
+        && !presentation.created
+        && presentation.model.status === 'loading') return;
+    if (!forceRefresh && isItemPreparing(itemID)) {
+        await adoptPreparedConversion(presentation, itemID);
+        return;
+    }
     if (!presentation.created
         && presentation.model.status !== 'error'
         && !forceRefresh) return;
@@ -1055,65 +1103,267 @@ async function openItemAsMarkdown(itemID, {
     const previousResult = forceRefresh
         ? snapshotReadyResult(presentation.model)
         : null;
-    abortConversion(itemID);
-    const controller = createZoteroAbortController();
-    runtime.pdfIndexOperations.start(itemID, controller);
-    Zotero.debug(
-        `Mktero: conversion started for item ${itemID} `
-        + `(force refresh: ${forceRefresh})`
-    );
+    if (forceRefresh) markConversionActivity(itemID);
+    const begun = runtime.conversionRuns.begin({
+        itemID,
+        owner: 'tab',
+        forceRefresh,
+    });
     runtime.presenter.update(
         presentation,
         createConversionLoadingChanges(previousResult, runtimeTranslate)
     );
+    const unsubscribe = subscribeTabConversion(presentation, itemID, {
+        batchOwned: false,
+    });
+    try {
+        const result = await begun.run.promise;
+        await publishConversionResult(
+            presentation,
+            itemID,
+            result,
+            begun.run.signal
+        );
+    }
+    catch (error) {
+        if (begun.run.signal.aborted || presentation.closed) return;
+        publishConversionFailure(presentation, itemID, error, previousResult);
+    }
+    finally {
+        unsubscribe();
+        clearConversionActivity(itemID);
+    }
+}
 
-    let lastLoggedProgress = null;
-    // Once the progressive document is published, later progress ticks must not
-    // flip the reader back to a content-clearing loading state.
+function releaseTabConversion(itemID, reason) {
+    if (reason !== MARKDOWN_TAB_CLOSE_REASONS.SHUTDOWN
+        && runtime.conversionRuns?.isActive(itemID)) {
+        continueConversionInBackground(itemID);
+        return;
+    }
+    runtime.conversionRuns?.release(itemID, 'tab');
+}
+
+function continueConversionInBackground(itemID) {
+    if (runtime.conversionBatch?.isPreparing(itemID)
+        || backgroundContinuations.has(itemID)) {
+        runtime.conversionRuns.release(itemID, 'tab', { abortIfLast: false });
+        return;
+    }
+    const run = runtime.conversionRuns.get(itemID);
+    if (!run) {
+        runtime.conversionRuns.release(itemID, 'tab', { abortIfLast: false });
+        return;
+    }
+    runtime.conversionRuns.attach(itemID, 'background');
+    runtime.conversionRuns.release(itemID, 'tab', { abortIfLast: false });
+    ensureConversionProgress();
+    runtime.conversionProgress?.add(itemID, conversionItemTitle(itemID));
+    updateProgressRow(
+        runtime.conversionProgress,
+        itemID,
+        'processing',
+        conversionStageDetail(0, {}, runtimeTranslate)
+    );
+    runtime.conversionProgress?.setStatus(runtimeTranslate('batch.statusHint'));
+    runtime.conversionProgress?.open();
+    markConversionActivity(itemID);
+    const unsubscribe = runtime.conversionRuns.subscribe(itemID, event => {
+        if (event.type !== 'progress') return;
+        updateProgressRow(
+            runtime.conversionProgress,
+            itemID,
+            'processing',
+            conversionStageDetail(event.progress, event.state, runtimeTranslate)
+        );
+    });
+    backgroundContinuations.set(itemID, unsubscribe);
+    void run.promise.then(result => {
+        void rememberMarkdownReadiness(itemID, result)
+            .finally(() => clearConversionActivity(itemID));
+        updateProgressRow(
+            runtime.conversionProgress,
+            itemID,
+            'succeeded',
+            runtimeTranslate('batch.ready')
+        );
+    }, error => {
+        if (isCancellation(error)) {
+            clearConversionActivity(itemID);
+            runtime.conversionProgress?.remove(itemID);
+            return;
+        }
+        clearConversionActivity(itemID);
+        updateProgressRow(
+            runtime.conversionProgress,
+            itemID,
+            'failed',
+            userFacingError(error)
+        );
+        if (conversionNeedsSettings(error)) openMinerUPreferences(Zotero);
+    }).finally(() => {
+        unsubscribe();
+        backgroundContinuations.delete(itemID);
+        runtime.conversionRuns?.release(itemID, 'background', {
+            abortIfLast: false,
+        });
+    });
+}
+
+function cancelBackgroundContinuations() {
+    cancelPreparation([...backgroundContinuations.keys()]);
+}
+
+function cancelPreparation(itemIDs) {
+    for (const itemID of itemIDs) {
+        cancelledPreparations.add(itemID);
+        runtime.conversionRuns?.abort(itemID, 'cancelled');
+        forceClearConversionActivity(itemID);
+    }
+}
+
+function conversionItemTitle(itemID) {
+    const item = Zotero.Items?.get?.(itemID);
+    const parentID = item?.parentItemID || item?.parentID;
+    const parent = item?.parentItem
+        || (parentID ? Zotero.Items?.get?.(parentID) : null);
+    const title = String(parent?.getDisplayTitle?.()
+        || item?.getDisplayTitle?.()
+        || '')
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!title) return 'PDF';
+    return title.length > 300 ? `${title.slice(0, 299)}…` : title;
+}
+
+function isItemPreparing(itemID) {
+    return runtime.conversionBatch?.isPreparing(itemID) === true
+        || runtime.conversionRuns?.isActive(itemID) === true;
+}
+
+async function adoptPreparedConversion(presentation, itemID) {
+    runtime.conversionRuns?.attach(itemID, 'tab');
+    const showQueue = () => {
+        const position = runtime.conversionBatch?.position(itemID);
+        if (!position || position.status !== 'queued' || presentation.closed) {
+            return false;
+        }
+        runtime.presenter?.update(presentation, {
+            ...createConversionLoadingChanges(null, runtimeTranslate),
+            batchOwned: true,
+            queueAhead: position.ahead,
+        });
+        return true;
+    };
+    showQueue();
+    const unsubscribeRun = subscribeTabConversion(presentation, itemID, {
+        batchOwned: true,
+    });
+    const stopQueue = watchBatchItem(itemID, () => {
+        if (presentation.closed) return;
+        showQueue();
+        runtime.conversionRuns?.attach(itemID, 'tab');
+    });
+    try {
+        const result = runtime.conversionBatch?.isPreparing(itemID)
+            ? await runtime.conversionBatch.wait(itemID)
+            : await runtime.conversionRuns.get(itemID)?.promise;
+        if (!result) return;
+        await publishConversionResult(presentation, itemID, result);
+    }
+    catch (error) {
+        if (isCancellation(error) || presentation.closed) return;
+        publishConversionFailure(presentation, itemID, error, null);
+    }
+    finally {
+        unsubscribeRun();
+        stopQueue();
+    }
+}
+
+function watchBatchItem(itemID, listener) {
+    let watchers = batchItemWatchers.get(itemID);
+    if (!watchers) {
+        watchers = new Set();
+        batchItemWatchers.set(itemID, watchers);
+    }
+    watchers.add(listener);
+    return () => {
+        watchers.delete(listener);
+        if (!watchers.size) batchItemWatchers.delete(itemID);
+    };
+}
+
+function notifyBatchItem(itemID) {
+    for (const listener of batchItemWatchers.get(itemID) || []) {
+        try {
+            listener();
+        }
+        catch {
+            // A closed reader must not stop the preparation queue.
+        }
+    }
+}
+
+function subscribeTabConversion(presentation, itemID, { batchOwned }) {
     let progressivePublished = false;
+    return runtime.conversionRuns.subscribe(itemID, event => {
+        if (presentation.closed) return;
+        if (event.type === 'progress') {
+            const progress = normalizeConversionProgress(event.progress);
+            if (progress < CONVERSION_PROGRESS.COMPLETE) {
+                markConversionActivity(itemID);
+            }
+            if (progressivePublished) return;
+            runtime.presenter?.update(presentation, {
+                ...createConversionProgressChanges(progress, event.state),
+                batchOwned,
+                queueAhead: null,
+            });
+            return;
+        }
+        if (event.type !== 'progressive' || event.event?.type !== 'document') {
+            return;
+        }
+        progressivePublished = true;
+        const documentEvent = event.event;
+        logFigureAssetSizes(
+            `item ${itemID}: progressive`,
+            documentEvent.document
+        );
+        runtime.presenter?.update(presentation, {
+            ...documentEvent.document,
+            status: 'ready',
+            progress: 100,
+            preserveContent: false,
+            batchOwned,
+            queueAhead: null,
+            figureRestoration: { status: 'pending' },
+            ...(documentEvent.pendingFigureAssets instanceof Map
+                ? { pendingFigureAssets: documentEvent.pendingFigureAssets }
+                : {}),
+        });
+    });
+}
+
+async function executeItemConversion(itemID, {
+    controller,
+    signal,
+    forceRefresh,
+    onProgress,
+    onProgressiveFigures,
+}) {
+    runtime.pdfIndexOperations.start(itemID, controller);
+    let lastLoggedProgress = null;
+    Zotero.debug(
+        `Mktero: conversion started for item ${itemID} `
+        + `(force refresh: ${forceRefresh})`
+    );
     try {
         const result = await runtime.service.convert(itemID, {
-            signal: controller.signal,
+            signal,
             forceRefresh,
-            onProgressiveFigures(event) {
-                if (!event || controller.signal.aborted) return;
-                if (event.type === 'figure') {
-                    Zotero.debug(`Mktero: item ${itemID}: figure ${event.figure.id} ${event.figure.status}`);
-                    return;
-                }
-                if (event.type !== 'document') return;
-                progressivePublished = true;
-                backgroundFigureRestorations.add(itemID);
-                if (event.figureInput) {
-                    Zotero.debug(`Mktero: item ${itemID}: progressive figures started`);
-                }
-                logFigureAssetSizes(`item ${itemID}: progressive`, event.document);
-                runtime.presenter?.update(presentation, {
-                    ...event.document,
-                    status: 'ready',
-                    progress: 100,
-                    preserveContent: false,
-                    figureRestoration: { status: 'pending' },
-                    ...(event.pendingFigureAssets instanceof Map
-                        ? { pendingFigureAssets: event.pendingFigureAssets }
-                        : {}),
-                });
-                // Persist the readable provisional result so a reopen during a
-                // later extension restart can resume without re-uploading.
-                if (event.figureInput && event.cacheKey && runtime.cache
-                    && getMinerUCacheEnabled(Zotero)) {
-                    runtime.cache.put(event.cacheKey, event.document, {
-                        figureRestoration: {
-                            status: 'pending',
-                            input: event.figureInput,
-                            completedFigureIds: [],
-                        },
-                    }).then(() => rememberMarkdownReadiness(itemID, {
-                        cacheKey: event.cacheKey,
-                        parserProfile: currentConversionParserProfile(),
-                    })).catch(error => Zotero.logError?.(error));
-                }
-            },
             onProgress(progress, state) {
                 const normalizedProgress = normalizeConversionProgress(progress);
                 if (normalizedProgress !== lastLoggedProgress) {
@@ -1127,11 +1377,19 @@ async function openItemAsMarkdown(itemID, {
                         + `(${normalizedProgress}%)`
                     );
                 }
-                if (progressivePublished) return;
-                runtime.presenter?.update(
-                    presentation,
-                    createConversionProgressChanges(normalizedProgress, state)
-                );
+                onProgress(normalizedProgress, state);
+            },
+            onProgressiveFigures(event) {
+                if (!event || signal.aborted) return;
+                if (event.type === 'figure') {
+                    Zotero.debug(
+                        `Mktero: item ${itemID}: figure ${event.figure.id} `
+                        + `${event.figure.status}`
+                    );
+                    return;
+                }
+                noteProgressiveDocument(itemID, event);
+                onProgressiveFigures(event);
             },
         });
         Zotero.debug(
@@ -1141,56 +1399,300 @@ async function openItemAsMarkdown(itemID, {
                     ? `Mktero: item ${itemID}: completed from a resumed conversion task`
                     : `Mktero: item ${itemID}: completed through a new conversion request`
         );
-        void rememberMarkdownReadiness(itemID, result);
-        const revisionResult = await attachRevisionSession(
-            itemID,
-            result,
-            controller.signal
-        );
-        throwIfRevisionAborted(controller.signal);
-        const positionedResult = await attachReadingPosition(revisionResult);
-        const readyResult = await attachCachedDocumentTranslation(
-            positionedResult,
-            controller.signal
-        );
-        logFigureAssetSizes(`item ${itemID}: final`, readyResult);
-        runtime.presenter?.update(
-            presentation,
-            createConversionReadyChanges(
-                localizeConversionResult(readyResult, runtimeTranslate)
-            )
-        );
-    }
-    catch (error) {
-        if (controller.signal.aborted) return;
-        Zotero.debug(
-            `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
-        );
-        Zotero.logError(error);
-        const opensSettings = error instanceof MinerUConfigurationError
-            || error instanceof MistralConfigurationError
-            || error?.code === 'MINERU_API_KEY_INVALID'
-            || error?.code === 'MISTRAL_API_KEY_INVALID'
-            || error?.code === 'MISTRAL_API_KEY_REQUIRED';
-        if (opensSettings) {
-            openMinerUPreferences(Zotero);
-        }
-        runtime.presenter?.update(
-            presentation,
-            createConversionFailureChanges(
-                userFacingError(error),
-                previousResult,
-                runtimeTranslate,
-                {
-                    errorAction: opensSettings ? 'open-settings' : null,
-                }
-            )
-        );
+        return result;
     }
     finally {
         backgroundFigureRestorations.delete(itemID);
         runtime.pdfIndexOperations.finish(itemID, controller);
     }
+}
+
+function noteProgressiveDocument(itemID, event) {
+    if (!event || event.type !== 'document') return;
+    backgroundFigureRestorations.add(itemID);
+    if (event.figureInput) {
+        Zotero.debug(`Mktero: item ${itemID}: progressive figures started`);
+    }
+    if (!(event.figureInput && event.cacheKey && runtime.cache
+        && getMinerUCacheEnabled(Zotero))) {
+        return;
+    }
+    runtime.cache.put(event.cacheKey, event.document, {
+        figureRestoration: {
+            status: 'pending',
+            input: event.figureInput,
+            completedFigureIds: [],
+        },
+    }).then(() => rememberMarkdownReadiness(itemID, {
+        cacheKey: event.cacheKey,
+        parserProfile: currentConversionParserProfile(),
+    })).catch(error => Zotero.logError?.(error));
+}
+
+async function publishConversionResult(presentation, itemID, result, signal) {
+    if (!result || presentation.closed || signal?.aborted) return;
+    void rememberMarkdownReadiness(itemID, result);
+    const revisionResult = await attachRevisionSession(itemID, result, signal);
+    throwIfRevisionAborted(signal);
+    if (presentation.closed) return;
+    const positionedResult = await attachReadingPosition(revisionResult);
+    const readyResult = await attachCachedDocumentTranslation(
+        positionedResult,
+        signal
+    );
+    if (presentation.closed || signal?.aborted) return;
+    logFigureAssetSizes(`item ${itemID}: final`, readyResult);
+    runtime.presenter?.update(
+        presentation,
+        createConversionReadyChanges(
+            localizeConversionResult(readyResult, runtimeTranslate)
+        )
+    );
+}
+
+function publishConversionFailure(presentation, itemID, error, previousResult) {
+    if (presentation.closed) return;
+    Zotero.debug(
+        `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
+    );
+    Zotero.logError(error);
+    if (conversionNeedsSettings(error)) openMinerUPreferences(Zotero);
+    runtime.presenter?.update(
+        presentation,
+        createConversionFailureChanges(
+            userFacingError(error),
+            previousResult,
+            runtimeTranslate,
+            {
+                errorAction: conversionNeedsSettings(error)
+                    ? 'open-settings'
+                    : null,
+            }
+        )
+    );
+}
+
+function conversionNeedsSettings(error) {
+    return error instanceof MinerUConfigurationError
+        || error instanceof MistralConfigurationError
+        || error?.code === 'MINERU_API_KEY_INVALID'
+        || error?.code === 'MISTRAL_API_KEY_INVALID'
+        || error?.code === 'MISTRAL_API_KEY_REQUIRED';
+}
+
+function prepareSelectedMarkdown(targets) {
+    if (!runtime.conversionBatch) return;
+    for (const target of targets || []) cancelledPreparations.delete(target.itemID);
+    ensureConversionProgress();
+    const summary = runtime.conversionBatch.enqueue(targets);
+    runtime.conversionProgress?.setStatus(batchStatusMessage(summary));
+    if (summary.accepted.length
+        || summary.skippedReady.length
+        || summary.skippedActive.length
+        || summary.skippedQueued.length
+        || summary.truncated.length) {
+        runtime.conversionProgress?.open();
+    }
+    refreshMarkdownReadinessColumn(Zotero);
+}
+
+function ensureConversionProgress() {
+    if (runtime.conversionProgress || !runtime.conversionBatch) return;
+    runtime.conversionProgress = createZoteroConversionProgress({
+        zotero: Zotero,
+        services: typeof Services === 'undefined' ? null : Services,
+        title: runtimeTranslate('batch.windowTitle'),
+        onCancel: () => {
+            cancelPreparation(runtime.conversionBatch?.cancel() || []);
+            cancelBackgroundContinuations();
+        },
+    });
+    installProgressButtons();
+}
+
+function installProgressButtons() {
+    const windows = Zotero.getMainWindows?.()
+        || [Zotero.getMainWindow?.()].filter(Boolean);
+    for (const window of windows) installProgressButton(window);
+}
+
+function installProgressButton(window) {
+    if (!window || !runtime.conversionProgress) return;
+    disposeProgressButton(window);
+    const rootURI = runtime.rootURI || '';
+    const dispose = installZoteroConversionProgressButton({
+        zotero: Zotero,
+        window,
+        title: runtimeTranslate('batch.windowTitle'),
+        iconURL: `${rootURI}${rootURI.endsWith('/') ? '' : '/'}ui/icons/mktero.svg`,
+    });
+    if (dispose) progressButtonDisposers.set(window, dispose);
+}
+
+function disposeProgressButton(window) {
+    progressButtonDisposers.get(window)?.();
+    progressButtonDisposers.delete(window);
+}
+
+function disposeProgressButtons() {
+    for (const window of [...progressButtonDisposers.keys()]) {
+        disposeProgressButton(window);
+    }
+}
+
+async function convertBatchItem(item, { signal, onProgress }) {
+    const begun = runtime.conversionRuns.begin({
+        itemID: item.itemID,
+        owner: 'batch',
+    });
+    const unsubscribe = runtime.conversionRuns.subscribe(item.itemID, event => {
+        if (event.type === 'progress') onProgress(event.progress, event.state);
+    });
+    const releaseBatch = () => {
+        runtime.conversionRuns.release(item.itemID, 'batch');
+    };
+    signal.addEventListener('abort', releaseBatch, { once: true });
+    try {
+        return await begun.run.promise;
+    }
+    finally {
+        signal.removeEventListener('abort', releaseBatch);
+        unsubscribe();
+        runtime.conversionRuns.release(item.itemID, 'batch', {
+            abortIfLast: false,
+        });
+    }
+}
+
+function handleBatchEvent(event) {
+    const item = event.item;
+    const progress = runtime.conversionProgress;
+    if (event.type === 'queued') {
+        markConversionActivity(item.itemID, { refresh: false });
+        progress?.add(item.itemID, item.title);
+        updateProgressRow(progress, item.itemID, 'queued', queueStatus(event.ahead));
+    }
+    else if (event.type === 'position' && item) {
+        updateProgressRow(progress, item.itemID, 'queued', queueStatus(event.ahead));
+    }
+    else if (event.type === 'started') {
+        updateProgressRow(
+            progress,
+            item.itemID,
+            'processing',
+            conversionStageDetail(0, {}, runtimeTranslate)
+        );
+    }
+    else if (event.type === 'progress') {
+        if (normalizeConversionProgress(event.progress) < CONVERSION_PROGRESS.COMPLETE) {
+            markConversionActivity(item.itemID);
+        }
+        updateProgressRow(
+            progress,
+            item.itemID,
+            'processing',
+            conversionStageDetail(event.progress, event.state, runtimeTranslate)
+        );
+    }
+    else if (event.type === 'succeeded') {
+        if (cancelledPreparations.has(item.itemID)) return;
+        void rememberMarkdownReadiness(item.itemID, event.result)
+            .finally(() => clearConversionActivity(item.itemID));
+        updateProgressRow(
+            progress,
+            item.itemID,
+            'succeeded',
+            runtimeTranslate('batch.ready')
+        );
+    }
+    else if (event.type === 'failed') {
+        clearConversionActivity(item.itemID);
+        updateProgressRow(
+            progress,
+            item.itemID,
+            'failed',
+            userFacingError(event.error)
+        );
+        if (conversionNeedsSettings(event.error)) {
+            openMinerUPreferences(Zotero);
+        }
+    }
+    else if (event.type === 'cancelled' || event.type === 'released') {
+        clearConversionActivity(item.itemID);
+        progress?.remove(item.itemID);
+    }
+    if (item) notifyBatchItem(item.itemID);
+}
+
+function updateProgressRow(progress, itemID, status, message) {
+    if (!progress?.statuses || !progress.update) return;
+    progress.update(itemID, progress.statuses[status], message);
+}
+
+function queueStatus(ahead) {
+    return ahead > 0
+        ? runtimeTranslate('batch.queueAhead', { count: ahead })
+        : runtimeTranslate('batch.queued');
+}
+
+function batchStatusMessage(summary) {
+    const parts = [runtimeTranslate('batch.statusHint')];
+    if (summary.skippedReady.length) {
+        parts.push(runtimeTranslate('batch.skippedReady', {
+            count: summary.skippedReady.length,
+        }));
+    }
+    const preparing = summary.skippedActive.length + summary.skippedQueued.length;
+    if (preparing) {
+        parts.push(runtimeTranslate('batch.skippedActive', { count: preparing }));
+    }
+    if (summary.truncated.length) {
+        parts.push(runtimeTranslate('batch.truncated', {
+            count: CONVERSION_BATCH_LIMIT,
+        }));
+    }
+    return parts.join(' ');
+}
+
+function itemHasReadableMarkdown(itemID) {
+    const item = Zotero.Items?.get?.(itemID);
+    return runtime.readiness?.isReady(
+        item,
+        currentConversionParserProfile()
+    ) === true;
+}
+
+function markConversionActivity(itemID, { refresh = true } = {}) {
+    if (cancelledPreparations.has(itemID)) return false;
+    const identity = conversionActivityIdentity(itemID);
+    if (!identity) return false;
+    const changed = runtime.conversionActivity?.mark(identity) === true;
+    if (changed && refresh) refreshMarkdownReadinessColumn(Zotero);
+    return changed;
+}
+
+function clearConversionActivity(itemID) {
+    if (isItemPreparing(itemID)) return false;
+    return forceClearConversionActivity(itemID);
+}
+
+function forceClearConversionActivity(itemID) {
+    const identity = conversionActivityIdentity(itemID);
+    if (!identity) return false;
+    const changed = runtime.conversionActivity?.clear(identity) === true;
+    if (changed) refreshMarkdownReadinessColumn(Zotero);
+    return changed;
+}
+
+function conversionActivityIdentity(itemID) {
+    const item = Zotero.Items?.get?.(itemID);
+    return resolveMarkdownReadinessIdentity(readinessItem(item));
+}
+
+function isCancellation(error) {
+    return error?.name === 'AbortError'
+        || error?.code === 'ABORT_ERR'
+        || error?.code === 'MKTERO_CONVERSION_REPLACED';
 }
 
 async function openSavedMarkdownNote(noteID) {
@@ -1898,6 +2400,13 @@ async function resolveTranslationAfterRevision(snapshot, {
     };
 }
 
+function handleLocalCacheCleared() {
+    resetOpenDocumentTranslations();
+    // Preferences clears a separate cache instance, so the column index
+    // does not see that instance's store-change event.
+    void runtime.readiness?.clear();
+}
+
 function resetOpenDocumentTranslations() {
     abortAllTranslations();
     for (const presentation of runtime.presenter?.list?.() || []) {
@@ -2261,6 +2770,7 @@ function initializeMarkdownReadiness(cache, pluginID, rootURI) {
                 item,
                 currentConversionParserProfile()
             ) === true,
+            isPreparing: item => runtime.conversionActivity?.isActive(item) === true,
             translate: runtimeTranslate,
             onError: error => Zotero.logError?.(error),
         });
@@ -2277,6 +2787,7 @@ function initializeMarkdownReadiness(cache, pluginID, rootURI) {
 }
 
 async function rememberMarkdownReadiness(itemID, result) {
+    if (cancelledPreparations.has(itemID)) return;
     if (!runtime.readiness || !runtime.cache || !result?.cacheKey) return;
     const parserProfile = result.parserProfile || currentConversionParserProfile();
     if (parserProfile !== currentConversionParserProfile()) return;
@@ -2513,7 +3024,15 @@ function abortConversion(itemID) {
 }
 
 function abortAllConversions() {
+    runtime.conversionBatch?.cancel();
+    cancelBackgroundContinuations();
+    runtime.conversionRuns?.abortAll('shutdown');
     runtime.pdfIndexOperations.abortAll();
+    if (runtime.conversionActivity?.clearAll()) {
+        refreshMarkdownReadinessColumn(Zotero);
+    }
+    runtime.conversionProgress?.cancel();
+    disposeProgressButtons();
 }
 
 function trackPDFIndexTask(tracker, itemID, options, locator) {
@@ -2545,19 +3064,32 @@ function applyPdfOutlineToOpenMarkdown(itemID, outline) {
 
 function registerMainWindowContextMenu(window) {
     if (!window || !runtime.id || runtime.contextMenus.has(window)) return;
-    const dispose = registerItemContextMenu({
+    const disposeItemMenu = registerItemContextMenu({
         zotero: Zotero,
         window,
         rootURI: runtime.rootURI,
         onOpen: openItemAsMarkdown,
+        onPrepare: prepareSelectedMarkdown,
         onOpenSavedNote: openSavedMarkdownNote,
+        isPreparing: isItemPreparing,
         isSavedMarkdownNote: item => (
             runtime.savedMarkdownStore?.isSavedMarkdownNote(item) || false
         ),
         onError: handleOpenError,
         translate: runtimeTranslate,
     });
-    if (dispose) runtime.contextMenus.set(window, dispose);
+    const disposeCollectionMenu = registerCollectionContextMenu({
+        zotero: Zotero,
+        window,
+        onPrepare: prepareSelectedMarkdown,
+        onError: handleOpenError,
+        translate: runtimeTranslate,
+    });
+    if (!disposeItemMenu && !disposeCollectionMenu) return;
+    runtime.contextMenus.set(window, () => {
+        disposeItemMenu?.();
+        disposeCollectionMenu?.();
+    });
 }
 
 function disposeMainWindowContextMenu(window) {

@@ -389,7 +389,11 @@ test('presents every preference group as one cohesive settings card', async () =
     );
     assert.match(
         pane,
-        /id="mktero-cache-enabled"[\s\S]*class="mktero-switch-input"[\s\S]*role="switch"/
+        /id="mktero-conversion-section"[\s\S]*id="mktero-cache-enabled"[\s\S]*class="mktero-switch-input"[\s\S]*role="switch"/
+    );
+    assert.doesNotMatch(
+        pane.slice(0, pane.indexOf('id="mktero-conversion-section"')),
+        /id="mktero-cache-enabled"/
     );
     assert.match(
         pane,

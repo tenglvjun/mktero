@@ -2,12 +2,15 @@ import { createLucideIcon, LUCIDE_ICONS } from '../icons/lucide-icon.js';
 
 const DATA_KEY = 'markdownReady';
 const COLUMN_WIDTH = '32';
+const PREPARING_VALUE = 'loading';
+const STYLE_ID = 'mktero-markdown-readiness-style';
 
 export function registerMarkdownReadinessColumn({
     zotero,
     pluginID,
     rootURI = '',
     isReady,
+    isPreparing = () => false,
     translate,
     onError = null,
 } = {}) {
@@ -24,6 +27,7 @@ export function registerMarkdownReadinessColumn({
         pluginID,
         rootURI,
         isReady,
+        isPreparing,
         translate,
         onError,
     });
@@ -47,6 +51,7 @@ export function registerMarkdownReadinessColumn({
             refreshMarkdownReadinessColumn(zotero);
         },
         dispose() {
+            removePreparingStyle(zotero);
             if (!registeredKey) return;
             try {
                 if (typeof manager.unregisterColumn === 'function') {
@@ -90,12 +95,14 @@ export function markdownReadinessColumnOptions({
     pluginID,
     rootURI = '',
     isReady,
+    isPreparing = () => false,
     translate = key => key,
 } = {}) {
     return columnOptions({
         pluginID,
         rootURI,
         isReady,
+        isPreparing,
         translate,
         onError: null,
     });
@@ -105,11 +112,16 @@ function columnOptions({
     pluginID,
     rootURI,
     isReady,
+    isPreparing,
     translate,
     onError,
 }) {
     const label = safeTranslate(translate, 'column.markdownReady');
     const tooltip = safeTranslate(translate, 'column.markdownReadyTooltip');
+    const preparingTooltip = safeTranslate(
+        translate,
+        'column.markdownPreparingTooltip'
+    );
     const iconPath = columnIconPath(rootURI);
     return {
         dataKey: DATA_KEY,
@@ -132,6 +144,7 @@ function columnOptions({
         zoteroPersist: ['hidden', 'width', 'sortDirection'],
         dataProvider(item) {
             try {
+                if (isPreparing(item)) return PREPARING_VALUE;
                 return isReady(item) ? '1' : '';
             }
             catch (error) {
@@ -140,8 +153,12 @@ function columnOptions({
             }
         },
         renderCell(_index, data, column, _isFirstColumn, doc) {
-            if (data !== '1' || !doc) return null;
+            if (!doc) return null;
             try {
+                if (data === PREPARING_VALUE) {
+                    return renderPreparingCell(doc, column, preparingTooltip);
+                }
+                if (data !== '1') return null;
                 return renderReadyCell(doc, column, tooltip);
             }
             catch (error) {
@@ -150,6 +167,58 @@ function columnOptions({
             }
         },
     };
+}
+
+function renderPreparingCell(doc, column, tooltip) {
+    ensurePreparingStyle(doc);
+    const cell = doc.createElement('span');
+    cell.className = `cell ${column?.className || ''} mktero-markdown-preparing`.trim();
+    cell.title = tooltip;
+    cell.setAttribute?.('role', 'img');
+    cell.setAttribute?.('aria-label', tooltip);
+    if (typeof doc.createElementNS === 'function') {
+        cell.appendChild(createLucideIcon(doc, LUCIDE_ICONS.loaderCircle, {
+            className: 'mktero-markdown-preparing-icon',
+            size: 14,
+        }));
+    }
+    else {
+        cell.textContent = '…';
+    }
+    return cell;
+}
+
+function ensurePreparingStyle(doc) {
+    if (!doc?.getElementById || doc.getElementById(STYLE_ID)) return;
+    const parent = doc.documentElement || doc.head || doc.body;
+    if (!parent?.appendChild || typeof doc.createElement !== 'function') return;
+    const style = doc.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = [
+        '.mktero-markdown-preparing-icon {',
+        '  animation: mktero-markdown-preparing-spin 0.8s linear infinite;',
+        '  transform-origin: center;',
+        '  transform-box: fill-box;',
+        '}',
+        '@keyframes mktero-markdown-preparing-spin {',
+        '  to { transform: rotate(360deg); }',
+        '}',
+        '@media (prefers-reduced-motion: reduce) {',
+        '  .mktero-markdown-preparing-icon { animation: none; }',
+        '}',
+    ].join('\n');
+    parent.appendChild(style);
+}
+
+function removePreparingStyle(zotero) {
+    for (const win of mainWindows(zotero)) {
+        try {
+            win?.document?.getElementById?.(STYLE_ID)?.remove();
+        }
+        catch {
+            // A closing window must not block column cleanup.
+        }
+    }
 }
 
 function renderReadyCell(doc, column, tooltip) {

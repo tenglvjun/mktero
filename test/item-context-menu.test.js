@@ -6,7 +6,10 @@ import {
     createSavedMarkdownManifest,
     serializeSavedMarkdownNote,
 } from '../src/core/saved-markdown-note-format.js';
-import { registerItemContextMenu } from '../src/ui/item-context-menu.js';
+import {
+    registerCollectionContextMenu,
+    registerItemContextMenu,
+} from '../src/ui/item-context-menu.js';
 
 function createMenuHarness(selectedItems = []) {
     const { document } = parseHTML([
@@ -332,4 +335,101 @@ test('removes a legacy citation graph context-menu item during registration', ()
         null
     );
     dispose();
+});
+
+test('prepares every selected PDF and changes the label while one is preparing', async () => {
+    const first = pdfItem(1);
+    first.getDisplayTitle = () => 'First';
+    const secondParent = regularItem(10, [2, 1]);
+    secondParent.getDisplayTitle = () => 'Second';
+    const second = pdfItem(2);
+    second.parentItemID = 10;
+    const harness = createMenuHarness([first, secondParent]);
+    const prepared = [];
+    const opened = [];
+    registerItemContextMenu({
+        zotero: {
+            Items: {
+                get: id => ({
+                    1: first,
+                    2: second,
+                    10: secondParent,
+                })[id] || null,
+            },
+        },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: itemID => opened.push(itemID),
+        onPrepare: targets => prepared.push(targets),
+        isPreparing: itemID => itemID === 2,
+        onError: assert.fail,
+    });
+
+    showMenu(harness.document);
+    const menuItem = harness.document.querySelector('#mktero-read-as-markdown');
+    assert.equal(menuItem.hidden, false);
+    assert.equal(menuItem.getAttribute('label'), 'Prepare selected Markdown');
+    menuItem.dispatchEvent(new harness.document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(prepared, [[
+        { itemID: 1, title: 'First' },
+        { itemID: 2, title: 'Second' },
+    ]]);
+
+    harness.select([second]);
+    showMenu(harness.document);
+    assert.equal(menuItem.getAttribute('label'), 'Open preparing Markdown');
+    menuItem.dispatchEvent(new harness.document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(opened, [2]);
+});
+
+test('prepares PDFs in the selected collection and ignores its subcollections', async () => {
+    const direct = pdfItem(7);
+    direct.getDisplayTitle = () => 'Direct';
+    const parent = regularItem(8, [9]);
+    parent.getDisplayTitle = () => 'Parent paper';
+    const attachment = pdfItem(9);
+    attachment.parentItemID = 8;
+    const nested = pdfItem(10);
+    nested.getDisplayTitle = () => 'Nested';
+    const selected = {
+        getChildItems: () => [direct, parent, { id: 11, deleted: true, isPDFAttachment: () => true }],
+        getChildCollections: () => [{ getChildItems: () => [nested] }],
+    };
+    const { document } = parseHTML('<html><body><div id="zotero-collectionmenu"></div></body></html>');
+    document.createXULElement = tagName => document.createElement(tagName);
+    const prepared = [];
+    const dispose = registerCollectionContextMenu({
+        zotero: {
+            Items: {
+                get: id => ({
+                    8: parent,
+                    9: attachment,
+                })[id] || null,
+            },
+        },
+        window: {
+            document,
+            ZoteroPane: { getSelectedCollections: () => [selected] },
+        },
+        onPrepare: targets => prepared.push(targets),
+        onError: assert.fail,
+    });
+
+    document.querySelector('#zotero-collectionmenu').dispatchEvent(
+        new document.defaultView.Event('popupshowing', { bubbles: true })
+    );
+    const menuItem = document.querySelector('#mktero-prepare-collection-markdown');
+    assert.equal(menuItem.hidden, false);
+    assert.equal(menuItem.getAttribute('label'), 'Prepare collection Markdown');
+    menuItem.dispatchEvent(new document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(prepared, [[
+        { itemID: 7, title: 'Direct' },
+        { itemID: 9, title: 'Parent paper' },
+    ]]);
+    dispose();
+    assert.equal(document.querySelector('#mktero-prepare-collection-markdown'), null);
 });
