@@ -57,6 +57,9 @@ Useful links: [Product page](https://mktero.com/) ·
   identifiers are available.
 - Save a portable Zotero snapshot, or export corrected Markdown and its
   extracted figures to a local folder.
+- Show a Markdown column in the item list when this computer still has a
+  readable cached conversion for the current settings. The marker stays in
+  the Zotero profile, does not modify the item, and does not sync.
 - Follow Zotero's English or Simplified Chinese display language; other locales
   fall back to English.
 

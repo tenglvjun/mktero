@@ -39,6 +39,10 @@ AI 全文翻译需要用户主动触发，也不会重写原始 Markdown。Mkter
 
 `Save snapshot` 会在 PDF 所属条目下创建专用的 `Mktero Markdown Snapshot` Note。Note 保存便携 HTML，图片作为内嵌附件，原始 Markdown 和来源映射作为关联附件。恢复的图表还会附带可选的 `figure-map.json`，记录页面区域、子图身份和被消费的 OCR 片段。元数据缺失或损坏不会影响 Markdown 和 PNG 的阅读，旧快照仍可打开。用户修改过快照 Note 后，Mktero 不会静默覆盖。没有父级文库条目的独立 PDF 无法保存快照。
 
+## 查看哪些条目已有 Markdown
+
+文献列表有一个 Markdown 列。标记表示这台电脑可以用当前转换设置直接打开该 PDF 的缓存 Markdown。它只保存在 Zotero 配置文件中。清空缓存、结果过期，或切换 Provider、MinerU 服务后，标记会熄灭。它不会同步，也不会修改 Zotero 条目。可以在文献列表的列选择器中隐藏该列，这个选择会被记住。
+
 ## 导出 Markdown
 
 `导出 Markdown` 会打开系统文件夹选择窗口。选择文件夹 `A`、论文标题为 `B` 时，Mktero 会创建 `A/B/B.md`，并将提取图片写入 `A/B/assets/`，同时更新 Markdown 中的图片路径。如果 `B` 已存在，则创建 `B-2` 等带序号的目录及对应的 `B-2.md`，不会覆盖已有导出。在大小写不敏感的文件系统上发生图片名冲突时，Mktero 会为图片添加序号并同步更新 Markdown 引用，避免不同图片互相覆盖。导出内容不包含译文或双语阅读视图，也不会自动导出。

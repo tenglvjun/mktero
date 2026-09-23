@@ -154,6 +154,15 @@ remain readable.
 Mktero refuses to silently overwrite a snapshot Note that you edited. A
 standalone PDF without a parent library item cannot save a snapshot.
 
+## See which items already have Markdown
+
+The item list has a Markdown column. A mark means this computer can open that
+PDF's cached Markdown with the current conversion settings. It is stored only
+in the Zotero profile. Clearing the cache, letting a result expire, or
+switching provider or MinerU service turns the mark off. It does not sync, and
+it does not change the Zotero item. You can hide the column from the item-list
+column picker; that choice is remembered.
+
 ## Export Markdown
 
 `Export Markdown` opens the system folder picker. If the selected folder is `A`

@@ -7,6 +7,7 @@
 | Complete PDF on a cache miss | Selected MinerU cloud, the configured local MinerU service, or Mistral | Not by Mktero |
 | MinerU cloud token, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
+| Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and expiry time | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |

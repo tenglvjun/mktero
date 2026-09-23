@@ -19,6 +19,7 @@ import {
     MISTRAL_API_KEY_PREF,
     normalizeConversionProvider,
     normalizeMinerUEndpoint,
+    observeConversionProfile,
 } from '../src/config/conversion-preferences.js';
 
 test('normalizes conversion providers to the supported values', () => {
@@ -55,6 +56,37 @@ test('reads the selected conversion provider from global Zotero preferences', ()
         getConversionProvider({ Prefs: { get: () => undefined } }),
         'mineru'
     );
+});
+
+test('refreshes Markdown readiness when the conversion profile changes', () => {
+    const observers = [];
+    const zotero = {
+        Prefs: {
+            registerObserver(pref, onChange, global) {
+                const observer = { pref, onChange, global };
+                observers.push(observer);
+                return observer;
+            },
+            unregisterObserver(observer) {
+                observer.removed = true;
+            },
+        },
+    };
+    const changes = [];
+    const stop = observeConversionProfile(zotero, () => changes.push('changed'));
+
+    assert.deepEqual(observers.map(observer => observer.pref), [
+        CONVERSION_PROVIDER_PREF,
+        MINERU_ENDPOINT_PREF,
+    ]);
+    assert.equal(observers.every(observer => observer.global === true), true);
+    observers[0].onChange();
+    observers[1].onChange('local');
+    stop();
+
+    assert.deepEqual(changes, ['changed', 'changed']);
+    assert.equal(observers.every(observer => observer.removed === true), true);
+    assert.equal(typeof observeConversionProfile({}, () => {}), 'function');
 });
 
 test('reads and trims independent MinerU and Mistral API keys', () => {

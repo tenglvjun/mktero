@@ -25,6 +25,7 @@ const MAX_TRANSLATION_VARIANTS = 32;
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 100;
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export const MARKDOWN_CACHE_MAX_AGE_MS = DEFAULT_MAX_AGE_MS;
 export const DEFAULT_MAX_SOURCE_MAP_BYTES = 20 * 1024 * 1024;
 export const DEFAULT_MAX_SOURCE_LOCATIONS = 100_000;
 export const DEFAULT_MAX_TRANSLATION_BYTES = 16 * 1024 * 1024;
@@ -99,7 +100,12 @@ export class MarkdownCache {
         this.maxFigureMapBytes = maxFigureMapBytes;
         this.maxFigureRestorationBytes = maxFigureRestorationBytes;
         this.hash = hash;
+        this.onStoreChange = null;
         this.operationTail = Promise.resolve();
+    }
+
+    setStoreChangeListener(listener) {
+        this.onStoreChange = typeof listener === 'function' ? listener : null;
     }
 
     async get(cacheKey) {
@@ -128,6 +134,7 @@ export class MarkdownCache {
             );
             if (this.#isExpired(metadata)) {
                 await this.io.remove(entryPath, { recursive: true, ignoreAbsent: true });
+                this.#notifyStoreChange({ type: 'removed', cacheKeys: [cacheKey] });
                 return null;
             }
             const markdownFile = metadata.markdownFile || MARKDOWN_FILE;
@@ -211,6 +218,7 @@ export class MarkdownCache {
         catch {
             await this.io.remove(entryPath, { recursive: true, ignoreAbsent: true })
                 .catch(() => {});
+            this.#notifyStoreChange({ type: 'removed', cacheKeys: [cacheKey] });
             return null;
         }
     }
@@ -628,6 +636,16 @@ export class MarkdownCache {
             throw error;
         }
         await this.#scan({ removeInvalid: true, enforceLimits: true });
+        this.#notifyStoreChange({ type: 'written', cacheKey });
+    }
+
+    hasReadable(cacheKey) {
+        validateCacheKey(cacheKey);
+        return this.#withOperation(() => this.#hasReadable(cacheKey));
+    }
+
+    listReadableEntries() {
+        return this.#withOperation(() => this.#listReadableEntries());
     }
 
     prune() {
@@ -645,6 +663,7 @@ export class MarkdownCache {
 
         const now = this.now();
         const entries = [];
+        const removedKeys = [];
         for (const entryPath of await this.io.getChildren(entriesPath)) {
             try {
                 if ((await this.io.stat(entryPath)).type !== 'directory') continue;
@@ -668,22 +687,20 @@ export class MarkdownCache {
                 );
                 if (this.#isExpired(repairedMetadata, now)) {
                     if (removeInvalid) {
-                        await this.io.remove(entryPath, {
-                            recursive: true,
-                            ignoreAbsent: true,
-                        });
+                        await this.#removeEntry(entryPath, cacheKey, removedKeys);
                     }
                     continue;
                 }
                 entries.push({
                     path: entryPath,
+                    cacheKey,
                     lastAccessedAt: repairedMetadata.lastAccessedAt,
                     sizeBytes: repairedMetadata.sizeBytes,
                 });
             }
             catch {
                 if (removeInvalid) {
-                    await this.io.remove(entryPath, { recursive: true, ignoreAbsent: true });
+                    await this.#removeEntry(entryPath, null, removedKeys);
                 }
             }
         }
@@ -693,8 +710,11 @@ export class MarkdownCache {
         while (enforceLimits
             && (entries.length > this.maxEntries || sizeBytes > this.maxBytes)) {
             const entry = entries.shift();
-            await this.io.remove(entry.path, { recursive: true, ignoreAbsent: true });
+            await this.#removeEntry(entry.path, entry.cacheKey, removedKeys);
             sizeBytes -= entry.sizeBytes;
+        }
+        if (removedKeys.length) {
+            this.#notifyStoreChange({ type: 'removed', cacheKeys: removedKeys });
         }
         return { entries: entries.length, sizeBytes };
     }
@@ -713,6 +733,82 @@ export class MarkdownCache {
     async #clear() {
         await this.io.remove(this.rootPath, { recursive: true, ignoreAbsent: true });
         await this.#ensureRoot();
+        this.#notifyStoreChange({ type: 'cleared' });
+    }
+
+    async #hasReadable(cacheKey) {
+        const metadata = await this.#readReadableMetadata(cacheKey);
+        return metadata
+            ? { cacheKey, expiresAt: metadata.lastAccessedAt + this.maxAgeMs }
+            : null;
+    }
+
+    async #listReadableEntries() {
+        const entriesPath = this.path.join(this.rootPath, 'entries');
+        if (!(await this.io.exists(entriesPath))) return [];
+        const readable = [];
+        for (const entryPath of await this.io.getChildren(entriesPath)) {
+            try {
+                if ((await this.io.stat(entryPath)).type !== 'directory') continue;
+                const cacheKey = this.path.filename(entryPath);
+                const metadata = await this.#readReadableMetadata(cacheKey);
+                if (!metadata) continue;
+                readable.push({
+                    cacheKey,
+                    expiresAt: metadata.lastAccessedAt + this.maxAgeMs,
+                });
+            }
+            catch {
+                // An unreadable directory is not a live Markdown result.
+            }
+        }
+        return readable;
+    }
+
+    async #readReadableMetadata(cacheKey) {
+        const metadataPath = this.path.join(this.#entryPath(cacheKey), METADATA_FILE);
+        if (!(await this.io.exists(metadataPath))) return null;
+        try {
+            const metadata = JSON.parse(await this.io.readUTF8(metadataPath));
+            validateMetadata(
+                metadata,
+                cacheKey,
+                this.maxSourceMapBytes,
+                this.maxChromeRangesBytes,
+                this.maxFigureRestorationBytes
+            );
+            if (this.#isExpired(metadata)) return null;
+            return metadata;
+        }
+        catch {
+            return null;
+        }
+    }
+
+    async #removeEntry(entryPath, cacheKey, removedKeys) {
+        const key = CACHE_KEY_PATTERN.test(String(cacheKey || ''))
+            ? cacheKey
+            : this.path.filename?.(entryPath);
+        await this.io.remove(entryPath, { recursive: true, ignoreAbsent: true });
+        if (CACHE_KEY_PATTERN.test(String(key || ''))) removedKeys.push(key);
+    }
+
+    #notifyStoreChange(event) {
+        const listener = this.onStoreChange;
+        if (typeof listener !== 'function' || !event) return;
+        const notification = event.cacheKeys
+            ? { ...event, cacheKeys: [...event.cacheKeys] }
+            : { ...event };
+        const notify = () => {
+            try {
+                listener(notification);
+            }
+            catch {
+                // Readiness display must not affect cache reads or writes.
+            }
+        };
+        if (typeof queueMicrotask === 'function') queueMicrotask(notify);
+        else Promise.resolve().then(notify);
     }
 
     #entryPath(cacheKey) {
@@ -1020,8 +1116,10 @@ function createGenerationID(timestamp) {
     return `${Number(timestamp).toString(36)}-${random}`;
 }
 
+const CACHE_KEY_PATTERN = /^[a-f0-9]{64}$/;
+
 function validateCacheKey(cacheKey) {
-    if (!/^[a-f0-9]{64}$/.test(String(cacheKey))) {
+    if (!CACHE_KEY_PATTERN.test(String(cacheKey))) {
         throw new TypeError('A SHA-256 cache key is required');
     }
 }

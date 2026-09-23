@@ -1,5 +1,9 @@
 import { unzipSync } from 'fflate';
 import {
+    CONVERSION_PROVIDER_MISTRAL,
+    observeConversionProfile,
+} from './config/conversion-preferences.js';
+import {
     getMinerUCacheEnabled,
     getMinerUApiKey,
     getMinerUEndpoint,
@@ -16,7 +20,10 @@ import {
     createMarkdownCacheKey,
     createMinerUCacheKey,
     createZoteroMarkdownCache,
+    MARKDOWN_CACHE_MAX_AGE_MS,
 } from './cache/markdown-cache.js';
+import { createMarkdownReadinessController } from './cache/markdown-readiness-controller.js';
+import { resolveMarkdownReadinessIdentity } from './cache/markdown-readiness-index.js';
 import {
     createCitationCacheKey,
     createZoteroCitationGraphCache,
@@ -153,8 +160,15 @@ import {
     createZoteroActionsTagsBridge,
 } from './platform/zotero-actions-tags.js';
 import {
+    createZoteroMarkdownReadinessStore,
+} from './platform/zotero-markdown-readiness-store.js';
+import {
     createZoteroSourceNavigation,
 } from './platform/zotero-source-navigation.js';
+import {
+    refreshMarkdownReadinessColumn,
+    registerMarkdownReadinessColumn,
+} from './ui/markdown-readiness-column.js';
 import { createZoteroClipboard } from './platform/zotero-clipboard.js';
 import {
     createZoteroEvidenceReference,
@@ -216,6 +230,9 @@ const runtime = {
     referenceLibrary: null,
     referenceImportService: null,
     cache: null,
+    readiness: null,
+    readinessColumn: null,
+    disposeConversionProfileObserver: null,
     translationService: null,
     revisionStore: null,
     readingPositions: null,
@@ -293,6 +310,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.cache = cache;
+    const readinessReady = initializeMarkdownReadiness(cache, id, rootURI);
     initializeCitationGraph(localization);
     initializeReferenceImport();
     runtime.translationService = new MarkdownTranslationService({
@@ -672,7 +690,12 @@ globalThis.startup = async function startup({ id, rootURI }) {
         runtime.reasoningCatalogStore
     );
     void runtime.reasoningCatalogStore.load();
-    cache.prune().catch(error => Zotero.logError(error));
+    Promise.resolve(readinessReady)
+        .catch(error => Zotero.logError(error))
+        .then(() => cache.prune())
+        .then(() => cache.listReadableEntries())
+        .then(entries => runtime.readiness?.retainLiveEntries(entries))
+        .catch(error => Zotero.logError(error));
     runtime.citationCache?.prune().catch(error => Zotero.logError(error));
     pdfTextIndexCache.prune().catch(error => Zotero.logError(error));
     pendingTasks.prune().catch(error => Zotero.logError(error));
@@ -828,6 +851,10 @@ globalThis.shutdown = function shutdown() {
     runtime.referenceImportService?.dispose?.();
     runtime.disposeCacheObserver?.();
     runtime.disposeAITargetLanguageObserver?.();
+    runtime.disposeConversionProfileObserver?.();
+    runtime.cache?.setStoreChangeListener?.(null);
+    runtime.readinessColumn?.dispose();
+    runtime.readiness?.dispose();
     runtime.localAnnotations?.dispose();
     runtime.pdfAnnotationLocator?.dispose();
     void runtime.sourcePeekRenderer?.disposeAll();
@@ -851,6 +878,9 @@ globalThis.shutdown = function shutdown() {
     runtime.referenceImportService = null;
     runtime.service = null;
     runtime.cache = null;
+    runtime.readiness = null;
+    runtime.readinessColumn = null;
+    runtime.disposeConversionProfileObserver = null;
     runtime.translationService = null;
     runtime.translationRequests = null;
     runtime.revisionStore = null;
@@ -1078,7 +1108,10 @@ async function openItemAsMarkdown(itemID, {
                             input: event.figureInput,
                             completedFigureIds: [],
                         },
-                    }).catch(error => Zotero.logError?.(error));
+                    }).then(() => rememberMarkdownReadiness(itemID, {
+                        cacheKey: event.cacheKey,
+                        parserProfile: currentConversionParserProfile(),
+                    })).catch(error => Zotero.logError?.(error));
                 }
             },
             onProgress(progress, state) {
@@ -1108,6 +1141,7 @@ async function openItemAsMarkdown(itemID, {
                     ? `Mktero: item ${itemID}: completed from a resumed conversion task`
                     : `Mktero: item ${itemID}: completed through a new conversion request`
         );
+        void rememberMarkdownReadiness(itemID, result);
         const revisionResult = await attachRevisionSession(
             itemID,
             result,
@@ -2196,6 +2230,91 @@ function currentMinerUParserProfile() {
     return getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
         ? MINERU_LOCAL_PARSER_PROFILE_ID
         : MINERU_PARSER_PROFILE_ID;
+}
+
+function currentConversionParserProfile() {
+    return getConversionProvider(Zotero) === CONVERSION_PROVIDER_MISTRAL
+        ? MISTRAL_PARSER_PROFILE_ID
+        : currentMinerUParserProfile();
+}
+
+function initializeMarkdownReadiness(cache, pluginID, rootURI) {
+    try {
+        const store = createZoteroMarkdownReadinessStore({
+            zotero: Zotero,
+            ioUtils: IOUtils,
+            pathUtils: PathUtils,
+        });
+        runtime.readiness = createMarkdownReadinessController({
+            store,
+            onChange: () => refreshMarkdownReadinessColumn(Zotero),
+            onError: error => Zotero.logError?.(error),
+        });
+        cache.setStoreChangeListener?.(event => {
+            void runtime.readiness?.handleCacheEvent(event);
+        });
+        runtime.readinessColumn = registerMarkdownReadinessColumn({
+            zotero: Zotero,
+            pluginID,
+            rootURI,
+            isReady: item => runtime.readiness?.isReady(
+                item,
+                currentConversionParserProfile()
+            ) === true,
+            translate: runtimeTranslate,
+            onError: error => Zotero.logError?.(error),
+        });
+        runtime.disposeConversionProfileObserver = observeConversionProfile(
+            Zotero,
+            () => refreshMarkdownReadinessColumn(Zotero)
+        );
+        return runtime.readiness.load();
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        return Promise.resolve();
+    }
+}
+
+async function rememberMarkdownReadiness(itemID, result) {
+    if (!runtime.readiness || !runtime.cache || !result?.cacheKey) return;
+    const parserProfile = result.parserProfile || currentConversionParserProfile();
+    if (parserProfile !== currentConversionParserProfile()) return;
+    try {
+        const readable = await runtime.cache.hasReadable(result.cacheKey);
+        if (!readable) {
+            await runtime.readiness.forgetCacheKeys(result.cacheKey);
+            return;
+        }
+        const item = Zotero.Items?.get?.(itemID)
+            || await Zotero.Items?.getAsync?.(itemID);
+        const identity = resolveMarkdownReadinessIdentity(readinessItem(item));
+        if (!identity) return;
+        await runtime.readiness.remember({
+            ...identity,
+            cacheKey: result.cacheKey,
+            parserProfile,
+            expiresAt: readable.expiresAt || (Date.now() + MARKDOWN_CACHE_MAX_AGE_MS),
+        });
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+    }
+}
+
+function readinessItem(item) {
+    if (!item) return null;
+    const parentID = item.parentItemID || item.parentID;
+    const parent = item.parentItem
+        || (parentID ? Zotero.Items?.get?.(parentID) : null);
+    return {
+        libraryID: item.libraryID,
+        key: item.key,
+        parentItem: parent ? {
+            libraryID: parent.libraryID ?? item.libraryID,
+            key: parent.key,
+        } : null,
+    };
 }
 
 function throwIfRevisionAborted(signal) {
