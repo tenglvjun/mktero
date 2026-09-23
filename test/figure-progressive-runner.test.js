@@ -50,29 +50,38 @@ test('publishes one provisional document, patches each figure, and prepares twic
     assert.equal(prepares, 2);
 });
 
-test('rejects when plan prepare throws and does not emit a document after a figure', async () => {
+test('finalizes the rendered draft when plan prepare throws and does not emit a document after a figure', async () => {
     const { input } = makeFigureInput();
     let prepares = 0;
+    let finalized = 0;
     const events = [];
+    const finalizedDocument = { markdown: 'from-finalize', figureMap: { version: 1, fromFinalize: true } };
     const runner = createProgressiveFigureRunner({
         restoration: progressiveService(),
-        prepare: value => {
+        prepare: () => {
             prepares += 1;
-            if (prepares === 1) throw new Error('transient prepare failure');
-            return prepareMinerUResult(value);
+            throw new Error('transient prepare failure');
         },
         hash,
+        finalize: async (source, draft) => {
+            finalized += 1;
+            assert.equal(source, input);
+            assert.ok(draft.blueprints.length > 0);
+            return finalizedDocument;
+        },
     });
-    await assert.rejects(
-        () => runner(input, { fileData: Uint8Array.of(1), onEvent: event => events.push(event) }),
-        { message: 'transient prepare failure' },
-    );
+    const document = await runner(input, {
+        fileData: Uint8Array.of(1), onEvent: event => events.push(event),
+    });
+    assert.equal(document, finalizedDocument);
+    assert.equal(finalized, 1);
+    assert.equal(prepares, 1);
     assert.ok(events.some(event => event.type === 'figure'));
     assert.equal(events.some((event, index) => event.type === 'document'
         && events.slice(0, index).some(earlier => earlier.type === 'figure')), false);
     assert.equal(events.filter(event => event.type === 'document').length, 0);
-    assert.equal(events.some(event => event.type === 'complete'), false);
-    assert.equal(prepares, 1);
+    assert.equal(events.at(-1).type, 'complete');
+    assert.equal(events.at(-1).document, finalizedDocument);
 });
 
 test('emits one provisional document from the original input when onPlan is never called', async () => {
