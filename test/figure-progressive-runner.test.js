@@ -25,33 +25,27 @@ function progressiveService() {
     return new FigureRestorationService({ hash, openPDF: async () => session });
 }
 
-test('publishes provisionally, rebuilds per figure and completes with a figure map', async () => {
+test('publishes one provisional document, patches each figure, and prepares twice', async () => {
     const { input } = makeFigureInput();
+    let prepares = 0;
+    const events = [];
     const runner = createProgressiveFigureRunner({
         restoration: progressiveService(),
-        prepare: prepareMinerUResult,
+        prepare: value => { prepares += 1; return prepareMinerUResult(value); },
         hash,
         finalize: async (source, draft, { prepare }) => ({
             ...(await prepare(draft.input)), figureMap: { version: 1, stub: true },
         }),
     });
-    const events = [];
-    const document = await runner(input, { fileData: Uint8Array.of(1),
-        onEvent: event => events.push(event) });
-    const first = events[0];
-    assert.equal(first.type, 'document');
-    assert.ok(first.pendingFigureAssets instanceof Map);
-    const panel = input.blocks.find(block => block.role === 'panel');
-    assert.ok(first.pendingFigureAssets.has(panel.assetPath));
-    assert.equal(first.document.figureRestoration.status, 'pending');
-    assert.ok(events.some(event => event.type === 'figure' && event.figure.status === 'composed'));
-    const rebuilt = events.filter(event => event.type === 'document');
-    assert.ok(rebuilt.length >= 2, 'document is rebuilt after a figure completes');
-    assert.equal(rebuilt.at(-1).pendingFigureAssets.size, 0);
-    const complete = events.at(-1);
-    assert.equal(complete.type, 'complete');
-    assert.equal(complete.document.figureMap.stub, true);
-    assert.equal(document.figureMap.stub, true);
+    await runner(input, { fileData: Uint8Array.of(1), onEvent: event => events.push(event) });
+    assert.equal(events.filter(event => event.type === 'document').length, 1);
+    const composed = events.find(event => event.type === 'figure' && event.figure.status === 'composed');
+    assert.ok(composed.figure.crop?.data);
+    assert.ok(composed.figure.panelAssetPaths.includes(
+        input.blocks.find(block => block.role === 'panel').assetPath
+    ));
+    assert.equal(events.at(-1).type, 'complete');
+    assert.equal(prepares, 2);
 });
 
 test('progressive final document matches the synchronous restoration path', async () => {
