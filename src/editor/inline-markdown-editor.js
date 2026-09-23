@@ -28,6 +28,7 @@ import {
     setFigureViews,
     setInlineEditingRange,
     setPendingFigures,
+    setRestoredFigures,
     setReferenceHighlight,
     setTableHighlight,
     setTranslationRanges,
@@ -110,6 +111,7 @@ export function createInlineMarkdownEditor({
     parent,
     initialMarkdown,
     resolveImageURL,
+    resolveRestoredFigureURL,
     openLink,
     createMarkdownAnnotation,
     changeAnnotationColor,
@@ -371,6 +373,7 @@ export function createInlineMarkdownEditor({
                 markdown({ extensions: [GFM] }),
                 createInlineRenderingExtension({
                     resolveImageURL,
+                    resolveRestoredFigureURL,
                     openLink,
                     openImagePreview: imagePreview.open,
                     copyCode,
@@ -898,6 +901,7 @@ export function createInlineMarkdownEditor({
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
     let currentSourceMap = [];
     let currentFigureViews = [];
+    let currentRestoredFigures = new Map();
     let currentChromeRanges = [];
     let currentSourceActionRanges = null;
     let openSelectionKey = null;
@@ -992,6 +996,16 @@ export function createInlineMarkdownEditor({
             return Boolean(activeCorrection);
         },
         setDocument,
+        showRestoredFigure(figure) {
+            if (destroyed || !figure || figure.id == null) return;
+            activateDOMGlobals(ownerWindow);
+            const next = new Map(currentRestoredFigures);
+            next.set(figure.id, figure);
+            currentRestoredFigures = next;
+            view.dispatch({
+                effects: setRestoredFigures.of(next),
+            });
+        },
         setMarkdown(markdown) {
             setDocument({
                 markdown,
