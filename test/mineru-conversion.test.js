@@ -20,6 +20,14 @@ import {
     MinerUConversion,
 } from '../src/mineru/mineru-conversion.js';
 import { MinerUPendingTaskStore } from '../src/mineru/pending-task-store.js';
+import {
+    MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_PARSER_PROFILE_ID,
+} from '../src/mineru/parser-profile.js';
+import {
+    MISTRAL_PARSER_PROFILE_ID,
+    MISTRAL_PREVIOUS_PARSER_PROFILE_IDS,
+} from '../src/mistral/parser-profile.js';
 
 const CONVERSION_KEY = 'a'.repeat(64);
 
@@ -877,6 +885,53 @@ test('does not upload when pending-task lookup is uncertain', async () => {
         fileData: new Uint8Array([1]),
     }), error => error === readError);
     assert.deepEqual(reported, [readError]);
+});
+
+test('reuses a completed v14 cache without OCR or figure rendering', async () => {
+    const calls = [];
+    const conversion = new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            async get(key) {
+                calls.push(['get', key]);
+                if (key === 'previous-key') {
+                    return {
+                        markdown: '# Cached',
+                        assets: [{
+                            path: 'old.png',
+                            data: new Uint8Array([1]),
+                            mimeType: 'image/png',
+                        }],
+                    };
+                }
+                return null;
+            },
+            async put(key, result) {
+                calls.push(['put', key, result.markdown]);
+            },
+        },
+        createPreviousCacheKeys: async () => ['previous-key'],
+        recoverFigures: async result => result,
+    });
+    const result = await conversion.convert({
+        key: 'current-key',
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+    assert.equal(result.origin, 'cache');
+    assert.equal(result.result.markdown, '# Cached');
+    assert.deepEqual(calls.map(call => call[0]), ['get', 'get', 'put']);
+});
+
+test('current profiles are v15 and v14 ids stay compatible', () => {
+    assert.match(MINERU_PARSER_PROFILE_ID, /figure-region-v15/);
+    assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v15/);
+    assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS[0].includes('figure-region-v14'), true);
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0].includes('figure-region-v14'), true);
+    assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
 });
 
 function createSuccessfulClient(result) {

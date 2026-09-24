@@ -6,6 +6,7 @@ import { reassembleMinerUColumnFlow } from '../src/mineru/column-flow-normalizer
 import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_FIGURE_REGION_V14_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_SOURCE_MAP_OPTIONS,
 } from '../src/mineru/parser-profile.js';
@@ -39,7 +40,9 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
         MINERU_SOURCE_MAP_OPTIONS.chrome,
         'page-edge-repeated-v1'
     );
-    assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, []);
+    assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, [
+        MINERU_FIGURE_REGION_V14_PARSER_PROFILE_ID,
+    ]);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.some(profile => (
         JSON.parse(profile).sourceMap.textFlow === 'cross-page-continuation-v1'
     )), true);

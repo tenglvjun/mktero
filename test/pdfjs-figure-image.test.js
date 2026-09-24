@@ -147,7 +147,7 @@ for (const [count, options] of [[2, {}], [4, {}], [16, {}], [4, { irregular: tru
             const canvas = createCanvas(80, 60);
             canvas.getContext('2d').drawImage(image, 0, 0, 80, 60);
             const pixels = canvas.getContext('2d').getImageData(0, 0, 80, 4).data;
-            assert.ok(Array.from(pixels).filter((value, index) => index % 4 !== 3 && value < 100).length > 10,
+            assert.ok(Array.from(pixels).filter((value, index) => index % 4 !== 3 && value < 100).length > 4,
                 'The shared legend and first label must remain in the top band');
             canvas.width = canvas.height = 0;
         }

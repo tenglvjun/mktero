@@ -122,3 +122,79 @@ test('delivers progress to a listener registered before the run starts', async (
     await begun.run.promise;
     assert.deepEqual(events, ['progress', 'ready']);
 });
+
+test('replays the provisional document before stored figure patches', () => {
+    let emitProgressive = null;
+    const runs = registry((_itemID, { onProgressiveFigures }) => {
+        emitProgressive = onProgressiveFigures;
+        return new Promise(() => {});
+    });
+    runs.begin({ itemID: 4, owner: 'batch' });
+    emitProgressive({
+        type: 'figure',
+        figure: {
+            id: 'fig-a',
+            status: 'composed',
+            crop: { data: new Uint8Array([1]) },
+        },
+    });
+    emitProgressive({
+        type: 'document',
+        document: { markdown: '# Paper' },
+        figureInput: {},
+    });
+    const seen = [];
+    runs.subscribe(4, event => {
+        if (event.type === 'progressive') seen.push(event.event.type);
+    });
+    assert.deepEqual(seen, ['document', 'figure']);
+});
+
+test('replays only the first document and composed figure crops', () => {
+    let emitProgressive = null;
+    const runs = registry((_itemID, { onProgressiveFigures }) => {
+        emitProgressive = onProgressiveFigures;
+        return new Promise(() => {});
+    });
+    runs.begin({ itemID: 4, owner: 'batch' });
+    emitProgressive({
+        type: 'document',
+        document: { markdown: '# First' },
+    });
+    emitProgressive({
+        type: 'document',
+        document: { markdown: '# Second' },
+    });
+    emitProgressive({
+        type: 'figure',
+        figure: { id: 'fig-a', status: 'preserved' },
+    });
+    emitProgressive({
+        type: 'figure',
+        figure: { id: 'fig-b', status: 'composed' },
+    });
+    emitProgressive({
+        type: 'figure',
+        figure: {
+            id: 'fig-c',
+            status: 'composed',
+            crop: { data: new Uint8Array([2]) },
+        },
+    });
+    const seen = [];
+    runs.subscribe(4, event => {
+        if (event.type !== 'progressive') return;
+        seen.push(event.event.type === 'document'
+            ? event.event.document.markdown
+            : event.event.figure.id);
+    });
+    emitProgressive({
+        type: 'figure',
+        figure: {
+            id: 'fig-d',
+            status: 'composed',
+            crop: { data: new Uint8Array([3]) },
+        },
+    });
+    assert.deepEqual(seen, ['# First', 'fig-c', 'fig-d']);
+});

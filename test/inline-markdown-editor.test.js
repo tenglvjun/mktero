@@ -283,6 +283,143 @@ test('swaps pending figure images for animated placeholders and restores them', 
     dom.window.close();
 });
 
+test('showRestoredFigure swaps one finished crop without resetting the document', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: source => source.startsWith('images/')
+            ? `blob:${source}`
+            : null,
+        resolveRestoredFigureURL: figure => `blob:${figure.assetPath}`,
+    });
+    const markdown = [
+        'Body text.',
+        '',
+        '![Figure A](images/a.png)',
+        '',
+        '![Figure B](images/b.png)',
+    ].join('\n');
+    editor.setDocument({
+        markdown,
+        pendingFigures: new Map([
+            ['images/a.png', 'fig-a'],
+            ['images/b.png', 'fig-b'],
+        ]),
+    });
+    assert.equal(document.querySelectorAll('.mktero-figure-placeholder').length, 2);
+
+    editor.showRestoredFigure({
+        id: 'fig-a',
+        assetPath: 'generated/figures/fig-a.png',
+        data: Uint8Array.of(1, 2, 3),
+        mimeType: 'image/png',
+    });
+    assert.equal(
+        document.querySelector('img[data-figure-id="fig-a"]')?.getAttribute('src'),
+        'blob:generated/figures/fig-a.png',
+    );
+    assert.equal(
+        document.querySelector('img[data-figure-id="fig-a"]')?.getAttribute('data-mktero-asset'),
+        'generated/figures/fig-a.png',
+    );
+    assert.equal(
+        document.querySelector('[data-figure-id="fig-b"]')?.classList.contains('mktero-figure-placeholder'),
+        true,
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.showRestoredFigure({
+        id: 'fig-b',
+        assetPath: 'generated/figures/fig-b.png',
+        data: Uint8Array.of(4),
+        mimeType: 'image/png',
+    });
+    assert.equal(
+        document.querySelector('img[data-figure-id="fig-a"]')?.getAttribute('src'),
+        'blob:generated/figures/fig-a.png',
+    );
+    assert.equal(
+        document.querySelector('img[data-figure-id="fig-b"]')?.getAttribute('src'),
+        'blob:generated/figures/fig-b.png',
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('setDocument keeps a stitched figure only while the pending map is unchanged', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: source => source.startsWith('images/')
+            ? `blob:${source}`
+            : null,
+        resolveRestoredFigureURL: figure => `blob:${figure.assetPath}`,
+    });
+    const markdown = '![Figure A](images/a.png)';
+    const replacedMarkdown = 'Replacement.\n\n![Figure A](images/a.png)';
+    const pending = new Map([['images/a.png', 'fig-p0-b0']]);
+    const stitched = 'blob:generated/figures/fig-p0-b0.png';
+    const restored = {
+        id: 'fig-p0-b0',
+        assetPath: 'generated/figures/fig-p0-b0.png',
+        data: Uint8Array.of(1, 2, 3),
+        mimeType: 'image/png',
+    };
+    const stitchedSrc = () => document.querySelector(
+        'img[data-figure-id="fig-p0-b0"]'
+    )?.getAttribute('src') ?? null;
+
+    editor.setDocument({ markdown, pendingFigures: pending });
+    editor.showRestoredFigure(restored);
+    assert.equal(stitchedSrc(), stitched);
+
+    editor.setDocument({ markdown, pendingFigures: pending });
+    assert.equal(stitchedSrc(), stitched);
+
+    editor.setDocument({
+        markdown,
+        pendingFigures: new Map([['images/a.png', 'fig-p0-b0']]),
+    });
+    assert.equal(stitchedSrc(), null);
+    assert.equal(
+        document.querySelector('[data-figure-id="fig-p0-b0"]')
+            ?.classList.contains('mktero-figure-placeholder'),
+        true,
+    );
+
+    editor.setDocument({ markdown, pendingFigures: pending });
+    editor.showRestoredFigure(restored);
+    assert.equal(stitchedSrc(), stitched);
+    editor.setDocument({ markdown: replacedMarkdown });
+    assert.equal(
+        document.querySelector(`img[src="${stitched}"]`),
+        null,
+    );
+    editor.setDocument({
+        markdown: replacedMarkdown,
+        pendingFigures: pending,
+    });
+    assert.equal(stitchedSrc(), null);
+    assert.equal(
+        document.querySelector('[data-figure-id="fig-p0-b0"]')
+            ?.classList.contains('mktero-figure-placeholder'),
+        true,
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('marks translated block widgets with their content language', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

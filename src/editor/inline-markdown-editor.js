@@ -28,6 +28,7 @@ import {
     setFigureViews,
     setInlineEditingRange,
     setPendingFigures,
+    setRestoredFigures,
     setReferenceHighlight,
     setTableHighlight,
     setTranslationRanges,
@@ -110,6 +111,7 @@ export function createInlineMarkdownEditor({
     parent,
     initialMarkdown,
     resolveImageURL,
+    resolveRestoredFigureURL,
     openLink,
     createMarkdownAnnotation,
     changeAnnotationColor,
@@ -371,6 +373,7 @@ export function createInlineMarkdownEditor({
                 markdown({ extensions: [GFM] }),
                 createInlineRenderingExtension({
                     resolveImageURL,
+                    resolveRestoredFigureURL,
                     openLink,
                     openImagePreview: imagePreview.open,
                     copyCode,
@@ -898,6 +901,8 @@ export function createInlineMarkdownEditor({
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
     let currentSourceMap = [];
     let currentFigureViews = [];
+    let currentPendingFigures = null;
+    let currentRestoredFigures = new Map();
     let currentChromeRanges = [];
     let currentSourceActionRanges = null;
     let openSelectionKey = null;
@@ -952,6 +957,18 @@ export function createInlineMarkdownEditor({
         currentSourceActionRanges = Array.isArray(sourceActionRanges)
             ? normalizeSourceActionRanges(sourceActionRanges, value.length)
             : null;
+        const nextPendingFigures = pendingFigures instanceof Map
+            ? pendingFigures
+            : null;
+        // Figure ids are positional and the next conversion reuses them.
+        // An annotation refresh passes the same pending Map and does not
+        // replay finished crops, so drop those crops only when that Map is
+        // replaced or cleared.
+        const pendingFiguresReplaced = nextPendingFigures !== currentPendingFigures;
+        if (pendingFiguresReplaced) {
+            currentPendingFigures = nextPendingFigures;
+            currentRestoredFigures = new Map();
+        }
         const effects = [
             ...referenceFeatureList.map(feature => feature.effect.of(null)),
             setAnnotationOverlay.of(
@@ -960,7 +977,10 @@ export function createInlineMarkdownEditor({
             setChromeRanges.of(currentChromeRanges),
             setDocumentTitle.of(documentTitle),
             setFigureViews.of(currentFigureViews),
-            setPendingFigures.of(pendingFigures instanceof Map ? pendingFigures : null),
+            setPendingFigures.of(nextPendingFigures),
+            ...(pendingFiguresReplaced
+                ? [setRestoredFigures.of(currentRestoredFigures)]
+                : []),
             setTranslationRanges.of(translationRanges || []),
             setTranslationFailures.of(translationFailures || []),
             setTranslationPairs.of(translationPairs || []),
@@ -992,6 +1012,16 @@ export function createInlineMarkdownEditor({
             return Boolean(activeCorrection);
         },
         setDocument,
+        showRestoredFigure(figure) {
+            if (destroyed || !figure || figure.id == null) return;
+            activateDOMGlobals(ownerWindow);
+            const next = new Map(currentRestoredFigures);
+            next.set(figure.id, figure);
+            currentRestoredFigures = next;
+            view.dispatch({
+                effects: setRestoredFigures.of(next),
+            });
+        },
         setMarkdown(markdown) {
             setDocument({
                 markdown,

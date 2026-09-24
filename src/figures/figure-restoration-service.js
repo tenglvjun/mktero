@@ -21,7 +21,7 @@ export class FigureRestorationService {
         this.abortOptions = { setTimeout, clearTimeout, createAbortController };
     }
 
-    async restore(input, { fileData, signal, onProgress, onFigure, mode = 'render' } = {}) {
+    async restore(input, { fileData, signal, onProgress, onFigure, onPlan, mode = 'render' } = {}) {
         throwIfFigureAborted(signal);
         try {
             validateFigureInput(input);
@@ -90,6 +90,12 @@ export class FigureRestorationService {
                     placeholders: buildFigurePlaceholders(bound, candidates),
                 };
             }
+            try {
+                await onPlan?.({ input: bound, candidates });
+            }
+            catch {
+                // A plan listener must not discard crops that are already safe to render.
+            }
             const paths = new Set(bound.assets.map(asset => normalizeFigureAssetPath(asset.path)));
             let generatedBytes = 0;
             const originalBytes = bound.assets.reduce((total, asset) => total + asset.data.byteLength, 0);
@@ -128,12 +134,17 @@ export class FigureRestorationService {
                                 else {
                                     generatedBytes += crop.data.byteLength;
                                     completed.push({ candidate, crop, assetPath });
-                                    await onFigure?.({
-                                        id: candidate.id, status: 'composed', candidate,
-                                        pageIndex: candidate.pageIndex,
-                                        assetPath, crop, replacement: plan.replacement,
-                                        asset: plan.asset, blueprint: plan.blueprint,
-                                    });
+                                    try {
+                                        await onFigure?.({
+                                            id: candidate.id, status: 'composed', candidate,
+                                            pageIndex: candidate.pageIndex,
+                                            assetPath, crop, replacement: plan.replacement,
+                                            asset: plan.asset, blueprint: plan.blueprint,
+                                        });
+                                    }
+                                    catch {
+                                        // A figure listener must not discard a crop that already composed.
+                                    }
                                 }
                             }
                         }
@@ -141,8 +152,13 @@ export class FigureRestorationService {
                 }
                 if (reason) {
                     preserved.push({ id: candidate.id, pageIndex: candidate.pageIndex, reason });
-                    await onFigure?.({ id: candidate.id, status: 'preserved',
-                        pageIndex: candidate.pageIndex, reason });
+                    try {
+                        await onFigure?.({ id: candidate.id, status: 'preserved',
+                            pageIndex: candidate.pageIndex, reason });
+                    }
+                    catch {
+                        // A figure listener must not fail restoration.
+                    }
                 }
             }
             throwIfFigureAborted(signal);

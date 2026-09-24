@@ -85,6 +85,7 @@ export const setTableHighlight = StateEffect.define();
 export const setFigureHighlight = StateEffect.define();
 export const setFigureViews = StateEffect.define();
 export const setPendingFigures = StateEffect.define();
+export const setRestoredFigures = StateEffect.define();
 export const setAnnotationOverlay = StateEffect.define();
 export const setChromeRanges = StateEffect.define();
 export const setDocumentTitle = StateEffect.define();
@@ -113,6 +114,8 @@ class RenderedMarkdownWidget extends WidgetType {
         translationPresentation = {},
         translate = translateEnglish,
         pendingFigures = null,
+        restoredFigures = null,
+        resolveRestoredFigureURL = null,
     }) {
         super();
         this.source = source;
@@ -135,6 +138,8 @@ class RenderedMarkdownWidget extends WidgetType {
         );
         this.translate = translate;
         this.pendingFigures = pendingFigures;
+        this.restoredFigures = restoredFigures;
+        this.resolveRestoredFigureURL = resolveRestoredFigureURL;
     }
 
     eq(other) {
@@ -147,6 +152,7 @@ class RenderedMarkdownWidget extends WidgetType {
             && this.annotationKey === other.annotationKey
             && this.extraClassName === other.extraClassName
             && this.pendingFigures === other.pendingFigures
+            && this.restoredFigures === other.restoredFigures
             && this.tableCaption?.text === other.tableCaption?.text
             && sameTranslationPresentation(
                 this.translationPresentation,
@@ -204,7 +210,13 @@ class RenderedMarkdownWidget extends WidgetType {
             this.translate
         );
         if (this.pendingFigures?.size) {
-            replacePendingFigureImages(container, this.pendingFigures, this.translate);
+            replacePendingFigureImages(
+                container,
+                this.pendingFigures,
+                this.translate,
+                this.restoredFigures,
+                this.resolveRestoredFigureURL,
+            );
         }
         if (this.display === 'code-block') {
             enhanceRenderedCodeBlock(container, document, {
@@ -562,6 +574,7 @@ function isSafeTokenColor(color) {
 
 export function createInlineRenderingExtension({
     resolveImageURL,
+    resolveRestoredFigureURL,
     openLink,
     openImagePreview,
     copyCode,
@@ -587,6 +600,7 @@ export function createInlineRenderingExtension({
 }) {
     const context = {
         resolveImageURL,
+        resolveRestoredFigureURL,
         openLink,
         openImagePreview,
         copyCode,
@@ -615,6 +629,7 @@ export function createInlineRenderingExtension({
         highlightedFigureID: null,
         figureViews: null,
         pendingFigures: null,
+        restoredFigures: null,
         annotationOverlay: createEmptyAnnotationOverlay(),
         chromeRanges: [],
         documentTitle: '',
@@ -654,6 +669,7 @@ export function createInlineRenderingExtension({
             let figureHighlightChanged = false;
             let figureViewsChanged = false;
             let pendingFiguresChanged = false;
+            let restoredFiguresChanged = false;
             let annotationOverlayChanged = false;
             let chromeRangesChanged = false;
             let documentTitleChanged = false;
@@ -687,6 +703,12 @@ export function createInlineRenderingExtension({
                         ? effect.value
                         : null;
                     pendingFiguresChanged = true;
+                }
+                else if (effect.is(setRestoredFigures)) {
+                    context.restoredFigures = effect.value instanceof Map
+                        ? effect.value
+                        : null;
+                    restoredFiguresChanged = true;
                 }
                 else if (effect.is(setAnnotationOverlay)) {
                     context.annotationOverlay = effect.value
@@ -766,6 +788,7 @@ export function createInlineRenderingExtension({
                     figureHighlightChanged,
                     figureViewsChanged,
                     pendingFiguresChanged,
+                    restoredFiguresChanged,
                     annotationOverlayChanged,
                     chromeRangesChanged,
                     documentTitleChanged,
@@ -794,6 +817,7 @@ export function createInlineRenderingExtension({
                 || figureHighlightChanged
                 || figureViewsChanged
                 || pendingFiguresChanged
+                || restoredFiguresChanged
                 || annotationOverlayChanged
                 || chromeRangesChanged
                 || documentTitleChanged

@@ -1,9 +1,9 @@
 import { pendingFigureAssetPaths, buildProgressiveFigureDocument } from './figure-progressive.js';
 import { finalizeRestoredDocument } from './figure-finalization.js';
 
-// Drives progressive figure restoration end to end: publish the un-restored
-// document immediately with pending placeholders, then rebuild the document as
-// each figure finishes so the reader replaces one placeholder at a time.
+// Drives progressive figure restoration in one PDF session: publish one
+// provisional document, then emit each finished figure so the reader can patch
+// that placeholder without rebuilding the Markdown.
 export function createProgressiveFigureRunner({
     restoration,
     prepare,
@@ -23,31 +23,47 @@ export function createProgressiveFigureRunner({
             try { onEvent?.(event); }
             catch { /* A listener must not break restoration. */ }
         };
-        const plan = await restoration.restore(input, { fileData, signal, mode: 'plan' });
-        const candidates = plan.candidates || [];
-        const provisional = await buildProgressiveFigureDocument(input, [], { prepare, limits });
-        emit({ type: 'document', document: { ...provisional, figureRestoration: { status: 'pending' } },
-            pendingFigureAssets: pendingFigureAssetPaths(plan.input || input, candidates, []),
-            figureInput: plan.input || input });
-
+        const publishProvisional = async (source, candidates) => {
+            const provisional = await buildProgressiveFigureDocument(source, [], { prepare, limits });
+            emit({
+                type: 'document',
+                document: { ...provisional, figureRestoration: { status: 'pending' } },
+                pendingFigureAssets: pendingFigureAssetPaths(source, candidates, []),
+                figureInput: source,
+            });
+        };
+        let planned = false;
+        let source = input;
         const completed = [];
         const draft = await restoration.restore(input, {
             fileData, signal,
-            onFigure: async event => {
+            onPlan: async plan => {
+                // Mark the call before publish. The service swallows onPlan throws
+                // and keeps rendering, so a failed provisional publish must not
+                // become a second document after figure events or discard the draft.
+                planned = true;
+                source = plan.input || input;
+                try {
+                    await publishProvisional(source, plan.candidates || []);
+                }
+                catch {
+                    // Finalize still publishes the rendered draft on the success path.
+                }
+            },
+            onFigure: event => {
                 if (event.status === 'composed' && event.candidate) {
                     completed.push({ candidate: event.candidate, crop: event.crop, assetPath: event.assetPath });
                 }
-                emit({ type: 'figure', figure: event });
-                if (event.status === 'composed') {
-                    const document = await buildProgressiveFigureDocument(input, completed, { prepare, limits });
-                    emit({
-                        type: 'document',
-                        document: { ...document, figureRestoration: { status: 'pending' } },
-                        pendingFigureAssets: pendingFigureAssetPaths(
-                            plan.input || input, candidates, completed.map(entry => entry.candidate.id)
-                        ),
-                    });
-                }
+                const blocks = source.blocks || [];
+                emit({
+                    type: 'figure',
+                    figure: {
+                        ...event,
+                        panelAssetPaths: (event.candidate?.panelBlockIds || [])
+                            .map(id => blocks.find(block => block.id === id)?.assetPath)
+                            .filter(Boolean),
+                    },
+                });
             },
         });
         if (signal?.aborted) {
@@ -55,6 +71,9 @@ export function createProgressiveFigureRunner({
             error.name = 'AbortError';
             throw error;
         }
+        // Invalid input and a failed PDF open return before onPlan. A swallowed
+        // onPlan prepare error must not publish another document here.
+        if (!planned) await publishProvisional(input, []);
         const document = await finalize(input, draft, { prepare, hash, signal });
         emit({ type: 'complete', document, pendingFigureAssets: new Map() });
         return document;

@@ -313,6 +313,10 @@ class MarkdownTabView {
             : READING_POSITION_SAVE_DELAY_MS;
         this.renderedAssets = undefined;
         this.assetURLs = new Map();
+        this.restoredFigureURLs = new Map();
+        this.restoredFigureCrops = new Map();
+        this.cropPendingFigures = undefined;
+        this.renderedPendingFigures = undefined;
         this.renderedMarkdown = undefined;
         this.renderedRenderMode = null;
         this.renderedTranslationView = 'original';
@@ -421,6 +425,9 @@ class MarkdownTabView {
             parent: this.elements.editorHost,
             initialMarkdown: '',
             resolveImageURL: source => this.resolveImageURL(source),
+            resolveRestoredFigureURL: figure => (
+                this.resolveRestoredFigureURL(figure)
+            ),
             openLink: href => this.openLink(href),
             createMarkdownAnnotation: (annotation, selectionContext) => (
                 this.createMarkdownAnnotation(annotation, selectionContext)
@@ -558,7 +565,9 @@ class MarkdownTabView {
             elements.loadingHint.textContent = loadingView.hint;
             elements.loadingProgress.value = loadingView.progress;
             if (!loadingView.preserveContent) {
+                this.syncRetainedFigureCrops(null);
                 this.revokeAssetURLs();
+                this.renderedPendingFigures = null;
                 this.editor.setDocument({
                     markdown: '',
                     annotationOverlay: createEmptyAnnotationOverlay(),
@@ -681,6 +690,12 @@ class MarkdownTabView {
                         model.translationBlockRanges
                     )
                     : Array.isArray(model.sourceMap) ? model.sourceMap : [];
+            const nextPendingFigures = model.pendingFigureAssets instanceof Map
+                ? model.pendingFigureAssets
+                : null;
+            const pendingFiguresReplaced = nextPendingFigures
+                !== this.renderedPendingFigures;
+            this.syncRetainedFigureCrops(nextPendingFigures);
             const assetsChanged = this.syncAssetURLs();
             elements.readingLayout.classList.toggle(
                 'is-comparing',
@@ -748,6 +763,8 @@ class MarkdownTabView {
                     comparisonView
                 ),
             });
+            if (pendingFiguresReplaced) this.replayRetainedFigures();
+            this.renderedPendingFigures = nextPendingFigures;
             const correctionAnnotationRanges = collectMatchedAnnotationRanges(
                 model.annotationOverlay
             );
@@ -6004,6 +6021,59 @@ class MarkdownTabView {
         this.restoreReadingPosition(offset);
     }
 
+    showRestoredFigure(figure) {
+        if (this.destroyed || figure?.id == null) return;
+        if (figure.crop) {
+            const pending = this.model?.pendingFigureAssets instanceof Map
+                ? this.model.pendingFigureAssets
+                : null;
+            if (pending !== this.cropPendingFigures) {
+                this.restoredFigureCrops.clear();
+                this.revokeRestoredFigureURLs(false);
+                this.cropPendingFigures = pending;
+            }
+        }
+        this.editor.showRestoredFigure(figure);
+        if (figure.crop) this.restoredFigureCrops.set(figure.id, figure);
+    }
+
+    resolveRestoredFigureURL(figure) {
+        const assetPath = typeof figure?.assetPath === 'string'
+            ? figure.assetPath
+            : '';
+        const data = figure?.crop?.data;
+        const mimeType = figure?.crop?.mimeType;
+        if (!assetPath || !data || typeof mimeType !== 'string' || !mimeType) {
+            return null;
+        }
+        const key = figure.id == null ? assetPath : String(figure.id);
+        const existing = this.restoredFigureURLs.get(key);
+        if (existing) return existing;
+        const URLAPI = this.ownerWindow.URL || globalThis.URL;
+        const BlobType = this.ownerWindow.Blob || globalThis.Blob;
+        const url = URLAPI.createObjectURL(new BlobType(
+            [data],
+            { type: mimeType }
+        ));
+        this.restoredFigureURLs.set(key, url);
+        return url;
+    }
+
+    syncRetainedFigureCrops(pendingFigures) {
+        const next = pendingFigures instanceof Map ? pendingFigures : null;
+        if (next === this.cropPendingFigures) return;
+        this.cropPendingFigures = next;
+        this.restoredFigureCrops.clear();
+        this.revokeRestoredFigureURLs(false);
+    }
+
+    replayRetainedFigures() {
+        if (this.destroyed) return;
+        for (const figure of this.restoredFigureCrops.values()) {
+            this.editor.showRestoredFigure(figure);
+        }
+    }
+
     syncAssetURLs() {
         if (this.renderedAssets === this.model.assets) return false;
         this.revokeAssetURLs();
@@ -6027,6 +6097,22 @@ class MarkdownTabView {
         for (const url of this.assetURLs.values()) URLAPI.revokeObjectURL(url);
         this.assetURLs = new Map();
         this.renderedAssets = undefined;
+        this.revokeRestoredFigureURLs(true);
+    }
+
+    // A revoked crop URL stays on the painted widget until the restored-figure
+    // map changes. Re-show the stored crop so the next render mints a live URL.
+    revokeRestoredFigureURLs(refresh) {
+        const URLAPI = this.ownerWindow.URL || globalThis.URL;
+        for (const url of this.restoredFigureURLs.values()) {
+            URLAPI.revokeObjectURL(url);
+        }
+        this.restoredFigureURLs = new Map();
+        if (!refresh || this.destroyed) return;
+        if (typeof this.editor?.showRestoredFigure !== 'function') return;
+        for (const figure of this.restoredFigureCrops.values()) {
+            this.editor.showRestoredFigure(figure);
+        }
     }
 
     syncSnapshot() {

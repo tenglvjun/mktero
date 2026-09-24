@@ -41,9 +41,17 @@ export function isFigurePlaceholderElement(node) {
 }
 
 // Swaps the original OCR panel images of a pending figure for a single animated
-// placeholder per figure. `pendingAssets` maps an original asset path to the
-// pending figure id.
-export function replacePendingFigureImages(container, pendingAssets, translate = translateEnglish) {
+// placeholder per figure. A finished crop in `restoredFigures` replaces only
+// that figure. `pendingAssets` maps an original asset path to the pending
+// figure id. A resolver that throws or returns a non-string leaves the
+// placeholder in place.
+export function replacePendingFigureImages(
+    container,
+    pendingAssets,
+    translate = translateEnglish,
+    restoredFigures = null,
+    resolveRestoredFigureURL = null,
+) {
     if (!container?.querySelectorAll || !pendingAssets?.size) return 0;
     const document = container.ownerDocument;
     const replaced = new Set();
@@ -56,8 +64,40 @@ export function replacePendingFigureImages(container, pendingAssets, translate =
             continue;
         }
         replaced.add(figureId);
-        image.replaceWith(createFigurePlaceholderElement(document, { id: figureId, translate }));
+        const restored = restoredFigures?.get?.(figureId);
+        image.replaceWith(
+            createRestoredFigureImage(
+                document,
+                figureId,
+                restored,
+                resolveRestoredFigureURL,
+            )
+            || createFigurePlaceholderElement(document, { id: figureId, translate }),
+        );
         count++;
     }
     return count;
+}
+
+function createRestoredFigureImage(
+    document,
+    figureId,
+    restored,
+    resolveRestoredFigureURL,
+) {
+    if (!restored || typeof resolveRestoredFigureURL !== 'function') return null;
+    let url = null;
+    try {
+        url = resolveRestoredFigureURL(restored);
+    }
+    catch {
+        return null;
+    }
+    if (typeof url !== 'string') return null;
+    const image = document.createElementNS(XHTML_NAMESPACE, 'img');
+    image.setAttribute('data-figure-id', figureId);
+    image.setAttribute('data-mktero-asset', restored.assetPath);
+    image.setAttribute('src', url);
+    image.setAttribute('alt', '');
+    return image;
 }

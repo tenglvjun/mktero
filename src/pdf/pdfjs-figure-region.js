@@ -406,8 +406,10 @@ function cropRectangle(geometry, request, limits) {
         const height = Math.ceil(y1 * geometry.height * scale / 1000) - y;
         if (![x, y, width, height].every(Number.isSafeInteger) || width < 1 || height < 1) break;
         if (width <= limits.maxCropEdge && height <= limits.maxCropEdge
+            && width <= limits.maxOutputEdge && height <= limits.maxOutputEdge
             && width * height <= limits.maxCropPixels) return { x, y, width, height, scale };
         scale *= Math.min((limits.maxCropEdge - 1) / width, (limits.maxCropEdge - 1) / height,
+            (limits.maxOutputEdge - 1) / width, (limits.maxOutputEdge - 1) / height,
             Math.sqrt(limits.maxCropPixels / ((width + 1) * (height + 1))));
     }
     throw new RangeError('Figure crop exceeds the pixel budget');
@@ -447,6 +449,8 @@ function pageCropScale(geometry, dpi, regions, limits) {
         scale = Math.min(scale,
             (limits.maxCropEdge - 1) / maxWidth,
             (limits.maxCropEdge - 1) / maxHeight,
+            (limits.maxOutputEdge - 1) / maxWidth,
+            (limits.maxOutputEdge - 1) / maxHeight,
             Math.sqrt(limits.maxCropPixels / ((maxWidth + 1) * (maxHeight + 1))));
     }
     if (!Number.isFinite(scale) || scale <= 0) throw new RangeError('Figure page crop exceeds the pixel budget');
