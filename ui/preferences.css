@@ -63,10 +63,347 @@
     height: 14px;
 }
 
-.mktero-pref-tab[aria-selected='true'] {
+.mktero-pref-tab[aria-selected='true'],
+.mktero-feature-switch .mktero-pref-tab[aria-pressed='true'],
+.mktero-inline-switch .mktero-pref-tab[aria-pressed='true'] {
     background: Canvas;
     color: CanvasText;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.mktero-inline-switch {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0 0 0 16px;
+}
+
+.mktero-inline-switch .mktero-pref-tab {
+    min-width: 0;
+    padding-inline: 8px;
+}
+
+#mktero-features-section > * + *,
+#mktero-custom-panel > * + * {
+    margin-top: 16px;
+}
+
+.mktero-code-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mktero-code-control input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.mktero-code-control .mktero-account-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.mktero-account-action-row {
+    align-items: center;
+}
+
+.mktero-auth-link {
+    -moz-appearance: none;
+    appearance: none;
+    display: inline;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: AccentColor;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+#mktero-account-code-row[hidden],
+#mktero-account-password-row[hidden],
+#mktero-account-password-confirm-row[hidden],
+#mktero-account-keep-row[hidden],
+#mktero-account-signed-in[hidden],
+#mktero-account-form[hidden],
+#mktero-account-mode-switch[hidden],
+#mktero-account-login[hidden],
+#mktero-account-register[hidden],
+#mktero-account-send-reset[hidden],
+#mktero-account-forgot[hidden],
+#mktero-account-forgot-back[hidden] {
+    display: none;
+}
+
+#mktero-features-section {
+    padding-bottom: 28px;
+}
+
+.mktero-feature-page-header {
+    display: grid;
+    gap: 8px;
+    max-width: 760px;
+    margin: 6px 0 28px;
+}
+
+.mktero-feature-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: AccentColor;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.mktero-feature-kicker-mark {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: AccentColor;
+}
+
+.mktero-feature-page-header h1 {
+    margin: 0;
+    color: CanvasText;
+    font-size: 1.7rem;
+    font-weight: 700;
+    line-height: 1.15;
+}
+
+.mktero-feature-page-header p {
+    max-width: 680px;
+    margin: 0;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.96rem;
+    line-height: 1.5;
+}
+
+.mktero-source-block {
+    padding: 0 0 26px;
+    border-bottom: 1px solid var(--material-border, rgba(127, 127, 127, 0.24));
+}
+
+.mktero-block-heading,
+.mktero-content-heading {
+    display: grid;
+    gap: 5px;
+    margin-bottom: 14px;
+}
+
+.mktero-block-heading strong,
+.mktero-content-heading strong {
+    color: CanvasText;
+    font-size: 1.02rem;
+    font-weight: 700;
+}
+
+.mktero-block-heading small,
+.mktero-content-heading small {
+    max-width: 720px;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.mktero-source-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.mktero-source-option {
+    -moz-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 18px;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    min-height: 82px;
+    margin: 0;
+    padding: 14px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.3));
+    border-radius: 10px;
+    background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+    color: CanvasText;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.mktero-source-option:hover {
+    border-color: color-mix(in srgb, AccentColor 55%, CanvasText 20%);
+    background: color-mix(in srgb, AccentColor 5%, Canvas);
+}
+
+.mktero-source-option[aria-pressed='true'] {
+    border-color: AccentColor;
+    background: color-mix(in srgb, AccentColor 9%, Canvas);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, AccentColor 35%, transparent);
+}
+
+.mktero-source-option:focus-visible,
+.mktero-subsection-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, AccentColor 58%, transparent);
+    outline-offset: 2px;
+}
+
+.mktero-source-option-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid color-mix(in srgb, AccentColor 38%, CanvasText 20%);
+    border-radius: 7px;
+    color: AccentColor;
+    font-size: 0.78rem;
+    font-weight: 750;
+    line-height: 1;
+}
+
+.mktero-source-option-copy,
+.mktero-subsection-copy {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.mktero-source-option-copy strong,
+.mktero-subsection-copy strong {
+    overflow-wrap: anywhere;
+    font-size: 0.96rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.mktero-source-option-copy small,
+.mktero-subsection-copy small {
+    overflow-wrap: anywhere;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.mktero-source-option-check {
+    box-sizing: border-box;
+    width: 17px;
+    height: 17px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.42));
+    border-radius: 50%;
+}
+
+.mktero-source-option[aria-pressed='true'] .mktero-source-option-check {
+    border-color: AccentColor;
+    background: AccentColor;
+    box-shadow: inset 0 0 0 4px Canvas;
+}
+
+.mktero-feature-content {
+    margin-top: 26px;
+}
+
+.mktero-subsection-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.mktero-subsection-button {
+    -moz-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+    min-height: 66px;
+    margin: 0;
+    padding: 11px 13px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.28));
+    border-radius: 9px;
+    background: transparent;
+    color: CanvasText;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.mktero-subsection-button:hover {
+    background: color-mix(in srgb, CanvasText 5%, transparent);
+}
+
+.mktero-subsection-button[aria-pressed='true'] {
+    border-color: AccentColor;
+    background: color-mix(in srgb, AccentColor 8%, Canvas);
+}
+
+.mktero-subsection-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 32px;
+    border-radius: 6px;
+    background: color-mix(in srgb, AccentColor 12%, Canvas);
+    color: AccentColor;
+    font-size: 0.68rem;
+    font-weight: 750;
+    letter-spacing: 0.02em;
+}
+
+.mktero-feature-content > .mktero-settings-card,
+.mktero-feature-content > .mktero-preferences-section > .mktero-settings-card {
+    box-shadow: none;
+}
+
+.mktero-feature-lead,
+.mktero-mode-switch,
+.mktero-section-switch {
+    display: none;
+}
+
+.mktero-card-header {
+    display: grid;
+    gap: 4px;
+    padding: 16px 28px 2px;
+}
+
+.mktero-card-header strong {
+    font-size: 1.05rem;
+    font-weight: 650;
+    line-height: 1.3;
+}
+
+.mktero-card-header small {
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.mktero-card-header + .mktero-setting-row,
+.mktero-card-header + #mktero-ai-settings > .mktero-setting-row:first-child {
+    border-top: 0;
+}
+
+.mktero-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 .mktero-pref-tab:focus-visible {
@@ -81,7 +418,9 @@
     min-width: 0;
 }
 
-.mktero-preferences-section[hidden] {
+.mktero-preferences-section[hidden],
+#mktero-conversion-section[hidden],
+#mktero-ai-section[hidden] {
     display: none;
 }
 
@@ -106,7 +445,7 @@
     width: 100%;
     min-width: 0;
     min-height: 64px;
-    padding: 16px 20px;
+    padding: 16px 28px;
 }
 
 .mktero-field-row {
@@ -141,7 +480,7 @@
 .mktero-field-row > .mktero-setting-copy,
 .mktero-reader-font-row > .mktero-setting-copy {
     flex: 1 1 auto;
-    min-width: 240px;
+    min-width: 0;
 }
 
 .mktero-setting-copy strong {
@@ -162,19 +501,19 @@
 .mktero-field-control {
     box-sizing: border-box;
     display: grid;
-    flex: 0 0 280px;
+    flex: 0 1 200px;
     gap: 6px;
     min-width: 0;
-    width: 280px;
-    max-width: 48%;
+    width: 200px;
+    max-width: 42%;
     margin-inline-start: auto;
 }
 
 .mktero-field-control-compact,
 .mktero-field-control-numeric {
-    flex-basis: 280px;
-    width: 280px;
-    max-width: 48%;
+    flex-basis: 200px;
+    width: 200px;
+    max-width: 42%;
 }
 
 /* Zotero supplies the select dropmarker; forcing native appearance duplicates it on macOS. */
@@ -196,16 +535,17 @@
 }
 
 .mktero-field-control select {
+    max-width: 100%;
     padding-inline-end: 32px;
 }
 
 .mktero-field-control.mktero-provider-control {
     display: flex;
-    flex: 0 0 280px;
+    flex: 0 1 200px;
     align-items: center;
     gap: 8px;
-    width: 280px;
-    max-width: 48%;
+    width: 200px;
+    max-width: 42%;
 }
 
 .mktero-field-control.mktero-provider-control select {
@@ -301,13 +641,19 @@
 .mktero-reader-font-control {
     display: flex;
     box-sizing: border-box;
-    flex: 0 0 280px;
-    width: 280px;
-    max-width: 48%;
+    flex: 0 1 168px;
+    width: 168px;
+    max-width: 168px;
     min-width: 0;
     margin-inline-start: auto;
     align-items: center;
     gap: 12px;
+}
+
+.mktero-reader-slider-control {
+    flex-basis: 220px;
+    width: 220px;
+    max-width: 220px;
 }
 
 .mktero-reader-font-control input,
@@ -318,6 +664,7 @@
 }
 
 .mktero-reader-font-control select {
+    max-width: 100%;
     min-height: 36px;
     padding: 7px 11px;
     border: 1px solid color-mix(in srgb, CanvasText 35%, Canvas);
@@ -428,16 +775,237 @@
     display: none;
 }
 
+#mktero-account-api-base-row[hidden],
+#mktero-account-signed-in-row[hidden],
+#mktero-account-email-row[hidden],
+#mktero-account-password-row[hidden],
+#mktero-pdf-account-status[hidden],
+#mktero-ai-account-status[hidden],
+.mktero-own-pdf-row[hidden],
+.mktero-own-ai-row[hidden] {
+    display: none;
+}
+
+.mktero-auth-card {
+    box-sizing: border-box;
+    width: min(100%, 620px);
+    margin: 0;
+    padding: 24px 28px 26px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.28));
+    border-radius: 10px;
+    background: Canvas;
+    color: CanvasText;
+}
+
+.mktero-auth-logo {
+    margin: 0 0 22px;
+    color: CanvasText;
+    font-size: 1.45rem;
+    font-weight: 760;
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+
+.mktero-auth-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin: 0 0 22px;
+    border-bottom: 1px solid var(--material-border, rgba(127, 127, 127, 0.25));
+}
+
+.mktero-auth-tab {
+    -moz-appearance: none;
+    appearance: none;
+    margin: 0;
+    padding: 9px 8px 11px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.mktero-auth-tab[aria-selected='true'] {
+    border-bottom-color: AccentColor;
+    color: CanvasText;
+}
+
+.mktero-auth-field {
+    display: grid;
+    gap: 7px;
+    margin: 0 0 16px;
+}
+
+.mktero-auth-field label,
+.mktero-auth-check {
+    color: CanvasText;
+    font-size: 0.9rem;
+    font-weight: 650;
+}
+
+.mktero-auth-field input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 40px;
+    padding: 9px 11px;
+    border: 1px solid color-mix(in srgb, CanvasText 28%, Canvas);
+    border-radius: 7px;
+    background: color-mix(in srgb, Canvas 97%, CanvasText 3%);
+    color: CanvasText;
+    color-scheme: light dark;
+    font: inherit;
+}
+
+.mktero-auth-field input:hover {
+    border-color: color-mix(in srgb, CanvasText 48%, Canvas);
+}
+
+.mktero-auth-field input:focus {
+    border-color: AccentColor;
+    outline: 2px solid color-mix(in srgb, AccentColor 28%, transparent);
+    outline-offset: 0;
+}
+
+.mktero-auth-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 18px;
+    font-weight: 500;
+}
+
+.mktero-auth-check input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: AccentColor;
+}
+
+.mktero-auth-submit {
+    -moz-appearance: none;
+    appearance: none;
+    width: 100%;
+    min-height: 42px;
+    margin: 0 0 12px;
+    border: 0;
+    border-radius: 7px;
+    background: AccentColor;
+    color: AccentColorText;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.mktero-auth-submit:hover {
+    filter: brightness(0.94);
+}
+
+.mktero-auth-submit:disabled {
+    cursor: progress;
+    opacity: 0.7;
+}
+
+.mktero-auth-link:hover {
+    text-decoration: underline;
+}
+
+.mktero-auth-status {
+    max-width: 620px;
+    min-height: 1.4em;
+    margin: 12px 0 0;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.88rem;
+    line-height: 1.4;
+}
+
+.mktero-auth-signed-in {
+    display: grid;
+    gap: 16px;
+    max-width: 620px;
+}
+
+.mktero-auth-signed-in p {
+    margin: 0;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    line-height: 1.45;
+}
+
+.mktero-auth-signed-in .mktero-auth-submit {
+    width: auto;
+    justify-self: start;
+    padding: 0 18px;
+}
+
+.mktero-auth-field[hidden],
+.mktero-auth-signed-in[hidden],
+#mktero-account-form[hidden] {
+    display: none;
+}
+
+.mktero-account-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.mktero-account-button {
+    -moz-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    justify-self: end;
+    min-height: 36px;
+    margin: 0;
+    padding: 7px 14px;
+    border: 1px solid color-mix(in srgb, CanvasText 35%, Canvas);
+    border-radius: 8px;
+    background-color: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+    color: CanvasText;
+    color-scheme: light dark;
+    font: inherit;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+.mktero-account-button:hover {
+    border-color: color-mix(in srgb, CanvasText 55%, Canvas);
+}
+
+.mktero-account-button:focus-visible {
+    border-color: AccentColor;
+    outline: 2px solid color-mix(in srgb, AccentColor 28%, transparent);
+    outline-offset: 0;
+}
+
+.mktero-account-button:disabled {
+    cursor: progress;
+    opacity: 0.65;
+}
+
 .mktero-card-note {
     display: block;
     box-sizing: border-box;
-    padding: 12px 20px;
+    padding: 12px 28px;
     background: color-mix(in srgb, currentColor 3%, transparent);
 }
 
 @media (max-width: 700px) {
     #mktero-preferences-pane {
         padding-inline: 16px;
+    }
+
+    .mktero-source-grid,
+    .mktero-subsection-nav {
+        grid-template-columns: 1fr;
+    }
+
+    .mktero-auth-card {
+        padding: 20px 18px 22px;
+    }
+
+    .mktero-feature-page-header h1 {
+        font-size: 1.45rem;
     }
 
     .mktero-field-row,
@@ -448,7 +1016,9 @@
     }
 
     .mktero-field-control,
-    .mktero-reader-font-control {
+    .mktero-field-control.mktero-provider-control,
+    .mktero-reader-font-control,
+    .mktero-reader-slider-control {
         width: 100%;
         flex: 0 0 auto;
         max-width: none;
@@ -472,6 +1042,20 @@
     .mktero-setting-row {
         gap: 16px;
         padding: 14px 12px;
+    }
+
+    .mktero-feature-page-header {
+        margin-bottom: 22px;
+    }
+
+    .mktero-source-option {
+        grid-template-columns: 32px minmax(0, 1fr) 18px;
+        min-height: 74px;
+        padding: 11px;
+    }
+
+    .mktero-auth-card {
+        padding-inline: 14px;
     }
 
     .mktero-cache-usage-row {

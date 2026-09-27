@@ -142,6 +142,9 @@ conversion profile restores the last reading paragraph.
 - Credentials, cached Markdown and figures, corrections, translations, and
   reading positions are stored unencrypted in the active Zotero profile and are
   not synced by Mktero.
+- Optional Mktero account sign-in sends the email and password only when you
+  sign in. Registration also emails a verification code. The access token and
+  refresh token stay in the same profile.
 - Reference, citation, and translation requests are bounded and local-first;
   logs never contain API tokens, presigned URLs, PDF bytes, or authenticated
   responses.

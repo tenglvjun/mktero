@@ -204,9 +204,9 @@ test('ships responsive settings cards and a cache switch', async () => {
     ]);
 
     assert.match(pane, /class="mktero-settings-card"/);
-    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 4);
-    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 4);
-    assert.equal((pane.match(/role="switch"/g) || []).length, 4);
+    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 5);
+    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 5);
+    assert.equal((pane.match(/role="switch"/g) || []).length, 5);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionLabel"/);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionHelp"/);
     assert.match(pane, /id="mktero-ai-streaming"/);
@@ -290,11 +290,11 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
     );
     assert.match(
         styles,
-        /\.mktero-field-control\s*\{[\s\S]*?flex:\s*0\s+0\s+280px[\s\S]*?width:\s*280px[\s\S]*?max-width:\s*48%/s
+        /\.mktero-field-control\s*\{[\s\S]*?flex:\s*0\s+1\s+200px[\s\S]*?width:\s*200px[\s\S]*?max-width:\s*42%/s
     );
     assert.match(
         styles,
-        /\.mktero-field-row\s*>\s*\.mktero-setting-copy[\s\S]*?min-width:\s*240px/s
+        /\.mktero-field-row\s*>\s*\.mktero-setting-copy[\s\S]*?min-width:\s*0/s
     );
     assert.match(
         styles,
@@ -314,13 +314,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
     );
     assert.equal(
         (pane.match(
-            /class="mktero-setting-row mktero-(?:field|reader-font)-row"/g
+            /class="mktero-setting-row mktero-(?:field|reader-font)-row[^\"]*"/g
         ) || []).length,
-        20
+        25
     );
     assert.equal(
         (pane.match(
-            /<html:div class="mktero-(?:field|reader-font)-control(?: [^"]+)?">/g
+            /<html:div class="mktero-field-control(?: [^"]+)?">/g
         ) || []).length,
         20
     );
@@ -344,11 +344,11 @@ test('keeps right-side preference controls aligned at one width without native s
     );
     assert.match(
         styles,
-        /\.mktero-field-control-compact,\s*\.mktero-field-control-numeric\s*\{[\s\S]*?flex-basis:\s*280px[\s\S]*?width:\s*280px[\s\S]*?max-width:\s*48%/s
+        /\.mktero-field-control-compact,\s*\.mktero-field-control-numeric\s*\{[\s\S]*?flex-basis:\s*200px[\s\S]*?width:\s*200px[\s\S]*?max-width:\s*42%/s
     );
     assert.match(
         styles,
-        /\.mktero-field-control\.mktero-provider-control\s*\{[\s\S]*?flex:\s*0\s+0\s+280px[\s\S]*?width:\s*280px[\s\S]*?max-width:\s*48%/s
+        /\.mktero-field-control\.mktero-provider-control\s*\{[\s\S]*?flex:\s*0\s+1\s+200px[\s\S]*?width:\s*200px[\s\S]*?max-width:\s*42%/s
     );
     assert.match(
         pane,
@@ -374,26 +374,27 @@ test('presents every preference group as one cohesive settings card', async () =
         readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
     ]);
 
-    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
-    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 6);
+    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 5);
     assert.match(pane, /id="mktero-pref-tablist"[\s\S]*role="tablist"/);
-    assert.match(pane, /id="mktero-tab-general"[\s\S]*aria-selected="true"/);
-    assert.match(pane, /id="mktero-general-section"/);
+    assert.match(pane, /id="mktero-tab-features"[\s\S]*aria-selected="true"/);
+    assert.match(pane, /id="mktero-features-section"/);
     assert.doesNotMatch(pane, /id="mktero-tab-reader"/);
-    assert.equal((pane.match(/class="mktero-pref-tab"/g) || []).length, 3);
-    assert.equal((pane.match(/data-tab-icon="/g) || []).length, 3);
-    assert.equal((pane.match(/role="tabpanel"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-pref-tab"/g) || []).length, 8);
+    assert.equal((pane.match(/data-feature-source=/g) || []).length, 2);
+    assert.equal((pane.match(/data-tab-icon="/g) || []).length, 2);
+    assert.equal((pane.match(/role="tabpanel"/g) || []).length, 2);
     assert.match(
         pane,
         /id="mktero-api-key"[\s\S]*aria-describedby="mktero-api-key-help mktero-api-key-storage"/
     );
     assert.match(
         pane,
-        /id="mktero-conversion-section"[\s\S]*id="mktero-cache-enabled"[\s\S]*class="mktero-switch-input"[\s\S]*role="switch"/
+        /id="mktero-conversion-section"[\s\S]*id="mktero-api-key"/
     );
-    assert.doesNotMatch(
-        pane.slice(0, pane.indexOf('id="mktero-conversion-section"')),
-        /id="mktero-cache-enabled"/
+    assert.match(
+        pane,
+        /id="mktero-cache-enabled"[\s\S]*class="mktero-switch-input"[\s\S]*role="switch"/
     );
     assert.match(
         pane,

@@ -12,6 +12,13 @@ const {
     formatCacheStats,
 } = preferencesUI;
 
+function withoutFeatureSourceWrites(writes) {
+    return writes.filter(write => (
+        !String(write.key).includes('featureSource')
+        && !String(write.key).includes('ServiceSource')
+    ));
+}
+
 test('formats cache statistics for the preferences pane', () => {
     assert.equal(
         formatCacheStats({ entries: 0, sizeBytes: 0 }),
@@ -207,7 +214,7 @@ test('configures the Markdown reader font size from preferences', async () => {
 
     input.value = '22';
     input.dispatchEvent(new dom.window.Event('input'));
-    assert.deepEqual(writes, [{
+    assert.deepEqual(withoutFeatureSourceWrites(writes), [{
         key: 'extensions.mktero.readerFontSize',
         value: 22,
         global: true,
@@ -242,7 +249,7 @@ test('configures the Markdown reader font size from preferences', async () => {
     assert.equal(sourcePeek.checked, true);
     sourcePeek.checked = false;
     sourcePeek.dispatchEvent(new dom.window.Event('change'));
-    assert.deepEqual(writes, [
+    assert.deepEqual(withoutFeatureSourceWrites(writes), [
         {
             key: 'extensions.mktero.readerFontSize',
             value: 22,
@@ -282,7 +289,7 @@ test('configures the Markdown reader font size from preferences', async () => {
     font.dispatchEvent(new dom.window.Event('change'));
     sourcePeek.checked = true;
     sourcePeek.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(writes.length, 6);
+    assert.equal(withoutFeatureSourceWrites(writes).length, 6);
 });
 
 test('switches one conversion API key field with the selected provider', async () => {
@@ -350,7 +357,7 @@ test('switches one conversion API key field with the selected provider', async (
     const apiKey = dom.window.document.getElementById('mktero-api-key');
     apiKey.value = 'updated-mineru-secret';
     apiKey.dispatchEvent(new dom.window.Event('change'));
-    assert.deepEqual(writes, [{
+    assert.deepEqual(withoutFeatureSourceWrites(writes), [{
         key: 'extensions.mktero.mineruApiKey',
         value: 'updated-mineru-secret',
         global: true,
@@ -513,7 +520,11 @@ test('localizes preferences from Zotero without storing a language choice', asyn
     const zotero = {
         locale: 'zh-CN',
         Prefs: {
-            set: assert.fail,
+            set(key) {
+                if (String(key).includes('featureSource')
+                    || String(key).includes('ServiceSource')) return;
+                assert.fail(key);
+            },
         },
         logError: assert.fail,
     };
@@ -1564,7 +1575,7 @@ test('switches MinerU between cloud and a local service without mixing keys', as
         dom.window.document.getElementById('mktero-conversion-privacy-note').textContent,
         /local MinerU address/i
     );
-    assert.deepEqual(writes[0], {
+    assert.deepEqual(withoutFeatureSourceWrites(writes)[0], {
         key: 'extensions.mktero.mineruEndpoint',
         value: 'local',
         global: true,

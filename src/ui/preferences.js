@@ -68,6 +68,27 @@ import {
     normalizeMinerUEndpoint,
 } from '../config/conversion-preferences.js';
 import {
+    loginMkteroAccount,
+    logoutMkteroAccount,
+    refreshMkteroAccount,
+    registerMkteroAccount,
+    requestPasswordReset,
+    sendSignupCode,
+} from '../account/account-client.js';
+import {
+    accessTokenNeedsRefresh,
+    clearAccountSession,
+    getAccountApiBase,
+    getAccountSession,
+    getFeatureSource,
+    isAccountSignedIn,
+    saveAccountSession,
+    SERVICE_SOURCE_MKTERO,
+    setAccountApiBase,
+    setFeatureSource,
+} from '../config/account-preferences.js';
+import { isDebugBuild } from '../config/runtime-config.js';
+import {
     getMarkdownReaderAlignment,
     getMarkdownReaderFont,
     getMarkdownReaderFontSize,
@@ -170,9 +191,37 @@ export function createPreferencesController({
     const readerSourcePeekInput = document.getElementById(
         'mktero-reader-source-peek'
     );
+    const accountEmailInput = document.getElementById('mktero-account-email');
+    const accountPasswordInput = document.getElementById('mktero-account-password');
+    const accountLoginButton = document.getElementById('mktero-account-login');
+    const accountRegisterButton = document.getElementById('mktero-account-register');
+    const accountForgotButton = document.getElementById('mktero-account-forgot');
+    const accountForgotBackButton = document.getElementById('mktero-account-forgot-back');
+    const accountSendResetButton = document.getElementById('mktero-account-send-reset');
+    const accountLoginTab = document.getElementById('mktero-auth-tab-login');
+    const accountRegisterTab = document.getElementById('mktero-auth-tab-register');
+    const accountKeepInput = document.getElementById('mktero-account-keep');
+    const accountCodeInput = document.getElementById('mktero-account-code');
+    const accountConfirmInput = document.getElementById('mktero-account-password-confirm');
+    const accountSendCodeButton = document.getElementById('mktero-account-send-code');
+    let accountMode = 'login';
+    let codeCooldownTimer = 0;
+    const accountLogoutButton = document.getElementById('mktero-account-logout');
+    const accountApiBaseInput = document.getElementById('mktero-account-api-base');
+    const accountStatus = document.getElementById('mktero-account-status');
+    const featureSourceButtons = [
+        ...document.querySelectorAll?.('[data-feature-source]') || [],
+    ];
+    const accountPanel = document.getElementById('mktero-account-panel');
+    const customPanel = document.getElementById('mktero-custom-panel');
+    const customSectionButtons = [
+        ...document.querySelectorAll?.('[data-custom-section]') || [],
+    ];
+    let customSection = 'pdf';
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
     );
+    let accountBusy = false;
     const conversionApiKeyRow = document.getElementById('mktero-api-key-row');
     const conversionApiKeyInput = document.getElementById(
         'mktero-api-key'
@@ -493,6 +542,381 @@ export function createPreferencesController({
             getSelectedConversionProvider()
         );
         zotero?.Prefs?.set?.(config.preference, conversionApiKeyInput.value, true);
+    }
+
+    function setAccountStatus(key) {
+        if (!accountStatus) return;
+        accountStatus.textContent = key ? t(key) : '';
+    }
+
+    function accountErrorKey(error) {
+        if (error?.code === 'invalid_credentials') {
+            return 'preferences.account.invalidCredentials';
+        }
+        if (error?.code === 'email_exists') {
+            return 'preferences.account.emailExists';
+        }
+        if (error?.code === 'email_not_verified') {
+            return 'preferences.account.emailNotVerified';
+        }
+        if (error?.code === 'invalid_password') {
+            return 'preferences.account.invalidPassword';
+        }
+        if (error?.code === 'invalid_code') {
+            return 'preferences.account.invalidCodeServer';
+        }
+        if (error?.code === 'code_rate_limited') {
+            return 'preferences.account.codeRateLimited';
+        }
+        if (error?.code === 'registration_unavailable') {
+            return 'preferences.account.registrationUnavailable';
+        }
+        if (error?.code === 'network') {
+            return 'preferences.account.networkFailed';
+        }
+        return 'preferences.account.loginFailed';
+    }
+
+    function selectedFeatureSource() {
+        const pressed = featureSourceButtons.find(button => (
+            button.getAttribute('aria-pressed') === 'true'
+        ));
+        return pressed?.getAttribute('data-feature-source')
+            || getFeatureSource(zotero);
+    }
+
+    function updateServiceSources() {
+        const mktero = selectedFeatureSource() === SERVICE_SOURCE_MKTERO;
+        if (accountPanel) accountPanel.hidden = !mktero;
+        if (customPanel) customPanel.hidden = mktero;
+        for (const button of featureSourceButtons) {
+            const selected = button.getAttribute('data-feature-source')
+                === (mktero ? SERVICE_SOURCE_MKTERO : 'own');
+            button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        }
+        if (!mktero) {
+            updateCustomSection();
+            updateConversionApiKeyControl();
+            updateAICustomFieldVisibility();
+        }
+    }
+
+    function updateCustomSection() {
+        const conversion = document.getElementById('mktero-conversion-section');
+        const ai = document.getElementById('mktero-ai-section');
+        if (conversion) conversion.hidden = customSection !== 'pdf';
+        if (ai) ai.hidden = customSection !== 'ai';
+        for (const button of customSectionButtons) {
+            button.setAttribute(
+                'aria-pressed',
+                button.getAttribute('data-custom-section') === customSection
+                    ? 'true'
+                    : 'false'
+            );
+        }
+    }
+
+    function saveCustomSection(event) {
+        const section = event.currentTarget?.getAttribute('data-custom-section');
+        if (section !== 'pdf' && section !== 'ai') return;
+        customSection = section;
+        updateCustomSection();
+    }
+
+    function renderAccount() {
+        const session = getAccountSession(zotero);
+        const signedIn = isAccountSignedIn(session);
+        const apiBaseRow = document.getElementById('mktero-account-api-base-row');
+
+        const signedInPanel = document.getElementById('mktero-account-signed-in');
+        const accountForm = document.getElementById('mktero-account-form');
+        if (signedInPanel) signedInPanel.hidden = !signedIn;
+        if (accountForm) accountForm.hidden = signedIn;
+        setHidden('mktero-account-mode-switch', signedIn);
+        const signedInLabel = document.getElementById('mktero-account-signed-in-text');
+        if (signedInLabel) {
+            signedInLabel.textContent = t('preferences.account.signedIn', {
+                email: session.email,
+            });
+        }
+        if (!signedIn) setAccountMode(accountMode);
+        if (apiBaseRow) apiBaseRow.hidden = !isDebugBuild();
+        if (accountApiBaseInput && !accountApiBaseInput.value) {
+            accountApiBaseInput.value = getAccountApiBase(zotero);
+        }
+        const source = getFeatureSource(zotero);
+        for (const button of featureSourceButtons) {
+            button.setAttribute(
+                'aria-pressed',
+                button.getAttribute('data-feature-source') === source
+                    ? 'true'
+                    : 'false'
+            );
+        }
+        updateServiceSources();
+    }
+
+    function setHidden(id, hidden) {
+        const element = document.getElementById(id);
+        if (element) element.hidden = hidden;
+    }
+
+    function setAccountMode(mode) {
+        accountMode = mode;
+        const forgot = mode === 'forgot';
+        const register = mode === 'register';
+        setHidden('mktero-account-password-row', forgot);
+        setHidden('mktero-account-code-row', !register);
+        setHidden('mktero-account-password-confirm-row', !register);
+        setHidden('mktero-account-keep-row', mode !== 'login');
+        if (accountLoginButton) accountLoginButton.hidden = mode !== 'login';
+        if (accountRegisterButton) accountRegisterButton.hidden = !register;
+        if (accountSendResetButton) accountSendResetButton.hidden = !forgot;
+        if (accountForgotButton) accountForgotButton.hidden = mode !== 'login';
+        if (accountForgotBackButton) accountForgotBackButton.hidden = !forgot;
+        if (accountPasswordInput) {
+            accountPasswordInput.setAttribute(
+                'autocomplete',
+                register ? 'new-password' : 'current-password'
+            );
+        }
+        if (accountLoginTab) {
+            accountLoginTab.setAttribute('aria-selected', mode === 'login' || forgot ? 'true' : 'false');
+        }
+        if (accountRegisterTab) {
+            accountRegisterTab.setAttribute('aria-selected', register ? 'true' : 'false');
+        }
+    }
+
+    function selectAccountLoginMode() {
+        setAccountMode('login');
+    }
+
+    function selectAccountRegisterMode() {
+        setAccountMode('register');
+    }
+
+    function selectAccountForgotMode() {
+        setAccountMode('forgot');
+    }
+
+    function selectAccountForgotBack() {
+        setAccountMode('login');
+    }
+
+    function setAccountBusy(busy) {
+        accountBusy = busy;
+        if (accountLoginButton) accountLoginButton.disabled = busy;
+        if (accountRegisterButton) accountRegisterButton.disabled = busy;
+        if (accountSendResetButton) accountSendResetButton.disabled = busy;
+        if (accountSendCodeButton) accountSendCodeButton.disabled = busy || accountSendCodeButton.dataset.cooling === 'true';
+        if (accountLogoutButton) accountLogoutButton.disabled = busy;
+    }
+
+    async function submitAccount(request) {
+        if (accountBusy) return;
+        const email = String(accountEmailInput?.value || '').trim();
+        const password = String(accountPasswordInput?.value || '');
+        if (!email || password.length < 8 || password.length > 128) {
+            setAccountStatus('preferences.account.invalidPassword');
+            return;
+        }
+        setAccountBusy(true);
+        setAccountStatus('');
+        try {
+            const session = await request({
+                apiBase: getAccountApiBase(zotero),
+                email,
+                password,
+            });
+            if (session?.verificationRequired) {
+                if (accountPasswordInput) accountPasswordInput.value = '';
+                setAccountStatus('preferences.account.verificationSent');
+                return;
+            }
+            if (accountKeepInput && !accountKeepInput.checked) {
+                session.refreshToken = '';
+            }
+            saveAccountSession(zotero, session);
+            if (accountPasswordInput) accountPasswordInput.value = '';
+            renderAccount();
+        }
+        catch (error) {
+            setAccountStatus(accountErrorKey(error));
+        }
+        finally {
+            setAccountBusy(false);
+        }
+    }
+
+    async function sendPasswordReset() {
+        if (accountBusy) return;
+        const email = String(accountEmailInput?.value || '').trim();
+        if (!email) {
+            setAccountStatus('preferences.account.invalidPassword');
+            return;
+        }
+        setAccountBusy(true);
+        setAccountStatus('');
+        try {
+            await requestPasswordReset({
+                apiBase: getAccountApiBase(zotero),
+                email,
+            });
+            setAccountStatus('preferences.account.resetSent');
+        }
+        catch (error) {
+            setAccountStatus(accountErrorKey(error));
+        }
+        finally {
+            setAccountBusy(false);
+        }
+    }
+
+    function startCodeCooldown() {
+        clearTimeout(codeCooldownTimer);
+        let remaining = 60;
+        const tick = () => {
+            if (!accountSendCodeButton) return;
+            if (remaining <= 0) {
+                delete accountSendCodeButton.dataset.cooling;
+                accountSendCodeButton.disabled = accountBusy;
+                accountSendCodeButton.textContent = t('preferences.account.sendCode');
+                return;
+            }
+            accountSendCodeButton.dataset.cooling = 'true';
+            accountSendCodeButton.disabled = true;
+            accountSendCodeButton.textContent = t('preferences.account.codeWait', {
+                seconds: remaining,
+            });
+            remaining -= 1;
+            codeCooldownTimer = setTimeout(tick, 1000);
+        };
+        tick();
+    }
+
+    async function sendAccountCode() {
+        if (accountBusy || accountSendCodeButton?.dataset.cooling === 'true') return;
+        const email = String(accountEmailInput?.value || '').trim();
+        if (!email.includes('@')) {
+            setAccountStatus('preferences.account.invalidEmail');
+            return;
+        }
+        setAccountBusy(true);
+        setAccountStatus('');
+        try {
+            await sendSignupCode({
+                apiBase: getAccountApiBase(zotero),
+                email,
+            });
+            setAccountStatus('preferences.account.codeSent');
+            startCodeCooldown();
+        }
+        catch (error) {
+            setAccountStatus(accountErrorKey(error));
+        }
+        finally {
+            setAccountBusy(false);
+        }
+    }
+
+    function loginAccount() {
+        return submitAccount(loginMkteroAccount);
+    }
+
+    function registerAccount() {
+        const password = String(accountPasswordInput?.value || '');
+        const confirmation = String(accountConfirmInput?.value || '');
+        const code = String(accountCodeInput?.value || '').trim();
+        if (password !== confirmation) {
+            setAccountStatus('preferences.account.passwordMismatch');
+            return undefined;
+        }
+        if (!/^\d{6}$/.test(code)) {
+            setAccountStatus('preferences.account.invalidCode');
+            return undefined;
+        }
+        return submitAccount(args => registerMkteroAccount({ ...args, code }));
+    }
+
+    async function logoutAccount() {
+        if (accountBusy) return;
+        accountBusy = true;
+        if (accountLogoutButton) accountLogoutButton.disabled = true;
+        const session = getAccountSession(zotero);
+        try {
+            await logoutMkteroAccount({
+                apiBase: getAccountApiBase(zotero),
+                refreshToken: session.refreshToken,
+            });
+        }
+        catch {
+            // A failed logout still clears the local session.
+        }
+        clearAccountSession(zotero);
+        accountBusy = false;
+        if (accountLogoutButton) accountLogoutButton.disabled = false;
+        renderAccount();
+    }
+
+    async function refreshAccountIfNeeded() {
+        const session = getAccountSession(zotero);
+        if (!accessTokenNeedsRefresh(session)) return;
+        try {
+            const refreshed = await refreshMkteroAccount({
+                apiBase: getAccountApiBase(zotero),
+                refreshToken: session.refreshToken,
+            });
+            saveAccountSession(zotero, {
+                ...refreshed,
+                email: refreshed.email || session.email,
+            });
+        }
+        catch {
+            clearAccountSession(zotero);
+        }
+    }
+
+    function saveFeatureSource(event) {
+        const source = event.currentTarget?.getAttribute('data-feature-source');
+        if (!source) return;
+        setFeatureSource(zotero, source);
+        renderAccount();
+    }
+
+    function saveAccountApiBase() {
+        if (!isDebugBuild() || !accountApiBaseInput) return;
+        try {
+            accountApiBaseInput.value = setAccountApiBase(
+                zotero,
+                accountApiBaseInput.value
+            );
+            setAccountStatus('');
+            renderAccount();
+        }
+        catch {
+            setAccountStatus('preferences.account.invalidApiBase');
+        }
+    }
+
+    function initializeAccount() {
+        accountLoginButton?.addEventListener('click', loginAccount);
+        accountRegisterButton?.addEventListener('click', registerAccount);
+        accountLogoutButton?.addEventListener('click', logoutAccount);
+        accountLoginTab?.addEventListener('click', selectAccountLoginMode);
+        accountRegisterTab?.addEventListener('click', selectAccountRegisterMode);
+        accountForgotButton?.addEventListener('click', selectAccountForgotMode);
+        accountForgotBackButton?.addEventListener('click', selectAccountForgotBack);
+        accountSendResetButton?.addEventListener('click', sendPasswordReset);
+        accountSendCodeButton?.addEventListener('click', sendAccountCode);
+        accountApiBaseInput?.addEventListener('change', saveAccountApiBase);
+        for (const button of featureSourceButtons) {
+            button.addEventListener('click', saveFeatureSource);
+        }
+        for (const button of customSectionButtons) {
+            button.addEventListener('click', saveCustomSection);
+        }
+        renderAccount();
     }
 
     function initializeConversionProvider() {
@@ -848,6 +1272,9 @@ export function createPreferencesController({
             aiTestButton?.addEventListener('click', testAI);
             localize();
             initializePreferenceTabs();
+            initializeAccount();
+            await refreshAccountIfNeeded();
+            renderAccount();
             initializeConversionProvider();
             initializeAIProvider();
             initializeAIRequestTimeout();
@@ -857,6 +1284,7 @@ export function createPreferencesController({
             initializeReaderWidth();
             initializeReaderAlignment();
             initializeReaderSourcePeek();
+            updateServiceSources();
             await refresh();
         },
         destroy() {
@@ -916,6 +1344,23 @@ export function createPreferencesController({
                 'change',
                 saveConversionApiKey
             );
+            accountLoginButton?.removeEventListener('click', loginAccount);
+            accountRegisterButton?.removeEventListener('click', registerAccount);
+            accountLogoutButton?.removeEventListener('click', logoutAccount);
+            accountLoginTab?.removeEventListener('click', selectAccountLoginMode);
+            accountRegisterTab?.removeEventListener('click', selectAccountRegisterMode);
+            accountForgotButton?.removeEventListener('click', selectAccountForgotMode);
+            accountForgotBackButton?.removeEventListener('click', selectAccountForgotBack);
+            accountSendResetButton?.removeEventListener('click', sendPasswordReset);
+            accountSendCodeButton?.removeEventListener('click', sendAccountCode);
+            clearTimeout(codeCooldownTimer);
+            accountApiBaseInput?.removeEventListener('change', saveAccountApiBase);
+            for (const button of featureSourceButtons) {
+                button.removeEventListener('click', saveFeatureSource);
+            }
+            for (const button of customSectionButtons) {
+                button.removeEventListener('click', saveCustomSection);
+            }
             readerFontSizeInput?.removeEventListener(
                 'input',
                 updateReaderFontSize
