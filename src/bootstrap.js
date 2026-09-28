@@ -81,7 +81,10 @@ import {
     MINERU_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
 } from './mineru/parser-profile.js';
-import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_IDS } from './mistral/parser-profile.js';
+import {
+    MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
+    MISTRAL_PARSER_PROFILE_ID,
+} from './mistral/parser-profile.js';
 import {
     createZoteroBlobFactory,
     createZoteroSavedMarkdownStore,
@@ -627,7 +630,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache,
         prepareResult: prepareWithFigures(decodeMistralResult, prepareMistralResult),
         recoverFigures,
-        createPreviousCacheKeys: fileData => Promise.all(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => (
+        createPreviousCacheKeys: fileData => Promise.all(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
             createMarkdownCacheKey(fileData, { parserProfile })
         ))),
         onError: error => Zotero.logError?.(error),

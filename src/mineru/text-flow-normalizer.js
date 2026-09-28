@@ -1,9 +1,15 @@
 import { isValidSourceMapEntry } from '../core/markdown-source-map.js';
+import {
+    isPublisherCopyrightGap,
+    isPublisherCopyrightParagraph,
+} from '../markdown/publisher-copyright.js';
 
 const MAX_CONTINUATION_TOP = 220;
 const MIN_ANCHOR_BOTTOM = 780;
 const MIN_ANCHOR_WORDS = 6;
 const INCOMPLETE_TEXT_END_PATTERN = /(?:[+\-*/=<>≤≥≠]|[([{,;:])\s*$/u;
+const SENTENCE_END_PATTERN = /[.!?。！？]["'”’»)\]]*$/u;
+const MIN_COPYRIGHT_JOIN_WORDS = 6;
 const DANGLING_WORD_END_PATTERN = new RegExp(
     '\\b(?:a|an|and|as|at|because|between|but|by|for|from|her|his|if|in|into'
     + '|its|my|nor|of|on|or|our|over|than|that|the|their|these|this|those|though'
@@ -22,8 +28,17 @@ export function reassembleMinerUTextFlow(markdown, sourceMap) {
         .sort((left, right) => left.markdownFrom - right.markdownFrom);
     const edits = [];
     const usedAnchors = new Set();
+    const usedContinuations = new Set();
+    collectPublisherCopyrightJoins(
+        source,
+        entries,
+        edits,
+        usedAnchors,
+        usedContinuations
+    );
 
     for (const continuation of entries) {
+        if (usedContinuations.has(continuation)) continue;
         const continuationPage = singlePageIndex(continuation);
         if (continuation.type !== 'text'
             || continuationPage === null
@@ -78,9 +93,107 @@ export function reassembleMinerUTextFlow(markdown, sourceMap) {
             });
         }
         usedAnchors.add(anchor);
+        usedContinuations.add(continuation);
     }
 
     return applyNonOverlappingEdits(source, edits);
+}
+
+function collectPublisherCopyrightJoins(
+    source,
+    entries,
+    edits,
+    usedAnchors,
+    usedContinuations
+) {
+    for (let index = 0; index < entries.length; index += 1) {
+        const anchor = entries[index];
+        if (anchor.type !== 'text' || usedAnchors.has(anchor)) continue;
+        const continuation = continuationAcrossPublisherCopyright(
+            source,
+            entries,
+            index
+        );
+        if (!continuation || usedContinuations.has(continuation)) continue;
+        if (!canJoinAcrossPublisherCopyright(source, anchor, continuation)) {
+            continue;
+        }
+        const join = joinContinuation(source, anchor, continuation);
+        if (!join.length) continue;
+        edits.push(...join);
+        usedAnchors.add(anchor);
+        usedContinuations.add(continuation);
+    }
+}
+
+function continuationAcrossPublisherCopyright(source, entries, anchorIndex) {
+    const anchor = entries[anchorIndex];
+    for (let index = anchorIndex + 1; index < entries.length
+        && index < anchorIndex + 12; index += 1) {
+        const candidate = entries[index];
+        if (candidate.markdownFrom < anchor.markdownTo) continue;
+        const gap = source.slice(anchor.markdownTo, candidate.markdownFrom);
+        if (isPublisherCopyrightGap(gap)) return candidate;
+        const candidateText = source.slice(
+            candidate.markdownFrom,
+            candidate.markdownTo
+        );
+        if (isPublisherCopyrightParagraph(candidateText)
+            || isPublisherCopyrightGap(`${gap}${candidateText}`)) {
+            continue;
+        }
+        return null;
+    }
+    return null;
+}
+
+function canJoinAcrossPublisherCopyright(source, anchor, continuation) {
+    const anchorPage = singlePageIndex(anchor);
+    const continuationPage = singlePageIndex(continuation);
+    if (anchorPage === null
+        || continuationPage === null
+        || (continuationPage !== anchorPage
+            && continuationPage !== anchorPage + 1)) {
+        return false;
+    }
+    const anchorText = source.slice(anchor.markdownFrom, anchor.markdownTo);
+    const continuationText = source.slice(
+        continuation.markdownFrom,
+        continuation.markdownTo
+    );
+    if (isPublisherCopyrightParagraph(anchorText)
+        || isPublisherCopyrightParagraph(continuationText)
+        || !startsWithLowercaseProse(source, continuation)
+        || !endsWithoutSentencePunctuation(anchorText)) {
+        return false;
+    }
+    const words = anchorText.match(/\p{L}[\p{L}\p{N}'’-]*/gu) || [];
+    return words.length >= MIN_COPYRIGHT_JOIN_WORDS;
+}
+
+function endsWithoutSentencePunctuation(text) {
+    const trimmed = String(text || '').trimEnd();
+    return Boolean(trimmed) && !SENTENCE_END_PATTERN.test(trimmed);
+}
+
+function joinContinuation(source, anchor, continuation) {
+    const anchorSource = source
+        .slice(anchor.markdownFrom, anchor.markdownTo)
+        .trimEnd();
+    const continuationSource = source
+        .slice(continuation.markdownFrom, continuation.markdownTo)
+        .trimStart();
+    const removal = continuationRemovalRange(source, continuation);
+    if (!anchorSource || !continuationSource || !removal) return [];
+    return [{
+        from: anchor.markdownFrom,
+        to: anchor.markdownTo,
+        replacement: `${anchorSource} ${continuationSource}`,
+    }, {
+        from: removal.from,
+        to: removal.to,
+        replacement: '',
+    }];
 }
 
 function findContinuationAnchor(
