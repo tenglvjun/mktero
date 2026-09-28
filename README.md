@@ -28,7 +28,11 @@ local cache avoids repeating conversions for the same PDF and parser profile.
 Useful links: [Product page](https://mktero.com/) ·
 [Download](https://github.com/tenglvjun/mktero/releases/latest) ·
 [Discussions](https://github.com/tenglvjun/mktero/discussions) ·
-[Issues](https://github.com/tenglvjun/mktero/issues)
+[Issues](https://github.com/tenglvjun/mktero/issues) ·
+[Discord](https://discord.gg/F3Mjkv7ku) ·
+QQ group 616518076
+
+<img src="./docs/assets/qq-group.png" width="180" alt="QR code for the Mktero QQ group, number 616518076">
 
 ## Features
 
@@ -166,10 +170,13 @@ See [Development](./docs/development.md) for the figure corpus regression.
 ## Contributing
 
 Pull requests are welcome. For ideas, reading workflows, and beta feedback, use
-[GitHub Discussions](https://github.com/tenglvjun/mktero/discussions). For
-changes to runtime behavior, run the complete verification commands above and
-include tests for the affected behavior. Please keep credentials, private PDFs,
-and other sensitive data out of issues, pull requests, and logs.
+[GitHub Discussions](https://github.com/tenglvjun/mktero/discussions). For usage
+questions, search QQ group 616518076 in QQ, or join
+[Discord](https://discord.gg/F3Mjkv7ku). Reproducible bugs still belong in
+[GitHub Issues](https://github.com/tenglvjun/mktero/issues). For changes to
+runtime behavior, run the complete verification commands above and include
+tests for the affected behavior. Please keep credentials, private PDFs, and
+other sensitive data out of the QQ group, Discord, issues, pull requests, and logs.
 
 ## License
 
