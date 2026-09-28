@@ -847,6 +847,7 @@ class MarkdownTabView {
                 this.restoreReadingPosition(model.restoreReadingOffset);
                 this.didRestorePersistedPosition = true;
             }
+            this.revealRequestedMarkdown();
             if (this.documentSearchOpen) {
                 this.runDocumentSearch({
                     keepIndex: true,
@@ -5825,6 +5826,18 @@ class MarkdownTabView {
         this.mount.appendChild(host);
         this.elements.sourcePeekCanvasHost = host;
         return host;
+    }
+
+    revealRequestedMarkdown() {
+        const requestedOffset = Number(this.model?.revealMarkdownOffset);
+        const requestedEnd = Number(this.model?.revealMarkdownTo);
+        if (!Number.isFinite(requestedOffset)) return;
+        delete this.model.revealMarkdownOffset;
+        delete this.model.revealMarkdownTo;
+        this.restoreReadingPosition(requestedOffset);
+        if (Number.isFinite(requestedEnd) && requestedEnd > requestedOffset) {
+            this.editor?.flashRange?.(requestedOffset, requestedEnd);
+        }
     }
 
     restoreReadingPosition(offset) {

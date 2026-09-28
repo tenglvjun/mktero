@@ -3,9 +3,11 @@ import {
     createLucideIcon,
     LUCIDE_ICONS,
 } from '../icons/lucide-icon.js';
+import { pdfSelectionPagesFromAnnotation } from '../core/pdf-selection-source-resolver.js';
 
 const MARKDOWN_BUTTON_SELECTOR = '.mktero-markdown-button';
 const GRAPH_BUTTON_SELECTOR = '.mktero-citation-graph-button';
+const SELECTION_BUTTON_SELECTOR = '.mktero-selection-markdown-button';
 const BUTTON_SELECTOR = `${MARKDOWN_BUTTON_SELECTOR}, ${GRAPH_BUTTON_SELECTOR}`;
 const CUSTOM_SECTIONS_SELECTOR = '.toolbar .end .custom-sections';
 
@@ -13,6 +15,9 @@ export function registerReaderToolbar({
     zotero,
     pluginID,
     onOpen,
+    onOpenSelection = null,
+    isMarkdownReady = null,
+    onSelectionUnresolved = null,
     onPDFReaderAvailable = null,
     onError = defaultErrorHandler,
     translate = translateEnglish,
@@ -57,6 +62,33 @@ export function registerReaderToolbar({
         }
     };
 
+    const selectionHandler = ({ reader, doc, params, append }) => {
+        if (!active || reader?.type !== 'pdf' || typeof onOpenSelection !== 'function') {
+            return;
+        }
+        if (typeof isMarkdownReady === 'function' && !isMarkdownReady(reader)) return;
+        const annotation = params?.annotation;
+        if (!pdfSelectionPagesFromAnnotation(annotation)) return;
+        if (doc.querySelector?.(SELECTION_BUTTON_SELECTOR)) return;
+        append(createSelectionButton({
+            doc,
+            reader,
+            annotation,
+            title: translate('readerSelection.openMarkdown'),
+            ariaLabel: translate('readerSelection.openMarkdownAria'),
+            onOpenSelection,
+            onSelectionUnresolved,
+            onError,
+        }));
+    };
+
+    if (typeof onOpenSelection === 'function') {
+        zotero.Reader.registerEventListener(
+            'renderTextSelectionPopup',
+            selectionHandler,
+            pluginID
+        );
+    }
     zotero.Reader.registerEventListener('renderToolbar', handler, pluginID);
     injectOpenReaderToolbars(zotero, handler, notifyPDFReaderAvailable);
     return () => {
@@ -70,6 +102,10 @@ export function registerReaderToolbar({
             return;
         }
         zotero.Reader.unregisterEventListener?.('renderToolbar', handler);
+        zotero.Reader.unregisterEventListener?.(
+            'renderTextSelectionPopup',
+            selectionHandler
+        );
     };
 }
 
@@ -97,6 +133,45 @@ function createToolbarButton({
         Promise.resolve(onClick()).catch(error => onError(error, reader));
     });
     return button;
+}
+
+function createSelectionButton({
+    doc,
+    reader,
+    annotation,
+    title,
+    ariaLabel,
+    onOpenSelection,
+    onSelectionUnresolved,
+    onError,
+}) {
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'toolbar-button wide-button mktero-selection-markdown-button';
+    button.textContent = title;
+    button.title = title;
+    button.setAttribute?.('aria-label', ariaLabel);
+    button.addEventListener('click', () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        Promise.resolve(onOpenSelection(
+            reader,
+            annotation,
+            message => reportSelection(button, message, reader, onSelectionUnresolved)
+        )).then(result => {
+            if (result?.status === 'opened') button.disabled = false;
+        }).catch(error => onError(error, reader));
+    });
+    return button;
+}
+
+function reportSelection(button, message, reader, onSelectionUnresolved) {
+    if (button.isConnected !== false) {
+        button.textContent = message;
+        button.disabled = true;
+        return;
+    }
+    onSelectionUnresolved?.(message, reader);
 }
 
 function injectOpenReaderToolbars(zotero, handler, notifyPDFReaderAvailable) {

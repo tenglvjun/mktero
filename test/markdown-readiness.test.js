@@ -45,6 +45,8 @@ test('marks the parent paper and its PDF when the current cache is readable', as
 
     assert.equal(remembered, true);
     assert.equal(harness.controller.isReady(parentItem(), PROFILE), true);
+    assert.equal(harness.controller.cacheKeyFor(attachmentItem(), PROFILE), CACHE_KEY);
+    assert.equal(harness.controller.cacheKeyFor(parentItem(), OTHER_PROFILE), null);
     assert.equal(harness.controller.isReady(attachmentItem(), PROFILE), true);
     assert.equal(harness.controller.isReady(parentItem(), OTHER_PROFILE), false);
     assert.equal(harness.controller.isReady({

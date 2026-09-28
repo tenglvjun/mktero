@@ -6,8 +6,14 @@
 
 OCR content mappings connect Markdown blocks to physical PDF pages and
 regions. Source links and source-aware copy use those mappings when they are
-reliable; Mktero does not guess a location when a match is ambiguous. Markdown
-is rendered in an isolated shadow root with a restricted link and image policy.
+reliable; Mktero does not guess a location when a match is ambiguous. Selecting
+PDF text offers `Open in Markdown` when that PDF already has a readable cache.
+A unique source region focuses the Markdown paragraph. If no region overlaps
+the selection, a passage that occurs in exactly one cached paragraph still opens.
+A complete translation
+for that passage switches an original view to bilingual and leaves an existing
+translation or bilingual view unchanged. No translation request is started.
+Markdown is rendered in an isolated shadow root with a restricted link and image policy.
 Academic figure captions are recognized in common publisher formats, including
 `Figure N | ...` captions that follow an empty OCR image, so prose figure
 references remain previewable in cached documents.

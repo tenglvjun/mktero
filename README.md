@@ -43,7 +43,8 @@ QQ group 616518076
   replaces placeholders in place, so slow figures never block reading.
 - Hide publisher mastheads, first-page copyright notices, repeated headers and
   footers, and page numbers, and keep reliable page/region mappings so text,
-  formulas, tables, and figures can jump back to their PDF source.
+  formulas, tables, and figures can jump back to their PDF source. A PDF text
+  selection can open its Markdown paragraph when that mapping is unique.
 - Browse the outline or a figure/table index, preview citations, affiliations,
   figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
 - Display Zotero PDF highlights and underlines in Markdown, and create,
