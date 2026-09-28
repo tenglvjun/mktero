@@ -84,6 +84,12 @@ import {
     setMarkdownReaderWidth,
 } from '../config/reader-preferences.js';
 import {
+    getObsidianSubdirectory,
+    getObsidianVaultPath,
+    setObsidianSubdirectory,
+    setObsidianVaultPath,
+} from '../config/obsidian-preferences.js';
+import {
     createLucideIcon,
     LUCIDE_ICONS,
 } from '../icons/lucide-icon.js';
@@ -145,6 +151,7 @@ export function createPreferencesController({
     testAIConnection = null,
     notifyAITestResult = null,
     confirmClearCache = null,
+    createFilePicker = null,
     createAbortController = createRuntimeAbortController,
 }) {
     const status = document.getElementById('mktero-cache-status');
@@ -169,6 +176,13 @@ export function createPreferencesController({
     );
     const readerSourcePeekInput = document.getElementById(
         'mktero-reader-source-peek'
+    );
+    const obsidianVaultInput = document.getElementById('mktero-obsidian-vault');
+    const obsidianVaultBrowse = document.getElementById(
+        'mktero-obsidian-vault-browse'
+    );
+    const obsidianSubdirectoryInput = document.getElementById(
+        'mktero-obsidian-subdirectory'
     );
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
@@ -396,6 +410,71 @@ export function createPreferencesController({
         if (!readerSourcePeekInput) return;
         readerSourcePeekInput.checked = getMarkdownReaderSourcePeek(zotero);
         readerSourcePeekInput.addEventListener('change', updateReaderSourcePeek);
+    }
+
+    function initializeObsidianExport() {
+        if (obsidianVaultInput) {
+            obsidianVaultInput.value = getObsidianVaultPath(zotero);
+        }
+        if (obsidianSubdirectoryInput) {
+            obsidianSubdirectoryInput.value = getObsidianSubdirectory(zotero);
+            obsidianSubdirectoryInput.addEventListener(
+                'change',
+                updateObsidianSubdirectory
+            );
+        }
+        obsidianVaultBrowse?.addEventListener('click', browseObsidianVault);
+    }
+
+    function updateObsidianSubdirectory() {
+        if (!obsidianSubdirectoryInput) return;
+        obsidianSubdirectoryInput.value = setObsidianSubdirectory(
+            zotero,
+            obsidianSubdirectoryInput.value
+        );
+    }
+
+    async function browseObsidianVault() {
+        const picker = createObsidianVaultPicker();
+        if (!picker) return;
+        picker.init(
+            document.defaultView,
+            t('preferences.obsidian.vaultDialogTitle'),
+            picker.modeGetFolder
+        );
+        const result = await picker.show();
+        if (result === picker.returnCancel) return;
+        const selected = String(picker.file || '').trim();
+        if (!selected) return;
+        if (!await selectedObsidianVault(selected)) {
+            services?.prompt?.alert?.(
+                document.defaultView,
+                t('preferences.obsidian.vaultInvalidTitle'),
+                t('preferences.obsidian.vaultInvalid')
+            );
+            return;
+        }
+        if (obsidianVaultInput) obsidianVaultInput.value = selected;
+        setObsidianVaultPath(zotero, selected);
+    }
+
+    function createObsidianVaultPicker() {
+        if (typeof createFilePicker === 'function') return createFilePicker();
+        if (typeof ChromeUtils === 'undefined') return null;
+        const { FilePicker } = ChromeUtils.importESModule(
+            'chrome://zotero/content/modules/filePicker.mjs'
+        );
+        return typeof FilePicker === 'function' ? new FilePicker() : null;
+    }
+
+    async function selectedObsidianVault(vaultPath) {
+        if (typeof IOUtils === 'undefined' || typeof PathUtils === 'undefined') {
+            return true;
+        }
+        return Boolean(await IOUtils.exists(PathUtils.join(
+            vaultPath,
+            '.obsidian'
+        )));
     }
 
     function getSelectedConversionProvider() {
@@ -857,6 +936,7 @@ export function createPreferencesController({
             initializeReaderWidth();
             initializeReaderAlignment();
             initializeReaderSourcePeek();
+            initializeObsidianExport();
             await refresh();
         },
         destroy() {
@@ -933,6 +1013,14 @@ export function createPreferencesController({
             readerSourcePeekInput?.removeEventListener(
                 'change',
                 updateReaderSourcePeek
+            );
+            obsidianSubdirectoryInput?.removeEventListener(
+                'change',
+                updateObsidianSubdirectory
+            );
+            obsidianVaultBrowse?.removeEventListener(
+                'click',
+                browseObsidianVault
             );
             for (const tab of preferenceTabs()) {
                 tab.removeEventListener('click', handlePreferenceTabClick);
