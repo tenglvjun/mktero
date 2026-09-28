@@ -24,7 +24,11 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 常用链接：[产品介绍页](https://mktero.com/) ·
 [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest) ·
 [Discussions](https://github.com/tenglvjun/mktero/discussions) ·
-[Issues](https://github.com/tenglvjun/mktero/issues)
+[Issues](https://github.com/tenglvjun/mktero/issues) ·
+[Discord](https://discord.gg/F3Mjkv7ku) ·
+QQ 群 616518076
+
+<img src="./docs/assets/qq-group.png" width="180" alt="Mktero 用户群二维码，群号 616518076">
 
 ## 核心能力
 
@@ -112,7 +116,7 @@ npm run build
 ## 贡献
 
 欢迎提交 Pull Request。功能想法、阅读工作流和 Beta 反馈请前往
-[GitHub Discussions](https://github.com/tenglvjun/mktero/discussions)；确认且可复现的问题请提交到 [GitHub Issues](https://github.com/tenglvjun/mktero/issues)。修改运行时行为时，请运行上面的完整验证命令并为受影响的行为补充测试。请勿在 Issue、Pull Request 或日志中提交凭据、私密 PDF 或其他敏感信息。
+[GitHub Discussions](https://github.com/tenglvjun/mktero/discussions)；使用问题可在 QQ 中搜索群号 616518076，或加入 [Discord](https://discord.gg/F3Mjkv7ku)。确认且可复现的问题请提交到 [GitHub Issues](https://github.com/tenglvjun/mktero/issues)。修改运行时行为时，请运行上面的完整验证命令并为受影响的行为补充测试。请勿在 QQ 群、Discord、Issue、Pull Request 或日志中提交凭据、私密 PDF 或其他敏感信息。
 
 ## License
 
