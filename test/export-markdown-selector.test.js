@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.js';
+import {
+    selectExportMarkdown,
+    selectExportMarkdownView,
+} from '../src/markdown/export-markdown-selector.js';
 
 test('returns the original Markdown when no translation view is active', () => {
     const model = {
@@ -23,6 +26,7 @@ test('returns the translated Markdown in the translated reading view', () => {
         translationView: 'translated',
     };
     assert.equal(selectExportMarkdown(model), '# 论文\n\n译文段落。');
+    assert.equal(selectExportMarkdownView(model), 'translated');
 });
 
 test('returns the comparison Markdown in the bilingual comparison view', () => {

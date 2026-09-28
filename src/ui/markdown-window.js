@@ -101,6 +101,12 @@ const DOCUMENT_ACTION_FEEDBACK = Object.freeze({
         failure: 'viewer.markdownExportFailed',
         neutralStatus: 'cancelled',
     }),
+    exportObsidian: Object.freeze({
+        progress: 'viewer.obsidianExporting',
+        success: 'viewer.obsidianExported',
+        failure: 'viewer.obsidianExportFailed',
+        neutralStatus: 'cancelled',
+    }),
 });
 const WARNING_TOAST_TIMEOUT_MS = 5_000;
 const CORRECTION_UNDO_TIMEOUT_MS = 8_000;
@@ -1524,6 +1530,8 @@ class MarkdownTabView {
             saveSnapshotLabel: documentActions.saveSnapshotLabel,
             exportMarkdown: documentActions.exportMarkdown,
             exportMarkdownLabel: documentActions.exportMarkdownLabel,
+            exportObsidian: documentActions.exportObsidian,
+            exportObsidianLabel: documentActions.exportObsidianLabel,
             readerControls: documentActions.readerControls,
             readerFontSize: documentActions.readerFontSize,
             readerFontSizeLabel: documentActions.readerFontSizeLabel,
@@ -2213,6 +2221,27 @@ class MarkdownTabView {
             this.t('viewer.exportMarkdownShort')
         );
         exportMarkdown.appendChild(exportMarkdownLabel);
+        const exportObsidian = this.createElement('button', {
+            id: 'mktero-export-obsidian',
+            class: 'markdown-reader-action markdown-reader-action--child',
+            type: 'button',
+            'aria-label': this.t('viewer.exportObsidian'),
+            title: this.t('viewer.exportObsidian'),
+        });
+        exportObsidian.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.bookOpen,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        const exportObsidianLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-action-label' },
+            this.t('viewer.exportObsidianShort')
+        );
+        exportObsidian.appendChild(exportObsidianLabel);
         const citationGraphButton = this.createElement('button', {
             id: 'mktero-citation-graph',
             class: 'markdown-reader-action markdown-reader-action--child',
@@ -2241,6 +2270,7 @@ class MarkdownTabView {
         menu.appendChild(reparse);
         menu.appendChild(saveSnapshot);
         menu.appendChild(exportMarkdown);
+        menu.appendChild(exportObsidian);
         const status = this.createElement('span', {
             class: 'markdown-reader-action-status',
             'aria-live': 'polite',
@@ -2306,6 +2336,8 @@ class MarkdownTabView {
             saveSnapshotLabel,
             exportMarkdown,
             exportMarkdownLabel,
+            exportObsidian,
+            exportObsidianLabel,
             citationGraphButton,
             citationGraphLabel,
             githubRepos,
@@ -2609,6 +2641,11 @@ class MarkdownTabView {
                 ownerWindow: this.ownerWindow,
             });
         });
+        this.listen(this.elements.exportObsidian, 'click', () => {
+            this.runDocumentAction('exportObsidian', 'onExportObsidian', {
+                ownerWindow: this.ownerWindow,
+            });
+        });
         this.listen(this.elements.citationGraphButton, 'click', () => {
             this.openCitationGraph();
         });
@@ -2878,6 +2915,7 @@ class MarkdownTabView {
             openWarningSettings: this.elements.warningSettings,
             saveSnapshot: this.elements.saveSnapshot,
             exportMarkdown: this.elements.exportMarkdown,
+            exportObsidian: this.elements.exportObsidian,
         }[kind];
         if (!button || button.disabled
             || this.documentActionBusy
@@ -4336,6 +4374,17 @@ class MarkdownTabView {
         this.elements.exportMarkdownLabel.textContent = this.t(
             'viewer.exportMarkdownShort'
         );
+        this.elements.exportObsidian.setAttribute(
+            'aria-label',
+            this.t('viewer.exportObsidian')
+        );
+        this.elements.exportObsidian.setAttribute(
+            'title',
+            this.t('viewer.exportObsidian')
+        );
+        this.elements.exportObsidianLabel.textContent = this.t(
+            'viewer.exportObsidianShort'
+        );
         const correctionLabel = this.t(this.model.correctionMode
             ? 'revision.finish'
             : 'revision.start');
@@ -4525,6 +4574,10 @@ class MarkdownTabView {
             && model.renderMode !== 'html'
             && typeof model.onExportMarkdown === 'function'
             && !figureRestorationPending;
+        const obsidianAvailable = model.status === 'ready'
+            && model.renderMode !== 'html'
+            && typeof model.onExportObsidian === 'function'
+            && !figureRestorationPending;
         const correctionAvailable = model.status === 'ready'
             && model.renderMode !== 'html'
             && Array.isArray(model.editableBlocks)
@@ -4543,6 +4596,7 @@ class MarkdownTabView {
         const documentActionsAvailable = reparseAvailable
             || saveAvailable
             || exportAvailable
+            || obsidianAvailable
             || correctionAvailable
             || restoreAvailable
             || translationAvailable
@@ -4572,6 +4626,7 @@ class MarkdownTabView {
         this.elements.reparse.hidden = !reparseAvailable;
         this.elements.saveSnapshot.hidden = !saveAvailable;
         this.elements.exportMarkdown.hidden = !exportAvailable;
+        this.elements.exportObsidian.hidden = !obsidianAvailable;
         this.elements.correctionToggle.hidden = !correctionAvailable;
         if (!translationAvailable) {
             this.elements.translationProgress.hidden = true;
@@ -4596,10 +4651,14 @@ class MarkdownTabView {
         this.elements.exportMarkdown.disabled = !exportAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
+        this.elements.exportObsidian.disabled = !obsidianAvailable
+            || loadingView.visible
+            || Boolean(this.documentActionBusy);
         if (figureRestorationPending) {
             const pendingLabel = this.t('viewer.figureRestorationPending');
             this.elements.saveSnapshot.setAttribute('title', pendingLabel);
             this.elements.exportMarkdown.setAttribute('title', pendingLabel);
+            this.elements.exportObsidian.setAttribute('title', pendingLabel);
         }
         this.elements.correctionToggle.disabled = !correctionAvailable
             || loadingView.visible
@@ -4707,6 +4766,15 @@ class MarkdownTabView {
         this.elements.exportMarkdown.classList.toggle(
             'is-exporting',
             exporting
+        );
+        const exportingObsidian = this.documentActionBusy === 'exportObsidian';
+        this.elements.exportObsidian.setAttribute(
+            'aria-busy',
+            String(exportingObsidian)
+        );
+        this.elements.exportObsidian.classList.toggle(
+            'is-exporting',
+            exportingObsidian
         );
         if (!documentActionsAvailable) {
             this.documentActionsOpen = false;
@@ -5166,6 +5234,7 @@ class MarkdownTabView {
         this.elements.reparse.setAttribute('tabindex', menuTabIndex);
         this.elements.saveSnapshot.setAttribute('tabindex', menuTabIndex);
         this.elements.exportMarkdown.setAttribute('tabindex', menuTabIndex);
+        this.elements.exportObsidian.setAttribute('tabindex', menuTabIndex);
         this.elements.correctionToggle.setAttribute('tabindex', menuTabIndex);
         this.elements.retranslateDocument.setAttribute(
             'tabindex',

@@ -103,6 +103,7 @@ export class MarkdownTabPresenter {
         onOpenSettings,
         onSaveSnapshot,
         onExportMarkdown,
+        onExportObsidian,
         onSetCorrectionMode,
         onCommitCorrection,
         onRestoreCorrection,
@@ -168,6 +169,9 @@ export class MarkdownTabPresenter {
             }
             if (onExportMarkdown !== undefined) {
                 existing.model.onExportMarkdown = onExportMarkdown;
+            }
+            if (onExportObsidian !== undefined) {
+                existing.model.onExportObsidian = onExportObsidian;
             }
             if (onSetCorrectionMode !== undefined) {
                 existing.model.onSetCorrectionMode = onSetCorrectionMode;
@@ -289,6 +293,7 @@ export class MarkdownTabPresenter {
                 onOpenSettings,
                 onSaveSnapshot,
                 onExportMarkdown,
+                onExportObsidian,
                 onSetCorrectionMode,
                 onCommitCorrection,
                 onRestoreCorrection,
