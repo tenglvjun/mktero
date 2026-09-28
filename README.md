@@ -37,9 +37,9 @@ Useful links: [Product page](https://mktero.com/) ·
 - Rebuild figures from the local PDF when layout evidence, page coordinates,
   and Markdown ranges agree. Restoration runs in a background worker and
   replaces placeholders in place, so slow figures never block reading.
-- Hide publisher mastheads, repeated headers/footers, and page numbers, and
-  keep reliable page/region mappings so text, formulas, tables, and figures can
-  jump back to their PDF source.
+- Hide publisher mastheads, first-page copyright notices, repeated headers and
+  footers, and page numbers, and keep reliable page/region mappings so text,
+  formulas, tables, and figures can jump back to their PDF source.
 - Browse the outline or a figure/table index, preview citations, affiliations,
   figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
 - Display Zotero PDF highlights and underlines in Markdown, and create,
