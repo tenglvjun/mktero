@@ -458,3 +458,96 @@ test('replaces a stale toolbar action during a hot plugin update', () => {
     assert.equal(staleButton.isConnected, false);
     dispose();
 });
+
+test('offers a PDF selection jump only when Markdown is already readable', async () => {
+    const listeners = new Map();
+    const zotero = {
+        Reader: {
+            registerEventListener(type, handler) {
+                listeners.set(type, handler);
+            },
+            unregisterEventListener(type) {
+                listeners.delete(type);
+            },
+        },
+    };
+    const opened = [];
+    const dispose = registerReaderToolbar({
+        zotero,
+        pluginID: 'mktero@example.com',
+        onOpen: () => {},
+        isMarkdownReady: reader => reader.itemID === 42,
+        onOpenSelection: async (reader, annotation) => {
+            opened.push([reader.itemID, annotation.position.pageIndex]);
+        },
+    });
+    const ready = [];
+    const unread = [];
+    listeners.get('renderTextSelectionPopup')({
+        reader: { type: 'pdf', itemID: 42 },
+        doc: createDocument(),
+        params: { annotation: selectionAnnotation() },
+        append: element => ready.push(element),
+    });
+    listeners.get('renderTextSelectionPopup')({
+        reader: { type: 'pdf', itemID: 7 },
+        doc: createDocument(),
+        params: { annotation: selectionAnnotation() },
+        append: element => unread.push(element),
+    });
+    ready[0].click();
+    await Promise.resolve();
+
+    assert.equal(ready.length, 1);
+    assert.equal(ready[0].textContent, 'Open in Markdown');
+    assert.deepEqual(opened, [[42, 0]]);
+    assert.deepEqual(unread, []);
+    dispose();
+    assert.equal(listeners.has('renderTextSelectionPopup'), false);
+    assert.equal(listeners.has('renderToolbar'), false);
+});
+
+test('reports an unreliable PDF selection without leaving the reader popup', async () => {
+    let handler;
+    const zotero = {
+        Reader: {
+            registerEventListener(type, value) {
+                if (type === 'renderTextSelectionPopup') handler = value;
+            },
+            unregisterEventListener() {},
+        },
+    };
+    const notices = [];
+    registerReaderToolbar({
+        zotero,
+        pluginID: 'mktero@example.com',
+        onOpen: () => {},
+        isMarkdownReady: () => true,
+        onOpenSelection: async (_reader, _annotation, report) => {
+            report('No reliable paragraph');
+        },
+        onSelectionUnresolved: message => notices.push(message),
+    });
+    const appended = [];
+    handler({
+        reader: { type: 'pdf', itemID: 42 },
+        doc: createDocument(),
+        params: { annotation: selectionAnnotation() },
+        append: element => appended.push(element),
+    });
+    appended[0].click();
+    await Promise.resolve();
+
+    assert.equal(appended[0].textContent, 'No reliable paragraph');
+    assert.equal(appended[0].disabled, true);
+    assert.deepEqual(notices, []);
+});
+
+function selectionAnnotation() {
+    return {
+        position: {
+            pageIndex: 0,
+            rects: [[0, 0, 10, 10]],
+        },
+    };
+}

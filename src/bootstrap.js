@@ -71,7 +71,12 @@ import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
     collectMatchedAnnotationRanges,
     createMarkdownRevisionSessionRegistry,
+    snapshotStoredMarkdownRevision,
 } from './core/markdown-revision-session.js';
+import { selectionRevealChanges } from './core/markdown-selection-reveal.js';
+import {
+    revealPdfSelectionAsMarkdown,
+} from './ui/pdf-selection-markdown.js';
 import {
     createSavedMarkdownOpenResolver,
 } from './core/saved-markdown-open-resolver.js';
@@ -182,6 +187,8 @@ import {
 } from './platform/zotero-markdown-readiness-store.js';
 import {
     createZoteroSourceNavigation,
+    normalizedBBoxToPDFRect,
+    readerPageViewport,
 } from './platform/zotero-source-navigation.js';
 import {
     refreshMarkdownReadinessColumn,
@@ -287,6 +294,7 @@ const runtime = {
     annotationOverlayRefresher: null,
     localAnnotations: null,
     disposeToolbar: null,
+    pendingSelectionReveals: new Map(),
     contextMenus: new Map(),
     translationRequests: null,
     pdfIndexOperations: new PDFIndexOperationTracker(),
@@ -900,6 +908,7 @@ async function loadFigureWorkerSource(rootURI) {
 }
 
 globalThis.shutdown = function shutdown() {
+    runtime.pendingSelectionReveals?.clear();
     abortAllConversions();
     abortAllTranslations();
     destroyAllRevisionSessions();
@@ -1027,6 +1036,7 @@ async function openItemAsMarkdown(itemID, {
     const presentation = runtime.presenter.open(itemID, {
         sourceItemID: itemID,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
+            runtime.pendingSelectionReveals?.delete(itemID);
             releaseTabConversion(itemID, reason);
             void runtime.sourcePeekRenderer?.dispose(itemID);
             abortDocumentTranslations(itemID);
@@ -1477,15 +1487,20 @@ async function publishConversionResult(presentation, itemID, result, signal) {
     );
     if (presentation.closed || signal?.aborted) return;
     logFigureAssetSizes(`item ${itemID}: final`, readyResult);
+    const readyChanges = createConversionReadyChanges(
+        localizeConversionResult(readyResult, runtimeTranslate)
+    );
     runtime.presenter?.update(
         presentation,
-        createConversionReadyChanges(
-            localizeConversionResult(readyResult, runtimeTranslate)
-        )
+        {
+            ...readyChanges,
+            ...consumeSelectionRevealChanges(itemID, readyChanges),
+        }
     );
 }
 
 function publishConversionFailure(presentation, itemID, error, previousResult) {
+    runtime.pendingSelectionReveals?.delete(itemID);
     if (presentation.closed) return;
     Zotero.debug(
         `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
@@ -3337,6 +3352,9 @@ function registerReaderToolbarAction() {
         zotero: Zotero,
         pluginID: runtime.id,
         onOpen: openReaderAsMarkdown,
+        onOpenSelection: openPdfSelectionAsMarkdown,
+        isMarkdownReady: reader => itemHasReadableMarkdown(reader?.itemID),
+        onSelectionUnresolved: message => showSelectionNotice(message),
         onPDFReaderAvailable: reader => (
             runtime.localAnnotations?.synchronizePending(
                 reader.itemID,
@@ -3346,6 +3364,151 @@ function registerReaderToolbarAction() {
         onError: handleOpenError,
         translate: runtimeTranslate,
     });
+}
+
+async function openPdfSelectionAsMarkdown(reader, annotation, report) {
+    const result = await revealPdfSelectionAsMarkdown({
+        reader,
+        annotation,
+        loadSource: loadSelectionSource,
+        rectForBBox: (pageIndex, bbox) => normalizedBBoxToPDFRect(
+            bbox,
+            readerPageViewport(reader, pageIndex)
+        ),
+        queueReveal: queueSelectionReveal,
+        openMarkdown: async itemID => {
+            try {
+                await openItemAsMarkdown(itemID, {
+                    entryPoint: 'reader-selection',
+                });
+                return finishSelectionReveal(itemID);
+            }
+            catch (error) {
+                runtime.pendingSelectionReveals?.delete(itemID);
+                throw error;
+            }
+        },
+    });
+    if (result.status !== 'opened') {
+        report(runtimeTranslate('readerSelection.unresolved'));
+    }
+    return result;
+}
+
+function queueSelectionReveal(itemID, sourceRange) {
+    runtime.pendingSelectionReveals?.set(itemID, sourceRange);
+}
+
+function consumeSelectionRevealChanges(itemID, model) {
+    const sourceRange = runtime.pendingSelectionReveals?.get(itemID);
+    if (!sourceRange) return {};
+    runtime.pendingSelectionReveals.delete(itemID);
+    const target = selectionRevealChanges(model, sourceRange);
+    if (!target) return {};
+    return {
+        translationView: target.view,
+        revealMarkdownOffset: target.offset,
+        ...(Number.isSafeInteger(target.to) && target.to > target.offset
+            ? { revealMarkdownTo: target.to }
+            : {}),
+        ...(target.view !== 'original' ? { correctionMode: false } : {}),
+    };
+}
+
+function applyPendingSelectionReveal(itemID) {
+    const presentation = runtime.presenter?.get(itemID);
+    if (!presentation || presentation.closed) {
+        runtime.pendingSelectionReveals?.delete(itemID);
+        return false;
+    }
+    if (presentation.model?.status !== 'ready'
+        || presentation.model.renderMode === 'html') {
+        return false;
+    }
+    const changes = consumeSelectionRevealChanges(itemID, presentation.model);
+    if (!Object.keys(changes).length) return false;
+    runtime.presenter.update(presentation, changes);
+    return true;
+}
+
+function finishSelectionReveal(itemID) {
+    if (applyPendingSelectionReveal(itemID)) return true;
+    if (!runtime.pendingSelectionReveals?.has(itemID)) return true;
+    const presentation = runtime.presenter?.get(itemID);
+    if (presentation?.model?.status === 'ready') {
+        runtime.pendingSelectionReveals.delete(itemID);
+        return false;
+    }
+    return true;
+}
+
+async function loadSelectionSource(itemID) {
+    const presentation = runtime.presenter?.get(itemID);
+    const model = presentation?.model;
+    if (model?.status === 'ready'
+        && model.renderMode !== 'html'
+        && Array.isArray(model.sourceMap)
+        && typeof model.markdown === 'string') {
+        return {
+            markdown: model.markdown,
+            sourceMap: model.sourceMap,
+            documentLength: model.markdown.length,
+        };
+    }
+    const run = runtime.conversionRuns?.get?.(itemID);
+    if (run?.promise) {
+        try {
+            await run.promise;
+        }
+        catch {
+            return null;
+        }
+        return loadSelectionSource(itemID);
+    }
+    if (!itemHasReadableMarkdown(itemID) || !runtime.cache || !runtime.revisionStore) {
+        return null;
+    }
+    const item = Zotero.Items?.get?.(itemID) || await Zotero.Items?.getAsync?.(itemID);
+    const cacheKey = runtime.readiness?.cacheKeyFor?.(
+        readinessItem(item),
+        currentConversionParserProfile()
+    );
+    if (typeof cacheKey !== 'string') return null;
+    const cached = await runtime.cache.get(cacheKey);
+    if (!cached || typeof cached.markdown !== 'string' || !Array.isArray(cached.sourceMap)) {
+        return null;
+    }
+    const stored = await runtime.revisionStore.load(cacheKey);
+    if (!stored) {
+        return {
+            markdown: cached.markdown,
+            sourceMap: cached.sourceMap,
+            documentLength: cached.markdown.length,
+        };
+    }
+    try {
+        const corrected = snapshotStoredMarkdownRevision(stored, cacheKey);
+        if (typeof corrected.markdown !== 'string' || !Array.isArray(corrected.sourceMap)) {
+            return null;
+        }
+        return {
+            markdown: corrected.markdown,
+            sourceMap: corrected.sourceMap,
+            documentLength: corrected.markdown.length,
+        };
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        return null;
+    }
+}
+
+function showSelectionNotice(message) {
+    const progressWindow = new Zotero.ProgressWindow();
+    progressWindow.changeHeadline(runtimeTranslate('toolbar.openMarkdown'));
+    progressWindow.addDescription(message);
+    progressWindow.show();
+    progressWindow.startCloseTimer(4000);
 }
 
 function runtimeTranslate(key, variables) {

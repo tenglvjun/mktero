@@ -74,6 +74,10 @@ export async function openMarkdownRevisionSession({
     return new MarkdownRevisionSession({ revision, store, now });
 }
 
+export function snapshotStoredMarkdownRevision(stored, cacheKey) {
+    return materializeRevision(validateStoredRevision(stored, cacheKey));
+}
+
 export function createMarkdownRevisionSessionRegistry({
     openSession = openMarkdownRevisionSession,
 } = {}) {

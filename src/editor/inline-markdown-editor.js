@@ -49,6 +49,10 @@ import {
     createDocumentSearchHighlightExtension,
     setDocumentSearchHighlight,
 } from './document-search-highlight.js';
+import {
+    createSelectionFlashExtension,
+    setSelectionFlash,
+} from './selection-flash.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const editorNavigationMeasureKey = {};
@@ -242,6 +246,7 @@ export function createInlineMarkdownEditor({
     let stalledViewportRepairFrame = null;
     let correctionViewportFallbackEnabled = false;
     let translationHighlightTimer = null;
+    let selectionFlashTimer = null;
     let citationReturnPoint = null;
     let citationReturnAvailable = false;
     const setCitationReturnAvailable = available => {
@@ -539,6 +544,7 @@ export function createInlineMarkdownEditor({
                     ...historyKeymap,
                 ]),
                 createDocumentSearchHighlightExtension(),
+                createSelectionFlashExtension(),
                 EditorView.lineWrapping,
                 EditorView.updateListener.of(update => {
                     const correctingDocument = update.docChanged
@@ -1096,6 +1102,26 @@ export function createInlineMarkdownEditor({
             });
         },
         returnToCitation,
+        flashRange(from, to) {
+            activateDOMGlobals(ownerWindow);
+            if (selectionFlashTimer !== null) {
+                ownerWindow.clearTimeout?.(selectionFlashTimer);
+                selectionFlashTimer = null;
+            }
+            const length = view.state.doc.length;
+            const start = Math.max(0, Math.trunc(Number(from) || 0));
+            const end = Math.min(length, Math.trunc(Number(to) || 0));
+            if (end <= start) return;
+            view.dispatch({
+                effects: setSelectionFlash.of({ from: start, to: end }),
+            });
+            if (typeof ownerWindow.setTimeout !== 'function') return;
+            selectionFlashTimer = ownerWindow.setTimeout(() => {
+                selectionFlashTimer = null;
+                if (destroyed) return;
+                view.dispatch({ effects: setSelectionFlash.of(null) });
+            }, 1200);
+        },
         highlightTranslationBlock(blockID) {
             activateDOMGlobals(ownerWindow);
             if (translationHighlightTimer !== null) {
@@ -1123,6 +1149,10 @@ export function createInlineMarkdownEditor({
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            if (selectionFlashTimer !== null) {
+                ownerWindow.clearTimeout?.(selectionFlashTimer);
+                selectionFlashTimer = null;
+            }
             activateDOMGlobals(ownerWindow);
             try {
                 for (const feature of referenceFeatureList) {

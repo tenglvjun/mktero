@@ -59,6 +59,11 @@ export function createZoteroSourceNavigation(zotero, {
     };
 }
 
+export function readerPageViewport(reader, pageIndex) {
+    const view = reader?._internalReader?._primaryView || reader?._primaryView;
+    return pageViewport(view, pageIndex);
+}
+
 export function normalizedBBoxToPDFRect(bbox, viewport) {
     if (!isValidNormalizedSourceBBox(bbox)
         || !Number.isFinite(viewport?.width)

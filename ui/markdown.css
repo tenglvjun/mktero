@@ -2847,6 +2847,19 @@ main {
     outline-offset: 2px;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-selection-flash {
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--accent) 48%, transparent);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    animation: mktero-selection-flash 1.1s ease-in-out;
+}
+
+@keyframes mktero-selection-flash {
+    0%, 42% { background: color-mix(in srgb, var(--accent) 62%, transparent); }
+    18%, 64%, 100% { background: transparent; }
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-reference-highlight {
     border-radius: 4px;
     background: color-mix(in srgb, var(--accent) 20%, transparent);
@@ -4644,7 +4657,8 @@ main {
     .markdown-editor-host > .cm-editor .cm-mktero-translation-pair {
         transition: none;
     }
-    .markdown-editor-host > .cm-editor .cm-mktero-reference-highlight {
+    .markdown-editor-host > .cm-editor .cm-mktero-reference-highlight,
+    .markdown-editor-host > .cm-editor .cm-mktero-selection-flash {
         animation: none;
     }
 }
