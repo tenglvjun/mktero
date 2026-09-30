@@ -203,8 +203,7 @@ test('scrolls once to a requested Markdown passage', () => {
         assert.equal('revealMarkdownOffset' in model, false);
         assert.equal('revealMarkdownTo' in model, false);
         view.render(model);
-        // A later render re-asserts the same visible line instead of moving away.
-        assert.equal(scrolled.every(offset => offset === 9), true);
+        assert.deepEqual(scrolled, [9]);
         assert.deepEqual(flashed, [[9, 28]]);
     }
     finally {
@@ -4819,15 +4818,7 @@ test('restores the current Markdown position after a reparse replaces the docume
             unmatched: [],
         },
     });
-    // An annotation refresh re-asserts the same visible line, so the reader
-    // never loses the section the conversion key change took it to.
-    assert.equal(
-        scrolledOffsets.length > 0
-            && scrolledOffsets.every(offset => (
-                offset === replacementMarkdown.indexOf('New methods.')
-            )),
-        true
-    );
+    assert.deepEqual(scrolledOffsets, [replacementMarkdown.indexOf('New methods.')]);
     view.destroy();
 });
 
@@ -4896,59 +4887,6 @@ test('keeps the saved reading position as the model restore target', () => {
 
     assert.equal(anchors.length, 1);
     assert.equal(model.restoreReadingOffset, anchors[0].offset);
-    view.destroy();
-});
-
-test('keeps the visible line when only annotations change', () => {
-    const markdown = [
-        '# Overview',
-        '',
-        'Hello.',
-        '',
-        '# Methods',
-        '',
-        'Method text.',
-    ].join('\n');
-    const restoreReadingOffset = markdown.indexOf('Method text.');
-    const scrolledOffsets = [];
-    const model = createModel({
-        status: 'ready',
-        progress: 100,
-        markdown,
-        cacheKey: 'b'.repeat(64),
-        sourceKind: 'markdown',
-        restoreReadingOffset,
-    });
-    const { view } = createView(model, {}, {
-        editorFactory(options) {
-            const editor = createTestInlineEditor(options);
-            editor.scrollToOffset = offset => scrolledOffsets.push(offset);
-            return editor;
-        },
-    });
-    assert.deepEqual(scrolledOffsets, [restoreReadingOffset]);
-    scrolledOffsets.length = 0;
-    const from = markdown.indexOf('Hello.');
-
-    view.render({
-        ...model,
-        annotationOverlay: {
-            matched: [{
-                id: 'NOTE0001',
-                type: 'highlight',
-                text: 'Hello.',
-                comment: '',
-                color: '#ffd400',
-                pageLabel: '1',
-                ranges: [{ from, to: from + 'Hello.'.length }],
-            }],
-            unmatched: [],
-        },
-    });
-
-    // The same visible line is restored, so a rebuilt widget cannot move the
-    // reader away from where the annotation lives.
-    assert.deepEqual(scrolledOffsets, [restoreReadingOffset]);
     view.destroy();
 });
 

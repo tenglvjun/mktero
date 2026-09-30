@@ -791,7 +791,6 @@ class MarkdownTabView {
             this.renderedMarkdown = markdown;
             this.renderedSourceMap = sourceMap;
             this.renderedRenderMode = 'markdown';
-            this.renderedAnnotationKey = annotationOverlayKey(annotationOverlay);
             this.renderedTranslationView = translationViewName(
                 translatedView,
                 comparisonView
@@ -823,20 +822,10 @@ class MarkdownTabView {
             );
             this.renderedCacheKey = nextCacheKey;
             // Annotation-only updates republish the same document. Rebuilding
-            // the rendered widgets can move the viewport, so keep the visible
-            // line where the reader left it unless the render asks to move.
             // A republished result can carry a new cache key for the very same
             // document. There is nothing to restore in that case: the reader is
             // already looking at the content, and re-applying the saved position
             // (or scrolling to the top) would move the view for no reason.
-            const preserveViewportOffset = !documentChanged
-                && !translationAnchor
-                && !restoreAnchor
-                && Number.isFinite(this.activeNavigationOffset)
-                && this.activeNavigationOffset > 0
-                && !Number.isFinite(Number(model.revealMarkdownOffset))
-                ? this.activeNavigationOffset
-                : null;
             if (conversionIdentityChanged) {
                 this.lastPersistedReadingSignature = '';
                 if (!documentChanged) {
@@ -870,9 +859,6 @@ class MarkdownTabView {
                 this.didRestorePersistedPosition = true;
             }
             this.revealRequestedMarkdown();
-            if (preserveViewportOffset !== null) {
-                this.restoreReadingPosition(preserveViewportOffset);
-            }
             if (this.documentSearchOpen) {
                 this.runDocumentSearch({
                     keepIndex: true,
@@ -6577,18 +6563,6 @@ function firstAnnotationOffset(annotation, markdownLength) {
         }
     }
     return null;
-}
-
-function annotationOverlayKey(annotationOverlay) {
-    try {
-        return JSON.stringify([
-            annotationOverlay?.matched || [],
-            annotationOverlay?.unmatched || [],
-        ]);
-    }
-    catch {
-        return null;
-    }
 }
 
 function isAnnotationEntry(annotation) {
