@@ -2084,6 +2084,45 @@ test('renders PDF annotations inside an academic figure caption', () => {
     dom.window.close();
 });
 
+test('keeps one highlight across a caption formula and its following prose', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '![Figure 2. Established, that is $Y=D(X)$ is the maximum of D.](images/figure.png)';
+    const from = markdown.indexOf('Established');
+    const to = markdown.indexOf('](images/figure.png)');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => 'blob:mktero-figure',
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'MATH0003',
+                type: 'highlight',
+                text: 'Established, that is Y=D(X) is the maximum of D.',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from, to }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const rendered = document.querySelectorAll('.cm-mktero-pdf-annotation');
+    assert.equal(rendered.length, 1);
+    assert.match(rendered[0].textContent, /Y=D\(X\)/);
+    assert.match(rendered[0].textContent, /maximum of D\.$/);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('normalizes PDF annotation whitespace inside rendered widgets', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

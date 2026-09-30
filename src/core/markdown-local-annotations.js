@@ -16,7 +16,10 @@ import {
     createPdfAnnotationTextIndex,
     normalizePdfAnnotationText,
 } from '../markdown/pdf-annotation-text.js';
-import { resolvePDFPageIndexHint } from './markdown-source-map.js';
+import {
+    resolvePDFPageIndexHint,
+    resolveSourceMapRegion,
+} from './markdown-source-map.js';
 
 const DEFAULT_ANNOTATION_COLOR = '#ffd400';
 const MARKDOWN_ANNOTATION_CONTEXT_CODE_POINTS
@@ -368,6 +371,7 @@ export class MarkdownLocalAnnotations {
                 ...(annotation.pdfPageIndexHint === undefined
                     ? {}
                     : { pdfPageIndexHint: annotation.pdfPageIndexHint }),
+                ...(annotation.pdfRegion ? { pdfRegion: annotation.pdfRegion } : {}),
                 ...(annotation.textQuote
                     ? { textQuote: annotation.textQuote }
                     : {}),
@@ -721,6 +725,7 @@ function sameAnnotation(left, right) {
         && left.comment === right.comment
         && left.color === right.color
         && left.pdfPageIndexHint === right.pdfPageIndexHint
+        && samePDFRegion(left.pdfRegion, right.pdfRegion)
         && sameTextQuote(left.textQuote, right.textQuote)
         && left.ranges[0].from === right.ranges[0].from
         && left.ranges[0].to === right.ranges[0].to;
@@ -746,6 +751,7 @@ function normalizeAnnotation(value) {
     const color = String(value?.color || DEFAULT_ANNOTATION_COLOR).toLowerCase();
     const range = value?.ranges?.[0];
     const pdfPageIndexHint = value?.pdfPageIndexHint;
+    const pdfRegion = normalizePDFRegion(value?.pdfRegion);
     let textQuote;
     try {
         textQuote = normalizePDFAnnotationTextQuote(value?.textQuote);
@@ -763,6 +769,7 @@ function normalizeAnnotation(value) {
         || (pdfPageIndexHint !== undefined
             && (!Number.isSafeInteger(pdfPageIndexHint)
                 || pdfPageIndexHint < 0))
+        || (value?.pdfRegion !== undefined && !pdfRegion)
         || !validRange(range)) {
         throw new Error('Invalid Markdown annotation');
     }
@@ -775,8 +782,32 @@ function normalizeAnnotation(value) {
         color,
         ranges: [{ from: range.from, to: range.to }],
         ...(pdfPageIndexHint === undefined ? {} : { pdfPageIndexHint }),
+        ...(pdfRegion ? { pdfRegion } : {}),
         ...(textQuote ? { textQuote } : {}),
     };
+}
+
+function normalizePDFRegion(value) {
+    if (value === undefined || value === null) return null;
+    const pageIndex = value?.pageIndex;
+    const bbox = value?.bbox;
+    if (!Number.isSafeInteger(pageIndex) || pageIndex < 0) return null;
+    if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+    if (!bbox.every(coordinate => (
+        Number.isFinite(coordinate)
+        && coordinate >= 0
+        && coordinate <= 1000
+    ))) {
+        return null;
+    }
+    if (bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) return null;
+    return { pageIndex, bbox: [...bbox] };
+}
+
+function samePDFRegion(left, right) {
+    if (!left || !right) return !left === !right;
+    return left.pageIndex === right.pageIndex
+        && left.bbox.every((value, index) => value === right.bbox[index]);
 }
 
 function normalizeRangeMappings(mappings, documentLength) {
@@ -833,10 +864,13 @@ function refreshAnnotationAnchors(
         }
         if (!Array.isArray(sourceMap)) return refreshed;
         if (remainingWork < sourceMap.length) {
-            if (refreshed.pdfPageIndexHint === undefined) return refreshed;
+            if (refreshed.pdfPageIndexHint === undefined
+                && refreshed.pdfRegion === undefined) {
+                return refreshed;
+            }
             changed = true;
             changedIDs.add(annotation.id);
-            return annotationWithoutPDFPageIndexHint(refreshed);
+            return annotationWithoutPDFAnchors(refreshed);
         }
         remainingWork -= sourceMap.length;
         const pdfPageIndexHint = resolvePDFPageIndexHint(
@@ -844,14 +878,24 @@ function refreshAnnotationAnchors(
             range,
             markdown.length
         );
+        const pdfRegion = resolveSourceMapRegion(
+            sourceMap,
+            range,
+            markdown.length
+        );
         const currentHint = refreshed.pdfPageIndexHint ?? null;
-        if (pdfPageIndexHint === currentHint) return refreshed;
+        if (pdfPageIndexHint === currentHint
+            && samePDFRegion(refreshed.pdfRegion, pdfRegion)) {
+            return refreshed;
+        }
         changed = true;
         changedIDs.add(annotation.id);
-        const withoutHint = annotationWithoutPDFPageIndexHint(refreshed);
-        refreshed = pdfPageIndexHint === null
-            ? withoutHint
-            : { ...withoutHint, pdfPageIndexHint };
+        const withoutAnchors = annotationWithoutPDFAnchors(refreshed);
+        refreshed = {
+            ...withoutAnchors,
+            ...(pdfPageIndexHint === null ? {} : { pdfPageIndexHint }),
+            ...(pdfRegion ? { pdfRegion } : {}),
+        };
         return refreshed;
     });
     return {
@@ -872,20 +916,25 @@ function refreshAnnotationTextQuote(annotation, range, visible) {
 
 function applyRefreshedAnnotationAnchors(annotation, current) {
     const withoutAnchors = annotationWithoutTextQuote(
-        annotationWithoutPDFPageIndexHint(annotation)
+        annotationWithoutPDFAnchors(annotation)
     );
     return {
         ...withoutAnchors,
         ...(current?.pdfPageIndexHint === undefined
             ? {}
             : { pdfPageIndexHint: current.pdfPageIndexHint }),
+        ...(current?.pdfRegion ? { pdfRegion: current.pdfRegion } : {}),
         ...(current?.textQuote ? { textQuote: current.textQuote } : {}),
     };
 }
 
-function annotationWithoutPDFPageIndexHint(annotation) {
-    const { pdfPageIndexHint: _staleHint, ...withoutHint } = annotation;
-    return withoutHint;
+function annotationWithoutPDFAnchors(annotation) {
+    const {
+        pdfPageIndexHint: _staleHint,
+        pdfRegion: _staleRegion,
+        ...withoutAnchors
+    } = annotation;
+    return withoutAnchors;
 }
 
 function annotationWithoutTextQuote(annotation) {

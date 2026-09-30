@@ -22,6 +22,10 @@
   paragraph and no source region overlaps it. Ambiguous, repeated, uncached,
   or unscannable text stays in the PDF and does not start a conversion.
   Zotero supplies at most two pages of selection geometry.
+- Markdown selections are matched against the PDF's own text layer. A passage
+  that extraction mangles beyond the tolerated edit budget, a scanned page
+  without a text layer, and a repeated passage that no context can separate
+  stay in Markdown as a local annotation and can be retried.
 - Mktero displays text highlights and underlines, not standalone notes,
   image/area annotations, or ink annotations.
 - Markdown images are limited to supported GIF, JPEG, PNG, and WebP files from

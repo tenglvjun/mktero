@@ -4853,6 +4853,43 @@ test('restores a persisted Markdown reading offset when the document first becom
     view.destroy();
 });
 
+test('keeps the saved reading position as the model restore target', () => {
+    const markdown = [
+        '# Overview',
+        '',
+        'Hello.',
+        '',
+        '# Methods',
+        '',
+        'Method text.',
+    ].join('\n');
+    const anchors = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        cacheKey: 'b'.repeat(64),
+        sourceKind: 'markdown',
+        onReadingPositionChange: anchor => {
+            anchors.push(anchor);
+        },
+    });
+    const { view } = createView(model, {}, {
+        readingPositionDelay: 0,
+        editorFactory(options) {
+            editorOptions = options;
+            return createTestInlineEditor(options);
+        },
+    });
+
+    editorOptions.onViewportChange(markdown.indexOf('Method text.'));
+
+    assert.equal(anchors.length, 1);
+    assert.equal(model.restoreReadingOffset, anchors[0].offset);
+    view.destroy();
+});
+
 test('starts from the beginning when the conversion key changes', () => {
     const initialMarkdown = [
         '# Overview',

@@ -1,4 +1,5 @@
 import {
+    createAbbreviationFoldedPdfAnnotationTextIndex,
     createDehyphenatedPdfAnnotationTextIndex,
     createHyphenFoldedPdfAnnotationTextIndex,
     createHyphenPreservingPdfAnnotationTextIndex,
@@ -6,6 +7,7 @@ import {
     normalizePdfAnnotationText,
 } from '../markdown/pdf-annotation-text.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
+import { isValidNormalizedSourceBBox } from '../core/markdown-source-map.js';
 import { sha256Hex } from '../core/sha256.js';
 import {
     leadingCodePoints,
@@ -17,6 +19,24 @@ import {
 const MAX_MATCHES = 10_000;
 const MIN_GLYPH_FALLBACK_TEXT_LENGTH = 32;
 const MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH = 12;
+const MIN_PROSE_FRAGMENT_LENGTH = 12;
+const MAX_MISENCODED_CITATION_GAP = 32;
+const MIN_PAGE_BREAK_MATCH_LENGTH = 24;
+const MIN_PAGE_BREAK_PART_LENGTH = 12;
+const PAGE_BREAK_ANCHOR_LENGTH = 12;
+// The journal watermark sits in the last stretch of the page, so a part that
+// stopped there marks a page break rather than a mismatch.
+const PAGE_BREAK_CHROME_WINDOW = 240;
+const MAX_PAGE_BREAK_PAGE_DISTANCE = 3;
+const MAX_PAGE_BREAK_STARTS = 16;
+const MIN_DIFF_MATCH_LENGTH = 48;
+const MAX_DIFF_MATCH_LENGTH = 1_000;
+const DIFF_ANCHOR_LENGTH = 24;
+const MAX_DIFF_EDIT_RATIO = 0.04;
+const MAX_DIFF_EDITS = 12;
+const MAX_DIFF_CANDIDATES = 200;
+const MAX_DIFF_LONG_CANDIDATES = 8;
+const DIFF_LONG_TEXT_LENGTH = 400;
 const MIN_REPEATED_PAGE_HEADER_LENGTH = 20;
 const MISENCODED_PLUS_MINUS = /§(?=\d)/gu;
 const PLUS_MINUS_NUMBER = /±(?=\d)/u;
@@ -113,6 +133,7 @@ export class PDFAnnotationLocator {
             try {
                 return locateInIndex(entry.index, text, {
                     pdfPageIndexHint: options.pdfPageIndexHint,
+                    pdfRegion: options.pdfRegion,
                     textQuote: options.textQuote,
                     measureText: this.measureText,
                 });
@@ -287,6 +308,7 @@ export async function createPDFTextIndexCacheKey(sourceHash, profile) {
 
 function locateInIndex(index, text, {
     pdfPageIndexHint,
+    pdfRegion,
     textQuote,
     measureText,
 }) {
@@ -365,7 +387,16 @@ function locateInIndex(index, text, {
         }
         if (located) break;
     }
-    if (!located) throw notFoundError();
+    if (!located) {
+        // A paragraph can continue several pages later, so this fallback always
+        // searches the whole document instead of the hinted page.
+        located = findPageBreakMatch(index.pages, target, value => value);
+    }
+    if (!located) {
+        const regionLocated = locatePDFRegion(index, pdfRegion, selectedText);
+        if (regionLocated) return regionLocated;
+        throw notFoundError();
+    }
     if (located.segments) {
         const segments = locateCrossPageSegments(
             located.segments,
@@ -402,6 +433,65 @@ function locateInIndex(index, text, {
     };
 }
 
+// Display equations rarely survive the PDF text layer intact, so when every
+// text strategy fails, fall back to the OCR region recorded for the block the
+// selection covers.
+function locatePDFRegion(index, region, text) {
+    if (!region
+        || !Number.isSafeInteger(region.pageIndex)
+        || region.pageIndex < 0
+        || !isValidNormalizedSourceBBox(region.bbox)) {
+        return null;
+    }
+    const page = index.pages.find(candidate => (
+        candidate.pageIndex === region.pageIndex
+    ));
+    if (!page) return null;
+    const rect = normalizedBBoxToPageRect(page, region.bbox);
+    if (!rect) return null;
+    return {
+        text,
+        pageLabel: page.pageLabel,
+        sortIndex: createSortIndex(page, 0, rect),
+        position: {
+            pageIndex: page.pageIndex,
+            rects: [rect],
+        },
+    };
+}
+
+function normalizedBBoxToPageRect(page, bbox) {
+    const viewport = page?.viewport;
+    if (!isValidNormalizedSourceBBox(bbox)
+        || !Array.isArray(viewport?.transform)
+        || !Number.isFinite(viewport.width)
+        || viewport.width <= 0
+        || !Number.isFinite(viewport.height)
+        || viewport.height <= 0) {
+        return null;
+    }
+    const left = bbox[0] * viewport.width / 1000;
+    const top = bbox[1] * viewport.height / 1000;
+    const right = bbox[2] * viewport.width / 1000;
+    const bottom = bbox[3] * viewport.height / 1000;
+    const corners = [
+        [left, top],
+        [right, top],
+        [right, bottom],
+        [left, bottom],
+    ].map(point => inverseTransformPoint(viewport.transform, point));
+    if (!corners.every(point => point.every(Number.isFinite))) return null;
+    const xs = corners.map(point => point[0]);
+    const ys = corners.map(point => point[1]);
+    const rect = [
+        Math.min(...xs),
+        Math.min(...ys),
+        Math.max(...xs),
+        Math.max(...ys),
+    ];
+    return rect[2] > rect[0] && rect[3] > rect[1] ? rect : null;
+}
+
 function findMatchWithTextStrategies(
     pages,
     target,
@@ -434,7 +524,482 @@ function findMatchWithTextStrategies(
         target,
         textQuote,
         transformText
+    ) || findAbbreviationSpacingMatch(
+        pages,
+        target,
+        textQuote,
+        transformText
+    ) || findMisencodedCitationMatch(
+        pages,
+        target,
+        textQuote,
+        transformText
+    ) || findBoundedDiffMatch(
+        pages,
+        target,
+        textQuote,
+        transformText
     );
+}
+
+// A paragraph can continue on a later page: an intervening full-page figure and
+// the journal watermark keep the two halves from ever appearing as one string.
+// Splitting the selection at a word boundary and matching both halves keeps the
+// passage locatable as a per-page highlight.
+function findPageBreakMatch(pages, target) {
+    if (target.length < MIN_PAGE_BREAK_MATCH_LENGTH) return null;
+    for (const strategy of basicTextMatchStrategies()) {
+        const texts = pages.map(page => strategy.normalizedTextForPage(page));
+        const parts = pageBreakSegments(pages, texts, target);
+        if (!parts) continue;
+        const firstPage = pages[parts[0].pageIndex];
+        const sourceIndex = strategy.createSourceIndex(firstPage.rawText);
+        return {
+            segments: [{
+                page: firstPage,
+                sourceRange: sourceIndex.sourceRange(
+                    parts[0].at,
+                    parts[0].length
+                ),
+            }, parts[1]],
+        };
+    }
+    return null;
+}
+
+function pageBreakSegments(pages, texts, target) {
+    const starts = pageBreakStartCandidates(texts, target);
+    if (!starts) return null;
+    const walks = [];
+    for (const start of starts) {
+        const parts = walkPageBreakSegments(pages, texts, target, start);
+        if (parts) walks.push(parts);
+    }
+    return walks.length === 1 ? walks[0] : null;
+}
+
+// The opening words are short enough to repeat across a paper, so every
+// candidate start is walked and only a unique complete path is accepted.
+function pageBreakStartCandidates(texts, target) {
+    const anchor = target.slice(0, PAGE_BREAK_ANCHOR_LENGTH);
+    const starts = [];
+    for (let index = 0; index < texts.length; index += 1) {
+        const at = texts[index].indexOf(anchor);
+        if (at < 0) continue;
+        if (texts[index].indexOf(anchor, at + 1) >= 0) continue;
+        starts.push({ pageIndex: index, at });
+        if (starts.length > MAX_PAGE_BREAK_STARTS) return null;
+    }
+    return starts.length ? starts : null;
+}
+
+// The opening part is aligned exactly; when it stops inside the page's last
+// stretch (the watermark), the rest of the passage is looked up a page or two
+// later with the same tolerant matching used elsewhere.
+function walkPageBreakSegments(pages, texts, target, start) {
+    const text = texts[start.pageIndex];
+    const firstLength = commonPrefixLength(text.slice(start.at), target);
+    if (firstLength < Math.min(MIN_PAGE_BREAK_PART_LENGTH, target.length)) {
+        return null;
+    }
+    if (firstLength >= target.length) return null;
+    if (text.length - (start.at + firstLength) > PAGE_BREAK_CHROME_WINDOW) {
+        return null;
+    }
+    const remainder = target.slice(firstLength).replace(/^\s+/u, '');
+    const from = start.pageIndex + 1;
+    const tail = pages.slice(from, from + MAX_PAGE_BREAK_PAGE_DISTANCE);
+    if (!tail.length) return null;
+    const second = findRemainderSegment(tail, remainder);
+    if (!second) return null;
+    return [
+        { pageIndex: start.pageIndex, at: start.at, length: firstLength },
+        second,
+    ];
+}
+
+function findRemainderSegment(tail, remainder) {
+    if (!remainder) return null;
+    for (const strategy of basicTextMatchStrategies()) {
+        const matches = [];
+        for (const page of tail) {
+            const occurrences = findTextOccurrences(
+                strategy.normalizedTextForPage(page),
+                remainder,
+                MAX_MATCHES
+            );
+            if (occurrences.truncated || occurrences.offsets.length > 1) {
+                return null;
+            }
+            if (!occurrences.offsets.length) continue;
+            const sourceIndex = strategy.createSourceIndex(page.rawText);
+            matches.push({
+                page,
+                sourceRange: sourceIndex.sourceRange(
+                    occurrences.offsets[0],
+                    remainder.length
+                ),
+            });
+        }
+        if (matches.length === 1) return matches[0];
+        if (matches.length > 1) return null;
+    }
+    // A mangled citation or hyphen inside the rest still matches tolerantly.
+    const tolerant = findBoundedDiffMatch(tail, remainder, null, value => value);
+    return tolerant
+        ? { page: tolerant.match.page, sourceRange: tolerant.sourceRange }
+        : null;
+}
+
+// The PDF text layer mangles math glyphs (for example "q(t)=0" becomes
+// "q(?)=0" and "t<=N" becomes "t <,N"). Anchoring on the surrounding prose and
+// allowing a small edit budget keeps such a passage locatable without turning
+// the lookup into an unconstrained fuzzy search.
+function findBoundedDiffMatch(pages, target, textQuote, transformText) {
+    if (target.length < MIN_DIFF_MATCH_LENGTH
+        || target.length > MAX_DIFF_MATCH_LENGTH) {
+        return null;
+    }
+    const maxEdits = Math.max(2, Math.min(
+        MAX_DIFF_EDITS,
+        Math.floor(target.length * MAX_DIFF_EDIT_RATIO)
+    ));
+    for (const strategy of basicTextMatchStrategies()) {
+        const normalizedTextQuote = mapTextQuote(textQuote, value => (
+            transformText(strategy.createSourceIndex(value).text.trim())
+        ));
+        const candidates = [];
+        let overflowed = false;
+        for (const page of pages) {
+            const normalizedText = transformText(
+                strategy.normalizedTextForPage(page)
+            );
+            const found = diffCandidates(
+                normalizedText,
+                target,
+                maxEdits
+            );
+            if (found === null) {
+                overflowed = true;
+                break;
+            }
+            for (const candidate of found) {
+                candidates.push({
+                    page,
+                    normalizedFrom: candidate.from,
+                    normalizedText,
+                    normalizedLength: candidate.to - candidate.from,
+                    distance: candidate.distance,
+                });
+            }
+        }
+        if (overflowed || !candidates.length) continue;
+        const best = Math.min(...candidates.map(item => item.distance));
+        const winners = candidates.filter(item => item.distance === best);
+        const match = winners.length === 1
+            ? winners[0]
+            : findUniqueContextualMatch(
+                winners,
+                target.length,
+                normalizedTextQuote
+            );
+        if (!match) continue;
+        const sourceIndex = strategy.createSourceIndex(match.page.rawText);
+        return {
+            match,
+            sourceRange: sourceIndex.sourceRange(
+                match.normalizedFrom,
+                match.normalizedLength
+            ),
+        };
+    }
+    return null;
+}
+
+// The mangled span can sit anywhere in the selection, so the anchor is the
+// first slice of the target that the page actually contains.
+function diffAnchorOffset(text, target) {
+    const last = target.length - DIFF_ANCHOR_LENGTH;
+    if (last < 0) return -1;
+    const offsets = last === 0
+        ? [0]
+        : [
+            0,
+            Math.round(last / 4),
+            Math.round(last / 2),
+            Math.round((last * 3) / 4),
+            last,
+        ];
+    for (const offset of offsets) {
+        const anchor = target.slice(offset, offset + DIFF_ANCHOR_LENGTH);
+        if (text.includes(anchor)) return offset;
+    }
+    return -1;
+}
+
+function diffCandidates(text, target, maxEdits) {
+    const anchorOffset = diffAnchorOffset(text, target);
+    if (anchorOffset < 0) return [];
+    const candidateLimit = target.length > DIFF_LONG_TEXT_LENGTH
+        ? MAX_DIFF_LONG_CANDIDATES
+        : MAX_DIFF_CANDIDATES;
+    const anchor = target.slice(
+        anchorOffset,
+        anchorOffset + DIFF_ANCHOR_LENGTH
+    );
+    const occurrences = findTextOccurrences(text, anchor, MAX_MATCHES);
+    if (occurrences.truncated) return null;
+    const candidates = [];
+    for (const position of occurrences.offsets) {
+        const windowFrom = Math.max(
+            0,
+            position - anchorOffset - maxEdits
+        );
+        const windowTo = Math.min(
+            text.length,
+            position - anchorOffset + (target.length - anchorOffset) + maxEdits
+        );
+        const aligned = alignedDiffSpan(
+            target,
+            text.slice(windowFrom, windowTo),
+            maxEdits
+        );
+        if (!aligned) continue;
+        candidates.push({
+            from: windowFrom + aligned.from,
+            to: windowFrom + aligned.to,
+            distance: aligned.distance,
+        });
+        if (candidates.length > candidateLimit) return null;
+    }
+    return candidates;
+}
+
+// Semi-global alignment: the search window is padded on both sides, so the
+// window edges are skipped for free and the traceback reports exactly which
+// page characters the selection covers.
+function alignedDiffSpan(target, windowText, limit) {
+    const targetLength = target.length;
+    const windowLength = windowText.length;
+    if (targetLength > windowLength) return null;
+    const rows = [];
+    for (let row = 0; row <= targetLength; row += 1) {
+        rows.push(new Uint16Array(windowLength + 1));
+    }
+    for (let row = 1; row <= targetLength; row += 1) {
+        rows[row][0] = Math.min(row, limit + 1);
+        for (let column = 1; column <= windowLength; column += 1) {
+            const cost = target[row - 1] === windowText[column - 1] ? 0 : 1;
+            rows[row][column] = Math.min(
+                rows[row - 1][column] + 1,
+                rows[row][column - 1] + 1,
+                rows[row - 1][column - 1] + cost,
+                limit + 1
+            );
+        }
+    }
+    let best = limit + 1;
+    let end = -1;
+    for (let column = 1; column <= windowLength; column += 1) {
+        const value = rows[targetLength][column];
+        if (value < best) {
+            best = value;
+            end = column;
+        }
+    }
+    if (end < 0) return null;
+    let row = targetLength;
+    let column = end;
+    let start = 0;
+    while (row > 0) {
+        const cost = target[row - 1] === windowText[column - 1] ? 0 : 1;
+        if (column > 0
+            && rows[row][column] === rows[row - 1][column - 1] + cost) {
+            row -= 1;
+            column -= 1;
+            start = column;
+            continue;
+        }
+        if (rows[row][column] === rows[row - 1][column] + 1) {
+            row -= 1;
+            continue;
+        }
+        if (column > 0
+            && rows[row][column] === rows[row][column - 1] + 1) {
+            column -= 1;
+            continue;
+        }
+        return null;
+    }
+    if (end <= start) return null;
+    return { distance: best, from: start, to: end };
+}
+
+function findAbbreviationSpacingMatch(
+    pages,
+    target,
+    textQuote,
+    transformText
+) {
+    for (const strategy of basicTextMatchStrategies()) {
+        const foldedTargetIndex = (
+            createAbbreviationFoldedPdfAnnotationTextIndex(
+                strategy.normalizedTextForPage({ rawText: target })
+            )
+        );
+        const foldedTarget = foldedTargetIndex.trimmedText;
+        if (!foldedTarget) continue;
+        const normalizedTextQuote = mapTextQuote(textQuote, value => (
+            transformText(
+                createAbbreviationFoldedPdfAnnotationTextIndex(
+                    strategy.createSourceIndex(value).text
+                ).text.trim()
+            )
+        ));
+        const matches = [];
+        for (const page of pages) {
+            const sourceIndex = createAbbreviationFoldedPdfAnnotationTextIndex(
+                strategy.normalizedTextForPage(page)
+            );
+            const normalizedText = transformText(sourceIndex.text);
+            const occurrences = findTextOccurrences(
+                normalizedText,
+                foldedTarget,
+                MAX_MATCHES
+            );
+            if (occurrences.truncated) throw ambiguousError();
+            for (const normalizedFrom of occurrences.offsets) {
+                matches.push({
+                    page,
+                    normalizedFrom,
+                    normalizedText,
+                    sourceIndex,
+                });
+                if (matches.length > MAX_MATCHES) throw ambiguousError();
+            }
+        }
+        const match = selectUniqueIndexMatch(
+            matches,
+            foldedTarget.length,
+            normalizedTextQuote
+        );
+        if (!match) continue;
+        const sourceRange = match.sourceIndex.sourceRange(
+            match.normalizedFrom,
+            foldedTarget.length
+        );
+        const trimmedRange = foldedTargetIndex.trimmedSourceRange();
+        return {
+            match,
+            sourceRange: {
+                from: sourceRange.from,
+                to: sourceRange.from
+                    + trimmedRange.to
+                    - trimmedRange.from,
+            },
+        };
+    }
+    return null;
+}
+
+function findMisencodedCitationMatch(
+    pages,
+    target,
+    textQuote,
+    transformText
+) {
+    const fragments = proseFragmentsAroundCitations(target);
+    if (!fragments) return null;
+    for (const strategy of basicTextMatchStrategies()) {
+        const normalizedTextQuote = mapTextQuote(textQuote, value => (
+            transformText(strategy.createSourceIndex(value).text.trim())
+        ));
+        const matches = [];
+        for (const page of pages) {
+            const normalizedText = transformText(
+                strategy.normalizedTextForPage(page)
+            );
+            for (const span of misencodedCitationSpans(
+                normalizedText,
+                fragments
+            )) {
+                matches.push({
+                    page,
+                    normalizedFrom: span.from,
+                    normalizedText,
+                    normalizedLength: span.to - span.from,
+                });
+                if (matches.length > MAX_MATCHES) throw ambiguousError();
+            }
+        }
+        const match = selectUniqueIndexMatch(
+            matches,
+            fragments.join('').length,
+            normalizedTextQuote
+        );
+        if (!match) continue;
+        const sourceIndex = strategy.createSourceIndex(match.page.rawText);
+        return {
+            match,
+            sourceRange: sourceIndex.sourceRange(
+                match.normalizedFrom,
+                match.normalizedLength
+            ),
+        };
+    }
+    return null;
+}
+
+function proseFragmentsAroundCitations(target) {
+    const pattern = /(^|\s)(?:\d+(?:\s*[-,]\s*\d+)*|[\[\(]\d+(?:\s*[-,]\s*\d+)*[\]\)])(?=\s|[,.;:]|$)/gu;
+    const fragments = [];
+    let from = 0;
+    for (const match of target.matchAll(pattern)) {
+        const prose = target.slice(from, match.index).trim();
+        if (prose) fragments.push(prose);
+        from = match.index + match[0].length;
+    }
+    const tail = target.slice(from).trim();
+    if (tail) fragments.push(tail);
+    if (fragments.length < 2
+        || fragments.join('').length === target.trim().length
+        || fragments.some(fragment => (
+            fragment.length < MIN_PROSE_FRAGMENT_LENGTH
+        ))) {
+        return null;
+    }
+    return fragments;
+}
+
+function misencodedCitationSpans(text, fragments) {
+    const spans = [];
+    const occurrences = findTextOccurrences(
+        text,
+        fragments[0],
+        MAX_MATCHES
+    );
+    if (occurrences.truncated) throw ambiguousError();
+    for (const start of occurrences.offsets) {
+        let cursor = start + fragments[0].length;
+        let valid = true;
+        for (let index = 1; index < fragments.length; index += 1) {
+            const fragment = fragments[index];
+            const gap = text.slice(
+                cursor,
+                cursor + MAX_MISENCODED_CITATION_GAP + fragment.length
+            );
+            const found = gap.indexOf(fragment);
+            if (found < 0
+                || found > MAX_MISENCODED_CITATION_GAP
+                || /\p{L}/u.test(gap.slice(0, found))) {
+                valid = false;
+                break;
+            }
+            cursor += found + fragment.length;
+        }
+        if (valid) spans.push({ from: start, to: cursor });
+    }
+    return spans;
 }
 
 function findCrossPageMatch(

@@ -1370,6 +1370,110 @@ test('does not infer citation spacing for numeric PDF subscripts', async () => {
     locator.dispose();
 });
 
+test('locates an uppercase abbreviation split by one PDF space', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'measures of HR V assessed from 857 nominal 24-h Holter tapes',
+            {
+                width: 330,
+                height: 9,
+                transform: [9, 0, 0, 9, 72, 700],
+            }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'measures of HRV assessed from 857 nominal 24-h Holter tapes',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
+    locator.dispose();
+});
+
+test('does not fold a space inside an ordinary lowercase word', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('available today remains useful', {
+            width: 180,
+            height: 10,
+            transform: [10, 0, 0, 10, 72, 700],
+        }),
+    ]]);
+
+    await assert.rejects(
+        locator.locate(42, 'available to day remains useful', {
+            pdfPageIndexHint: 0,
+        }),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+    );
+    locator.dispose();
+});
+
+test('locates prose around a misencoded PDF superscript citation', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('sudden cardiac death\'', {
+            width: 120,
+            height: 10,
+            transform: [10, 0, 0, 10, 72, 700],
+        }),
+        createTextItem('1', {
+            width: 4,
+            height: 6.5,
+            transform: [6.5, 0, 0, 6.5, 192, 703],
+        }),
+        createTextItem('^*', {
+            width: 9,
+            height: 10,
+            transform: [10, 0, 0, 10, 196, 700],
+        }),
+        createTextItem('1', {
+            width: 4,
+            height: 6.5,
+            transform: [6.5, 0, 0, 6.5, 205, 703],
+        }),
+        createTextItem('. Experimental evidence', {
+            width: 130,
+            height: 10,
+            transform: [10, 0, 0, 10, 209, 700],
+        }),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'sudden cardiac death $^{[1-4]}$ . Experimental evidence',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 5);
+    locator.dispose();
+});
+
+test('does not skip real prose while ignoring a citation marker', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'sudden cardiac death remains fatal. Experimental evidence',
+            {
+                width: 320,
+                height: 10,
+                transform: [10, 0, 0, 10, 72, 700],
+            }
+        ),
+    ]]);
+
+    await assert.rejects(
+        locator.locate(
+            42,
+            'sudden cardiac death $^{[1-4]}$ . Experimental evidence',
+            { pdfPageIndexHint: 0 }
+        ),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+    );
+    locator.dispose();
+});
+
 test('recovers spaces after attached PDF superscript citations', async () => {
     const locator = await createSyntheticLocator([[
         createTextItem('authors', {
@@ -1776,6 +1880,169 @@ test('does not treat a short section reference as a plus-minus value', async () 
 
     await assert.rejects(
         locator.locate(42, '±2', { pdfPageIndexHint: 0 }),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+    );
+    locator.dispose();
+});
+
+test('locates prose whose inline formula glyphs are mangled', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'the values N and M are established on the time axis and a '
+            + 'multilinear function q constructed such that q(?)=0 for '
+            + 't <,N and t^M and q(X)= Y, and',
+            { width: 460, height: 9, transform: [9, 0, 0, 9, 72, 700] }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'the values N and M are established on the time axis and a '
+        + 'multilinear function q constructed such that q(t)=0 for t<=N',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    const [left, bottom, right, top] = located.position.rects[0];
+    assert.ok(right > left && top > bottom);
+    locator.dispose();
+});
+
+test('locates a long caption across mangled punctuation and superscript', async () => {
+    const pdfText = 'Interval tachogram of 256 consecutive RR values in a '
+        + 'normal subject at supine rest (a) and after head-up tilt (b). The '
+        + 'HRV spectra are shown, calculated by parametric autoregressive '
+        + 'modelling (c and d), and by a FFT based non-parametric algorithm '
+        + '(e and f)- Mean values (m), variances (s2) and the number (n) of '
+        + 'samples are indicated. For (c) and (d), VLF, LF and HF central '
+        + 'frequency, power in absolute value and power in normalized units.';
+    const selected = pdfText
+        .replace('(e and f)- ', '(e and f). ')
+        .replace('variances (s2)', 'variances (s²)');
+    const locator = await createSyntheticLocator([[
+        createTextItem(pdfText, {
+            width: 900,
+            height: 9,
+            transform: [9, 0, 0, 9, 72, 700],
+        }),
+    ]]);
+
+    const located = await locator.locate(42, selected, {
+        pdfPageIndexHint: 0,
+    });
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.ok(located.position.rects.length >= 1);
+    locator.dispose();
+});
+
+test('does not fuzzy match a passage that is absent from the page', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'the values N and M are established on the time axis and a '
+            + 'multilinear function q constructed such that q(?)=0 for '
+            + 't <,N and t^M and q(X)= Y, and',
+            { width: 460, height: 9, transform: [9, 0, 0, 9, 72, 700] }
+        ),
+    ]]);
+
+    await assert.rejects(
+        locator.locate(
+            42,
+            'a completely different passage that the page does not contain '
+            + 'anywhere at all in this document',
+            { pdfPageIndexHint: 0 }
+        ),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+    );
+    locator.dispose();
+});
+
+test('locates a passage split across non-adjacent pages', async () => {
+    const locator = await createSyntheticLocator([
+        [createTextItem(
+            'order to test the reliability of the model. The prediction',
+            { width: 300, height: 9, transform: [9, 0, 0, 9, 72, 700] }
+        )],
+        [createTextItem(
+            'a full page figure keeps the paragraph apart',
+            { width: 300, height: 9, transform: [9, 0, 0, 9, 72, 700] }
+        )],
+        [createTextItem(
+            'error whiteness test (PEWT) provides information.',
+            { width: 300, height: 9, transform: [9, 0, 0, 9, 72, 700] }
+        )],
+    ]);
+
+    const located = await locator.locate(
+        42,
+        'The prediction error whiteness test (PEWT)',
+        {}
+    );
+
+    assert.equal(located.segments.length, 2);
+    assert.equal(located.segments[0].position.pageIndex, 0);
+    assert.equal(located.segments[1].position.pageIndex, 2);
+    locator.dispose();
+});
+
+test('does not split-match halves that appear on the same page', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'The prediction error whiteness test (PEWT) provides information.',
+            { width: 400, height: 9, transform: [9, 0, 0, 9, 72, 700] }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'The prediction error whiteness test (PEWT)',
+        {}
+    );
+
+    // The whole passage is on one page, so it stays a single highlight.
+    assert.equal(located.segments, undefined);
+    assert.equal(located.position.pageIndex, 0);
+    locator.dispose();
+});
+
+test('uses the mapped OCR region when a display formula is missing', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('such that the integral', {
+            width: 90,
+            height: 9,
+            transform: [9, 0, 0, 9, 72, 700],
+        }),
+    ]]);
+    const text = '\\int_ {0} ^ {+ \\infty} (\\mathbf {D} (t) - '
+        + '\\mathbf {q} (t)) ^ {2} d t';
+
+    const located = await locator.locate(42, text, {
+        pdfPageIndexHint: 0,
+        pdfRegion: { pageIndex: 0, bbox: [231.93, 444.03, 376.47, 465.17] },
+    });
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
+    const [left, bottom, right, top] = located.position.rects[0];
+    assert.ok(right > left && top > bottom);
+    assert.equal(located.text, text);
+    locator.dispose();
+});
+
+test('keeps reporting missing text when no mapped region is available', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('such that the integral', {
+            width: 90,
+            height: 9,
+            transform: [9, 0, 0, 9, 72, 700],
+        }),
+    ]]);
+
+    await assert.rejects(
+        locator.locate(42, '\\int_ {0} ^ {+ \\infty} d t', {
+            pdfPageIndexHint: 0,
+        }),
         error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
     );
     locator.dispose();

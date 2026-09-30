@@ -46,6 +46,21 @@ export function createZoteroAnnotationActions(zotero, {
             if (typeof zotero.Reader?.open !== 'function') {
                 throw new Error('PDF reader is unavailable');
             }
+            // The reader resolves an annotation position against the page
+            // layout it has already rendered, so selecting an annotation whose
+            // page is still unlaid can land on a neighbouring page. Put the
+            // reader on that page first, then let Zotero select the annotation.
+            const pageIndex = annotationPageIndex(zotero, itemID, key);
+            if (Number.isInteger(pageIndex)) {
+                const opened = await zotero.Reader.open(itemID);
+                const reader = opened || readerForItem(zotero, itemID, null);
+                try {
+                    await reader?.navigate?.({ pageIndex });
+                }
+                catch {
+                    // The annotation navigation below still selects the item.
+                }
+            }
             return zotero.Reader.open(itemID, { annotationID: key });
         },
         async createFromText(itemID, draft, context = null) {
@@ -56,6 +71,7 @@ export function createZoteroAnnotationActions(zotero, {
             const comment = String(draft?.comment || '');
             const color = String(draft?.color || '').toLowerCase();
             const pdfPageIndexHint = draft?.pdfPageIndexHint;
+            const pdfRegion = normalizePDFRegion(draft?.pdfRegion);
             const textQuote = normalizePDFAnnotationTextQuote(
                 draft?.textQuote
             );
@@ -69,6 +85,9 @@ export function createZoteroAnnotationActions(zotero, {
                     || pdfPageIndexHint < 0)) {
                 throw new Error('Invalid PDF annotation page hint');
             }
+            if (draft?.pdfRegion !== undefined && !pdfRegion) {
+                throw new Error('Invalid PDF annotation region');
+            }
             if (!isZoteroAnnotationColor(color)) {
                 throw new Error('Unsupported PDF annotation color');
             }
@@ -79,6 +98,7 @@ export function createZoteroAnnotationActions(zotero, {
             const locatedText = await textLocator(itemID, text, {
                 reader,
                 pdfPageIndexHint,
+                ...(pdfRegion ? { pdfRegion } : {}),
                 textQuote,
                 signal,
             });
@@ -260,6 +280,23 @@ function sameAnnotationPosition(value, expected) {
         ));
 }
 
+function normalizePDFRegion(value) {
+    if (value === undefined || value === null) return null;
+    const pageIndex = value?.pageIndex;
+    const bbox = value?.bbox;
+    if (!Number.isSafeInteger(pageIndex) || pageIndex < 0) return null;
+    if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+    if (!bbox.every(coordinate => (
+        Number.isFinite(coordinate)
+        && coordinate >= 0
+        && coordinate <= 1000
+    ))) {
+        return null;
+    }
+    if (bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) return null;
+    return { pageIndex, bbox: [...bbox] };
+}
+
 function validateLocatedText(value) {
     const located = validateLocatedSegment(value);
     if (value?.segments === undefined) return located;
@@ -420,6 +457,7 @@ async function locateTextInActiveReader(reader, text, {
             'Zotero PDF text search is unavailable'
         );
     }
+    throwIfReaderClosed(view);
 
     const previousFindState = view._findState || inactiveFindState();
     let searchError = null;
@@ -561,8 +599,15 @@ function notFoundPDFTextError() {
 }
 
 async function setReaderFindState(view, reader, state, cloneIntoReader) {
+    throwIfReaderClosed(view);
     const readerState = cloneIntoReader(state, reader?._iframeWindow);
-    await view.setFindState(readerState);
+    try {
+        await view.setFindState(readerState);
+    }
+    catch (error) {
+        throwIfReaderClosed(view);
+        throw error;
+    }
 }
 
 function defaultCloneIntoReader(value, target) {
@@ -575,6 +620,7 @@ function defaultCloneIntoReader(value, target) {
 }
 
 function findNormalizedPDFSearchQuery(view, text, tracker = null) {
+    throwIfReaderClosed(view);
     const pages = view?._findController?._pageContents;
     if (tracker?.status === 'ambiguous') {
         return { query: null, ambiguous: true, unavailable: false };
@@ -692,6 +738,26 @@ function createNormalizedPDFSearchTracker(text) {
         matchCount: 0,
         status: 'active',
     };
+}
+
+function annotationPageIndex(zotero, itemID, key) {
+    try {
+        const attachment = zotero.Items?.get?.(itemID);
+        const item = zotero.Items?.getByLibraryAndKey?.(
+            attachment?.libraryID,
+            key
+        );
+        const raw = item?.annotationPosition;
+        if (!raw) return null;
+        const position = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const pageIndex = position?.pageIndex;
+        return Number.isInteger(pageIndex) && pageIndex >= 0
+            ? pageIndex
+            : null;
+    }
+    catch {
+        return null;
+    }
 }
 
 function readerForItem(zotero, itemID, openedReader) {
@@ -898,7 +964,32 @@ function ambiguousPDFTextError() {
     );
 }
 
+function throwIfReaderClosed(view) {
+    try {
+        if (typeof Components !== 'undefined'
+            && Components.utils?.isDeadWrapper?.(view)) {
+            throw readerUnavailableError();
+        }
+        // Accessing either property throws when the reader window has been
+        // destroyed and its wrapper is already dead.
+        void view?._findState;
+        void view?._findController;
+    }
+    catch (error) {
+        if (error?.code === 'MKTERO_PDF_READER_UNAVAILABLE') throw error;
+        throw readerUnavailableError();
+    }
+}
+
+function readerUnavailableError() {
+    return annotationSyncError(
+        'MKTERO_PDF_READER_UNAVAILABLE',
+        'Zotero PDF text search is unavailable'
+    );
+}
+
 function pdfPageTextExtractionCompleted(view) {
+    throwIfReaderClosed(view);
     const controller = view?._findController;
     const extraction = controller?._extractTextPromises;
     const pages = controller?._pageContents;
@@ -914,6 +1005,7 @@ function pdfPageTextExtractionCompleted(view) {
 }
 
 function currentFindResult(view, text) {
+    throwIfReaderClosed(view);
     const state = view?._findState;
     if (!state?.active || state.query !== text || !state.result) return null;
     const result = state.result;
@@ -937,6 +1029,7 @@ function annotationMatchKey(annotation) {
 }
 
 function pdfSearchCompleted(view, text) {
+    throwIfReaderClosed(view);
     const controller = view?._findController;
     const pending = controller?._pendingFindMatches;
     return controller?.state?.query === text
