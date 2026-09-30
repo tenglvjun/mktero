@@ -52,9 +52,14 @@ overlaps a citation, table reference, or figure reference, that semantic
 reference keeps interaction priority; annotation actions remain available from
 the surrounding highlighted text or its note marker.
 Selections that cross a PDF page break are split into one single-page Zotero
-highlight per page, so the complete Markdown selection remains navigable.
+highlight per page, so the complete Markdown selection remains navigable. A
+paragraph that resumes a page or two later is located the same way, across the
+full-page figure or running footer in between.
 Common MinerU LaTeX math symbols and simple subscripts are normalized to the
-PDF's extracted text so selections that include formulas can still be located.
+PDF's extracted text, and a few characters the PDF text layer mangles inside a
+passage are tolerated, so selections that include formulas can still be
+located. A display formula whose LaTeX never survives extraction falls back to
+the OCR region recorded for that block.
 
 ## Translate with AI
 

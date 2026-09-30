@@ -15,7 +15,10 @@ import {
     createMarkdownAnnotationTextQuote,
     markdownAnnotationRangeMatchesSource,
 } from '../core/markdown-local-annotations.js';
-import { resolvePDFPageIndexHint } from '../core/markdown-source-map.js';
+import {
+    resolvePDFPageIndexHint,
+    resolveSourceMapRegion,
+} from '../core/markdown-source-map.js';
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     AI_TARGET_LANGUAGES,
@@ -788,6 +791,7 @@ class MarkdownTabView {
             this.renderedMarkdown = markdown;
             this.renderedSourceMap = sourceMap;
             this.renderedRenderMode = 'markdown';
+            this.renderedAnnotationKey = annotationOverlayKey(annotationOverlay);
             this.renderedTranslationView = translationViewName(
                 translatedView,
                 comparisonView
@@ -818,14 +822,32 @@ class MarkdownTabView {
                 && previousCacheKey !== nextCacheKey
             );
             this.renderedCacheKey = nextCacheKey;
+            // Annotation-only updates republish the same document. Rebuilding
+            // the rendered widgets can move the viewport, so keep the visible
+            // line where the reader left it unless the render asks to move.
+            // A republished result can carry a new cache key for the very same
+            // document. There is nothing to restore in that case: the reader is
+            // already looking at the content, and re-applying the saved position
+            // (or scrolling to the top) would move the view for no reason.
+            const preserveViewportOffset = !documentChanged
+                && !translationAnchor
+                && !restoreAnchor
+                && Number.isFinite(this.activeNavigationOffset)
+                && this.activeNavigationOffset > 0
+                && !Number.isFinite(Number(model.revealMarkdownOffset))
+                ? this.activeNavigationOffset
+                : null;
             if (conversionIdentityChanged) {
-                this.didRestorePersistedPosition = false;
                 this.lastPersistedReadingSignature = '';
-                if (Number.isFinite(model.restoreReadingOffset)) {
+                if (!documentChanged) {
+                    this.didRestorePersistedPosition = true;
+                }
+                else if (Number.isFinite(model.restoreReadingOffset)) {
                     this.restoreReadingPosition(model.restoreReadingOffset);
                     this.didRestorePersistedPosition = true;
                 }
                 else {
+                    this.didRestorePersistedPosition = false;
                     this.restoreReadingPosition(0);
                 }
             }
@@ -848,6 +870,9 @@ class MarkdownTabView {
                 this.didRestorePersistedPosition = true;
             }
             this.revealRequestedMarkdown();
+            if (preserveViewportOffset !== null) {
+                this.restoreReadingPosition(preserveViewportOffset);
+            }
             if (this.documentSearchOpen) {
                 this.runDocumentSearch({
                     keepIndex: true,
@@ -1016,9 +1041,18 @@ class MarkdownTabView {
             sourceAnnotation.ranges,
             this.model.chromeRanges
         );
+        // A selection that contains a whole mapped block (for example a display
+        // equation whose LaTeX does not survive the PDF text layer) records that
+        // block's OCR region as a locator fallback.
+        const pdfRegion = resolveSourceMapRegion(
+            this.model.sourceMap,
+            sourceAnnotation?.ranges?.[0],
+            String(this.model.markdown || '').length
+        );
         const draft = {
             ...sourceAnnotation,
             ...(pdfPageIndexHint === null ? {} : { pdfPageIndexHint }),
+            ...(pdfRegion ? { pdfRegion } : {}),
             ...(textQuote ? { textQuote } : {}),
         };
         const saved = await this.model.onCreateMarkdownAnnotation(draft);
@@ -2811,6 +2845,18 @@ class MarkdownTabView {
                 const annotationID = openPDF.getAttribute('data-annotation-id');
                 this.runNoteButtonAction(openPDF, () => (
                     this.model.onOpenAnnotationInPDF(annotationID)
+                ));
+                return;
+            }
+            const deleteNote = event.target?.closest?.(
+                '.markdown-note-delete'
+            );
+            if (deleteNote && this.elements.notesList.contains(deleteNote)) {
+                const annotationID = deleteNote.getAttribute(
+                    'data-annotation-id'
+                );
+                this.runNoteButtonAction(deleteNote, () => (
+                    this.deleteAnnotation(annotationID)
                 ));
                 return;
             }
@@ -5891,6 +5937,10 @@ class MarkdownTabView {
         const signature = readingPositionSignature(anchor);
         if (signature === this.lastPersistedReadingSignature) return;
         this.lastPersistedReadingSignature = signature;
+        // The save is debounced, so the model can still hold an older target.
+        // Keep it on the reader's live position: a later re-render that
+        // restores the saved position must not pull the view backwards.
+        this.model.restoreReadingOffset = anchor.offset;
         try {
             const result = this.model.onReadingPositionChange(anchor);
             if (result && typeof result.catch === 'function') {
@@ -5958,6 +6008,19 @@ class MarkdownTabView {
             ));
             item.appendChild(retry);
         }
+        const deleteNote = this.createElement('button', {
+            class: 'markdown-note-delete',
+            type: 'button',
+            'data-annotation-id': String(annotation.id || ''),
+            'aria-label': this.t('annotation.delete'),
+            title: this.t('annotation.delete'),
+        });
+        deleteNote.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.trash2,
+            { className: 'markdown-note-delete-icon', size: 15 }
+        ));
+        item.appendChild(deleteNote);
         return item;
     }
 
@@ -6514,6 +6577,18 @@ function firstAnnotationOffset(annotation, markdownLength) {
         }
     }
     return null;
+}
+
+function annotationOverlayKey(annotationOverlay) {
+    try {
+        return JSON.stringify([
+            annotationOverlay?.matched || [],
+            annotationOverlay?.unmatched || [],
+        ]);
+    }
+    catch {
+        return null;
+    }
 }
 
 function isAnnotationEntry(annotation) {

@@ -111,6 +111,69 @@ test('persists a supplied PDF page hint before first synchronization', async () 
     assert.equal((await store.get(42))[0].pdfPageIndexHint, 1);
 });
 
+test('persists a mapped OCR region for formula lookup fallback', async () => {
+    const store = createMemoryStore();
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation(_itemID, draft) {
+            synchronized.push(draft);
+            return { deferred: true };
+        },
+    });
+    const pdfRegion = { pageIndex: 3, bbox: [231.9, 444, 376.5, 465.2] };
+
+    await annotations.create(42, {
+        text: '\\int_ {0} ^ {+ \\infty} d t',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 4, to: 25 }],
+        pdfRegion,
+    });
+
+    await waitFor(() => synchronized.length === 1);
+    assert.deepEqual(synchronized[0].pdfRegion, pdfRegion);
+    assert.deepEqual((await store.get(42))[0].pdfRegion, pdfRegion);
+});
+
+test('rejects a malformed mapped OCR region before writing it', async () => {
+    let putCalls = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store: {
+            async get() {
+                return [];
+            },
+            async put() {
+                putCalls++;
+            },
+        },
+        createID: () => 'local-1',
+    });
+    const draft = {
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    };
+
+    await assert.rejects(
+        () => annotations.create(42, {
+            ...draft,
+            pdfRegion: { pageIndex: -1, bbox: [0, 0, 10, 10] },
+        }),
+        /Invalid Markdown annotation/
+    );
+    await assert.rejects(
+        () => annotations.create(42, {
+            ...draft,
+            pdfRegion: { pageIndex: 0, bbox: [10, 10, 0, 0] },
+        }),
+        /Invalid Markdown annotation/
+    );
+    assert.equal(putCalls, 0);
+});
+
 test('persists surrounding text for PDF synchronization retries', async () => {
     const store = createMemoryStore();
     const synchronized = [];

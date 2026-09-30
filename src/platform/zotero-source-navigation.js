@@ -49,6 +49,12 @@ export function createZoteroSourceNavigation(zotero, {
             if (typeof reader.navigate !== 'function') {
                 throw new Error('PDF reader navigation is unavailable');
             }
+            // The reader resolves a position against the page layout it has
+            // already rendered, so a position-only jump can land on a
+            // neighbouring page while the target page is still unlaid. Load
+            // the page first, then refine to the mapped rectangle.
+            await reader.navigate({ pageIndex: location.pageIndex });
+            await delay(0);
             await reader.navigate({
                 position: {
                     pageIndex: location.pageIndex,

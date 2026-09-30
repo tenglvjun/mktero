@@ -51,6 +51,7 @@ import {
     annotationAttributes,
     annotationClassName,
     createAnnotationNoteMarker,
+    hiddenMathTextNode,
     installRenderedAnnotations,
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
@@ -1794,10 +1795,12 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
 }
 
 function annotationSelectionWithoutChrome(view, from, to, chromeRanges) {
-    const ranges = subtractChromeRanges({ from, to }, chromeRanges);
+    const markdown = view.state.doc.toString();
+    const expanded = expandRangeToMathBoundaries(markdown, from, to);
+    const ranges = subtractChromeRanges(expanded, chromeRanges);
     if (!ranges.length) return null;
     const text = visibleMarkdownTextForRanges(
-        view.state.doc.toString(),
+        markdown,
         ranges
     ).trim();
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
@@ -1875,11 +1878,20 @@ function selectedRenderedMarkdownAnnotation(
     // text (which includes math) against the Markdown source.
     const captionRange = renderedFigureCaptionRange(range, source);
     if (captionRange) {
+        const selectedCaption = selectedRenderedCaptionRange(
+            start,
+            range,
+            source,
+            captionRange
+        );
+        if (!selectedCaption) return null;
         const ranges = subtractChromeRanges({
-            from: sourceFrom + captionRange.from,
-            to: sourceFrom + captionRange.to,
+            from: sourceFrom + selectedCaption.from,
+            to: sourceFrom + selectedCaption.to,
         }, chromeRanges);
-        return ranges.length ? { text, ranges } : null;
+        return ranges.length
+            ? { text: selectedCaption.text, ranges }
+            : null;
     }
     const content = renderedMarkdownContentContainer(start);
     const renderedOffset = renderedSelectionTextOffset(
@@ -1905,9 +1917,10 @@ function selectedRenderedMarkdownAnnotation(
     if (candidates.truncated || ordinal >= candidates.offsets.length) {
         return null;
     }
-    const selectedRange = visible.sourceRange(
-        candidates.offsets[ordinal],
-        text.length
+    const selectedRange = expandRangeToMathBoundaries(
+        source,
+        visible.sourceRange(candidates.offsets[ordinal], text.length).from,
+        visible.sourceRange(candidates.offsets[ordinal], text.length).to
     );
     const ranges = subtractChromeRanges({
         from: sourceFrom + selectedRange.from,
@@ -1915,6 +1928,117 @@ function selectedRenderedMarkdownAnnotation(
     }, chromeRanges);
     if (!ranges.length) return null;
     return { text, ranges };
+}
+
+// The browser selection string includes the TeX source MathML keeps in a
+// hidden <annotation> node, which duplicates every formula in the text. Walk
+// the selection instead so the text matches what the reader shows.
+function visibleSelectionText(container, range) {
+    const document = container.ownerDocument;
+    const walker = document.createTreeWalker(
+        container,
+        document.defaultView.NodeFilter.SHOW_TEXT
+    );
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (hiddenMathTextNode(node)) continue;
+        let intersects = false;
+        try {
+            intersects = range.intersectsNode(node);
+        }
+        catch {
+            intersects = false;
+        }
+        if (!intersects) continue;
+        const from = node === range.startContainer ? range.startOffset : 0;
+        const to = node === range.endContainer
+            ? range.endOffset
+            : node.textContent.length;
+        text += node.textContent.slice(from, to);
+    }
+    return text;
+}
+
+function selectedRenderedCaptionRange(
+    container,
+    range,
+    source,
+    captionRange
+) {
+    const caption = source.slice(captionRange.from, captionRange.to);
+    const visible = createVisibleMarkdownTextIndex(caption);
+    const compactVisible = createCompactVisibleTextIndex(visible.text);
+    const compactNeedle = compactRenderedText(
+        visibleSelectionText(container, range)
+    );
+    const candidates = findTextOccurrences(
+        compactVisible.text,
+        compactNeedle,
+        MAX_MATCH_CANDIDATES
+    );
+    if (candidates.truncated || candidates.offsets.length !== 1) return null;
+    const sourceRange = compactVisible.sourceRange(
+        candidates.offsets[0],
+        compactNeedle.length
+    );
+    const mappedRange = visible.sourceRange(
+        sourceRange.from,
+        sourceRange.to - sourceRange.from
+    );
+    const expanded = expandRangeToMathBoundaries(
+        source,
+        captionRange.from + mappedRange.from,
+        captionRange.from + mappedRange.to
+    );
+    const text = createVisibleMarkdownTextIndex(
+        source.slice(expanded.from, expanded.to)
+    ).text;
+    return { from: expanded.from, to: expanded.to, text };
+}
+
+// A selection boundary inside $...$ or $$...$$ only covers part of the math
+// source, which leaves a stray delimiter in the extracted text and breaks the
+// PDF lookup. Growing the range to the math boundary keeps the text plain.
+function expandRangeToMathBoundaries(source, from, to) {
+    let start = from;
+    let end = to;
+    const matches = [
+        ...findDisplayMathMatches(source),
+        ...findInlineMathMatches(source),
+    ];
+    for (const match of matches) {
+        if (start > match.start && start < match.end) start = match.start;
+        if (end > match.start && end < match.end) end = match.end;
+    }
+    return { from: start, to: end };
+}
+
+function createCompactVisibleTextIndex(text) {
+    const source = String(text || '');
+    const output = [];
+    const sourceOffsets = [];
+    for (let offset = 0; offset < source.length; offset += 1) {
+        if (/\s/u.test(source[offset])) continue;
+        output.push(source[offset]);
+        sourceOffsets.push(offset);
+    }
+    return {
+        text: output.join(''),
+        sourceRange(from, length) {
+            return {
+                from: sourceOffsets[from],
+                to: sourceOffsets[from + length - 1] + 1,
+            };
+        },
+    };
+}
+
+function compactRenderedText(value) {
+    return String(value || '').replace(/\s+/gu, '');
+}
+
+function normalizeVisibleText(value) {
+    return String(value || '').replace(/\s+/gu, ' ').trim();
 }
 
 function renderedFigureCaptionRange(range, source) {
@@ -2819,14 +2943,13 @@ function positionInsideEditing(position, context) {
 
 function annotationsForRange(overlay, from, to) {
     return (overlay?.matched || []).flatMap(annotation => {
-        const contained = (annotation.ranges || []).some(range => (
+        const overlaps = (annotation.ranges || []).some(range => (
             Number.isInteger(range?.from)
             && Number.isInteger(range?.to)
-            && range.from >= from
-            && range.to > range.from
-            && range.to <= to
+            && range.from < to
+            && range.to > from
         ));
-        if (!contained) return [];
+        if (!overlaps) return [];
         return [{
             ...annotation,
             showNoteMarker: rangeContainsStartOffset(
@@ -2980,6 +3103,14 @@ function annotationsOverlappingRange(overlay, from, to) {
 }
 
 function wrapRenderedMathAnnotations(container, annotations, translate) {
+    const before = container.querySelectorAll(
+        '.cm-mktero-pdf-annotation'
+    ).length;
+    installRenderedAnnotations(container, annotations, translate);
+    const textual = container.querySelectorAll(
+        '.cm-mktero-pdf-annotation'
+    ).length > before;
+    if (textual) return;
     for (const annotation of annotations) {
         const wrapper = container.ownerDocument.createElementNS(
             XHTML_NAMESPACE,

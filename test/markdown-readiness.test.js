@@ -192,7 +192,7 @@ test('registers a narrow local column and does not require a color tag', () => {
     const options = calls[0];
     assert.equal(options.dataKey, 'markdownReady');
     assert.equal(options.pluginID, 'mktero@tenglvjun.github.io');
-    assert.deepEqual(options.defaultIn, ['default']);
+    assert.equal(Object.hasOwn(options, 'defaultIn'), false);
     assert.equal(options.flex, 0);
     assert.equal(options.width, '32');
     assert.equal(options.fixedWidth, true);
@@ -204,7 +204,7 @@ test('registers a narrow local column and does not require a color tag', () => {
     const cell = options.renderCell(0, '1', { className: 'column' }, false, document);
     assert.equal(cell.getAttribute('aria-label'), 'column.markdownReadyTooltip');
     assert.equal(cell.querySelector('svg')?.getAttribute('data-lucide'), 'file-text');
-    assert.equal(options.renderCell(0, '', {}, false, document), null);
+    assertEmptyReadinessCell(options.renderCell(0, '', {}, false, document));
 
     column.refresh();
     column.dispose();
@@ -273,8 +273,14 @@ test('shows a preparing spinner ahead of the ready mark', () => {
         'loader-circle'
     );
     assert.equal(document.getElementById('mktero-markdown-readiness-style')?.textContent.includes('prefers-reduced-motion'), true);
-    assert.equal(options.renderCell(0, '', {}, false, document), null);
+    assertEmptyReadinessCell(options.renderCell(0, '', {}, false, document));
 });
+
+function assertEmptyReadinessCell(cell) {
+    assert.equal(cell?.tagName, 'SPAN');
+    assert.equal(cell.className, 'cell');
+    assert.equal(cell.childNodes.length, 0);
+}
 
 test('notifies readiness when a cache entry is written, expires, or cleared', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-readiness-cache-'));

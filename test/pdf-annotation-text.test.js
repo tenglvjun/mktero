@@ -311,6 +311,33 @@ test('leaves escaped, malformed, and oversized LaTeX-like input unchanged', () =
     assert.equal(normalizePdfAnnotationText(source), source);
 });
 
+test('normalizes bracketed MinerU superscript citations to PDF citation text', () => {
+    const markdown = 'Sudden cardiac death $^{[1-4]}$ . Experimental evidence.';
+    const pdf = 'Sudden cardiac death 1-4. Experimental evidence.';
+    const markdownIndex = createPdfAnnotationTextIndex(markdown);
+    const pdfIndex = createPdfAnnotationTextIndex(pdf);
+
+    assert.equal(markdownIndex.text, pdfIndex.text);
+    assert.equal(
+        markdownIndex.text,
+        'Sudden cardiac death 1-4. Experimental evidence.'
+    );
+    const target = '1-4';
+    const range = markdownIndex.sourceRange(
+        markdownIndex.text.indexOf(target),
+        target.length
+    );
+    assert.equal(markdown.slice(range.from, range.to), '$^{[1-4]}$');
+    assert.equal(
+        normalizePdfAnnotationText('model x^{[1-4]}.'),
+        'model x^{[1-4]}.'
+    );
+    assert.equal(
+        normalizePdfAnnotationText('death $^{[not a citation]}$ .'),
+        'death $^{[not a citation]}$.'
+    );
+});
+
 test('maps PDF line-end hyphens back to their original source range', () => {
     const source = '😀 Words were inves-\ntigated and evidence-based.';
     const index = createDehyphenatedPdfAnnotationTextIndex(source);

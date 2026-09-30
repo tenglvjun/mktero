@@ -105,6 +105,7 @@ test('opens the Zotero PDF and navigates to the mapped source rectangle', async 
 
     assert.deepEqual(calls, [
         { opened: 42 },
+        { navigated: { pageIndex: 2 } },
         {
             navigated: {
                 position: {
@@ -119,7 +120,7 @@ test('opens the Zotero PDF and navigates to the mapped source rectangle', async 
 test('finds a reader registered after Zotero selects an unloaded PDF tab', async () => {
     const readers = [];
     let delayCalls = 0;
-    let navigated;
+    const navigations = [];
     const viewport = {
         width: 1000,
         height: 1000,
@@ -140,7 +141,7 @@ test('finds a reader registered after Zotero selects an unloaded PDF tab', async
                 },
             },
         },
-        navigate: async location => { navigated = location; },
+        navigate: async location => { navigations.push(location); },
     };
     const zotero = {
         Items: { get: () => ({ isPDFAttachment: () => true }) },
@@ -163,11 +164,16 @@ test('finds a reader registered after Zotero selects an unloaded PDF tab', async
         bbox: [100, 100, 200, 200],
     });
 
-    assert.equal(delayCalls, 1);
-    assert.deepEqual(navigated.position, {
-        pageIndex: 0,
-        rects: [[100, 800, 200, 900]],
-    });
+    assert.equal(delayCalls, 2);
+    assert.deepEqual(navigations, [
+        { pageIndex: 0 },
+        {
+            position: {
+                pageIndex: 0,
+                rects: [[100, 800, 200, 900]],
+            },
+        },
+    ]);
 });
 
 test('selects the reader for the requested attachment when several are open', async () => {
