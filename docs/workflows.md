@@ -6,8 +6,14 @@
 
 OCR content mappings connect Markdown blocks to physical PDF pages and
 regions. Source links and source-aware copy use those mappings when they are
-reliable; Mktero does not guess a location when a match is ambiguous. Markdown
-is rendered in an isolated shadow root with a restricted link and image policy.
+reliable; Mktero does not guess a location when a match is ambiguous. Selecting
+PDF text offers `Open in Markdown` when that PDF already has a readable cache.
+A unique source region focuses the Markdown paragraph. If no region overlaps
+the selection, a passage that occurs in exactly one cached paragraph still opens.
+A complete translation
+for that passage switches an original view to bilingual and leaves an existing
+translation or bilingual view unchanged. No translation request is started.
+Markdown is rendered in an isolated shadow root with a restricted link and image policy.
 Academic figure captions are recognized in common publisher formats, including
 `Figure N | ...` captions that follow an empty OCR image, so prose figure
 references remain previewable in cached documents.
@@ -46,9 +52,14 @@ overlaps a citation, table reference, or figure reference, that semantic
 reference keeps interaction priority; annotation actions remain available from
 the surrounding highlighted text or its note marker.
 Selections that cross a PDF page break are split into one single-page Zotero
-highlight per page, so the complete Markdown selection remains navigable.
+highlight per page, so the complete Markdown selection remains navigable. A
+paragraph that resumes a page or two later is located the same way, across the
+full-page figure or running footer in between.
 Common MinerU LaTeX math symbols and simple subscripts are normalized to the
-PDF's extracted text so selections that include formulas can still be located.
+PDF's extracted text, and a few characters the PDF text layer mangles inside a
+passage are tolerated, so selections that include formulas can still be
+located. A display formula whose LaTeX never survives extraction falls back to
+the OCR region recorded for that block.
 
 ## Translate with AI
 
@@ -186,3 +197,28 @@ already exists, a numbered directory such as `B-2` is created with a matching
 case-insensitive filesystems are numbered and their Markdown references are
 updated, so distinct figures cannot overwrite each other. Export does not
 include translated or bilingual views and never runs automatically.
+
+## Export to Obsidian
+
+`Export to Obsidian` writes the original Markdown, not the view currently
+open, into a folder inside a local Obsidian vault. Each complete saved
+translation is written beside it: a paper named `B` stays `B`, and its
+Simplified Chinese translation is `B - chinese`. Other languages use the same
+pattern, such as `japanese` or `spanish`. Incomplete translations and the
+bilingual reading view are not exported. `Export Markdown` still saves only
+the view you are reading. The first export asks for the vault folder that
+contains `.obsidian`. Later exports reuse it. Settings can change the vault
+and the folder name, which defaults to `Mktero`, so the note does not replace
+a literature note created by another plugin.
+
+A paper titled `B` becomes `<vault>/Mktero/B/B.md`, with figures in
+`<vault>/Mktero/B/assets/` and ordinary relative image links. Figure captions
+are written below each image, not inside its alt text, because Obsidian does
+not render an image when the alt text contains brackets. YAML frontmatter
+carries the title, authors, year, DOI, tags, a `zotero://` link, and the
+Zotero item identity. A Better BibTeX citation key is included only when Extra
+already contains one. Exporting the same item again updates that note even if
+the title changes. If the note was edited in Obsidian, or the file belongs to
+another item, Mktero asks before overwriting it. Mktero does not delete extra
+files you later add under `assets/`. Obsidian Sync, iCloud, or git can carry
+the vault; Mktero does not.

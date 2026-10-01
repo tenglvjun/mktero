@@ -25,6 +25,7 @@ import {
     MINERU_PARSER_PROFILE_ID,
 } from '../src/mineru/parser-profile.js';
 import {
+    MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
     MISTRAL_PARSER_PROFILE_ID,
     MISTRAL_PREVIOUS_PARSER_PROFILE_IDS,
 } from '../src/mistral/parser-profile.js';
@@ -932,6 +933,10 @@ test('current profiles are v15 and v14 ids stay compatible', () => {
     assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS[0].includes('figure-region-v14'), true);
     assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0].includes('figure-region-v14'), true);
     assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
+    assert.equal(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.includes(MISTRAL_PARSER_PROFILE_ID), false);
+    assert.equal(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.some(profile => (
+        profile.includes('same-and-cross-page-column-continuation-v3')
+    )), false);
 });
 
 function createSuccessfulClient(result) {

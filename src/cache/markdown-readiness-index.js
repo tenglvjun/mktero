@@ -9,6 +9,21 @@ export function createMarkdownReadinessIndex({
     let records = [];
     const liveCacheKeys = new Set();
 
+    function readableCacheKey(item, parserProfile) {
+        const libraryID = normalizeLibraryID(item?.libraryID);
+        const itemKey = typeof item?.key === 'string' ? item.key : '';
+        if (libraryID === null || !ITEM_KEY.test(itemKey)) return null;
+        if (typeof parserProfile !== 'string' || !parserProfile) return null;
+        const timestamp = now();
+        return records.find(record => (
+            record.libraryID === libraryID
+            && record.parserProfile === parserProfile
+            && (record.itemKey === itemKey || record.attachmentKey === itemKey)
+            && liveCacheKeys.has(record.cacheKey)
+            && record.expiresAt > timestamp
+        ))?.cacheKey || null;
+    }
+
     return {
         replace(nextRecords) {
             records = normalizeRecords(nextRecords);
@@ -75,18 +90,11 @@ export function createMarkdownReadinessIndex({
         },
 
         isReady(item, parserProfile) {
-            const libraryID = normalizeLibraryID(item?.libraryID);
-            const itemKey = typeof item?.key === 'string' ? item.key : '';
-            if (libraryID === null || !ITEM_KEY.test(itemKey)) return false;
-            if (typeof parserProfile !== 'string' || !parserProfile) return false;
-            const timestamp = now();
-            return records.some(record => (
-                record.libraryID === libraryID
-                && record.parserProfile === parserProfile
-                && (record.itemKey === itemKey || record.attachmentKey === itemKey)
-                && liveCacheKeys.has(record.cacheKey)
-                && record.expiresAt > timestamp
-            ));
+            return readableCacheKey(item, parserProfile) !== null;
+        },
+
+        cacheKeyFor(item, parserProfile) {
+            return readableCacheKey(item, parserProfile);
         },
 
         snapshot() {

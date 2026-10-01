@@ -8,6 +8,11 @@ import {
     normalizeChromeRanges,
 } from '../markdown/chrome-ranges.js';
 import {
+    findPublisherCopyrightRanges,
+    isPublisherCopyrightGap,
+    isPublisherCopyrightParagraph,
+} from '../markdown/publisher-copyright.js';
+import {
     normalizeMistralFigureLayouts,
     normalizeMistralMarkdown,
 } from './markdown-normalizer.js';
@@ -536,17 +541,35 @@ function detectMistralPageChrome(markdown, pageIndex, records, repeatedLines) {
         }
     }
 
+    const copyrightRanges = findPublisherCopyrightRanges(markdown);
     const chromeRecords = findChromeRecords(
         records,
         context.edgeTextByIndex,
         removableIndexes
     );
+    for (const record of records) {
+        if (recordInsidePublisherCopyright(record, markdown, copyrightRanges)) {
+            chromeRecords.add(record);
+        }
+    }
 
     return {
         markdown,
         chromeRecords,
-        chromeRanges: chromeRangesForLineIndexes(context.lines, removableIndexes),
+        chromeRanges: [
+            ...chromeRangesForLineIndexes(context.lines, removableIndexes),
+            ...copyrightRanges,
+        ],
     };
+}
+
+function recordInsidePublisherCopyright(record, markdown, ranges) {
+    const text = record?.normalized?.text;
+    if (!text || !ranges.length || !isPublisherCopyrightParagraph(text)) return false;
+    const needle = text.replace(/\s+/gu, ' ').trim().slice(0, 80);
+    if ([...needle].length < 12) return false;
+    return ranges.some(range => markdown.slice(range.from, range.to).includes(needle)
+        || markdown.slice(range.from, range.to).replace(/\s+/gu, ' ').includes(needle));
 }
 
 function chromeRangesForLineIndexes(lines, indexes) {
@@ -770,11 +793,16 @@ function applyMistralTextFlow(markdown, records) {
         .filter(entry => entry.type === 'text' && entry.locations.length === 1)
         .sort((left, right) => left.markdownFrom - right.markdownFrom);
     const edits = [];
+    const usedContinuations = new Set();
+    collectMistralPublisherCopyrightJoins(markdown, entries, edits, usedContinuations);
 
     for (let index = 1; index < entries.length; index++) {
         const previous = entries[index - 1];
         const current = entries[index];
-        if (!isMistralColumnContinuation(markdown, previous, current)) continue;
+        if (usedContinuations.has(current)
+            || !isMistralColumnContinuation(markdown, previous, current)) {
+            continue;
+        }
         edits.push({
             from: previous.markdownTo,
             to: current.markdownFrom,
@@ -791,6 +819,105 @@ function applyMistralTextFlow(markdown, records) {
                 to: edit.to,
                 replacementLength: edit.replacement.length,
             })),
+    };
+}
+
+function collectMistralPublisherCopyrightJoins(
+    markdown,
+    entries,
+    edits,
+    usedContinuations
+) {
+    const usedAnchors = new Set();
+    for (let index = 0; index < entries.length; index += 1) {
+        const anchor = entries[index];
+        if (usedAnchors.has(anchor)) continue;
+        const continuation = mistralContinuationAcrossCopyright(
+            markdown,
+            entries,
+            index
+        );
+        if (!continuation
+            || usedContinuations.has(continuation)
+            || !canJoinMistralPublisherCopyright(markdown, anchor, continuation)) {
+            continue;
+        }
+        const anchorText = markdown.slice(anchor.markdownFrom, anchor.markdownTo)
+            .trimEnd();
+        const continuationText = markdown.slice(
+            continuation.markdownFrom,
+            continuation.markdownTo
+        ).trimStart();
+        const removal = mistralContinuationRemoval(markdown, continuation);
+        if (!anchorText || !continuationText || !removal) continue;
+        edits.push({
+            from: anchor.markdownFrom,
+            to: anchor.markdownTo,
+            replacement: `${anchorText} ${continuationText}`,
+        }, {
+            from: removal.from,
+            to: removal.to,
+            replacement: '',
+        });
+        usedAnchors.add(anchor);
+        usedContinuations.add(continuation);
+    }
+}
+
+function mistralContinuationAcrossCopyright(markdown, entries, anchorIndex) {
+    const anchor = entries[anchorIndex];
+    for (let index = anchorIndex + 1; index < entries.length
+        && index < anchorIndex + 12; index += 1) {
+        const candidate = entries[index];
+        if (candidate.markdownFrom < anchor.markdownTo) continue;
+        const gap = markdown.slice(anchor.markdownTo, candidate.markdownFrom);
+        if (isPublisherCopyrightGap(gap)) return candidate;
+        const candidateText = markdown.slice(
+            candidate.markdownFrom,
+            candidate.markdownTo
+        );
+        if (isPublisherCopyrightParagraph(candidateText)
+            || isPublisherCopyrightGap(`${gap}${candidateText}`)) {
+            continue;
+        }
+        return null;
+    }
+    return null;
+}
+
+function canJoinMistralPublisherCopyright(markdown, anchor, continuation) {
+    const anchorPage = anchor.locations[0]?.pageIndex;
+    const continuationPage = continuation.locations[0]?.pageIndex;
+    if (!Number.isSafeInteger(anchorPage)
+        || !Number.isSafeInteger(continuationPage)
+        || (continuationPage !== anchorPage
+            && continuationPage !== anchorPage + 1)) {
+        return false;
+    }
+    const anchorText = markdown.slice(anchor.markdownFrom, anchor.markdownTo);
+    const continuationText = markdown.slice(
+        continuation.markdownFrom,
+        continuation.markdownTo
+    ).trimStart();
+    if (isPublisherCopyrightParagraph(anchorText)
+        || isPublisherCopyrightParagraph(continuationText)
+        || MISTRAL_NON_PROSE_START_PATTERN.test(continuationText)
+        || !/^\p{Ll}/u.test(continuationText)
+        || MISTRAL_SENTENCE_END_PATTERN.test(anchorText.trimEnd())) {
+        return false;
+    }
+    const words = anchorText.match(/\p{L}[\p{L}\p{N}'’-]*/gu) || [];
+    return words.length >= 6;
+}
+
+function mistralContinuationRemoval(markdown, entry) {
+    const preceding = /(?:\r?\n[ \t]*){2}$/.exec(
+        markdown.slice(0, entry.markdownFrom)
+    );
+    if (!preceding) return null;
+    return {
+        from: entry.markdownFrom - preceding[0].length,
+        to: entry.markdownTo,
     };
 }
 
@@ -822,6 +949,10 @@ function isMistralColumnContinuation(markdown, previous, current) {
         .trimEnd();
     const currentText = markdown.slice(current.markdownFrom, current.markdownTo)
         .trimStart();
+    if (isPublisherCopyrightParagraph(previousText)
+        || isPublisherCopyrightParagraph(currentText)) {
+        return false;
+    }
     if (!previousText || !currentText
         || MISTRAL_NON_PROSE_START_PATTERN.test(currentText)) {
         return false;

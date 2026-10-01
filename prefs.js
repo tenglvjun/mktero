@@ -31,3 +31,5 @@ pref("extensions.mktero.aiRequestTimeoutMs", 600000);
 pref("extensions.mktero.aiStreaming", true);
 pref("extensions.mktero.aiAutoTranslateSelection", false);
 pref("extensions.mktero.aiProviderProfiles", "{}");
+pref("extensions.mktero.obsidianVaultPath", "");
+pref("extensions.mktero.obsidianSubdirectory", "Mktero");

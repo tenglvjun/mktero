@@ -76,7 +76,7 @@ export function installRenderedAnnotations(
     for (const annotation of annotations || []) {
         const text = String(annotation.text || '');
         if (!text) continue;
-        const content = container.textContent || '';
+        const content = visibleContainerText(container);
         const range = renderedTextRange(
             content,
             text,
@@ -87,6 +87,31 @@ export function installRenderedAnnotations(
         if (!range) continue;
         wrapTextRange(container, range.from, range.to, annotation, translate);
     }
+}
+
+// MathML keeps the TeX source in a hidden <annotation> element, so a formula
+// appears twice in textContent. Matching against that text breaks any
+// annotation that spans the formula, so both the search text and the range
+// walker skip the hidden math source.
+export function hiddenMathTextNode(node) {
+    return Boolean(node?.parentElement?.closest?.(
+        'annotation, annotation-xml'
+    ));
+}
+
+function visibleContainerText(container) {
+    const document = container?.ownerDocument;
+    if (!document) return '';
+    const walker = document.createTreeWalker(
+        container,
+        document.defaultView.NodeFilter.SHOW_TEXT
+    );
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (hiddenMathTextNode(node)) continue;
+        text += node.textContent;
+    }
+    return text;
 }
 
 function renderedTextRange(
@@ -145,6 +170,13 @@ function renderedTextRange(
     if (normalizedFrom !== undefined) {
         return index.sourceRange(normalizedFrom, normalizedTarget.length);
     }
+    const sourceDerived = sourceDerivedTextRange(
+        content,
+        annotation,
+        source,
+        sourceFrom
+    );
+    if (sourceDerived) return sourceDerived;
     if (normalized.offsets.length === 1) {
         return index.sourceRange(
             normalized.offsets[0],
@@ -189,6 +221,28 @@ function sourceOccurrenceOrdinal(
     });
 }
 
+// The saved text can differ from the rendered caption (for example when math
+// delimiters or KaTeX spacing were part of the selection). The source range is
+// authoritative, so when every text lookup misses, wrap the visible text that
+// the range itself produces.
+function sourceDerivedTextRange(content, annotation, source, sourceFrom) {
+    if (!source || !Number.isInteger(sourceFrom)) return null;
+    const range = annotationSourceRange(annotation, source, sourceFrom);
+    if (!range) return null;
+    const visible = createVisibleMarkdownTextIndex(source);
+    const from = Math.max(0, range.from - sourceFrom);
+    const to = Math.min(source.length, range.to - sourceFrom);
+    const text = visible.visibleOffsetAt
+        ? visible.text.slice(
+            visible.visibleOffsetAt(from),
+            visible.visibleOffsetAt(to)
+        ).trim()
+        : '';
+    if (!text) return null;
+    const at = content.indexOf(text);
+    return at < 0 ? null : { from: at, to: at + text.length };
+}
+
 function annotationSourceRange(annotation, source, sourceFrom) {
     return (annotation.ranges || []).find(range => (
         Number.isInteger(range?.from)
@@ -211,6 +265,7 @@ function wrapTextRange(container, from, to, annotation, translate) {
     let endNode = null;
     let endOffset = 0;
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (hiddenMathTextNode(node)) continue;
         const nextOffset = offset + node.textContent.length;
         if (!startNode && from >= offset && from < nextOffset) {
             startNode = node;

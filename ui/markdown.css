@@ -697,6 +697,10 @@ main {
     margin: 4px 0;
 }
 
+.markdown-note-item:has(.markdown-note-delete) {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .markdown-note-link {
     display: block;
     width: 100%;
@@ -778,7 +782,8 @@ main {
 .markdown-note-sync-label { overflow-wrap: anywhere; }
 
 .markdown-note-sync-retry,
-.markdown-note-open-pdf {
+.markdown-note-open-pdf,
+.markdown-note-delete {
     display: inline-grid;
     width: 28px;
     height: 28px;
@@ -793,11 +798,18 @@ main {
 
 .markdown-note-sync-retry { color: var(--warning); }
 
-.markdown-note-open-pdf { color: var(--muted); }
+.markdown-note-open-pdf,
+.markdown-note-delete { color: var(--muted); }
 
 .markdown-note-sync-retry:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--warning) 30%, transparent);
     background: color-mix(in srgb, var(--warning) 9%, transparent);
+}
+
+.markdown-note-delete:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--danger, var(--warning)) 30%, transparent);
+    color: var(--danger, var(--warning));
+    background: color-mix(in srgb, var(--danger, var(--warning)) 9%, transparent);
 }
 
 .markdown-note-open-pdf:hover:not(:disabled) {
@@ -811,13 +823,19 @@ main {
     outline-offset: -2px;
 }
 
+.markdown-note-delete:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--danger, var(--warning)) 55%, transparent);
+    outline-offset: -2px;
+}
+
 .markdown-note-open-pdf:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
     outline-offset: -2px;
 }
 
 .markdown-note-sync-retry:disabled,
-.markdown-note-open-pdf:disabled {
+.markdown-note-open-pdf:disabled,
+.markdown-note-delete:disabled {
     cursor: default;
     opacity: 0.5;
 }
@@ -2847,6 +2865,19 @@ main {
     outline-offset: 2px;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-selection-flash {
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--accent) 48%, transparent);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    animation: mktero-selection-flash 1.1s ease-in-out;
+}
+
+@keyframes mktero-selection-flash {
+    0%, 42% { background: color-mix(in srgb, var(--accent) 62%, transparent); }
+    18%, 64%, 100% { background: transparent; }
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-reference-highlight {
     border-radius: 4px;
     background: color-mix(in srgb, var(--accent) 20%, transparent);
@@ -4644,7 +4675,8 @@ main {
     .markdown-editor-host > .cm-editor .cm-mktero-translation-pair {
         transition: none;
     }
-    .markdown-editor-host > .cm-editor .cm-mktero-reference-highlight {
+    .markdown-editor-host > .cm-editor .cm-mktero-reference-highlight,
+    .markdown-editor-host > .cm-editor .cm-mktero-selection-flash {
         animation: none;
     }
 }

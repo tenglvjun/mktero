@@ -22,7 +22,7 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
     );
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.textFlow,
-        'cross-page-continuation-v2'
+        'cross-page-continuation-v3'
     );
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.prose,
@@ -38,7 +38,7 @@ test('includes figure panel reassembly in the MinerU parser profile', () => {
     );
     assert.equal(
         MINERU_SOURCE_MAP_OPTIONS.chrome,
-        'page-edge-repeated-v1'
+        'publisher-copyright-cluster-v1'
     );
     assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, [
         MINERU_FIGURE_REGION_V14_PARSER_PROFILE_ID,
@@ -434,6 +434,83 @@ test('keeps a genuine next-page heading after complete prose', () => {
     });
 
     assert.equal(result.markdown, markdown);
+});
+
+test('joins prose split by a first-page publisher copyright cluster', () => {
+    const abstract = 'Believable proxies of human behavior wake up and head to work '
+        + 'while authors write and the agents spread invitations over the next two';
+    const continuation = 'days, make new acquaintances and show up together.';
+    const copyright = [
+        'Permission to make digital or hard copies of part or all of this work for '
+            + 'personal or classroom use is granted without fee.',
+        "UIST '23, October 29-November 1, 2023, San Francisco, CA, USA",
+        '© 2023 Copyright held by the owner/author(s).',
+        'ACM ISBN 979-8-4007-0132-0/23/10.',
+        'https://doi.org/10.1145/3586183.3606763',
+    ].join('\n\n');
+    const result = prepareMinerUResult({
+        markdown: [abstract, copyright, continuation].join('\n\n'),
+        contentList: [{
+            type: 'text',
+            text: abstract,
+            pageIndex: 0,
+            bbox: [82, 400, 484, 560],
+        }, {
+            type: 'text',
+            text: continuation,
+            pageIndex: 1,
+            bbox: [82, 106, 484, 220],
+        }],
+    });
+
+    assert.match(result.markdown, /over the next two days, make new acquaintances/u);
+    assert.ok(result.markdown.indexOf('over the next two days')
+        < result.markdown.indexOf('Permission to make digital'));
+    assert.equal(
+        result.chromeRanges.some(range => (
+            result.markdown.slice(range.from, range.to).includes('Permission to make digital')
+            && result.markdown.slice(range.from, range.to).includes('doi.org/10.1145')
+        )),
+        true
+    );
+    assert.equal(
+        result.chromeRanges.some(range => (
+            result.markdown.slice(range.from, range.to).includes('days, make new acquaintances')
+        )),
+        false
+    );
+});
+
+test('does not join a finished paragraph across a publisher copyright cluster', () => {
+    const abstract = 'This paragraph is complete and remains before the copyright notice.';
+    const continuation = 'lowercase text on the next page starts a new paragraph.';
+    const copyright = [
+        'Permission to make digital or hard copies of part or all of this work.',
+        '© 2023 Copyright held by the owner/author(s).',
+    ].join('\n\n');
+    const markdown = [abstract, copyright, continuation].join('\n\n');
+    const result = prepareMinerUResult({
+        markdown,
+        contentList: [{
+            type: 'text',
+            text: abstract,
+            pageIndex: 0,
+            bbox: [82, 400, 484, 560],
+        }, {
+            type: 'text',
+            text: continuation,
+            pageIndex: 1,
+            bbox: [82, 106, 484, 220],
+        }],
+    });
+
+    assert.equal(result.markdown.includes(`${abstract} ${continuation}`), false);
+    assert.equal(
+        result.chromeRanges.some(range => (
+            result.markdown.slice(range.from, range.to).includes('Permission to make digital')
+        )),
+        true
+    );
 });
 
 test('does not join banner-separated prose without a dangling anchor word', () => {

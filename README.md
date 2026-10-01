@@ -16,7 +16,10 @@ opens the resulting Markdown, formulas, tables, figures, citations, and
 annotations in a temporary, reading-first Zotero tab. A content-addressed
 local cache avoids repeating conversions for the same PDF and parser profile.
 
-![Mktero converting, reading, and annotating an academic PDF in Zotero](./docs/assets/mktero-demo.gif)
+[Download](https://github.com/tenglvjun/mktero/releases/latest) ·
+[Product page](https://mktero.com/) ·
+[Documentation](#documentation) ·
+[Community](#community)
 
 > [!IMPORTANT]
 > Mktero is in beta. On a cache miss, the complete PDF is sent to the selected
@@ -25,23 +28,37 @@ local cache avoids repeating conversions for the same PDF and parser profile.
 > configured by you. Review [Privacy and data handling](./docs/privacy.md)
 > before processing sensitive documents.
 
-Useful links: [Product page](https://mktero.com/) ·
-[Download](https://github.com/tenglvjun/mktero/releases/latest) ·
-[Discussions](https://github.com/tenglvjun/mktero/discussions) ·
-[Issues](https://github.com/tenglvjun/mktero/issues)
+![Mktero converting, reading, and annotating an academic PDF in Zotero](./docs/assets/mktero-demo.gif)
+
+## Contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Documentation](#documentation)
+- [Privacy](#privacy)
+- [Development](#development)
+- [Community](#community)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
+### Reading
+
 - Reflow OCR output, multi-column text, formulas, tables, figures, lists, and
   code into a continuous academic reading document.
+- Hide publisher mastheads, first-page copyright notices, repeated headers and
+  footers, and page numbers, and keep reliable page/region mappings so text,
+  formulas, tables, and figures can jump back to their PDF source. A PDF text
+  selection can open its Markdown paragraph when that mapping is unique.
+- Browse the outline or a figure/table index, preview citations, affiliations,
+  figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
 - Rebuild figures from the local PDF when layout evidence, page coordinates,
   and Markdown ranges agree. Restoration runs in a background worker and
   replaces placeholders in place, so slow figures never block reading.
-- Hide publisher mastheads, repeated headers/footers, and page numbers, and
-  keep reliable page/region mappings so text, formulas, tables, and figures can
-  jump back to their PDF source.
-- Browse the outline or a figure/table index, preview citations, affiliations,
-  figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
+
+### Annotations and translation
+
 - Display Zotero PDF highlights and underlines in Markdown, and create,
   recolor, comment on, or delete annotations.
 - Correct recognition errors in existing paragraphs, headings, and GFM table
@@ -49,33 +66,44 @@ Useful links: [Product page](https://mktero.com/) ·
 - Translate a complete article through a configured Vercel AI SDK provider and
   switch between Original, Translation, and continuous Bilingual reading; look
   up a selected term or passage on demand.
-- Check whether each Markdown reference already exists in any accessible Zotero
-  library, copy a reference from another library, and import missing metadata
-  with an optional public PDF attachment.
+
+### Library and export
+
+- Check whether each Markdown reference already exists in any accessible
+  Zotero library, copy a reference from another library, and import missing
+  metadata with an optional public PDF attachment.
 - Explore direct reference relationships among papers already in the current
   Zotero library, using Semantic Scholar, OpenCitations, and OpenAlex when
   identifiers are available.
 - Save a portable Zotero snapshot, or export corrected Markdown and its
-  extracted figures to a local folder.
+  extracted figures to a local folder or an Obsidian vault.
 - Show a Markdown column in the item list when this computer still has a
   readable cached conversion for the current settings. While a PDF is queued
   or converting, that column shows a session-only spinner. The ready marker
   stays in the Zotero profile, does not modify the item, and does not sync.
-- Follow Zotero's English or Simplified Chinese display language; other locales
-  fall back to English.
+
+The interface follows Zotero's English or Simplified Chinese display language.
+Other locales fall back to English.
 
 ## Quick start
 
+> [!TIP]
+> Install the XPI, open `Settings -> Mktero`, add an OCR key, then open a PDF
+> and click the Mktero icon in the reader toolbar.
+
 ### Requirements
 
-- Desktop Zotero `7.0` through `10.0.*`
-- A PDF attachment downloaded and available as a local file
-- An API key for MinerU cloud or [Mistral](https://console.mistral.ai/api-keys/).
-  MinerU can instead use a self-hosted MinerU 4.0 service; its API key is optional
-- Network access to the selected conversion API, or to the configured local MinerU service
+- **Zotero.** Desktop `7.0` through `10.0.*`.
+- **PDF.** An attachment downloaded and available as a local file.
+- **OCR.** An API key for MinerU cloud or [Mistral](https://console.mistral.ai/api-keys/).
+  MinerU can instead use a self-hosted MinerU 4.0 service; its API key is
+  optional.
+- **Network.** Access to the selected conversion API, or to the configured
+  local MinerU service.
 
-MinerU and Mistral control file-size, page-count, quota, and service-availability
-limits. See the [MinerU API documentation](https://mineru.net/apiManage/docs) or
+MinerU and Mistral control file-size, page-count, quota, and
+service-availability limits. See the
+[MinerU API documentation](https://mineru.net/apiManage/docs) or
 [Mistral OCR documentation](https://docs.mistral.ai/studio/document-processing/basic_ocr)
 for current limits.
 
@@ -102,38 +130,40 @@ See [Configuration](./docs/configuration.md) for every setting and
 
 ### Open a PDF
 
-1. Open a PDF in Zotero and click the Mktero file icon in the reader toolbar, or
-   right-click a PDF or library item and choose `Read as Markdown with Mktero`.
-   Select several items and choose `Prepare selected Markdown` to queue them
-   without opening a tab for each one. Right-click a collection and choose
-   `Prepare collection Markdown` to prepare only that collection's own PDFs,
-   not its subcollections. A single item still uses `Read as Markdown with Mktero`.
+1. Start from the PDF or library item you already have:
+
+   - Open a PDF in Zotero and click the Mktero file icon in the reader toolbar.
+   - Right-click a PDF or library item and choose `Read as Markdown with Mktero`.
+   - Select several items and choose `Prepare selected Markdown` to queue them
+     without opening a tab for each one.
+   - Right-click a collection and choose `Prepare collection Markdown` to
+     prepare only that collection's own PDFs, not its subcollections. A single
+     item still uses `Read as Markdown with Mktero`.
+
 2. Follow the upload, conversion, and download progress in the temporary Mktero
    tab. A valid cache entry skips the remote conversion. A batch uses Zotero's
    progress window; minimizing it keeps preparation running.
 3. Use the outline, find, citations, figure/table previews, source links, and
    Zotero notes panel to navigate the document.
 
-Mktero tabs are session-only and are not restored after Zotero restarts. Closing
-a tab does not cancel an in-progress conversion; it continues in the background
-and appears in the preparation window. Shutting down the extension cancels
-active conversion and translation requests. Each uncached PDF in a
-batch is sent the same way as a single conversion. Reopening the same PDF and
-conversion profile restores the last reading paragraph.
+> [!NOTE]
+> Mktero tabs are session-only and are not restored after Zotero restarts.
+> Closing a tab does not cancel an in-progress conversion; it continues in the
+> background and appears in the preparation window. Shutting down the extension
+> cancels active conversion and translation requests. Each uncached PDF in a
+> batch is sent the same way as a single conversion. Reopening the same PDF and
+> conversion profile restores the last reading paragraph.
 
 ## Documentation
 
-- [Configuration](./docs/configuration.md) — every setting and its default.
-- [Reading and annotation workflows](./docs/workflows.md) — corrections,
-  annotations, AI translation, citations, references, snapshots, and export.
-- [Figure pipeline](./docs/figure-pipeline.md) — how figures are rebuilt from
-  the local PDF.
-- [Privacy and data handling](./docs/privacy.md) — what Mktero sends and where
-  it is stored.
-- [Limitations](./docs/limitations.md) — supported PDFs, navigation, and
-  resource limits.
-- [Development](./docs/development.md) — build, test, figure corpus, and
-  contributing.
+| Guide | What it covers |
+| --- | --- |
+| [Configuration](./docs/configuration.md) | Every setting and its default |
+| [Reading and annotation workflows](./docs/workflows.md) | Corrections, annotations, AI translation, citations, references, snapshots, and export |
+| [Figure pipeline](./docs/figure-pipeline.md) | How figures are rebuilt from the local PDF |
+| [Privacy and data handling](./docs/privacy.md) | What Mktero sends and where it is stored |
+| [Limitations](./docs/limitations.md) | Supported PDFs, navigation, and resource limits |
+| [Development](./docs/development.md) | Build, test, figure corpus, and contributing |
 
 ## Privacy
 
@@ -166,13 +196,46 @@ npm run build
 
 See [Development](./docs/development.md) for the figure corpus regression.
 
+## Community
+
+Usage questions can go to the QQ group, WeChat, or
+[Discord](https://discord.gg/uyxmxah2sh). Ideas, reading workflows, and beta
+feedback belong in
+[GitHub Discussions](https://github.com/tenglvjun/mktero/discussions).
+Reproducible bugs belong in
+[GitHub Issues](https://github.com/tenglvjun/mktero/issues).
+
+Do not paste API keys, PDF contents, or logs that contain credentials into the
+QQ group, WeChat, Discord, issues, or pull requests.
+
+QQ is a group: scan the code, or search `616518076` in QQ.
+
+<table>
+  <tr>
+    <td align="center" width="220">
+      <img src="./docs/assets/qq-group.png" width="180" alt="QR code for the Mktero QQ group, number 616518076"><br>
+      <b>QQ</b>
+    </td>
+    <td align="center" width="220">
+      <img src="./docs/assets/wechat.png" width="180" alt="WeChat QR code for the Mktero maintainer"><br>
+      <b>WeChat</b>
+    </td>
+  </tr>
+</table>
+
 ## Contributing
 
-Pull requests are welcome. For ideas, reading workflows, and beta feedback, use
-[GitHub Discussions](https://github.com/tenglvjun/mktero/discussions). For
-changes to runtime behavior, run the complete verification commands above and
-include tests for the affected behavior. Please keep credentials, private PDFs,
-and other sensitive data out of issues, pull requests, and logs.
+Pull requests are welcome. For changes to runtime behavior, run the complete
+verification commands above and include tests for the affected behavior.
+
+- Ideas, reading workflows, and beta feedback:
+  [GitHub Discussions](https://github.com/tenglvjun/mktero/discussions)
+- Usage questions: [Community](#community)
+- Reproducible bugs:
+  [GitHub Issues](https://github.com/tenglvjun/mktero/issues)
+
+Please keep credentials, private PDFs, and other sensitive data out of the QQ
+group, WeChat, Discord, issues, pull requests, and logs.
 
 ## License
 

@@ -450,6 +450,47 @@ test('opens a Zotero PDF reader at the selected annotation', async () => {
     assert.deepEqual(opened, [[42, { annotationID: 'HIGH0001' }]]);
 });
 
+test('loads the annotation page before selecting the annotation', async () => {
+    const attachment = {
+        id: 42,
+        libraryID: 1,
+        isPDFAttachment: () => true,
+    };
+    const calls = [];
+    const reader = {
+        itemID: 42,
+        async navigate(location) {
+            calls.push({ navigated: location });
+        },
+    };
+    const zotero = {
+        Items: {
+            get: id => (id === 42 ? attachment : null),
+            getByLibraryAndKey: (libraryID, key) => (
+                libraryID === 1 && key === 'HIGH0009'
+                    ? { annotationPosition: JSON.stringify({ pageIndex: 6 }) }
+                    : null
+            ),
+        },
+        Reader: {
+            _readers: [reader],
+            async open(...args) {
+                calls.push({ opened: args });
+                return reader;
+            },
+        },
+    };
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await actions.openInPDF(42, 'HIGH0009');
+
+    assert.deepEqual(calls, [
+        { opened: [42] },
+        { navigated: { pageIndex: 6 } },
+        { opened: [42, { annotationID: 'HIGH0009' }] },
+    ]);
+});
+
 test('opens annotations from different windows through the shared reader manager', async () => {
     const attachments = new Map([
         [42, { isPDFAttachment: () => true }],
@@ -546,6 +587,36 @@ test('locates Markdown text through an open Zotero PDF reader', async () => {
     assert.equal(
         zotero.Reader._readers[0]._iframe.docShellIsActive,
         false
+    );
+});
+
+test('reports a closed PDF reader instead of exposing a dead wrapper', async () => {
+    const text = 'Selected paper title';
+    const view = createSearchView({
+        total: 1,
+        annotation: locatedAnnotation(text),
+    });
+    const deadError = new Error("can't access dead object");
+    Object.defineProperty(view, '_findState', {
+        configurable: true,
+        get() {
+            throw deadError;
+        },
+    });
+    const zotero = createZoteroForAnnotationCreation({ view });
+    const actions = createZoteroAnnotationActions(zotero, {
+        now: () => 0,
+        delay: async () => {},
+        searchTimeout: 1_000,
+    });
+
+    await assert.rejects(
+        actions.createFromText(42, {
+            text,
+            comment: '',
+            color: '#ffd400',
+        }),
+        error => error?.code === 'MKTERO_PDF_READER_UNAVAILABLE'
     );
 });
 

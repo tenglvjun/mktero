@@ -396,6 +396,39 @@ export function resolvePDFPageIndexHint(
     return nearestPages.length === 1 ? nearestPages[0] : null;
 }
 
+// A selection that fully contains exactly one mapped block identifies that
+// block's OCR region. The PDF text layer often mangles display equations, so
+// this region is the only reliable anchor for them.
+export function resolveSourceMapRegion(
+    sourceMap,
+    range,
+    documentLength = Infinity
+) {
+    if (!Array.isArray(sourceMap)
+        || !Number.isSafeInteger(range?.from)
+        || !Number.isSafeInteger(range?.to)
+        || range.from < 0
+        || range.to <= range.from
+        || range.to > documentLength) {
+        return null;
+    }
+    const contained = sourceMap.filter(entry => (
+        isValidSourceMapEntry(entry, documentLength)
+        && entry.markdownFrom >= range.from
+        && entry.markdownTo <= range.to
+    ));
+    if (contained.length !== 1) return null;
+    const entry = contained[0];
+    const pageIndex = uniqueSourceMapEntryPage(entry);
+    if (pageIndex === null) return null;
+    const location = entry.locations.find(candidate => (
+        candidate.pageIndex === pageIndex
+    ));
+    return location
+        ? { pageIndex, bbox: [...location.bbox] }
+        : null;
+}
+
 function overlappingSourceMapEntries(sourceMap, range, documentLength) {
     if (!Array.isArray(sourceMap) || !isValidDocumentRange(range, documentLength)) {
         return [];

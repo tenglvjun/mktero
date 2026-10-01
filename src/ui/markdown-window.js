@@ -15,7 +15,10 @@ import {
     createMarkdownAnnotationTextQuote,
     markdownAnnotationRangeMatchesSource,
 } from '../core/markdown-local-annotations.js';
-import { resolvePDFPageIndexHint } from '../core/markdown-source-map.js';
+import {
+    resolvePDFPageIndexHint,
+    resolveSourceMapRegion,
+} from '../core/markdown-source-map.js';
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     AI_TARGET_LANGUAGES,
@@ -99,6 +102,12 @@ const DOCUMENT_ACTION_FEEDBACK = Object.freeze({
         progress: 'viewer.markdownExporting',
         success: 'viewer.markdownExported',
         failure: 'viewer.markdownExportFailed',
+        neutralStatus: 'cancelled',
+    }),
+    exportObsidian: Object.freeze({
+        progress: 'viewer.obsidianExporting',
+        success: 'viewer.obsidianExported',
+        failure: 'viewer.obsidianExportFailed',
         neutralStatus: 'cancelled',
     }),
 });
@@ -812,14 +821,22 @@ class MarkdownTabView {
                 && previousCacheKey !== nextCacheKey
             );
             this.renderedCacheKey = nextCacheKey;
+            // Annotation-only updates republish the same document. Rebuilding
+            // A republished result can carry a new cache key for the very same
+            // document. There is nothing to restore in that case: the reader is
+            // already looking at the content, and re-applying the saved position
+            // (or scrolling to the top) would move the view for no reason.
             if (conversionIdentityChanged) {
-                this.didRestorePersistedPosition = false;
                 this.lastPersistedReadingSignature = '';
-                if (Number.isFinite(model.restoreReadingOffset)) {
+                if (!documentChanged) {
+                    this.didRestorePersistedPosition = true;
+                }
+                else if (Number.isFinite(model.restoreReadingOffset)) {
                     this.restoreReadingPosition(model.restoreReadingOffset);
                     this.didRestorePersistedPosition = true;
                 }
                 else {
+                    this.didRestorePersistedPosition = false;
                     this.restoreReadingPosition(0);
                 }
             }
@@ -841,6 +858,7 @@ class MarkdownTabView {
                 this.restoreReadingPosition(model.restoreReadingOffset);
                 this.didRestorePersistedPosition = true;
             }
+            this.revealRequestedMarkdown();
             if (this.documentSearchOpen) {
                 this.runDocumentSearch({
                     keepIndex: true,
@@ -1009,9 +1027,18 @@ class MarkdownTabView {
             sourceAnnotation.ranges,
             this.model.chromeRanges
         );
+        // A selection that contains a whole mapped block (for example a display
+        // equation whose LaTeX does not survive the PDF text layer) records that
+        // block's OCR region as a locator fallback.
+        const pdfRegion = resolveSourceMapRegion(
+            this.model.sourceMap,
+            sourceAnnotation?.ranges?.[0],
+            String(this.model.markdown || '').length
+        );
         const draft = {
             ...sourceAnnotation,
             ...(pdfPageIndexHint === null ? {} : { pdfPageIndexHint }),
+            ...(pdfRegion ? { pdfRegion } : {}),
             ...(textQuote ? { textQuote } : {}),
         };
         const saved = await this.model.onCreateMarkdownAnnotation(draft);
@@ -1524,6 +1551,8 @@ class MarkdownTabView {
             saveSnapshotLabel: documentActions.saveSnapshotLabel,
             exportMarkdown: documentActions.exportMarkdown,
             exportMarkdownLabel: documentActions.exportMarkdownLabel,
+            exportObsidian: documentActions.exportObsidian,
+            exportObsidianLabel: documentActions.exportObsidianLabel,
             readerControls: documentActions.readerControls,
             readerFontSize: documentActions.readerFontSize,
             readerFontSizeLabel: documentActions.readerFontSizeLabel,
@@ -2213,6 +2242,27 @@ class MarkdownTabView {
             this.t('viewer.exportMarkdownShort')
         );
         exportMarkdown.appendChild(exportMarkdownLabel);
+        const exportObsidian = this.createElement('button', {
+            id: 'mktero-export-obsidian',
+            class: 'markdown-reader-action markdown-reader-action--child',
+            type: 'button',
+            'aria-label': this.t('viewer.exportObsidian'),
+            title: this.t('viewer.exportObsidian'),
+        });
+        exportObsidian.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.bookOpen,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        const exportObsidianLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-action-label' },
+            this.t('viewer.exportObsidianShort')
+        );
+        exportObsidian.appendChild(exportObsidianLabel);
         const citationGraphButton = this.createElement('button', {
             id: 'mktero-citation-graph',
             class: 'markdown-reader-action markdown-reader-action--child',
@@ -2241,6 +2291,7 @@ class MarkdownTabView {
         menu.appendChild(reparse);
         menu.appendChild(saveSnapshot);
         menu.appendChild(exportMarkdown);
+        menu.appendChild(exportObsidian);
         const status = this.createElement('span', {
             class: 'markdown-reader-action-status',
             'aria-live': 'polite',
@@ -2306,6 +2357,8 @@ class MarkdownTabView {
             saveSnapshotLabel,
             exportMarkdown,
             exportMarkdownLabel,
+            exportObsidian,
+            exportObsidianLabel,
             citationGraphButton,
             citationGraphLabel,
             githubRepos,
@@ -2609,6 +2662,11 @@ class MarkdownTabView {
                 ownerWindow: this.ownerWindow,
             });
         });
+        this.listen(this.elements.exportObsidian, 'click', () => {
+            this.runDocumentAction('exportObsidian', 'onExportObsidian', {
+                ownerWindow: this.ownerWindow,
+            });
+        });
         this.listen(this.elements.citationGraphButton, 'click', () => {
             this.openCitationGraph();
         });
@@ -2776,6 +2834,18 @@ class MarkdownTabView {
                 ));
                 return;
             }
+            const deleteNote = event.target?.closest?.(
+                '.markdown-note-delete'
+            );
+            if (deleteNote && this.elements.notesList.contains(deleteNote)) {
+                const annotationID = deleteNote.getAttribute(
+                    'data-annotation-id'
+                );
+                this.runNoteButtonAction(deleteNote, () => (
+                    this.deleteAnnotation(annotationID)
+                ));
+                return;
+            }
             const retry = event.target?.closest?.(
                 '.markdown-note-sync-retry'
             );
@@ -2878,6 +2948,7 @@ class MarkdownTabView {
             openWarningSettings: this.elements.warningSettings,
             saveSnapshot: this.elements.saveSnapshot,
             exportMarkdown: this.elements.exportMarkdown,
+            exportObsidian: this.elements.exportObsidian,
         }[kind];
         if (!button || button.disabled
             || this.documentActionBusy
@@ -4336,6 +4407,17 @@ class MarkdownTabView {
         this.elements.exportMarkdownLabel.textContent = this.t(
             'viewer.exportMarkdownShort'
         );
+        this.elements.exportObsidian.setAttribute(
+            'aria-label',
+            this.t('viewer.exportObsidian')
+        );
+        this.elements.exportObsidian.setAttribute(
+            'title',
+            this.t('viewer.exportObsidian')
+        );
+        this.elements.exportObsidianLabel.textContent = this.t(
+            'viewer.exportObsidianShort'
+        );
         const correctionLabel = this.t(this.model.correctionMode
             ? 'revision.finish'
             : 'revision.start');
@@ -4525,6 +4607,10 @@ class MarkdownTabView {
             && model.renderMode !== 'html'
             && typeof model.onExportMarkdown === 'function'
             && !figureRestorationPending;
+        const obsidianAvailable = model.status === 'ready'
+            && model.renderMode !== 'html'
+            && typeof model.onExportObsidian === 'function'
+            && !figureRestorationPending;
         const correctionAvailable = model.status === 'ready'
             && model.renderMode !== 'html'
             && Array.isArray(model.editableBlocks)
@@ -4543,6 +4629,7 @@ class MarkdownTabView {
         const documentActionsAvailable = reparseAvailable
             || saveAvailable
             || exportAvailable
+            || obsidianAvailable
             || correctionAvailable
             || restoreAvailable
             || translationAvailable
@@ -4572,6 +4659,7 @@ class MarkdownTabView {
         this.elements.reparse.hidden = !reparseAvailable;
         this.elements.saveSnapshot.hidden = !saveAvailable;
         this.elements.exportMarkdown.hidden = !exportAvailable;
+        this.elements.exportObsidian.hidden = !obsidianAvailable;
         this.elements.correctionToggle.hidden = !correctionAvailable;
         if (!translationAvailable) {
             this.elements.translationProgress.hidden = true;
@@ -4596,10 +4684,14 @@ class MarkdownTabView {
         this.elements.exportMarkdown.disabled = !exportAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
+        this.elements.exportObsidian.disabled = !obsidianAvailable
+            || loadingView.visible
+            || Boolean(this.documentActionBusy);
         if (figureRestorationPending) {
             const pendingLabel = this.t('viewer.figureRestorationPending');
             this.elements.saveSnapshot.setAttribute('title', pendingLabel);
             this.elements.exportMarkdown.setAttribute('title', pendingLabel);
+            this.elements.exportObsidian.setAttribute('title', pendingLabel);
         }
         this.elements.correctionToggle.disabled = !correctionAvailable
             || loadingView.visible
@@ -4707,6 +4799,15 @@ class MarkdownTabView {
         this.elements.exportMarkdown.classList.toggle(
             'is-exporting',
             exporting
+        );
+        const exportingObsidian = this.documentActionBusy === 'exportObsidian';
+        this.elements.exportObsidian.setAttribute(
+            'aria-busy',
+            String(exportingObsidian)
+        );
+        this.elements.exportObsidian.classList.toggle(
+            'is-exporting',
+            exportingObsidian
         );
         if (!documentActionsAvailable) {
             this.documentActionsOpen = false;
@@ -5166,6 +5267,7 @@ class MarkdownTabView {
         this.elements.reparse.setAttribute('tabindex', menuTabIndex);
         this.elements.saveSnapshot.setAttribute('tabindex', menuTabIndex);
         this.elements.exportMarkdown.setAttribute('tabindex', menuTabIndex);
+        this.elements.exportObsidian.setAttribute('tabindex', menuTabIndex);
         this.elements.correctionToggle.setAttribute('tabindex', menuTabIndex);
         this.elements.retranslateDocument.setAttribute(
             'tabindex',
@@ -5758,6 +5860,18 @@ class MarkdownTabView {
         return host;
     }
 
+    revealRequestedMarkdown() {
+        const requestedOffset = Number(this.model?.revealMarkdownOffset);
+        const requestedEnd = Number(this.model?.revealMarkdownTo);
+        if (!Number.isFinite(requestedOffset)) return;
+        delete this.model.revealMarkdownOffset;
+        delete this.model.revealMarkdownTo;
+        this.restoreReadingPosition(requestedOffset);
+        if (Number.isFinite(requestedEnd) && requestedEnd > requestedOffset) {
+            this.editor?.flashRange?.(requestedOffset, requestedEnd);
+        }
+    }
+
     restoreReadingPosition(offset) {
         const requestedOffset = Number(offset);
         if (!Number.isFinite(requestedOffset)) return;
@@ -5809,6 +5923,10 @@ class MarkdownTabView {
         const signature = readingPositionSignature(anchor);
         if (signature === this.lastPersistedReadingSignature) return;
         this.lastPersistedReadingSignature = signature;
+        // The save is debounced, so the model can still hold an older target.
+        // Keep it on the reader's live position: a later re-render that
+        // restores the saved position must not pull the view backwards.
+        this.model.restoreReadingOffset = anchor.offset;
         try {
             const result = this.model.onReadingPositionChange(anchor);
             if (result && typeof result.catch === 'function') {
@@ -5876,6 +5994,19 @@ class MarkdownTabView {
             ));
             item.appendChild(retry);
         }
+        const deleteNote = this.createElement('button', {
+            class: 'markdown-note-delete',
+            type: 'button',
+            'data-annotation-id': String(annotation.id || ''),
+            'aria-label': this.t('annotation.delete'),
+            title: this.t('annotation.delete'),
+        });
+        deleteNote.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.trash2,
+            { className: 'markdown-note-delete-icon', size: 15 }
+        ));
+        item.appendChild(deleteNote);
         return item;
     }
 

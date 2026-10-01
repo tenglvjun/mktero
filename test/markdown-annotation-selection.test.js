@@ -20,7 +20,7 @@ function textNodeContaining(element, text) {
     return null;
 }
 
-function selectAndHighlight(document, ownerWindow, target, color = '#2ea8e5') {
+function selectAndHighlight(document, ownerWindow, target, color = '#2ea8e5', eventTarget = null) {
     const range = document.createRange();
     if (typeof target === 'function') {
         target(range);
@@ -30,8 +30,9 @@ function selectAndHighlight(document, ownerWindow, target, color = '#2ea8e5') {
     }
     document.getSelection().removeAllRanges();
     document.getSelection().addRange(range);
-    const eventTarget = target.nodeType ? target : document.querySelector('.cm-content');
-    eventTarget.dispatchEvent(new ownerWindow.MouseEvent('mouseup', {
+    const mouseTarget = eventTarget
+        || (target.nodeType ? target : document.querySelector('.cm-content'));
+    mouseTarget.dispatchEvent(new ownerWindow.MouseEvent('mouseup', {
         bubbles: true,
         button: 0,
     }));
@@ -318,6 +319,114 @@ test('creates a bilingual highlight from the SKILL.state schema paragraph', asyn
     dom.window.close();
 });
 
+test('expands a partial formula selection to the whole formula', async () => {
+    const markdown = '![Figure 2 established, that is $Y=D(X)$ is the maximum.](generated/figures/fig-2.png)';
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    const figcaption = document.querySelector('figcaption');
+    const before = textNodeContaining(figcaption, 'that is');
+    const equals = textNodeContaining(figcaption, '=');
+    selectAndHighlight(document, dom.window, range => {
+        range.setStart(before, before.textContent.indexOf('that is'));
+        range.setEnd(equals, 1);
+    }, '#2ea8e5', equals);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created[0].text, 'that is Y=D(X)');
+    const [{ from, to }] = created[0].ranges;
+    assert.equal(markdown.slice(from, to), 'that is $Y=D(X)$');
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('creates a highlight across rendered math in a figure caption', async () => {
+    const markdown = '![Figure 2 established, that is $Y=D(X)$ is the maximum.](generated/figures/fig-2.png)';
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    const figcaption = document.querySelector('figcaption');
+    const before = textNodeContaining(figcaption, 'that is');
+    const after = textNodeContaining(figcaption, 'maximum');
+    selectAndHighlight(document, dom.window, range => {
+        const start = before.textContent.indexOf('that is');
+        range.setStart(before, start);
+        range.setEnd(after, after.textContent.indexOf('maximum') + 'maximum'.length);
+    }, '#2ea8e5', after);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].text, 'that is Y=D(X) is the maximum');
+    const [{ from, to }] = created[0].ranges;
+    assert.equal(markdown.slice(from, to), 'that is $Y=D(X)$ is the maximum');
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('creates a highlight in a caption with repeated word fragments', async () => {
+    const caption = 'Figure 5 Interval tachogram values together with the order p '
+        + 'of the chosen model and minimal values.';
+    const markdown = `![${caption}](generated/figures/fig-5.png)`;
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => 'blob:mktero-figure',
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    const figcaption = document.querySelector('figcaption');
+    const node = textNodeContaining(figcaption, 'Interval tachogram');
+    assert.ok(node);
+    const from = markdown.indexOf('Interval tachogram');
+    const to = markdown.indexOf('order p') + 'order p'.length;
+    selectAndHighlight(document, dom.window, range => {
+        range.setStart(node, node.textContent.indexOf('Interval tachogram'));
+        range.setEnd(node, node.textContent.indexOf('order p') + 'order p'.length);
+    }, '#2ea8e5', node);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].text, 'Interval tachogram values together with the order p');
+    assert.deepEqual(created[0].ranges, [{ from, to }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('creates a highlight from a figure caption selection', async () => {
     const caption = 'Figure 5. Ablation results for PaIRSet augmentation strategies. '
         + 'Significance markers: \\* p \\leq 0.05 , \\*\\* p \\leq 0.01 .';
@@ -340,8 +449,9 @@ test('creates a highlight from a figure caption selection', async () => {
     assert.ok(figcaption);
     const markerNode = textNodeContaining(figcaption, 'Significance markers');
     assert.ok(markerNode);
+    const markerOffset = markerNode.textContent.indexOf('Significance markers');
     selectAndHighlight(document, dom.window, range => {
-        range.setStart(markerNode, 0);
+        range.setStart(markerNode, markerOffset);
         range.setEnd(markerNode, markerNode.textContent.length);
     });
     await Promise.resolve();
@@ -350,8 +460,15 @@ test('creates a highlight from a figure caption selection', async () => {
     assert.equal(created.length, 1);
     assert.equal(created[0].ranges.length, 1);
     const [{ from, to }] = created[0].ranges;
-    assert.ok(markdown.slice(from, to).includes('Significance markers'));
-    assert.ok(markdown.slice(from, to).includes('non-significant') === false);
+    assert.equal(
+        created[0].text,
+        'Significance markers: * p \\leq 0.05 , ** p \\leq 0.01 .'
+    );
+    assert.equal(
+        markdown.slice(from, to),
+        'Significance markers: \\* p \\leq 0.05 , \\*\\* p \\leq 0.01 .'
+    );
+    assert.equal(markdown.slice(from, to).includes('Figure 5'), false);
 
     editor.destroy();
     dom.window.close();

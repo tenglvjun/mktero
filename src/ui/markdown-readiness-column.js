@@ -128,10 +128,6 @@ function columnOptions({
         label,
         pluginID,
         enabledTreeIDs: ['main'],
-        // Zotero still uses defaultIn to decide the initial hidden state.
-        // Without it, a custom column stays hidden whenever any built-in
-        // column declares defaultIn. A persisted hidden preference still wins.
-        defaultIn: ['default'],
         flex: 0,
         width: COLUMN_WIDTH,
         fixedWidth: true,
@@ -153,20 +149,31 @@ function columnOptions({
             }
         },
         renderCell(_index, data, column, _isFirstColumn, doc) {
-            if (!doc) return null;
+            // Zotero 9 rejects null, undefined, and non-Element cell values
+            // before falling back to its own empty renderer.
+            if (typeof doc?.createElement !== 'function') {
+                return emptyReadinessCell(doc, column);
+            }
             try {
                 if (data === PREPARING_VALUE) {
                     return renderPreparingCell(doc, column, preparingTooltip);
                 }
-                if (data !== '1') return null;
+                if (data !== '1') return emptyReadinessCell(doc, column);
                 return renderReadyCell(doc, column, tooltip);
             }
             catch (error) {
                 report(onError, error);
-                return null;
+                return emptyReadinessCell(doc, column);
             }
         },
     };
+}
+
+function emptyReadinessCell(doc, column) {
+    const cell = doc?.createElement?.('span');
+    if (!cell) return null;
+    cell.className = `cell ${column?.className || ''}`.trim();
+    return cell;
 }
 
 function renderPreparingCell(doc, column, tooltip) {

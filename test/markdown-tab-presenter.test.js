@@ -181,6 +181,23 @@ test('passes the Markdown export action to new and reused reader models', () => 
     presenter.dispose();
 });
 
+test('passes the Obsidian export action to new and reused reader models', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const firstExport = () => ({ status: 'exported' });
+    const presentation = presenter.open(42, {
+        onExportObsidian: firstExport,
+    });
+
+    assert.equal(presentation.model.onExportObsidian, firstExport);
+
+    const secondExport = () => ({ status: 'cancelled' });
+    presenter.open(42, { onExportObsidian: secondExport });
+    assert.equal(presentation.model.onExportObsidian, secondExport);
+    presenter.dispose();
+});
+
 test('passes reference library actions to the Markdown reader model and refreshes reuse', () => {
     const mainWindow = createMainWindow();
     const harness = createViewHarness();

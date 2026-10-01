@@ -710,6 +710,49 @@ test('does not join Mistral body blocks across retained page chrome', () => {
     );
 });
 
+test('joins a sentence split by an ACM copyright cluster and hides the cluster', () => {
+    const abstract = 'Believable proxies of human behavior wake up and head to work '
+        + 'while authors write and the agents spread invitations over the next two';
+    const continuation = 'days, make new acquaintances and show up together.';
+    const copyright = [
+        'Permission to make digital or hard copies of part or all of this work for '
+            + 'personal or classroom use is granted without fee.',
+        "UIST '23, October 29-November 1, 2023, San Francisco, CA, USA",
+        '© 2023 Copyright held by the owner/author(s).',
+        'ACM ISBN 979-8-4007-0132-0/23/10.',
+        'https://doi.org/10.1145/3586183.3606763',
+    ].join('\n\n');
+    const result = normalizeMistralResult({
+        pages: [
+            page({
+                index: 0,
+                markdown: `${abstract}\n\n${copyright}`,
+                blocks: [{
+                    type: 'text',
+                    content: abstract,
+                    bbox: [82, 400, 484, 560],
+                }],
+            }),
+            page({
+                index: 1,
+                markdown: continuation,
+                blocks: [{
+                    type: 'text',
+                    content: continuation,
+                    bbox: [82, 106, 484, 220],
+                }],
+            }),
+        ],
+    });
+
+    assert.match(result.markdown, /over the next two days, make new acquaintances/u);
+    assert.ok(result.markdown.indexOf('over the next two days')
+        < result.markdown.indexOf('Permission to make digital'));
+    assertCovered(result.markdown, result.chromeRanges, 'Permission to make digital');
+    assertCovered(result.markdown, result.chromeRanges, 'doi.org/10.1145');
+    assertNotCovered(result.markdown, result.chromeRanges, 'days, make new acquaintances');
+});
+
 test('joins a paragraph that continues from the bottom of one column', () => {
     const firstBlock = 'MT has emerged as a promising approach. '
         + 'Studies showed improvements in stress coping, reduction in anxiety '

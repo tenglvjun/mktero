@@ -71,7 +71,12 @@ import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
     collectMatchedAnnotationRanges,
     createMarkdownRevisionSessionRegistry,
+    snapshotStoredMarkdownRevision,
 } from './core/markdown-revision-session.js';
+import { selectionRevealChanges } from './core/markdown-selection-reveal.js';
+import {
+    revealPdfSelectionAsMarkdown,
+} from './ui/pdf-selection-markdown.js';
 import {
     createSavedMarkdownOpenResolver,
 } from './core/saved-markdown-open-resolver.js';
@@ -81,14 +86,25 @@ import {
     MINERU_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
 } from './mineru/parser-profile.js';
-import { MISTRAL_PARSER_PROFILE_ID, MISTRAL_PREVIOUS_PARSER_PROFILE_IDS } from './mistral/parser-profile.js';
+import {
+    MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
+    MISTRAL_PARSER_PROFILE_ID,
+} from './mistral/parser-profile.js';
 import {
     createZoteroBlobFactory,
     createZoteroSavedMarkdownStore,
 } from './platform/zotero-saved-markdown-store.js';
 import {
+    getObsidianSubdirectory,
+    getObsidianVaultPath,
+    setObsidianVaultPath,
+} from './config/obsidian-preferences.js';
+import {
     createZoteroMarkdownExporter,
 } from './platform/zotero-markdown-exporter.js';
+import {
+    createZoteroObsidianExporter,
+} from './platform/zotero-obsidian-exporter.js';
 import {
     createZoteroMarkdownRevisionStore,
 } from './platform/zotero-markdown-revision-store.js';
@@ -171,6 +187,8 @@ import {
 } from './platform/zotero-markdown-readiness-store.js';
 import {
     createZoteroSourceNavigation,
+    normalizedBBoxToPDFRect,
+    readerPageViewport,
 } from './platform/zotero-source-navigation.js';
 import {
     refreshMarkdownReadinessColumn,
@@ -260,6 +278,7 @@ const runtime = {
     savedMarkdownStore: null,
     savedMarkdownResolver: null,
     markdownExporter: null,
+    obsidianExporter: null,
     rootURI: null,
     preferencePaneID: null,
     localization: null,
@@ -275,6 +294,7 @@ const runtime = {
     annotationOverlayRefresher: null,
     localAnnotations: null,
     disposeToolbar: null,
+    pendingSelectionReveals: new Map(),
     contextMenus: new Map(),
     translationRequests: null,
     pdfIndexOperations: new PDFIndexOperationTracker(),
@@ -319,6 +339,20 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
         createID: createMarkdownExportID,
         translate: runtimeTranslate,
+    });
+    runtime.obsidianExporter = createZoteroObsidianExporter({
+        createFilePicker: createZoteroFilePicker,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+        createID: createMarkdownExportID,
+        translate: runtimeTranslate,
+        getVaultPath: () => getObsidianVaultPath(Zotero),
+        setVaultPath: value => setObsidianVaultPath(Zotero, value),
+        getSubdirectory: () => getObsidianSubdirectory(Zotero),
+        getProfilePath: () => Zotero.Profile?.dir,
+        confirmOverwrite: ({ ownerWindow, path }) => (
+            confirmObsidianOverwrite(ownerWindow, path)
+        ),
     });
     const presenter = runtime.presenter;
     await Zotero.uiReadyPromise;
@@ -627,7 +661,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache,
         prepareResult: prepareWithFigures(decodeMistralResult, prepareMistralResult),
         recoverFigures,
-        createPreviousCacheKeys: fileData => Promise.all(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => (
+        createPreviousCacheKeys: fileData => Promise.all(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
             createMarkdownCacheKey(fileData, { parserProfile })
         ))),
         onError: error => Zotero.logError?.(error),
@@ -874,6 +908,7 @@ async function loadFigureWorkerSource(rootURI) {
 }
 
 globalThis.shutdown = function shutdown() {
+    runtime.pendingSelectionReveals?.clear();
     abortAllConversions();
     abortAllTranslations();
     destroyAllRevisionSessions();
@@ -930,6 +965,7 @@ globalThis.shutdown = function shutdown() {
     runtime.savedMarkdownStore = null;
     runtime.savedMarkdownResolver = null;
     runtime.markdownExporter = null;
+    runtime.obsidianExporter = null;
     runtime.rootURI = null;
     runtime.localization = null;
     runtime.annotationActions = null;
@@ -1000,6 +1036,7 @@ async function openItemAsMarkdown(itemID, {
     const presentation = runtime.presenter.open(itemID, {
         sourceItemID: itemID,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
+            runtime.pendingSelectionReveals?.delete(itemID);
             releaseTabConversion(itemID, reason);
             void runtime.sourcePeekRenderer?.dispose(itemID);
             abortDocumentTranslations(itemID);
@@ -1018,6 +1055,7 @@ async function openItemAsMarkdown(itemID, {
         onOpenSettings: () => openMinerUPreferences(Zotero),
         onSaveSnapshot: () => saveSnapshotForItem(itemID),
         onExportMarkdown: options => exportMarkdownForDocument(itemID, options),
+        onExportObsidian: options => exportObsidianForDocument(itemID, options),
         onSetCorrectionMode: enabled => setCorrectionMode(itemID, enabled),
         onCommitCorrection: correction => commitCorrection(itemID, correction),
         onRestoreCorrection: blockID => restoreCorrection(itemID, blockID),
@@ -1449,15 +1487,20 @@ async function publishConversionResult(presentation, itemID, result, signal) {
     );
     if (presentation.closed || signal?.aborted) return;
     logFigureAssetSizes(`item ${itemID}: final`, readyResult);
+    const readyChanges = createConversionReadyChanges(
+        localizeConversionResult(readyResult, runtimeTranslate)
+    );
     runtime.presenter?.update(
         presentation,
-        createConversionReadyChanges(
-            localizeConversionResult(readyResult, runtimeTranslate)
-        )
+        {
+            ...readyChanges,
+            ...consumeSelectionRevealChanges(itemID, readyChanges),
+        }
     );
 }
 
 function publishConversionFailure(presentation, itemID, error, previousResult) {
+    runtime.pendingSelectionReveals?.delete(itemID);
     if (presentation.closed) return;
     Zotero.debug(
         `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
@@ -1774,6 +1817,7 @@ function createSavedMarkdownActions(noteID, sourceItem) {
             ? () => saveSnapshotForSavedNote(noteID, sourceItem.id)
             : null,
         onExportMarkdown: options => exportMarkdownForDocument(noteID, options),
+        onExportObsidian: options => exportObsidianForDocument(noteID, options),
         onOpenAnnotationInPDF: withSource((itemID, annotationID) => (
             runAnnotationAction('openInPDF', itemID, annotationID)
         )),
@@ -1845,6 +1889,15 @@ async function saveSnapshotForItem(itemID) {
 async function exportMarkdownForDocument(documentID, options) {
     const presentation = runtime.presenter?.get(documentID);
     return exportMarkdownForModel(presentation?.model, options);
+}
+
+async function exportObsidianForDocument(documentID, options) {
+    const presentation = runtime.presenter?.get(documentID);
+    return exportObsidianForModel(
+        presentation?.model,
+        options,
+        documentID
+    );
 }
 
 async function readRevisionSnapshot({ itemID, cacheKey, signal }) {
@@ -2862,6 +2915,122 @@ async function exportMarkdownForModel(model, { ownerWindow } = {}) {
     });
 }
 
+async function exportObsidianForModel(
+    model,
+    { ownerWindow } = {},
+    documentID
+) {
+    if (model?.status !== 'ready' || model.renderMode === 'html') {
+        throw new Error('The Markdown document is unavailable');
+    }
+    if (!runtime.obsidianExporter?.export) {
+        throw new Error('Obsidian export is unavailable');
+    }
+    const sourceItemID = model.sourceItemID ?? model.itemID ?? documentID;
+    return runtime.obsidianExporter.export({
+        ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
+        title: model.title,
+        markdown: model.markdown || '',
+        assets: model.assets,
+        assetBasePath: model.assetBasePath,
+        metadata: await obsidianMetadataForItem(sourceItemID, model),
+        translations: await obsidianTranslationsForModel(model),
+    });
+}
+
+async function obsidianTranslationsForModel(model) {
+    const markdown = String(model?.markdown || '');
+    const listed = await runtime.translationService
+        ?.listCachedDocumentTranslationVariants?.({
+            documentKey: model?.cacheKey,
+            markdown,
+            chromeRanges: model?.chromeRanges,
+            figureMap: model?.figureMap,
+        }) || [];
+    const translations = [];
+    const seen = new Set();
+    for (const item of listed) {
+        if (!item || item.partial || typeof item.translatedMarkdown !== 'string'
+            || !item.translatedMarkdown
+            || !isSupportedAITargetLanguage(item.targetLanguage)
+            || seen.has(item.targetLanguage)) {
+            continue;
+        }
+        seen.add(item.targetLanguage);
+        translations.push({
+            language: item.targetLanguage,
+            markdown: item.translatedMarkdown,
+        });
+    }
+    if (model?.translationStatus === 'ready'
+        && isSupportedAITargetLanguage(model.translationTargetLanguage)
+        && typeof model.translatedMarkdown === 'string'
+        && model.translatedMarkdown
+        && !seen.has(model.translationTargetLanguage)) {
+        translations.push({
+            language: model.translationTargetLanguage,
+            markdown: model.translatedMarkdown,
+        });
+    }
+    return translations;
+}
+
+async function obsidianMetadataForItem(sourceItemID, model) {
+    const pdfItem = await Zotero.Items.getAsync(sourceItemID);
+    if (!pdfItem?.key) throw new Error('The PDF attachment is unavailable');
+    const parent = pdfItem.isRegularItem?.()
+        ? pdfItem
+        : (pdfItem.parentItem || pdfItem);
+    if (!parent?.key) throw new Error('The Zotero item is unavailable');
+    const library = Zotero.Libraries?.get?.(parent.libraryID);
+    return {
+        libraryID: parent.libraryID,
+        libraryType: library?.libraryType === 'group' ? 'group' : 'user',
+        groupID: library?.groupID,
+        itemKey: parent.key,
+        attachmentKey: pdfItem.key,
+        title: zoteroField(parent, 'title')
+            || parent.getDisplayTitle?.()
+            || model.title,
+        creators: zoteroList(parent, 'getCreators'),
+        date: zoteroField(parent, 'date'),
+        doi: zoteroField(parent, 'DOI'),
+        extra: zoteroField(parent, 'extra'),
+        tags: zoteroList(parent, 'getTags'),
+        provider: model.provider,
+        view: 'original',
+    };
+}
+
+function zoteroField(item, name) {
+    try {
+        return item.getField?.(name) || '';
+    }
+    catch {
+        return '';
+    }
+}
+
+function zoteroList(item, methodName) {
+    try {
+        const value = item[methodName]?.();
+        return Array.isArray(value) ? value : [];
+    }
+    catch {
+        return [];
+    }
+}
+
+function confirmObsidianOverwrite(ownerWindow, path) {
+    const services = typeof Services === 'undefined' ? null : Services;
+    if (!services?.prompt?.confirm) return false;
+    return services.prompt.confirm(
+        ownerWindow,
+        runtimeTranslate('viewer.obsidianOverwriteTitle'),
+        runtimeTranslate('viewer.obsidianOverwriteMessage', { path })
+    );
+}
+
 async function saveSnapshotForModel(pdfItemOrID, model) {
     if (model?.status !== 'ready' || model.renderMode === 'html') {
         throw new Error('The Markdown document is unavailable');
@@ -3183,6 +3352,9 @@ function registerReaderToolbarAction() {
         zotero: Zotero,
         pluginID: runtime.id,
         onOpen: openReaderAsMarkdown,
+        onOpenSelection: openPdfSelectionAsMarkdown,
+        isMarkdownReady: reader => itemHasReadableMarkdown(reader?.itemID),
+        onSelectionUnresolved: message => showSelectionNotice(message),
         onPDFReaderAvailable: reader => (
             runtime.localAnnotations?.synchronizePending(
                 reader.itemID,
@@ -3192,6 +3364,151 @@ function registerReaderToolbarAction() {
         onError: handleOpenError,
         translate: runtimeTranslate,
     });
+}
+
+async function openPdfSelectionAsMarkdown(reader, annotation, report) {
+    const result = await revealPdfSelectionAsMarkdown({
+        reader,
+        annotation,
+        loadSource: loadSelectionSource,
+        rectForBBox: (pageIndex, bbox) => normalizedBBoxToPDFRect(
+            bbox,
+            readerPageViewport(reader, pageIndex)
+        ),
+        queueReveal: queueSelectionReveal,
+        openMarkdown: async itemID => {
+            try {
+                await openItemAsMarkdown(itemID, {
+                    entryPoint: 'reader-selection',
+                });
+                return finishSelectionReveal(itemID);
+            }
+            catch (error) {
+                runtime.pendingSelectionReveals?.delete(itemID);
+                throw error;
+            }
+        },
+    });
+    if (result.status !== 'opened') {
+        report(runtimeTranslate('readerSelection.unresolved'));
+    }
+    return result;
+}
+
+function queueSelectionReveal(itemID, sourceRange) {
+    runtime.pendingSelectionReveals?.set(itemID, sourceRange);
+}
+
+function consumeSelectionRevealChanges(itemID, model) {
+    const sourceRange = runtime.pendingSelectionReveals?.get(itemID);
+    if (!sourceRange) return {};
+    runtime.pendingSelectionReveals.delete(itemID);
+    const target = selectionRevealChanges(model, sourceRange);
+    if (!target) return {};
+    return {
+        translationView: target.view,
+        revealMarkdownOffset: target.offset,
+        ...(Number.isSafeInteger(target.to) && target.to > target.offset
+            ? { revealMarkdownTo: target.to }
+            : {}),
+        ...(target.view !== 'original' ? { correctionMode: false } : {}),
+    };
+}
+
+function applyPendingSelectionReveal(itemID) {
+    const presentation = runtime.presenter?.get(itemID);
+    if (!presentation || presentation.closed) {
+        runtime.pendingSelectionReveals?.delete(itemID);
+        return false;
+    }
+    if (presentation.model?.status !== 'ready'
+        || presentation.model.renderMode === 'html') {
+        return false;
+    }
+    const changes = consumeSelectionRevealChanges(itemID, presentation.model);
+    if (!Object.keys(changes).length) return false;
+    runtime.presenter.update(presentation, changes);
+    return true;
+}
+
+function finishSelectionReveal(itemID) {
+    if (applyPendingSelectionReveal(itemID)) return true;
+    if (!runtime.pendingSelectionReveals?.has(itemID)) return true;
+    const presentation = runtime.presenter?.get(itemID);
+    if (presentation?.model?.status === 'ready') {
+        runtime.pendingSelectionReveals.delete(itemID);
+        return false;
+    }
+    return true;
+}
+
+async function loadSelectionSource(itemID) {
+    const presentation = runtime.presenter?.get(itemID);
+    const model = presentation?.model;
+    if (model?.status === 'ready'
+        && model.renderMode !== 'html'
+        && Array.isArray(model.sourceMap)
+        && typeof model.markdown === 'string') {
+        return {
+            markdown: model.markdown,
+            sourceMap: model.sourceMap,
+            documentLength: model.markdown.length,
+        };
+    }
+    const run = runtime.conversionRuns?.get?.(itemID);
+    if (run?.promise) {
+        try {
+            await run.promise;
+        }
+        catch {
+            return null;
+        }
+        return loadSelectionSource(itemID);
+    }
+    if (!itemHasReadableMarkdown(itemID) || !runtime.cache || !runtime.revisionStore) {
+        return null;
+    }
+    const item = Zotero.Items?.get?.(itemID) || await Zotero.Items?.getAsync?.(itemID);
+    const cacheKey = runtime.readiness?.cacheKeyFor?.(
+        readinessItem(item),
+        currentConversionParserProfile()
+    );
+    if (typeof cacheKey !== 'string') return null;
+    const cached = await runtime.cache.get(cacheKey);
+    if (!cached || typeof cached.markdown !== 'string' || !Array.isArray(cached.sourceMap)) {
+        return null;
+    }
+    const stored = await runtime.revisionStore.load(cacheKey);
+    if (!stored) {
+        return {
+            markdown: cached.markdown,
+            sourceMap: cached.sourceMap,
+            documentLength: cached.markdown.length,
+        };
+    }
+    try {
+        const corrected = snapshotStoredMarkdownRevision(stored, cacheKey);
+        if (typeof corrected.markdown !== 'string' || !Array.isArray(corrected.sourceMap)) {
+            return null;
+        }
+        return {
+            markdown: corrected.markdown,
+            sourceMap: corrected.sourceMap,
+            documentLength: corrected.markdown.length,
+        };
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+        return null;
+    }
+}
+
+function showSelectionNotice(message) {
+    const progressWindow = new Zotero.ProgressWindow();
+    progressWindow.changeHeadline(runtimeTranslate('toolbar.openMarkdown'));
+    progressWindow.addDescription(message);
+    progressWindow.show();
+    progressWindow.startCloseTimer(4000);
 }
 
 function runtimeTranslate(key, variables) {

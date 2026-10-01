@@ -17,8 +17,15 @@
 - Local MinerU mode talks to a MinerU 4.0 V1 service. It does not restore
   figures from that service's result, and a restarted local service cannot
   resume an earlier job.
-- Navigation currently goes from Markdown to PDF. Reverse navigation is not
-  implemented.
+- A PDF text selection opens its Markdown paragraph only when one source
+  region covers it, or when the selection text occurs in exactly one cached
+  paragraph and no source region overlaps it. Ambiguous, repeated, uncached,
+  or unscannable text stays in the PDF and does not start a conversion.
+  Zotero supplies at most two pages of selection geometry.
+- Markdown selections are matched against the PDF's own text layer. A passage
+  that extraction mangles beyond the tolerated edit budget, a scanned page
+  without a text layer, and a repeated passage that no context can separate
+  stay in Markdown as a local annotation and can be retried.
 - Mktero displays text highlights and underlines, not standalone notes,
   image/area annotations, or ink annotations.
 - Markdown images are limited to supported GIF, JPEG, PNG, and WebP files from

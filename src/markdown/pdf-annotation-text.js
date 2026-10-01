@@ -9,6 +9,7 @@ const DOUBLE_QUOTES = new Set(['“', '”', '„', '‟']);
 const HYPHENS = new Set(['‐', '‑', '‒', '–', '—', '−']);
 const CITATION_WRAPPER = /\$\[([0-9,，;；\s–—-]{1,512})\]\$/gu;
 const NUMERIC_SUPERSCRIPT = /\$\^\{\s*([0-9][0-9,，;；\s–—-]{0,511}?)\s*\}\$/gu;
+const BRACKETED_NUMERIC_SUPERSCRIPT = /\$\^\{\s*\[([0-9][0-9,，;；\s–—-]{0,511}?)\]\s*\}\$/gu;
 const TRADEMARK_SUPERSCRIPT = /\$\^\{([®©™])\}\$/gu;
 const SENTENCE_FOOTNOTE_SUPERSCRIPT = /\$\^\{([0-9]{1,4})\}\$/gu;
 const STATISTICAL_NUMERIC_EXPONENT = /\^\{\s*([0-9]{1,4})\s*\}(?=\s*(?:<=|>=|!=|[=<>≤≥≠]))/gu;
@@ -244,6 +245,61 @@ export function createHyphenFoldedPdfAnnotationTextIndex(text) {
     return createLineWrappedPdfAnnotationTextIndex(text, false, true);
 }
 
+export function createAbbreviationFoldedPdfAnnotationTextIndex(
+    text,
+    sourceOffsetAt = offset => offset
+) {
+    const normalized = createPdfAnnotationTextIndex(
+        String(text),
+        sourceOffsetAt
+    );
+    const output = [];
+    const sourceStarts = [];
+    const sourceEnds = [];
+    for (let offset = 0; offset < normalized.text.length;) {
+        const character = normalized.text[offset];
+        if (character === ' '
+            && isAbbreviationCodePoint(normalized.text, offset - 1)
+            && isAbbreviationCodePoint(normalized.text, offset + 1)
+            && (isAbbreviationCodePoint(normalized.text, offset - 2)
+                || isAbbreviationCodePoint(normalized.text, offset + 2))) {
+            offset += 1;
+            continue;
+        }
+        output.push(character);
+        sourceStarts.push(offset);
+        sourceEnds.push(offset + 1);
+        offset += 1;
+    }
+    const textValue = output.join('');
+    const trimmedStart = textValue.length - textValue.trimStart().length;
+    const trimmedEnd = textValue.length - textValue.trimEnd().length;
+    return {
+        text: textValue,
+        trimmedText: textValue.trim(),
+        trimmedSourceRange() {
+            return this.sourceRange(
+                trimmedStart,
+                textValue.length - trimmedStart - trimmedEnd
+            );
+        },
+        sourceRange(from, length) {
+            const normalizedFrom = sourceStarts[from];
+            const normalizedTo = sourceEnds[from + length - 1];
+            return normalized.sourceRange(
+                normalizedFrom,
+                normalizedTo - normalizedFrom
+            );
+        },
+    };
+}
+
+function isAbbreviationCodePoint(text, offset) {
+    return offset >= 0
+        && offset < text.length
+        && /[A-Z0-9]/u.test(text[offset]);
+}
+
 function createLineWrappedPdfAnnotationTextIndex(
     text,
     preserveHyphen,
@@ -373,36 +429,41 @@ function collectNormalizationMarkup(text) {
         ignoredOffsets.add(match.index);
         ignoredOffsets.add(match.index + match[0].length - 1);
     }
-    for (const match of text.matchAll(NUMERIC_SUPERSCRIPT)) {
-        const value = match[1].trim();
-        if (!isNumericCitationContent(value)
-            || !hasInlineSuperscriptContext(text, match.index)
-            || isLikelyNumericSuperscriptExponent(
-                text,
-                match.index,
-                value
-            )) {
-            continue;
-        }
-        const contentFrom = match.index + match[0].indexOf(value);
-        const contentTo = contentFrom + value.length;
-        for (
-            let offset = match.index;
-            offset < match.index + match[0].length;
-            offset++
-        ) {
-            if (offset < contentFrom || offset >= contentTo) {
-                ignoredOffsets.add(offset);
+    for (const pattern of [
+        NUMERIC_SUPERSCRIPT,
+        BRACKETED_NUMERIC_SUPERSCRIPT,
+    ]) {
+        for (const match of text.matchAll(pattern)) {
+            const value = match[1].trim();
+            if (!isNumericCitationContent(value)
+                || !hasInlineSuperscriptContext(text, match.index)
+                || isLikelyNumericSuperscriptExponent(
+                    text,
+                    match.index,
+                    value
+                )) {
                 continue;
             }
-            const character = text[offset];
-            replacements.set(offset, {
-                from: match.index,
-                to: match.index + match[0].length,
-                text: HYPHENS.has(character)
-                    ? '-'
-                    : character.normalize('NFKC'),
-            });
+            const contentFrom = match.index + match[0].indexOf(value);
+            const contentTo = contentFrom + value.length;
+            for (
+                let offset = match.index;
+                offset < match.index + match[0].length;
+                offset++
+            ) {
+                if (offset < contentFrom || offset >= contentTo) {
+                    ignoredOffsets.add(offset);
+                    continue;
+                }
+                const character = text[offset];
+                replacements.set(offset, {
+                    from: match.index,
+                    to: match.index + match[0].length,
+                    text: HYPHENS.has(character)
+                        ? '-'
+                        : character.normalize('NFKC'),
+                });
+            }
         }
     }
     for (const match of text.matchAll(TRADEMARK_SUPERSCRIPT)) {

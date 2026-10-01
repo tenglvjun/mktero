@@ -2,6 +2,7 @@ import {
     absorbBlankLines,
     normalizeChromeRanges,
 } from '../markdown/chrome-ranges.js';
+import { findPublisherCopyrightRanges } from '../markdown/publisher-copyright.js';
 
 const CANDIDATE_TYPES = new Set(['text', 'header', 'footer']);
 const PAGE_NUMBER_PATTERN = /^(?:page\s+)?\d+\s+of\s+\d+$/iu;
@@ -34,7 +35,10 @@ export function detectMinerUPageChrome(markdown, contentList, sourceMap) {
     }
 
     const chromeRanges = normalizeChromeRanges(
-        absorbBlankLines(markdown, ranges),
+        absorbBlankLines(markdown, [
+            ...ranges,
+            ...findPublisherCopyrightRanges(markdown),
+        ]),
         markdown.length
     );
     const filteredSourceMap = Array.isArray(sourceMap)

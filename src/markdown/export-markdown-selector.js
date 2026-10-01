@@ -11,16 +11,24 @@
  */
 export function selectExportMarkdown(model) {
     if (!model) return '';
+    const view = selectExportMarkdownView(model);
+    if (view === 'translated') return model.translatedMarkdown;
+    if (view === 'compare') return model.comparisonMarkdown;
+    return model.markdown || '';
+}
+
+export function selectExportMarkdownView(model) {
+    if (!model) return 'original';
     const view = model.translationView;
     if (view === 'translated'
         && typeof model.translatedMarkdown === 'string'
         && model.translatedMarkdown) {
-        return model.translatedMarkdown;
+        return 'translated';
     }
     if (view === 'compare'
         && typeof model.comparisonMarkdown === 'string'
         && model.comparisonMarkdown) {
-        return model.comparisonMarkdown;
+        return 'compare';
     }
-    return model.markdown || '';
+    return 'original';
 }

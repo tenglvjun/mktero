@@ -173,6 +173,44 @@ function dispatchWindowKeyboardEvent(window, key) {
     window.dispatchEvent(event);
 }
 
+test('scrolls once to a requested Markdown passage', () => {
+    const scrolled = [];
+    const flashed = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nThe selected paragraph.',
+        sourceKind: 'markdown',
+        revealMarkdownOffset: 9,
+        revealMarkdownTo: 28,
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            const scrollToOffset = editor.scrollToOffset.bind(editor);
+            editor.scrollToOffset = offset => {
+                scrolled.push(offset);
+                scrollToOffset(offset);
+            };
+            editor.flashRange = (from, to) => flashed.push([from, to]);
+            return editor;
+        },
+    });
+
+    try {
+        assert.deepEqual(scrolled, [9]);
+        assert.deepEqual(flashed, [[9, 28]]);
+        assert.equal('revealMarkdownOffset' in model, false);
+        assert.equal('revealMarkdownTo' in model, false);
+        view.render(model);
+        assert.deepEqual(scrolled, [9]);
+        assert.deepEqual(flashed, [[9, 28]]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('shows Markdown without editing controls', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -4812,6 +4850,43 @@ test('restores a persisted Markdown reading offset when the document first becom
     });
 
     assert.deepEqual(scrolledOffsets, [restoreReadingOffset]);
+    view.destroy();
+});
+
+test('keeps the saved reading position as the model restore target', () => {
+    const markdown = [
+        '# Overview',
+        '',
+        'Hello.',
+        '',
+        '# Methods',
+        '',
+        'Method text.',
+    ].join('\n');
+    const anchors = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        cacheKey: 'b'.repeat(64),
+        sourceKind: 'markdown',
+        onReadingPositionChange: anchor => {
+            anchors.push(anchor);
+        },
+    });
+    const { view } = createView(model, {}, {
+        readingPositionDelay: 0,
+        editorFactory(options) {
+            editorOptions = options;
+            return createTestInlineEditor(options);
+        },
+    });
+
+    editorOptions.onViewportChange(markdown.indexOf('Method text.'));
+
+    assert.equal(anchors.length, 1);
+    assert.equal(model.restoreReadingOffset, anchors[0].offset);
     view.destroy();
 });
 

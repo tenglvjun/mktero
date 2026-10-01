@@ -3,7 +3,41 @@ import assert from 'node:assert/strict';
 import {
     createMarkdownSourceMap,
     resolvePDFPageIndexHint,
+    resolveSourceMapRegion,
 } from '../src/core/markdown-source-map.js';
+
+test('resolves an OCR region only when one mapped block is covered', () => {
+    const sourceMap = [{
+        type: 'interline_equation',
+        markdownFrom: 10,
+        markdownTo: 40,
+        locations: [{ pageIndex: 3, bbox: [100, 120, 900, 220] }],
+    }, {
+        type: 'text',
+        markdownFrom: 40,
+        markdownTo: 200,
+        locations: [{ pageIndex: 3, bbox: [80, 240, 900, 420] }],
+    }];
+
+    assert.deepEqual(
+        resolveSourceMapRegion(sourceMap, { from: 10, to: 40 }, 200),
+        { pageIndex: 3, bbox: [100, 120, 900, 220] }
+    );
+    // A selection inside a paragraph must not highlight the whole block.
+    assert.equal(
+        resolveSourceMapRegion(sourceMap, { from: 60, to: 120 }, 200),
+        null
+    );
+    // Two covered blocks leave no unique region.
+    assert.equal(
+        resolveSourceMapRegion(sourceMap, { from: 10, to: 200 }, 200),
+        null
+    );
+    assert.equal(
+        resolveSourceMapRegion(sourceMap, { from: 10, to: 40 }, 30),
+        null
+    );
+});
 
 test('resolves a PDF page hint for a range inside one single-page source entry', () => {
     const sourceMap = [{
