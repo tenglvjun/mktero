@@ -294,147 +294,167 @@
         </html:div>
     </html:div>
 
-    <html:div id="mktero-features-section"
+        <html:div id="mktero-features-section"
               class="mktero-preferences-section"
               role="tabpanel"
               aria-labelledby="mktero-tab-features">
-        <html:div class="mktero-settings-card">
-            <html:div class="mktero-setting-row">
-                <html:div class="mktero-setting-copy">
-                    <html:strong data-i18n="preferences.featureSource.title"></html:strong>
-                    <html:small data-i18n="preferences.featureSource.lead"></html:small>
-                </html:div>
-                <html:div class="mktero-pref-tablist mktero-inline-switch"
+        <html:section class="mktero-panel mktero-source-panel">
+            <html:div class="mktero-source-row">
+                <html:strong data-i18n="preferences.featureSource.title"></html:strong>
+                <html:div class="mktero-segmented"
                           role="group"
                           aria-labelledby="mktero-feature-source-label">
                     <html:span id="mktero-feature-source-label"
                                class="mktero-visually-hidden"
                                data-i18n="preferences.featureSource.label"></html:span>
                     <html:button id="mktero-feature-mktero"
-                                 class="mktero-pref-tab"
+                                 class="mktero-segmented-item"
                                  type="button"
                                  data-feature-source="mktero"
-                                 aria-pressed="true">
-                        <html:span data-i18n="preferences.featureSource.mktero"></html:span>
-                    </html:button>
+                                 aria-pressed="true"
+                                 data-i18n="preferences.featureSource.mktero"></html:button>
                     <html:button id="mktero-feature-own"
-                                 class="mktero-pref-tab"
+                                 class="mktero-segmented-item"
                                  type="button"
                                  data-feature-source="own"
-                                 aria-pressed="false">
-                        <html:span data-i18n="preferences.featureSource.own"></html:span>
-                    </html:button>
+                                 aria-pressed="false"
+                                 data-i18n="preferences.featureSource.own"></html:button>
                 </html:div>
             </html:div>
-        </html:div>
+        </html:section>
 
         <html:div id="mktero-account-panel" class="mktero-preferences-section">
-            <html:div class="mktero-settings-card">
-                <html:div class="mktero-setting-row">
-                    <html:div class="mktero-setting-copy">
-                        <html:strong data-i18n="preferences.account.title"></html:strong>
-                        <html:small data-i18n="preferences.account.lead"></html:small>
-                    </html:div>
-                    <html:div id="mktero-account-mode-switch" class="mktero-pref-tablist mktero-inline-switch" role="tablist">
-                        <html:button id="mktero-auth-tab-login" class="mktero-pref-tab" type="button" role="tab" aria-selected="true" data-i18n="preferences.account.loginTab"></html:button>
-                        <html:button id="mktero-auth-tab-register" class="mktero-pref-tab" type="button" role="tab" aria-selected="false" data-i18n="preferences.account.registerTab"></html:button>
-                    </html:div>
-                </html:div>
-                <html:div id="mktero-account-api-base-row" class="mktero-setting-row mktero-field-row" hidden="hidden">
-                    <html:div class="mktero-setting-copy">
-                        <html:label for="mktero-account-api-base"><html:strong data-i18n="preferences.account.apiBaseLabel"></html:strong></html:label>
-                        <html:small data-i18n="preferences.account.apiBaseHelp"></html:small>
-                    </html:div>
-                    <html:div class="mktero-field-control">
-                        <html:input id="mktero-account-api-base" type="url" autocomplete="off" spellcheck="false" />
-                    </html:div>
-                </html:div>
-                <html:div id="mktero-account-signed-in" class="mktero-setting-row" hidden="hidden">
-                    <html:div class="mktero-setting-copy">
+            <html:section class="mktero-panel mktero-auth-panel">
+                <html:div id="mktero-account-signed-in" class="mktero-signed-in" hidden="hidden">
+                    <html:span class="mktero-signed-in-copy">
+                        <html:span class="mktero-signed-in-mark" aria-hidden="true"></html:span>
                         <html:strong id="mktero-account-signed-in-text"></html:strong>
-                    </html:div>
-                    <html:button id="mktero-account-logout" class="mktero-account-button" type="button" data-i18n="preferences.account.logout"></html:button>
+                    </html:span>
+                    <html:button id="mktero-account-logout"
+                                 class="mktero-button"
+                                 type="button"
+                                 data-i18n="preferences.account.logout"></html:button>
                 </html:div>
-                <html:div id="mktero-account-form">
-                    <html:div class="mktero-setting-row mktero-field-row">
-                        <html:div class="mktero-setting-copy">
-                            <html:label for="mktero-account-email"><html:strong data-i18n="preferences.account.emailLabel"></html:strong></html:label>
-                        </html:div>
-                        <html:div class="mktero-field-control">
-                            <html:input id="mktero-account-email" type="email" autocomplete="username" spellcheck="false" />
+
+                <html:div id="mktero-account-form" class="mktero-auth-form">
+                    <html:div id="mktero-account-api-base-row" class="mktero-form-field" hidden="hidden">
+                        <html:label for="mktero-account-api-base" data-i18n="preferences.account.apiBaseLabel"></html:label>
+                        <html:input id="mktero-account-api-base"
+                                    type="url"
+                                    autocomplete="off"
+                                    spellcheck="false" />
+                    </html:div>
+
+                    <html:div class="mktero-form-field">
+                        <html:input id="mktero-account-email"
+                                    type="email"
+                                    autocomplete="username"
+                                    spellcheck="false"
+                                    data-i18n-placeholder="preferences.account.emailPlaceholder"
+                                    data-i18n-aria-label="preferences.account.emailLabel" />
+                    </html:div>
+
+                    <html:div id="mktero-account-code-row" class="mktero-form-field" hidden="hidden">
+                        <html:div class="mktero-input-action">
+                            <html:input id="mktero-account-code"
+                                        type="text"
+                                        inputmode="numeric"
+                                        maxlength="6"
+                                        autocomplete="one-time-code"
+                                        spellcheck="false"
+                                        data-i18n-placeholder="preferences.account.codePlaceholder"
+                                        data-i18n-aria-label="preferences.account.codeLabel" />
+                            <html:button id="mktero-account-send-code"
+                                         class="mktero-button"
+                                         type="button"
+                                         data-i18n="preferences.account.sendCode"></html:button>
                         </html:div>
                     </html:div>
-                    <html:div id="mktero-account-code-row" class="mktero-setting-row mktero-field-row" hidden="hidden">
-                        <html:div class="mktero-setting-copy">
-                            <html:label for="mktero-account-code"><html:strong data-i18n="preferences.account.codeLabel"></html:strong></html:label>
-                            <html:small data-i18n="preferences.account.codeHelp"></html:small>
-                        </html:div>
-                        <html:div class="mktero-field-control mktero-code-control">
-                            <html:input id="mktero-account-code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" spellcheck="false" />
-                            <html:button id="mktero-account-send-code" class="mktero-account-button" type="button" data-i18n="preferences.account.sendCode"></html:button>
-                        </html:div>
+
+                    <html:div id="mktero-account-password-row" class="mktero-form-field">
+                        <html:input id="mktero-account-password"
+                                    type="password"
+                                    autocomplete="current-password"
+                                    spellcheck="false"
+                                    data-i18n-placeholder="preferences.account.passwordPlaceholder"
+                                    data-i18n-aria-label="preferences.account.passwordLabel" />
                     </html:div>
-                    <html:div id="mktero-account-password-row" class="mktero-setting-row mktero-field-row">
-                        <html:div class="mktero-setting-copy">
-                            <html:label for="mktero-account-password"><html:strong data-i18n="preferences.account.passwordLabel"></html:strong></html:label>
-                            <html:small data-i18n="preferences.account.passwordHelp"></html:small>
-                        </html:div>
-                        <html:div class="mktero-field-control">
-                            <html:input id="mktero-account-password" type="password" autocomplete="current-password" spellcheck="false" />
-                        </html:div>
+
+                    <html:div id="mktero-account-password-confirm-row" class="mktero-form-field" hidden="hidden">
+                        <html:input id="mktero-account-password-confirm"
+                                    type="password"
+                                    autocomplete="new-password"
+                                    spellcheck="false"
+                                    data-i18n-placeholder="preferences.account.confirmPasswordPlaceholder"
+                                    data-i18n-aria-label="preferences.account.confirmPasswordLabel" />
                     </html:div>
-                    <html:div id="mktero-account-password-confirm-row" class="mktero-setting-row mktero-field-row" hidden="hidden">
-                        <html:div class="mktero-setting-copy">
-                            <html:label for="mktero-account-password-confirm"><html:strong data-i18n="preferences.account.confirmPasswordLabel"></html:strong></html:label>
-                            <html:small data-i18n="preferences.account.confirmPasswordHelp"></html:small>
-                        </html:div>
-                        <html:div class="mktero-field-control">
-                            <html:input id="mktero-account-password-confirm" type="password" autocomplete="new-password" spellcheck="false" />
-                        </html:div>
-                    </html:div>
-                    <html:label id="mktero-account-keep-row" class="mktero-setting-row mktero-switch-row" for="mktero-account-keep">
-                        <html:span class="mktero-setting-copy">
-                            <html:strong data-i18n="preferences.account.keepSignedIn"></html:strong>
-                        </html:span>
-                        <html:span class="mktero-switch-control">
-                            <html:input id="mktero-account-keep" class="mktero-switch-input" type="checkbox" role="switch" checked="checked" />
-                            <html:span class="mktero-switch" aria-hidden="true"></html:span>
-                        </html:span>
-                    </html:label>
-                    <html:div class="mktero-setting-row mktero-account-action-row">
-                        <html:div class="mktero-setting-copy">
-                            <html:button id="mktero-account-forgot" class="mktero-auth-link" type="button" data-i18n="preferences.account.forgot"></html:button>
-                            <html:button id="mktero-account-forgot-back" class="mktero-auth-link" type="button" hidden="hidden" data-i18n="preferences.account.backToLogin"></html:button>
-                            <html:small id="mktero-account-status" role="status" aria-live="polite"></html:small>
-                        </html:div>
-                        <html:button id="mktero-account-login" class="mktero-account-button" type="button" data-i18n="preferences.account.login"></html:button>
-                        <html:button id="mktero-account-register" class="mktero-account-button" type="button" hidden="hidden" data-i18n="preferences.account.register"></html:button>
-                        <html:button id="mktero-account-send-reset" class="mktero-account-button" type="button" hidden="hidden" data-i18n="preferences.account.sendReset"></html:button>
-                    </html:div>
+
+                    <html:button id="mktero-account-login"
+                                 class="mktero-button mktero-button-primary mktero-auth-submit"
+                                 type="button"
+                                 data-i18n="preferences.account.login"></html:button>
+                    <html:button id="mktero-account-register"
+                                 class="mktero-button mktero-button-primary mktero-auth-submit"
+                                 type="button"
+                                 hidden="hidden"
+                                 data-i18n="preferences.account.register"></html:button>
+                    <html:button id="mktero-account-send-reset"
+                                 class="mktero-button mktero-button-primary mktero-auth-submit"
+                                 type="button"
+                                 hidden="hidden"
+                                 data-i18n="preferences.account.sendReset"></html:button>
+
+                    <html:p id="mktero-account-switch" class="mktero-auth-switch">
+                        <html:span id="mktero-account-switch-lead"></html:span>
+                        <html:button id="mktero-account-switch-action"
+                                     class="mktero-link-button"
+                                     type="button"></html:button>
+                    </html:p>
+                    <html:button id="mktero-account-forgot"
+                                 class="mktero-link-button mktero-auth-inline-link"
+                                 type="button"
+                                 data-i18n="preferences.account.forgot"></html:button>
+                    <html:button id="mktero-account-forgot-back"
+                                 class="mktero-link-button mktero-auth-inline-link"
+                                 type="button"
+                                 hidden="hidden"
+                                 data-i18n="preferences.account.backToLogin"></html:button>
+
+                    <html:p id="mktero-account-status" class="mktero-auth-status" role="status" aria-live="polite"></html:p>
                 </html:div>
-            </html:div>
+            </html:section>
         </html:div>
 
         <html:div id="mktero-custom-panel"
-                  class="mktero-preferences-section mktero-feature-content"
+                  class="mktero-preferences-section"
                   hidden="hidden">
-            <html:div class="mktero-settings-card">
-                <html:div class="mktero-setting-row">
-                    <html:div class="mktero-setting-copy">
+            <html:section class="mktero-panel">
+                <html:div class="mktero-panel-head">
+                    <html:div class="mktero-panel-heading">
                         <html:strong data-i18n="preferences.customSection.label"></html:strong>
                         <html:small data-i18n="preferences.featureSource.ownHelp"></html:small>
                     </html:div>
-                    <html:div class="mktero-pref-tablist mktero-inline-switch" role="group" aria-labelledby="mktero-custom-section-label">
-                        <html:span id="mktero-custom-section-label" class="mktero-visually-hidden" data-i18n="preferences.customSection.label"></html:span>
-                        <html:button id="mktero-custom-pdf" class="mktero-pref-tab" type="button" data-custom-section="pdf" aria-pressed="true">
-                            <html:span data-i18n="preferences.customSection.pdf"></html:span>
-                        </html:button>
-                        <html:button id="mktero-custom-ai" class="mktero-pref-tab" type="button" data-custom-section="ai" aria-pressed="false">
-                            <html:span data-i18n="preferences.customSection.ai"></html:span>
-                        </html:button>
+                    <html:div class="mktero-segmented"
+                              role="group"
+                              aria-labelledby="mktero-custom-section-label">
+                        <html:span id="mktero-custom-section-label"
+                                   class="mktero-visually-hidden"
+                                   data-i18n="preferences.customSection.label"></html:span>
+                        <html:button id="mktero-custom-pdf"
+                                     class="mktero-segmented-item"
+                                     type="button"
+                                     data-custom-section="pdf"
+                                     aria-pressed="true"
+                                     data-i18n="preferences.customSection.pdf"></html:button>
+                        <html:button id="mktero-custom-ai"
+                                     class="mktero-segmented-item"
+                                     type="button"
+                                     data-custom-section="ai"
+                                     aria-pressed="false"
+                                     data-i18n="preferences.customSection.ai"></html:button>
                     </html:div>
                 </html:div>
-            </html:div>
+            </html:section>
         <html:div id="mktero-conversion-section"
                   class="mktero-preferences-section">
             <html:div class="mktero-settings-card">

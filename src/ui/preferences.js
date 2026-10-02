@@ -205,9 +205,9 @@ export function createPreferencesController({
     const accountForgotButton = document.getElementById('mktero-account-forgot');
     const accountForgotBackButton = document.getElementById('mktero-account-forgot-back');
     const accountSendResetButton = document.getElementById('mktero-account-send-reset');
-    const accountLoginTab = document.getElementById('mktero-auth-tab-login');
-    const accountRegisterTab = document.getElementById('mktero-auth-tab-register');
-    const accountKeepInput = document.getElementById('mktero-account-keep');
+    const accountSwitch = document.getElementById('mktero-account-switch');
+    const accountSwitchLead = document.getElementById('mktero-account-switch-lead');
+    const accountSwitchAction = document.getElementById('mktero-account-switch-action');
     const accountCodeInput = document.getElementById('mktero-account-code');
     const accountConfirmInput = document.getElementById('mktero-account-password-confirm');
     const accountSendCodeButton = document.getElementById('mktero-account-send-code');
@@ -711,7 +711,6 @@ export function createPreferencesController({
         const accountForm = document.getElementById('mktero-account-form');
         if (signedInPanel) signedInPanel.hidden = !signedIn;
         if (accountForm) accountForm.hidden = signedIn;
-        setHidden('mktero-account-mode-switch', signedIn);
         const signedInLabel = document.getElementById('mktero-account-signed-in-text');
         if (signedInLabel) {
             signedInLabel.textContent = t('preferences.account.signedIn', {
@@ -747,32 +746,37 @@ export function createPreferencesController({
         setHidden('mktero-account-password-row', forgot);
         setHidden('mktero-account-code-row', !register);
         setHidden('mktero-account-password-confirm-row', !register);
-        setHidden('mktero-account-keep-row', mode !== 'login');
         if (accountLoginButton) accountLoginButton.hidden = mode !== 'login';
         if (accountRegisterButton) accountRegisterButton.hidden = !register;
         if (accountSendResetButton) accountSendResetButton.hidden = !forgot;
         if (accountForgotButton) accountForgotButton.hidden = mode !== 'login';
         if (accountForgotBackButton) accountForgotBackButton.hidden = !forgot;
+        if (accountSwitch) accountSwitch.hidden = forgot;
+        if (accountSwitchLead) {
+            accountSwitchLead.textContent = t(
+                register
+                    ? 'preferences.account.switchToLoginLead'
+                    : 'preferences.account.switchToRegisterLead'
+            );
+        }
+        if (accountSwitchAction) {
+            accountSwitchAction.textContent = t(
+                register
+                    ? 'preferences.account.switchToLoginAction'
+                    : 'preferences.account.switchToRegisterAction'
+            );
+        }
         if (accountPasswordInput) {
             accountPasswordInput.setAttribute(
                 'autocomplete',
                 register ? 'new-password' : 'current-password'
             );
         }
-        if (accountLoginTab) {
-            accountLoginTab.setAttribute('aria-selected', mode === 'login' || forgot ? 'true' : 'false');
-        }
-        if (accountRegisterTab) {
-            accountRegisterTab.setAttribute('aria-selected', register ? 'true' : 'false');
-        }
     }
 
-    function selectAccountLoginMode() {
-        setAccountMode('login');
-    }
-
-    function selectAccountRegisterMode() {
-        setAccountMode('register');
+    function toggleAccountMode() {
+        setAccountMode(accountMode === 'register' ? 'login' : 'register');
+        setAccountStatus('');
     }
 
     function selectAccountForgotMode() {
@@ -812,9 +816,6 @@ export function createPreferencesController({
                 if (accountPasswordInput) accountPasswordInput.value = '';
                 setAccountStatus('preferences.account.verificationSent');
                 return;
-            }
-            if (accountKeepInput && !accountKeepInput.checked) {
-                session.refreshToken = '';
             }
             saveAccountSession(zotero, session);
             if (accountPasswordInput) accountPasswordInput.value = '';
@@ -982,8 +983,7 @@ export function createPreferencesController({
         accountLoginButton?.addEventListener('click', loginAccount);
         accountRegisterButton?.addEventListener('click', registerAccount);
         accountLogoutButton?.addEventListener('click', logoutAccount);
-        accountLoginTab?.addEventListener('click', selectAccountLoginMode);
-        accountRegisterTab?.addEventListener('click', selectAccountRegisterMode);
+        accountSwitchAction?.addEventListener('click', toggleAccountMode);
         accountForgotButton?.addEventListener('click', selectAccountForgotMode);
         accountForgotBackButton?.addEventListener('click', selectAccountForgotBack);
         accountSendResetButton?.addEventListener('click', sendPasswordReset);
@@ -1427,8 +1427,7 @@ export function createPreferencesController({
             accountLoginButton?.removeEventListener('click', loginAccount);
             accountRegisterButton?.removeEventListener('click', registerAccount);
             accountLogoutButton?.removeEventListener('click', logoutAccount);
-            accountLoginTab?.removeEventListener('click', selectAccountLoginMode);
-            accountRegisterTab?.removeEventListener('click', selectAccountRegisterMode);
+            accountSwitchAction?.removeEventListener('click', toggleAccountMode);
             accountForgotButton?.removeEventListener('click', selectAccountForgotMode);
             accountForgotBackButton?.removeEventListener('click', selectAccountForgotBack);
             accountSendResetButton?.removeEventListener('click', sendPasswordReset);
@@ -1558,6 +1557,18 @@ function createHTMLElement(document, tagName) {
 export function localizePreferencesDocument(document, localization) {
     for (const element of document.querySelectorAll?.('[data-i18n]') || []) {
         element.textContent = localization.t(element.getAttribute('data-i18n'));
+    }
+    for (const element of document.querySelectorAll?.('[data-i18n-placeholder]') || []) {
+        element.setAttribute(
+            'placeholder',
+            localization.t(element.getAttribute('data-i18n-placeholder'))
+        );
+    }
+    for (const element of document.querySelectorAll?.('[data-i18n-aria-label]') || []) {
+        element.setAttribute(
+            'aria-label',
+            localization.t(element.getAttribute('data-i18n-aria-label'))
+        );
     }
     document.getElementById('mktero-preferences-pane')
         ?.setAttribute('lang', localization.language);

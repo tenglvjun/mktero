@@ -204,9 +204,9 @@ test('ships responsive settings cards and a cache switch', async () => {
     ]);
 
     assert.match(pane, /class="mktero-settings-card"/);
-    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 5);
-    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 5);
-    assert.equal((pane.match(/role="switch"/g) || []).length, 5);
+    assert.equal((pane.match(/class="mktero-switch-input"/g) || []).length, 4);
+    assert.equal((pane.match(/class="mktero-switch" aria-hidden="true"/g) || []).length, 4);
+    assert.equal((pane.match(/role="switch"/g) || []).length, 4);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionLabel"/);
     assert.match(pane, /data-i18n="preferences\.ai\.autoTranslateSelectionHelp"/);
     assert.match(pane, /id="mktero-ai-streaming"/);
@@ -316,13 +316,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row[^\"]*"/g
         ) || []).length,
-        27
+        22
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-field-control(?: [^"]+)?">/g
         ) || []).length,
-        22
+        17
     );
 });
 
@@ -374,13 +374,14 @@ test('presents every preference group as one cohesive settings card', async () =
         readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
     ]);
 
-    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 6);
-    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 5);
+    assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 6);
     assert.match(pane, /id="mktero-pref-tablist"[\s\S]*role="tablist"/);
     assert.match(pane, /id="mktero-tab-features"[\s\S]*aria-selected="true"/);
     assert.match(pane, /id="mktero-features-section"/);
     assert.doesNotMatch(pane, /id="mktero-tab-reader"/);
-    assert.equal((pane.match(/class="mktero-pref-tab"/g) || []).length, 8);
+    assert.equal((pane.match(/class="mktero-pref-tab"/g) || []).length, 2);
+    assert.equal((pane.match(/class="mktero-segmented-item"/g) || []).length, 4);
     assert.equal((pane.match(/data-feature-source=/g) || []).length, 2);
     assert.equal((pane.match(/data-tab-icon="/g) || []).length, 2);
     assert.equal((pane.match(/role="tabpanel"/g) || []).length, 2);
