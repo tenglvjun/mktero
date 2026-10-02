@@ -12,10 +12,9 @@ const {
     formatCacheStats,
 } = preferencesUI;
 
-function withoutFeatureSourceWrites(writes) {
+function withoutServiceSourceWrites(writes) {
     return writes.filter(write => (
-        !String(write.key).includes('featureSource')
-        && !String(write.key).includes('ServiceSource')
+        !String(write.key).includes('ServiceSource')
     ));
 }
 
@@ -214,7 +213,7 @@ test('configures the Markdown reader font size from preferences', async () => {
 
     input.value = '22';
     input.dispatchEvent(new dom.window.Event('input'));
-    assert.deepEqual(withoutFeatureSourceWrites(writes), [{
+    assert.deepEqual(withoutServiceSourceWrites(writes), [{
         key: 'extensions.mktero.readerFontSize',
         value: 22,
         global: true,
@@ -249,7 +248,7 @@ test('configures the Markdown reader font size from preferences', async () => {
     assert.equal(sourcePeek.checked, true);
     sourcePeek.checked = false;
     sourcePeek.dispatchEvent(new dom.window.Event('change'));
-    assert.deepEqual(withoutFeatureSourceWrites(writes), [
+    assert.deepEqual(withoutServiceSourceWrites(writes), [
         {
             key: 'extensions.mktero.readerFontSize',
             value: 22,
@@ -289,13 +288,14 @@ test('configures the Markdown reader font size from preferences', async () => {
     font.dispatchEvent(new dom.window.Event('change'));
     sourcePeek.checked = true;
     sourcePeek.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(withoutFeatureSourceWrites(writes).length, 6);
+    assert.equal(withoutServiceSourceWrites(writes).length, 6);
 });
 
 test('switches one conversion API key field with the selected provider', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
             <select id="mktero-conversion-provider">
+                <option value="mktero">Mktero</option>
                 <option value="mineru">MinerU</option>
                 <option value="mistral">Mistral OCR 4.1</option>
             </select>
@@ -357,7 +357,11 @@ test('switches one conversion API key field with the selected provider', async (
     const apiKey = dom.window.document.getElementById('mktero-api-key');
     apiKey.value = 'updated-mineru-secret';
     apiKey.dispatchEvent(new dom.window.Event('change'));
-    assert.deepEqual(withoutFeatureSourceWrites(writes), [{
+    assert.deepEqual(withoutServiceSourceWrites(writes), [{
+        key: 'extensions.mktero.conversionProvider',
+        value: 'mineru',
+        global: true,
+    }, {
         key: 'extensions.mktero.mineruApiKey',
         value: 'updated-mineru-secret',
         global: true,
@@ -510,7 +514,7 @@ test('shows legacy OpenAI-compatible settings as custom Chat Completions', async
 test('localizes preferences from Zotero without storing a language choice', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
-            <h2 data-i18n="preferences.conversion.title"></h2>
+            <h2 data-i18n="preferences.features.title"></h2>
             <strong data-i18n="preferences.cache.usageLabel"></strong>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache" data-i18n="preferences.cache.clear"></button>
@@ -521,8 +525,7 @@ test('localizes preferences from Zotero without storing a language choice', asyn
         locale: 'zh-CN',
         Prefs: {
             set(key) {
-                if (String(key).includes('featureSource')
-                    || String(key).includes('ServiceSource')) return;
+                if (String(key).includes('ServiceSource')) return;
                 assert.fail(key);
             },
         },
@@ -538,7 +541,7 @@ test('localizes preferences from Zotero without storing a language choice', asyn
     });
 
     await controller.init();
-    assert.equal(document.querySelector('h2').textContent, 'PDF 转换');
+    assert.equal(document.querySelector('h2').textContent, 'Markdown 转换');
     assert.equal(
         document.getElementById('mktero-cache-status').textContent,
         '2 个本地缓存条目，1.5 KB'
@@ -1575,11 +1578,97 @@ test('switches MinerU between cloud and a local service without mixing keys', as
         dom.window.document.getElementById('mktero-conversion-privacy-note').textContent,
         /local MinerU address/i
     );
-    assert.deepEqual(withoutFeatureSourceWrites(writes)[0], {
+    assert.deepEqual(withoutServiceSourceWrites(writes)[0], {
         key: 'extensions.mktero.mineruEndpoint',
         value: 'local',
         global: true,
     });
+
+    controller.destroy();
+});
+
+test('hides every custom PDF row when the hosted subscription is selected', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider">
+                <option value="mktero">Mktero</option>
+                <option value="mineru">MinerU</option>
+                <option value="mistral">Mistral OCR 4.1</option>
+            </select>
+            <div id="mktero-account-panel"></div>
+            <div id="mktero-mineru-endpoint-row">
+                <select id="mktero-mineru-endpoint">
+                    <option value="cloud">Cloud</option>
+                    <option value="local">Local</option>
+                </select>
+            </div>
+            <div id="mktero-mineru-local-base-row">
+                <input id="mktero-mineru-local-base">
+            </div>
+            <div id="mktero-api-key-row">
+                <input id="mktero-api-key">
+                <small id="mktero-api-key-help"></small>
+                <a id="mktero-api-key-manage"></a>
+            </div>
+            <small id="mktero-conversion-privacy-note"></small>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mineru'],
+        ['extensions.mktero.mineruEndpoint', 'cloud'],
+        ['extensions.mktero.mineruApiKey', 'cloud-secret'],
+    ]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const provider = dom.window.document.getElementById(
+        'mktero-conversion-provider'
+    );
+    const endpointRow = dom.window.document.getElementById(
+        'mktero-mineru-endpoint-row'
+    );
+    const apiKeyRow = dom.window.document.getElementById('mktero-api-key-row');
+    const privacyNote = dom.window.document.getElementById(
+        'mktero-conversion-privacy-note'
+    );
+
+    provider.value = 'mktero';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        dom.window.document.getElementById('mktero-account-panel').hidden,
+        false
+    );
+    assert.equal(endpointRow.hidden, true);
+    assert.equal(apiKeyRow.hidden, true);
+    assert.equal(privacyNote.hidden, true);
+    assert.equal(values.get('extensions.mktero.pdfServiceSource'), 'mktero');
+
+    provider.value = 'mineru';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(endpointRow.hidden, false);
+    assert.equal(apiKeyRow.hidden, false);
+    assert.equal(values.get('extensions.mktero.pdfServiceSource'), 'own');
+
+    provider.value = 'mktero';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(endpointRow.hidden, true);
+    assert.equal(apiKeyRow.hidden, true);
+    assert.equal(privacyNote.hidden, true);
 
     controller.destroy();
 });

@@ -51,6 +51,7 @@ import {
 import {
     CONVERSION_PROVIDER_MINERU,
     CONVERSION_PROVIDER_MISTRAL,
+    CONVERSION_PROVIDER_PREF,
     MISTRAL_API_KEY_PREF,
     DEFAULT_MINERU_LOCAL_API_BASE,
     MINERU_API_KEY_PREF,
@@ -80,12 +81,12 @@ import {
     clearAccountSession,
     getAccountApiBase,
     getAccountSession,
-    getFeatureSource,
+    getPdfServiceSource,
     isAccountSignedIn,
     saveAccountSession,
     SERVICE_SOURCE_MKTERO,
     setAccountApiBase,
-    setFeatureSource,
+    setPdfServiceSource,
 } from '../config/account-preferences.js';
 import { isDebugBuild } from '../config/runtime-config.js';
 import {
@@ -216,15 +217,7 @@ export function createPreferencesController({
     const accountLogoutButton = document.getElementById('mktero-account-logout');
     const accountApiBaseInput = document.getElementById('mktero-account-api-base');
     const accountStatus = document.getElementById('mktero-account-status');
-    const featureSourceButtons = [
-        ...document.querySelectorAll?.('[data-feature-source]') || [],
-    ];
     const accountPanel = document.getElementById('mktero-account-panel');
-    const customPanel = document.getElementById('mktero-custom-panel');
-    const customSectionButtons = [
-        ...document.querySelectorAll?.('[data-custom-section]') || [],
-    ];
-    let customSection = 'pdf';
     const obsidianVaultInput = document.getElementById('mktero-obsidian-vault');
     const obsidianVaultBrowse = document.getElementById(
         'mktero-obsidian-vault-browse'
@@ -527,9 +520,9 @@ export function createPreferencesController({
     }
 
     function getSelectedConversionProvider() {
-        return normalizeConversionProvider(
-            conversionProviderInput?.value || getConversionProvider(zotero)
-        );
+        const value = conversionProviderInput?.value;
+        if (value === SERVICE_SOURCE_MKTERO) return CONVERSION_PROVIDER_MINERU;
+        return normalizeConversionProvider(value || getConversionProvider(zotero));
     }
 
     function selectedMinerUEndpoint() {
@@ -568,14 +561,16 @@ export function createPreferencesController({
     }
 
     function updateConversionApiKeyControl() {
+        const hosted = selectedConversionChoice() === SERVICE_SOURCE_MKTERO;
         const provider = getSelectedConversionProvider();
         const local = provider === CONVERSION_PROVIDER_MINERU
             && selectedMinerUEndpoint() === MINERU_ENDPOINT_LOCAL;
         if (mineruEndpointRow) {
-            mineruEndpointRow.hidden = provider !== CONVERSION_PROVIDER_MINERU;
+            mineruEndpointRow.hidden = hosted
+                || provider !== CONVERSION_PROVIDER_MINERU;
         }
-        if (mineruLocalBaseRow) mineruLocalBaseRow.hidden = !local;
-        if (conversionApiKeyRow) conversionApiKeyRow.hidden = local;
+        if (mineruLocalBaseRow) mineruLocalBaseRow.hidden = hosted || !local;
+        if (conversionApiKeyRow) conversionApiKeyRow.hidden = hosted || local;
         if (mineruEndpointInput && !mineruEndpointInput.value) {
             mineruEndpointInput.value = getMinerUEndpoint(zotero);
         }
@@ -593,6 +588,7 @@ export function createPreferencesController({
             conversionApiKeyHelp.textContent = localization.t(config.helpKey);
         }
         if (conversionPrivacyNote) {
+            conversionPrivacyNote.hidden = hosted;
             conversionPrivacyNote.setAttribute('data-i18n', config.privacyKey);
             conversionPrivacyNote.textContent = localization.t(config.privacyKey);
         }
@@ -656,50 +652,21 @@ export function createPreferencesController({
         return 'preferences.account.loginFailed';
     }
 
-    function selectedFeatureSource() {
-        const pressed = featureSourceButtons.find(button => (
-            button.getAttribute('aria-pressed') === 'true'
-        ));
-        return pressed?.getAttribute('data-feature-source')
-            || getFeatureSource(zotero);
+    // The conversion provider select owns the hosted/custom decision. "mktero"
+    // is a UI-only value: it maps to the PDF source preference, while MinerU and
+    // Mistral keep using the conversion provider preference.
+    function selectedConversionChoice() {
+        const value = String(conversionProviderInput?.value || '').trim();
+        if (value) return value;
+        return getPdfServiceSource(zotero) === SERVICE_SOURCE_MKTERO
+            ? SERVICE_SOURCE_MKTERO
+            : getConversionProvider(zotero);
     }
 
     function updateServiceSources() {
-        const mktero = selectedFeatureSource() === SERVICE_SOURCE_MKTERO;
+        const mktero = selectedConversionChoice() === SERVICE_SOURCE_MKTERO;
         if (accountPanel) accountPanel.hidden = !mktero;
-        if (customPanel) customPanel.hidden = mktero;
-        for (const button of featureSourceButtons) {
-            const selected = button.getAttribute('data-feature-source')
-                === (mktero ? SERVICE_SOURCE_MKTERO : 'own');
-            button.setAttribute('aria-pressed', selected ? 'true' : 'false');
-        }
-        if (!mktero) {
-            updateCustomSection();
-            updateConversionApiKeyControl();
-            updateAICustomFieldVisibility();
-        }
-    }
-
-    function updateCustomSection() {
-        const conversion = document.getElementById('mktero-conversion-section');
-        const ai = document.getElementById('mktero-ai-section');
-        if (conversion) conversion.hidden = customSection !== 'pdf';
-        if (ai) ai.hidden = customSection !== 'ai';
-        for (const button of customSectionButtons) {
-            button.setAttribute(
-                'aria-pressed',
-                button.getAttribute('data-custom-section') === customSection
-                    ? 'true'
-                    : 'false'
-            );
-        }
-    }
-
-    function saveCustomSection(event) {
-        const section = event.currentTarget?.getAttribute('data-custom-section');
-        if (section !== 'pdf' && section !== 'ai') return;
-        customSection = section;
-        updateCustomSection();
+        updateConversionApiKeyControl();
     }
 
     function renderAccount() {
@@ -721,15 +688,6 @@ export function createPreferencesController({
         if (apiBaseRow) apiBaseRow.hidden = !isDebugBuild();
         if (accountApiBaseInput && !accountApiBaseInput.value) {
             accountApiBaseInput.value = getAccountApiBase(zotero);
-        }
-        const source = getFeatureSource(zotero);
-        for (const button of featureSourceButtons) {
-            button.setAttribute(
-                'aria-pressed',
-                button.getAttribute('data-feature-source') === source
-                    ? 'true'
-                    : 'false'
-            );
         }
         updateServiceSources();
     }
@@ -957,10 +915,17 @@ export function createPreferencesController({
         }
     }
 
-    function saveFeatureSource(event) {
-        const source = event.currentTarget?.getAttribute('data-feature-source');
-        if (!source) return;
-        setFeatureSource(zotero, source);
+    function saveConversionChoice() {
+        if (!conversionProviderInput) return;
+        const choice = selectedConversionChoice();
+        if (choice === SERVICE_SOURCE_MKTERO) {
+            setPdfServiceSource(zotero, SERVICE_SOURCE_MKTERO);
+        }
+        else {
+            setPdfServiceSource(zotero, 'own');
+            zotero?.Prefs?.set?.(CONVERSION_PROVIDER_PREF, choice, true);
+        }
+        updateServiceSources();
         renderAccount();
     }
 
@@ -989,12 +954,6 @@ export function createPreferencesController({
         accountSendResetButton?.addEventListener('click', sendPasswordReset);
         accountSendCodeButton?.addEventListener('click', sendAccountCode);
         accountApiBaseInput?.addEventListener('change', saveAccountApiBase);
-        for (const button of featureSourceButtons) {
-            button.addEventListener('click', saveFeatureSource);
-        }
-        for (const button of customSectionButtons) {
-            button.addEventListener('click', saveCustomSection);
-        }
         renderAccount();
     }
 
@@ -1003,7 +962,10 @@ export function createPreferencesController({
             updateConversionApiKeyControl();
             return;
         }
-        conversionProviderInput.value = getConversionProvider(zotero);
+        conversionProviderInput.value = getPdfServiceSource(zotero)
+            === SERVICE_SOURCE_MKTERO
+            ? SERVICE_SOURCE_MKTERO
+            : getConversionProvider(zotero);
         if (mineruEndpointInput) {
             mineruEndpointInput.value = getMinerUEndpoint(zotero);
         }
@@ -1014,7 +976,7 @@ export function createPreferencesController({
         updateConversionApiKeyControl();
         conversionProviderInput.addEventListener(
             'change',
-            updateConversionApiKeyControl
+            saveConversionChoice
         );
         mineruEndpointInput?.addEventListener('change', saveMinerUEndpoint);
         mineruLocalBaseInput?.addEventListener('change', saveMinerULocalApiBase);
@@ -1413,7 +1375,7 @@ export function createPreferencesController({
             );
             conversionProviderInput?.removeEventListener(
                 'change',
-                updateConversionApiKeyControl
+                saveConversionChoice
             );
             mineruEndpointInput?.removeEventListener('change', saveMinerUEndpoint);
             mineruLocalBaseInput?.removeEventListener(
@@ -1434,12 +1396,6 @@ export function createPreferencesController({
             accountSendCodeButton?.removeEventListener('click', sendAccountCode);
             clearTimeout(codeCooldownTimer);
             accountApiBaseInput?.removeEventListener('change', saveAccountApiBase);
-            for (const button of featureSourceButtons) {
-                button.removeEventListener('click', saveFeatureSource);
-            }
-            for (const button of customSectionButtons) {
-                button.removeEventListener('click', saveCustomSection);
-            }
             readerFontSizeInput?.removeEventListener(
                 'input',
                 updateReaderFontSize

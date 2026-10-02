@@ -157,27 +157,20 @@
     flex: 0 0 auto;
 }
 
-.mktero-source-panel {
-    padding: 12px 18px;
+.mktero-account-inline {
+    border-top: 1px solid var(--material-border, rgba(127, 127, 127, 0.22));
 }
 
-.mktero-source-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px 16px;
+.mktero-account-inline .mktero-panel {
+    padding: 20px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
-.mktero-source-row > strong {
-    color: CanvasText;
-    font-size: 0.96rem;
-    font-weight: 650;
-    line-height: 1.3;
-}
-
-.mktero-source-row .mktero-segmented {
-    flex: 0 0 auto;
+.mktero-account-inline[hidden] {
+    display: none;
 }
 
 .mktero-auth-panel {
@@ -428,29 +421,6 @@
 #mktero-account-forgot[hidden],
 #mktero-account-forgot-back[hidden] {
     display: none;
-}
-
-.mktero-card-header {
-    display: grid;
-    gap: 4px;
-    padding: 16px 28px 2px;
-}
-
-.mktero-card-header strong {
-    font-size: 1.05rem;
-    font-weight: 650;
-    line-height: 1.3;
-}
-
-.mktero-card-header small {
-    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
-    font-size: 0.9rem;
-    line-height: 1.4;
-}
-
-.mktero-card-header + .mktero-setting-row,
-.mktero-card-header + #mktero-ai-settings > .mktero-setting-row:first-child {
-    border-top: 0;
 }
 
 .mktero-visually-hidden {
@@ -840,10 +810,6 @@
 #mktero-account-password-row[hidden],
 #mktero-pdf-account-status[hidden],
 #mktero-ai-account-status[hidden],
-.mktero-own-pdf-row[hidden],
-.mktero-own-ai-row[hidden] {
-    display: none;
-}
 
 .mktero-card-note {
     display: block;

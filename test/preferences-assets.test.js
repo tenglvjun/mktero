@@ -83,7 +83,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.doesNotMatch(prefs, /extensions\.mktero\.language/);
     assert.doesNotMatch(pane, /id="mktero-language"/);
     assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
-    assert.match(pane, /id="mktero-conversion-provider"[\s\S]*?preference="extensions\.mktero\.conversionProvider"/);
+    assert.match(pane, /id="mktero-conversion-provider"[\s\S]*?<html:option value="mktero"/);
     assert.match(pane, /<html:option value="mineru" data-i18n="preferences\.conversion\.provider\.mineru"><\/html:option>/);
     assert.match(pane, /<html:option value="mistral" data-i18n="preferences\.conversion\.provider\.mistral"><\/html:option>/);
     assert.equal((pane.match(/id="mktero-api-key"/g) || []).length, 1);
@@ -128,7 +128,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.doesNotMatch(pane, /id="mktero-ai-test-status"/);
     assert.match(
         pane,
-        /id="mktero-ai-streaming"[\s\S]*?id="mktero-ai-provider"/
+        /id="mktero-ai-provider"[\s\S]*?id="mktero-ai-streaming"/
     );
     assert.match(pane, /class="mktero-field-control mktero-provider-control"/);
     assert.match(pane, /class="mktero-ai-test-icon"/);
@@ -375,16 +375,16 @@ test('presents every preference group as one cohesive settings card', async () =
     ]);
 
     assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
-    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 6);
+    assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 4);
     assert.match(pane, /id="mktero-pref-tablist"[\s\S]*role="tablist"/);
     assert.match(pane, /id="mktero-tab-features"[\s\S]*aria-selected="true"/);
     assert.match(pane, /id="mktero-features-section"/);
     assert.doesNotMatch(pane, /id="mktero-tab-reader"/);
-    assert.equal((pane.match(/class="mktero-pref-tab"/g) || []).length, 2);
-    assert.equal((pane.match(/class="mktero-segmented-item"/g) || []).length, 4);
-    assert.equal((pane.match(/data-feature-source=/g) || []).length, 2);
-    assert.equal((pane.match(/data-tab-icon="/g) || []).length, 2);
-    assert.equal((pane.match(/role="tabpanel"/g) || []).length, 2);
+    assert.equal((pane.match(/class="mktero-pref-tab"/g) || []).length, 3);
+    assert.equal((pane.match(/class="mktero-segmented-item"/g) || []).length, 0);
+    assert.equal((pane.match(/data-feature-source=/g) || []).length, 0);
+    assert.equal((pane.match(/data-tab-icon="/g) || []).length, 3);
+    assert.equal((pane.match(/role="tabpanel"/g) || []).length, 3);
     assert.match(
         pane,
         /id="mktero-api-key"[\s\S]*aria-describedby="mktero-api-key-help mktero-api-key-storage"/

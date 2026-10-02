@@ -6,13 +6,13 @@ Open `Settings -> Mktero` after installation.
 
 | Setting | Required | Purpose |
 | --- | --- | --- |
-| Account | Optional | Sign in or register a Mktero account. Registration asks for a password confirmation and emails a six-digit code. Debug builds can change the server address; release builds use the packaged production address. The password is not saved. The access token and refresh token stay unencrypted in the current Zotero profile |
-| Feature source | Optional, Mktero account by default | The Features tab opens on Mktero account sign-in and registration. Custom shows PDF conversion and AI model settings |
+| Account | Optional | Sign in or register a Mktero account. The account is only used for hosted PDF conversion. Registration asks for a password confirmation and emails a six-digit code. Debug builds can change the server address; release builds use the packaged production address. The password is not saved. The access token and refresh token stay unencrypted in the current Zotero profile |
+| Conversion service | Optional, Mktero by default | The Conversion tab lists Mktero, MinerU, and Mistral. Mktero shows account sign-in and uses the hosted service. MinerU and Mistral use your own credentials. AI translation always uses your own provider key |
 | Conversion provider | Required when using your own API | Select MinerU or Mistral OCR 4.1 |
 | MinerU service | MinerU only | Choose MinerU cloud, or a self-hosted MinerU 4.0 V1 service |
 | Local service address | Local MinerU only | Service origin, default `http://127.0.0.1:8000`. HTTP is limited to loopback and private-network addresses |
 | API key | Required for a cloud cache miss | Enter the key for MinerU cloud or Mistral. The field is hidden for a local MinerU service |
-| AI features and provider settings | Optional in Custom | Configure streaming, provider, model, key, reasoning, and timeout per provider; Alibaba Cloud Model Studio, Moonshot AI, and MiniMax can use the international or China endpoint to match the site that issued the key; switching providers restores that provider's last settings or an empty profile; reasoning options follow the selected model when known; a custom URL and protocol appear only for Custom |
+| AI features and provider settings | Optional | Configure streaming, provider, model, key, reasoning, and timeout per provider; Alibaba Cloud Model Studio, Moonshot AI, and MiniMax can use the international or China endpoint to match the site that issued the key; switching providers restores that provider's last settings or an empty profile; reasoning options follow the selected model when known; a custom URL and protocol appear only for Custom |
 | Translation language | Optional | Choose Simplified/Traditional Chinese, Japanese, Korean, Spanish, French, or Brazilian Portuguese |
 | Automatically translate Markdown selections | Optional, off by default | Translate a stable selection without an extra click; disabling it keeps the manual popup action |
 | Body text font and size | Optional | Choose the reading font and a 14–28 px body size |

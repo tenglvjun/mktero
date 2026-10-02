@@ -15,13 +15,7 @@ export const ACCOUNT_REFRESH_TOKEN_PREF = 'extensions.mktero.accountRefreshToken
 export const ACCOUNT_ACCESS_EXPIRES_AT_PREF =
     'extensions.mktero.accountAccessExpiresAt';
 export const ACCOUNT_API_BASE_PREF = 'extensions.mktero.accountApiBase';
-export const FEATURE_SOURCE_PREF = 'extensions.mktero.featureSource';
-export const FEATURE_SOURCE_EPOCH_PREF = 'extensions.mktero.featureSourceEpoch';
-export const FEATURE_SOURCE_EPOCH = 2;
 export const PDF_SERVICE_SOURCE_PREF = 'extensions.mktero.pdfServiceSource';
-export const AI_SERVICE_SOURCE_PREF = 'extensions.mktero.aiServiceSource';
-
-const migratedProfiles = new WeakSet();
 
 const SESSION_PREFS = [
     ACCOUNT_EMAIL_PREF,
@@ -36,39 +30,15 @@ export function normalizeServiceSource(value) {
         : SERVICE_SOURCE_OWN;
 }
 
-export function getFeatureSource(zotero) {
-    ensureFeatureSourceDefault(zotero);
-    const current = zotero?.Prefs?.get?.(FEATURE_SOURCE_PREF, true);
-    if (current) return normalizeServiceSource(current);
-    return SERVICE_SOURCE_MKTERO;
-}
-
-function ensureFeatureSourceDefault(zotero) {
-    if (!zotero || migratedProfiles.has(zotero)) return;
-    const epoch = Number(zotero?.Prefs?.get?.(FEATURE_SOURCE_EPOCH_PREF, true) || 0);
-    if (epoch >= FEATURE_SOURCE_EPOCH) {
-        migratedProfiles.add(zotero);
-        return;
-    }
-    setFeatureSource(zotero, SERVICE_SOURCE_MKTERO);
-    zotero?.Prefs?.set?.(FEATURE_SOURCE_EPOCH_PREF, FEATURE_SOURCE_EPOCH, true);
-    migratedProfiles.add(zotero);
-}
-
-export function setFeatureSource(zotero, value) {
-    const source = normalizeServiceSource(value);
-    zotero?.Prefs?.set?.(FEATURE_SOURCE_PREF, source, true);
-    zotero?.Prefs?.set?.(PDF_SERVICE_SOURCE_PREF, source, true);
-    zotero?.Prefs?.set?.(AI_SERVICE_SOURCE_PREF, source, true);
-    return source;
-}
-
 export function getPdfServiceSource(zotero) {
-    return getFeatureSource(zotero);
+    const current = zotero?.Prefs?.get?.(PDF_SERVICE_SOURCE_PREF, true);
+    return normalizeServiceSource(current);
 }
 
-export function getAIServiceSource(zotero) {
-    return getFeatureSource(zotero);
+export function setPdfServiceSource(zotero, value) {
+    const source = normalizeServiceSource(value);
+    zotero?.Prefs?.set?.(PDF_SERVICE_SOURCE_PREF, source, true);
+    return source;
 }
 
 export function getAccountSession(zotero) {

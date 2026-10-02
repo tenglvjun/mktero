@@ -6,7 +6,6 @@ import {
     clearAccountSession,
     getAccountApiBase,
     getAccountSession,
-    getAIServiceSource,
     getPdfServiceSource,
     isAccountSignedIn,
     saveAccountSession,
@@ -30,10 +29,21 @@ function memoryPrefs(initial = {}) {
     };
 }
 
-test('feature source defaults to the Mktero account', () => {
-    const zotero = { Prefs: memoryPrefs() };
+test('the PDF source reads the stored value and defaults to your own service', () => {
+    const zotero = { Prefs: memoryPrefs({
+        'extensions.mktero.pdfServiceSource': SERVICE_SOURCE_MKTERO,
+    }) };
     assert.equal(getPdfServiceSource(zotero), SERVICE_SOURCE_MKTERO);
-    assert.equal(getAIServiceSource(zotero), SERVICE_SOURCE_MKTERO);
+    assert.equal(
+        getPdfServiceSource({ Prefs: memoryPrefs() }),
+        SERVICE_SOURCE_OWN
+    );
+    assert.equal(
+        getPdfServiceSource({ Prefs: memoryPrefs({
+            'extensions.mktero.pdfServiceSource': SERVICE_SOURCE_OWN,
+        }) }),
+        SERVICE_SOURCE_OWN
+    );
 });
 
 test('stores both tokens and refreshes shortly before the access token expires', () => {
