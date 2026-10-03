@@ -5,6 +5,7 @@ import {
 import {
     CONVERSION_PROVIDER_MINERU,
     CONVERSION_PROVIDER_MISTRAL,
+    CONVERSION_PROVIDER_MKTERO,
     CONVERSION_PROVIDER_PREF,
     getConversionProvider,
     getMinerUApiKey,
@@ -25,6 +26,7 @@ export const MINERU_PREFERENCE_PANE_ID = 'mktero-preferences';
 export {
     CONVERSION_PROVIDER_MINERU,
     CONVERSION_PROVIDER_MISTRAL,
+    CONVERSION_PROVIDER_MKTERO,
     CONVERSION_PROVIDER_PREF,
     getConversionProvider,
     getMinerUApiKey,

@@ -6,7 +6,9 @@ Open `Settings -> Mktero` after installation.
 
 | Setting | Required | Purpose |
 | --- | --- | --- |
-| Conversion provider | Yes | Select MinerU or Mistral OCR 4.1 |
+| Account | Optional | Sign in or register a Mktero account. The account is only used for hosted PDF conversion. Registration asks for a password confirmation and emails a six-digit code. Debug builds can change the server address; release builds use the packaged production address. The password is not saved. After signing in the pane shows the account name, email, registration date, conversion counters, and a one-year activity heat map; the display name can be changed from the pencil button next to the name. The access token and refresh token stay unencrypted in the current Zotero profile |
+| Conversion service | Optional, Mktero by default | The Conversion tab lists Mktero, MinerU, and Mistral. Mktero shows account sign-in and uses the hosted service. MinerU and Mistral use your own credentials. AI translation always uses your own provider key |
+| Conversion provider | Required when using your own API | Select MinerU or Mistral OCR 4.1 |
 | MinerU service | MinerU only | Choose MinerU cloud, or a self-hosted MinerU 4.0 V1 service |
 | Local service address | Local MinerU only | Service origin, default `http://127.0.0.1:8000`. HTTP is limited to loopback and private-network addresses |
 | API key | Required for a cloud cache miss | Enter the key for MinerU cloud or Mistral. The field is hidden for a local MinerU service |

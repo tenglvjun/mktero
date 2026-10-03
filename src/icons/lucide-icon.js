@@ -21,6 +21,7 @@ import {
     MessageSquareText,
     MoreHorizontal,
     Network,
+    Pencil,
     RefreshCw,
     RotateCcw,
     Save,
@@ -189,6 +190,10 @@ export const LUCIDE_ICONS = Object.freeze({
     network: Object.freeze({
         name: 'network',
         nodes: Network,
+    }),
+    pencil: Object.freeze({
+        name: 'pencil',
+        nodes: Pencil,
     }),
     refreshCw: Object.freeze({
         name: 'refresh-cw',

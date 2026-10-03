@@ -1,5 +1,6 @@
 export const CONVERSION_PROVIDER_MINERU = 'mineru';
 export const CONVERSION_PROVIDER_MISTRAL = 'mistral';
+export const CONVERSION_PROVIDER_MKTERO = 'mktero';
 export const MINERU_ENDPOINT_CLOUD = 'cloud';
 export const MINERU_ENDPOINT_LOCAL = 'local';
 export const DEFAULT_MINERU_LOCAL_API_BASE = 'http://127.0.0.1:8000';
@@ -21,6 +22,7 @@ const SUPPORTED_MINERU_ENDPOINTS = new Set([
 const SUPPORTED_CONVERSION_PROVIDERS = new Set([
     CONVERSION_PROVIDER_MINERU,
     CONVERSION_PROVIDER_MISTRAL,
+    CONVERSION_PROVIDER_MKTERO,
 ]);
 
 export function normalizeConversionProvider(value) {

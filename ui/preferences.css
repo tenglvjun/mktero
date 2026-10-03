@@ -69,6 +69,784 @@
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
+#mktero-features-section > * + *,
+#mktero-custom-panel > * + * {
+    margin-top: 16px;
+}
+
+/* Panels replace the old settings-card look on the Features page. */
+.mktero-panel {
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding: 20px 24px 22px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.26));
+    border-radius: 12px;
+    background: var(--material-background, Canvas);
+    color: CanvasText;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.mktero-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 16px;
+    margin-bottom: 18px;
+}
+
+.mktero-panel-heading {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.mktero-panel-heading strong {
+    font-size: 1.02rem;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.mktero-panel-heading small {
+    max-width: 560px;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.mktero-segmented {
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.26));
+    border-radius: 9px;
+    background: color-mix(in srgb, CanvasText 6%, Canvas);
+}
+
+.mktero-segmented-item {
+    -moz-appearance: none;
+    appearance: none;
+    margin: 0;
+    padding: 6px 14px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: CanvasText;
+    font: inherit;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.mktero-segmented-item:hover {
+    background: color-mix(in srgb, CanvasText 8%, transparent);
+}
+
+.mktero-segmented-item[aria-selected='true'],
+.mktero-segmented-item[aria-pressed='true'] {
+    background: Canvas;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.mktero-panel-head .mktero-segmented {
+    flex: 0 0 auto;
+}
+
+/* The account block spans the same content width as every settings row: the row
+   uses 16px 28px, so the horizontal padding here matches it and the signed-in
+   card is not capped at a narrower width. That mirrors the website, whose
+   profile page is full width while its sign-in page stays narrow. */
+.mktero-account-inline {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 24px 28px 28px;
+}
+
+.mktero-account-inline[hidden] {
+    display: none;
+}
+
+/* The account card mirrors the website: a segmented tab row, then either the
+   sign-in form or the signed-in identity block. It sits inside the settings
+   card, so it adds no fill of its own and no second border. */
+.mktero-auth-card {
+    box-sizing: border-box;
+    display: grid;
+    gap: 22px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: CanvasText;
+    color-scheme: light dark;
+}
+
+.mktero-auth-tabs {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    /* The sign-in page keeps the website's narrow column. */
+    max-width: 452px;
+    padding: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, CanvasText 8%, Canvas);
+}
+
+.mktero-auth-tabs[hidden] {
+    display: none;
+}
+
+.mktero-auth-tab {
+    -moz-appearance: none;
+    appearance: none;
+    min-height: 38px;
+    margin: 0;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: color-mix(in srgb, CanvasText 62%, Canvas);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.mktero-auth-tab:hover {
+    color: CanvasText;
+}
+
+.mktero-auth-tab[aria-selected='true'] {
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+.mktero-auth-form {
+    box-sizing: border-box;
+    display: grid;
+    gap: 16px;
+    width: 100%;
+    /* The sign-in page keeps the website's narrow column. */
+    max-width: 452px;
+}
+
+.mktero-auth-form[hidden] {
+    display: none;
+}
+
+.mktero-auth-submit {
+    width: 100%;
+    min-height: 46px;
+    margin-top: 2px;
+    font-size: 0.92rem;
+}
+
+/* Fields and buttons follow the website card: white inputs with a soft border
+   and a blue focus ring, and a dark pill as the primary action. */
+.mktero-auth-card .mktero-form-field label {
+    font-size: 0.86rem;
+    font-weight: 650;
+}
+
+.mktero-auth-card .mktero-form-field input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 13px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: Canvas;
+    color: CanvasText;
+    color-scheme: light dark;
+    font: inherit;
+    font-size: 0.94rem;
+}
+
+.mktero-auth-card .mktero-form-field input::placeholder {
+    color: color-mix(in srgb, CanvasText 42%, Canvas);
+    opacity: 1;
+}
+
+.mktero-auth-card .mktero-form-field input:hover {
+    border-color: color-mix(in srgb, CanvasText 26%, Canvas);
+}
+
+.mktero-auth-card .mktero-form-field input:focus {
+    border-color: #3b82f6;
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.16);
+}
+
+.mktero-auth-card .mktero-input-action .mktero-button {
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: Canvas;
+    color: CanvasText;
+    font-size: 0.86rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.mktero-auth-card .mktero-input-action .mktero-button:hover {
+    border-color: color-mix(in srgb, CanvasText 26%, Canvas);
+    background: color-mix(in srgb, Canvas 97%, CanvasText 3%);
+}
+
+.mktero-auth-card .mktero-button-primary {
+    min-height: 46px;
+    padding: 0 18px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: #111111;
+    color: #ffffff;
+    font-size: 0.92rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+}
+
+.mktero-auth-card .mktero-button-primary:hover {
+    border-color: transparent;
+    background: #000000;
+}
+
+/* Sign out is a plain text action: no border, no fill, red so it reads as the
+   destructive choice. The lighter red keeps it legible on a dark canvas. */
+.mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary) {
+    -moz-appearance: none;
+    appearance: none;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #b42318;
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 650;
+}
+
+.mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary):hover {
+    background: color-mix(in srgb, #b42318 10%, transparent);
+    color: #8f1c13;
+}
+
+@media (prefers-color-scheme: dark) {
+    .mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary) {
+        color: #f97066;
+    }
+
+    .mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary):hover {
+        background: color-mix(in srgb, #f97066 14%, transparent);
+        color: #fda29b;
+    }
+}
+
+.mktero-auth-card .mktero-auth-inline-link {
+    justify-self: end;
+    color: #3b82f6;
+    font-size: 0.85rem;
+}
+
+.mktero-auth-card .mktero-auth-inline-link:hover {
+    color: #2563eb;
+}
+
+.mktero-auth-status {
+    min-height: 1.3em;
+    margin: 0;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.85rem;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.mktero-auth-status[data-tone='success'] {
+    color: color-mix(in srgb, AccentColor 72%, CanvasText);
+}
+
+/* Signed-in surface: the identity row with its rename button, the conversion
+   counters, and the activity heat map. It mirrors the website profile page
+   (mktero-web/profile.html) inside the settings card. */
+.mktero-account-signed-in {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+}
+
+.mktero-account-signed-in[hidden] {
+    display: none;
+}
+
+/* Identity on the left, sign out on the right. */
+.mktero-account-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-width: 0;
+}
+
+.mktero-account-identity {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+}
+
+.mktero-account-avatar {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: AccentColor;
+    color: AccentColorText;
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.mktero-account-identity-copy {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.mktero-account-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.mktero-account-identity-copy strong {
+    overflow-wrap: anywhere;
+    font-size: 1.05rem;
+    font-weight: 650;
+    /* Pin the line box so the edit button can match the name's height. */
+    line-height: 1.3;
+}
+
+.mktero-account-identity-copy p {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.88rem;
+}
+
+.mktero-account-member-since {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.mktero-account-member-since strong {
+    color: CanvasText;
+    font-size: 0.88rem;
+    font-weight: 650;
+}
+
+/* Icon-only buttons carry no text, so they stay square and rely on the
+   aria-label supplied by the localized copy. */
+.mktero-account-icon-button {
+    -moz-appearance: none;
+    appearance: none;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: color-mix(in srgb, CanvasText 62%, Canvas);
+    cursor: pointer;
+}
+
+/* The rename pencil sits on the nickname line, so its box is exactly the
+   nickname's line box: 1.05rem font size x 1.3 line-height. */
+.mktero-account-name-row .mktero-account-icon-button {
+    width: 1.365rem;
+    height: 1.365rem;
+}
+
+.mktero-account-icon-button:hover {
+    background: color-mix(in srgb, CanvasText 10%, Canvas);
+    color: CanvasText;
+}
+
+.mktero-account-icon-svg {
+    pointer-events: none;
+}
+
+/* The three counters sit side by side like the website stat cards. */
+.mktero-account-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.mktero-stat-card {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: color-mix(in srgb, Canvas 98%, CanvasText 2%);
+}
+
+.mktero-stat-value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+}
+
+.mktero-stat-label {
+    overflow-wrap: anywhere;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.8rem;
+}
+
+/* Activity heat map: 7 rows of 12px cells laid out column by column. */
+.mktero-heatmap-card {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px 16px 12px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: color-mix(in srgb, Canvas 98%, CanvasText 2%);
+}
+
+.mktero-heatmap-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+}
+
+.mktero-heatmap-head h2 {
+    margin: 0;
+    font-size: 0.92rem;
+    font-weight: 650;
+}
+
+.mktero-heatmap-summary {
+    margin: 0;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.8rem;
+}
+
+.mktero-heatmap-scroll {
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+.mktero-heatmap {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(7, 12px);
+    grid-auto-columns: 12px;
+    gap: 3px;
+    width: max-content;
+}
+
+.mktero-heatmap-cell {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: color-mix(in srgb, CanvasText 14%, Canvas);
+}
+
+.mktero-heatmap-cell[data-level='1'] { background: #bfdbfe; }
+.mktero-heatmap-cell[data-level='2'] { background: #93c5fd; }
+.mktero-heatmap-cell[data-level='3'] { background: #60a5fa; }
+.mktero-heatmap-cell[data-level='4'] { background: #2563eb; }
+
+.mktero-heatmap-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.76rem;
+}
+
+.mktero-heatmap-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: color-mix(in srgb, CanvasText 14%, Canvas);
+}
+
+.mktero-heatmap-swatch[data-level='1'] { background: #bfdbfe; }
+.mktero-heatmap-swatch[data-level='2'] { background: #93c5fd; }
+.mktero-heatmap-swatch[data-level='3'] { background: #60a5fa; }
+.mktero-heatmap-swatch[data-level='4'] { background: #2563eb; }
+
+/* Rename modal. Zotero renders XHTML, and the older runtime has no <dialog>
+   support, so this follows the same hand-rolled backdrop the reader uses. */
+.mktero-account-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(17, 17, 17, 0.46);
+}
+
+.mktero-account-dialog-backdrop[hidden] {
+    display: none;
+}
+
+.mktero-account-dialog-card {
+    box-sizing: border-box;
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    max-width: 420px;
+    padding: 20px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.28));
+    border-radius: 14px;
+    background: var(--material-background, Canvas);
+    color: CanvasText;
+    box-shadow: 0 14px 40px rgba(15, 23, 42, 0.22);
+}
+
+.mktero-account-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mktero-account-dialog-head h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+.mktero-account-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.mktero-account-dialog-actions .mktero-button {
+    min-height: 40px;
+    padding: 0 16px;
+}
+
+.mktero-form {
+    display: grid;
+    gap: 16px;
+    max-width: 460px;
+}
+
+.mktero-form-field {
+    display: grid;
+    gap: 7px;
+}
+
+.mktero-form-field label {
+    color: CanvasText;
+    font-size: 0.9rem;
+    font-weight: 650;
+}
+
+.mktero-form-field small {
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.84rem;
+    line-height: 1.4;
+}
+
+.mktero-form-field input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 38px;
+    padding: 8px 11px;
+    border: 1px solid color-mix(in srgb, CanvasText 30%, Canvas);
+    border-radius: 8px;
+    background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+    color: CanvasText;
+    color-scheme: light dark;
+    font: inherit;
+}
+
+.mktero-form-field input::placeholder {
+    color: color-mix(in srgb, CanvasText 45%, Canvas);
+    opacity: 1;
+}
+
+.mktero-panel-head > .mktero-segmented {
+    margin-inline-start: auto;
+}
+
+.mktero-form-field input:hover {
+    border-color: color-mix(in srgb, CanvasText 48%, Canvas);
+}
+
+.mktero-form-field input:focus {
+    border-color: AccentColor;
+    outline: 2px solid color-mix(in srgb, AccentColor 28%, transparent);
+    outline-offset: 0;
+}
+
+.mktero-input-action {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mktero-input-action input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.mktero-input-action .mktero-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.mktero-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    color: CanvasText;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.mktero-form-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--material-border, rgba(127, 127, 127, 0.22));
+}
+
+.mktero-form-foot > small {
+    flex: 1 1 220px;
+    min-width: 0;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.mktero-form-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.mktero-button {
+    -moz-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    min-height: 34px;
+    margin: 0;
+    padding: 6px 16px;
+    border: 1px solid color-mix(in srgb, CanvasText 32%, Canvas);
+    border-radius: 8px;
+    background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+    color: CanvasText;
+    color-scheme: light dark;
+    font: inherit;
+    font-weight: 600;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+.mktero-button:hover {
+    border-color: color-mix(in srgb, CanvasText 52%, Canvas);
+}
+
+.mktero-button-primary {
+    border-color: transparent;
+    background: AccentColor;
+    color: AccentColorText;
+}
+
+.mktero-button-primary:hover {
+    border-color: transparent;
+    filter: brightness(0.94);
+}
+
+.mktero-button:disabled {
+    cursor: progress;
+    opacity: 0.65;
+}
+
+.mktero-link-button {
+    -moz-appearance: none;
+    appearance: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: AccentColor;
+    font: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+
+.mktero-link-button:hover {
+    text-decoration: underline;
+}
+
+.mktero-form-field[hidden],
+#mktero-account-form[hidden],
+#mktero-account-login[hidden],
+#mktero-account-register[hidden],
+#mktero-account-send-reset[hidden],
+#mktero-account-forgot[hidden],
+#mktero-account-forgot-back[hidden] {
+    display: none;
+}
+
+.mktero-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 .mktero-pref-tab:focus-visible {
     outline: 2px solid color-mix(in srgb, AccentColor 55%, transparent);
     outline-offset: 1px;
@@ -81,7 +859,9 @@
     min-width: 0;
 }
 
-.mktero-preferences-section[hidden] {
+.mktero-preferences-section[hidden],
+#mktero-conversion-section[hidden],
+#mktero-ai-section[hidden] {
     display: none;
 }
 
@@ -106,7 +886,7 @@
     width: 100%;
     min-width: 0;
     min-height: 64px;
-    padding: 16px 20px;
+    padding: 16px 28px;
 }
 
 .mktero-field-row {
@@ -141,7 +921,7 @@
 .mktero-field-row > .mktero-setting-copy,
 .mktero-reader-font-row > .mktero-setting-copy {
     flex: 1 1 auto;
-    min-width: 240px;
+    min-width: 0;
 }
 
 .mktero-setting-copy strong {
@@ -162,19 +942,19 @@
 .mktero-field-control {
     box-sizing: border-box;
     display: grid;
-    flex: 0 0 280px;
+    flex: 0 1 200px;
     gap: 6px;
     min-width: 0;
-    width: 280px;
-    max-width: 48%;
+    width: 200px;
+    max-width: 42%;
     margin-inline-start: auto;
 }
 
 .mktero-field-control-compact,
 .mktero-field-control-numeric {
-    flex-basis: 280px;
-    width: 280px;
-    max-width: 48%;
+    flex-basis: 200px;
+    width: 200px;
+    max-width: 42%;
 }
 
 /* Zotero supplies the select dropmarker; forcing native appearance duplicates it on macOS. */
@@ -196,16 +976,17 @@
 }
 
 .mktero-field-control select {
+    max-width: 100%;
     padding-inline-end: 32px;
 }
 
 .mktero-field-control.mktero-provider-control {
     display: flex;
-    flex: 0 0 280px;
+    flex: 0 1 200px;
     align-items: center;
     gap: 8px;
-    width: 280px;
-    max-width: 48%;
+    width: 200px;
+    max-width: 42%;
 }
 
 .mktero-field-control.mktero-provider-control select {
@@ -301,13 +1082,19 @@
 .mktero-reader-font-control {
     display: flex;
     box-sizing: border-box;
-    flex: 0 0 280px;
-    width: 280px;
-    max-width: 48%;
+    flex: 0 1 168px;
+    width: 168px;
+    max-width: 168px;
     min-width: 0;
     margin-inline-start: auto;
     align-items: center;
     gap: 12px;
+}
+
+.mktero-reader-slider-control {
+    flex-basis: 220px;
+    width: 220px;
+    max-width: 220px;
 }
 
 .mktero-reader-font-control input,
@@ -318,6 +1105,7 @@
 }
 
 .mktero-reader-font-control select {
+    max-width: 100%;
     min-height: 36px;
     padding: 7px 11px;
     border: 1px solid color-mix(in srgb, CanvasText 35%, Canvas);
@@ -428,16 +1216,40 @@
     display: none;
 }
 
+#mktero-account-api-base-row[hidden],
+#mktero-account-register-nickname-row[hidden],
+#mktero-account-signed-in[hidden],
+#mktero-account-nickname-dialog[hidden],
+#mktero-account-password-confirm-row[hidden],
+#mktero-account-code-row[hidden],
+#mktero-pdf-account-status[hidden],
+#mktero-ai-account-status[hidden] {
+    display: none;
+}
+
 .mktero-card-note {
     display: block;
     box-sizing: border-box;
-    padding: 12px 20px;
+    padding: 12px 28px;
     background: color-mix(in srgb, currentColor 3%, transparent);
 }
 
 @media (max-width: 700px) {
     #mktero-preferences-pane {
         padding-inline: 16px;
+    }
+
+    .mktero-panel {
+        padding: 18px 16px 20px;
+    }
+
+    .mktero-panel-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .mktero-form {
+        max-width: none;
     }
 
     .mktero-field-row,
@@ -448,7 +1260,9 @@
     }
 
     .mktero-field-control,
-    .mktero-reader-font-control {
+    .mktero-field-control.mktero-provider-control,
+    .mktero-reader-font-control,
+    .mktero-reader-slider-control {
         width: 100%;
         flex: 0 0 auto;
         max-width: none;
@@ -472,6 +1286,19 @@
     .mktero-setting-row {
         gap: 16px;
         padding: 14px 12px;
+    }
+
+    .mktero-panel {
+        padding-inline: 14px;
+    }
+
+    .mktero-form-foot {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .mktero-form-actions {
+        justify-content: flex-start;
     }
 
     .mktero-cache-usage-row {
