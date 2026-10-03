@@ -584,11 +584,30 @@ test('matches the website account card controls', async () => {
         /color:\s*#3b82f6/
     );
 
-    // Sign out is the outlined secondary pill.
+    // Sign out is a plain red text action: no border, no fill, so it reads as
+    // the destructive choice rather than a second primary button.
     const secondary = rule('.mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary)');
-    assert.ok(secondary, 'the secondary button rule is missing');
-    assert.match(secondary, /border-radius:\s*999px/);
-    assert.match(secondary, /background:\s*Canvas/);
+    assert.ok(secondary, 'the sign-out rule is missing');
+    assert.match(secondary, /border:\s*0/);
+    assert.match(secondary, /background:\s*transparent/);
+    assert.match(secondary, /color:\s*#b42318/);
+    assert.doesNotMatch(secondary, /border-radius:\s*999px/);
+    assert.doesNotMatch(secondary, /min-height:\s*4[46]px/);
+
+    // The rename pencil is square and exactly as tall as the nickname line box
+    // (1.05rem font x 1.3 line-height).
+    const icon = rule('.mktero-account-icon-button');
+    assert.ok(icon, 'the account icon button rule is missing');
+    assert.match(icon, /border:\s*0/);
+    assert.doesNotMatch(icon, /width:\s*30px/);
+    assert.match(
+        styles,
+        /\.mktero-account-name-row \.mktero-account-icon-button\s*\{[\s\S]*?width:\s*1\.365rem[\s\S]*?height:\s*1\.365rem/s
+    );
+    assert.match(
+        styles,
+        /\.mktero-account-identity-copy strong\s*\{[\s\S]*?font-size:\s*1\.05rem[\s\S]*?line-height:\s*1\.3/s
+    );
 });
 
 test('uses the same account placeholders as the website', async () => {

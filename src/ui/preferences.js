@@ -1230,9 +1230,11 @@ export function createPreferencesController({
                 ? LUCIDE_ICONS.x
                 : LUCIDE_ICONS.pencil;
             if (!icon) continue;
+            // The pencil shares the nickname line, so it is drawn smaller than
+            // the dialog's close button.
             host.replaceChildren(createLucideIcon(document, icon, {
                 className: 'mktero-account-icon-svg',
-                size: host === accountNicknameDialogClose ? 16 : 15,
+                size: host === accountNicknameDialogClose ? 15 : 13,
             }));
         }
     }
