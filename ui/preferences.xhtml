@@ -253,26 +253,33 @@
                     </html:div>
 
                     <html:div id="mktero-account-signed-in" class="mktero-account-signed-in" hidden="hidden">
-                        <html:div class="mktero-account-identity">
-                            <html:span id="mktero-account-avatar"
-                                       class="mktero-account-avatar"
-                                       aria-hidden="true"></html:span>
-                            <html:div class="mktero-account-identity-copy">
-                                <html:div class="mktero-account-name-row">
-                                    <html:strong id="mktero-account-signed-in-nickname"></html:strong>
-                                    <html:button id="mktero-account-edit-nickname"
-                                                 class="mktero-account-icon-button"
-                                                 type="button"
-                                                 aria-haspopup="dialog"
-                                                 aria-controls="mktero-account-nickname-dialog"
-                                                 data-i18n-aria-label="preferences.account.nicknameEdit"></html:button>
+                        <html:div class="mktero-account-top">
+                            <html:div class="mktero-account-identity">
+                                <html:span id="mktero-account-avatar"
+                                           class="mktero-account-avatar"
+                                           aria-hidden="true"></html:span>
+                                <html:div class="mktero-account-identity-copy">
+                                    <html:div class="mktero-account-name-row">
+                                        <html:strong id="mktero-account-signed-in-nickname"></html:strong>
+                                        <html:button id="mktero-account-edit-nickname"
+                                                     class="mktero-account-icon-button"
+                                                     type="button"
+                                                     aria-haspopup="dialog"
+                                                     aria-controls="mktero-account-nickname-dialog"
+                                                     data-i18n-aria-label="preferences.account.nicknameEdit"></html:button>
+                                    </html:div>
+                                    <html:p id="mktero-account-signed-in-email"></html:p>
+                                    <html:p class="mktero-account-member-since">
+                                        <html:span data-i18n="preferences.account.memberSince"></html:span>
+                                        <html:strong id="mktero-account-created"></html:strong>
+                                    </html:p>
                                 </html:div>
-                                <html:p id="mktero-account-signed-in-email"></html:p>
-                                <html:p class="mktero-account-member-since">
-                                    <html:span data-i18n="preferences.account.memberSince"></html:span>
-                                    <html:strong id="mktero-account-created"></html:strong>
-                                </html:p>
                             </html:div>
+
+                            <html:button id="mktero-account-logout"
+                                         class="mktero-button mktero-auth-submit"
+                                         type="button"
+                                         data-i18n="preferences.account.logout"></html:button>
                         </html:div>
 
                         <html:p id="mktero-account-nickname-status"
@@ -313,11 +320,6 @@
                                 <html:span data-i18n="preferences.account.heatmap.more"></html:span>
                             </html:div>
                         </html:section>
-
-                        <html:button id="mktero-account-logout"
-                                     class="mktero-button mktero-auth-submit"
-                                     type="button"
-                                     data-i18n="preferences.account.logout"></html:button>
                     </html:div>
 
                     <html:div id="mktero-account-form" class="mktero-auth-form">

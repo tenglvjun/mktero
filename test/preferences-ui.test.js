@@ -1687,18 +1687,24 @@ test('drives the account card tabs and the signed-in identity', async () => {
                     <button id="mktero-account-tab-register" aria-selected="false"></button>
                 </div>
                 <div id="mktero-account-signed-in" hidden>
-                    <span id="mktero-account-avatar"></span>
-                    <strong id="mktero-account-signed-in-nickname"></strong>
-                    <button id="mktero-account-edit-nickname"></button>
-                    <p id="mktero-account-signed-in-email"></p>
-                    <strong id="mktero-account-created"></strong>
+                    <div class="mktero-account-top">
+                        <div class="mktero-account-identity">
+                            <span id="mktero-account-avatar"></span>
+                            <div class="mktero-account-identity-copy">
+                                <strong id="mktero-account-signed-in-nickname"></strong>
+                                <button id="mktero-account-edit-nickname"></button>
+                                <p id="mktero-account-signed-in-email"></p>
+                                <strong id="mktero-account-created"></strong>
+                            </div>
+                        </div>
+                        <button id="mktero-account-logout"></button>
+                    </div>
                     <p id="mktero-account-nickname-status"></p>
                     <span id="mktero-stat-total">0</span>
                     <span id="mktero-stat-streak">0</span>
                     <span id="mktero-stat-longest">0</span>
                     <div id="mktero-heatmap"></div>
                     <p id="mktero-heatmap-summary"></p>
-                    <button id="mktero-account-logout"></button>
                 </div>
                 <div id="mktero-account-form">
                     <input id="mktero-account-email">
@@ -1872,6 +1878,17 @@ test('drives the account card tabs and the signed-in identity', async () => {
     doc.getElementById('mktero-account-nickname-dialog-cancel')
         .dispatchEvent(new dom.window.Event('click'));
     assert.equal(dialog.hasAttribute('hidden'), true);
+
+    // Sign out belongs to the identity row, next to the name and avatar.
+    const logout = doc.getElementById('mktero-account-logout');
+    const top = doc.querySelector('.mktero-account-top');
+    assert.ok(top, '.mktero-account-top wrapper is missing');
+    assert.equal(top.contains(logout), true);
+    assert.equal(top.contains(doc.getElementById('mktero-account-avatar')), true);
+    assert.equal(top.contains(doc.getElementById('mktero-account-signed-in-nickname')), true);
+    // The counters and the heat map stay outside that row, below it.
+    assert.equal(top.contains(doc.getElementById('mktero-stat-total')), false);
+    assert.equal(top.contains(doc.getElementById('mktero-heatmap')), false);
 
     signedInController.destroy();
 });

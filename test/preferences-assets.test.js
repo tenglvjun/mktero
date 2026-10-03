@@ -466,6 +466,41 @@ test('presents the account card with website-style tabs and an identity block', 
     assert.match(styles, /\.mktero-auth-tabs\s*\{[\s\S]*?grid-template-columns:\s*1fr\s+1fr/s);
     assert.match(styles, /\.mktero-auth-tab\[aria-selected='true'\]/);
     assert.match(styles, /\.mktero-account-avatar\s*\{[\s\S]*?border-radius:\s*50%/s);
+
+    // The signed-in block spans the settings-row content width so its left and
+    // right edges line up with the conversion-provider row above it. The row is
+    // padded 16px 28px, so the account block must use the same 28px and must not
+    // re-cap the card narrower than the row.
+    const accountInline = styles.match(/\.mktero-account-inline\s*\{([^}]*)\}/)?.[1] || '';
+    assert.ok(accountInline, '.mktero-account-inline rule is missing');
+    assert.match(accountInline, /padding:\s*24px\s+28px\s+28px/);
+    assert.doesNotMatch(accountInline, /justify-content:\s*center/);
+    assert.doesNotMatch(authCard, /max-width:/);
+    const settingsRow = styles.match(/\.mktero-setting-row\s*\{([^}]*)\}/)?.[1] || '';
+    assert.match(settingsRow, /padding:\s*16px\s+28px/);
+    // Only the signed-out sign-in column keeps the website's narrow width.
+    assert.match(
+        styles,
+        /\.mktero-auth-tabs\s*\{[\s\S]*?max-width:\s*452px/s
+    );
+    assert.match(
+        styles,
+        /\.mktero-auth-form\s*\{[\s\S]*?max-width:\s*452px/s
+    );
+
+    // Sign out sits in the identity row, right-aligned against that same edge.
+    assert.match(
+        pane,
+        /class="mktero-account-top"[\s\S]*?class="mktero-account-identity"[\s\S]*?id="mktero-account-logout"/
+    );
+    const accountTop = styles.match(/\.mktero-account-top\s*\{([^}]*)\}/)?.[1] || '';
+    assert.ok(accountTop, '.mktero-account-top rule is missing');
+    assert.match(accountTop, /justify-content:\s*space-between/);
+    // The sign-out pill keeps its intrinsic width instead of stretching.
+    assert.match(
+        styles,
+        /\.mktero-auth-card \.mktero-auth-submit:not\(\.mktero-button-primary\)\s*\{[\s\S]*?flex:\s*0\s+0\s+auto/s
+    );
     // The heat map lays out 7 rows of 12px cells, column by column.
     assert.match(
         styles,
