@@ -5,8 +5,6 @@ import {
     MKTERO_RELEASE_API_BASE,
 } from './runtime-config.js';
 
-export const SERVICE_SOURCE_OWN = 'own';
-export const SERVICE_SOURCE_MKTERO = 'mktero';
 export const ACCOUNT_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 export const ACCOUNT_EMAIL_PREF = 'extensions.mktero.accountEmail';
@@ -15,7 +13,6 @@ export const ACCOUNT_REFRESH_TOKEN_PREF = 'extensions.mktero.accountRefreshToken
 export const ACCOUNT_ACCESS_EXPIRES_AT_PREF =
     'extensions.mktero.accountAccessExpiresAt';
 export const ACCOUNT_API_BASE_PREF = 'extensions.mktero.accountApiBase';
-export const PDF_SERVICE_SOURCE_PREF = 'extensions.mktero.pdfServiceSource';
 
 const SESSION_PREFS = [
     ACCOUNT_EMAIL_PREF,
@@ -23,23 +20,6 @@ const SESSION_PREFS = [
     ACCOUNT_REFRESH_TOKEN_PREF,
     ACCOUNT_ACCESS_EXPIRES_AT_PREF,
 ];
-
-export function normalizeServiceSource(value) {
-    return String(value || '').trim() === SERVICE_SOURCE_MKTERO
-        ? SERVICE_SOURCE_MKTERO
-        : SERVICE_SOURCE_OWN;
-}
-
-export function getPdfServiceSource(zotero) {
-    const current = zotero?.Prefs?.get?.(PDF_SERVICE_SOURCE_PREF, true);
-    return normalizeServiceSource(current);
-}
-
-export function setPdfServiceSource(zotero, value) {
-    const source = normalizeServiceSource(value);
-    zotero?.Prefs?.set?.(PDF_SERVICE_SOURCE_PREF, source, true);
-    return source;
-}
 
 export function getAccountSession(zotero) {
     return {

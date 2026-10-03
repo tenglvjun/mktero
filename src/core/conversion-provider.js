@@ -1,8 +1,10 @@
 const MINERU_PROVIDER = 'mineru';
 const MISTRAL_PROVIDER = 'mistral';
+const MKTERO_PROVIDER = 'mktero';
 const SUPPORTED_PROVIDERS = new Set([
     MINERU_PROVIDER,
     MISTRAL_PROVIDER,
+    MKTERO_PROVIDER,
 ]);
 
 /**
@@ -42,4 +44,5 @@ export class ConversionProviderRouter {
 export const CONVERSION_PROVIDER_IDS = Object.freeze({
     MINERU: MINERU_PROVIDER,
     MISTRAL: MISTRAL_PROVIDER,
+    MKTERO: MKTERO_PROVIDER,
 });

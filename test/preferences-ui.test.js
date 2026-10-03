@@ -1656,13 +1656,13 @@ test('hides every custom PDF row when the hosted subscription is selected', asyn
     assert.equal(endpointRow.hidden, true);
     assert.equal(apiKeyRow.hidden, true);
     assert.equal(privacyNote.hidden, true);
-    assert.equal(values.get('extensions.mktero.pdfServiceSource'), 'mktero');
+    assert.equal(values.get('extensions.mktero.conversionProvider'), 'mktero');
 
     provider.value = 'mineru';
     provider.dispatchEvent(new dom.window.Event('change'));
     assert.equal(endpointRow.hidden, false);
     assert.equal(apiKeyRow.hidden, false);
-    assert.equal(values.get('extensions.mktero.pdfServiceSource'), 'own');
+    assert.equal(values.get('extensions.mktero.conversionProvider'), 'mineru');
 
     provider.value = 'mktero';
     provider.dispatchEvent(new dom.window.Event('change'));

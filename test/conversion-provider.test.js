@@ -24,6 +24,9 @@ test('dispatches extraction to the configured provider', async () => {
                     return result;
                 },
             },
+            mktero: {
+                extract: async () => assert.fail('Mktero was selected'),
+            },
         },
     });
 
@@ -44,6 +47,9 @@ test('falls back to MinerU for an invalid provider value', async () => {
             },
             mistral: {
                 extract: async () => assert.fail('Mistral was selected'),
+            },
+            mktero: {
+                extract: async () => assert.fail('Mktero was selected'),
             },
         },
     });
@@ -71,20 +77,30 @@ test('reads the provider for each extraction and preserves the signal', async ()
                     return { provider: 'mistral' };
                 },
             },
+            mktero: {
+                extract: async (...args) => {
+                    calls.push(['mktero', ...args]);
+                    return { provider: 'mktero' };
+                },
+            },
         },
     });
 
     await router.extract(1, { signal });
     configured = 'mistral';
     await router.extract(2, { signal });
+    configured = 'mktero';
+    await router.extract(3, { signal });
 
     assert.equal(calls[0][0], 'mineru');
     assert.equal(calls[1][0], 'mistral');
+    assert.equal(calls[2][0], 'mktero');
     assert.equal(calls[0][2].signal, signal);
     assert.equal(calls[1][2].signal, signal);
+    assert.equal(calls[2][2].signal, signal);
 });
 
-test('requires both provider extractors', () => {
+test('requires every provider extractor', () => {
     assert.throws(
         () => new ConversionProviderRouter({
             getProvider: () => 'mineru',
@@ -111,5 +127,15 @@ test('requires both provider extractors', () => {
             },
         }),
         /mineru document extractor is required/
+    );
+    assert.throws(
+        () => new ConversionProviderRouter({
+            getProvider: () => 'mineru',
+            providers: {
+                mineru: { extract() {} },
+                mistral: { extract() {} },
+            },
+        }),
+        /mktero document extractor is required/
     );
 });

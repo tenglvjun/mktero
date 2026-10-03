@@ -6,11 +6,8 @@ import {
     clearAccountSession,
     getAccountApiBase,
     getAccountSession,
-    getPdfServiceSource,
     isAccountSignedIn,
     saveAccountSession,
-    SERVICE_SOURCE_MKTERO,
-    SERVICE_SOURCE_OWN,
     setAccountApiBase,
 } from '../src/config/account-preferences.js';
 
@@ -28,23 +25,6 @@ function memoryPrefs(initial = {}) {
         },
     };
 }
-
-test('the PDF source reads the stored value and defaults to your own service', () => {
-    const zotero = { Prefs: memoryPrefs({
-        'extensions.mktero.pdfServiceSource': SERVICE_SOURCE_MKTERO,
-    }) };
-    assert.equal(getPdfServiceSource(zotero), SERVICE_SOURCE_MKTERO);
-    assert.equal(
-        getPdfServiceSource({ Prefs: memoryPrefs() }),
-        SERVICE_SOURCE_OWN
-    );
-    assert.equal(
-        getPdfServiceSource({ Prefs: memoryPrefs({
-            'extensions.mktero.pdfServiceSource': SERVICE_SOURCE_OWN,
-        }) }),
-        SERVICE_SOURCE_OWN
-    );
-});
 
 test('stores both tokens and refreshes shortly before the access token expires', () => {
     const zotero = { Prefs: memoryPrefs() };
@@ -87,7 +67,5 @@ test('debug server address changes clear the saved session', () => {
         () => setAccountApiBase(zotero, 'http://example.com'),
         { code: 'MINERU_LOCAL_ENDPOINT_INVALID' }
     );
-    assert.equal(getPdfServiceSource({ Prefs: memoryPrefs({
-        'extensions.mktero.pdfServiceSource': SERVICE_SOURCE_MKTERO,
-    }) }), SERVICE_SOURCE_MKTERO);
+
 });

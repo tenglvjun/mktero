@@ -51,6 +51,7 @@ import {
 import {
     CONVERSION_PROVIDER_MINERU,
     CONVERSION_PROVIDER_MISTRAL,
+    CONVERSION_PROVIDER_MKTERO,
     CONVERSION_PROVIDER_PREF,
     MISTRAL_API_KEY_PREF,
     DEFAULT_MINERU_LOCAL_API_BASE,
@@ -81,12 +82,9 @@ import {
     clearAccountSession,
     getAccountApiBase,
     getAccountSession,
-    getPdfServiceSource,
     isAccountSignedIn,
     saveAccountSession,
-    SERVICE_SOURCE_MKTERO,
     setAccountApiBase,
-    setPdfServiceSource,
 } from '../config/account-preferences.js';
 import { isDebugBuild } from '../config/runtime-config.js';
 import {
@@ -520,9 +518,9 @@ export function createPreferencesController({
     }
 
     function getSelectedConversionProvider() {
-        const value = conversionProviderInput?.value;
-        if (value === SERVICE_SOURCE_MKTERO) return CONVERSION_PROVIDER_MINERU;
-        return normalizeConversionProvider(value || getConversionProvider(zotero));
+        return normalizeConversionProvider(
+            conversionProviderInput?.value || getConversionProvider(zotero)
+        );
     }
 
     function selectedMinerUEndpoint() {
@@ -561,7 +559,7 @@ export function createPreferencesController({
     }
 
     function updateConversionApiKeyControl() {
-        const hosted = selectedConversionChoice() === SERVICE_SOURCE_MKTERO;
+        const hosted = selectedConversionChoice() === CONVERSION_PROVIDER_MKTERO;
         const provider = getSelectedConversionProvider();
         const local = provider === CONVERSION_PROVIDER_MINERU
             && selectedMinerUEndpoint() === MINERU_ENDPOINT_LOCAL;
@@ -653,18 +651,15 @@ export function createPreferencesController({
     }
 
     // The conversion provider select owns the hosted/custom decision. "mktero"
-    // is a UI-only value: it maps to the PDF source preference, while MinerU and
-    // Mistral keep using the conversion provider preference.
+    // is a real provider value: the account panel only appears for it.
     function selectedConversionChoice() {
-        const value = String(conversionProviderInput?.value || '').trim();
-        if (value) return value;
-        return getPdfServiceSource(zotero) === SERVICE_SOURCE_MKTERO
-            ? SERVICE_SOURCE_MKTERO
-            : getConversionProvider(zotero);
+        return normalizeConversionProvider(
+            conversionProviderInput?.value || getConversionProvider(zotero)
+        );
     }
 
     function updateServiceSources() {
-        const mktero = selectedConversionChoice() === SERVICE_SOURCE_MKTERO;
+        const mktero = selectedConversionChoice() === CONVERSION_PROVIDER_MKTERO;
         if (accountPanel) accountPanel.hidden = !mktero;
         updateConversionApiKeyControl();
     }
@@ -918,13 +913,7 @@ export function createPreferencesController({
     function saveConversionChoice() {
         if (!conversionProviderInput) return;
         const choice = selectedConversionChoice();
-        if (choice === SERVICE_SOURCE_MKTERO) {
-            setPdfServiceSource(zotero, SERVICE_SOURCE_MKTERO);
-        }
-        else {
-            setPdfServiceSource(zotero, 'own');
-            zotero?.Prefs?.set?.(CONVERSION_PROVIDER_PREF, choice, true);
-        }
+        zotero?.Prefs?.set?.(CONVERSION_PROVIDER_PREF, choice, true);
         updateServiceSources();
         renderAccount();
     }
@@ -962,10 +951,7 @@ export function createPreferencesController({
             updateConversionApiKeyControl();
             return;
         }
-        conversionProviderInput.value = getPdfServiceSource(zotero)
-            === SERVICE_SOURCE_MKTERO
-            ? SERVICE_SOURCE_MKTERO
-            : getConversionProvider(zotero);
+        conversionProviderInput.value = getConversionProvider(zotero);
         if (mineruEndpointInput) {
             mineruEndpointInput.value = getMinerUEndpoint(zotero);
         }

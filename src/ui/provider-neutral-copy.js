@@ -12,6 +12,7 @@ const ERROR_MESSAGE_KEYS = new Map([
     ['MinerU returned an empty Markdown document', 'error.emptyMarkdown'],
     ['MinerU completed without a result archive', 'error.resultMissing'],
     ['MinerU parsing timed out', 'error.parsingTimedOut'],
+    ['Sign in to Mktero before converting', 'error.mkteroSignInRequired'],
 ]);
 
 const ERROR_CODE_KEYS = new Map([
@@ -50,6 +51,18 @@ const ERROR_CODE_KEYS = new Map([
     ['MISTRAL_INVALID_RESULT', 'error.resultInvalid'],
     ['MISTRAL_INPUT_TOO_LARGE', 'error.resultTooLarge'],
     ['MISTRAL_RESPONSE_TOO_LARGE', 'error.resultTooLarge'],
+    ['MKTERO_SIGN_IN_REQUIRED', 'error.mkteroSignInRequired'],
+    ['MKTERO_CONVERSION_FAILED', 'error.mkteroConversionFailed'],
+    ['MKTERO_JOB_NOT_FOUND', 'error.mkteroJobUnavailable'],
+    ['MKTERO_UNAVAILABLE', 'error.mkteroUnavailable'],
+    ['MKTERO_UPLOAD_FAILED', 'error.mkteroUploadFailed'],
+    ['MKTERO_DOWNLOAD_FAILED', 'error.mkteroDownloadFailed'],
+    ['MKTERO_REQUEST_TIMEOUT', 'error.requestTimedOut'],
+    ['MKTERO_PARSE_TIMEOUT', 'error.parsingTimedOut'],
+    ['MKTERO_NETWORK_ERROR', 'error.networkFailed'],
+    ['MKTERO_HTTP_ERROR', 'error.requestFailed'],
+    ['MKTERO_INVALID_RESPONSE', 'error.invalidResponse'],
+    ['MKTERO_ARCHIVE_TOO_LARGE', 'error.resultTooLarge'],
 ]);
 
 const WARNING_MESSAGE_KEYS = new Map([
