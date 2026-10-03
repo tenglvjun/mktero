@@ -174,7 +174,10 @@ See [Configuration](./docs/configuration.md) for every setting and
   not synced by Mktero.
 - Optional Mktero account sign-in sends the email and password only when you
   sign in. Registration also emails a verification code. The access token and
-  refresh token stay in the same profile.
+  refresh token stay in the same profile. While the account pane is open, the
+  extension uses that token to request your profile and your conversion-activity
+  counts from the service you selected, and shows them as the account card's
+  counters and heat map.
 - Reference, citation, and translation requests are bounded and local-first;
   logs never contain API tokens, presigned URLs, PDF bytes, or authenticated
   responses.

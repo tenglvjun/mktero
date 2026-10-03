@@ -90,6 +90,56 @@ export async function logoutMkteroAccount({
     });
 }
 
+// getMkteroAccount reads the signed-in profile, including the registration date.
+export async function getMkteroAccount({
+    apiBase,
+    accessToken,
+    fetchImpl = globalThis.fetch,
+} = {}) {
+    const body = await requestJSON(fetchImpl, apiBase, '/api/v1/me', {
+        method: 'GET',
+        token: accessToken,
+    });
+    return {
+        email: String(body?.email || '').trim(),
+        nickname: String(body?.nickname || '').trim(),
+        createdAt: String(body?.created_at || '').trim(),
+    };
+}
+
+// getMkteroConversionStats reads the daily conversion counts behind the activity
+// heat map. Only successful conversions are counted, and the server fills the
+// days without activity with zero.
+export async function getMkteroConversionStats({
+    apiBase,
+    accessToken,
+    days = 0,
+    fetchImpl = globalThis.fetch,
+} = {}) {
+    const window = Number.isFinite(Number(days)) && Number(days) > 0
+        ? `?days=${Math.floor(Number(days))}`
+        : '';
+    const body = await requestJSON(
+        fetchImpl,
+        apiBase,
+        `/api/v1/me/stats${window}`,
+        { method: 'GET', token: accessToken }
+    );
+    return {
+        total: toCount(body?.total),
+        currentStreak: toCount(body?.current_streak),
+        longestStreak: toCount(body?.longest_streak),
+        days: Array.isArray(body?.days)
+            ? body.days
+                .map(day => ({
+                    date: String(day?.date || ''),
+                    count: toCount(day?.count),
+                }))
+                .filter(day => day.date)
+            : [],
+    };
+}
+
 // updateMkteroNickname replaces the display nickname of the signed-in account.
 export async function updateMkteroNickname({
     apiBase,
@@ -119,12 +169,14 @@ async function requestJSON(fetchImpl, apiBase, path, {
     }
     const headers = { ...JSON_HEADERS };
     if (token) headers.Authorization = `Bearer ${token}`;
+    // A GET carries no body; only the JSON-writing methods serialize a payload.
+    const sendsBody = method !== 'GET' && method !== 'HEAD';
     let response;
     try {
         response = await fetchImpl(joinURL(apiBase, path), {
             method,
             headers,
-            body: JSON.stringify(payload ?? {}),
+            body: sendsBody ? JSON.stringify(payload ?? {}) : undefined,
         });
     }
     catch {
@@ -165,6 +217,11 @@ function sessionFromBody(body, now) {
         refreshToken,
         accessExpiresAt: now() + lifetimeMs,
     };
+}
+
+function toCount(value) {
+    const count = Number(value);
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
 function joinURL(apiBase, path) {

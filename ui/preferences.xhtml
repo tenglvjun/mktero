@@ -252,36 +252,68 @@
                                      data-i18n="preferences.account.register"></html:button>
                     </html:div>
 
-                    <html:div id="mktero-account-signed-in" class="mktero-account-identity" hidden="hidden">
-                        <html:span id="mktero-account-avatar"
-                                   class="mktero-account-avatar"
-                                   aria-hidden="true"></html:span>
-                        <html:div class="mktero-account-identity-copy">
-                            <html:span class="mktero-account-signed-in-badge">
-                                <html:span class="mktero-account-signed-in-dot" aria-hidden="true"></html:span>
-                                <html:span data-i18n="preferences.account.signedInBadge"></html:span>
-                            </html:span>
-                            <html:strong id="mktero-account-signed-in-nickname"></html:strong>
-                            <html:p id="mktero-account-signed-in-email"></html:p>
+                    <html:div id="mktero-account-signed-in" class="mktero-account-signed-in" hidden="hidden">
+                        <html:div class="mktero-account-identity">
+                            <html:span id="mktero-account-avatar"
+                                       class="mktero-account-avatar"
+                                       aria-hidden="true"></html:span>
+                            <html:div class="mktero-account-identity-copy">
+                                <html:div class="mktero-account-name-row">
+                                    <html:strong id="mktero-account-signed-in-nickname"></html:strong>
+                                    <html:button id="mktero-account-edit-nickname"
+                                                 class="mktero-account-icon-button"
+                                                 type="button"
+                                                 aria-haspopup="dialog"
+                                                 aria-controls="mktero-account-nickname-dialog"
+                                                 data-i18n-aria-label="preferences.account.nicknameEdit"></html:button>
+                                </html:div>
+                                <html:p id="mktero-account-signed-in-email"></html:p>
+                                <html:p class="mktero-account-member-since">
+                                    <html:span data-i18n="preferences.account.memberSince"></html:span>
+                                    <html:strong id="mktero-account-created"></html:strong>
+                                </html:p>
+                            </html:div>
                         </html:div>
-                    </html:div>
 
-                    <html:div id="mktero-account-nickname-row" class="mktero-form-field" hidden="hidden">
-                        <html:label for="mktero-account-nickname" data-i18n="preferences.account.nickname"></html:label>
-                        <html:div class="mktero-input-action">
-                            <html:input id="mktero-account-nickname"
-                                        type="text"
-                                        maxlength="32"
-                                        autocomplete="off"
-                                        spellcheck="false"
-                                        data-i18n-placeholder="preferences.account.nicknamePlaceholder"
-                                        data-i18n-aria-label="preferences.account.nicknameLabel" />
-                            <html:button id="mktero-account-save-nickname"
-                                         class="mktero-button"
-                                         type="button"
-                                         data-i18n="preferences.account.saveNickname"></html:button>
+                        <html:p id="mktero-account-nickname-status"
+                                class="mktero-auth-status"
+                                role="status"
+                                aria-live="polite"></html:p>
+
+                        <html:div class="mktero-account-stats">
+                            <html:article class="mktero-stat-card">
+                                <html:span id="mktero-stat-total" class="mktero-stat-value">0</html:span>
+                                <html:span class="mktero-stat-label" data-i18n="preferences.account.stat.total"></html:span>
+                            </html:article>
+                            <html:article class="mktero-stat-card">
+                                <html:span id="mktero-stat-streak" class="mktero-stat-value">0</html:span>
+                                <html:span class="mktero-stat-label" data-i18n="preferences.account.stat.streak"></html:span>
+                            </html:article>
+                            <html:article class="mktero-stat-card">
+                                <html:span id="mktero-stat-longest" class="mktero-stat-value">0</html:span>
+                                <html:span class="mktero-stat-label" data-i18n="preferences.account.stat.longest"></html:span>
+                            </html:article>
                         </html:div>
-                        <html:p id="mktero-account-nickname-status" class="mktero-auth-status" role="status" aria-live="polite"></html:p>
+
+                        <html:section class="mktero-heatmap-card" aria-labelledby="mktero-heatmap-title">
+                            <html:div class="mktero-heatmap-head">
+                                <html:h2 id="mktero-heatmap-title" data-i18n="preferences.account.heatmap.title"></html:h2>
+                                <html:p id="mktero-heatmap-summary" class="mktero-heatmap-summary"></html:p>
+                            </html:div>
+                            <html:div class="mktero-heatmap-scroll">
+                                <html:div id="mktero-heatmap" class="mktero-heatmap"></html:div>
+                            </html:div>
+                            <html:div class="mktero-heatmap-legend">
+                                <html:span data-i18n="preferences.account.heatmap.less"></html:span>
+                                <html:span class="mktero-heatmap-swatch" data-level="0"></html:span>
+                                <html:span class="mktero-heatmap-swatch" data-level="1"></html:span>
+                                <html:span class="mktero-heatmap-swatch" data-level="2"></html:span>
+                                <html:span class="mktero-heatmap-swatch" data-level="3"></html:span>
+                                <html:span class="mktero-heatmap-swatch" data-level="4"></html:span>
+                                <html:span data-i18n="preferences.account.heatmap.more"></html:span>
+                            </html:div>
+                        </html:section>
+
                         <html:button id="mktero-account-logout"
                                      class="mktero-button mktero-auth-submit"
                                      type="button"
@@ -384,6 +416,47 @@
                         <html:p id="mktero-account-status" class="mktero-auth-status" role="status" aria-live="polite"></html:p>
                     </html:div>
                 </html:section>
+
+                <html:div id="mktero-account-nickname-dialog"
+                             class="mktero-account-dialog-backdrop"
+                             role="dialog"
+                             aria-modal="true"
+                             aria-labelledby="mktero-account-nickname-dialog-title"
+                             hidden="hidden">
+                    <html:div class="mktero-account-dialog-card">
+                        <html:div class="mktero-account-dialog-head">
+                            <html:h2 id="mktero-account-nickname-dialog-title" data-i18n="preferences.account.nicknameDialog.title"></html:h2>
+                            <html:button id="mktero-account-nickname-dialog-close"
+                                         class="mktero-account-icon-button"
+                                         type="button"
+                                         data-i18n-aria-label="preferences.account.nicknameDialog.close"></html:button>
+                        </html:div>
+                        <html:div class="mktero-form-field">
+                            <html:label for="mktero-account-nickname" data-i18n="preferences.account.nickname"></html:label>
+                            <html:input id="mktero-account-nickname"
+                                        type="text"
+                                        maxlength="32"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        data-i18n-placeholder="preferences.account.nicknamePlaceholder"
+                                        data-i18n-aria-label="preferences.account.nicknameLabel" />
+                        </html:div>
+                        <html:p id="mktero-account-dialog-status"
+                                class="mktero-auth-status"
+                                role="status"
+                                aria-live="polite"></html:p>
+                        <html:div class="mktero-account-dialog-actions">
+                            <html:button id="mktero-account-nickname-dialog-cancel"
+                                         class="mktero-button"
+                                         type="button"
+                                         data-i18n="preferences.account.nicknameDialog.cancel"></html:button>
+                            <html:button id="mktero-account-save-nickname"
+                                         class="mktero-button mktero-button-primary"
+                                         type="button"
+                                         data-i18n="preferences.account.saveNickname"></html:button>
+                        </html:div>
+                    </html:div>
+                </html:div>
                 </html:div>
 
                 <html:div id="mktero-mineru-endpoint-row"

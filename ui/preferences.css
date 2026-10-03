@@ -353,16 +353,24 @@
     color: color-mix(in srgb, AccentColor 72%, CanvasText);
 }
 
-/* Signed-in identity: avatar initial, name, email, then the nickname editor. */
+/* Signed-in surface: the identity row with its rename button, the conversion
+   counters, and the activity heat map. It mirrors the website profile page
+   (mktero-web/profile.html) inside the settings card. */
+.mktero-account-signed-in {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+}
+
+.mktero-account-signed-in[hidden] {
+    display: none;
+}
+
 .mktero-account-identity {
     display: flex;
     align-items: center;
     gap: 16px;
     min-width: 0;
-}
-
-.mktero-account-identity[hidden] {
-    display: none;
 }
 
 .mktero-account-avatar {
@@ -385,25 +393,11 @@
     min-width: 0;
 }
 
-.mktero-account-signed-in-badge {
-    display: inline-flex;
+.mktero-account-name-row {
+    display: flex;
     align-items: center;
-    gap: 7px;
-    width: fit-content;
-    padding: 3px 11px;
-    border-radius: 999px;
-    background: color-mix(in srgb, #10b981 16%, Canvas);
-    color: color-mix(in srgb, #067647 88%, CanvasText);
-    font-size: 0.78rem;
-    font-weight: 650;
-}
-
-.mktero-account-signed-in-dot {
-    flex: 0 0 auto;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #10b981;
+    gap: 8px;
+    min-width: 0;
 }
 
 .mktero-account-identity-copy strong {
@@ -417,6 +411,212 @@
     overflow-wrap: anywhere;
     color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
     font-size: 0.88rem;
+}
+
+.mktero-account-member-since {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.mktero-account-member-since strong {
+    color: CanvasText;
+    font-size: 0.88rem;
+    font-weight: 650;
+}
+
+/* Icon-only buttons carry no text, so they stay square and rely on the
+   aria-label supplied by the localized copy. */
+.mktero-account-icon-button {
+    -moz-appearance: none;
+    appearance: none;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: color-mix(in srgb, CanvasText 62%, Canvas);
+    cursor: pointer;
+}
+
+.mktero-account-icon-button:hover {
+    border-color: color-mix(in srgb, CanvasText 16%, Canvas);
+    background: color-mix(in srgb, Canvas 97%, CanvasText 3%);
+    color: CanvasText;
+}
+
+.mktero-account-icon-svg {
+    pointer-events: none;
+}
+
+/* The three counters sit side by side like the website stat cards. */
+.mktero-account-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.mktero-stat-card {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: color-mix(in srgb, Canvas 98%, CanvasText 2%);
+}
+
+.mktero-stat-value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+}
+
+.mktero-stat-label {
+    overflow-wrap: anywhere;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.8rem;
+}
+
+/* Activity heat map: 7 rows of 12px cells laid out column by column. */
+.mktero-heatmap-card {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px 16px 12px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: color-mix(in srgb, Canvas 98%, CanvasText 2%);
+}
+
+.mktero-heatmap-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+}
+
+.mktero-heatmap-head h2 {
+    margin: 0;
+    font-size: 0.92rem;
+    font-weight: 650;
+}
+
+.mktero-heatmap-summary {
+    margin: 0;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.8rem;
+}
+
+.mktero-heatmap-scroll {
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+.mktero-heatmap {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(7, 12px);
+    grid-auto-columns: 12px;
+    gap: 3px;
+    width: max-content;
+}
+
+.mktero-heatmap-cell {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: color-mix(in srgb, CanvasText 14%, Canvas);
+}
+
+.mktero-heatmap-cell[data-level='1'] { background: #bfdbfe; }
+.mktero-heatmap-cell[data-level='2'] { background: #93c5fd; }
+.mktero-heatmap-cell[data-level='3'] { background: #60a5fa; }
+.mktero-heatmap-cell[data-level='4'] { background: #2563eb; }
+
+.mktero-heatmap-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.76rem;
+}
+
+.mktero-heatmap-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: color-mix(in srgb, CanvasText 14%, Canvas);
+}
+
+.mktero-heatmap-swatch[data-level='1'] { background: #bfdbfe; }
+.mktero-heatmap-swatch[data-level='2'] { background: #93c5fd; }
+.mktero-heatmap-swatch[data-level='3'] { background: #60a5fa; }
+.mktero-heatmap-swatch[data-level='4'] { background: #2563eb; }
+
+/* Rename modal. Zotero renders XHTML, and the older runtime has no <dialog>
+   support, so this follows the same hand-rolled backdrop the reader uses. */
+.mktero-account-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(17, 17, 17, 0.46);
+}
+
+.mktero-account-dialog-backdrop[hidden] {
+    display: none;
+}
+
+.mktero-account-dialog-card {
+    box-sizing: border-box;
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    max-width: 420px;
+    padding: 20px;
+    border: 1px solid var(--material-border, rgba(127, 127, 127, 0.28));
+    border-radius: 14px;
+    background: var(--material-background, Canvas);
+    color: CanvasText;
+    box-shadow: 0 14px 40px rgba(15, 23, 42, 0.22);
+}
+
+.mktero-account-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mktero-account-dialog-head h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+.mktero-account-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.mktero-account-dialog-actions .mktero-button {
+    min-height: 40px;
+    padding: 0 16px;
 }
 
 .mktero-form {
@@ -583,7 +783,6 @@
 
 .mktero-form-field[hidden],
 #mktero-account-form[hidden],
-#mktero-account-nickname-row[hidden],
 #mktero-account-login[hidden],
 #mktero-account-register[hidden],
 #mktero-account-send-reset[hidden],
@@ -975,6 +1174,8 @@
 
 #mktero-account-api-base-row[hidden],
 #mktero-account-register-nickname-row[hidden],
+#mktero-account-signed-in[hidden],
+#mktero-account-nickname-dialog[hidden],
 #mktero-account-password-confirm-row[hidden],
 #mktero-account-code-row[hidden],
 #mktero-pdf-account-status[hidden],

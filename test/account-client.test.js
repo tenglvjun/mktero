@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    getMkteroAccount,
+    getMkteroConversionStats,
     loginMkteroAccount,
     logoutMkteroAccount,
     refreshMkteroAccount,
@@ -252,5 +254,149 @@ test('surfaces the server error code when a nickname update fails', async () => 
             fetchImpl: async () => jsonResponse(401, { error: { code: 'invalid_token' } }),
         }),
         error => error.code === 'invalid_token'
+    );
+});
+
+test('reads the profile with a GET that carries no body', async () => {
+    const calls = [];
+    const profile = await getMkteroAccount({
+        apiBase: 'http://127.0.0.1:8080',
+        accessToken: 'access-token',
+        fetchImpl: async (url, options) => {
+            calls.push({ url, method: options.method, headers: options.headers, body: options.body });
+            return jsonResponse(200, {
+                id: 1,
+                email: 'user@example.com',
+                nickname: 'paper-reader',
+                created_at: '2026-09-01T00:00:00Z',
+            });
+        },
+    });
+
+    assert.equal(calls[0].url, 'http://127.0.0.1:8080/api/v1/me');
+    assert.equal(calls[0].method, 'GET');
+    assert.equal(calls[0].headers.Authorization, 'Bearer access-token');
+    // A GET must not serialize a payload.
+    assert.equal(calls[0].body, undefined);
+    assert.deepEqual(profile, {
+        email: 'user@example.com',
+        nickname: 'paper-reader',
+        createdAt: '2026-09-01T00:00:00Z',
+    });
+});
+
+test('tolerates a profile response with missing fields', async () => {
+    const profile = await getMkteroAccount({
+        apiBase: 'http://127.0.0.1:8080',
+        accessToken: 'access-token',
+        fetchImpl: async () => jsonResponse(200, {}),
+    });
+    assert.deepEqual(profile, { email: '', nickname: '', createdAt: '' });
+});
+
+test('requests the conversion stats window and normalizes the days', async () => {
+    const calls = [];
+    const stats = await getMkteroConversionStats({
+        apiBase: 'http://127.0.0.1:8080/',
+        accessToken: 'access-token',
+        days: 371,
+        fetchImpl: async (url, options) => {
+            calls.push({ url, method: options.method, body: options.body });
+            return jsonResponse(200, {
+                total: 4,
+                current_streak: 2,
+                longest_streak: 5,
+                days: [
+                    { date: '2026-09-27', count: 0 },
+                    { date: '2026-09-28', count: 1 },
+                    { date: '2026-09-29', count: -2 },
+                    { date: '2026-09-30', count: 3 },
+                    { count: 9 },
+                    null,
+                ],
+            });
+        },
+    });
+
+    assert.equal(calls[0].url, 'http://127.0.0.1:8080/api/v1/me/stats?days=371');
+    assert.equal(calls[0].method, 'GET');
+    assert.equal(calls[0].body, undefined);
+    assert.equal(stats.total, 4);
+    assert.equal(stats.currentStreak, 2);
+    assert.equal(stats.longestStreak, 5);
+    // Entries without a date are dropped and negative counts clamp to zero.
+    assert.deepEqual(stats.days, [
+        { date: '2026-09-27', count: 0 },
+        { date: '2026-09-28', count: 1 },
+        { date: '2026-09-29', count: 0 },
+        { date: '2026-09-30', count: 3 },
+    ]);
+});
+
+test('omits the stats window when no day count is given', async () => {
+    const urls = [];
+    const fetchImpl = async url => {
+        urls.push(String(url));
+        return jsonResponse(200, { total: 0, days: [] });
+    };
+    await getMkteroConversionStats({
+        apiBase: 'http://127.0.0.1:8080',
+        accessToken: 'access-token',
+        fetchImpl,
+    });
+    await getMkteroConversionStats({
+        apiBase: 'http://127.0.0.1:8080',
+        accessToken: 'access-token',
+        days: 0,
+        fetchImpl,
+    });
+    await getMkteroConversionStats({
+        apiBase: 'http://127.0.0.1:8080',
+        accessToken: 'access-token',
+        days: -5,
+        fetchImpl,
+    });
+    assert.deepEqual(urls, [
+        'http://127.0.0.1:8080/api/v1/me/stats',
+        'http://127.0.0.1:8080/api/v1/me/stats',
+        'http://127.0.0.1:8080/api/v1/me/stats',
+    ]);
+});
+
+test('defaults an empty stats response to zeros', async () => {
+    const stats = await getMkteroConversionStats({
+        apiBase: 'http://127.0.0.1:8080',
+        accessToken: 'access-token',
+        fetchImpl: async () => jsonResponse(200, {}),
+    });
+    assert.deepEqual(stats, {
+        total: 0,
+        currentStreak: 0,
+        longestStreak: 0,
+        days: [],
+    });
+});
+
+test('surfaces the server error code when the stats request fails', async () => {
+    await assert.rejects(
+        getMkteroConversionStats({
+            apiBase: 'http://127.0.0.1:8080',
+            accessToken: 'access-token',
+            fetchImpl: async () => jsonResponse(401, { error: { code: 'invalid_token' } }),
+        }),
+        error => error.code === 'invalid_token'
+    );
+});
+
+test('reports a network failure as a network error', async () => {
+    await assert.rejects(
+        getMkteroConversionStats({
+            apiBase: 'http://127.0.0.1:8080',
+            accessToken: 'access-token',
+            fetchImpl: async () => {
+                throw new Error('offline');
+            },
+        }),
+        error => error.code === 'network'
     );
 });

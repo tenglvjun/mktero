@@ -1689,12 +1689,15 @@ test('drives the account card tabs and the signed-in identity', async () => {
                 <div id="mktero-account-signed-in" hidden>
                     <span id="mktero-account-avatar"></span>
                     <strong id="mktero-account-signed-in-nickname"></strong>
+                    <button id="mktero-account-edit-nickname"></button>
                     <p id="mktero-account-signed-in-email"></p>
-                </div>
-                <div id="mktero-account-nickname-row" hidden>
-                    <input id="mktero-account-nickname">
-                    <button id="mktero-account-save-nickname"></button>
+                    <strong id="mktero-account-created"></strong>
                     <p id="mktero-account-nickname-status"></p>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-streak">0</span>
+                    <span id="mktero-stat-longest">0</span>
+                    <div id="mktero-heatmap"></div>
+                    <p id="mktero-heatmap-summary"></p>
                     <button id="mktero-account-logout"></button>
                 </div>
                 <div id="mktero-account-form">
@@ -1711,6 +1714,15 @@ test('drives the account card tabs and the signed-in identity', async () => {
                     <p id="mktero-account-status"></p>
                 </div>
                 <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+                <div id="mktero-account-nickname-dialog" hidden>
+                    <div>
+                        <input id="mktero-account-nickname">
+                        <p id="mktero-account-dialog-status"></p>
+                        <button id="mktero-account-nickname-dialog-close"></button>
+                        <button id="mktero-account-nickname-dialog-cancel"></button>
+                        <button id="mktero-account-save-nickname"></button>
+                    </div>
+                </div>
             </div>
             <div id="mktero-mineru-endpoint-row" hidden><select id="mktero-mineru-endpoint"><option value="cloud">Cloud</option></select></div>
             <div id="mktero-mineru-local-base-row" hidden><input id="mktero-mineru-local-base"></div>
@@ -1734,6 +1746,9 @@ test('drives the account card tabs and the signed-in identity', async () => {
             getStats: async () => ({ entries: 0, sizeBytes: 0 }),
             clear: async () => {},
         },
+        accountFetch: () => {
+            throw new Error('signed out: the pane must not call the server');
+        },
     });
 
     await controller.init();
@@ -1743,13 +1758,11 @@ test('drives the account card tabs and the signed-in identity', async () => {
     const tabRegister = doc.getElementById('mktero-account-tab-register');
     const form = doc.getElementById('mktero-account-form');
     const signedIn = doc.getElementById('mktero-account-signed-in');
-    const nicknameRow = doc.getElementById('mktero-account-nickname-row');
 
     // Signed out: tabs and the form show, the identity block does not.
     assert.equal(tabs.hidden, false);
     assert.equal(form.hidden, false);
     assert.equal(signedIn.hidden, true);
-    assert.equal(nicknameRow.hidden, true);
     assert.equal(doc.getElementById('mktero-account-code-row').hidden, true);
 
     // The register tab reveals the code, confirm, and optional nickname fields.
@@ -1774,6 +1787,7 @@ test('drives the account card tabs and the signed-in identity', async () => {
     values.set('extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000);
     controller.destroy();
 
+    const requested = [];
     const signedInController = createPreferencesController({
         document: dom.window.document,
         zotero: {
@@ -1787,18 +1801,142 @@ test('drives the account card tabs and the signed-in identity', async () => {
             getStats: async () => ({ entries: 0, sizeBytes: 0 }),
             clear: async () => {},
         },
+        accountFetch: async url => {
+            requested.push(String(url));
+            if (String(url).includes('/me/stats')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        total: 3,
+                        current_streak: 2,
+                        longest_streak: 5,
+                        days: [
+                            { date: '2026-09-27', count: 0 },
+                            { date: '2026-09-28', count: 1 },
+                            { date: '2026-09-29', count: 3 },
+                        ],
+                    }),
+                };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    email: 'user@example.com',
+                    nickname: 'paper-reader',
+                    created_at: '2026-09-01T00:00:00Z',
+                }),
+            };
+        },
     });
     await signedInController.init();
 
     assert.equal(tabs.hidden, true);
     assert.equal(form.hidden, true);
     assert.equal(signedIn.hidden, false);
-    assert.equal(nicknameRow.hidden, false);
     assert.equal(doc.getElementById('mktero-account-avatar').textContent, 'P');
     assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
     assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
 
+    // The activity request carries the bearer token and the one-year window.
+    assert.deepEqual(
+        requested.filter(url => url.includes('/me/stats')).length,
+        1
+    );
+    assert.match(
+        requested.find(url => url.includes('/me/stats')),
+        /\/api\/v1\/me\/stats\?days=371$/
+    );
+
+    // The counters and the heat map come from the loaded stats response.
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '3');
+    assert.equal(doc.getElementById('mktero-stat-streak').textContent, '2');
+    assert.equal(doc.getElementById('mktero-stat-longest').textContent, '5');
+    assert.match(doc.getElementById('mktero-heatmap-summary').textContent, /3/);
+    const cells = doc.querySelectorAll('#mktero-heatmap .mktero-heatmap-cell');
+    // 2026-09-27 is a Sunday, so the three days fill the first column exactly.
+    assert.equal(cells.length, 3);
+    assert.equal(cells[0].getAttribute('data-level'), '0');
+    assert.equal(cells[1].getAttribute('data-level'), '1');
+    assert.equal(cells[2].getAttribute('data-level'), '3');
+    assert.equal(cells[2].getAttribute('title'), '2026-09-29: 3');
+
+    // The rename dialog opens from the icon button, seeded with the nickname.
+    const dialog = doc.getElementById('mktero-account-nickname-dialog');
+    const nicknameInput = doc.getElementById('mktero-account-nickname');
+    assert.equal(dialog.hasAttribute('hidden'), true);
+    doc.getElementById('mktero-account-edit-nickname')
+        .dispatchEvent(new dom.window.Event('click'));
+    assert.equal(dialog.hasAttribute('hidden'), false);
+    assert.equal(nicknameInput.value, 'paper-reader');
+
+    doc.getElementById('mktero-account-nickname-dialog-cancel')
+        .dispatchEvent(new dom.window.Event('click'));
+    assert.equal(dialog.hasAttribute('hidden'), true);
+
     signedInController.destroy();
+});
+
+test('keeps the account card at zero when the activity request fails', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <p id="mktero-account-signed-in-email"></p>
+                    <strong id="mktero-account-created"></strong>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-streak">0</span>
+                    <span id="mktero-stat-longest">0</span>
+                    <div id="mktero-heatmap"></div>
+                    <p id="mktero-heatmap-summary"></p>
+                </div>
+                <div id="mktero-account-form" hidden></div>
+                <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mktero'],
+        ['extensions.mktero.accountEmail', 'user@example.com'],
+        ['extensions.mktero.accountNickname', 'paper-reader'],
+        ['extensions.mktero.accountRefreshToken', 'refresh'],
+        ['extensions.mktero.accountAccessToken', 'access'],
+        ['extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000],
+    ]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: async () => {
+            throw new Error('offline');
+        },
+    });
+
+    // A failed activity request must not reject the whole pane.
+    await controller.init();
+    const doc = dom.window.document;
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '0');
+    assert.equal(doc.getElementById('mktero-stat-streak').textContent, '0');
+    assert.equal(doc.getElementById('mktero-stat-longest').textContent, '0');
+    assert.equal(doc.getElementById('mktero-heatmap').children.length, 0);
+    // The stored session still renders, so the card stays usable.
+    assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
+    assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
+
+    controller.destroy();
 });
 
 function createControl(properties = {}) {

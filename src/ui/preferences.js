@@ -70,6 +70,8 @@ import {
     normalizeMinerUEndpoint,
 } from '../config/conversion-preferences.js';
 import {
+    getMkteroAccount,
+    getMkteroConversionStats,
     loginMkteroAccount,
     logoutMkteroAccount,
     refreshMkteroAccount,
@@ -110,6 +112,13 @@ import {
     setObsidianSubdirectory,
     setObsidianVaultPath,
 } from '../config/obsidian-preferences.js';
+import {
+    ACTIVITY_WINDOW_DAYS,
+    activityCellTitle,
+    activitySummaryText,
+    buildActivityGrid,
+    formatMemberSince,
+} from './account-activity.js';
 import {
     createLucideIcon,
     LUCIDE_ICONS,
@@ -174,6 +183,8 @@ export function createPreferencesController({
     confirmClearCache = null,
     createFilePicker = null,
     createAbortController = createRuntimeAbortController,
+    // Injected so tests never reach the network; the pane only reads here.
+    accountFetch = globalThis.fetch,
 }) {
     const status = document.getElementById('mktero-cache-status');
     const clearButton = document.getElementById('mktero-clear-cache');
@@ -215,9 +226,34 @@ export function createPreferencesController({
     const accountAvatar = document.getElementById('mktero-account-avatar');
     const accountSignedInNickname = document.getElementById('mktero-account-signed-in-nickname');
     const accountSignedInEmail = document.getElementById('mktero-account-signed-in-email');
+    const accountCreated = document.getElementById('mktero-account-created');
+    const accountEditNicknameButton = document.getElementById(
+        'mktero-account-edit-nickname'
+    );
+    const accountNicknameDialog = document.getElementById(
+        'mktero-account-nickname-dialog'
+    );
+    const accountNicknameDialogClose = document.getElementById(
+        'mktero-account-nickname-dialog-close'
+    );
+    const accountNicknameDialogCancel = document.getElementById(
+        'mktero-account-nickname-dialog-cancel'
+    );
+    const accountDialogStatus = document.getElementById(
+        'mktero-account-dialog-status'
+    );
     const accountProfileNicknameInput = document.getElementById('mktero-account-nickname');
     const accountSaveNicknameButton = document.getElementById('mktero-account-save-nickname');
     const accountNicknameStatus = document.getElementById('mktero-account-nickname-status');
+    const accountStatTotal = document.getElementById('mktero-stat-total');
+    const accountStatStreak = document.getElementById('mktero-stat-streak');
+    const accountStatLongest = document.getElementById('mktero-stat-longest');
+    const accountHeatmap = document.getElementById('mktero-heatmap');
+    const accountHeatmapSummary = document.getElementById('mktero-heatmap-summary');
+    // The account activity request runs once per pane load; a failed request
+    // leaves the counters at zero instead of retrying on every render.
+    let accountStats = null;
+    let accountStatsRequested = false;
     let accountMode = 'login';
     let codeCooldownTimer = 0;
     const accountLogoutButton = document.getElementById('mktero-account-logout');
@@ -631,10 +667,17 @@ export function createPreferencesController({
     }
 
     function setAccountNicknameStatus(key, tone = '') {
-        if (!accountNicknameStatus) return;
-        accountNicknameStatus.textContent = key ? t(key) : '';
-        if (tone) accountNicknameStatus.dataset.tone = tone;
-        else delete accountNicknameStatus.dataset.tone;
+        if (accountNicknameStatus) {
+            accountNicknameStatus.textContent = key ? t(key) : '';
+            if (tone) accountNicknameStatus.dataset.tone = tone;
+            else delete accountNicknameStatus.dataset.tone;
+        }
+        // The dialog is transient, so a save confirmation also lands on the card.
+        if (accountDialogStatus) {
+            accountDialogStatus.textContent = tone === 'success' ? t(key) : '';
+            if (tone === 'success') accountDialogStatus.dataset.tone = tone;
+            else delete accountDialogStatus.dataset.tone;
+        }
     }
 
     function accountErrorKey(error) {
@@ -687,27 +730,119 @@ export function createPreferencesController({
         const signedInPanel = document.getElementById('mktero-account-signed-in');
         const accountForm = document.getElementById('mktero-account-form');
         const tabs = document.getElementById('mktero-account-tabs');
-        const nicknameRow = document.getElementById('mktero-account-nickname-row');
         if (signedInPanel) signedInPanel.hidden = !signedIn;
         if (accountForm) accountForm.hidden = signedIn;
-        // Tabs and the nickname editor belong to exactly one of the two states.
+        // The tabs belong to the signed-out state only.
         if (tabs) tabs.hidden = signedIn;
-        if (nicknameRow) nicknameRow.hidden = !signedIn;
         if (signedIn) {
             const nickname = session.nickname || session.email || '';
             if (accountAvatar) accountAvatar.textContent = accountInitial(nickname);
             if (accountSignedInNickname) accountSignedInNickname.textContent = nickname;
             if (accountSignedInEmail) accountSignedInEmail.textContent = session.email || '';
-            if (accountProfileNicknameInput && !accountProfileNicknameInput.value) {
-                accountProfileNicknameInput.value = session.nickname || '';
-            }
         }
         if (!signedIn) setAccountMode(accountMode);
+        renderAccountActivity();
         if (apiBaseRow) apiBaseRow.hidden = !isDebugBuild();
         if (accountApiBaseInput && !accountApiBaseInput.value) {
             accountApiBaseInput.value = getAccountApiBase(zotero);
         }
         updateServiceSources();
+    }
+
+    // renderAccountActivity paints the counters and the heat map from the last
+    // loaded stats response. It runs on every render so a language change
+    // re-localizes the summary and the day tooltips.
+    function renderAccountActivity() {
+        const grid = accountStats ? buildActivityGrid(accountStats.days) : null;
+        // The counters use the server's window total; the grid only supplies the
+        // calendar. That matches the website profile page.
+        const total = accountStats ? accountStats.total : 0;
+        if (accountStatTotal) accountStatTotal.textContent = String(total);
+        if (accountStatStreak) {
+            accountStatStreak.textContent = String(accountStats?.currentStreak || 0);
+        }
+        if (accountStatLongest) {
+            accountStatLongest.textContent = String(accountStats?.longestStreak || 0);
+        }
+        if (accountHeatmapSummary) {
+            accountHeatmapSummary.textContent = accountStats
+                ? activitySummaryText(t('preferences.account.heatmap.summary'), {
+                    total,
+                    language: localization.language,
+                })
+                : '';
+        }
+        if (!accountHeatmap) return;
+        if (!grid || !grid.cells.length) {
+            accountHeatmap.replaceChildren();
+            return;
+        }
+        const cells = grid.cells.map(cell => {
+            const node = createHTMLElement(document, 'span');
+            node.setAttribute('class', 'mktero-heatmap-cell');
+            node.setAttribute('data-level', String(cell.level));
+            if (cell.pad) {
+                node.setAttribute('aria-hidden', 'true');
+                return node;
+            }
+            const title = activityCellTitle(cell);
+            if (title) node.setAttribute('title', title);
+            return node;
+        });
+        accountHeatmap.replaceChildren(...cells);
+        accountHeatmap.style.setProperty('--mktero-heatmap-weeks', String(grid.weeks));
+        accountHeatmap.setAttribute('aria-label', t('preferences.account.heatmap.title'));
+    }
+
+    // loadAccountStats fills the counters and the heat map for the signed-in
+    // account. A failure keeps the card at zero: the activity view is
+    // informational, so it never blocks the settings pane.
+    async function loadAccountStats() {
+        if (accountStatsRequested) return;
+        const session = getAccountSession(zotero);
+        if (!isAccountSignedIn(session) || !session.accessToken) return;
+        accountStatsRequested = true;
+        try {
+            accountStats = await getMkteroConversionStats({
+                apiBase: getAccountApiBase(zotero),
+                accessToken: session.accessToken,
+                days: ACTIVITY_WINDOW_DAYS,
+                fetchImpl: accountFetch,
+            });
+        }
+        catch {
+            accountStats = null;
+        }
+        renderAccountActivity();
+    }
+
+    // loadAccountProfile refreshes the stored nickname, email, and registration
+    // date. Like the stats request it is best-effort and never blocks the pane.
+    async function loadAccountProfile() {
+        const session = getAccountSession(zotero);
+        if (!isAccountSignedIn(session) || !session.accessToken) return;
+        try {
+            const profile = await getMkteroAccount({
+                apiBase: getAccountApiBase(zotero),
+                accessToken: session.accessToken,
+                fetchImpl: accountFetch,
+            });
+            saveAccountSession(zotero, {
+                ...session,
+                email: profile.email || session.email,
+                nickname: profile.nickname || session.nickname,
+            });
+            if (accountCreated) {
+                accountCreated.textContent = formatMemberSince(
+                    profile.createdAt,
+                    localization.language
+                );
+            }
+            renderAccount();
+        }
+        catch {
+            // A stale token only skips the refresh; the stored session renders.
+        }
     }
 
     // accountInitial returns the first character used by the avatar circle.
@@ -759,6 +894,43 @@ export function createPreferencesController({
         setAccountStatus('');
     }
 
+    // openAccountNicknameDialog seeds the field from the stored session so the
+    // dialog always opens on the current nickname.
+    function openAccountNicknameDialog() {
+        const session = getAccountSession(zotero);
+        if (accountProfileNicknameInput) {
+            accountProfileNicknameInput.value = session.nickname || '';
+        }
+        setAccountNicknameStatus('');
+        accountNicknameDialog?.removeAttribute('hidden');
+        accountEditNicknameButton?.setAttribute('aria-expanded', 'true');
+        accountProfileNicknameInput?.focus?.();
+        accountProfileNicknameInput?.select?.();
+    }
+
+    function closeAccountNicknameDialog() {
+        accountNicknameDialog?.setAttribute('hidden', 'hidden');
+        accountEditNicknameButton?.setAttribute('aria-expanded', 'false');
+        accountEditNicknameButton?.focus?.();
+    }
+
+    function handleAccountNicknameKeydown(event) {
+        handleAccountDialogKeydown(event);
+    }
+
+    // handleAccountDialogKeydown keeps the modal keyboard-complete: Escape
+    // dismisses it and Enter saves without reaching for the mouse.
+    function handleAccountDialogKeydown(event) {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeAccountNicknameDialog();
+            return;
+        }
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        saveAccountNickname();
+    }
+
     async function saveAccountNickname() {
         if (accountBusy) return;
         const nickname = String(accountProfileNicknameInput?.value || '').trim();
@@ -775,6 +947,7 @@ export function createPreferencesController({
                 apiBase: getAccountApiBase(zotero),
                 accessToken: session.accessToken,
                 nickname,
+                fetchImpl: accountFetch,
             });
             saveAccountSession(zotero, {
                 ...session,
@@ -785,6 +958,7 @@ export function createPreferencesController({
             }
             setAccountNicknameStatus('preferences.account.nicknameSaved', 'success');
             renderAccount();
+            closeAccountNicknameDialog();
         }
         catch (error) {
             setAccountNicknameStatus(accountErrorKey(error));
@@ -1026,8 +1200,41 @@ export function createPreferencesController({
         accountSendResetButton?.addEventListener('click', sendPasswordReset);
         accountSendCodeButton?.addEventListener('click', sendAccountCode);
         accountSaveNicknameButton?.addEventListener('click', saveAccountNickname);
+        accountEditNicknameButton?.addEventListener('click', openAccountNicknameDialog);
+        accountNicknameDialogClose?.addEventListener('click', closeAccountNicknameDialog);
+        accountNicknameDialogCancel?.addEventListener('click', closeAccountNicknameDialog);
+        // Clicking the backdrop (outside the card) dismisses the modal.
+        accountNicknameDialog?.addEventListener('click', event => {
+            if (event.target === accountNicknameDialog) closeAccountNicknameDialog();
+        });
+        // Escape and Enter are handled on the backdrop, so the modal needs no
+        // document-level listener and the pane keeps its own key handling.
+        accountNicknameDialog?.addEventListener('keydown', handleAccountDialogKeydown);
+        accountProfileNicknameInput?.addEventListener(
+            'keydown',
+            handleAccountNicknameKeydown
+        );
         accountApiBaseInput?.addEventListener('change', saveAccountApiBase);
         renderAccount();
+    }
+
+    // initializeAccountIcons fills the two icon-only account buttons. They carry
+    // no text, so their accessible name comes from data-i18n-aria-label.
+    function initializeAccountIcons() {
+        for (const host of [
+            accountEditNicknameButton,
+            accountNicknameDialogClose,
+        ]) {
+            if (!host || host.querySelector('svg')) continue;
+            const icon = host === accountNicknameDialogClose
+                ? LUCIDE_ICONS.x
+                : LUCIDE_ICONS.pencil;
+            if (!icon) continue;
+            host.replaceChildren(createLucideIcon(document, icon, {
+                className: 'mktero-account-icon-svg',
+                size: host === accountNicknameDialogClose ? 16 : 15,
+            }));
+        }
     }
 
     function initializeConversionProvider() {
@@ -1384,8 +1591,10 @@ export function createPreferencesController({
             localize();
             initializePreferenceTabs();
             initializeAccount();
+            initializeAccountIcons();
             await refreshAccountIfNeeded();
             renderAccount();
+            await Promise.all([loadAccountProfile(), loadAccountStats()]);
             initializeConversionProvider();
             initializeAIProvider();
             initializeAIRequestTimeout();
@@ -1459,6 +1668,27 @@ export function createPreferencesController({
             accountLoginButton?.removeEventListener('click', loginAccount);
             accountRegisterButton?.removeEventListener('click', registerAccount);
             accountLogoutButton?.removeEventListener('click', logoutAccount);
+            accountEditNicknameButton?.removeEventListener(
+                'click',
+                openAccountNicknameDialog
+            );
+            accountNicknameDialogClose?.removeEventListener(
+                'click',
+                closeAccountNicknameDialog
+            );
+            accountNicknameDialogCancel?.removeEventListener(
+                'click',
+                closeAccountNicknameDialog
+            );
+            accountNicknameDialog?.removeEventListener(
+                'keydown',
+                handleAccountDialogKeydown
+            );
+            accountProfileNicknameInput?.removeEventListener(
+                'keydown',
+                handleAccountNicknameKeydown
+            );
+            accountSaveNicknameButton?.removeEventListener('click', saveAccountNickname);
             accountForgotButton?.removeEventListener('click', selectAccountForgotMode);
             accountForgotBackButton?.removeEventListener('click', selectAccountForgotBack);
             accountSendResetButton?.removeEventListener('click', sendPasswordReset);

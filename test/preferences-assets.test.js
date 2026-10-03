@@ -419,12 +419,37 @@ test('presents the account card with website-style tabs and an identity block', 
     assert.match(pane, /id="mktero-account-tab-register"[\s\S]*?role="tab"[\s\S]*?aria-selected="false"/);
     assert.doesNotMatch(pane, /id="mktero-account-switch"/);
 
-    // Signed in shows the avatar, the badge, the name, and the email.
+    // Signed in shows the avatar, the name with its rename button, the email,
+    // and the registration date, mirroring the website profile card.
     assert.match(pane, /id="mktero-account-avatar"/);
-    assert.match(pane, /class="mktero-account-signed-in-badge"[\s\S]*?data-i18n="preferences\.account\.signedInBadge"/);
     assert.match(pane, /id="mktero-account-signed-in-nickname"/);
     assert.match(pane, /id="mktero-account-signed-in-email"/);
+    assert.match(pane, /id="mktero-account-created"/);
     assert.match(pane, /id="mktero-account-save-nickname"/);
+    // The rename control is an icon-only button next to the name, and the
+    // nickname field moved into its dialog.
+    assert.match(
+        pane,
+        /class="mktero-account-name-row"[\s\S]*?id="mktero-account-edit-nickname"[\s\S]*?aria-haspopup="dialog"[\s\S]*?aria-controls="mktero-account-nickname-dialog"/
+    );
+    assert.match(
+        pane,
+        /id="mktero-account-nickname-dialog"[\s\S]*?role="dialog"[\s\S]*?aria-modal="true"/
+    );
+    assert.match(pane, /id="mktero-account-nickname-dialog-cancel"/);
+    assert.doesNotMatch(pane, /id="mktero-account-nickname-row"/);
+    assert.doesNotMatch(pane, /mktero-account-signed-in-badge/);
+
+    // The activity surface carries the three counters and the heat map.
+    assert.match(pane, /id="mktero-stat-total"/);
+    assert.match(pane, /id="mktero-stat-streak"/);
+    assert.match(pane, /id="mktero-stat-longest"/);
+    assert.match(pane, /id="mktero-heatmap"[\s\S]*?class="mktero-heatmap"/);
+    assert.match(pane, /id="mktero-heatmap-summary"/);
+    assert.equal(
+        (pane.match(/class="mktero-heatmap-swatch" data-level=/g) || []).length,
+        5
+    );
 
     // The registration nickname stays a separate optional field.
     assert.match(pane, /id="mktero-account-register-nickname"[\s\S]*?maxlength="32"/);
@@ -441,7 +466,22 @@ test('presents the account card with website-style tabs and an identity block', 
     assert.match(styles, /\.mktero-auth-tabs\s*\{[\s\S]*?grid-template-columns:\s*1fr\s+1fr/s);
     assert.match(styles, /\.mktero-auth-tab\[aria-selected='true'\]/);
     assert.match(styles, /\.mktero-account-avatar\s*\{[\s\S]*?border-radius:\s*50%/s);
-    assert.match(styles, /\.mktero-account-signed-in-dot\s*\{/);
+    // The heat map lays out 7 rows of 12px cells, column by column.
+    assert.match(
+        styles,
+        /\.mktero-heatmap\s*\{[\s\S]*?grid-auto-flow:\s*column[\s\S]*?grid-template-rows:\s*repeat\(7,\s*12px\)/s
+    );
+    assert.match(styles, /\.mktero-heatmap-cell\[data-level='4'\]\s*\{\s*background:\s*#2563eb/);
+    assert.match(
+        styles,
+        /\.mktero-account-stats\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s
+    );
+    // The rename modal uses a hand-rolled backdrop: no <dialog> in the runtime.
+    assert.match(
+        styles,
+        /\.mktero-account-dialog-backdrop\s*\{[\s\S]*?position:\s*fixed[\s\S]*?inset:\s*0/s
+    );
+    assert.match(styles, /\.mktero-account-dialog-backdrop::backdrop|rgba\(17, 17, 17, 0\.46\)/);
 });
 
 test('hides the account card rows that are not in use', async () => {
