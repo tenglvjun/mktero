@@ -406,3 +406,151 @@ test('presents every preference group as one cohesive settings card', async () =
     assert.match(styles, /\.mktero-preferences-section\[hidden\]/);
     assert.match(styles, /\.mktero-card-note/);
 });
+
+test('presents the account card with website-style tabs and an identity block', async () => {
+    const [pane, styles] = await Promise.all([
+        readFile(new URL('../ui/preferences.xhtml', import.meta.url), 'utf8'),
+        readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
+    ]);
+
+    // The card mirrors mktero-web/account.html: a tab row over the form.
+    assert.match(pane, /id="mktero-account-tabs"[\s\S]*?role="tablist"/);
+    assert.match(pane, /id="mktero-account-tab-login"[\s\S]*?role="tab"[\s\S]*?aria-selected="true"/);
+    assert.match(pane, /id="mktero-account-tab-register"[\s\S]*?role="tab"[\s\S]*?aria-selected="false"/);
+    assert.doesNotMatch(pane, /id="mktero-account-switch"/);
+
+    // Signed in shows the avatar, the badge, the name, and the email.
+    assert.match(pane, /id="mktero-account-avatar"/);
+    assert.match(pane, /class="mktero-account-signed-in-badge"[\s\S]*?data-i18n="preferences\.account\.signedInBadge"/);
+    assert.match(pane, /id="mktero-account-signed-in-nickname"/);
+    assert.match(pane, /id="mktero-account-signed-in-email"/);
+    assert.match(pane, /id="mktero-account-save-nickname"/);
+
+    // The registration nickname stays a separate optional field.
+    assert.match(pane, /id="mktero-account-register-nickname"[\s\S]*?maxlength="32"/);
+    assert.match(pane, /id="mktero-account-nickname"[\s\S]*?maxlength="32"/);
+
+    // The account card shares the settings-card background: no own fill, no
+    // own border, and no second rounded surface inside the card.
+    const authCard = styles.match(/\.mktero-auth-card\s*\{([^}]*)\}/)?.[1] || '';
+    assert.ok(authCard, '.mktero-auth-card rule is missing');
+    assert.match(authCard, /background:\s*transparent/);
+    assert.match(authCard, /border:\s*0/);
+    assert.doesNotMatch(authCard, /border-radius:/);
+    assert.doesNotMatch(authCard, /color-mix\(/);
+    assert.match(styles, /\.mktero-auth-tabs\s*\{[\s\S]*?grid-template-columns:\s*1fr\s+1fr/s);
+    assert.match(styles, /\.mktero-auth-tab\[aria-selected='true'\]/);
+    assert.match(styles, /\.mktero-account-avatar\s*\{[\s\S]*?border-radius:\s*50%/s);
+    assert.match(styles, /\.mktero-account-signed-in-dot\s*\{/);
+});
+
+test('hides the account card rows that are not in use', async () => {
+    const styles = await readFile(
+        new URL('../ui/preferences.css', import.meta.url),
+        'utf8'
+    );
+
+    // A stray trailing comma previously folded .mktero-card-note into this
+    // hidden list, which forced the hidden account rows back to display: block.
+    assert.match(
+        styles,
+        /#mktero-account-register-nickname-row\[hidden\],[\s\S]*?#mktero-ai-account-status\[hidden\]\s*\{\s*display:\s*none;/s
+    );
+    // The hidden list must close before .mktero-card-note starts, otherwise the
+    // card-note rule would apply to the hidden account rows instead.
+    const hiddenList = styles.match(
+        /#mktero-account-api-base-row\[hidden\][\s\S]*?\n\}/s
+    )?.[0] || '';
+    assert.match(hiddenList, /#mktero-ai-account-status\[hidden\]\s*\{\s*display:\s*none;/);
+    assert.doesNotMatch(hiddenList, /\.mktero-card-note/);
+    assert.doesNotMatch(styles, /#mktero-account-switch\[hidden\]/);
+});
+
+test('matches the website account card controls', async () => {
+    const styles = await readFile(
+        new URL('../ui/preferences.css', import.meta.url),
+        'utf8'
+    );
+
+    const rule = selector => styles.match(
+        new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}')
+    )?.[1] || '';
+
+    // The website card: white inputs, 12px radius, 44px tall, dark pill button.
+    const input = rule('.mktero-auth-card .mktero-form-field input');
+    assert.ok(input, 'the account input rule is missing');
+    assert.match(input, /min-height:\s*44px/);
+    assert.match(input, /border-radius:\s*12px/);
+    assert.match(input, /background:\s*Canvas/);
+    assert.match(input, /padding:\s*0\s+13px/);
+
+    const primary = rule('.mktero-auth-card .mktero-button-primary');
+    assert.ok(primary, 'the primary button rule is missing');
+    assert.match(primary, /min-height:\s*46px/);
+    assert.match(primary, /border-radius:\s*999px/);
+    assert.match(primary, /background:\s*#111111/);
+    assert.match(primary, /color:\s*#ffffff/);
+
+    // The inline send-code button is a 12px-radius outlined control.
+    const inline = rule('.mktero-auth-card .mktero-input-action .mktero-button');
+    assert.ok(inline, 'the inline button rule is missing');
+    assert.match(inline, /border-radius:\s*12px/);
+    assert.match(inline, /min-height:\s*44px/);
+
+    // The tab row is a pill with a 38px selected tab.
+    const tab = rule('.mktero-auth-tab');
+    assert.match(tab, /min-height:\s*38px/);
+    assert.match(tab, /border-radius:\s*999px/);
+    assert.match(rule('.mktero-auth-tabs'), /border-radius:\s*999px/);
+
+    // "Forgot password?" uses the website blue, not the theme accent.
+    assert.match(
+        rule('.mktero-auth-card .mktero-auth-inline-link'),
+        /color:\s*#3b82f6/
+    );
+
+    // Sign out is the outlined secondary pill.
+    const secondary = rule('.mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary)');
+    assert.ok(secondary, 'the secondary button rule is missing');
+    assert.match(secondary, /border-radius:\s*999px/);
+    assert.match(secondary, /background:\s*Canvas/);
+});
+
+test('uses the same account placeholders as the website', async () => {
+    const [pane, localization] = await Promise.all([
+        readFile(new URL('../ui/preferences.xhtml', import.meta.url), 'utf8'),
+        readFile(new URL('../src/i18n/localization.js', import.meta.url), 'utf8'),
+    ]);
+
+    const english = localization.slice(
+        localization.indexOf('[LANGUAGE_ENGLISH]: Object.freeze({'),
+        localization.indexOf('[LANGUAGE_SIMPLIFIED_CHINESE]: Object.freeze({')
+    );
+    const chinese = localization.slice(
+        localization.indexOf('[LANGUAGE_SIMPLIFIED_CHINESE]: Object.freeze({')
+    );
+
+    const value = (block, key) => block.match(
+        new RegExp("'" + key.replace(/[.]/g, '\\.') + "':\\s*'([^']*)'")
+    )?.[1];
+
+    // English matches mktero-web/account.js.
+    assert.equal(value(english, 'preferences.account.emailPlaceholder'), 'Enter your email');
+    assert.equal(value(english, 'preferences.account.passwordPlaceholder'), 'Enter your password');
+    assert.equal(value(english, 'preferences.account.codePlaceholder'), 'Enter the 6-digit code');
+    assert.equal(value(english, 'preferences.account.confirmPasswordPlaceholder'), 'Enter the password again');
+
+    // Chinese matches mktero-web/account.js.
+    assert.equal(value(chinese, 'preferences.account.emailPlaceholder'), '请输入邮箱');
+    assert.equal(value(chinese, 'preferences.account.passwordPlaceholder'), '请输入密码');
+    assert.equal(value(chinese, 'preferences.account.codePlaceholder'), '请输入 6 位验证码');
+    assert.equal(value(chinese, 'preferences.account.confirmPasswordPlaceholder'), '请再次输入密码');
+
+    // The registration nickname field asks for an optional name.
+    assert.equal(value(chinese, 'preferences.account.nicknameOptionalPlaceholder'), '请你输入昵称（选填）');
+    assert.match(pane, /id="mktero-account-register-nickname"[\s\S]*?data-i18n-placeholder="preferences\.account\.nicknameOptionalPlaceholder"/);
+
+    // The signed-in rename field keeps the plain wording.
+    assert.match(pane, /id="mktero-account-nickname"[\s\S]*?data-i18n-placeholder="preferences\.account\.nicknamePlaceholder"/);
+    assert.equal(value(chinese, 'preferences.account.nicknamePlaceholder'), '请输入昵称');
+});

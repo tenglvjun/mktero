@@ -1673,6 +1673,134 @@ test('hides every custom PDF row when the hosted subscription is selected', asyn
     controller.destroy();
 });
 
+test('drives the account card tabs and the signed-in identity', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider">
+                <option value="mktero">Mktero</option>
+                <option value="mineru">MinerU</option>
+                <option value="mistral">Mistral OCR 4.1</option>
+            </select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-tabs">
+                    <button id="mktero-account-tab-login" aria-selected="true"></button>
+                    <button id="mktero-account-tab-register" aria-selected="false"></button>
+                </div>
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <p id="mktero-account-signed-in-email"></p>
+                </div>
+                <div id="mktero-account-nickname-row" hidden>
+                    <input id="mktero-account-nickname">
+                    <button id="mktero-account-save-nickname"></button>
+                    <p id="mktero-account-nickname-status"></p>
+                    <button id="mktero-account-logout"></button>
+                </div>
+                <div id="mktero-account-form">
+                    <input id="mktero-account-email">
+                    <div id="mktero-account-code-row" hidden><input id="mktero-account-code"><button id="mktero-account-send-code"></button></div>
+                    <div id="mktero-account-password-row"><input id="mktero-account-password"></div>
+                    <div id="mktero-account-password-confirm-row" hidden><input id="mktero-account-password-confirm"></div>
+                    <div id="mktero-account-register-nickname-row" hidden><input id="mktero-account-register-nickname"></div>
+                    <button id="mktero-account-forgot"></button>
+                    <button id="mktero-account-login"></button>
+                    <button id="mktero-account-register" hidden></button>
+                    <button id="mktero-account-send-reset" hidden></button>
+                    <button id="mktero-account-forgot-back" hidden></button>
+                    <p id="mktero-account-status"></p>
+                </div>
+                <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+            </div>
+            <div id="mktero-mineru-endpoint-row" hidden><select id="mktero-mineru-endpoint"><option value="cloud">Cloud</option></select></div>
+            <div id="mktero-mineru-local-base-row" hidden><input id="mktero-mineru-local-base"></div>
+            <div id="mktero-api-key-row" hidden><input id="mktero-api-key"></div>
+            <small id="mktero-conversion-privacy-note"></small>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([['extensions.mktero.conversionProvider', 'mktero']]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const doc = dom.window.document;
+    const tabs = doc.getElementById('mktero-account-tabs');
+    const tabLogin = doc.getElementById('mktero-account-tab-login');
+    const tabRegister = doc.getElementById('mktero-account-tab-register');
+    const form = doc.getElementById('mktero-account-form');
+    const signedIn = doc.getElementById('mktero-account-signed-in');
+    const nicknameRow = doc.getElementById('mktero-account-nickname-row');
+
+    // Signed out: tabs and the form show, the identity block does not.
+    assert.equal(tabs.hidden, false);
+    assert.equal(form.hidden, false);
+    assert.equal(signedIn.hidden, true);
+    assert.equal(nicknameRow.hidden, true);
+    assert.equal(doc.getElementById('mktero-account-code-row').hidden, true);
+
+    // The register tab reveals the code, confirm, and optional nickname fields.
+    tabRegister.dispatchEvent(new dom.window.Event('click'));
+    assert.equal(tabRegister.getAttribute('aria-selected'), 'true');
+    assert.equal(tabLogin.getAttribute('aria-selected'), 'false');
+    assert.equal(doc.getElementById('mktero-account-code-row').hidden, false);
+    assert.equal(doc.getElementById('mktero-account-password-confirm-row').hidden, false);
+    assert.equal(doc.getElementById('mktero-account-register-nickname-row').hidden, false);
+    assert.equal(doc.getElementById('mktero-account-login').hidden, true);
+    assert.equal(doc.getElementById('mktero-account-register').hidden, false);
+
+    tabLogin.dispatchEvent(new dom.window.Event('click'));
+    assert.equal(tabLogin.getAttribute('aria-selected'), 'true');
+    assert.equal(doc.getElementById('mktero-account-register-nickname-row').hidden, true);
+
+    // Signing in swaps the whole card to the identity block.
+    values.set('extensions.mktero.accountEmail', 'user@example.com');
+    values.set('extensions.mktero.accountNickname', 'paper-reader');
+    values.set('extensions.mktero.accountRefreshToken', 'refresh');
+    values.set('extensions.mktero.accountAccessToken', 'access');
+    values.set('extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000);
+    controller.destroy();
+
+    const signedInController = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+    await signedInController.init();
+
+    assert.equal(tabs.hidden, true);
+    assert.equal(form.hidden, true);
+    assert.equal(signedIn.hidden, false);
+    assert.equal(nicknameRow.hidden, false);
+    assert.equal(doc.getElementById('mktero-account-avatar').textContent, 'P');
+    assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
+    assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
+
+    signedInController.destroy();
+});
+
 function createControl(properties = {}) {
     const listeners = new Map();
     return {

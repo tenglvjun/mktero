@@ -8,6 +8,7 @@ import {
 export const ACCOUNT_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 export const ACCOUNT_EMAIL_PREF = 'extensions.mktero.accountEmail';
+export const ACCOUNT_NICKNAME_PREF = 'extensions.mktero.accountNickname';
 export const ACCOUNT_ACCESS_TOKEN_PREF = 'extensions.mktero.accountAccessToken';
 export const ACCOUNT_REFRESH_TOKEN_PREF = 'extensions.mktero.accountRefreshToken';
 export const ACCOUNT_ACCESS_EXPIRES_AT_PREF =
@@ -16,6 +17,7 @@ export const ACCOUNT_API_BASE_PREF = 'extensions.mktero.accountApiBase';
 
 const SESSION_PREFS = [
     ACCOUNT_EMAIL_PREF,
+    ACCOUNT_NICKNAME_PREF,
     ACCOUNT_ACCESS_TOKEN_PREF,
     ACCOUNT_REFRESH_TOKEN_PREF,
     ACCOUNT_ACCESS_EXPIRES_AT_PREF,
@@ -24,6 +26,7 @@ const SESSION_PREFS = [
 export function getAccountSession(zotero) {
     return {
         email: readString(zotero, ACCOUNT_EMAIL_PREF),
+        nickname: readString(zotero, ACCOUNT_NICKNAME_PREF),
         accessToken: readString(zotero, ACCOUNT_ACCESS_TOKEN_PREF),
         refreshToken: readString(zotero, ACCOUNT_REFRESH_TOKEN_PREF),
         accessExpiresAt: readExpiresAt(zotero),
@@ -42,6 +45,7 @@ export function accessTokenNeedsRefresh(session, now = Date.now()) {
 
 export function saveAccountSession(zotero, session) {
     writeString(zotero, ACCOUNT_EMAIL_PREF, session?.email);
+    writeString(zotero, ACCOUNT_NICKNAME_PREF, session?.nickname);
     writeString(zotero, ACCOUNT_ACCESS_TOKEN_PREF, session?.accessToken);
     writeString(zotero, ACCOUNT_REFRESH_TOKEN_PREF, session?.refreshToken);
     const expiresAt = Number(session?.accessExpiresAt);

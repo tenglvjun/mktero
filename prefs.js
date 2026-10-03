@@ -5,6 +5,7 @@ pref("extensions.mktero.mineruLocalApiKey", "");
 pref("extensions.mktero.conversionProvider", "mineru");
 pref("extensions.mktero.accountApiBase", "http://127.0.0.1:8080");
 pref("extensions.mktero.accountEmail", "");
+pref("extensions.mktero.accountNickname", "");
 pref("extensions.mktero.accountAccessToken", "");
 pref("extensions.mktero.accountRefreshToken", "");
 pref("extensions.mktero.accountAccessExpiresAt", 0);

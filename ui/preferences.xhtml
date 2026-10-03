@@ -233,14 +233,57 @@
 
 
                 <html:div id="mktero-account-panel" class="mktero-account-inline">
-                <html:section class="mktero-panel mktero-auth-panel">
-                    <html:div id="mktero-account-signed-in" class="mktero-signed-in" hidden="hidden">
-                        <html:span class="mktero-signed-in-copy">
-                            <html:span class="mktero-signed-in-mark" aria-hidden="true"></html:span>
-                            <html:strong id="mktero-account-signed-in-text"></html:strong>
-                        </html:span>
+                <html:section class="mktero-auth-card">
+                    <html:div id="mktero-account-tabs"
+                              class="mktero-auth-tabs"
+                              role="tablist"
+                              aria-label="Account mode">
+                        <html:button id="mktero-account-tab-login"
+                                     class="mktero-auth-tab"
+                                     type="button"
+                                     role="tab"
+                                     aria-selected="true"
+                                     data-i18n="preferences.account.login"></html:button>
+                        <html:button id="mktero-account-tab-register"
+                                     class="mktero-auth-tab"
+                                     type="button"
+                                     role="tab"
+                                     aria-selected="false"
+                                     data-i18n="preferences.account.register"></html:button>
+                    </html:div>
+
+                    <html:div id="mktero-account-signed-in" class="mktero-account-identity" hidden="hidden">
+                        <html:span id="mktero-account-avatar"
+                                   class="mktero-account-avatar"
+                                   aria-hidden="true"></html:span>
+                        <html:div class="mktero-account-identity-copy">
+                            <html:span class="mktero-account-signed-in-badge">
+                                <html:span class="mktero-account-signed-in-dot" aria-hidden="true"></html:span>
+                                <html:span data-i18n="preferences.account.signedInBadge"></html:span>
+                            </html:span>
+                            <html:strong id="mktero-account-signed-in-nickname"></html:strong>
+                            <html:p id="mktero-account-signed-in-email"></html:p>
+                        </html:div>
+                    </html:div>
+
+                    <html:div id="mktero-account-nickname-row" class="mktero-form-field" hidden="hidden">
+                        <html:label for="mktero-account-nickname" data-i18n="preferences.account.nickname"></html:label>
+                        <html:div class="mktero-input-action">
+                            <html:input id="mktero-account-nickname"
+                                        type="text"
+                                        maxlength="32"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        data-i18n-placeholder="preferences.account.nicknamePlaceholder"
+                                        data-i18n-aria-label="preferences.account.nicknameLabel" />
+                            <html:button id="mktero-account-save-nickname"
+                                         class="mktero-button"
+                                         type="button"
+                                         data-i18n="preferences.account.saveNickname"></html:button>
+                        </html:div>
+                        <html:p id="mktero-account-nickname-status" class="mktero-auth-status" role="status" aria-live="polite"></html:p>
                         <html:button id="mktero-account-logout"
-                                     class="mktero-button"
+                                     class="mktero-button mktero-auth-submit"
                                      type="button"
                                      data-i18n="preferences.account.logout"></html:button>
                     </html:div>
@@ -255,6 +298,7 @@
                         </html:div>
 
                         <html:div class="mktero-form-field">
+                            <html:label for="mktero-account-email" data-i18n="preferences.account.emailLabel"></html:label>
                             <html:input id="mktero-account-email"
                                         type="email"
                                         autocomplete="username"
@@ -264,6 +308,7 @@
                         </html:div>
 
                         <html:div id="mktero-account-code-row" class="mktero-form-field" hidden="hidden">
+                            <html:label for="mktero-account-code" data-i18n="preferences.account.codeLabel"></html:label>
                             <html:div class="mktero-input-action">
                                 <html:input id="mktero-account-code"
                                             type="text"
@@ -281,6 +326,7 @@
                         </html:div>
 
                         <html:div id="mktero-account-password-row" class="mktero-form-field">
+                            <html:label for="mktero-account-password" data-i18n="preferences.account.passwordLabel"></html:label>
                             <html:input id="mktero-account-password"
                                         type="password"
                                         autocomplete="current-password"
@@ -290,6 +336,7 @@
                         </html:div>
 
                         <html:div id="mktero-account-password-confirm-row" class="mktero-form-field" hidden="hidden">
+                            <html:label for="mktero-account-password-confirm" data-i18n="preferences.account.confirmPasswordLabel"></html:label>
                             <html:input id="mktero-account-password-confirm"
                                         type="password"
                                         autocomplete="new-password"
@@ -297,6 +344,22 @@
                                         data-i18n-placeholder="preferences.account.confirmPasswordPlaceholder"
                                         data-i18n-aria-label="preferences.account.confirmPasswordLabel" />
                         </html:div>
+
+                        <html:div id="mktero-account-register-nickname-row" class="mktero-form-field" hidden="hidden">
+                            <html:label for="mktero-account-register-nickname" data-i18n="preferences.account.nicknameLabel"></html:label>
+                            <html:input id="mktero-account-register-nickname"
+                                        type="text"
+                                        maxlength="32"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        data-i18n-placeholder="preferences.account.nicknameOptionalPlaceholder"
+                                        data-i18n-aria-label="preferences.account.nicknameLabel" />
+                        </html:div>
+
+                        <html:button id="mktero-account-forgot"
+                                     class="mktero-link-button mktero-auth-inline-link"
+                                     type="button"
+                                     data-i18n="preferences.account.forgot"></html:button>
 
                         <html:button id="mktero-account-login"
                                      class="mktero-button mktero-button-primary mktero-auth-submit"
@@ -312,17 +375,6 @@
                                      type="button"
                                      hidden="hidden"
                                      data-i18n="preferences.account.sendReset"></html:button>
-
-                        <html:p id="mktero-account-switch" class="mktero-auth-switch">
-                            <html:span id="mktero-account-switch-lead"></html:span>
-                            <html:button id="mktero-account-switch-action"
-                                         class="mktero-link-button"
-                                         type="button"></html:button>
-                        </html:p>
-                        <html:button id="mktero-account-forgot"
-                                     class="mktero-link-button mktero-auth-inline-link"
-                                     type="button"
-                                     data-i18n="preferences.account.forgot"></html:button>
                         <html:button id="mktero-account-forgot-back"
                                      class="mktero-link-button mktero-auth-inline-link"
                                      type="button"

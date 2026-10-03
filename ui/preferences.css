@@ -158,55 +158,186 @@
 }
 
 .mktero-account-inline {
-    border-top: 1px solid var(--material-border, rgba(127, 127, 127, 0.22));
-}
-
-.mktero-account-inline .mktero-panel {
-    padding: 20px 0 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
+    display: flex;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 24px 28px 28px;
 }
 
 .mktero-account-inline[hidden] {
     display: none;
 }
 
-.mktero-auth-panel {
-    display: flex;
-    justify-content: center;
+/* The account card mirrors the website: a segmented tab row, then either the
+   sign-in form or the signed-in identity block. It sits inside the settings
+   card, so it adds no fill of its own and no second border. */
+.mktero-auth-card {
+    box-sizing: border-box;
+    display: grid;
+    gap: 22px;
+    width: 100%;
+    max-width: 452px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: CanvasText;
+    color-scheme: light dark;
+}
+
+.mktero-auth-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, CanvasText 8%, Canvas);
+}
+
+.mktero-auth-tabs[hidden] {
+    display: none;
+}
+
+.mktero-auth-tab {
+    -moz-appearance: none;
+    appearance: none;
+    min-height: 38px;
+    margin: 0;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: color-mix(in srgb, CanvasText 62%, Canvas);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.mktero-auth-tab:hover {
+    color: CanvasText;
+}
+
+.mktero-auth-tab[aria-selected='true'] {
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
 }
 
 .mktero-auth-form {
     display: grid;
-    gap: 12px;
+    gap: 16px;
     width: 100%;
-    max-width: 380px;
+}
+
+.mktero-auth-form[hidden] {
+    display: none;
 }
 
 .mktero-auth-submit {
     width: 100%;
-    min-height: 40px;
-    margin-top: 4px;
-    font-size: 0.96rem;
+    min-height: 46px;
+    margin-top: 2px;
+    font-size: 0.92rem;
 }
 
-.mktero-auth-switch {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: center;
-    gap: 4px;
-    margin: 2px 0 0;
-    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
-    font-size: 0.88rem;
-    text-align: center;
+/* Fields and buttons follow the website card: white inputs with a soft border
+   and a blue focus ring, and a dark pill as the primary action. */
+.mktero-auth-card .mktero-form-field label {
+    font-size: 0.86rem;
+    font-weight: 650;
 }
 
-.mktero-auth-inline-link {
+.mktero-auth-card .mktero-form-field input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 13px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: Canvas;
+    color: CanvasText;
+    color-scheme: light dark;
+    font: inherit;
+    font-size: 0.94rem;
+}
+
+.mktero-auth-card .mktero-form-field input::placeholder {
+    color: color-mix(in srgb, CanvasText 42%, Canvas);
+    opacity: 1;
+}
+
+.mktero-auth-card .mktero-form-field input:hover {
+    border-color: color-mix(in srgb, CanvasText 26%, Canvas);
+}
+
+.mktero-auth-card .mktero-form-field input:focus {
+    border-color: #3b82f6;
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.16);
+}
+
+.mktero-auth-card .mktero-input-action .mktero-button {
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, CanvasText 11%, Canvas);
+    border-radius: 12px;
+    background: Canvas;
+    color: CanvasText;
+    font-size: 0.86rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.mktero-auth-card .mktero-input-action .mktero-button:hover {
+    border-color: color-mix(in srgb, CanvasText 26%, Canvas);
+    background: color-mix(in srgb, Canvas 97%, CanvasText 3%);
+}
+
+.mktero-auth-card .mktero-button-primary {
+    min-height: 46px;
+    padding: 0 18px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: #111111;
+    color: #ffffff;
+    font-size: 0.92rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+}
+
+.mktero-auth-card .mktero-button-primary:hover {
+    border-color: transparent;
+    background: #000000;
+}
+
+/* Sign out is the secondary action, so it reads as an outlined pill. */
+.mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary) {
     justify-self: center;
-    font-size: 0.88rem;
+    width: auto;
+    min-width: 160px;
+    min-height: 44px;
+    margin-top: 4px;
+    border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas);
+    border-radius: 999px;
+    background: Canvas;
+    color: CanvasText;
+    font-weight: 650;
+}
+
+.mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary):hover {
+    border-color: color-mix(in srgb, CanvasText 26%, Canvas);
+    background: color-mix(in srgb, Canvas 97%, CanvasText 3%);
+}
+
+.mktero-auth-card .mktero-auth-inline-link {
+    justify-self: end;
+    color: #3b82f6;
+    font-size: 0.85rem;
+}
+
+.mktero-auth-card .mktero-auth-inline-link:hover {
+    color: #2563eb;
 }
 
 .mktero-auth-status {
@@ -218,35 +349,74 @@
     text-align: center;
 }
 
-.mktero-signed-in {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 16px;
-    border: 1px solid color-mix(in srgb, AccentColor 30%, Canvas);
-    border-radius: 11px;
-    background: color-mix(in srgb, AccentColor 7%, Canvas);
+.mktero-auth-status[data-tone='success'] {
+    color: color-mix(in srgb, AccentColor 72%, CanvasText);
 }
 
-.mktero-signed-in-copy {
-    display: inline-flex;
+/* Signed-in identity: avatar initial, name, email, then the nickname editor. */
+.mktero-account-identity {
+    display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 16px;
     min-width: 0;
 }
 
-.mktero-signed-in-mark {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: AccentColor;
+.mktero-account-identity[hidden] {
+    display: none;
 }
 
-.mktero-signed-in strong {
-    overflow-wrap: anywhere;
+.mktero-account-avatar {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: AccentColor;
+    color: AccentColorText;
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.mktero-account-identity-copy {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.mktero-account-signed-in-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    width: fit-content;
+    padding: 3px 11px;
+    border-radius: 999px;
+    background: color-mix(in srgb, #10b981 16%, Canvas);
+    color: color-mix(in srgb, #067647 88%, CanvasText);
+    font-size: 0.78rem;
     font-weight: 650;
+}
+
+.mktero-account-signed-in-dot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #10b981;
+}
+
+.mktero-account-identity-copy strong {
+    overflow-wrap: anywhere;
+    font-size: 1.05rem;
+    font-weight: 650;
+}
+
+.mktero-account-identity-copy p {
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--fill-secondary, rgba(90, 90, 90, 0.88));
+    font-size: 0.88rem;
 }
 
 .mktero-form {
@@ -412,9 +582,8 @@
 }
 
 .mktero-form-field[hidden],
-.mktero-signed-in[hidden],
 #mktero-account-form[hidden],
-#mktero-account-switch[hidden],
+#mktero-account-nickname-row[hidden],
 #mktero-account-login[hidden],
 #mktero-account-register[hidden],
 #mktero-account-send-reset[hidden],
@@ -805,11 +974,13 @@
 }
 
 #mktero-account-api-base-row[hidden],
-#mktero-account-signed-in-row[hidden],
-#mktero-account-email-row[hidden],
-#mktero-account-password-row[hidden],
+#mktero-account-register-nickname-row[hidden],
+#mktero-account-password-confirm-row[hidden],
+#mktero-account-code-row[hidden],
 #mktero-pdf-account-status[hidden],
-#mktero-ai-account-status[hidden],
+#mktero-ai-account-status[hidden] {
+    display: none;
+}
 
 .mktero-card-note {
     display: block;

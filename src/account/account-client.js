@@ -6,10 +6,18 @@ const JSON_HEADERS = Object.freeze({
 export async function sendSignupCode({
     apiBase,
     email,
+    locale = '',
     fetchImpl = globalThis.fetch,
 } = {}) {
-    await postJSON(fetchImpl, apiBase, '/api/v1/auth/verification-code', { email });
+    await postJSON(fetchImpl, apiBase, '/api/v1/auth/verification-code', withLocale({ email }, locale));
     return { codeSent: true };
+}
+
+// withLocale adds the interface language so the server can localize the email.
+// An empty value is omitted and the server falls back to English.
+function withLocale(payload, locale) {
+    const tag = String(locale || '').trim();
+    return tag ? { ...payload, locale: tag } : payload;
 }
 
 export async function registerMkteroAccount({
@@ -17,14 +25,19 @@ export async function registerMkteroAccount({
     email,
     password,
     code,
+    nickname,
+    locale = '',
     fetchImpl = globalThis.fetch,
     now = Date.now,
 } = {}) {
-    const body = await postJSON(fetchImpl, apiBase, '/api/v1/auth/register', {
+    const trimmedNickname = String(nickname || '').trim();
+    const body = await postJSON(fetchImpl, apiBase, '/api/v1/auth/register', withLocale({
         email,
         password,
         code,
-    });
+        // The server generates a nickname when this is absent.
+        ...(trimmedNickname ? { nickname: trimmedNickname } : {}),
+    }, locale));
     if (body?.status === 'verification_required') {
         return { verificationRequired: true, email: String(email || '').trim() };
     }
@@ -77,16 +90,41 @@ export async function logoutMkteroAccount({
     });
 }
 
+// updateMkteroNickname replaces the display nickname of the signed-in account.
+export async function updateMkteroNickname({
+    apiBase,
+    accessToken,
+    nickname,
+    fetchImpl = globalThis.fetch,
+} = {}) {
+    const body = await requestJSON(fetchImpl, apiBase, '/api/v1/me', {
+        method: 'PATCH',
+        token: accessToken,
+        payload: { nickname: String(nickname || '').trim() },
+    });
+    return { nickname: String(body?.nickname || '').trim() };
+}
+
 async function postJSON(fetchImpl, apiBase, path, payload) {
+    return requestJSON(fetchImpl, apiBase, path, { payload });
+}
+
+async function requestJSON(fetchImpl, apiBase, path, {
+    method = 'POST',
+    payload,
+    token = '',
+} = {}) {
     if (typeof fetchImpl !== 'function') {
         throw accountError('network');
     }
+    const headers = { ...JSON_HEADERS };
+    if (token) headers.Authorization = `Bearer ${token}`;
     let response;
     try {
         response = await fetchImpl(joinURL(apiBase, path), {
-            method: 'POST',
-            headers: JSON_HEADERS,
-            body: JSON.stringify(payload),
+            method,
+            headers,
+            body: JSON.stringify(payload ?? {}),
         });
     }
     catch {
@@ -112,6 +150,7 @@ function sessionFromBody(body, now) {
     const accessToken = String(body?.access_token || '').trim();
     const refreshToken = String(body?.refresh_token || '').trim();
     const email = String(body?.user?.email || body?.email || '').trim();
+    const nickname = String(body?.user?.nickname || '').trim();
     if (!accessToken || !refreshToken) {
         throw accountError('invalid_response');
     }
@@ -121,6 +160,7 @@ function sessionFromBody(body, now) {
         : 60 * 60 * 1000;
     return {
         email,
+        nickname,
         accessToken,
         refreshToken,
         accessExpiresAt: now() + lifetimeMs,

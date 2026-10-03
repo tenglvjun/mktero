@@ -76,6 +76,7 @@ import {
     registerMkteroAccount,
     requestPasswordReset,
     sendSignupCode,
+    updateMkteroNickname,
 } from '../account/account-client.js';
 import {
     accessTokenNeedsRefresh,
@@ -204,12 +205,19 @@ export function createPreferencesController({
     const accountForgotButton = document.getElementById('mktero-account-forgot');
     const accountForgotBackButton = document.getElementById('mktero-account-forgot-back');
     const accountSendResetButton = document.getElementById('mktero-account-send-reset');
-    const accountSwitch = document.getElementById('mktero-account-switch');
-    const accountSwitchLead = document.getElementById('mktero-account-switch-lead');
-    const accountSwitchAction = document.getElementById('mktero-account-switch-action');
     const accountCodeInput = document.getElementById('mktero-account-code');
     const accountConfirmInput = document.getElementById('mktero-account-password-confirm');
     const accountSendCodeButton = document.getElementById('mktero-account-send-code');
+    // The registration nickname is optional and only shown while registering.
+    const accountNicknameInput = document.getElementById('mktero-account-register-nickname');
+    const accountTabLogin = document.getElementById('mktero-account-tab-login');
+    const accountTabRegister = document.getElementById('mktero-account-tab-register');
+    const accountAvatar = document.getElementById('mktero-account-avatar');
+    const accountSignedInNickname = document.getElementById('mktero-account-signed-in-nickname');
+    const accountSignedInEmail = document.getElementById('mktero-account-signed-in-email');
+    const accountProfileNicknameInput = document.getElementById('mktero-account-nickname');
+    const accountSaveNicknameButton = document.getElementById('mktero-account-save-nickname');
+    const accountNicknameStatus = document.getElementById('mktero-account-nickname-status');
     let accountMode = 'login';
     let codeCooldownTimer = 0;
     const accountLogoutButton = document.getElementById('mktero-account-logout');
@@ -622,6 +630,13 @@ export function createPreferencesController({
         accountStatus.textContent = key ? t(key) : '';
     }
 
+    function setAccountNicknameStatus(key, tone = '') {
+        if (!accountNicknameStatus) return;
+        accountNicknameStatus.textContent = key ? t(key) : '';
+        if (tone) accountNicknameStatus.dataset.tone = tone;
+        else delete accountNicknameStatus.dataset.tone;
+    }
+
     function accountErrorKey(error) {
         if (error?.code === 'invalid_credentials') {
             return 'preferences.account.invalidCredentials';
@@ -671,13 +686,21 @@ export function createPreferencesController({
 
         const signedInPanel = document.getElementById('mktero-account-signed-in');
         const accountForm = document.getElementById('mktero-account-form');
+        const tabs = document.getElementById('mktero-account-tabs');
+        const nicknameRow = document.getElementById('mktero-account-nickname-row');
         if (signedInPanel) signedInPanel.hidden = !signedIn;
         if (accountForm) accountForm.hidden = signedIn;
-        const signedInLabel = document.getElementById('mktero-account-signed-in-text');
-        if (signedInLabel) {
-            signedInLabel.textContent = t('preferences.account.signedIn', {
-                email: session.email,
-            });
+        // Tabs and the nickname editor belong to exactly one of the two states.
+        if (tabs) tabs.hidden = signedIn;
+        if (nicknameRow) nicknameRow.hidden = !signedIn;
+        if (signedIn) {
+            const nickname = session.nickname || session.email || '';
+            if (accountAvatar) accountAvatar.textContent = accountInitial(nickname);
+            if (accountSignedInNickname) accountSignedInNickname.textContent = nickname;
+            if (accountSignedInEmail) accountSignedInEmail.textContent = session.email || '';
+            if (accountProfileNicknameInput && !accountProfileNicknameInput.value) {
+                accountProfileNicknameInput.value = session.nickname || '';
+            }
         }
         if (!signedIn) setAccountMode(accountMode);
         if (apiBaseRow) apiBaseRow.hidden = !isDebugBuild();
@@ -685,6 +708,12 @@ export function createPreferencesController({
             accountApiBaseInput.value = getAccountApiBase(zotero);
         }
         updateServiceSources();
+    }
+
+    // accountInitial returns the first character used by the avatar circle.
+    function accountInitial(value) {
+        const source = String(value || '').trim();
+        return source ? source[0].toUpperCase() : '?';
     }
 
     function setHidden(id, hidden) {
@@ -699,25 +728,18 @@ export function createPreferencesController({
         setHidden('mktero-account-password-row', forgot);
         setHidden('mktero-account-code-row', !register);
         setHidden('mktero-account-password-confirm-row', !register);
+        setHidden('mktero-account-register-nickname-row', !register);
         if (accountLoginButton) accountLoginButton.hidden = mode !== 'login';
         if (accountRegisterButton) accountRegisterButton.hidden = !register;
         if (accountSendResetButton) accountSendResetButton.hidden = !forgot;
         if (accountForgotButton) accountForgotButton.hidden = mode !== 'login';
         if (accountForgotBackButton) accountForgotBackButton.hidden = !forgot;
-        if (accountSwitch) accountSwitch.hidden = forgot;
-        if (accountSwitchLead) {
-            accountSwitchLead.textContent = t(
-                register
-                    ? 'preferences.account.switchToLoginLead'
-                    : 'preferences.account.switchToRegisterLead'
-            );
+        // The login / register tabs stay visible while signing in or registering.
+        if (accountTabLogin) {
+            accountTabLogin.setAttribute('aria-selected', String(mode === 'login'));
         }
-        if (accountSwitchAction) {
-            accountSwitchAction.textContent = t(
-                register
-                    ? 'preferences.account.switchToLoginAction'
-                    : 'preferences.account.switchToRegisterAction'
-            );
+        if (accountTabRegister) {
+            accountTabRegister.setAttribute('aria-selected', String(register));
         }
         if (accountPasswordInput) {
             accountPasswordInput.setAttribute(
@@ -727,9 +749,49 @@ export function createPreferencesController({
         }
     }
 
-    function toggleAccountMode() {
-        setAccountMode(accountMode === 'register' ? 'login' : 'register');
+    function selectAccountLoginTab() {
+        setAccountMode('login');
         setAccountStatus('');
+    }
+
+    function selectAccountRegisterTab() {
+        setAccountMode('register');
+        setAccountStatus('');
+    }
+
+    async function saveAccountNickname() {
+        if (accountBusy) return;
+        const nickname = String(accountProfileNicknameInput?.value || '').trim();
+        if (!nickname) {
+            setAccountNicknameStatus('preferences.account.nicknameRequired');
+            return;
+        }
+        const session = getAccountSession(zotero);
+        if (!session.refreshToken) return;
+        setAccountBusy(true);
+        setAccountNicknameStatus('');
+        try {
+            const updated = await updateMkteroNickname({
+                apiBase: getAccountApiBase(zotero),
+                accessToken: session.accessToken,
+                nickname,
+            });
+            saveAccountSession(zotero, {
+                ...session,
+                nickname: updated.nickname || nickname,
+            });
+            if (accountProfileNicknameInput) {
+                accountProfileNicknameInput.value = updated.nickname || nickname;
+            }
+            setAccountNicknameStatus('preferences.account.nicknameSaved', 'success');
+            renderAccount();
+        }
+        catch (error) {
+            setAccountNicknameStatus(accountErrorKey(error));
+        }
+        finally {
+            setAccountBusy(false);
+        }
     }
 
     function selectAccountForgotMode() {
@@ -747,6 +809,7 @@ export function createPreferencesController({
         if (accountSendResetButton) accountSendResetButton.disabled = busy;
         if (accountSendCodeButton) accountSendCodeButton.disabled = busy || accountSendCodeButton.dataset.cooling === 'true';
         if (accountLogoutButton) accountLogoutButton.disabled = busy;
+        if (accountSaveNicknameButton) accountSaveNicknameButton.disabled = busy;
     }
 
     async function submitAccount(request) {
@@ -767,11 +830,15 @@ export function createPreferencesController({
             });
             if (session?.verificationRequired) {
                 if (accountPasswordInput) accountPasswordInput.value = '';
+                if (accountConfirmInput) accountConfirmInput.value = '';
+                if (accountNicknameInput) accountNicknameInput.value = '';
                 setAccountStatus('preferences.account.verificationSent');
                 return;
             }
             saveAccountSession(zotero, session);
             if (accountPasswordInput) accountPasswordInput.value = '';
+            if (accountConfirmInput) accountConfirmInput.value = '';
+            if (accountNicknameInput) accountNicknameInput.value = '';
             renderAccount();
         }
         catch (error) {
@@ -841,6 +908,7 @@ export function createPreferencesController({
             await sendSignupCode({
                 apiBase: getAccountApiBase(zotero),
                 email,
+                locale: accountEmailLocale(),
             });
             setAccountStatus('preferences.account.codeSent');
             startCodeCooldown();
@@ -851,6 +919,13 @@ export function createPreferencesController({
         finally {
             setAccountBusy(false);
         }
+    }
+
+    // accountEmailLocale reports the Zotero interface language so the server can
+    // localize transactional email. The server falls back to English for tags it
+    // does not know.
+    function accountEmailLocale() {
+        return getZoteroLocale(zotero, services);
     }
 
     function loginAccount() {
@@ -869,7 +944,13 @@ export function createPreferencesController({
             setAccountStatus('preferences.account.invalidCode');
             return undefined;
         }
-        return submitAccount(args => registerMkteroAccount({ ...args, code }));
+        const nickname = String(accountNicknameInput?.value || '').trim();
+        return submitAccount(args => registerMkteroAccount({
+            ...args,
+            code,
+            nickname,
+            locale: accountEmailLocale(),
+        }));
     }
 
     async function logoutAccount() {
@@ -903,6 +984,7 @@ export function createPreferencesController({
             saveAccountSession(zotero, {
                 ...refreshed,
                 email: refreshed.email || session.email,
+                nickname: refreshed.nickname || session.nickname,
             });
         }
         catch {
@@ -937,11 +1019,13 @@ export function createPreferencesController({
         accountLoginButton?.addEventListener('click', loginAccount);
         accountRegisterButton?.addEventListener('click', registerAccount);
         accountLogoutButton?.addEventListener('click', logoutAccount);
-        accountSwitchAction?.addEventListener('click', toggleAccountMode);
+        accountTabLogin?.addEventListener('click', selectAccountLoginTab);
+        accountTabRegister?.addEventListener('click', selectAccountRegisterTab);
         accountForgotButton?.addEventListener('click', selectAccountForgotMode);
         accountForgotBackButton?.addEventListener('click', selectAccountForgotBack);
         accountSendResetButton?.addEventListener('click', sendPasswordReset);
         accountSendCodeButton?.addEventListener('click', sendAccountCode);
+        accountSaveNicknameButton?.addEventListener('click', saveAccountNickname);
         accountApiBaseInput?.addEventListener('change', saveAccountApiBase);
         renderAccount();
     }
@@ -1375,7 +1459,6 @@ export function createPreferencesController({
             accountLoginButton?.removeEventListener('click', loginAccount);
             accountRegisterButton?.removeEventListener('click', registerAccount);
             accountLogoutButton?.removeEventListener('click', logoutAccount);
-            accountSwitchAction?.removeEventListener('click', toggleAccountMode);
             accountForgotButton?.removeEventListener('click', selectAccountForgotMode);
             accountForgotBackButton?.removeEventListener('click', selectAccountForgotBack);
             accountSendResetButton?.removeEventListener('click', sendPasswordReset);
