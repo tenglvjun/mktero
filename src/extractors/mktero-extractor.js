@@ -30,6 +30,7 @@ export class MkteroDocumentExtractor {
         createCacheKey = null,
         createSourceHash = null,
         readRevision = null,
+        cache = null,
         isCacheEnabled = () => false,
         prepareResult = prepareMinerUResult,
         recoverFigures = async result => result,
@@ -56,6 +57,7 @@ export class MkteroDocumentExtractor {
         this.createCacheKey = createCacheKey;
         this.createSourceHash = createSourceHash;
         this.readRevision = readRevision;
+        this.cache = cache;
         this.isCacheEnabled = isCacheEnabled;
         this.prepareResult = prepareResult;
         this.recoverFigures = recoverFigures;
@@ -102,6 +104,7 @@ export class MkteroDocumentExtractor {
             error => this.#reportCacheError(error)
         );
 
+        const cacheEnabled = Boolean(this.isCacheEnabled());
         if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
             const revision = await this.#readRevision({
                 itemID,
@@ -122,6 +125,29 @@ export class MkteroDocumentExtractor {
                     true,
                     warnings,
                     revision.cacheKey,
+                    false,
+                    sourceHash
+                );
+            }
+        }
+        if (!forceRefresh && cacheKey) {
+            const cached = await this.#readCachedResult({
+                cacheKey,
+                fileData,
+                cacheEnabled,
+                signal,
+                warnings,
+                onProgress,
+            });
+            throwIfAborted(signal);
+            if (cached) {
+                onProgress?.(100);
+                return createResult(
+                    title,
+                    cached,
+                    true,
+                    warnings,
+                    cacheKey,
                     false,
                     sourceHash
                 );
@@ -159,6 +185,9 @@ export class MkteroDocumentExtractor {
             onProgress,
         });
         throwIfAborted(signal);
+        if (cacheKey && cacheEnabled) {
+            await this.#saveCachedResult(cacheKey, result, signal, warnings);
+        }
         return createResult(
             title,
             result,
@@ -193,6 +222,107 @@ export class MkteroDocumentExtractor {
             if (revision) return { snapshot: revision, cacheKey: legacyKey };
         }
         return null;
+    }
+
+    // #readCachedResult uses the same local Markdown cache as MinerU. A disabled
+    // cache still returns a user-edited entry so corrections are not discarded.
+    async #readCachedResult({
+        cacheKey,
+        fileData,
+        cacheEnabled,
+        signal,
+        warnings,
+        onProgress,
+    }) {
+        if (!this.cache?.get) return null;
+        const cached = await this.#getCachedResult(cacheKey, warnings);
+        throwIfAborted(signal);
+        if (cached && (cacheEnabled || cached.userEdited)) {
+            return this.#finishCachedResult({
+                cached,
+                cacheKey,
+                storedKey: cacheKey,
+                fileData,
+                cacheEnabled,
+                signal,
+                warnings,
+                onProgress,
+            });
+        }
+        if (!cacheEnabled || !this.createCacheKey) return null;
+        const visited = new Set([cacheKey]);
+        for (const parserProfile of MINERU_COMPATIBLE_CACHE_PROFILE_IDS) {
+            let legacyKey = null;
+            try {
+                legacyKey = await this.createCacheKey(fileData, { parserProfile });
+            }
+            catch (error) {
+                this.#reportCacheError(error);
+                continue;
+            }
+            throwIfAborted(signal);
+            if (!legacyKey || visited.has(legacyKey)) continue;
+            visited.add(legacyKey);
+            const legacy = await this.#getCachedResult(legacyKey, warnings);
+            throwIfAborted(signal);
+            if (!legacy) continue;
+            return this.#finishCachedResult({
+                cached: legacy,
+                cacheKey,
+                storedKey: legacyKey,
+                fileData,
+                cacheEnabled,
+                signal,
+                warnings,
+                onProgress,
+            });
+        }
+        return null;
+    }
+
+    async #getCachedResult(cacheKey, warnings) {
+        try {
+            return await this.cache.get(cacheKey);
+        }
+        catch (error) {
+            this.#reportCacheError(error);
+            warnings.push('The local Markdown cache could not be read.');
+            return null;
+        }
+    }
+
+    async #finishCachedResult({
+        cached,
+        cacheKey,
+        storedKey,
+        fileData,
+        cacheEnabled,
+        signal,
+        warnings,
+        onProgress,
+    }) {
+        const recovered = await this.recoverFigures(cached, {
+            fileData,
+            signal,
+            onProgress,
+        });
+        throwIfAborted(signal);
+        if (cacheEnabled && (storedKey !== cacheKey || recovered !== cached)) {
+            await this.#saveCachedResult(cacheKey, recovered, signal, warnings);
+        }
+        return recovered;
+    }
+
+    async #saveCachedResult(cacheKey, result, signal, warnings) {
+        if (!this.cache?.put) return;
+        try {
+            await this.cache.put(cacheKey, result, { signal });
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            this.#reportCacheError(error);
+            warnings.push('The Markdown result could not be saved to the local cache.');
+        }
     }
 
     #preparePDFIndex(itemID, fileData, signal) {

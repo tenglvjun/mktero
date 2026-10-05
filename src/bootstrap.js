@@ -717,6 +717,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         createCacheKey: (fileData, options) => createMinerUCacheKey(fileData, options),
         createSourceHash: fileData => sha256Hex(fileData),
         readRevision: options => readRevisionSnapshot(options),
+        cache,
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         prepareResult: prepareWithFigures(
             decodeMinerUFigureInput,

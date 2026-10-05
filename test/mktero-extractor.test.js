@@ -118,6 +118,109 @@ test('surfaces a signed-out user as a configuration error', async () => {
     );
 });
 
+test('reuses a cached conversion without calling the hosted service', async () => {
+    let converted = false;
+    const extractor = createExtractor({
+        conversion: {
+            async convert() {
+                converted = true;
+                return { result: { markdown: 'fresh' }, origin: 'network' };
+            },
+        },
+        createCacheKey: async () => 'a'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: {
+            async get(key) {
+                assert.equal(key, 'a'.repeat(64));
+                return { markdown: '# Cached' };
+            },
+            async put() {
+                throw new Error('a cache hit must not be written again');
+            },
+        },
+    });
+
+    const result = await extractor.extract(42, {});
+
+    assert.equal(converted, false);
+    assert.equal(result.markdown, '# Cached');
+    assert.equal(result.cacheHit, true);
+    assert.equal(result.cacheKey, 'a'.repeat(64));
+});
+
+test('saves a hosted conversion to the local cache', async () => {
+    const saved = [];
+    const extractor = createExtractor({
+        createCacheKey: async () => 'b'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: {
+            async get() {
+                return null;
+            },
+            async put(key, result) {
+                saved.push([key, result.markdown]);
+            },
+        },
+        prepareResult: async raw => ({ ...raw, markdown: `${raw.markdown} prepared` }),
+        recoverFigures: async result => ({ ...result, markdown: `${result.markdown} figures` }),
+    });
+
+    const result = await extractor.extract(42, {});
+
+    assert.equal(result.cacheHit, false);
+    assert.deepEqual(saved, [['b'.repeat(64), '# Hosted result prepared figures']]);
+});
+
+test('does not read or write the cache when reuse is disabled', async () => {
+    let reads = 0;
+    let writes = 0;
+    const extractor = createExtractor({
+        createCacheKey: async () => 'c'.repeat(64),
+        isCacheEnabled: () => false,
+        cache: {
+            async get() {
+                reads += 1;
+                return { markdown: '# Cached' };
+            },
+            async put() {
+                writes += 1;
+            },
+        },
+    });
+
+    const result = await extractor.extract(42, {});
+
+    assert.equal(result.markdown, '# Hosted result');
+    assert.equal(result.cacheHit, false);
+    assert.equal(reads, 1);
+    assert.equal(writes, 0);
+});
+
+test('still opens a user-edited cache entry when reuse is disabled', async () => {
+    let converted = false;
+    const extractor = createExtractor({
+        conversion: {
+            async convert() {
+                converted = true;
+                return { result: { markdown: 'fresh' }, origin: 'network' };
+            },
+        },
+        createCacheKey: async () => 'd'.repeat(64),
+        isCacheEnabled: () => false,
+        cache: {
+            async get() {
+                return { markdown: '# Edited locally', userEdited: true };
+            },
+        },
+    });
+
+    const result = await extractor.extract(42, {});
+
+    assert.equal(converted, false);
+    assert.equal(result.markdown, '# Edited locally');
+    assert.equal(result.cacheHit, true);
+});
+
 test('reuses a stored revision without calling the hosted service', async () => {
     let converted = false;
     const extractor = createExtractor({
