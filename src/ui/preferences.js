@@ -244,7 +244,6 @@ export function createPreferencesController({
     );
     const accountProfileNicknameInput = document.getElementById('mktero-account-nickname');
     const accountSaveNicknameButton = document.getElementById('mktero-account-save-nickname');
-    const accountNicknameStatus = document.getElementById('mktero-account-nickname-status');
     const accountStatTotal = document.getElementById('mktero-stat-total');
     const accountStatStreak = document.getElementById('mktero-stat-streak');
     const accountStatLongest = document.getElementById('mktero-stat-longest');
@@ -666,18 +665,12 @@ export function createPreferencesController({
         accountStatus.textContent = key ? t(key) : '';
     }
 
-    function setAccountNicknameStatus(key, tone = '') {
-        if (accountNicknameStatus) {
-            accountNicknameStatus.textContent = key ? t(key) : '';
-            if (tone) accountNicknameStatus.dataset.tone = tone;
-            else delete accountNicknameStatus.dataset.tone;
-        }
-        // The dialog is transient, so a save confirmation also lands on the card.
-        if (accountDialogStatus) {
-            accountDialogStatus.textContent = tone === 'success' ? t(key) : '';
-            if (tone === 'success') accountDialogStatus.dataset.tone = tone;
-            else delete accountDialogStatus.dataset.tone;
-        }
+    // Errors stay in the dialog. A successful save closes it, and the updated
+    // name on the card is the confirmation, so nothing is written back there.
+    function setAccountNicknameStatus(key) {
+        if (!accountDialogStatus) return;
+        accountDialogStatus.textContent = key ? t(key) : '';
+        delete accountDialogStatus.dataset.tone;
     }
 
     function accountErrorKey(error) {
@@ -956,7 +949,6 @@ export function createPreferencesController({
             if (accountProfileNicknameInput) {
                 accountProfileNicknameInput.value = updated.nickname || nickname;
             }
-            setAccountNicknameStatus('preferences.account.nicknameSaved', 'success');
             renderAccount();
             closeAccountNicknameDialog();
         }

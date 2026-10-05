@@ -374,10 +374,6 @@
     text-align: center;
 }
 
-.mktero-auth-status[data-tone='success'] {
-    color: color-mix(in srgb, AccentColor 72%, CanvasText);
-}
-
 /* Signed-in surface: the identity row with its rename button, the conversion
    counters, and the activity heat map. It mirrors the website profile page
    (mktero-web/profile.html) inside the settings card. */
