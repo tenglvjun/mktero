@@ -76,7 +76,6 @@ import {
     logoutMkteroAccount,
     refreshMkteroAccount,
     registerMkteroAccount,
-    requestPasswordReset,
     sendSignupCode,
     updateMkteroNickname,
 } from '../account/account-client.js';
@@ -89,7 +88,11 @@ import {
     saveAccountSession,
     setAccountApiBase,
 } from '../config/account-preferences.js';
-import { isDebugBuild } from '../config/runtime-config.js';
+import {
+    isDebugBuild,
+    MKTERO_DEBUG_SITE_BASE,
+    MKTERO_RELEASE_SITE_BASE,
+} from '../config/runtime-config.js';
 import {
     getMarkdownReaderAlignment,
     getMarkdownReaderFont,
@@ -215,8 +218,6 @@ export function createPreferencesController({
     const accountLoginButton = document.getElementById('mktero-account-login');
     const accountRegisterButton = document.getElementById('mktero-account-register');
     const accountForgotButton = document.getElementById('mktero-account-forgot');
-    const accountForgotBackButton = document.getElementById('mktero-account-forgot-back');
-    const accountSendResetButton = document.getElementById('mktero-account-send-reset');
     const accountCodeInput = document.getElementById('mktero-account-code');
     const accountConfirmInput = document.getElementById('mktero-account-password-confirm');
     const accountSendCodeButton = document.getElementById('mktero-account-send-code');
@@ -864,17 +865,13 @@ export function createPreferencesController({
 
     function setAccountMode(mode) {
         accountMode = mode;
-        const forgot = mode === 'forgot';
         const register = mode === 'register';
-        setHidden('mktero-account-password-row', forgot);
         setHidden('mktero-account-code-row', !register);
         setHidden('mktero-account-password-confirm-row', !register);
         setHidden('mktero-account-register-nickname-row', !register);
         if (accountLoginButton) accountLoginButton.hidden = mode !== 'login';
         if (accountRegisterButton) accountRegisterButton.hidden = !register;
-        if (accountSendResetButton) accountSendResetButton.hidden = !forgot;
         if (accountForgotButton) accountForgotButton.hidden = mode !== 'login';
-        if (accountForgotBackButton) accountForgotBackButton.hidden = !forgot;
         // The login / register tabs stay visible while signing in or registering.
         if (accountTabLogin) {
             accountTabLogin.setAttribute('aria-selected', String(mode === 'login'));
@@ -973,19 +970,27 @@ export function createPreferencesController({
         }
     }
 
-    function selectAccountForgotMode() {
-        setAccountMode('forgot');
-    }
-
-    function selectAccountForgotBack() {
-        setAccountMode('login');
+    // Password reset lives on the website. The pane only opens that page,
+    // carrying a valid email so the field does not have to be typed twice.
+    function openForgotPasswordPage() {
+        const base = isDebugBuild() ? MKTERO_DEBUG_SITE_BASE : MKTERO_RELEASE_SITE_BASE;
+        const url = new URL('forgot.html', `${base}/`);
+        const email = String(accountEmailInput?.value || '').trim();
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254) {
+            url.searchParams.set('email', email);
+        }
+        const href = url.toString();
+        if (typeof zotero?.launchURL === 'function') {
+            zotero.launchURL(href);
+            return;
+        }
+        document.defaultView?.open?.(href, '_blank', 'noopener');
     }
 
     function setAccountBusy(busy) {
         accountBusy = busy;
         if (accountLoginButton) accountLoginButton.disabled = busy;
         if (accountRegisterButton) accountRegisterButton.disabled = busy;
-        if (accountSendResetButton) accountSendResetButton.disabled = busy;
         if (accountSendCodeButton) accountSendCodeButton.disabled = busy || accountSendCodeButton.dataset.cooling === 'true';
         if (accountLogoutButton) accountLogoutButton.disabled = busy;
         if (accountSaveNicknameButton) accountSaveNicknameButton.disabled = busy;
@@ -1025,31 +1030,6 @@ export function createPreferencesController({
             resetAccountActivity();
             renderAccount();
             await Promise.all([loadAccountProfile(), loadAccountStats()]);
-        }
-        catch (error) {
-            setAccountStatus(accountErrorKey(error));
-        }
-        finally {
-            setAccountBusy(false);
-        }
-    }
-
-    async function sendPasswordReset() {
-        if (accountBusy) return;
-        const email = String(accountEmailInput?.value || '').trim();
-        if (!email) {
-            setAccountStatus('preferences.account.invalidPassword');
-            return;
-        }
-        setAccountBusy(true);
-        setAccountStatus('');
-        try {
-            await requestPasswordReset({
-                apiBase: getAccountApiBase(zotero),
-                email,
-                fetchImpl: accountFetch,
-            });
-            setAccountStatus('preferences.account.resetSent');
         }
         catch (error) {
             setAccountStatus(accountErrorKey(error));
@@ -1212,9 +1192,7 @@ export function createPreferencesController({
         accountLogoutButton?.addEventListener('click', logoutAccount);
         accountTabLogin?.addEventListener('click', selectAccountLoginTab);
         accountTabRegister?.addEventListener('click', selectAccountRegisterTab);
-        accountForgotButton?.addEventListener('click', selectAccountForgotMode);
-        accountForgotBackButton?.addEventListener('click', selectAccountForgotBack);
-        accountSendResetButton?.addEventListener('click', sendPasswordReset);
+        accountForgotButton?.addEventListener('click', openForgotPasswordPage);
         accountSendCodeButton?.addEventListener('click', sendAccountCode);
         accountSaveNicknameButton?.addEventListener('click', saveAccountNickname);
         accountEditNicknameButton?.addEventListener('click', openAccountNicknameDialog);
@@ -1708,9 +1686,7 @@ export function createPreferencesController({
                 handleAccountNicknameKeydown
             );
             accountSaveNicknameButton?.removeEventListener('click', saveAccountNickname);
-            accountForgotButton?.removeEventListener('click', selectAccountForgotMode);
-            accountForgotBackButton?.removeEventListener('click', selectAccountForgotBack);
-            accountSendResetButton?.removeEventListener('click', sendPasswordReset);
+            accountForgotButton?.removeEventListener('click', openForgotPasswordPage);
             accountSendCodeButton?.removeEventListener('click', sendAccountCode);
             clearTimeout(codeCooldownTimer);
             accountApiBaseInput?.removeEventListener('change', saveAccountApiBase);

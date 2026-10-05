@@ -825,9 +825,7 @@
 #mktero-account-form[hidden],
 #mktero-account-login[hidden],
 #mktero-account-register[hidden],
-#mktero-account-send-reset[hidden],
-#mktero-account-forgot[hidden],
-#mktero-account-forgot-back[hidden] {
+#mktero-account-forgot[hidden] {
     display: none;
 }
 
