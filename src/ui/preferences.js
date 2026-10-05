@@ -117,6 +117,7 @@ import {
     activityCellTitle,
     activitySummaryText,
     buildActivityGrid,
+    emptyActivityDays,
     formatMemberSince,
 } from './account-activity.js';
 import {
@@ -742,11 +743,23 @@ export function createPreferencesController({
         updateServiceSources();
     }
 
+    function resetAccountActivity() {
+        accountStats = null;
+        accountStatsRequested = false;
+    }
+
     // renderAccountActivity paints the counters and the heat map from the last
     // loaded stats response. It runs on every render so a language change
-    // re-localizes the summary and the day tooltips.
+    // re-localizes the summary and the day tooltips. A signed-in card with no
+    // stats yet still paints the empty year, so the calendar is never a hole.
     function renderAccountActivity() {
-        const grid = accountStats ? buildActivityGrid(accountStats.days) : null;
+        const signedIn = isAccountSignedIn(getAccountSession(zotero));
+        // A signed-in card always shows the year grid. Stats replace the zeros
+        // when they arrive; a failed request must not leave the hole blank.
+        const days = accountStats?.days?.length
+            ? accountStats.days
+            : (signedIn ? emptyActivityDays() : []);
+        const grid = buildActivityGrid(days);
         // The counters use the server's window total; the grid only supplies the
         // calendar. That matches the website profile page.
         const total = accountStats ? accountStats.total : 0;
@@ -758,7 +771,7 @@ export function createPreferencesController({
             accountStatLongest.textContent = String(accountStats?.longestStreak || 0);
         }
         if (accountHeatmapSummary) {
-            accountHeatmapSummary.textContent = accountStats
+            accountHeatmapSummary.textContent = signedIn
                 ? activitySummaryText(t('preferences.account.heatmap.summary'), {
                     total,
                     language: localization.language,
@@ -766,7 +779,7 @@ export function createPreferencesController({
                 : '';
         }
         if (!accountHeatmap) return;
-        if (!grid || !grid.cells.length) {
+        if (!grid.cells.length) {
             accountHeatmap.replaceChildren();
             return;
         }
@@ -993,6 +1006,7 @@ export function createPreferencesController({
                 apiBase: getAccountApiBase(zotero),
                 email,
                 password,
+                fetchImpl: accountFetch,
             });
             if (session?.verificationRequired) {
                 if (accountPasswordInput) accountPasswordInput.value = '';
@@ -1005,7 +1019,12 @@ export function createPreferencesController({
             if (accountPasswordInput) accountPasswordInput.value = '';
             if (accountConfirmInput) accountConfirmInput.value = '';
             if (accountNicknameInput) accountNicknameInput.value = '';
+            // The pane may have opened signed out, so the initial profile and
+            // stats requests never ran. Paint the empty calendar immediately,
+            // then fill the date and the real counts.
+            resetAccountActivity();
             renderAccount();
+            await Promise.all([loadAccountProfile(), loadAccountStats()]);
         }
         catch (error) {
             setAccountStatus(accountErrorKey(error));
@@ -1028,6 +1047,7 @@ export function createPreferencesController({
             await requestPasswordReset({
                 apiBase: getAccountApiBase(zotero),
                 email,
+                fetchImpl: accountFetch,
             });
             setAccountStatus('preferences.account.resetSent');
         }
@@ -1075,6 +1095,7 @@ export function createPreferencesController({
                 apiBase: getAccountApiBase(zotero),
                 email,
                 locale: accountEmailLocale(),
+                fetchImpl: accountFetch,
             });
             setAccountStatus('preferences.account.codeSent');
             startCodeCooldown();
@@ -1128,12 +1149,14 @@ export function createPreferencesController({
             await logoutMkteroAccount({
                 apiBase: getAccountApiBase(zotero),
                 refreshToken: session.refreshToken,
+                fetchImpl: accountFetch,
             });
         }
         catch {
             // A failed logout still clears the local session.
         }
         clearAccountSession(zotero);
+        resetAccountActivity();
         accountBusy = false;
         if (accountLogoutButton) accountLogoutButton.disabled = false;
         renderAccount();
@@ -1146,6 +1169,7 @@ export function createPreferencesController({
             const refreshed = await refreshMkteroAccount({
                 apiBase: getAccountApiBase(zotero),
                 refreshToken: session.refreshToken,
+                fetchImpl: accountFetch,
             });
             saveAccountSession(zotero, {
                 ...refreshed,
@@ -1155,6 +1179,7 @@ export function createPreferencesController({
         }
         catch {
             clearAccountSession(zotero);
+            resetAccountActivity();
         }
     }
 

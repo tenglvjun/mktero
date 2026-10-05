@@ -1948,10 +1948,117 @@ test('keeps the account card at zero when the activity request fails', async () 
     assert.equal(doc.getElementById('mktero-stat-total').textContent, '0');
     assert.equal(doc.getElementById('mktero-stat-streak').textContent, '0');
     assert.equal(doc.getElementById('mktero-stat-longest').textContent, '0');
-    assert.equal(doc.getElementById('mktero-heatmap').children.length, 0);
+    // A failed request still paints the empty year instead of a blank hole.
+    const cells = doc.querySelectorAll('#mktero-heatmap .mktero-heatmap-cell');
+    assert.equal(cells.length >= 371, true);
+    assert.equal([...cells].every(cell => cell.getAttribute('data-level') === '0'), true);
+    assert.match(doc.getElementById('mktero-heatmap-summary').textContent, /0/);
     // The stored session still renders, so the card stays usable.
     assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
     assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
+
+    controller.destroy();
+});
+
+test('loads the profile and the heat map after the first sign-in', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <p id="mktero-account-signed-in-email"></p>
+                    <strong id="mktero-account-created"></strong>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-streak">0</span>
+                    <span id="mktero-stat-longest">0</span>
+                    <div id="mktero-heatmap"></div>
+                    <p id="mktero-heatmap-summary"></p>
+                </div>
+                <div id="mktero-account-form">
+                    <input id="mktero-account-email">
+                    <input id="mktero-account-password">
+                    <button id="mktero-account-login"></button>
+                    <p id="mktero-account-status"></p>
+                </div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([['extensions.mktero.conversionProvider', 'mktero']]);
+    const requested = [];
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: async url => {
+            requested.push(String(url));
+            if (String(url).includes('/auth/login')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        access_token: 'access',
+                        refresh_token: 'refresh',
+                        expires_in: 3600,
+                        user: { email: 'user@example.com', nickname: 'paper-reader' },
+                    }),
+                };
+            }
+            if (String(url).includes('/me/stats')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        total: 1,
+                        current_streak: 1,
+                        longest_streak: 1,
+                        days: [{ date: '2026-10-03', count: 1 }],
+                    }),
+                };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    email: 'user@example.com',
+                    nickname: 'paper-reader',
+                    created_at: '2026-10-03T00:00:00Z',
+                }),
+            };
+        },
+    });
+
+    await controller.init();
+    const doc = dom.window.document;
+    assert.equal(doc.getElementById('mktero-heatmap').children.length, 0);
+
+    doc.getElementById('mktero-account-email').value = 'user@example.com';
+    doc.getElementById('mktero-account-password').value = 'long-enough';
+    doc.getElementById('mktero-account-login')
+        .dispatchEvent(new dom.window.Event('click'));
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (doc.querySelector('#mktero-heatmap .mktero-heatmap-cell[data-level="1"]')) break;
+        await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    assert.equal(requested.some(url => url.includes('/auth/login')), true);
+    assert.equal(requested.some(url => /\/api\/v1\/me$/.test(url)), true);
+    assert.equal(requested.some(url => url.includes('/me/stats?days=371')), true);
+    assert.equal(doc.getElementById('mktero-account-created').textContent.length > 0, true);
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '1');
+    assert.equal(
+        doc.querySelector('#mktero-heatmap .mktero-heatmap-cell[data-level="1"]') != null,
+        true
+    );
 
     controller.destroy();
 });

@@ -6,6 +6,7 @@ import {
     activityLevel,
     activitySummaryText,
     buildActivityGrid,
+    emptyActivityDays,
     formatMemberSince,
     formatStreakLabel,
 } from '../src/ui/account-activity.js';
@@ -84,6 +85,17 @@ test('never reports a negative or fractional total', () => {
 
 test('covers a full year so the grid can span 53 columns', () => {
     assert.equal(ACTIVITY_WINDOW_DAYS, 371);
+});
+
+test('builds a zero-filled UTC window ending today when stats are missing', () => {
+    const days = emptyActivityDays(new Date('2026-10-03T15:00:00Z'));
+    assert.equal(days.length, 371);
+    assert.equal(days[0].date, '2025-09-28');
+    assert.equal(days.at(-1).date, '2026-10-03');
+    assert.equal(days.every(day => day.count === 0), true);
+    const grid = buildActivityGrid(days);
+    assert.equal(grid.cells.some(cell => !cell.pad), true);
+    assert.equal(grid.cells.every(cell => cell.level === 0), true);
 });
 
 test('fills the summary template with the localized total', () => {

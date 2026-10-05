@@ -21,6 +21,24 @@ export function activityLevel(count) {
 // padded so that the first cell is a Sunday. Each cell is either a real day or
 // a leading pad, which keeps the calendar aligned without date arithmetic in
 // the renderer.
+// emptyActivityDays is the calendar shown before stats arrive, and the one
+// kept when that request fails. It matches the server window: today and the
+// preceding days, in UTC, each with a zero count.
+export function emptyActivityDays(now = new Date(), windowDays = ACTIVITY_WINDOW_DAYS) {
+    const count = Number.isFinite(Number(windowDays)) && Number(windowDays) > 0
+        ? Math.floor(Number(windowDays))
+        : ACTIVITY_WINDOW_DAYS;
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const days = [];
+    for (let offset = count - 1; offset >= 0; offset -= 1) {
+        days.push({
+            date: new Date(today - offset * 86400000).toISOString().slice(0, 10),
+            count: 0,
+        });
+    }
+    return days;
+}
+
 export function buildActivityGrid(days) {
     const entries = normalizeDays(days);
     if (!entries.length) return { cells: [], weeks: 0, total: 0 };
