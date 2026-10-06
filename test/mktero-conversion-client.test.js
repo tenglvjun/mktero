@@ -185,6 +185,94 @@ test('fails before the request when no access token is available', async () => {
     assert.equal(called, false);
 });
 
+test('reports a rejected PDF upload with an actionable cause', async () => {
+    const responses = [
+        jsonResponse(201, {
+            job_id: 'job-4',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+        }),
+        {
+            ok: false,
+            status: 403,
+            headers: { get: () => null },
+            async arrayBuffer() {
+                return new ArrayBuffer(0);
+            },
+        },
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async () => responses.shift(),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        client.convert({
+            apiBase: API_BASE,
+            getAccessToken: () => 'access-token',
+            fileName: 'paper.pdf',
+            fileData: PDF_BYTES,
+        }),
+        error => error.code === 'MKTERO_UPLOAD_FAILED'
+            && error.status === 403
+            && error.stage === 'upload'
+    );
+});
+
+test('keeps the transport failure and stage when the upload cannot connect', async () => {
+    const responses = [
+        jsonResponse(201, {
+            job_id: 'job-5',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+        }),
+    ];
+    const transport = new TypeError('NetworkError when attempting to fetch resource');
+    const client = new MkteroConversionClient({
+        fetch: async () => {
+            const next = responses.shift();
+            if (next) return next;
+            throw transport;
+        },
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        client.convert({
+            apiBase: API_BASE,
+            getAccessToken: () => 'access-token',
+            fileName: 'paper.pdf',
+            fileData: PDF_BYTES,
+        }),
+        error => error.code === 'MKTERO_NETWORK_ERROR'
+            && error.stage === 'upload'
+            && error.requestLabel === 'PDF upload'
+            && error.cause === transport
+    );
+});
+
+test('keeps the HTTP status and service error code off the job API', async () => {
+    const client = new MkteroConversionClient({
+        fetch: async () => jsonResponse(404, {
+            error: { code: 'conversion_not_found', message: 'job is unknown' },
+        }),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        client.convert({
+            apiBase: API_BASE,
+            getAccessToken: () => 'access-token',
+            fileName: 'paper.pdf',
+            fileData: PDF_BYTES,
+        }),
+        error => error.code === 'MKTERO_JOB_NOT_FOUND'
+            && error.status === 404
+            && error.stage === 'api'
+            && error.errorCode === 'conversion_not_found'
+    );
+});
+
 test('stops polling when the caller aborts', async () => {
     const controller = new AbortController();
     const responses = [

@@ -26,6 +26,19 @@ const STATUS_FAILED = 'failed';
 
 const TERMINAL_STATUSES = new Set([STATUS_SUCCEEDED, STATUS_FAILED]);
 
+// Which leg of a conversion a failed request belongs to. The upload and
+// download legs talk to the object store through a presigned URL rather than to
+// the API, so they fail for reasons the generic messages never describe.
+export const MKTERO_REQUEST_STAGES = Object.freeze({
+    API: 'api',
+    UPLOAD: 'upload',
+    DOWNLOAD: 'download',
+});
+
+const STAGE_API = MKTERO_REQUEST_STAGES.API;
+const STAGE_UPLOAD = MKTERO_REQUEST_STAGES.UPLOAD;
+const STAGE_DOWNLOAD = MKTERO_REQUEST_STAGES.DOWNLOAD;
+
 /**
  * Talks to the hosted Mktero conversion service.
  *
@@ -178,12 +191,14 @@ export class MkteroConversionClient {
             signal,
             timeoutMs: this.uploadTimeoutMs,
             label: 'PDF upload',
+            stage: STAGE_UPLOAD,
             authorize: false,
         });
         if (!response.ok) {
             throw codedError(
                 'The PDF upload to Mktero failed',
-                'MKTERO_UPLOAD_FAILED'
+                'MKTERO_UPLOAD_FAILED',
+                { status: response.status, stage: STAGE_UPLOAD }
             );
         }
     }
@@ -254,12 +269,14 @@ export class MkteroConversionClient {
             signal,
             timeoutMs: this.downloadTimeoutMs,
             label: 'result download',
+            stage: STAGE_DOWNLOAD,
             authorize: false,
         });
         if (!response.ok) {
             throw codedError(
                 'The Mktero result download failed',
-                'MKTERO_DOWNLOAD_FAILED'
+                'MKTERO_DOWNLOAD_FAILED',
+                { status: response.status, stage: STAGE_DOWNLOAD }
             );
         }
         return readBoundedBytes(
@@ -288,6 +305,7 @@ export class MkteroConversionClient {
             signal,
             timeoutMs,
             label,
+            stage: STAGE_API,
             authorize: true,
             getAccessToken,
         });
@@ -295,7 +313,12 @@ export class MkteroConversionClient {
         if (!response.ok) {
             throw codedError(
                 'The Mktero conversion request failed',
-                errorCodeForStatus(response.status, payload)
+                errorCodeForStatus(response.status, payload),
+                {
+                    status: response.status,
+                    stage: STAGE_API,
+                    errorCode: payload?.error?.code || '',
+                }
             );
         }
         return payload;
@@ -309,6 +332,7 @@ export class MkteroConversionClient {
         signal,
         timeoutMs,
         label,
+        stage = STAGE_API,
         authorize,
         getAccessToken = null,
     }) {
@@ -355,9 +379,14 @@ export class MkteroConversionClient {
                 );
             }
             if (isKnownError(error)) throw error;
+            // The original exception is kept as `cause` so the presenter can
+            // report whether this was a transport failure or a rejected
+            // request. Its message may embed the request URL, which is a
+            // presigned URL for transfers, so it is never surfaced directly.
             throw codedError(
                 'The Mktero conversion request failed',
-                'MKTERO_NETWORK_ERROR'
+                'MKTERO_NETWORK_ERROR',
+                { cause: error, stage, requestLabel: label }
             );
         }
         finally {
