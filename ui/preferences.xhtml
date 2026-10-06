@@ -8,13 +8,25 @@
                      class="mktero-pref-tab"
                      type="button"
                      role="tab"
-                     aria-selected="false"
+                     aria-selected="true"
                      aria-controls="mktero-general-section"
-                     tabindex="-1">
+                     tabindex="0">
             <html:span class="mktero-pref-tab-icon"
                        data-tab-icon="settings"
                        aria-hidden="true"></html:span>
             <html:span data-i18n="preferences.tab.general"></html:span>
+        </html:button>
+        <html:button id="mktero-tab-features"
+                     class="mktero-pref-tab"
+                     type="button"
+                     role="tab"
+                     aria-selected="false"
+                     aria-controls="mktero-features-section"
+                     tabindex="-1">
+            <html:span class="mktero-pref-tab-icon"
+                       data-tab-icon="sparkles"
+                       aria-hidden="true"></html:span>
+            <html:span data-i18n="preferences.tab.conversion"></html:span>
         </html:button>
         <html:button id="mktero-tab-ai"
                      class="mktero-pref-tab"
@@ -28,25 +40,12 @@
                        aria-hidden="true"></html:span>
             <html:span data-i18n="preferences.tab.ai"></html:span>
         </html:button>
-        <html:button id="mktero-tab-features"
-                     class="mktero-pref-tab"
-                     type="button"
-                     role="tab"
-                     aria-selected="true"
-                     aria-controls="mktero-features-section"
-                     tabindex="0">
-            <html:span class="mktero-pref-tab-icon"
-                       data-tab-icon="sparkles"
-                       aria-hidden="true"></html:span>
-            <html:span data-i18n="preferences.tab.conversion"></html:span>
-        </html:button>
     </html:div>
 
     <html:div id="mktero-general-section"
               class="mktero-preferences-section"
               role="tabpanel"
-              aria-labelledby="mktero-tab-general"
-              hidden="hidden">
+              aria-labelledby="mktero-tab-general">
         <html:div class="mktero-settings-card">
             <html:div class="mktero-setting-row mktero-reader-font-row">
                 <html:div class="mktero-setting-copy">
@@ -213,7 +212,8 @@
         <html:div id="mktero-features-section"
               class="mktero-preferences-section"
               role="tabpanel"
-              aria-labelledby="mktero-tab-features">
+              aria-labelledby="mktero-tab-features"
+              hidden="hidden">
         <html:div id="mktero-conversion-section"
                   class="mktero-preferences-section">
             <html:div class="mktero-settings-card">

@@ -377,7 +377,10 @@ test('presents every preference group as one cohesive settings card', async () =
     assert.equal((pane.match(/class="mktero-settings-card"/g) || []).length, 3);
     assert.equal((pane.match(/class="mktero-preferences-section"/g) || []).length, 4);
     assert.match(pane, /id="mktero-pref-tablist"[\s\S]*role="tablist"/);
-    assert.match(pane, /id="mktero-tab-features"[\s\S]*aria-selected="true"/);
+    assert.match(
+        pane,
+        /id="mktero-tab-general"[\s\S]*aria-selected="true"[\s\S]*id="mktero-tab-features"[\s\S]*aria-selected="false"[\s\S]*id="mktero-tab-ai"/
+    );
     assert.match(pane, /id="mktero-features-section"/);
     assert.doesNotMatch(pane, /id="mktero-tab-reader"/);
     assert.equal((pane.match(/class="mktero-pref-tab"/g) || []).length, 3);
