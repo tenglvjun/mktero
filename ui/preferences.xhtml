@@ -276,10 +276,16 @@
                                 </html:div>
                             </html:div>
 
-                            <html:button id="mktero-account-logout"
-                                         class="mktero-button mktero-auth-submit"
-                                         type="button"
-                                         data-i18n="preferences.account.logout"></html:button>
+                            <html:div class="mktero-account-actions">
+                                <html:button id="mktero-account-refresh"
+                                             class="mktero-account-icon-button mktero-account-refresh"
+                                             type="button"
+                                             data-i18n-aria-label="preferences.account.refresh"></html:button>
+                                <html:button id="mktero-account-logout"
+                                             class="mktero-button mktero-auth-submit"
+                                             type="button"
+                                             data-i18n="preferences.account.logout"></html:button>
+                            </html:div>
                         </html:div>
 
                         <html:div class="mktero-account-stats">
@@ -288,33 +294,20 @@
                                 <html:span class="mktero-stat-label" data-i18n="preferences.account.stat.total"></html:span>
                             </html:article>
                             <html:article class="mktero-stat-card">
-                                <html:span id="mktero-stat-streak" class="mktero-stat-value">0</html:span>
-                                <html:span class="mktero-stat-label" data-i18n="preferences.account.stat.streak"></html:span>
+                                <html:span id="mktero-stat-month" class="mktero-stat-value">0</html:span>
+                                <html:span class="mktero-stat-label"></html:span>
                             </html:article>
                             <html:article class="mktero-stat-card">
-                                <html:span id="mktero-stat-longest" class="mktero-stat-value">0</html:span>
-                                <html:span class="mktero-stat-label" data-i18n="preferences.account.stat.longest"></html:span>
+                                <html:span id="mktero-stat-today" class="mktero-stat-value">0</html:span>
+                                <html:span class="mktero-stat-label"></html:span>
                             </html:article>
                         </html:div>
-
-                        <html:section class="mktero-heatmap-card" aria-labelledby="mktero-heatmap-title">
-                            <html:div class="mktero-heatmap-head">
-                                <html:h2 id="mktero-heatmap-title" data-i18n="preferences.account.heatmap.title"></html:h2>
-                                <html:p id="mktero-heatmap-summary" class="mktero-heatmap-summary"></html:p>
-                            </html:div>
-                            <html:div class="mktero-heatmap-scroll">
-                                <html:div id="mktero-heatmap" class="mktero-heatmap"></html:div>
-                            </html:div>
-                            <html:div class="mktero-heatmap-legend">
-                                <html:span data-i18n="preferences.account.heatmap.less"></html:span>
-                                <html:span class="mktero-heatmap-swatch" data-level="0"></html:span>
-                                <html:span class="mktero-heatmap-swatch" data-level="1"></html:span>
-                                <html:span class="mktero-heatmap-swatch" data-level="2"></html:span>
-                                <html:span class="mktero-heatmap-swatch" data-level="3"></html:span>
-                                <html:span class="mktero-heatmap-swatch" data-level="4"></html:span>
-                                <html:span data-i18n="preferences.account.heatmap.more"></html:span>
-                            </html:div>
-                        </html:section>
+                        <html:div class="mktero-account-more-row">
+                            <html:button id="mktero-account-more"
+                                         class="mktero-account-more"
+                                         type="button"
+                                         data-i18n="preferences.account.more"></html:button>
+                        </html:div>
                     </html:div>
 
                     <html:div id="mktero-account-form" class="mktero-auth-form">

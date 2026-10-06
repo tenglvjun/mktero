@@ -177,7 +177,7 @@ See [Configuration](./docs/configuration.md) for every setting and
   refresh token stay in the same profile. While the account pane is open, the
   extension uses that token to request your profile and your conversion-activity
   counts from the service you selected, and shows them as the account card's
-  counters and heat map.
+  counters.
 - Reference, citation, and translation requests are bounded and local-first;
   logs never contain API tokens, presigned URLs, PDF bytes, or authenticated
   responses.

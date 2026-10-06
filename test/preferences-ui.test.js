@@ -1701,10 +1701,8 @@ test('drives the account card tabs and the signed-in identity', async () => {
                     </div>
                     <p id="mktero-account-nickname-status"></p>
                     <span id="mktero-stat-total">0</span>
-                    <span id="mktero-stat-streak">0</span>
-                    <span id="mktero-stat-longest">0</span>
-                    <div id="mktero-heatmap"></div>
-                    <p id="mktero-heatmap-summary"></p>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
                 </div>
                 <div id="mktero-account-form">
                     <input id="mktero-account-email">
@@ -1812,16 +1810,7 @@ test('drives the account card tabs and the signed-in identity', async () => {
             if (String(url).includes('/me/stats')) {
                 return {
                     ok: true,
-                    json: async () => ({
-                        total: 3,
-                        current_streak: 2,
-                        longest_streak: 5,
-                        days: [
-                            { date: '2026-09-27', count: 0 },
-                            { date: '2026-09-28', count: 1 },
-                            { date: '2026-09-29', count: 3 },
-                        ],
-                    }),
+                    json: async () => ({ total: 3, month: 1, today: 0 }),
                 };
             }
             return {
@@ -1843,28 +1832,18 @@ test('drives the account card tabs and the signed-in identity', async () => {
     assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
     assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
 
-    // The activity request carries the bearer token and the one-year window.
     assert.deepEqual(
         requested.filter(url => url.includes('/me/stats')).length,
         1
     );
     assert.match(
         requested.find(url => url.includes('/me/stats')),
-        /\/api\/v1\/me\/stats\?days=371$/
+        /\/api\/v1\/me\/stats$/
     );
-
-    // The counters and the heat map come from the loaded stats response.
     assert.equal(doc.getElementById('mktero-stat-total').textContent, '3');
-    assert.equal(doc.getElementById('mktero-stat-streak').textContent, '2');
-    assert.equal(doc.getElementById('mktero-stat-longest').textContent, '5');
-    assert.match(doc.getElementById('mktero-heatmap-summary').textContent, /3/);
-    const cells = doc.querySelectorAll('#mktero-heatmap .mktero-heatmap-cell');
-    // 2026-09-27 is a Sunday, so the three days fill the first column exactly.
-    assert.equal(cells.length, 3);
-    assert.equal(cells[0].getAttribute('data-level'), '0');
-    assert.equal(cells[1].getAttribute('data-level'), '1');
-    assert.equal(cells[2].getAttribute('data-level'), '3');
-    assert.equal(cells[2].getAttribute('title'), '2026-09-29: 3');
+    assert.equal(doc.getElementById('mktero-stat-month').textContent, '1');
+    assert.equal(doc.getElementById('mktero-stat-today').textContent, '0');
+    assert.match(doc.querySelector('#mktero-stat-month').parentElement.textContent, /\d/);
 
     // The rename dialog opens from the icon button, seeded with the nickname.
     const dialog = doc.getElementById('mktero-account-nickname-dialog');
@@ -1879,16 +1858,13 @@ test('drives the account card tabs and the signed-in identity', async () => {
         .dispatchEvent(new dom.window.Event('click'));
     assert.equal(dialog.hasAttribute('hidden'), true);
 
-    // Sign out belongs to the identity row, next to the name and avatar.
-    const logout = doc.getElementById('mktero-account-logout');
     const top = doc.querySelector('.mktero-account-top');
     assert.ok(top, '.mktero-account-top wrapper is missing');
-    assert.equal(top.contains(logout), true);
+    assert.equal(doc.getElementById('mktero-account-logout') != null, true);
     assert.equal(top.contains(doc.getElementById('mktero-account-avatar')), true);
     assert.equal(top.contains(doc.getElementById('mktero-account-signed-in-nickname')), true);
-    // The counters and the heat map stay outside that row, below it.
+    // The counters stay outside that row, below it.
     assert.equal(top.contains(doc.getElementById('mktero-stat-total')), false);
-    assert.equal(top.contains(doc.getElementById('mktero-heatmap')), false);
 
     signedInController.destroy();
 });
@@ -1904,10 +1880,8 @@ test('keeps the account card at zero when the activity request fails', async () 
                     <p id="mktero-account-signed-in-email"></p>
                     <strong id="mktero-account-created"></strong>
                     <span id="mktero-stat-total">0</span>
-                    <span id="mktero-stat-streak">0</span>
-                    <span id="mktero-stat-longest">0</span>
-                    <div id="mktero-heatmap"></div>
-                    <p id="mktero-heatmap-summary"></p>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
                 </div>
                 <div id="mktero-account-form" hidden></div>
                 <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
@@ -1946,13 +1920,8 @@ test('keeps the account card at zero when the activity request fails', async () 
     await controller.init();
     const doc = dom.window.document;
     assert.equal(doc.getElementById('mktero-stat-total').textContent, '0');
-    assert.equal(doc.getElementById('mktero-stat-streak').textContent, '0');
-    assert.equal(doc.getElementById('mktero-stat-longest').textContent, '0');
-    // A failed request still paints the empty year instead of a blank hole.
-    const cells = doc.querySelectorAll('#mktero-heatmap .mktero-heatmap-cell');
-    assert.equal(cells.length >= 371, true);
-    assert.equal([...cells].every(cell => cell.getAttribute('data-level') === '0'), true);
-    assert.match(doc.getElementById('mktero-heatmap-summary').textContent, /0/);
+    assert.equal(doc.getElementById('mktero-stat-month').textContent, '0');
+    assert.equal(doc.getElementById('mktero-stat-today').textContent, '0');
     // The stored session still renders, so the card stays usable.
     assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
     assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
@@ -1960,7 +1929,7 @@ test('keeps the account card at zero when the activity request fails', async () 
     controller.destroy();
 });
 
-test('loads the profile and the heat map after the first sign-in', async () => {
+test('loads the profile and conversion counters after the first sign-in', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
             <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
@@ -1971,10 +1940,8 @@ test('loads the profile and the heat map after the first sign-in', async () => {
                     <p id="mktero-account-signed-in-email"></p>
                     <strong id="mktero-account-created"></strong>
                     <span id="mktero-stat-total">0</span>
-                    <span id="mktero-stat-streak">0</span>
-                    <span id="mktero-stat-longest">0</span>
-                    <div id="mktero-heatmap"></div>
-                    <p id="mktero-heatmap-summary"></p>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
                 </div>
                 <div id="mktero-account-form">
                     <input id="mktero-account-email">
@@ -2018,12 +1985,7 @@ test('loads the profile and the heat map after the first sign-in', async () => {
             if (String(url).includes('/me/stats')) {
                 return {
                     ok: true,
-                    json: async () => ({
-                        total: 1,
-                        current_streak: 1,
-                        longest_streak: 1,
-                        days: [{ date: '2026-10-03', count: 1 }],
-                    }),
+                    json: async () => ({ total: 1, month: 1, today: 1 }),
                 };
             }
             return {
@@ -2039,26 +2001,22 @@ test('loads the profile and the heat map after the first sign-in', async () => {
 
     await controller.init();
     const doc = dom.window.document;
-    assert.equal(doc.getElementById('mktero-heatmap').children.length, 0);
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '0');
 
     doc.getElementById('mktero-account-email').value = 'user@example.com';
     doc.getElementById('mktero-account-password').value = 'long-enough';
     doc.getElementById('mktero-account-login')
         .dispatchEvent(new dom.window.Event('click'));
     for (let attempt = 0; attempt < 20; attempt += 1) {
-        if (doc.querySelector('#mktero-heatmap .mktero-heatmap-cell[data-level="1"]')) break;
+        if (doc.getElementById('mktero-stat-total').textContent === '1') break;
         await new Promise(resolve => setTimeout(resolve, 0));
     }
 
     assert.equal(requested.some(url => url.includes('/auth/login')), true);
     assert.equal(requested.some(url => /\/api\/v1\/me$/.test(url)), true);
-    assert.equal(requested.some(url => url.includes('/me/stats?days=371')), true);
+    assert.equal(requested.some(url => url.endsWith('/me/stats')), true);
     assert.equal(doc.getElementById('mktero-account-created').textContent.length > 0, true);
     assert.equal(doc.getElementById('mktero-stat-total').textContent, '1');
-    assert.equal(
-        doc.querySelector('#mktero-heatmap .mktero-heatmap-cell[data-level="1"]') != null,
-        true
-    );
 
     controller.destroy();
 });

@@ -116,11 +116,7 @@ import {
     setObsidianVaultPath,
 } from '../config/obsidian-preferences.js';
 import {
-    ACTIVITY_WINDOW_DAYS,
-    activityCellTitle,
-    activitySummaryText,
-    buildActivityGrid,
-    emptyActivityDays,
+    formatActivityPeriodLabels,
     formatMemberSince,
 } from './account-activity.js';
 import {
@@ -247,10 +243,8 @@ export function createPreferencesController({
     const accountProfileNicknameInput = document.getElementById('mktero-account-nickname');
     const accountSaveNicknameButton = document.getElementById('mktero-account-save-nickname');
     const accountStatTotal = document.getElementById('mktero-stat-total');
-    const accountStatStreak = document.getElementById('mktero-stat-streak');
-    const accountStatLongest = document.getElementById('mktero-stat-longest');
-    const accountHeatmap = document.getElementById('mktero-heatmap');
-    const accountHeatmapSummary = document.getElementById('mktero-heatmap-summary');
+    const accountStatMonth = document.getElementById('mktero-stat-month');
+    const accountStatToday = document.getElementById('mktero-stat-today');
     // The account activity request runs once per pane load; a failed request
     // leaves the counters at zero instead of retrying on every render.
     let accountStats = null;
@@ -258,6 +252,8 @@ export function createPreferencesController({
     let accountMode = 'login';
     let codeCooldownTimer = 0;
     const accountLogoutButton = document.getElementById('mktero-account-logout');
+    const accountRefreshButton = document.getElementById('mktero-account-refresh');
+    const accountMoreButton = document.getElementById('mktero-account-more');
     const accountApiBaseInput = document.getElementById('mktero-account-api-base');
     const accountStatus = document.getElementById('mktero-account-status');
     const accountPanel = document.getElementById('mktero-account-panel');
@@ -749,59 +745,25 @@ export function createPreferencesController({
         accountStatsRequested = false;
     }
 
-    // renderAccountActivity paints the counters and the heat map from the last
-    // loaded stats response. It runs on every render so a language change
-    // re-localizes the summary and the day tooltips. A signed-in card with no
-    // stats yet still paints the empty year, so the calendar is never a hole.
+    // renderAccountActivity paints the three counters from the last loaded
+    // stats response. It runs on every render so a language change rewrites
+    // the month and day labels. Missing stats stay at zero.
     function renderAccountActivity() {
-        const signedIn = isAccountSignedIn(getAccountSession(zotero));
-        // A signed-in card always shows the year grid. Stats replace the zeros
-        // when they arrive; a failed request must not leave the hole blank.
-        const days = accountStats?.days?.length
-            ? accountStats.days
-            : (signedIn ? emptyActivityDays() : []);
-        const grid = buildActivityGrid(days);
-        // The counters use the server's window total; the grid only supplies the
-        // calendar. That matches the website profile page.
-        const total = accountStats ? accountStats.total : 0;
-        if (accountStatTotal) accountStatTotal.textContent = String(total);
-        if (accountStatStreak) {
-            accountStatStreak.textContent = String(accountStats?.currentStreak || 0);
+        const periodLabels = formatActivityPeriodLabels(new Date(), localization.language);
+        if (accountStatTotal) accountStatTotal.textContent = String(accountStats?.total || 0);
+        if (accountStatMonth) {
+            accountStatMonth.textContent = String(accountStats?.month || 0);
+            accountStatMonth.parentElement?.querySelector('.mktero-stat-label')
+                ?.replaceChildren(periodLabels.month);
         }
-        if (accountStatLongest) {
-            accountStatLongest.textContent = String(accountStats?.longestStreak || 0);
+        if (accountStatToday) {
+            accountStatToday.textContent = String(accountStats?.today || 0);
+            accountStatToday.parentElement?.querySelector('.mktero-stat-label')
+                ?.replaceChildren(periodLabels.today);
         }
-        if (accountHeatmapSummary) {
-            accountHeatmapSummary.textContent = signedIn
-                ? activitySummaryText(t('preferences.account.heatmap.summary'), {
-                    total,
-                    language: localization.language,
-                })
-                : '';
-        }
-        if (!accountHeatmap) return;
-        if (!grid.cells.length) {
-            accountHeatmap.replaceChildren();
-            return;
-        }
-        const cells = grid.cells.map(cell => {
-            const node = createHTMLElement(document, 'span');
-            node.setAttribute('class', 'mktero-heatmap-cell');
-            node.setAttribute('data-level', String(cell.level));
-            if (cell.pad) {
-                node.setAttribute('aria-hidden', 'true');
-                return node;
-            }
-            const title = activityCellTitle(cell);
-            if (title) node.setAttribute('title', title);
-            return node;
-        });
-        accountHeatmap.replaceChildren(...cells);
-        accountHeatmap.style.setProperty('--mktero-heatmap-weeks', String(grid.weeks));
-        accountHeatmap.setAttribute('aria-label', t('preferences.account.heatmap.title'));
     }
 
-    // loadAccountStats fills the counters and the heat map for the signed-in
+    // loadAccountStats fills the counters for the signed-in
     // account. A failure keeps the card at zero: the activity view is
     // informational, so it never blocks the settings pane.
     async function loadAccountStats() {
@@ -813,7 +775,6 @@ export function createPreferencesController({
             accountStats = await getMkteroConversionStats({
                 apiBase: getAccountApiBase(zotero),
                 accessToken: session.accessToken,
-                days: ACTIVITY_WINDOW_DAYS,
                 fetchImpl: accountFetch,
             });
         }
@@ -987,12 +948,37 @@ export function createPreferencesController({
         document.defaultView?.open?.(href, '_blank', 'noopener');
     }
 
+    function openAccountProfilePage() {
+        const base = isDebugBuild() ? MKTERO_DEBUG_SITE_BASE : MKTERO_RELEASE_SITE_BASE;
+        const href = new URL('profile.html', `${base}/`).toString();
+        if (typeof zotero?.launchURL === 'function') {
+            zotero.launchURL(href);
+            return;
+        }
+        document.defaultView?.open?.(href, '_blank', 'noopener');
+    }
+
+    async function refreshSignedInAccount() {
+        if (accountBusy) return;
+        setAccountBusy(true);
+        try {
+            await refreshAccountIfNeeded();
+            resetAccountActivity();
+            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+        }
+        finally {
+            setAccountBusy(false);
+            renderAccount();
+        }
+    }
+
     function setAccountBusy(busy) {
         accountBusy = busy;
         if (accountLoginButton) accountLoginButton.disabled = busy;
         if (accountRegisterButton) accountRegisterButton.disabled = busy;
         if (accountSendCodeButton) accountSendCodeButton.disabled = busy || accountSendCodeButton.dataset.cooling === 'true';
         if (accountLogoutButton) accountLogoutButton.disabled = busy;
+        if (accountRefreshButton) accountRefreshButton.disabled = busy;
         if (accountSaveNicknameButton) accountSaveNicknameButton.disabled = busy;
     }
 
@@ -1190,6 +1176,8 @@ export function createPreferencesController({
         accountLoginButton?.addEventListener('click', loginAccount);
         accountRegisterButton?.addEventListener('click', registerAccount);
         accountLogoutButton?.addEventListener('click', logoutAccount);
+        accountRefreshButton?.addEventListener('click', refreshSignedInAccount);
+        accountMoreButton?.addEventListener('click', openAccountProfilePage);
         accountTabLogin?.addEventListener('click', selectAccountLoginTab);
         accountTabRegister?.addEventListener('click', selectAccountRegisterTab);
         accountForgotButton?.addEventListener('click', openForgotPasswordPage);
@@ -1219,17 +1207,20 @@ export function createPreferencesController({
         for (const host of [
             accountEditNicknameButton,
             accountNicknameDialogClose,
+            accountRefreshButton,
         ]) {
             if (!host || host.querySelector('svg')) continue;
             const icon = host === accountNicknameDialogClose
                 ? LUCIDE_ICONS.x
-                : LUCIDE_ICONS.pencil;
+                : host === accountRefreshButton
+                    ? LUCIDE_ICONS.refreshCw
+                    : LUCIDE_ICONS.pencil;
             if (!icon) continue;
             // The pencil shares the nickname line, so it is drawn smaller than
             // the dialog's close button.
             host.replaceChildren(createLucideIcon(document, icon, {
                 className: 'mktero-account-icon-svg',
-                size: host === accountNicknameDialogClose ? 15 : 13,
+                size: host === accountRefreshButton ? 16 : host === accountNicknameDialogClose ? 15 : 13,
             }));
         }
     }
@@ -1665,6 +1656,8 @@ export function createPreferencesController({
             accountLoginButton?.removeEventListener('click', loginAccount);
             accountRegisterButton?.removeEventListener('click', registerAccount);
             accountLogoutButton?.removeEventListener('click', logoutAccount);
+            accountRefreshButton?.removeEventListener('click', refreshSignedInAccount);
+            accountMoreButton?.removeEventListener('click', openAccountProfilePage);
             accountEditNicknameButton?.removeEventListener(
                 'click',
                 openAccountNicknameDialog

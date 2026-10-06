@@ -440,16 +440,11 @@ test('presents the account card with website-style tabs and an identity block', 
     assert.doesNotMatch(pane, /id="mktero-account-nickname-row"/);
     assert.doesNotMatch(pane, /mktero-account-signed-in-badge/);
 
-    // The activity surface carries the three counters and the heat map.
+    // The activity surface is the three counters.
     assert.match(pane, /id="mktero-stat-total"/);
-    assert.match(pane, /id="mktero-stat-streak"/);
-    assert.match(pane, /id="mktero-stat-longest"/);
-    assert.match(pane, /id="mktero-heatmap"[\s\S]*?class="mktero-heatmap"/);
-    assert.match(pane, /id="mktero-heatmap-summary"/);
-    assert.equal(
-        (pane.match(/class="mktero-heatmap-swatch" data-level=/g) || []).length,
-        5
-    );
+    assert.match(pane, /id="mktero-stat-month"/);
+    assert.match(pane, /id="mktero-stat-today"/);
+    assert.doesNotMatch(pane, /heatmap/);
 
     // The registration nickname stays a separate optional field.
     assert.match(pane, /id="mktero-account-register-nickname"[\s\S]*?maxlength="32"/);
@@ -488,25 +483,24 @@ test('presents the account card with website-style tabs and an identity block', 
         /\.mktero-auth-form\s*\{[\s\S]*?max-width:\s*452px/s
     );
 
-    // Sign out sits in the identity row, right-aligned against that same edge.
+    // Refresh sits above sign out. More stays alone under the counters.
     assert.match(
         pane,
-        /class="mktero-account-top"[\s\S]*?class="mktero-account-identity"[\s\S]*?id="mktero-account-logout"/
+        /id="mktero-account-refresh"[\s\S]*?id="mktero-account-logout"/
+    );
+    assert.match(pane, /class="mktero-account-more-row"[\s\S]*?id="mktero-account-more"/);
+    assert.doesNotMatch(
+        pane,
+        /class="mktero-account-more-row"[\s\S]*?id="mktero-account-logout"/
     );
     const accountTop = styles.match(/\.mktero-account-top\s*\{([^}]*)\}/)?.[1] || '';
     assert.ok(accountTop, '.mktero-account-top rule is missing');
-    assert.match(accountTop, /justify-content:\s*space-between/);
+    assert.match(accountTop, /grid-template-columns:/);
     // The sign-out pill keeps its intrinsic width instead of stretching.
     assert.match(
         styles,
         /\.mktero-auth-card \.mktero-auth-submit:not\(\.mktero-button-primary\)\s*\{[\s\S]*?flex:\s*0\s+0\s+auto/s
     );
-    // The heat map lays out 7 rows of 12px cells, column by column.
-    assert.match(
-        styles,
-        /\.mktero-heatmap\s*\{[\s\S]*?grid-auto-flow:\s*column[\s\S]*?grid-template-rows:\s*repeat\(7,\s*12px\)/s
-    );
-    assert.match(styles, /\.mktero-heatmap-cell\[data-level='4'\]\s*\{\s*background:\s*#2563eb/);
     assert.match(
         styles,
         /\.mktero-account-stats\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s

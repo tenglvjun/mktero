@@ -107,36 +107,23 @@ export async function getMkteroAccount({
     };
 }
 
-// getMkteroConversionStats reads the daily conversion counts behind the activity
-// heat map. Only successful conversions are counted, and the server fills the
-// days without activity with zero.
+// getMkteroConversionStats reads the three conversion counters. Only successful
+// conversions are counted. Month and today are the current UTC month and day.
 export async function getMkteroConversionStats({
     apiBase,
     accessToken,
-    days = 0,
     fetchImpl = globalThis.fetch,
 } = {}) {
-    const window = Number.isFinite(Number(days)) && Number(days) > 0
-        ? `?days=${Math.floor(Number(days))}`
-        : '';
     const body = await requestJSON(
         fetchImpl,
         apiBase,
-        `/api/v1/me/stats${window}`,
+        '/api/v1/me/stats',
         { method: 'GET', token: accessToken }
     );
     return {
         total: toCount(body?.total),
-        currentStreak: toCount(body?.current_streak),
-        longestStreak: toCount(body?.longest_streak),
-        days: Array.isArray(body?.days)
-            ? body.days
-                .map(day => ({
-                    date: String(day?.date || ''),
-                    count: toCount(day?.count),
-                }))
-                .filter(day => day.date)
-            : [],
+        month: toCount(body?.month),
+        today: toCount(body?.today),
     };
 }
 
