@@ -2,6 +2,7 @@ import { toUint8Array } from '../mineru/binary.js';
 import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import { CONVERSION_PROGRESS } from '../core/conversion-progress.js';
+import { sha256Hex } from '../core/sha256.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 600;
@@ -103,28 +104,42 @@ export class MkteroConversionClient {
             fileName,
             bytes,
             metadata,
+            sha256: await pdfSHA256(bytes),
             signal,
         });
         throwIfAborted(signal);
 
-        await this.#upload({
-            job,
-            bytes,
-            onProgress,
-            signal,
-        });
-        throwIfAborted(signal);
+        let finished = job;
+        if (job.status === STATUS_SUCCEEDED && !job.upload_url) {
+            notifyProgress(onProgress, CONVERSION_PROGRESS.DOWNLOADING);
+        } else if (!job.upload_url && job.status === STATUS_WAITING_FOR_SHARED_PARSE) {
+            finished = await this.#waitForResult({
+                apiBase,
+                getAccessToken,
+                job,
+                onProgress,
+                signal,
+            });
+        } else {
+            await this.#upload({
+                job,
+                bytes,
+                onProgress,
+                signal,
+            });
+            throwIfAborted(signal);
 
-        await this.#complete({ apiBase, getAccessToken, job, signal });
-        notifyProgress(onProgress, CONVERSION_PROGRESS.QUEUED);
+            await this.#complete({ apiBase, getAccessToken, job, signal });
+            notifyProgress(onProgress, CONVERSION_PROGRESS.QUEUED);
 
-        const finished = await this.#waitForResult({
-            apiBase,
-            getAccessToken,
-            job,
-            onProgress,
-            signal,
-        });
+            finished = await this.#waitForResult({
+                apiBase,
+                getAccessToken,
+                job,
+                onProgress,
+                signal,
+            });
+        }
 
         const archive = await this.#downloadResult({
             apiBase,
@@ -149,6 +164,7 @@ export class MkteroConversionClient {
         fileName,
         bytes,
         metadata,
+        sha256,
         signal,
     }) {
         const body = {
@@ -157,6 +173,7 @@ export class MkteroConversionClient {
             content_type: 'application/pdf',
         };
         if (metadata && typeof metadata === 'object') body.metadata = metadata;
+        if (typeof sha256 === 'string' && sha256) body.sha256 = sha256;
         const job = await this.#requestJSON({
             apiBase,
             getAccessToken,
@@ -167,7 +184,7 @@ export class MkteroConversionClient {
             timeoutMs: this.requestTimeoutMs,
             label: 'conversion job',
         });
-        if (!job?.job_id || !job?.upload_url) {
+        if (!job?.job_id || (!job.upload_url && job.status !== STATUS_SUCCEEDED && job.status !== STATUS_WAITING_FOR_SHARED_PARSE)) {
             throw codedError(
                 'The Mktero service did not return an upload URL',
                 'MKTERO_INVALID_RESPONSE'
@@ -393,6 +410,15 @@ export class MkteroConversionClient {
             if (timeoutID !== null) clearTimeout(timeoutID);
             signal?.removeEventListener('abort', relayAbort);
         }
+    }
+}
+
+async function pdfSHA256(bytes) {
+    try {
+        return await sha256Hex(bytes);
+    }
+    catch {
+        return '';
     }
 }
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { strToU8, zipSync } from 'fflate';
+import { sha256Hex } from '../src/core/sha256.js';
 import { MkteroConversionClient } from '../src/mktero/mktero-conversion-client.js';
 
 const API_BASE = 'http://127.0.0.1:8080';
@@ -110,6 +111,52 @@ test('converts through the hosted service and decodes the MinerU archive', async
         `${API_BASE}/api/v1/conversions/job-1/result-url`
     );
     assert.equal(requests[6].url, 'https://r2.example/result.zip');
+});
+
+test('downloads an existing result without uploading when the service already has it', async () => {
+    const requests = [];
+    const progress = [];
+    const archive = resultArchive();
+    const responses = [
+        jsonResponse(201, {
+            job_id: 'job-ready',
+            status: 'succeeded',
+            progress: 100,
+        }),
+        jsonResponse(200, {
+            result_url: 'https://r2.example/result.zip',
+            method: 'GET',
+        }),
+        archiveResponse(archive),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return responses.shift();
+        },
+        sleep: async () => {},
+    });
+
+    const converted = await client.convert({
+        apiBase: API_BASE,
+        getAccessToken: () => 'access-token',
+        fileName: 'paper.pdf',
+        fileData: PDF_BYTES,
+        onProgress: value => progress.push(value),
+    });
+
+    assert.equal(converted.origin, 'network');
+    assert.match(converted.result.markdown, /Converted/);
+    const created = JSON.parse(requests[0].options.body);
+    assert.equal(created.sha256, await sha256Hex(PDF_BYTES));
+    assert.equal(created.sha256.length, 64);
+    assert.deepEqual(requests.map(request => request.url), [
+        `${API_BASE}/api/v1/conversions`,
+        `${API_BASE}/api/v1/conversions/job-ready/result-url`,
+        'https://r2.example/result.zip',
+    ]);
+    assert.deepEqual(progress, [2, 95, 95]);
+    assert.equal(JSON.stringify(progress).includes('cache'), false);
 });
 
 test('reports a failed job with its service error code', async () => {

@@ -9,6 +9,7 @@
 | 登录或注册时的邮箱和密码，以及注册验证码 | 你选择的 Mktero 服务；密码和验证码不会保存 | Mktero 不同步 |
 | Mktero 访问令牌和刷新令牌 | 当前 Zotero 配置文件，未加密 | 否 |
 | 账号资料和转换活跃度计数，在账号面板打开时使用访问令牌请求 | 你选择的 Mktero 服务 | Mktero 不同步 |
+| 创建托管转换时的 PDF SHA-256；仅当该服务还没有同一文件时才发送 PDF 字节 | 你选择的 Mktero 服务 | Mktero 不同步 |
 | 缓存的 Markdown、图片、图表元数据（含 OCR 片段）、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
 | Markdown 可用索引：文库 ID、条目 key、附件 key、缓存键、解析配置和过期时间 | 当前 Zotero 配置文件，未加密 | 否 |
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
