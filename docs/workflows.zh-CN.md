@@ -51,6 +51,6 @@ AI 全文翻译需要用户主动触发，也不会重写原始 Markdown。Mkter
 
 ## 导出到 Obsidian
 
-`导出到 Obsidian` 写入原文，不跟随当前打开的阅读视图。每种已经完整保存的译文单独再写一份：论文名为 `B` 时，原文仍是 `B`，简体中文译文是 `B - chinese`。其他语言同样处理，例如 `japanese`、`spanish`。未完成的译文和双语对照不会导出。`导出 Markdown` 仍然只保存当前正在阅读的视图。第一次会要求选择包含 `.obsidian` 的库文件夹，之后沿用该库。可以在设置里更改库路径和文件夹名，文件夹默认是 `Mktero`，以免盖住其他插件生成的文献笔记。
+`导出到 Obsidian` 写入原文，不跟随当前打开的阅读视图。每种已经完整保存的译文单独再写一份：论文名为 `B` 时，原文仍是 `B`，简体中文译文是 `B - chinese`。其他语言同样处理，例如 `japanese`、`spanish`。未完成的译文和双语对照不会导出。`导出 Markdown` 仍然只保存当前正在阅读的视图。第一次会要求选择包含 `.obsidian` 的库文件夹，之后沿用该库。可以在设置里更改库。笔记固定写入库内的 `Mktero` 文件夹，以免盖住其他插件生成的文献笔记。
 
 论文标题为 `B` 时，结果是 `<库>/Mktero/B/B.md`，图片在 `<库>/Mktero/B/assets/`，使用普通的相对路径链接。图注写在图片下面，不放进图片的 alt 文本，因为 Obsidian 遇到方括号就不会渲染这张图片。YAML frontmatter 包含标题、作者、年份、DOI、标签、`zotero://` 链接和 Zotero 条目身份。只有 Extra 里已经有 Better BibTeX citation key 时才会写入 `citekey`。同一条目再次导出会更新这篇笔记，即使标题变了也一样。如果笔记在 Obsidian 里被改过，或文件属于另一条目，Mktero 会先询问再覆盖。它不会删除你后来放进 `assets/` 的其他文件。库的跨设备同步仍由 Obsidian Sync、iCloud 或 git 负责，Mktero 不参与。

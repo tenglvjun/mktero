@@ -78,6 +78,19 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         /pref\("extensions\.mktero\.readerLineHeight", "standard"\)/
     );
     assert.match(prefs, /pref\("extensions\.mktero\.readerWidth", "standard"\)/);
+    assert.match(prefs, /pref\("extensions\.mktero\.obsidianVaultPath", ""\)/);
+    assert.doesNotMatch(prefs, /extensions\.mktero\.obsidianSubdirectory/);
+    assert.match(pane, /id="mktero-obsidian-vault-browse"/);
+    assert.match(pane, /id="mktero-obsidian-vault-help"/);
+    assert.doesNotMatch(pane, /id="mktero-obsidian-vault"/);
+    assert.doesNotMatch(pane, /id="mktero-obsidian-subdirectory"/);
+    assert.doesNotMatch(pane, /preferences\.obsidian\.subdirectory/);
+    assert.doesNotMatch(
+        script,
+        /obsidianSubdirectory|getObsidianSubdirectory|setObsidianSubdirectory/
+    );
+    assert.match(bootstrap, /DEFAULT_OBSIDIAN_SUBDIRECTORY/);
+    assert.doesNotMatch(bootstrap, /getObsidianSubdirectory/);
     assert.match(
         prefs,
         /pref\("extensions\.mktero\.readerAlignment", "start"\)/
@@ -323,13 +336,13 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row[^\"]*"/g
         ) || []).length,
-        22
+        20
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-field-control(?: [^"]+)?">/g
         ) || []).length,
-        17
+        15
     );
 });
 

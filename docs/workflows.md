@@ -207,9 +207,9 @@ Simplified Chinese translation is `B - chinese`. Other languages use the same
 pattern, such as `japanese` or `spanish`. Incomplete translations and the
 bilingual reading view are not exported. `Export Markdown` still saves only
 the view you are reading. The first export asks for the vault folder that
-contains `.obsidian`. Later exports reuse it. Settings can change the vault
-and the folder name, which defaults to `Mktero`, so the note does not replace
-a literature note created by another plugin.
+contains `.obsidian`. Later exports reuse it. Settings can change the vault.
+Notes always go in the `Mktero` folder, so they do not replace a literature
+note created by another plugin.
 
 A paper titled `B` becomes `<vault>/Mktero/B/B.md`, with figures in
 `<vault>/Mktero/B/assets/` and ordinary relative image links. Figure captions

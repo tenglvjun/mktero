@@ -2,13 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    getObsidianSubdirectory,
     getObsidianVaultPath,
-    setObsidianSubdirectory,
     setObsidianVaultPath,
 } from '../src/config/obsidian-preferences.js';
 
-test('stores the Obsidian vault path and falls back to Mktero for a bad folder', () => {
+test('stores the Obsidian vault path without a configurable folder', () => {
     const values = new Map();
     const zotero = {
         Prefs: {
@@ -20,13 +18,6 @@ test('stores the Obsidian vault path and falls back to Mktero for a bad folder',
     assert.equal(getObsidianVaultPath(zotero), '');
     assert.equal(setObsidianVaultPath(zotero, ' /vault '), '/vault');
     assert.equal(getObsidianVaultPath(zotero), '/vault');
-    assert.equal(getObsidianSubdirectory(zotero), 'Mktero');
-    assert.equal(setObsidianSubdirectory(zotero, 'Papers'), 'Papers');
-    assert.equal(getObsidianSubdirectory(zotero), 'Papers');
-    values.set(
-        'extensions.mktero.obsidianSubdirectory',
-        '../outside'
-    );
-    assert.equal(getObsidianSubdirectory(zotero), 'Mktero');
-    assert.equal(setObsidianSubdirectory(zotero, '../outside'), 'Mktero');
+    assert.equal(setObsidianVaultPath(zotero, '  '), '');
+    assert.equal(values.has('extensions.mktero.obsidianSubdirectory'), false);
 });

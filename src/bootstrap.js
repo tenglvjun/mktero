@@ -109,10 +109,10 @@ import {
     createZoteroSavedMarkdownStore,
 } from './platform/zotero-saved-markdown-store.js';
 import {
-    getObsidianSubdirectory,
     getObsidianVaultPath,
     setObsidianVaultPath,
 } from './config/obsidian-preferences.js';
+import { DEFAULT_OBSIDIAN_SUBDIRECTORY } from './markdown/obsidian-note.js';
 import {
     createZoteroMarkdownExporter,
 } from './platform/zotero-markdown-exporter.js';
@@ -362,7 +362,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         translate: runtimeTranslate,
         getVaultPath: () => getObsidianVaultPath(Zotero),
         setVaultPath: value => setObsidianVaultPath(Zotero, value),
-        getSubdirectory: () => getObsidianSubdirectory(Zotero),
+        getSubdirectory: () => DEFAULT_OBSIDIAN_SUBDIRECTORY,
         getProfilePath: () => Zotero.Profile?.dir,
         confirmOverwrite: ({ ownerWindow, path }) => (
             confirmObsidianOverwrite(ownerWindow, path)
