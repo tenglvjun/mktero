@@ -29,7 +29,7 @@ export function normalizeConversionProvider(value) {
     const provider = String(value || '').trim();
     return SUPPORTED_CONVERSION_PROVIDERS.has(provider)
         ? provider
-        : CONVERSION_PROVIDER_MINERU;
+        : CONVERSION_PROVIDER_MKTERO;
 }
 
 export function getConversionProvider(zotero) {

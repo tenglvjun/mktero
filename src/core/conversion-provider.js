@@ -36,7 +36,7 @@ export class ConversionProviderRouter {
         const configured = String(this.getProvider() || '').trim();
         const provider = SUPPORTED_PROVIDERS.has(configured)
             ? configured
-            : MINERU_PROVIDER;
+            : MKTERO_PROVIDER;
         return this.providers[provider].extract(itemID, options);
     }
 }

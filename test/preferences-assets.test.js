@@ -33,7 +33,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     ]);
 
     assert.match(prefs, /pref\("extensions\.mktero\.mineruApiKey", ""\)/);
-    assert.match(prefs, /pref\("extensions\.mktero\.conversionProvider", "mineru"\)/);
+    assert.match(prefs, /pref\("extensions\.mktero\.conversionProvider", "mktero"\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.mistralApiKey", ""\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.cacheEnabled", true\)/);
     assert.doesNotMatch(

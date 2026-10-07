@@ -34,27 +34,27 @@ test('dispatches extraction to the configured provider', async () => {
     assert.deepEqual(calls, [[42, options]]);
 });
 
-test('falls back to MinerU for an invalid provider value', async () => {
+test('falls back to Mktero for an invalid provider value', async () => {
     let selected = null;
     const router = new ConversionProviderRouter({
         getProvider: () => 'unsupported',
         providers: {
             mineru: {
-                extract: async itemID => {
-                    selected = itemID;
-                    return { provider: 'mineru' };
-                },
+                extract: async () => assert.fail('MinerU was selected'),
             },
             mistral: {
                 extract: async () => assert.fail('Mistral was selected'),
             },
             mktero: {
-                extract: async () => assert.fail('Mktero was selected'),
+                extract: async itemID => {
+                    selected = itemID;
+                    return { provider: 'mktero' };
+                },
             },
         },
     });
 
-    assert.deepEqual(await router.extract(7), { provider: 'mineru' });
+    assert.deepEqual(await router.extract(7), { provider: 'mktero' });
     assert.equal(selected, 7);
 });
 
