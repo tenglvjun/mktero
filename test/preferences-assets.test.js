@@ -629,7 +629,7 @@ test('uses the same account placeholders as the website', async () => {
     );
 
     const value = (block, key) => block.match(
-        new RegExp("'" + key.replace(/[.]/g, '\\.') + "':\\s*'([^']*)'")
+        new RegExp("'" + String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "':\\s*'([^']*)'")
     )?.[1];
 
     // English matches mktero-web/account.js.
