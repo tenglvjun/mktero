@@ -1,6 +1,7 @@
 import { unzipSync } from 'fflate';
 import {
     CONVERSION_PROVIDER_MISTRAL,
+    CONVERSION_PROVIDER_MKTERO,
     observeConversionProfile,
 } from './config/conversion-preferences.js';
 import {
@@ -65,6 +66,19 @@ import {
 } from './ai/translation-request-tracker.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import { ConversionProviderRouter } from './core/conversion-provider.js';
+import { MkteroConversionClient } from './mktero/mktero-conversion-client.js';
+import {
+    MkteroDocumentExtractor,
+    MkteroSignInRequiredError,
+} from './extractors/mktero-extractor.js';
+import {
+    accessTokenNeedsRefresh,
+    clearAccountSession,
+    getAccountApiBase,
+    getAccountSession,
+    saveAccountSession,
+} from './config/account-preferences.js';
+import { refreshMkteroAccount } from './account/account-client.js';
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import { createConversionRunRegistry } from './core/conversion-runs.js';
@@ -558,10 +572,14 @@ globalThis.startup = async function startup({ id, rootURI }) {
         await figureLabelRecovery.recover(result, context), context
     );
     const prepareWithFigures = (decode, prepare) => async (raw, context) => {
+        // A saved correction is already a prepared document. Re-running figure
+        // restoration would discard the edit and requires a conversion context
+        // that revision reopening does not have.
+        if (raw?.userEdited) return raw;
         const input = decode(raw);
         const draft = await figureRestoration.restore(input, context);
         return finalizeRestoredDocument(input, draft, {
-            prepare, hash: sha256Hex, signal: context.signal,
+            prepare, hash: sha256Hex, signal: context?.signal,
         });
     };
     const progressiveWithFigures = (decode, prepare) => async (raw, context) => {
@@ -687,11 +705,36 @@ globalThis.startup = async function startup({ id, rootURI }) {
         readRevision: options => readRevisionSnapshot(options),
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
     });
+    const mkteroExtractor = new MkteroDocumentExtractor({
+        zotero: Zotero,
+        conversion: new MkteroConversionClient({
+            createAbortController: createZoteroAbortController,
+        }),
+        getApiBase: () => getAccountApiBase(Zotero),
+        getAccessToken: () => ensureAccountAccessToken(),
+        readFile: path => IOUtils.read(path),
+        preparePDFIndex: (itemID, options) => preparePDFIndexForItem(
+            itemID,
+            options,
+            pdfAnnotationLocator
+        ),
+        createCacheKey: (fileData, options) => createMinerUCacheKey(fileData, options),
+        createSourceHash: fileData => sha256Hex(fileData),
+        readRevision: options => readRevisionSnapshot(options),
+        cache,
+        isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
+        prepareResult: prepareWithFigures(
+            decodeMinerUFigureInput,
+            prepareMinerUResult
+        ),
+        recoverFigures,
+    });
     const extractor = new ConversionProviderRouter({
         getProvider: () => getConversionProvider(Zotero),
         providers: {
             mineru: mineruExtractor,
             mistral: mistralExtractor,
+            mktero: mkteroExtractor,
         },
     });
     runtime.service = new MarkdownDocumentService({
@@ -1525,9 +1568,11 @@ function publishConversionFailure(presentation, itemID, error, previousResult) {
 function conversionNeedsSettings(error) {
     return error instanceof MinerUConfigurationError
         || error instanceof MistralConfigurationError
+        || error instanceof MkteroSignInRequiredError
         || error?.code === 'MINERU_API_KEY_INVALID'
         || error?.code === 'MISTRAL_API_KEY_INVALID'
-        || error?.code === 'MISTRAL_API_KEY_REQUIRED';
+        || error?.code === 'MISTRAL_API_KEY_REQUIRED'
+        || error?.code === 'MKTERO_SIGN_IN_REQUIRED';
 }
 
 function prepareSelectedMarkdown(targets) {
@@ -2789,6 +2834,31 @@ async function loadRevisionSessionForItem(itemID) {
     return replaceRevisionSession(itemID, saved.base);
 }
 
+// Returns a valid access token for the hosted service, refreshing it first
+// when it is missing or about to expire. Throws when the user is signed out.
+async function ensureAccountAccessToken() {
+    const session = getAccountSession(Zotero);
+    if (!session.refreshToken) {
+        throw new MkteroSignInRequiredError();
+    }
+    if (!accessTokenNeedsRefresh(session)) return session.accessToken;
+    try {
+        const refreshed = await refreshMkteroAccount({
+            apiBase: getAccountApiBase(Zotero),
+            refreshToken: session.refreshToken,
+        });
+        saveAccountSession(Zotero, {
+            ...refreshed,
+            email: refreshed.email || session.email,
+        });
+        return refreshed.accessToken;
+    }
+    catch {
+        clearAccountSession(Zotero);
+        throw new MkteroSignInRequiredError();
+    }
+}
+
 function currentMinerUParserProfile() {
     return getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
         ? MINERU_LOCAL_PARSER_PROFILE_ID
@@ -2799,6 +2869,10 @@ function currentConversionParserProfile() {
     return getConversionProvider(Zotero) === CONVERSION_PROVIDER_MISTRAL
         ? MISTRAL_PARSER_PROFILE_ID
         : currentMinerUParserProfile();
+}
+
+function isMkteroProvider() {
+    return getConversionProvider(Zotero) === CONVERSION_PROVIDER_MKTERO;
 }
 
 function initializeMarkdownReadiness(cache, pluginID, rootURI) {

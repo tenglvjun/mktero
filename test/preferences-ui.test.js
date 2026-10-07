@@ -12,6 +12,12 @@ const {
     formatCacheStats,
 } = preferencesUI;
 
+function withoutServiceSourceWrites(writes) {
+    return writes.filter(write => (
+        !String(write.key).includes('ServiceSource')
+    ));
+}
+
 test('formats cache statistics for the preferences pane', () => {
     assert.equal(
         formatCacheStats({ entries: 0, sizeBytes: 0 }),
@@ -207,7 +213,7 @@ test('configures the Markdown reader font size from preferences', async () => {
 
     input.value = '22';
     input.dispatchEvent(new dom.window.Event('input'));
-    assert.deepEqual(writes, [{
+    assert.deepEqual(withoutServiceSourceWrites(writes), [{
         key: 'extensions.mktero.readerFontSize',
         value: 22,
         global: true,
@@ -242,7 +248,7 @@ test('configures the Markdown reader font size from preferences', async () => {
     assert.equal(sourcePeek.checked, true);
     sourcePeek.checked = false;
     sourcePeek.dispatchEvent(new dom.window.Event('change'));
-    assert.deepEqual(writes, [
+    assert.deepEqual(withoutServiceSourceWrites(writes), [
         {
             key: 'extensions.mktero.readerFontSize',
             value: 22,
@@ -282,13 +288,14 @@ test('configures the Markdown reader font size from preferences', async () => {
     font.dispatchEvent(new dom.window.Event('change'));
     sourcePeek.checked = true;
     sourcePeek.dispatchEvent(new dom.window.Event('change'));
-    assert.equal(writes.length, 6);
+    assert.equal(withoutServiceSourceWrites(writes).length, 6);
 });
 
 test('switches one conversion API key field with the selected provider', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
             <select id="mktero-conversion-provider">
+                <option value="mktero">Mktero</option>
                 <option value="mineru">MinerU</option>
                 <option value="mistral">Mistral OCR 4.1</option>
             </select>
@@ -350,7 +357,11 @@ test('switches one conversion API key field with the selected provider', async (
     const apiKey = dom.window.document.getElementById('mktero-api-key');
     apiKey.value = 'updated-mineru-secret';
     apiKey.dispatchEvent(new dom.window.Event('change'));
-    assert.deepEqual(writes, [{
+    assert.deepEqual(withoutServiceSourceWrites(writes), [{
+        key: 'extensions.mktero.conversionProvider',
+        value: 'mineru',
+        global: true,
+    }, {
         key: 'extensions.mktero.mineruApiKey',
         value: 'updated-mineru-secret',
         global: true,
@@ -503,7 +514,7 @@ test('shows legacy OpenAI-compatible settings as custom Chat Completions', async
 test('localizes preferences from Zotero without storing a language choice', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">
-            <h2 data-i18n="preferences.conversion.title"></h2>
+            <h2 data-i18n="preferences.features.title"></h2>
             <strong data-i18n="preferences.cache.usageLabel"></strong>
             <span id="mktero-cache-status"></span>
             <button id="mktero-clear-cache" data-i18n="preferences.cache.clear"></button>
@@ -513,7 +524,10 @@ test('localizes preferences from Zotero without storing a language choice', asyn
     const zotero = {
         locale: 'zh-CN',
         Prefs: {
-            set: assert.fail,
+            set(key) {
+                if (String(key).includes('ServiceSource')) return;
+                assert.fail(key);
+            },
         },
         logError: assert.fail,
     };
@@ -527,12 +541,55 @@ test('localizes preferences from Zotero without storing a language choice', asyn
     });
 
     await controller.init();
-    assert.equal(document.querySelector('h2').textContent, 'PDF 转换');
+    assert.equal(document.querySelector('h2').textContent, 'Markdown 转换');
     assert.equal(
         document.getElementById('mktero-cache-status').textContent,
         '2 个本地缓存条目，1.5 KB'
     );
 
+    controller.destroy();
+});
+
+test('paints preference controls before cache statistics finish', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <h2 data-i18n="preferences.features.title"></h2>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache" data-i18n="preferences.cache.clear"></button>
+        </section>
+    </body>`);
+    const { document } = dom.window;
+    let releaseStats;
+    const statsReady = new Promise(resolve => {
+        releaseStats = resolve;
+    });
+    const controller = createPreferencesController({
+        document,
+        zotero: {
+            locale: 'zh-CN',
+            Prefs: {
+                set(key) {
+                    if (String(key).includes('ServiceSource')) return;
+                    assert.fail(key);
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: () => statsReady.then(() => ({ entries: 2, sizeBytes: 1536 })),
+            clear: async () => {},
+        },
+    });
+
+    const pending = controller.start();
+    assert.equal(document.querySelector('h2').textContent, 'Markdown 转换');
+    assert.equal(document.getElementById('mktero-cache-status').textContent, '');
+    releaseStats();
+    await pending;
+    assert.equal(
+        document.getElementById('mktero-cache-status').textContent,
+        '2 个本地缓存条目，1.5 KB'
+    );
     controller.destroy();
 });
 
@@ -1564,11 +1621,445 @@ test('switches MinerU between cloud and a local service without mixing keys', as
         dom.window.document.getElementById('mktero-conversion-privacy-note').textContent,
         /local MinerU address/i
     );
-    assert.deepEqual(writes[0], {
+    assert.deepEqual(withoutServiceSourceWrites(writes)[0], {
         key: 'extensions.mktero.mineruEndpoint',
         value: 'local',
         global: true,
     });
+
+    controller.destroy();
+});
+
+test('hides every custom PDF row when the hosted subscription is selected', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider">
+                <option value="mktero">Mktero</option>
+                <option value="mineru">MinerU</option>
+                <option value="mistral">Mistral OCR 4.1</option>
+            </select>
+            <div id="mktero-account-panel"></div>
+            <div id="mktero-mineru-endpoint-row">
+                <select id="mktero-mineru-endpoint">
+                    <option value="cloud">Cloud</option>
+                    <option value="local">Local</option>
+                </select>
+            </div>
+            <div id="mktero-mineru-local-base-row">
+                <input id="mktero-mineru-local-base">
+            </div>
+            <div id="mktero-api-key-row">
+                <input id="mktero-api-key">
+                <small id="mktero-api-key-help"></small>
+                <a id="mktero-api-key-manage"></a>
+            </div>
+            <small id="mktero-conversion-privacy-note"></small>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mineru'],
+        ['extensions.mktero.mineruEndpoint', 'cloud'],
+        ['extensions.mktero.mineruApiKey', 'cloud-secret'],
+    ]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const provider = dom.window.document.getElementById(
+        'mktero-conversion-provider'
+    );
+    const endpointRow = dom.window.document.getElementById(
+        'mktero-mineru-endpoint-row'
+    );
+    const apiKeyRow = dom.window.document.getElementById('mktero-api-key-row');
+    const privacyNote = dom.window.document.getElementById(
+        'mktero-conversion-privacy-note'
+    );
+
+    provider.value = 'mktero';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(
+        dom.window.document.getElementById('mktero-account-panel').hidden,
+        false
+    );
+    assert.equal(endpointRow.hidden, true);
+    assert.equal(apiKeyRow.hidden, true);
+    assert.equal(privacyNote.hidden, true);
+    assert.equal(values.get('extensions.mktero.conversionProvider'), 'mktero');
+
+    provider.value = 'mineru';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(endpointRow.hidden, false);
+    assert.equal(apiKeyRow.hidden, false);
+    assert.equal(values.get('extensions.mktero.conversionProvider'), 'mineru');
+
+    provider.value = 'mktero';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(endpointRow.hidden, true);
+    assert.equal(apiKeyRow.hidden, true);
+    assert.equal(privacyNote.hidden, true);
+
+    controller.destroy();
+});
+
+test('drives the account card tabs and the signed-in identity', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider">
+                <option value="mktero">Mktero</option>
+                <option value="mineru">MinerU</option>
+                <option value="mistral">Mistral OCR 4.1</option>
+            </select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-tabs">
+                    <button id="mktero-account-tab-login" aria-selected="true"></button>
+                    <button id="mktero-account-tab-register" aria-selected="false"></button>
+                </div>
+                <div id="mktero-account-signed-in" hidden>
+                    <div class="mktero-account-top">
+                        <div class="mktero-account-identity">
+                            <span id="mktero-account-avatar"></span>
+                            <div class="mktero-account-identity-copy">
+                                <strong id="mktero-account-signed-in-nickname"></strong>
+                                <button id="mktero-account-edit-nickname"></button>
+                                <p id="mktero-account-signed-in-email"></p>
+                                <strong id="mktero-account-created"></strong>
+                            </div>
+                        </div>
+                        <button id="mktero-account-logout"></button>
+                    </div>
+                    <p id="mktero-account-nickname-status"></p>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
+                </div>
+                <div id="mktero-account-form">
+                    <input id="mktero-account-email">
+                    <div id="mktero-account-code-row" hidden><input id="mktero-account-code"><button id="mktero-account-send-code"></button></div>
+                    <div id="mktero-account-password-row"><input id="mktero-account-password"></div>
+                    <div id="mktero-account-password-confirm-row" hidden><input id="mktero-account-password-confirm"></div>
+                    <div id="mktero-account-register-nickname-row" hidden><input id="mktero-account-register-nickname"></div>
+                    <button id="mktero-account-forgot"></button>
+                    <button id="mktero-account-login"></button>
+                    <button id="mktero-account-register" hidden></button>
+                    <button id="mktero-account-send-reset" hidden></button>
+                    <button id="mktero-account-forgot-back" hidden></button>
+                    <p id="mktero-account-status"></p>
+                </div>
+                <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+                <div id="mktero-account-nickname-dialog" hidden>
+                    <div>
+                        <input id="mktero-account-nickname">
+                        <p id="mktero-account-dialog-status"></p>
+                        <button id="mktero-account-nickname-dialog-close"></button>
+                        <button id="mktero-account-nickname-dialog-cancel"></button>
+                        <button id="mktero-account-save-nickname"></button>
+                    </div>
+                </div>
+            </div>
+            <div id="mktero-mineru-endpoint-row" hidden><select id="mktero-mineru-endpoint"><option value="cloud">Cloud</option></select></div>
+            <div id="mktero-mineru-local-base-row" hidden><input id="mktero-mineru-local-base"></div>
+            <div id="mktero-api-key-row" hidden><input id="mktero-api-key"></div>
+            <small id="mktero-conversion-privacy-note"></small>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([['extensions.mktero.conversionProvider', 'mktero']]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: () => {
+            throw new Error('signed out: the pane must not call the server');
+        },
+    });
+
+    await controller.init();
+    const doc = dom.window.document;
+    const tabs = doc.getElementById('mktero-account-tabs');
+    const tabLogin = doc.getElementById('mktero-account-tab-login');
+    const tabRegister = doc.getElementById('mktero-account-tab-register');
+    const form = doc.getElementById('mktero-account-form');
+    const signedIn = doc.getElementById('mktero-account-signed-in');
+
+    // Signed out: tabs and the form show, the identity block does not.
+    assert.equal(tabs.hidden, false);
+    assert.equal(form.hidden, false);
+    assert.equal(signedIn.hidden, true);
+    assert.equal(doc.getElementById('mktero-account-code-row').hidden, true);
+
+    // The register tab reveals the code, confirm, and optional nickname fields.
+    tabRegister.dispatchEvent(new dom.window.Event('click'));
+    assert.equal(tabRegister.getAttribute('aria-selected'), 'true');
+    assert.equal(tabLogin.getAttribute('aria-selected'), 'false');
+    assert.equal(doc.getElementById('mktero-account-code-row').hidden, false);
+    assert.equal(doc.getElementById('mktero-account-password-confirm-row').hidden, false);
+    assert.equal(doc.getElementById('mktero-account-register-nickname-row').hidden, false);
+    assert.equal(doc.getElementById('mktero-account-login').hidden, true);
+    assert.equal(doc.getElementById('mktero-account-register').hidden, false);
+
+    tabLogin.dispatchEvent(new dom.window.Event('click'));
+    assert.equal(tabLogin.getAttribute('aria-selected'), 'true');
+    assert.equal(doc.getElementById('mktero-account-register-nickname-row').hidden, true);
+
+    // Signing in swaps the whole card to the identity block.
+    values.set('extensions.mktero.accountEmail', 'user@example.com');
+    values.set('extensions.mktero.accountNickname', 'paper-reader');
+    values.set('extensions.mktero.accountRefreshToken', 'refresh');
+    values.set('extensions.mktero.accountAccessToken', 'access');
+    values.set('extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000);
+    controller.destroy();
+
+    const requested = [];
+    const signedInController = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: async url => {
+            requested.push(String(url));
+            if (String(url).includes('/me/stats')) {
+                return {
+                    ok: true,
+                    json: async () => ({ total: 3, month: 1, today: 0 }),
+                };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    email: 'user@example.com',
+                    nickname: 'paper-reader',
+                    created_at: '2026-09-01T00:00:00Z',
+                }),
+            };
+        },
+    });
+    await signedInController.init();
+
+    assert.equal(tabs.hidden, true);
+    assert.equal(form.hidden, true);
+    assert.equal(signedIn.hidden, false);
+    assert.equal(doc.getElementById('mktero-account-avatar').textContent, 'P');
+    assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
+    assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
+
+    assert.deepEqual(
+        requested.filter(url => url.includes('/me/stats')).length,
+        1
+    );
+    assert.match(
+        requested.find(url => url.includes('/me/stats')),
+        /\/api\/v1\/me\/stats$/
+    );
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '3');
+    assert.equal(doc.getElementById('mktero-stat-month').textContent, '1');
+    assert.equal(doc.getElementById('mktero-stat-today').textContent, '0');
+    assert.match(doc.querySelector('#mktero-stat-month').parentElement.textContent, /\d/);
+
+    // The rename dialog opens from the icon button, seeded with the nickname.
+    const dialog = doc.getElementById('mktero-account-nickname-dialog');
+    const nicknameInput = doc.getElementById('mktero-account-nickname');
+    assert.equal(dialog.hasAttribute('hidden'), true);
+    doc.getElementById('mktero-account-edit-nickname')
+        .dispatchEvent(new dom.window.Event('click'));
+    assert.equal(dialog.hasAttribute('hidden'), false);
+    assert.equal(nicknameInput.value, 'paper-reader');
+
+    doc.getElementById('mktero-account-nickname-dialog-cancel')
+        .dispatchEvent(new dom.window.Event('click'));
+    assert.equal(dialog.hasAttribute('hidden'), true);
+
+    const top = doc.querySelector('.mktero-account-top');
+    assert.ok(top, '.mktero-account-top wrapper is missing');
+    assert.equal(doc.getElementById('mktero-account-logout') != null, true);
+    assert.equal(top.contains(doc.getElementById('mktero-account-avatar')), true);
+    assert.equal(top.contains(doc.getElementById('mktero-account-signed-in-nickname')), true);
+    // The counters stay outside that row, below it.
+    assert.equal(top.contains(doc.getElementById('mktero-stat-total')), false);
+
+    signedInController.destroy();
+});
+
+test('keeps the account card at zero when the activity request fails', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <p id="mktero-account-signed-in-email"></p>
+                    <strong id="mktero-account-created"></strong>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
+                </div>
+                <div id="mktero-account-form" hidden></div>
+                <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mktero'],
+        ['extensions.mktero.accountEmail', 'user@example.com'],
+        ['extensions.mktero.accountNickname', 'paper-reader'],
+        ['extensions.mktero.accountRefreshToken', 'refresh'],
+        ['extensions.mktero.accountAccessToken', 'access'],
+        ['extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000],
+    ]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: async () => {
+            throw new Error('offline');
+        },
+    });
+
+    // A failed activity request must not reject the whole pane.
+    await controller.init();
+    const doc = dom.window.document;
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '0');
+    assert.equal(doc.getElementById('mktero-stat-month').textContent, '0');
+    assert.equal(doc.getElementById('mktero-stat-today').textContent, '0');
+    // The stored session still renders, so the card stays usable.
+    assert.equal(doc.getElementById('mktero-account-signed-in-nickname').textContent, 'paper-reader');
+    assert.equal(doc.getElementById('mktero-account-signed-in-email').textContent, 'user@example.com');
+
+    controller.destroy();
+});
+
+test('loads the profile and conversion counters after the first sign-in', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <p id="mktero-account-signed-in-email"></p>
+                    <strong id="mktero-account-created"></strong>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
+                </div>
+                <div id="mktero-account-form">
+                    <input id="mktero-account-email">
+                    <input id="mktero-account-password">
+                    <button id="mktero-account-login"></button>
+                    <p id="mktero-account-status"></p>
+                </div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([['extensions.mktero.conversionProvider', 'mktero']]);
+    const requested = [];
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: async url => {
+            requested.push(String(url));
+            if (String(url).includes('/auth/login')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        access_token: 'access',
+                        refresh_token: 'refresh',
+                        expires_in: 3600,
+                        user: { email: 'user@example.com', nickname: 'paper-reader' },
+                    }),
+                };
+            }
+            if (String(url).includes('/me/stats')) {
+                return {
+                    ok: true,
+                    json: async () => ({ total: 1, month: 1, today: 1 }),
+                };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    email: 'user@example.com',
+                    nickname: 'paper-reader',
+                    created_at: '2026-10-03T00:00:00Z',
+                }),
+            };
+        },
+    });
+
+    await controller.init();
+    const doc = dom.window.document;
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '0');
+
+    doc.getElementById('mktero-account-email').value = 'user@example.com';
+    doc.getElementById('mktero-account-password').value = 'long-enough';
+    doc.getElementById('mktero-account-login')
+        .dispatchEvent(new dom.window.Event('click'));
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (doc.getElementById('mktero-stat-total').textContent === '1') break;
+        await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    assert.equal(requested.some(url => url.includes('/auth/login')), true);
+    assert.equal(requested.some(url => /\/api\/v1\/me$/.test(url)), true);
+    assert.equal(requested.some(url => url.endsWith('/me/stats')), true);
+    assert.equal(doc.getElementById('mktero-account-created').textContent.length > 0, true);
+    assert.equal(doc.getElementById('mktero-stat-total').textContent, '1');
 
     controller.destroy();
 });

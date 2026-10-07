@@ -24,6 +24,10 @@ const citationGraphStyles = await readFile(
     path.join(projectRoot, 'ui/citation-graph.css'),
     'utf8'
 );
+const buildMode = process.env.MKTERO_BUILD === 'debug' ? 'debug' : 'release';
+const buildDefines = {
+    __MKTERO_BUILD__: JSON.stringify(buildMode),
+};
 const xpiName = `mktero-${manifest.version}.xpi`;
 const xpiPath = path.join(buildRoot, xpiName);
 const requiredPackageFiles = [
@@ -40,6 +44,7 @@ const requiredPackageFiles = [
     'pdf.worker.mjs',
     'prefs.js',
     'ui/icons/mktero.svg',
+    'ui/preferences-ai.js',
     'ui/preferences.css',
     'ui/preferences.js',
     'ui/preferences.xhtml',
@@ -66,6 +71,7 @@ await Promise.all([
         target: ['firefox115'],
         legalComments: 'none',
         define: {
+            ...buildDefines,
             __MKTERO_MARKDOWN_STYLES__: JSON.stringify(markdownStyles),
             __MKTERO_CITATION_GRAPH_STYLES__: JSON.stringify(
                 citationGraphStyles
@@ -86,7 +92,7 @@ await Promise.all([
         platform: 'browser',
         target: ['firefox115'],
         legalComments: 'none',
-        define: { process: 'undefined', Buffer: 'undefined' },
+        define: { ...buildDefines, process: 'undefined', Buffer: 'undefined' },
     }),
     build({
         entryPoints: [path.join(projectRoot, 'src/ui/preferences.js')],
@@ -96,7 +102,17 @@ await Promise.all([
         platform: 'browser',
         target: ['firefox115'],
         legalComments: 'none',
-        define: { process: 'undefined', Buffer: 'undefined' },
+        define: { ...buildDefines, process: 'undefined', Buffer: 'undefined' },
+    }),
+    build({
+        entryPoints: [path.join(projectRoot, 'src/ui/preferences-ai.js')],
+        outfile: path.join(packageRoot, 'ui/preferences-ai.js'),
+        bundle: true,
+        format: 'iife',
+        platform: 'browser',
+        target: ['firefox115'],
+        legalComments: 'none',
+        define: { ...buildDefines, process: 'undefined', Buffer: 'undefined' },
     }),
     build({
         entryPoints: [path.join(projectRoot, 'src/figures/figure-render-worker-entry.js')],

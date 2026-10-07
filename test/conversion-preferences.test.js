@@ -31,8 +31,8 @@ test('normalizes conversion providers to the supported values', () => {
         normalizeConversionProvider(` ${CONVERSION_PROVIDER_MISTRAL} `),
         CONVERSION_PROVIDER_MISTRAL
     );
-    assert.equal(normalizeConversionProvider('unsupported'), 'mineru');
-    assert.equal(normalizeConversionProvider(undefined), 'mineru');
+    assert.equal(normalizeConversionProvider('unsupported'), 'mktero');
+    assert.equal(normalizeConversionProvider(undefined), 'mktero');
 });
 
 test('reads the selected conversion provider from global Zotero preferences', () => {
@@ -50,11 +50,11 @@ test('reads the selected conversion provider from global Zotero preferences', ()
     assert.deepEqual(calls, [{ key: CONVERSION_PROVIDER_PREF, global: true }]);
     assert.equal(
         getConversionProvider({ Prefs: { get: () => 'unsupported' } }),
-        'mineru'
+        'mktero'
     );
     assert.equal(
         getConversionProvider({ Prefs: { get: () => undefined } }),
-        'mineru'
+        'mktero'
     );
 });
 

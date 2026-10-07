@@ -39,10 +39,6 @@ import {
     resolveAIReasoningLevels,
     selectAIReasoningValue,
 } from '../config/ai-reasoning-options.js';
-import { AISDKGateway } from '../ai/ai-sdk-gateway.js';
-import {
-    MarkdownTranslationService,
-} from '../ai/markdown-translation-service.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import {
     getZoteroLocale,
@@ -51,6 +47,8 @@ import {
 import {
     CONVERSION_PROVIDER_MINERU,
     CONVERSION_PROVIDER_MISTRAL,
+    CONVERSION_PROVIDER_MKTERO,
+    CONVERSION_PROVIDER_PREF,
     MISTRAL_API_KEY_PREF,
     DEFAULT_MINERU_LOCAL_API_BASE,
     MINERU_API_KEY_PREF,
@@ -67,6 +65,30 @@ import {
     normalizeConversionProvider,
     normalizeMinerUEndpoint,
 } from '../config/conversion-preferences.js';
+import {
+    getMkteroAccount,
+    getMkteroConversionStats,
+    loginMkteroAccount,
+    logoutMkteroAccount,
+    refreshMkteroAccount,
+    registerMkteroAccount,
+    sendSignupCode,
+    updateMkteroNickname,
+} from '../account/account-client.js';
+import {
+    accessTokenNeedsRefresh,
+    clearAccountSession,
+    getAccountApiBase,
+    getAccountSession,
+    isAccountSignedIn,
+    saveAccountSession,
+    setAccountApiBase,
+} from '../config/account-preferences.js';
+import {
+    isDebugBuild,
+    MKTERO_DEBUG_SITE_BASE,
+    MKTERO_RELEASE_SITE_BASE,
+} from '../config/runtime-config.js';
 import {
     getMarkdownReaderAlignment,
     getMarkdownReaderFont,
@@ -89,6 +111,10 @@ import {
     setObsidianSubdirectory,
     setObsidianVaultPath,
 } from '../config/obsidian-preferences.js';
+import {
+    formatActivityPeriodLabels,
+    formatMemberSince,
+} from './account-activity.js';
 import {
     createLucideIcon,
     LUCIDE_ICONS,
@@ -153,6 +179,8 @@ export function createPreferencesController({
     confirmClearCache = null,
     createFilePicker = null,
     createAbortController = createRuntimeAbortController,
+    // Injected so tests never reach the network; the pane only reads here.
+    accountFetch = globalThis.fetch,
 }) {
     const status = document.getElementById('mktero-cache-status');
     const clearButton = document.getElementById('mktero-clear-cache');
@@ -177,6 +205,54 @@ export function createPreferencesController({
     const readerSourcePeekInput = document.getElementById(
         'mktero-reader-source-peek'
     );
+    const accountEmailInput = document.getElementById('mktero-account-email');
+    const accountPasswordInput = document.getElementById('mktero-account-password');
+    const accountLoginButton = document.getElementById('mktero-account-login');
+    const accountRegisterButton = document.getElementById('mktero-account-register');
+    const accountForgotButton = document.getElementById('mktero-account-forgot');
+    const accountCodeInput = document.getElementById('mktero-account-code');
+    const accountConfirmInput = document.getElementById('mktero-account-password-confirm');
+    const accountSendCodeButton = document.getElementById('mktero-account-send-code');
+    // The registration nickname is optional and only shown while registering.
+    const accountNicknameInput = document.getElementById('mktero-account-register-nickname');
+    const accountTabLogin = document.getElementById('mktero-account-tab-login');
+    const accountTabRegister = document.getElementById('mktero-account-tab-register');
+    const accountAvatar = document.getElementById('mktero-account-avatar');
+    const accountSignedInNickname = document.getElementById('mktero-account-signed-in-nickname');
+    const accountSignedInEmail = document.getElementById('mktero-account-signed-in-email');
+    const accountCreated = document.getElementById('mktero-account-created');
+    const accountEditNicknameButton = document.getElementById(
+        'mktero-account-edit-nickname'
+    );
+    const accountNicknameDialog = document.getElementById(
+        'mktero-account-nickname-dialog'
+    );
+    const accountNicknameDialogClose = document.getElementById(
+        'mktero-account-nickname-dialog-close'
+    );
+    const accountNicknameDialogCancel = document.getElementById(
+        'mktero-account-nickname-dialog-cancel'
+    );
+    const accountDialogStatus = document.getElementById(
+        'mktero-account-dialog-status'
+    );
+    const accountProfileNicknameInput = document.getElementById('mktero-account-nickname');
+    const accountSaveNicknameButton = document.getElementById('mktero-account-save-nickname');
+    const accountStatTotal = document.getElementById('mktero-stat-total');
+    const accountStatMonth = document.getElementById('mktero-stat-month');
+    const accountStatToday = document.getElementById('mktero-stat-today');
+    // The account activity request runs once per pane load; a failed request
+    // leaves the counters at zero instead of retrying on every render.
+    let accountStats = null;
+    let accountStatsRequested = false;
+    let accountMode = 'login';
+    let codeCooldownTimer = 0;
+    const accountLogoutButton = document.getElementById('mktero-account-logout');
+    const accountRefreshButton = document.getElementById('mktero-account-refresh');
+    const accountMoreButton = document.getElementById('mktero-account-more');
+    const accountApiBaseInput = document.getElementById('mktero-account-api-base');
+    const accountStatus = document.getElementById('mktero-account-status');
+    const accountPanel = document.getElementById('mktero-account-panel');
     const obsidianVaultInput = document.getElementById('mktero-obsidian-vault');
     const obsidianVaultBrowse = document.getElementById(
         'mktero-obsidian-vault-browse'
@@ -187,6 +263,7 @@ export function createPreferencesController({
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
     );
+    let accountBusy = false;
     const conversionApiKeyRow = document.getElementById('mktero-api-key-row');
     const conversionApiKeyInput = document.getElementById(
         'mktero-api-key'
@@ -234,6 +311,8 @@ export function createPreferencesController({
     const tabList = document.getElementById('mktero-pref-tablist');
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
+    let paneGeneration = 0;
+    let deferredRefresh = null;
     let activeAIProvider = '';
     let aiTestController = null;
     let unsubscribeReasoningCatalog = null;
@@ -519,14 +598,16 @@ export function createPreferencesController({
     }
 
     function updateConversionApiKeyControl() {
+        const hosted = selectedConversionChoice() === CONVERSION_PROVIDER_MKTERO;
         const provider = getSelectedConversionProvider();
         const local = provider === CONVERSION_PROVIDER_MINERU
             && selectedMinerUEndpoint() === MINERU_ENDPOINT_LOCAL;
         if (mineruEndpointRow) {
-            mineruEndpointRow.hidden = provider !== CONVERSION_PROVIDER_MINERU;
+            mineruEndpointRow.hidden = hosted
+                || provider !== CONVERSION_PROVIDER_MINERU;
         }
-        if (mineruLocalBaseRow) mineruLocalBaseRow.hidden = !local;
-        if (conversionApiKeyRow) conversionApiKeyRow.hidden = local;
+        if (mineruLocalBaseRow) mineruLocalBaseRow.hidden = hosted || !local;
+        if (conversionApiKeyRow) conversionApiKeyRow.hidden = hosted || local;
         if (mineruEndpointInput && !mineruEndpointInput.value) {
             mineruEndpointInput.value = getMinerUEndpoint(zotero);
         }
@@ -544,6 +625,7 @@ export function createPreferencesController({
             conversionApiKeyHelp.textContent = localization.t(config.helpKey);
         }
         if (conversionPrivacyNote) {
+            conversionPrivacyNote.hidden = hosted;
             conversionPrivacyNote.setAttribute('data-i18n', config.privacyKey);
             conversionPrivacyNote.textContent = localization.t(config.privacyKey);
         }
@@ -574,6 +656,583 @@ export function createPreferencesController({
         zotero?.Prefs?.set?.(config.preference, conversionApiKeyInput.value, true);
     }
 
+    function setAccountStatus(key) {
+        if (!accountStatus) return;
+        accountStatus.textContent = key ? t(key) : '';
+    }
+
+    // Errors stay in the dialog. A successful save closes it, and the updated
+    // name on the card is the confirmation, so nothing is written back there.
+    function setAccountNicknameStatus(key) {
+        if (!accountDialogStatus) return;
+        accountDialogStatus.textContent = key ? t(key) : '';
+        delete accountDialogStatus.dataset.tone;
+    }
+
+    function accountErrorKey(error) {
+        if (error?.code === 'invalid_credentials') {
+            return 'preferences.account.invalidCredentials';
+        }
+        if (error?.code === 'email_exists') {
+            return 'preferences.account.emailExists';
+        }
+        if (error?.code === 'email_not_verified') {
+            return 'preferences.account.emailNotVerified';
+        }
+        if (error?.code === 'invalid_password') {
+            return 'preferences.account.invalidPassword';
+        }
+        if (error?.code === 'invalid_code') {
+            return 'preferences.account.invalidCodeServer';
+        }
+        if (error?.code === 'code_rate_limited') {
+            return 'preferences.account.codeRateLimited';
+        }
+        if (error?.code === 'registration_unavailable') {
+            return 'preferences.account.registrationUnavailable';
+        }
+        if (error?.code === 'network') {
+            return 'preferences.account.networkFailed';
+        }
+        return 'preferences.account.loginFailed';
+    }
+
+    // The conversion provider select owns the hosted/custom decision. "mktero"
+    // is a real provider value: the account panel only appears for it.
+    function selectedConversionChoice() {
+        return normalizeConversionProvider(
+            conversionProviderInput?.value || getConversionProvider(zotero)
+        );
+    }
+
+    function updateServiceSources() {
+        const mktero = selectedConversionChoice() === CONVERSION_PROVIDER_MKTERO;
+        if (accountPanel) accountPanel.hidden = !mktero;
+        updateConversionApiKeyControl();
+    }
+
+    function renderAccount() {
+        const session = getAccountSession(zotero);
+        const signedIn = isAccountSignedIn(session);
+        const apiBaseRow = document.getElementById('mktero-account-api-base-row');
+
+        const signedInPanel = document.getElementById('mktero-account-signed-in');
+        const accountForm = document.getElementById('mktero-account-form');
+        const tabs = document.getElementById('mktero-account-tabs');
+        if (signedInPanel) signedInPanel.hidden = !signedIn;
+        if (accountForm) accountForm.hidden = signedIn;
+        // The tabs belong to the signed-out state only.
+        if (tabs) tabs.hidden = signedIn;
+        if (signedIn) {
+            const nickname = session.nickname || session.email || '';
+            if (accountAvatar) accountAvatar.textContent = accountInitial(nickname);
+            if (accountSignedInNickname) accountSignedInNickname.textContent = nickname;
+            if (accountSignedInEmail) accountSignedInEmail.textContent = session.email || '';
+        }
+        if (!signedIn) setAccountMode(accountMode);
+        renderAccountActivity();
+        if (apiBaseRow) apiBaseRow.hidden = !isDebugBuild();
+        if (accountApiBaseInput && !accountApiBaseInput.value) {
+            accountApiBaseInput.value = getAccountApiBase(zotero);
+        }
+        updateServiceSources();
+    }
+
+    function resetAccountActivity() {
+        accountStats = null;
+        accountStatsRequested = false;
+    }
+
+    // renderAccountActivity paints the three counters from the last loaded
+    // stats response. It runs on every render so a language change rewrites
+    // the month and day labels. Missing stats stay at zero.
+    function renderAccountActivity() {
+        const periodLabels = formatActivityPeriodLabels(new Date(), localization.language);
+        if (accountStatTotal) accountStatTotal.textContent = String(accountStats?.total || 0);
+        if (accountStatMonth) {
+            accountStatMonth.textContent = String(accountStats?.month || 0);
+            accountStatMonth.parentElement?.querySelector('.mktero-stat-label')
+                ?.replaceChildren(periodLabels.month);
+        }
+        if (accountStatToday) {
+            accountStatToday.textContent = String(accountStats?.today || 0);
+            accountStatToday.parentElement?.querySelector('.mktero-stat-label')
+                ?.replaceChildren(periodLabels.today);
+        }
+    }
+
+    function paneIsCurrent(generation) {
+        return initialized && generation === paneGeneration;
+    }
+
+    // Account requests are informational. They update the card after the pane
+    // is already visible and must not write into a pane that has been closed.
+    async function loadAccountStats() {
+        if (accountStatsRequested) return;
+        const session = getAccountSession(zotero);
+        if (!isAccountSignedIn(session) || !session.accessToken) return;
+        const generation = paneGeneration;
+        accountStatsRequested = true;
+        try {
+            accountStats = await getMkteroConversionStats({
+                apiBase: getAccountApiBase(zotero),
+                accessToken: session.accessToken,
+                fetchImpl: accountFetch,
+            });
+        }
+        catch {
+            accountStats = null;
+        }
+        if (!paneIsCurrent(generation)) return;
+        renderAccountActivity();
+    }
+
+    // loadAccountProfile refreshes the stored nickname, email, and registration
+    // date. A failure leaves the stored session on screen.
+    async function loadAccountProfile() {
+        const session = getAccountSession(zotero);
+        if (!isAccountSignedIn(session) || !session.accessToken) return;
+        const generation = paneGeneration;
+        try {
+            const profile = await getMkteroAccount({
+                apiBase: getAccountApiBase(zotero),
+                accessToken: session.accessToken,
+                fetchImpl: accountFetch,
+            });
+            if (!paneIsCurrent(generation)) return;
+            saveAccountSession(zotero, {
+                ...session,
+                email: profile.email || session.email,
+                nickname: profile.nickname || session.nickname,
+            });
+            if (accountCreated) {
+                accountCreated.textContent = formatMemberSince(
+                    profile.createdAt,
+                    localization.language
+                );
+            }
+            renderAccount();
+        }
+        catch {
+            // A stale token only skips the refresh; the stored session renders.
+        }
+    }
+
+    // accountInitial returns the first character used by the avatar circle.
+    function accountInitial(value) {
+        const source = String(value || '').trim();
+        return source ? source[0].toUpperCase() : '?';
+    }
+
+    function setHidden(id, hidden) {
+        const element = document.getElementById(id);
+        if (element) element.hidden = hidden;
+    }
+
+    function setAccountMode(mode) {
+        accountMode = mode;
+        const register = mode === 'register';
+        setHidden('mktero-account-code-row', !register);
+        setHidden('mktero-account-password-confirm-row', !register);
+        setHidden('mktero-account-register-nickname-row', !register);
+        if (accountLoginButton) accountLoginButton.hidden = mode !== 'login';
+        if (accountRegisterButton) accountRegisterButton.hidden = !register;
+        if (accountForgotButton) accountForgotButton.hidden = mode !== 'login';
+        // The login / register tabs stay visible while signing in or registering.
+        if (accountTabLogin) {
+            accountTabLogin.setAttribute('aria-selected', String(mode === 'login'));
+        }
+        if (accountTabRegister) {
+            accountTabRegister.setAttribute('aria-selected', String(register));
+        }
+        if (accountPasswordInput) {
+            accountPasswordInput.setAttribute(
+                'autocomplete',
+                register ? 'new-password' : 'current-password'
+            );
+        }
+    }
+
+    function selectAccountLoginTab() {
+        setAccountMode('login');
+        setAccountStatus('');
+    }
+
+    function selectAccountRegisterTab() {
+        setAccountMode('register');
+        setAccountStatus('');
+    }
+
+    // openAccountNicknameDialog seeds the field from the stored session so the
+    // dialog always opens on the current nickname.
+    function openAccountNicknameDialog() {
+        const session = getAccountSession(zotero);
+        if (accountProfileNicknameInput) {
+            accountProfileNicknameInput.value = session.nickname || '';
+        }
+        setAccountNicknameStatus('');
+        accountNicknameDialog?.removeAttribute('hidden');
+        accountEditNicknameButton?.setAttribute('aria-expanded', 'true');
+        accountProfileNicknameInput?.focus?.();
+        accountProfileNicknameInput?.select?.();
+    }
+
+    function closeAccountNicknameDialog() {
+        accountNicknameDialog?.setAttribute('hidden', 'hidden');
+        accountEditNicknameButton?.setAttribute('aria-expanded', 'false');
+        accountEditNicknameButton?.focus?.();
+    }
+
+    function handleAccountNicknameKeydown(event) {
+        handleAccountDialogKeydown(event);
+    }
+
+    // handleAccountDialogKeydown keeps the modal keyboard-complete: Escape
+    // dismisses it and Enter saves without reaching for the mouse.
+    function handleAccountDialogKeydown(event) {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeAccountNicknameDialog();
+            return;
+        }
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        saveAccountNickname();
+    }
+
+    async function saveAccountNickname() {
+        if (accountBusy) return;
+        const nickname = String(accountProfileNicknameInput?.value || '').trim();
+        if (!nickname) {
+            setAccountNicknameStatus('preferences.account.nicknameRequired');
+            return;
+        }
+        const session = getAccountSession(zotero);
+        if (!session.refreshToken) return;
+        setAccountBusy(true);
+        setAccountNicknameStatus('');
+        try {
+            const updated = await updateMkteroNickname({
+                apiBase: getAccountApiBase(zotero),
+                accessToken: session.accessToken,
+                nickname,
+                fetchImpl: accountFetch,
+            });
+            saveAccountSession(zotero, {
+                ...session,
+                nickname: updated.nickname || nickname,
+            });
+            if (accountProfileNicknameInput) {
+                accountProfileNicknameInput.value = updated.nickname || nickname;
+            }
+            renderAccount();
+            closeAccountNicknameDialog();
+        }
+        catch (error) {
+            setAccountNicknameStatus(accountErrorKey(error));
+        }
+        finally {
+            setAccountBusy(false);
+        }
+    }
+
+    // Password reset lives on the website. The pane only opens that page,
+    // carrying a valid email so the field does not have to be typed twice.
+    function openForgotPasswordPage() {
+        const base = isDebugBuild() ? MKTERO_DEBUG_SITE_BASE : MKTERO_RELEASE_SITE_BASE;
+        const url = new URL('forgot.html', `${base}/`);
+        const email = String(accountEmailInput?.value || '').trim();
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254) {
+            url.searchParams.set('email', email);
+        }
+        const href = url.toString();
+        if (typeof zotero?.launchURL === 'function') {
+            zotero.launchURL(href);
+            return;
+        }
+        document.defaultView?.open?.(href, '_blank', 'noopener');
+    }
+
+    function openAccountProfilePage() {
+        const base = isDebugBuild() ? MKTERO_DEBUG_SITE_BASE : MKTERO_RELEASE_SITE_BASE;
+        const href = new URL('profile.html', `${base}/`).toString();
+        if (typeof zotero?.launchURL === 'function') {
+            zotero.launchURL(href);
+            return;
+        }
+        document.defaultView?.open?.(href, '_blank', 'noopener');
+    }
+
+    async function refreshSignedInAccount() {
+        if (accountBusy) return;
+        setAccountBusy(true);
+        try {
+            await refreshAccountIfNeeded();
+            resetAccountActivity();
+            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+        }
+        finally {
+            setAccountBusy(false);
+            renderAccount();
+        }
+    }
+
+    function setAccountBusy(busy) {
+        accountBusy = busy;
+        if (accountLoginButton) accountLoginButton.disabled = busy;
+        if (accountRegisterButton) accountRegisterButton.disabled = busy;
+        if (accountSendCodeButton) accountSendCodeButton.disabled = busy || accountSendCodeButton.dataset.cooling === 'true';
+        if (accountLogoutButton) accountLogoutButton.disabled = busy;
+        if (accountRefreshButton) accountRefreshButton.disabled = busy;
+        if (accountSaveNicknameButton) accountSaveNicknameButton.disabled = busy;
+    }
+
+    async function submitAccount(request) {
+        if (accountBusy) return;
+        const email = String(accountEmailInput?.value || '').trim();
+        const password = String(accountPasswordInput?.value || '');
+        if (!email || password.length < 8 || password.length > 128) {
+            setAccountStatus('preferences.account.invalidPassword');
+            return;
+        }
+        setAccountBusy(true);
+        setAccountStatus('');
+        try {
+            const session = await request({
+                apiBase: getAccountApiBase(zotero),
+                email,
+                password,
+                fetchImpl: accountFetch,
+            });
+            if (session?.verificationRequired) {
+                if (accountPasswordInput) accountPasswordInput.value = '';
+                if (accountConfirmInput) accountConfirmInput.value = '';
+                if (accountNicknameInput) accountNicknameInput.value = '';
+                setAccountStatus('preferences.account.verificationSent');
+                return;
+            }
+            saveAccountSession(zotero, session);
+            if (accountPasswordInput) accountPasswordInput.value = '';
+            if (accountConfirmInput) accountConfirmInput.value = '';
+            if (accountNicknameInput) accountNicknameInput.value = '';
+            // The pane may have opened signed out, so the initial profile and
+            // stats requests never ran. Paint the empty calendar immediately,
+            // then fill the date and the real counts.
+            resetAccountActivity();
+            renderAccount();
+            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+        }
+        catch (error) {
+            setAccountStatus(accountErrorKey(error));
+        }
+        finally {
+            setAccountBusy(false);
+        }
+    }
+
+    function startCodeCooldown() {
+        clearTimeout(codeCooldownTimer);
+        let remaining = 60;
+        const tick = () => {
+            if (!accountSendCodeButton) return;
+            if (remaining <= 0) {
+                delete accountSendCodeButton.dataset.cooling;
+                accountSendCodeButton.disabled = accountBusy;
+                accountSendCodeButton.textContent = t('preferences.account.sendCode');
+                return;
+            }
+            accountSendCodeButton.dataset.cooling = 'true';
+            accountSendCodeButton.disabled = true;
+            accountSendCodeButton.textContent = t('preferences.account.codeWait', {
+                seconds: remaining,
+            });
+            remaining -= 1;
+            codeCooldownTimer = setTimeout(tick, 1000);
+        };
+        tick();
+    }
+
+    async function sendAccountCode() {
+        if (accountBusy || accountSendCodeButton?.dataset.cooling === 'true') return;
+        const email = String(accountEmailInput?.value || '').trim();
+        if (!email.includes('@')) {
+            setAccountStatus('preferences.account.invalidEmail');
+            return;
+        }
+        setAccountBusy(true);
+        setAccountStatus('');
+        try {
+            await sendSignupCode({
+                apiBase: getAccountApiBase(zotero),
+                email,
+                locale: accountEmailLocale(),
+                fetchImpl: accountFetch,
+            });
+            setAccountStatus('preferences.account.codeSent');
+            startCodeCooldown();
+        }
+        catch (error) {
+            setAccountStatus(accountErrorKey(error));
+        }
+        finally {
+            setAccountBusy(false);
+        }
+    }
+
+    // accountEmailLocale reports the Zotero interface language so the server can
+    // localize transactional email. The server falls back to English for tags it
+    // does not know.
+    function accountEmailLocale() {
+        return getZoteroLocale(zotero, services);
+    }
+
+    function loginAccount() {
+        return submitAccount(loginMkteroAccount);
+    }
+
+    function registerAccount() {
+        const password = String(accountPasswordInput?.value || '');
+        const confirmation = String(accountConfirmInput?.value || '');
+        const code = String(accountCodeInput?.value || '').trim();
+        if (password !== confirmation) {
+            setAccountStatus('preferences.account.passwordMismatch');
+            return undefined;
+        }
+        if (!/^\d{6}$/.test(code)) {
+            setAccountStatus('preferences.account.invalidCode');
+            return undefined;
+        }
+        const nickname = String(accountNicknameInput?.value || '').trim();
+        return submitAccount(args => registerMkteroAccount({
+            ...args,
+            code,
+            nickname,
+            locale: accountEmailLocale(),
+        }));
+    }
+
+    async function logoutAccount() {
+        if (accountBusy) return;
+        accountBusy = true;
+        if (accountLogoutButton) accountLogoutButton.disabled = true;
+        const session = getAccountSession(zotero);
+        try {
+            await logoutMkteroAccount({
+                apiBase: getAccountApiBase(zotero),
+                refreshToken: session.refreshToken,
+                fetchImpl: accountFetch,
+            });
+        }
+        catch {
+            // A failed logout still clears the local session.
+        }
+        clearAccountSession(zotero);
+        resetAccountActivity();
+        accountBusy = false;
+        if (accountLogoutButton) accountLogoutButton.disabled = false;
+        renderAccount();
+    }
+
+    async function refreshAccountIfNeeded() {
+        const session = getAccountSession(zotero);
+        if (!accessTokenNeedsRefresh(session)) return;
+        const generation = paneGeneration;
+        try {
+            const refreshed = await refreshMkteroAccount({
+                apiBase: getAccountApiBase(zotero),
+                refreshToken: session.refreshToken,
+                fetchImpl: accountFetch,
+            });
+            if (!paneIsCurrent(generation)) return;
+            saveAccountSession(zotero, {
+                ...refreshed,
+                email: refreshed.email || session.email,
+                nickname: refreshed.nickname || session.nickname,
+            });
+        }
+        catch {
+            if (!paneIsCurrent(generation)) return;
+            clearAccountSession(zotero);
+            resetAccountActivity();
+        }
+    }
+
+    function saveConversionChoice() {
+        if (!conversionProviderInput) return;
+        const choice = selectedConversionChoice();
+        zotero?.Prefs?.set?.(CONVERSION_PROVIDER_PREF, choice, true);
+        updateServiceSources();
+        renderAccount();
+    }
+
+    function saveAccountApiBase() {
+        if (!isDebugBuild() || !accountApiBaseInput) return;
+        try {
+            accountApiBaseInput.value = setAccountApiBase(
+                zotero,
+                accountApiBaseInput.value
+            );
+            setAccountStatus('');
+            renderAccount();
+        }
+        catch {
+            setAccountStatus('preferences.account.invalidApiBase');
+        }
+    }
+
+    function initializeAccount() {
+        accountLoginButton?.addEventListener('click', loginAccount);
+        accountRegisterButton?.addEventListener('click', registerAccount);
+        accountLogoutButton?.addEventListener('click', logoutAccount);
+        accountRefreshButton?.addEventListener('click', refreshSignedInAccount);
+        accountMoreButton?.addEventListener('click', openAccountProfilePage);
+        accountTabLogin?.addEventListener('click', selectAccountLoginTab);
+        accountTabRegister?.addEventListener('click', selectAccountRegisterTab);
+        accountForgotButton?.addEventListener('click', openForgotPasswordPage);
+        accountSendCodeButton?.addEventListener('click', sendAccountCode);
+        accountSaveNicknameButton?.addEventListener('click', saveAccountNickname);
+        accountEditNicknameButton?.addEventListener('click', openAccountNicknameDialog);
+        accountNicknameDialogClose?.addEventListener('click', closeAccountNicknameDialog);
+        accountNicknameDialogCancel?.addEventListener('click', closeAccountNicknameDialog);
+        // Clicking the backdrop (outside the card) dismisses the modal.
+        accountNicknameDialog?.addEventListener('click', event => {
+            if (event.target === accountNicknameDialog) closeAccountNicknameDialog();
+        });
+        // Escape and Enter are handled on the backdrop, so the modal needs no
+        // document-level listener and the pane keeps its own key handling.
+        accountNicknameDialog?.addEventListener('keydown', handleAccountDialogKeydown);
+        accountProfileNicknameInput?.addEventListener(
+            'keydown',
+            handleAccountNicknameKeydown
+        );
+        accountApiBaseInput?.addEventListener('change', saveAccountApiBase);
+        renderAccount();
+    }
+
+    // initializeAccountIcons fills the two icon-only account buttons. They carry
+    // no text, so their accessible name comes from data-i18n-aria-label.
+    function initializeAccountIcons() {
+        for (const host of [
+            accountEditNicknameButton,
+            accountNicknameDialogClose,
+            accountRefreshButton,
+        ]) {
+            if (!host || host.querySelector('svg')) continue;
+            const icon = host === accountNicknameDialogClose
+                ? LUCIDE_ICONS.x
+                : host === accountRefreshButton
+                    ? LUCIDE_ICONS.refreshCw
+                    : LUCIDE_ICONS.pencil;
+            if (!icon) continue;
+            // The pencil shares the nickname line, so it is drawn smaller than
+            // the dialog's close button.
+            host.replaceChildren(createLucideIcon(document, icon, {
+                className: 'mktero-account-icon-svg',
+                size: host === accountRefreshButton ? 16 : host === accountNicknameDialogClose ? 15 : 13,
+            }));
+        }
+    }
+
     function initializeConversionProvider() {
         if (!conversionProviderInput) {
             updateConversionApiKeyControl();
@@ -590,7 +1249,7 @@ export function createPreferencesController({
         updateConversionApiKeyControl();
         conversionProviderInput.addEventListener(
             'change',
-            updateConversionApiKeyControl
+            saveConversionChoice
         );
         mineruEndpointInput?.addEventListener('change', saveMinerUEndpoint);
         mineruLocalBaseInput?.addEventListener('change', saveMinerULocalApiBase);
@@ -827,17 +1486,59 @@ export function createPreferencesController({
     }
 
     async function refresh() {
-        status.setAttribute('aria-busy', 'true');
+        const generation = paneGeneration;
+        status?.setAttribute('aria-busy', 'true');
         try {
-            status.textContent = formatCacheStats(await cache.getStats(), t);
+            const stats = await cache.getStats();
+            if (!paneIsCurrent(generation)) return;
+            status.textContent = formatCacheStats(stats, t);
         }
         catch (error) {
+            if (!paneIsCurrent(generation)) return;
             zotero.logError?.(error);
             status.textContent = t('preferences.cache.unavailable');
         }
         finally {
-            status.setAttribute('aria-busy', 'false');
+            if (paneIsCurrent(generation)) {
+                status?.setAttribute('aria-busy', 'false');
+            }
         }
+    }
+
+    async function refreshDeferred() {
+        const generation = paneGeneration;
+        try {
+            await refreshAccountIfNeeded();
+            if (!paneIsCurrent(generation)) return;
+            renderAccount();
+            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+            if (!paneIsCurrent(generation)) return;
+            await refresh();
+        }
+        catch (error) {
+            if (paneIsCurrent(generation)) zotero.logError?.(error);
+        }
+    }
+
+    function mountPreferences() {
+        clearButton.addEventListener('click', clear);
+        aiTestButton?.addEventListener('click', testAI);
+        localize();
+        initializePreferenceTabs();
+        initializeAccount();
+        initializeAccountIcons();
+        renderAccount();
+        initializeConversionProvider();
+        initializeAIProvider();
+        initializeAIRequestTimeout();
+        initializeReaderFont();
+        initializeReaderFontSize();
+        initializeReaderLineHeight();
+        initializeReaderWidth();
+        initializeReaderAlignment();
+        initializeReaderSourcePeek();
+        updateServiceSources();
+        initializeObsidianExport();
     }
 
     async function confirmCacheClear() {
@@ -920,28 +1621,24 @@ export function createPreferencesController({
     }
 
     return {
-        async init() {
-            if (initialized) return;
+        // start paints the saved settings immediately. Account and cache
+        // requests continue afterwards so Zotero can show the pane.
+        start() {
+            if (initialized) return deferredRefresh;
             initialized = true;
-            clearButton.addEventListener('click', clear);
-            aiTestButton?.addEventListener('click', testAI);
-            localize();
-            initializePreferenceTabs();
-            initializeConversionProvider();
-            initializeAIProvider();
-            initializeAIRequestTimeout();
-            initializeReaderFont();
-            initializeReaderFontSize();
-            initializeReaderLineHeight();
-            initializeReaderWidth();
-            initializeReaderAlignment();
-            initializeReaderSourcePeek();
-            initializeObsidianExport();
-            await refresh();
+            paneGeneration += 1;
+            mountPreferences();
+            deferredRefresh = refreshDeferred();
+            return deferredRefresh;
+        },
+        async init() {
+            await this.start();
         },
         destroy() {
             if (!initialized) return;
             initialized = false;
+            paneGeneration += 1;
+            deferredRefresh = null;
             unsubscribeReasoningCatalog?.();
             unsubscribeReasoningCatalog = null;
             if (reasoningOptionsTimer != null) {
@@ -985,7 +1682,7 @@ export function createPreferencesController({
             );
             conversionProviderInput?.removeEventListener(
                 'change',
-                updateConversionApiKeyControl
+                saveConversionChoice
             );
             mineruEndpointInput?.removeEventListener('change', saveMinerUEndpoint);
             mineruLocalBaseInput?.removeEventListener(
@@ -996,6 +1693,36 @@ export function createPreferencesController({
                 'change',
                 saveConversionApiKey
             );
+            accountLoginButton?.removeEventListener('click', loginAccount);
+            accountRegisterButton?.removeEventListener('click', registerAccount);
+            accountLogoutButton?.removeEventListener('click', logoutAccount);
+            accountRefreshButton?.removeEventListener('click', refreshSignedInAccount);
+            accountMoreButton?.removeEventListener('click', openAccountProfilePage);
+            accountEditNicknameButton?.removeEventListener(
+                'click',
+                openAccountNicknameDialog
+            );
+            accountNicknameDialogClose?.removeEventListener(
+                'click',
+                closeAccountNicknameDialog
+            );
+            accountNicknameDialogCancel?.removeEventListener(
+                'click',
+                closeAccountNicknameDialog
+            );
+            accountNicknameDialog?.removeEventListener(
+                'keydown',
+                handleAccountDialogKeydown
+            );
+            accountProfileNicknameInput?.removeEventListener(
+                'keydown',
+                handleAccountNicknameKeydown
+            );
+            accountSaveNicknameButton?.removeEventListener('click', saveAccountNickname);
+            accountForgotButton?.removeEventListener('click', openForgotPasswordPage);
+            accountSendCodeButton?.removeEventListener('click', sendAccountCode);
+            clearTimeout(codeCooldownTimer);
+            accountApiBaseInput?.removeEventListener('change', saveAccountApiBase);
             readerFontSizeInput?.removeEventListener(
                 'input',
                 updateReaderFontSize
@@ -1114,6 +1841,18 @@ export function localizePreferencesDocument(document, localization) {
     for (const element of document.querySelectorAll?.('[data-i18n]') || []) {
         element.textContent = localization.t(element.getAttribute('data-i18n'));
     }
+    for (const element of document.querySelectorAll?.('[data-i18n-placeholder]') || []) {
+        element.setAttribute(
+            'placeholder',
+            localization.t(element.getAttribute('data-i18n-placeholder'))
+        );
+    }
+    for (const element of document.querySelectorAll?.('[data-i18n-aria-label]') || []) {
+        element.setAttribute(
+            'aria-label',
+            localization.t(element.getAttribute('data-i18n-aria-label'))
+        );
+    }
     document.getElementById('mktero-preferences-pane')
         ?.setAttribute('lang', localization.language);
 }
@@ -1181,8 +1920,42 @@ function validateCacheStats(value) {
     }
 }
 
+let preferencesAILoader = null;
+
+function preferencesAIScriptURL() {
+    const filename = globalThis.Components?.stack?.filename || '';
+    const marker = 'preferences.js';
+    const index = filename.lastIndexOf(marker);
+    if (index < 0) return '';
+    return `${filename.slice(0, index)}preferences-ai.js`;
+}
+
+function loadPreferencesAITester() {
+    if (typeof globalThis.MkteroPreferencesAI?.testConnection === 'function') {
+        return Promise.resolve(globalThis.MkteroPreferencesAI);
+    }
+    if (!preferencesAILoader) {
+        const scriptURL = preferencesAIScriptURL();
+        preferencesAILoader = Promise.resolve().then(() => {
+            const loader = globalThis.Services?.scriptloader;
+            if (!scriptURL || typeof loader?.loadSubScript !== 'function') {
+                throw new Error('Mktero AI test script is unavailable');
+            }
+            loader.loadSubScript(scriptURL, globalThis);
+            if (typeof globalThis.MkteroPreferencesAI?.testConnection !== 'function') {
+                throw new Error('Mktero AI test script did not load');
+            }
+            return globalThis.MkteroPreferencesAI;
+        }).catch(error => {
+            preferencesAILoader = null;
+            throw error;
+        });
+    }
+    return preferencesAILoader;
+}
+
 globalThis.MkteroPreferences = {
-    async init(event) {
+    init(event) {
         const document = event.target?.ownerDocument
             || event.currentTarget?.ownerDocument
             || globalThis.document;
@@ -1218,25 +1991,17 @@ globalThis.MkteroPreferences = {
                 pathUtils: PathUtils,
             }),
         ]);
-        const aiGateway = new AISDKGateway({
-            createAbortController: createRuntimeAbortController,
-            runtimeWindow: document?.defaultView,
-            onDebug: message => Zotero.debug(message),
-        });
-        const translationService = new MarkdownTranslationService({
-            aiGateway,
-            getSettings: () => getAISettings(Zotero),
-        });
         const controller = createPreferencesController({
             document,
             zotero: Zotero,
             cache,
-            testAIConnection: (settings, signal) => (
-                translationService.testConnection({ settings, signal })
-            ),
+            testAIConnection: async (settings, signal) => {
+                const tester = await loadPreferencesAITester();
+                return tester.testConnection(settings, signal, document?.defaultView);
+            },
             createAbortController: createRuntimeAbortController,
         });
-        await controller.init();
+        controller.start();
         return () => controller.destroy();
     },
 };

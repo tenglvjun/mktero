@@ -48,6 +48,32 @@ test('localizes known conversion errors and hides unknown internal messages', ()
     );
 });
 
+test('reports an object-store upload failure with a specific cause', () => {
+    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
+    const translate = localization.t.bind(localization);
+
+    const rejected = new Error('The PDF upload to Mktero failed');
+    rejected.code = 'MKTERO_UPLOAD_FAILED';
+    rejected.stage = 'upload';
+    rejected.status = 403;
+    assert.match(localizeConversionError(rejected, translate), /存储桶的 CORS 策略/);
+
+    const unreachable = new Error('The Mktero conversion request failed');
+    unreachable.code = 'MKTERO_NETWORK_ERROR';
+    unreachable.stage = 'upload';
+    unreachable.cause = new TypeError('NetworkError when attempting to fetch resource');
+    assert.match(
+        localizeConversionError(unreachable, translate),
+        /无法连接存储服务/
+    );
+
+    // An API-stage transport failure keeps the generic message.
+    const apiFailure = new Error('The Mktero conversion request failed');
+    apiFailure.code = 'MKTERO_NETWORK_ERROR';
+    apiFailure.stage = 'api';
+    assert.equal(localizeConversionError(apiFailure, translate), '无法连接到转换服务。');
+});
+
 test('localizes Mistral conversion errors without exposing provider details', () => {
     const localization = createLocalization({ zoteroLocale: 'en-US' });
     const error = new Error('Mistral OCR returned HTTP 401 with secret details');

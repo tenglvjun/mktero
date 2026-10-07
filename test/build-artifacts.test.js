@@ -55,6 +55,7 @@ test('builds reproducible release assets and Zotero update metadata', async () =
         'pdf.worker.mjs',
         'prefs.js',
         'ui/icons/mktero.svg',
+        'ui/preferences-ai.js',
         'ui/preferences.css',
         'ui/preferences.js',
         'ui/preferences.xhtml',
