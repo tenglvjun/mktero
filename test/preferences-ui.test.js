@@ -550,6 +550,49 @@ test('localizes preferences from Zotero without storing a language choice', asyn
     controller.destroy();
 });
 
+test('paints preference controls before cache statistics finish', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <h2 data-i18n="preferences.features.title"></h2>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache" data-i18n="preferences.cache.clear"></button>
+        </section>
+    </body>`);
+    const { document } = dom.window;
+    let releaseStats;
+    const statsReady = new Promise(resolve => {
+        releaseStats = resolve;
+    });
+    const controller = createPreferencesController({
+        document,
+        zotero: {
+            locale: 'zh-CN',
+            Prefs: {
+                set(key) {
+                    if (String(key).includes('ServiceSource')) return;
+                    assert.fail(key);
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: () => statsReady.then(() => ({ entries: 2, sizeBytes: 1536 })),
+            clear: async () => {},
+        },
+    });
+
+    const pending = controller.start();
+    assert.equal(document.querySelector('h2').textContent, 'Markdown 转换');
+    assert.equal(document.getElementById('mktero-cache-status').textContent, '');
+    releaseStats();
+    await pending;
+    assert.equal(
+        document.getElementById('mktero-cache-status').textContent,
+        '2 个本地缓存条目，1.5 KB'
+    );
+    controller.destroy();
+});
+
 test('initializes an imported preferences fragment from Zotero capture-phase load', async () => {
     assert.equal(typeof preferencesUI.registerPreferencesPaneLoader, 'function');
     const dom = new JSDOM('<!doctype html><div id="mktero-preferences-pane"></div>');

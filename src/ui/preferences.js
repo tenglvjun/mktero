@@ -39,10 +39,6 @@ import {
     resolveAIReasoningLevels,
     selectAIReasoningValue,
 } from '../config/ai-reasoning-options.js';
-import { AISDKGateway } from '../ai/ai-sdk-gateway.js';
-import {
-    MarkdownTranslationService,
-} from '../ai/markdown-translation-service.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import {
     getZoteroLocale,
@@ -315,6 +311,8 @@ export function createPreferencesController({
     const tabList = document.getElementById('mktero-pref-tablist');
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
+    let paneGeneration = 0;
+    let deferredRefresh = null;
     let activeAIProvider = '';
     let aiTestController = null;
     let unsubscribeReasoningCatalog = null;
@@ -763,13 +761,17 @@ export function createPreferencesController({
         }
     }
 
-    // loadAccountStats fills the counters for the signed-in
-    // account. A failure keeps the card at zero: the activity view is
-    // informational, so it never blocks the settings pane.
+    function paneIsCurrent(generation) {
+        return initialized && generation === paneGeneration;
+    }
+
+    // Account requests are informational. They update the card after the pane
+    // is already visible and must not write into a pane that has been closed.
     async function loadAccountStats() {
         if (accountStatsRequested) return;
         const session = getAccountSession(zotero);
         if (!isAccountSignedIn(session) || !session.accessToken) return;
+        const generation = paneGeneration;
         accountStatsRequested = true;
         try {
             accountStats = await getMkteroConversionStats({
@@ -781,20 +783,23 @@ export function createPreferencesController({
         catch {
             accountStats = null;
         }
+        if (!paneIsCurrent(generation)) return;
         renderAccountActivity();
     }
 
     // loadAccountProfile refreshes the stored nickname, email, and registration
-    // date. Like the stats request it is best-effort and never blocks the pane.
+    // date. A failure leaves the stored session on screen.
     async function loadAccountProfile() {
         const session = getAccountSession(zotero);
         if (!isAccountSignedIn(session) || !session.accessToken) return;
+        const generation = paneGeneration;
         try {
             const profile = await getMkteroAccount({
                 apiBase: getAccountApiBase(zotero),
                 accessToken: session.accessToken,
                 fetchImpl: accountFetch,
             });
+            if (!paneIsCurrent(generation)) return;
             saveAccountSession(zotero, {
                 ...session,
                 email: profile.email || session.email,
@@ -1131,12 +1136,14 @@ export function createPreferencesController({
     async function refreshAccountIfNeeded() {
         const session = getAccountSession(zotero);
         if (!accessTokenNeedsRefresh(session)) return;
+        const generation = paneGeneration;
         try {
             const refreshed = await refreshMkteroAccount({
                 apiBase: getAccountApiBase(zotero),
                 refreshToken: session.refreshToken,
                 fetchImpl: accountFetch,
             });
+            if (!paneIsCurrent(generation)) return;
             saveAccountSession(zotero, {
                 ...refreshed,
                 email: refreshed.email || session.email,
@@ -1144,6 +1151,7 @@ export function createPreferencesController({
             });
         }
         catch {
+            if (!paneIsCurrent(generation)) return;
             clearAccountSession(zotero);
             resetAccountActivity();
         }
@@ -1478,17 +1486,59 @@ export function createPreferencesController({
     }
 
     async function refresh() {
-        status.setAttribute('aria-busy', 'true');
+        const generation = paneGeneration;
+        status?.setAttribute('aria-busy', 'true');
         try {
-            status.textContent = formatCacheStats(await cache.getStats(), t);
+            const stats = await cache.getStats();
+            if (!paneIsCurrent(generation)) return;
+            status.textContent = formatCacheStats(stats, t);
         }
         catch (error) {
+            if (!paneIsCurrent(generation)) return;
             zotero.logError?.(error);
             status.textContent = t('preferences.cache.unavailable');
         }
         finally {
-            status.setAttribute('aria-busy', 'false');
+            if (paneIsCurrent(generation)) {
+                status?.setAttribute('aria-busy', 'false');
+            }
         }
+    }
+
+    async function refreshDeferred() {
+        const generation = paneGeneration;
+        try {
+            await refreshAccountIfNeeded();
+            if (!paneIsCurrent(generation)) return;
+            renderAccount();
+            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+            if (!paneIsCurrent(generation)) return;
+            await refresh();
+        }
+        catch (error) {
+            if (paneIsCurrent(generation)) zotero.logError?.(error);
+        }
+    }
+
+    function mountPreferences() {
+        clearButton.addEventListener('click', clear);
+        aiTestButton?.addEventListener('click', testAI);
+        localize();
+        initializePreferenceTabs();
+        initializeAccount();
+        initializeAccountIcons();
+        renderAccount();
+        initializeConversionProvider();
+        initializeAIProvider();
+        initializeAIRequestTimeout();
+        initializeReaderFont();
+        initializeReaderFontSize();
+        initializeReaderLineHeight();
+        initializeReaderWidth();
+        initializeReaderAlignment();
+        initializeReaderSourcePeek();
+        updateServiceSources();
+        initializeObsidianExport();
     }
 
     async function confirmCacheClear() {
@@ -1571,34 +1621,24 @@ export function createPreferencesController({
     }
 
     return {
-        async init() {
-            if (initialized) return;
+        // start paints the saved settings immediately. Account and cache
+        // requests continue afterwards so Zotero can show the pane.
+        start() {
+            if (initialized) return deferredRefresh;
             initialized = true;
-            clearButton.addEventListener('click', clear);
-            aiTestButton?.addEventListener('click', testAI);
-            localize();
-            initializePreferenceTabs();
-            initializeAccount();
-            initializeAccountIcons();
-            await refreshAccountIfNeeded();
-            renderAccount();
-            await Promise.all([loadAccountProfile(), loadAccountStats()]);
-            initializeConversionProvider();
-            initializeAIProvider();
-            initializeAIRequestTimeout();
-            initializeReaderFont();
-            initializeReaderFontSize();
-            initializeReaderLineHeight();
-            initializeReaderWidth();
-            initializeReaderAlignment();
-            initializeReaderSourcePeek();
-            updateServiceSources();
-            initializeObsidianExport();
-            await refresh();
+            paneGeneration += 1;
+            mountPreferences();
+            deferredRefresh = refreshDeferred();
+            return deferredRefresh;
+        },
+        async init() {
+            await this.start();
         },
         destroy() {
             if (!initialized) return;
             initialized = false;
+            paneGeneration += 1;
+            deferredRefresh = null;
             unsubscribeReasoningCatalog?.();
             unsubscribeReasoningCatalog = null;
             if (reasoningOptionsTimer != null) {
@@ -1880,8 +1920,42 @@ function validateCacheStats(value) {
     }
 }
 
+let preferencesAILoader = null;
+
+function preferencesAIScriptURL() {
+    const filename = globalThis.Components?.stack?.filename || '';
+    const marker = 'preferences.js';
+    const index = filename.lastIndexOf(marker);
+    if (index < 0) return '';
+    return `${filename.slice(0, index)}preferences-ai.js`;
+}
+
+function loadPreferencesAITester() {
+    if (typeof globalThis.MkteroPreferencesAI?.testConnection === 'function') {
+        return Promise.resolve(globalThis.MkteroPreferencesAI);
+    }
+    if (!preferencesAILoader) {
+        const scriptURL = preferencesAIScriptURL();
+        preferencesAILoader = Promise.resolve().then(() => {
+            const loader = globalThis.Services?.scriptloader;
+            if (!scriptURL || typeof loader?.loadSubScript !== 'function') {
+                throw new Error('Mktero AI test script is unavailable');
+            }
+            loader.loadSubScript(scriptURL, globalThis);
+            if (typeof globalThis.MkteroPreferencesAI?.testConnection !== 'function') {
+                throw new Error('Mktero AI test script did not load');
+            }
+            return globalThis.MkteroPreferencesAI;
+        }).catch(error => {
+            preferencesAILoader = null;
+            throw error;
+        });
+    }
+    return preferencesAILoader;
+}
+
 globalThis.MkteroPreferences = {
-    async init(event) {
+    init(event) {
         const document = event.target?.ownerDocument
             || event.currentTarget?.ownerDocument
             || globalThis.document;
@@ -1917,25 +1991,17 @@ globalThis.MkteroPreferences = {
                 pathUtils: PathUtils,
             }),
         ]);
-        const aiGateway = new AISDKGateway({
-            createAbortController: createRuntimeAbortController,
-            runtimeWindow: document?.defaultView,
-            onDebug: message => Zotero.debug(message),
-        });
-        const translationService = new MarkdownTranslationService({
-            aiGateway,
-            getSettings: () => getAISettings(Zotero),
-        });
         const controller = createPreferencesController({
             document,
             zotero: Zotero,
             cache,
-            testAIConnection: (settings, signal) => (
-                translationService.testConnection({ settings, signal })
-            ),
+            testAIConnection: async (settings, signal) => {
+                const tester = await loadPreferencesAITester();
+                return tester.testConnection(settings, signal, document?.defaultView);
+            },
             createAbortController: createRuntimeAbortController,
         });
-        await controller.init();
+        controller.start();
         return () => controller.destroy();
     },
 };

@@ -22,6 +22,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         markdownView,
         tabPresenter,
         buildScript,
+        aiScript,
     ] = await Promise.all([
         readFile(new URL('../prefs.js', import.meta.url), 'utf8'),
         readFile(new URL('../ui/preferences.xhtml', import.meta.url), 'utf8'),
@@ -30,6 +31,7 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
         readFile(new URL('../src/ui/markdown-window.js', import.meta.url), 'utf8'),
         readFile(new URL('../src/ui/markdown-tab-presenter.js', import.meta.url), 'utf8'),
         readFile(new URL('../scripts/build.mjs', import.meta.url), 'utf8'),
+        readFile(new URL('../src/ui/preferences-ai.js', import.meta.url), 'utf8'),
     ]);
 
     assert.match(prefs, /pref\("extensions\.mktero\.mineruApiKey", ""\)/);
@@ -170,7 +172,12 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(script, /createZoteroTranslationCache/);
     assert.match(script, /createZoteroCitationGraphCache/);
     assert.match(script, /createZoteroMarkdownReadingPositionStore/);
-    assert.match(script, /AISDKGateway/);
+    assert.match(script, /controller\.start\(\)/);
+    assert.doesNotMatch(script, /await controller\.init\(\)/);
+    assert.match(script, /preferences-ai\.js/);
+    assert.doesNotMatch(script, /from '\.\.\/ai\/ai-sdk-gateway\.js'/);
+    assert.match(aiScript, /AISDKGateway/);
+    assert.match(buildScript, /src\/ui\/preferences-ai\.js/);
     assert.match(script, /createCombinedLocalCache/);
     assert.doesNotMatch(script, /setMkteroLanguagePreference/);
     assert.match(bootstrap, /new MinerUClient/);
