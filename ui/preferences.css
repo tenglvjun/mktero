@@ -1172,11 +1172,47 @@
     cursor: pointer;
 }
 
+#mktero-obsidian-vault-browse {
+    -moz-appearance: none;
+    appearance: none;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    min-height: 36px;
+    margin: 0;
+    padding: 7px 11px;
+    border: 1px solid color-mix(in srgb, CanvasText 35%, Canvas);
+    border-radius: 8px;
+    background-color: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+    color: CanvasText;
+    color-scheme: light dark;
+    font: inherit;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+#mktero-obsidian-vault-help {
+    overflow-wrap: anywhere;
+}
+
+#mktero-obsidian-vault-help[hidden] {
+    display: none;
+}
+
 #mktero-clear-cache:hover {
     border-color: color-mix(in srgb, CanvasText 55%, Canvas);
 }
 
+#mktero-obsidian-vault-browse:hover {
+    border-color: color-mix(in srgb, CanvasText 55%, Canvas);
+}
+
 #mktero-clear-cache:focus-visible {
+    border-color: AccentColor;
+    outline: 2px solid color-mix(in srgb, AccentColor 28%, transparent);
+    outline-offset: 0;
+}
+
+#mktero-obsidian-vault-browse:focus-visible {
     border-color: AccentColor;
     outline: 2px solid color-mix(in srgb, AccentColor 28%, transparent);
     outline-offset: 0;
@@ -1283,12 +1319,14 @@
         justify-content: flex-start;
     }
 
-    .mktero-cache-usage-row {
+    .mktero-cache-usage-row,
+    .mktero-obsidian-vault-row {
         align-items: stretch;
         flex-direction: column;
     }
 
-    #mktero-clear-cache {
+    #mktero-clear-cache,
+    #mktero-obsidian-vault-browse {
         align-self: flex-start;
     }
 

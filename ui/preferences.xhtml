@@ -164,30 +164,15 @@
                 </html:span>
             </html:label>
 
-            <html:div class="mktero-setting-row mktero-field-row">
+            <html:div class="mktero-setting-row mktero-obsidian-vault-row">
                 <html:div class="mktero-setting-copy">
-                    <html:label for="mktero-obsidian-vault"><html:strong data-i18n="preferences.obsidian.vaultLabel"></html:strong></html:label>
-                    <html:small data-i18n="preferences.obsidian.vaultHelp"></html:small>
+                    <html:strong data-i18n="preferences.obsidian.vaultLabel"></html:strong>
+                    <html:small id="mktero-obsidian-vault-help"
+                                hidden="hidden"></html:small>
                 </html:div>
-                <html:div class="mktero-field-control">
-                    <html:input id="mktero-obsidian-vault"
-                                type="text"
-                                readonly="readonly" />
-                    <html:button id="mktero-obsidian-vault-browse"
-                                 type="button"
-                                 data-i18n="preferences.obsidian.browse"></html:button>
-                </html:div>
-            </html:div>
-            <html:div class="mktero-setting-row mktero-field-row">
-                <html:div class="mktero-setting-copy">
-                    <html:label for="mktero-obsidian-subdirectory"><html:strong data-i18n="preferences.obsidian.subdirectoryLabel"></html:strong></html:label>
-                    <html:small data-i18n="preferences.obsidian.subdirectoryHelp"></html:small>
-                </html:div>
-                <html:div class="mktero-field-control mktero-field-control-compact">
-                    <html:input id="mktero-obsidian-subdirectory"
-                                type="text"
-                                maxlength="180" />
-                </html:div>
+                <html:button id="mktero-obsidian-vault-browse"
+                             type="button"
+                             data-i18n="preferences.obsidian.browse"></html:button>
             </html:div>
 
             <html:div class="mktero-setting-row mktero-cache-usage-row">

@@ -106,9 +106,7 @@ import {
     setMarkdownReaderWidth,
 } from '../config/reader-preferences.js';
 import {
-    getObsidianSubdirectory,
     getObsidianVaultPath,
-    setObsidianSubdirectory,
     setObsidianVaultPath,
 } from '../config/obsidian-preferences.js';
 import {
@@ -253,12 +251,11 @@ export function createPreferencesController({
     const accountApiBaseInput = document.getElementById('mktero-account-api-base');
     const accountStatus = document.getElementById('mktero-account-status');
     const accountPanel = document.getElementById('mktero-account-panel');
-    const obsidianVaultInput = document.getElementById('mktero-obsidian-vault');
+    const obsidianVaultHelp = document.getElementById(
+        'mktero-obsidian-vault-help'
+    );
     const obsidianVaultBrowse = document.getElementById(
         'mktero-obsidian-vault-browse'
-    );
-    const obsidianSubdirectoryInput = document.getElementById(
-        'mktero-obsidian-subdirectory'
     );
     const conversionProviderInput = document.getElementById(
         'mktero-conversion-provider'
@@ -492,25 +489,32 @@ export function createPreferencesController({
     }
 
     function initializeObsidianExport() {
-        if (obsidianVaultInput) {
-            obsidianVaultInput.value = getObsidianVaultPath(zotero);
-        }
-        if (obsidianSubdirectoryInput) {
-            obsidianSubdirectoryInput.value = getObsidianSubdirectory(zotero);
-            obsidianSubdirectoryInput.addEventListener(
-                'change',
-                updateObsidianSubdirectory
-            );
-        }
+        renderObsidianVault();
         obsidianVaultBrowse?.addEventListener('click', browseObsidianVault);
     }
 
-    function updateObsidianSubdirectory() {
-        if (!obsidianSubdirectoryInput) return;
-        obsidianSubdirectoryInput.value = setObsidianSubdirectory(
-            zotero,
-            obsidianSubdirectoryInput.value
-        );
+    function renderObsidianVault() {
+        const path = getObsidianVaultPath(zotero);
+        if (obsidianVaultBrowse) {
+            obsidianVaultBrowse.textContent = t(path
+                ? 'preferences.obsidian.change'
+                : 'preferences.obsidian.browse');
+            if (path) {
+                obsidianVaultBrowse.title = path;
+                obsidianVaultBrowse.setAttribute(
+                    'aria-label',
+                    t('preferences.obsidian.changeLabel', { path })
+                );
+            }
+            else {
+                obsidianVaultBrowse.removeAttribute('title');
+                obsidianVaultBrowse.removeAttribute('aria-label');
+            }
+        }
+        if (obsidianVaultHelp) {
+            obsidianVaultHelp.textContent = path;
+            obsidianVaultHelp.hidden = !path;
+        }
     }
 
     async function browseObsidianVault() {
@@ -533,8 +537,8 @@ export function createPreferencesController({
             );
             return;
         }
-        if (obsidianVaultInput) obsidianVaultInput.value = selected;
         setObsidianVaultPath(zotero, selected);
+        renderObsidianVault();
     }
 
     function createObsidianVaultPicker() {
@@ -1740,10 +1744,6 @@ export function createPreferencesController({
             readerSourcePeekInput?.removeEventListener(
                 'change',
                 updateReaderSourcePeek
-            );
-            obsidianSubdirectoryInput?.removeEventListener(
-                'change',
-                updateObsidianSubdirectory
             );
             obsidianVaultBrowse?.removeEventListener(
                 'click',

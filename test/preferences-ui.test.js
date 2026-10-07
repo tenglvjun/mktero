@@ -2064,6 +2064,98 @@ test('loads the profile and conversion counters after the first sign-in', async 
     controller.destroy();
 });
 
+test('chooses an Obsidian vault from one button and keeps notes in Mktero', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <strong data-i18n="preferences.obsidian.vaultLabel"></strong>
+            <small id="mktero-obsidian-vault-help" hidden></small>
+            <button id="mktero-obsidian-vault-browse"
+                    type="button"
+                    data-i18n="preferences.obsidian.browse"></button>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const { document } = dom.window;
+    const values = new Map();
+    let pickerFile = '/Users/tenglvjun/Research';
+    let pickerResult = 0;
+    let pickerCalls = 0;
+    const controller = createPreferencesController({
+        document,
+        zotero: {
+            locale: 'zh-CN',
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        createFilePicker: () => ({
+            modeGetFolder: 2,
+            returnCancel: 1,
+            get file() {
+                return pickerFile;
+            },
+            init(_window, title, mode) {
+                pickerCalls += 1;
+                assert.equal(title, '选择 Obsidian 库');
+                assert.equal(mode, 2);
+            },
+            show: async () => pickerResult,
+        }),
+    });
+
+    await controller.init();
+    const button = document.getElementById('mktero-obsidian-vault-browse');
+    const help = document.getElementById('mktero-obsidian-vault-help');
+    assert.equal(
+        document.querySelector('strong').textContent,
+        'Obsidian'
+    );
+    assert.equal(button.textContent, '选择库');
+    assert.equal(button.hasAttribute('aria-label'), false);
+    assert.equal(help.hidden, true);
+    assert.equal(help.textContent, '');
+    assert.equal(document.getElementById('mktero-obsidian-subdirectory'), null);
+    assert.equal(document.getElementById('mktero-obsidian-vault'), null);
+
+    button.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(
+        values.get('extensions.mktero.obsidianVaultPath'),
+        '/Users/tenglvjun/Research'
+    );
+    assert.equal(values.has('extensions.mktero.obsidianSubdirectory'), false);
+    assert.equal(button.textContent, '更改库');
+    assert.equal(button.title, '/Users/tenglvjun/Research');
+    assert.equal(
+        button.getAttribute('aria-label'),
+        '更改库，当前为 /Users/tenglvjun/Research'
+    );
+    assert.equal(help.hidden, false);
+    assert.equal(help.textContent, '/Users/tenglvjun/Research');
+
+    pickerResult = 1;
+    button.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(pickerCalls, 2);
+    assert.equal(
+        values.get('extensions.mktero.obsidianVaultPath'),
+        '/Users/tenglvjun/Research'
+    );
+    assert.equal(button.textContent, '更改库');
+
+    controller.destroy();
+    button.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(pickerCalls, 2);
+});
+
 function createControl(properties = {}) {
     const listeners = new Map();
     return {
