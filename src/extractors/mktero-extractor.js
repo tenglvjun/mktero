@@ -115,9 +115,13 @@ export class MkteroDocumentExtractor {
             throwIfAborted(signal);
             if (revision?.snapshot) {
                 onProgress?.(100);
-                const result = this.prepareResult({
+                const result = await this.prepareResult({
                     ...revision.snapshot,
                     userEdited: true,
+                }, {
+                    fileData,
+                    signal,
+                    onProgress,
                 });
                 return createResult(
                     title,

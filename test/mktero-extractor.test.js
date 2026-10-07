@@ -241,6 +241,26 @@ test('reuses a stored revision without calling the hosted service', async () => 
     assert.equal(result.cacheHit, true);
 });
 
+test('awaits revision preparation and supplies the open PDF context', async () => {
+    let seen;
+    const signal = AbortSignal.timeout(60_000);
+    const extractor = createExtractor({
+        createCacheKey: async () => 'a'.repeat(64),
+        readRevision: async () => ({ markdown: '# Edited', userEdited: true }),
+        prepareResult: async (result, context) => {
+            seen = context;
+            await Promise.resolve();
+            return { ...result, markdown: '# Prepared' };
+        },
+    });
+
+    const result = await extractor.extract(42, { signal });
+
+    assert.equal(result.markdown, '# Prepared');
+    assert.equal(seen.signal, signal);
+    assert.ok(seen.fileData instanceof Uint8Array);
+});
+
 test('rejects a non-PDF attachment', async () => {
     const extractor = createExtractor({
         zotero: {

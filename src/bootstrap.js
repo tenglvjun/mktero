@@ -572,10 +572,14 @@ globalThis.startup = async function startup({ id, rootURI }) {
         await figureLabelRecovery.recover(result, context), context
     );
     const prepareWithFigures = (decode, prepare) => async (raw, context) => {
+        // A saved correction is already a prepared document. Re-running figure
+        // restoration would discard the edit and requires a conversion context
+        // that revision reopening does not have.
+        if (raw?.userEdited) return raw;
         const input = decode(raw);
         const draft = await figureRestoration.restore(input, context);
         return finalizeRestoredDocument(input, draft, {
-            prepare, hash: sha256Hex, signal: context.signal,
+            prepare, hash: sha256Hex, signal: context?.signal,
         });
     };
     const progressiveWithFigures = (decode, prepare) => async (raw, context) => {
