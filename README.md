@@ -177,9 +177,7 @@ See [Configuration](./docs/configuration.md) for every setting and
   refresh token stay in the same profile. While the account pane is open, the
   extension uses that token to request your profile and your conversion-activity
   counts from the service you selected, and shows them as the account card's
-  counters. A hosted conversion sends the PDF SHA-256 first. If the service
-  already has that file, the PDF is not uploaded again and the tab continues
-  at the download stage.
+  counters.
 - Reference, citation, and translation requests are bounded and local-first;
   logs never contain API tokens, presigned URLs, PDF bytes, or authenticated
   responses.

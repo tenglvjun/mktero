@@ -9,7 +9,7 @@
 | Email and password when signing in or registering, and the registration verification code | The Mktero service you select; the password and code are not saved | Not by Mktero |
 | Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
 | Your account profile and conversion-activity counts, requested with the access token while the account pane is open | The Mktero service you select | Not by Mktero |
-| PDF SHA-256 when creating a hosted conversion; the PDF bytes only when that service does not already have the same file | The Mktero service you select | Not by Mktero |
+| PDF sent for a hosted conversion | The Mktero service you select | Not by Mktero |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and expiry time | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
