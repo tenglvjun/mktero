@@ -53,6 +53,7 @@ const ERROR_CODE_KEYS = new Map([
     ['MISTRAL_INPUT_TOO_LARGE', 'error.resultTooLarge'],
     ['MISTRAL_RESPONSE_TOO_LARGE', 'error.resultTooLarge'],
     ['MKTERO_SIGN_IN_REQUIRED', 'error.mkteroSignInRequired'],
+    ['MKTERO_ACCOUNT_DISABLED', 'error.mkteroAccountDisabled'],
     ['MKTERO_CONVERSION_FAILED', 'error.mkteroConversionFailed'],
     ['MKTERO_JOB_NOT_FOUND', 'error.mkteroJobUnavailable'],
     ['MKTERO_UNAVAILABLE', 'error.mkteroUnavailable'],

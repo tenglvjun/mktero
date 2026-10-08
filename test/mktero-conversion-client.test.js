@@ -210,6 +210,25 @@ test('asks the user to sign in when the token is rejected', async () => {
     );
 });
 
+test('reports a disabled account instead of asking for sign-in', async () => {
+    const client = new MkteroConversionClient({
+        fetch: async () => jsonResponse(403, {
+            error: { code: 'account_disabled', message: 'account is disabled' },
+        }),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        client.convert({
+            apiBase: API_BASE,
+            getAccessToken: () => 'access-token',
+            fileName: 'paper.pdf',
+            fileData: PDF_BYTES,
+        }),
+        error => error.code === 'MKTERO_ACCOUNT_DISABLED'
+    );
+});
+
 test('fails before the request when no access token is available', async () => {
     let called = false;
     const client = new MkteroConversionClient({
