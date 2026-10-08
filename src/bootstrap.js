@@ -1543,6 +1543,9 @@ async function publishConversionResult(presentation, itemID, result, signal) {
 }
 
 function publishConversionFailure(presentation, itemID, error, previousResult) {
+    if (error?.code === 'MKTERO_ACCOUNT_DISABLED') {
+        clearAccountSession(Zotero);
+    }
     runtime.pendingSelectionReveals?.delete(itemID);
     if (presentation.closed) return;
     Zotero.debug(
@@ -1572,7 +1575,8 @@ function conversionNeedsSettings(error) {
         || error?.code === 'MINERU_API_KEY_INVALID'
         || error?.code === 'MISTRAL_API_KEY_INVALID'
         || error?.code === 'MISTRAL_API_KEY_REQUIRED'
-        || error?.code === 'MKTERO_SIGN_IN_REQUIRED';
+        || error?.code === 'MKTERO_SIGN_IN_REQUIRED'
+        || error?.code === 'MKTERO_ACCOUNT_DISABLED';
 }
 
 function prepareSelectedMarkdown(targets) {
@@ -2853,8 +2857,13 @@ async function ensureAccountAccessToken() {
         });
         return refreshed.accessToken;
     }
-    catch {
+    catch (error) {
         clearAccountSession(Zotero);
+        if (error?.code === 'account_disabled') {
+            const disabled = new Error('Mktero account is disabled');
+            disabled.code = 'MKTERO_ACCOUNT_DISABLED';
+            throw disabled;
+        }
         throw new MkteroSignInRequiredError();
     }
 }
