@@ -4,7 +4,9 @@ import { isSavedMarkdownNote as isMarkedSavedMarkdownNote } from '../core/saved-
 const ITEM_MENU_ID = 'zotero-itemmenu';
 const COLLECTION_MENU_ID = 'zotero-collectionmenu';
 const MENU_ITEM_ID = 'mktero-read-as-markdown';
+const EXPORT_MENU_ITEM_ID = 'mktero-export-obsidian';
 const COLLECTION_MENU_ITEM_ID = 'mktero-prepare-collection-markdown';
+const COLLECTION_EXPORT_MENU_ITEM_ID = 'mktero-export-collection-obsidian';
 const LEGACY_GRAPH_MENU_ITEM_ID = 'mktero-open-citation-graph';
 
 export function registerItemContextMenu({
@@ -13,6 +15,7 @@ export function registerItemContextMenu({
     rootURI,
     onOpen,
     onPrepare = null,
+    onExportObsidian = null,
     onOpenSavedNote = null,
     isSavedMarkdownNote = defaultIsSavedMarkdownNote,
     isPreparing = () => false,
@@ -24,6 +27,7 @@ export function registerItemContextMenu({
     if (!menu) return null;
 
     document.getElementById(MENU_ITEM_ID)?.remove();
+    document.getElementById(EXPORT_MENU_ITEM_ID)?.remove();
     // Remove the item injected by older builds that exposed the graph here.
     document.getElementById(LEGACY_GRAPH_MENU_ITEM_ID)?.remove();
 
@@ -32,6 +36,11 @@ export function registerItemContextMenu({
     menuItem.id = MENU_ITEM_ID;
     menuItem.hidden = true;
     menuItem.setAttribute('label', translate('menu.readAsMarkdown'));
+    const exportItem = document.createXULElement?.('menuitem')
+        || document.createElement('menuitem');
+    exportItem.id = EXPORT_MENU_ITEM_ID;
+    exportItem.hidden = true;
+    exportItem.setAttribute('label', translate('menu.exportObsidian'));
 
     const handlePopupShowing = event => {
         if (event.target !== menu) return;
@@ -67,18 +76,44 @@ export function registerItemContextMenu({
             })
             .catch(onError);
     };
+    const handleExportPopupShowing = event => {
+        if (event.target !== menu) return;
+        const targets = exportPDFTargets(zotero, window, onExportObsidian);
+        exportItem.hidden = !targets;
+        exportItem.setAttribute('label', translate('menu.exportObsidian'));
+    };
+    const handleExportCommand = () => {
+        const targets = exportPDFTargets(zotero, window, onExportObsidian);
+        if (!targets) return;
+        Promise.resolve()
+            .then(() => onExportObsidian(targets))
+            .catch(onError);
+    };
     menu.addEventListener('popupshowing', handlePopupShowing);
+    menu.addEventListener('popupshowing', handleExportPopupShowing);
     menuItem.addEventListener('command', handleCommand);
-    menu.append(menuItem);
+    exportItem.addEventListener('command', handleExportCommand);
+    menu.append(menuItem, exportItem);
 
     let active = true;
     return () => {
         if (!active) return;
         active = false;
         menu.removeEventListener('popupshowing', handlePopupShowing);
+        menu.removeEventListener('popupshowing', handleExportPopupShowing);
         menuItem.removeEventListener('command', handleCommand);
+        exportItem.removeEventListener('command', handleExportCommand);
         menuItem.remove();
+        exportItem.remove();
     };
+}
+
+function exportPDFTargets(zotero, window, onExportObsidian) {
+    if (typeof onExportObsidian !== 'function') return null;
+    const selectedItems = window?.ZoteroPane?.getSelectedItems?.();
+    if (!Array.isArray(selectedItems)) return null;
+    const targets = resolvePDFTargets(zotero, selectedItems);
+    return targets.length > 1 ? targets : null;
 }
 
 function resolveMenuAction({
@@ -192,6 +227,7 @@ export function registerCollectionContextMenu({
     zotero,
     window,
     onPrepare = null,
+    onExportObsidian = null,
     onError,
     translate = translateEnglish,
 } = {}) {
@@ -200,11 +236,17 @@ export function registerCollectionContextMenu({
     if (!menu || typeof onPrepare !== 'function') return null;
 
     document.getElementById(COLLECTION_MENU_ITEM_ID)?.remove();
+    document.getElementById(COLLECTION_EXPORT_MENU_ITEM_ID)?.remove();
     const menuItem = document.createXULElement?.('menuitem')
         || document.createElement('menuitem');
     menuItem.id = COLLECTION_MENU_ITEM_ID;
     menuItem.hidden = true;
     menuItem.setAttribute('label', translate('menu.prepareCollectionMarkdown'));
+    const exportItem = document.createXULElement?.('menuitem')
+        || document.createElement('menuitem');
+    exportItem.id = COLLECTION_EXPORT_MENU_ITEM_ID;
+    exportItem.hidden = true;
+    exportItem.setAttribute('label', translate('menu.exportCollectionObsidian'));
 
     const handlePopupShowing = event => {
         if (event.target !== menu) return;
@@ -222,18 +264,44 @@ export function registerCollectionContextMenu({
             .then(() => onPrepare(targets))
             .catch(onError);
     };
+    const handleExportPopupShowing = event => {
+        if (event.target !== menu) return;
+        const targets = collectionExportTargets(zotero, window, onExportObsidian);
+        exportItem.hidden = !targets.length;
+        exportItem.setAttribute(
+            'label',
+            translate('menu.exportCollectionObsidian')
+        );
+    };
+    const handleExportCommand = () => {
+        const targets = collectionExportTargets(zotero, window, onExportObsidian);
+        if (!targets.length) return;
+        Promise.resolve()
+            .then(() => onExportObsidian(targets))
+            .catch(onError);
+    };
     menu.addEventListener('popupshowing', handlePopupShowing);
+    menu.addEventListener('popupshowing', handleExportPopupShowing);
     menuItem.addEventListener('command', handleCommand);
-    menu.append(menuItem);
+    exportItem.addEventListener('command', handleExportCommand);
+    menu.append(menuItem, exportItem);
 
     let active = true;
     return () => {
         if (!active) return;
         active = false;
         menu.removeEventListener('popupshowing', handlePopupShowing);
+        menu.removeEventListener('popupshowing', handleExportPopupShowing);
         menuItem.removeEventListener('command', handleCommand);
+        exportItem.removeEventListener('command', handleExportCommand);
         menuItem.remove();
+        exportItem.remove();
     };
+}
+
+function collectionExportTargets(zotero, window, onExportObsidian) {
+    if (typeof onExportObsidian !== 'function') return [];
+    return collectionPDFTargets(zotero, window);
 }
 
 function collectionPDFTargets(zotero, window) {

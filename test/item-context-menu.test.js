@@ -433,3 +433,189 @@ test('prepares PDFs in the selected collection and ignores its subcollections', 
     dispose();
     assert.equal(document.querySelector('#mktero-prepare-collection-markdown'), null);
 });
+
+test('hides Obsidian export for a single PDF and keeps Read as Markdown', () => {
+    const harness = createMenuHarness([pdfItem(42)]);
+    const dispose = registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: () => {},
+        onPrepare: () => assert.fail('a single PDF must not prepare'),
+        onExportObsidian: () => assert.fail('a single PDF must not export'),
+        onError: assert.fail,
+    });
+
+    showMenu(harness.document);
+    const readItem = harness.document.querySelector('#mktero-read-as-markdown');
+    const exportItem = harness.document.querySelector('#mktero-export-obsidian');
+
+    assert.equal(readItem.hidden, false);
+    assert.equal(readItem.getAttribute('label'), 'Read as Markdown with Mktero');
+    assert.ok(exportItem);
+    assert.equal(exportItem.hidden, true);
+    dispose();
+});
+
+test('exports selected PDFs to Obsidian without preparing or opening', async () => {
+    const first = pdfItem(1);
+    first.getDisplayTitle = () => 'First';
+    const second = pdfItem(2);
+    second.getDisplayTitle = () => 'Second';
+    const harness = createMenuHarness([first, second]);
+    const exported = [];
+    const prepared = [];
+    const opened = [];
+    const dispose = registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: itemID => opened.push(itemID),
+        onPrepare: targets => prepared.push(targets),
+        onExportObsidian: targets => exported.push(targets),
+        onError: assert.fail,
+    });
+
+    showMenu(harness.document);
+    const prepareItem = harness.document.querySelector('#mktero-read-as-markdown');
+    const exportItem = harness.document.querySelector('#mktero-export-obsidian');
+
+    assert.equal(prepareItem.hidden, false);
+    assert.equal(prepareItem.getAttribute('label'), 'Prepare selected Markdown');
+    assert.equal(exportItem.hidden, false);
+    assert.equal(
+        exportItem.getAttribute('label'),
+        'Export selected Markdown to Obsidian'
+    );
+
+    exportItem.dispatchEvent(new harness.document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(exported, [[
+        { itemID: 1, title: 'First' },
+        { itemID: 2, title: 'Second' },
+    ]]);
+    assert.deepEqual(prepared, []);
+    assert.deepEqual(opened, []);
+    dispose();
+    assert.equal(harness.document.querySelector('#mktero-read-as-markdown'), null);
+    assert.equal(harness.document.querySelector('#mktero-export-obsidian'), null);
+});
+
+test('hides Obsidian export when the callback is omitted', () => {
+    const harness = createMenuHarness([pdfItem(1), pdfItem(2)]);
+    registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: () => {},
+        onPrepare: () => {},
+        onError: assert.fail,
+    });
+
+    showMenu(harness.document);
+    const prepareItem = harness.document.querySelector('#mktero-read-as-markdown');
+    const exportItem = harness.document.querySelector('#mktero-export-obsidian');
+
+    assert.equal(prepareItem.hidden, false);
+    assert.equal(prepareItem.getAttribute('label'), 'Prepare selected Markdown');
+    assert.ok(exportItem);
+    assert.equal(exportItem.hidden, true);
+});
+
+test('exports collection PDFs to Obsidian with the same targets as prepare', async () => {
+    const direct = pdfItem(7);
+    direct.getDisplayTitle = () => 'Direct';
+    const parent = regularItem(8, [9]);
+    parent.getDisplayTitle = () => 'Parent paper';
+    const attachment = pdfItem(9);
+    attachment.parentItemID = 8;
+    const nested = pdfItem(10);
+    nested.getDisplayTitle = () => 'Nested';
+    const selected = {
+        getChildItems: () => [
+            direct,
+            parent,
+            { id: 11, deleted: true, isPDFAttachment: () => true },
+        ],
+        getChildCollections: () => [{ getChildItems: () => [nested] }],
+    };
+    const { document } = parseHTML(
+        '<html><body><div id="zotero-collectionmenu"></div></body></html>'
+    );
+    document.createXULElement = tagName => document.createElement(tagName);
+    const prepared = [];
+    const exported = [];
+    const dispose = registerCollectionContextMenu({
+        zotero: {
+            Items: {
+                get: id => ({
+                    8: parent,
+                    9: attachment,
+                })[id] || null,
+            },
+        },
+        window: {
+            document,
+            ZoteroPane: { getSelectedCollections: () => [selected] },
+        },
+        onPrepare: targets => prepared.push(targets),
+        onExportObsidian: targets => exported.push(targets),
+        onError: assert.fail,
+    });
+
+    document.querySelector('#zotero-collectionmenu').dispatchEvent(
+        new document.defaultView.Event('popupshowing', { bubbles: true })
+    );
+    const prepareItem = document.querySelector('#mktero-prepare-collection-markdown');
+    const exportItem = document.querySelector('#mktero-export-collection-obsidian');
+    assert.equal(prepareItem.hidden, false);
+    assert.equal(exportItem.hidden, false);
+    assert.equal(
+        exportItem.getAttribute('label'),
+        'Export collection Markdown to Obsidian'
+    );
+
+    exportItem.dispatchEvent(new document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(exported, [[
+        { itemID: 7, title: 'Direct' },
+        { itemID: 9, title: 'Parent paper' },
+    ]]);
+    assert.deepEqual(prepared, []);
+    dispose();
+    assert.equal(document.querySelector('#mktero-prepare-collection-markdown'), null);
+    assert.equal(document.querySelector('#mktero-export-collection-obsidian'), null);
+});
+
+test('hides collection Obsidian export when the callback is omitted', () => {
+    const direct = pdfItem(7);
+    const { document } = parseHTML(
+        '<html><body><div id="zotero-collectionmenu"></div></body></html>'
+    );
+    document.createXULElement = tagName => document.createElement(tagName);
+    registerCollectionContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: {
+            document,
+            ZoteroPane: {
+                getSelectedCollections: () => [{
+                    getChildItems: () => [direct],
+                }],
+            },
+        },
+        onPrepare: () => {},
+        onError: assert.fail,
+    });
+
+    document.querySelector('#zotero-collectionmenu').dispatchEvent(
+        new document.defaultView.Event('popupshowing', { bubbles: true })
+    );
+    const prepareItem = document.querySelector('#mktero-prepare-collection-markdown');
+    const exportItem = document.querySelector('#mktero-export-collection-obsidian');
+
+    assert.equal(prepareItem.hidden, false);
+    assert.ok(exportItem);
+    assert.equal(exportItem.hidden, true);
+});
