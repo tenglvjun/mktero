@@ -683,6 +683,9 @@ export function createPreferencesController({
         if (error?.code === 'email_not_verified') {
             return 'preferences.account.emailNotVerified';
         }
+        if (error?.code === 'account_disabled') {
+            return 'preferences.account.disabled';
+        }
         if (error?.code === 'invalid_password') {
             return 'preferences.account.invalidPassword';
         }

@@ -395,6 +395,9 @@ export class MkteroConversionClient {
                     'MKTERO_REQUEST_TIMEOUT'
                 );
             }
+            if (error?.code === 'account_disabled') {
+                throw codedError('Mktero account is disabled', 'MKTERO_ACCOUNT_DISABLED');
+            }
             if (isKnownError(error)) throw error;
             // The original exception is kept as `cause` so the presenter can
             // report whether this was a transport failure or a rejected
@@ -447,6 +450,7 @@ function reportJobProgress(onProgress, status, progress) {
 
 function errorCodeForStatus(status, payload) {
     const code = String(payload?.error?.code || '').trim();
+    if (code === 'account_disabled') return 'MKTERO_ACCOUNT_DISABLED';
     if (code === 'invalid_token' || code === 'user_not_found') {
         return 'MKTERO_SIGN_IN_REQUIRED';
     }
