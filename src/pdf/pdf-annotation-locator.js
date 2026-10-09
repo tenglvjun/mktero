@@ -755,9 +755,13 @@ function diffCandidates(text, target, maxEdits) {
             0,
             position - anchorOffset - maxEdits
         );
+        // The window must cover the whole target from the anchor occurrence:
+        // trimming it by the anchor offset again made mid-target anchors
+        // (used whenever the selection head carries a glyph mismatch) end
+        // short of the selection tail, so the alignment could never fit.
         const windowTo = Math.min(
             text.length,
-            position - anchorOffset + (target.length - anchorOffset) + maxEdits
+            position - anchorOffset + target.length + maxEdits
         );
         const aligned = alignedDiffSpan(
             target,

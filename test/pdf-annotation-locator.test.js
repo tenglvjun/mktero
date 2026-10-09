@@ -2048,6 +2048,46 @@ test('keeps reporting missing text when no mapped region is available', async ()
     locator.dispose();
 });
 
+test('locates a selection whose head glyphs differ from the PDF text', async () => {
+    // The selection head carries an accent the PDF text layer lacks, so the
+    // diff anchor falls back to a mid-target slice; the alignment window must
+    // still cover the selection tail (and the mangled citation marker).
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'representation, Poincare sections, low-dimension attrac-',
+            { hasEOL: true, y: 700 }
+        ),
+        createTextItem(
+            'tor plots, singular value decomposition, and attractor',
+            { hasEOL: true, y: 680 }
+        ),
+        createTextItem(
+            'trajectories have been used. For other quantitative',
+            { hasEOL: true, y: 660 }
+        ),
+        createTextItem(
+            'descriptions, the D2 correlation dimension, Lyapunov',
+            { hasEOL: true, y: 640 }
+        ),
+        createTextItem(
+            'exponents, and Kolmogorov entropy have been',
+            { hasEOL: true, y: 620 }
+        ),
+        createTextItem("employed'491.", { hasEOL: true, y: 600 }),
+    ]]);
+
+    const located = await locator.locate(42, [
+        'Poincaré sections, low-dimension attractor plots, singular value',
+        'decomposition, and attractor trajectories have been used. For other',
+        'quantitative descriptions, the D_{2} correlation dimension, Lyapunov',
+        'exponents, and Kolmogorov entropy have been employed $^{[49]}$ .',
+    ].join(' '), { pdfPageIndexHint: 0 });
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 6);
+    locator.dispose();
+});
+
 test('reports text-less PDFs as not found', async () => {
     const locator = await createSyntheticLocator([[]]);
 

@@ -519,6 +519,71 @@ export function resolveSourceMapLocation(
     };
 }
 
+// A selection may span several mapped blocks. Contained entries keep their
+// precise locationRanges; otherwise the overlapping blocks on the selection's
+// first page are united into one navigation region.
+export function resolveSourceMapSelectionLocation(
+    sourceMap,
+    range,
+    documentLength = Infinity
+) {
+    if (!isValidDocumentRange(range, documentLength)) return null;
+    const containing = findUniqueContainingSourceMapEntry(
+        sourceMap,
+        range,
+        documentLength
+    );
+    if (containing) {
+        const located = resolveSourceMapLocation(
+            containing,
+            range,
+            documentLength
+        );
+        if (located) return located;
+        return sourceMapLocationAt(containing.locations, 0);
+    }
+    const overlapping = overlappingSourceMapEntries(
+        sourceMap,
+        range,
+        documentLength
+    );
+    if (!overlapping.length) return null;
+    const pages = uniqueSourceMapPages(overlapping);
+    const pageIndex = pages.length
+        ? pages[0]
+        : overlapping[0].locations[0]?.pageIndex;
+    if (!Number.isSafeInteger(pageIndex) || pageIndex < 0) return null;
+    let bbox = null;
+    for (const entry of overlapping) {
+        for (const location of entry.locations) {
+            if (location.pageIndex !== pageIndex) continue;
+            bbox = bbox
+                ? unionNormalizedBBox(bbox, location.bbox)
+                : [...location.bbox];
+        }
+    }
+    if (!isValidNormalizedSourceBBox(bbox)) return null;
+    return { pageIndex, bbox };
+}
+
+function sourceMapLocationAt(locations, index) {
+    const location = locations?.[index];
+    if (!isValidSourceLocation(location)) return null;
+    return {
+        pageIndex: location.pageIndex,
+        bbox: [...location.bbox],
+    };
+}
+
+function unionNormalizedBBox(left, right) {
+    return [
+        Math.min(left[0], right[0]),
+        Math.min(left[1], right[1]),
+        Math.max(left[2], right[2]),
+        Math.max(left[3], right[3]),
+    ];
+}
+
 export function findUniqueContainingSourceMapEntry(
     sourceMap,
     range,

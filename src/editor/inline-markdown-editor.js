@@ -7,8 +7,7 @@ import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
 import {
-    findUniqueContainingSourceMapEntry,
-    resolveSourceMapLocation,
+    resolveSourceMapSelectionLocation,
 } from '../core/markdown-source-map.js';
 import { createLocalization } from '../i18n/localization.js';
 import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
@@ -1632,27 +1631,7 @@ function createSourcedEvidence(markdown, sourceMap, target, figureViews) {
 
 function selectionSourceLocation(sourceMap, target, documentLength) {
     const range = target?.ranges?.length === 1 ? target.ranges[0] : null;
-    if (!Number.isSafeInteger(range?.from)
-        || !Number.isSafeInteger(range?.to)
-        || range.from < 0
-        || range.to <= range.from
-        || range.to > documentLength) {
-        return null;
-    }
-    const entry = findUniqueContainingSourceMapEntry(
-        sourceMap,
-        range,
-        documentLength
-    );
-    const location = resolveSourceMapLocation(
-        entry,
-        range,
-        documentLength
-    ) || entry?.locations[0];
-    return location ? {
-        pageIndex: location.pageIndex,
-        bbox: [...location.bbox],
-    } : null;
+    return resolveSourceMapSelectionLocation(sourceMap, range, documentLength);
 }
 
 function clampSelectionFocusToPointerLine(view, selection, pointer) {
