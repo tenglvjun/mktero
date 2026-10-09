@@ -225,11 +225,14 @@ the vault; Mktero does not.
 
 ### Batch export
 
-Select several items and choose `Export selected Markdown to Obsidian`. A
-single right-click still offers reading, not this export. Right-click a
-collection and choose `Export collection Markdown to Obsidian`. It uses the
-same collection scope as `Prepare collection Markdown`: that collection's own
-items, not items that belong only to a subcollection.
+The item menu shows `Export selected Markdown to Obsidian` when the selection
+resolves to more than one PDF. Right-clicking one parent item that has several
+PDF attachments also shows that export beside reading; reading is not
+replaced. A selection that resolves to exactly one PDF does not show the
+export item. Right-click a collection and choose `Export collection Markdown
+to Obsidian`. It uses the same collection scope as `Prepare collection
+Markdown`: that collection's own items, not items that belong only to a
+subcollection.
 
 Only Markdown that has already been converted is exported. A cache miss does
 not start OCR or conversion. One Zotero parent item becomes one note. If
