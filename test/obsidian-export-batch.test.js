@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
     createObsidianExportBatch,
+    mergeObsidianExportOverwrite,
+    selectObsidianExportConfirmations,
     selectObsidianExportGroups,
     summarizeObsidianExportBatch,
 } from '../src/core/obsidian-export-batch.js';
@@ -368,6 +370,35 @@ test('records a conflict without counting it as exported', async () => {
         title: 'Extra',
     }]);
     assert.equal(result.status, 'completed');
+});
+
+test('confirms an exported result that still has conflicts once', async () => {
+    const conflicts = [{
+        language: 'zh-CN',
+        path: 'Mktero/Paper/Paper - chinese.md',
+    }];
+    const batch = createObsidianExportBatch({
+        load: () => ({ markdown: 'cached' }),
+        exportDocument(_document, options) {
+            if (options.conflictPolicy === 'overwrite') {
+                return { status: 'exported' };
+            }
+            return { status: 'exported', conflicts };
+        },
+        isPreparing: () => false,
+    });
+    const groups = [group('1:UUUUUUUU', [{ itemID: 8, title: 'Paper' }])];
+
+    const first = await batch.run(groups, { conflictPolicy: 'skip' });
+    const confirmations = selectObsidianExportConfirmations(first);
+
+    assert.deepEqual(confirmations.map(item => item.identity), ['1:UUUUUUUU']);
+    assert.deepEqual(confirmations[0].conflicts, conflicts);
+
+    const overwritten = await batch.run(groups, { conflictPolicy: 'overwrite' });
+    const merged = mergeObsidianExportOverwrite(first, overwritten);
+
+    assert.deepEqual(merged.exported.map(item => item.identity), ['1:UUUUUUUU']);
 });
 
 test('does not overlap exportDocument calls', async () => {

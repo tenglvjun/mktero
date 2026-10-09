@@ -84,7 +84,7 @@ export class MinerUConversion {
             const resumed = await this.#selectResumableTask({ key, forceRefresh });
             if (resumed?.origin) return resumed;
             if (!forceRefresh) {
-                const cached = await this.readCached({
+                const cached = await this.#readCached({
                     key,
                     fileData,
                     cacheEnabled,
@@ -190,7 +190,15 @@ export class MinerUConversion {
         return { result, origin: 'fresh', warnings: [] };
     }
 
-    async readCached({
+    async readCached(options = {}) {
+        if (!options?.key) return null;
+        return this.#withKeyOperation(
+            options.key,
+            () => this.#readCached(options)
+        );
+    }
+
+    async #readCached({
         key,
         fileData,
         cacheEnabled = false,

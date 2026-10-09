@@ -83,6 +83,8 @@ import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import {
     createObsidianExportBatch,
+    mergeObsidianExportOverwrite,
+    selectObsidianExportConfirmations,
     selectObsidianExportGroups,
     summarizeObsidianExportBatch,
 } from './core/obsidian-export-batch.js';
@@ -3272,10 +3274,11 @@ async function runSelectedObsidianExport(targets, controller) {
         signal: controller.signal,
         conflictPolicy: 'skip',
     });
-    if (!controller.signal.aborted && result.conflict.length > 0) {
-        const overwrite = confirmObsidianBatchOverwrite(result.conflict.length);
+    const confirmations = selectObsidianExportConfirmations(result);
+    if (!controller.signal.aborted && confirmations.length > 0) {
+        const overwrite = confirmObsidianBatchOverwrite(confirmations.length);
         if (overwrite && !controller.signal.aborted) {
-            const identities = new Set(result.conflict.map(item => item.identity));
+            const identities = new Set(confirmations.map(item => item.identity));
             const conflictGroups = groups.filter(group => (
                 identities.has(group.identity)
             ));
@@ -3387,33 +3390,6 @@ function confirmObsidianBatchOverwrite(count) {
         runtimeTranslate('obsidianBatch.overwriteTitle'),
         runtimeTranslate('obsidianBatch.overwriteMessage', { count })
     );
-}
-
-function mergeObsidianExportOverwrite(skipped, overwritten) {
-    const finished = new Set();
-    for (const name of ['exported', 'notReady', 'preparing', 'conflict', 'failed']) {
-        for (const item of overwritten?.[name] || []) {
-            if (item?.identity != null) finished.add(item.identity);
-        }
-    }
-    const seenDuplicates = new Set((skipped.duplicate || []).map(item => item.itemID));
-    return {
-        status: overwritten?.status === 'cancelled' ? 'cancelled' : skipped.status,
-        exported: [...skipped.exported, ...(overwritten?.exported || [])],
-        notReady: [...skipped.notReady, ...(overwritten?.notReady || [])],
-        preparing: [...skipped.preparing, ...(overwritten?.preparing || [])],
-        duplicate: [
-            ...skipped.duplicate,
-            ...(overwritten?.duplicate || []).filter(item => (
-                !seenDuplicates.has(item.itemID)
-            )),
-        ],
-        conflict: [
-            ...skipped.conflict.filter(item => !finished.has(item.identity)),
-            ...(overwritten?.conflict || []),
-        ],
-        failed: [...skipped.failed, ...(overwritten?.failed || [])],
-    };
 }
 
 function obsidianExportGroupTitle(title) {

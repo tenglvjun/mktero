@@ -1029,6 +1029,94 @@ test('readCached restores pending figures and falls back without submitting', as
     assert.deepEqual(calls, { submit: 0, parse: 0, collect: 0 });
 });
 
+test('public readCached does not interleave cache.put with an in-flight convert write', async () => {
+    const calls = { submit: 0, parse: 0, collect: 0 };
+    const events = [];
+    let releaseConvertPut = () => {};
+    let convertPutStarted = () => {};
+    const convertPutEntered = new Promise(resolve => {
+        convertPutStarted = resolve;
+    });
+    let stored = null;
+    let readStarted = false;
+    const pending = {
+        markdown: '# Pending',
+        figureRestoration: { status: 'pending' },
+        restorationInput: { marker: true },
+    };
+    const conversion = new MinerUConversion({
+        client: {
+            async submit({ dataID, fileName }) {
+                calls.submit += 1;
+                return { batchID: 'batch-lock', dataID, fileName };
+            },
+            async parse() {
+                calls.parse += 1;
+                throw new Error('parse must not run');
+            },
+            async collect() {
+                calls.collect += 1;
+                return { markdown: '# Converted' };
+            },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            async get() {
+                events.push(readStarted ? 'read-get' : 'convert-get');
+                return readStarted ? pending : stored;
+            },
+            async put(_key, result) {
+                events.push(`put-start:${result.markdown}`);
+                if (result.markdown === '# Converted') {
+                    convertPutStarted();
+                    await new Promise(resolve => {
+                        releaseConvertPut = resolve;
+                    });
+                }
+                stored = result;
+                events.push(`put-end:${result.markdown}`);
+            },
+        },
+        restoreCachedInput: async input => {
+            assert.equal(input.marker, true);
+            return { markdown: '# Restored' };
+        },
+        createDataID: () => 'mktero-lock',
+        now: () => 1_700_000_000_000,
+    });
+
+    const converting = conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+    await convertPutEntered;
+    readStarted = true;
+    const reading = conversion.readCached({
+        key: CONVERSION_KEY,
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(events.includes('read-get'), false);
+    assert.equal(events.includes('put-start:# Restored'), false);
+    releaseConvertPut();
+    await converting;
+    const restored = await reading;
+
+    assert.equal(restored.result.markdown, '# Restored');
+    assert.deepEqual(events.filter(event => event.startsWith('put-')), [
+        'put-start:# Converted',
+        'put-end:# Converted',
+        'put-start:# Restored',
+        'put-end:# Restored',
+    ]);
+    assert.deepEqual(calls, { submit: 1, parse: 0, collect: 1 });
+});
+
 test('current profiles are v15 and v14 ids stay compatible', () => {
     assert.match(MINERU_PARSER_PROFILE_ID, /figure-region-v15/);
     assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v15/);

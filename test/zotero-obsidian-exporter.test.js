@@ -279,6 +279,71 @@ test('skips a hand-edited note without asking when the conflict policy is skip',
     assert.match(files.get('/vault/Mktero/Paper/Paper.md'), /Hand edit/);
 });
 
+test('exports unchanged versions and reports the conflicting version without writing it', async () => {
+    const writes = [];
+    const files = new Map();
+    const ioUtils = createIOUtils(writes, {
+        existingPaths: ['/vault/.obsidian'],
+        files,
+    });
+    let confirmCalls = 0;
+    const exporter = createExporter({
+        writes,
+        ioUtils,
+        vaultPath: '/vault',
+        confirmOverwrite: async () => {
+            confirmCalls += 1;
+            return true;
+        },
+    });
+    await exporter.export(exportInput({
+        markdown: '# Original\n',
+        translations: [{
+            language: 'zh-CN',
+            markdown: '# 论文\n',
+        }],
+    }));
+    files.set(
+        '/vault/Mktero/Paper/Paper - chinese.md',
+        files.get('/vault/Mktero/Paper/Paper - chinese.md').replace(
+            '# 论文\n',
+            '# 论文\n\nHand edit\n'
+        )
+    );
+    writes.length = 0;
+
+    const mixed = await exporter.export(exportInput({
+        markdown: '# Updated\n',
+        translations: [{
+            language: 'zh-CN',
+            markdown: '# 更新译文\n',
+        }],
+        conflictPolicy: 'skip',
+    }));
+
+    assert.equal(confirmCalls, 0);
+    assert.equal(mixed.status, 'exported');
+    assert.equal(mixed.conflicts.length, 1);
+    assert.equal(mixed.conflicts[0].language, 'zh-CN');
+    assert.equal(
+        mixed.conflicts[0].path,
+        '/vault/Mktero/Paper/Paper - chinese.md'
+    );
+    assert.equal(writes.some(write => write.type === 'text'
+        && write.path.endsWith('/Paper.md')), true);
+    assert.equal(writes.some(write => write.type === 'text'
+        && write.path.endsWith('Paper - chinese.md')), false);
+    assert.match(files.get('/vault/Mktero/Paper/Paper.md'), /# Updated/);
+    assert.match(
+        files.get('/vault/Mktero/Paper/Paper - chinese.md'),
+        /Hand edit/
+    );
+    assert.doesNotMatch(
+        files.get('/vault/Mktero/Paper/Paper - chinese.md'),
+        /更新译文/
+    );
+});
+
 test('overwrites a hand-edited note without asking when the conflict policy is overwrite', async () => {
     const writes = [];
     const files = new Map();
