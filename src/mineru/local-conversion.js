@@ -46,23 +46,18 @@ export class MinerULocalConversion {
     }) {
         throwIfAborted(signal);
         const warnings = [];
-        if (!forceRefresh && cacheEnabled && key && this.cache) {
-            try {
-                const cached = await this.cache.get(key);
-                throwIfAborted(signal);
-                if (cached) {
-                    onProgress(100);
-                    return {
-                        result: withIdentity(cached, this.parserProfile),
-                        origin: 'cache',
-                        warnings,
-                    };
-                }
-            }
-            catch (error) {
-                throwIfAborted(signal);
-                this.#reportError(error);
-                warnings.push(CACHE_READ_WARNING);
+        if (!forceRefresh) {
+            const cached = await this.readCached({
+                key,
+                fileData,
+                cacheEnabled,
+                signal,
+                onProgress,
+                warnings,
+            });
+            if (cached) {
+                onProgress(100);
+                return cached;
             }
         }
 
@@ -93,6 +88,34 @@ export class MinerULocalConversion {
         throwIfAborted(signal);
         onProgress(100);
         return { result: prepared, origin: 'fresh', warnings };
+    }
+
+    async readCached({
+        key,
+        cacheEnabled = false,
+        signal,
+        warnings,
+    } = {}) {
+        const reportedWarnings = Array.isArray(warnings) ? warnings : [];
+        if (!cacheEnabled || !key || !this.cache) return null;
+        throwIfAborted(signal);
+        try {
+            const cached = await this.cache.get(key);
+            throwIfAborted(signal);
+            if (!cached) return null;
+            return {
+                result: withIdentity(cached, this.parserProfile),
+                origin: 'cache',
+                warnings: reportedWarnings,
+            };
+        }
+        catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throwIfAborted(signal);
+            this.#reportError(error);
+            reportedWarnings.push(CACHE_READ_WARNING);
+            return null;
+        }
     }
 
     #reportError(error) {

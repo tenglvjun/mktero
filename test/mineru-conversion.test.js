@@ -927,6 +927,108 @@ test('reuses a completed v14 cache without OCR or figure rendering', async () =>
     assert.deepEqual(calls.map(call => call[0]), ['get', 'get', 'put']);
 });
 
+test('readCached returns null without submitting when the cache has no entry', async () => {
+    const calls = { submit: 0, parse: 0, collect: 0 };
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() { calls.submit += 1; },
+            async parse() { calls.parse += 1; },
+            async collect() { calls.collect += 1; },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        cache: { async get() { return null; } },
+    });
+
+    assert.equal(await conversion.readCached({
+        key: CONVERSION_KEY,
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    }), null);
+    assert.deepEqual(calls, { submit: 0, parse: 0, collect: 0 });
+});
+
+test('readCached returns a previous profile entry without submitting', async () => {
+    const calls = { submit: 0, parse: 0, collect: 0 };
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() { calls.submit += 1; },
+            async parse() { calls.parse += 1; },
+            async collect() { calls.collect += 1; },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            async get(key) {
+                return key === 'previous-key' ? { markdown: '# Previous profile' } : null;
+            },
+        },
+        createPreviousCacheKeys: async () => ['previous-key'],
+    });
+
+    const result = await conversion.readCached({
+        key: 'current-key',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+
+    assert.equal(result.origin, 'cache');
+    assert.equal(result.result.markdown, '# Previous profile');
+    assert.deepEqual(calls, { submit: 0, parse: 0, collect: 0 });
+});
+
+test('readCached restores pending figures and falls back without submitting', async () => {
+    const calls = { submit: 0, parse: 0, collect: 0 };
+    const client = {
+        async submit() { calls.submit += 1; },
+        async parse() { calls.parse += 1; },
+        async collect() { calls.collect += 1; },
+    };
+    const cached = {
+        markdown: '# Provisional',
+        figureRestoration: { status: 'pending' },
+        restorationInput: { marker: true },
+    };
+    const restored = new MinerUConversion({
+        client,
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            async get() { return cached; },
+            async put() {},
+        },
+        restoreCachedInput: async input => {
+            assert.equal(input.marker, true);
+            return { markdown: '# Restored' };
+        },
+    });
+    const failed = new MinerUConversion({
+        client,
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            async get() { return cached; },
+            async put() {},
+        },
+        restoreCachedInput: async () => {
+            throw new Error('restore failed');
+        },
+    });
+
+    const hit = await restored.readCached({
+        key: CONVERSION_KEY,
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+    const fallback = await failed.readCached({
+        key: CONVERSION_KEY,
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+
+    assert.equal(hit.origin, 'cache');
+    assert.equal(hit.result.markdown, '# Restored');
+    assert.equal(fallback.origin, 'cache');
+    assert.equal(fallback.result.markdown, '# Provisional');
+    assert.deepEqual(calls, { submit: 0, parse: 0, collect: 0 });
+});
+
 test('current profiles are v15 and v14 ids stay compatible', () => {
     assert.match(MINERU_PARSER_PROFILE_ID, /figure-region-v15/);
     assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v15/);

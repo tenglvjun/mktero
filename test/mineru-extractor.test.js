@@ -381,3 +381,49 @@ test('reports when a pending MinerU task was resumed', async () => {
     assert.equal(result.cacheHit, false);
     assert.equal(result.resumedTask, true);
 });
+
+test('readCached returns null without converting when nothing is stored', async () => {
+    let conversions = 0;
+    let indexed = false;
+    const extractor = new MinerUDocumentExtractor({
+        zotero: { Items: { getAsync: async () => createPDFItem() } },
+        conversion: {
+            async convert() { conversions += 1; },
+            async readCached() { return null; },
+        },
+        getApiKey: () => 'configured-token',
+        readFile: async () => new Uint8Array([1]),
+        createCacheKey: async () => 'a'.repeat(64),
+        readRevision: async () => null,
+        preparePDFIndex() { indexed = true; },
+    });
+
+    assert.equal(await extractor.readCached(42, {}), null);
+    assert.equal(conversions, 0);
+    assert.equal(indexed, false);
+});
+
+test('readCached returns a corrected revision without converting', async () => {
+    let conversions = 0;
+    const extractor = new MinerUDocumentExtractor({
+        zotero: { Items: { getAsync: async () => createPDFItem() } },
+        conversion: {
+            async convert() { conversions += 1; },
+            async readCached() { conversions += 1; },
+        },
+        getApiKey: () => '',
+        readFile: async () => new Uint8Array([1]),
+        createCacheKey: async () => 'c'.repeat(64),
+        readRevision: async () => ({ markdown: '# Corrected paper' }),
+        preparePDFIndex() { assert.fail('PDF index must not be prepared'); },
+    });
+
+    const result = await extractor.readCached(42, {});
+
+    assert.equal(conversions, 0);
+    assert.equal(result.markdown, '# Corrected paper');
+    assert.equal(result.userEdited, true);
+    assert.equal(result.cacheHit, true);
+    assert.equal(result.provider, 'mineru');
+    assert.equal(result.cacheKey, 'c'.repeat(64));
+});

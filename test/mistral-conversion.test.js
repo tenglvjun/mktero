@@ -192,3 +192,51 @@ test('propagates caller cancellation before starting OCR', async () => {
     );
     assert.equal(requests, 0);
 });
+
+test('readCached returns null without submitting when the cache has no entry', async () => {
+    const calls = { submit: 0, parse: 0, collect: 0, ocr: 0 };
+    const conversion = new MistralConversion({
+        client: {
+            async submit() { calls.submit += 1; },
+            async parse() { calls.parse += 1; },
+            async collect() { calls.collect += 1; },
+            async ocr() { calls.ocr += 1; },
+        },
+        cache: { async get() { return null; } },
+    });
+
+    assert.equal(await conversion.readCached({
+        key: KEY,
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    }), null);
+    assert.deepEqual(calls, { submit: 0, parse: 0, collect: 0, ocr: 0 });
+});
+
+test('readCached returns a previous profile entry without submitting', async () => {
+    const calls = { submit: 0, parse: 0, collect: 0, ocr: 0 };
+    const conversion = new MistralConversion({
+        client: {
+            async submit() { calls.submit += 1; },
+            async parse() { calls.parse += 1; },
+            async collect() { calls.collect += 1; },
+            async ocr() { calls.ocr += 1; },
+        },
+        cache: {
+            async get(key) {
+                return key === 'previous-key' ? { markdown: '# Previous profile' } : null;
+            },
+        },
+        createPreviousCacheKeys: async () => ['previous-key'],
+    });
+
+    const result = await conversion.readCached({
+        key: 'current-key',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+
+    assert.equal(result.origin, 'cache');
+    assert.equal(result.result.markdown, '# Previous profile');
+    assert.deepEqual(calls, { submit: 0, parse: 0, collect: 0, ocr: 0 });
+});

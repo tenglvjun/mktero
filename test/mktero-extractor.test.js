@@ -270,3 +270,73 @@ test('rejects a non-PDF attachment', async () => {
 
     await assert.rejects(extractor.extract(42, {}), /Only PDF attachments/);
 });
+
+test('readCached returns null without converting when nothing is stored', async () => {
+    let conversions = 0;
+    let indexed = false;
+    const extractor = createExtractor({
+        conversion: {
+            async convert() { conversions += 1; },
+        },
+        createCacheKey: async () => 'a'.repeat(64),
+        readRevision: async () => null,
+        isCacheEnabled: () => true,
+        cache: { async get() { return null; } },
+        preparePDFIndex() { indexed = true; },
+    });
+
+    assert.equal(await extractor.readCached(42, {}), null);
+    assert.equal(conversions, 0);
+    assert.equal(indexed, false);
+});
+
+test('readCached returns a corrected revision without converting', async () => {
+    let conversions = 0;
+    const extractor = createExtractor({
+        conversion: {
+            async convert() { conversions += 1; },
+        },
+        createCacheKey: async () => 'a'.repeat(64),
+        readRevision: async () => ({ markdown: '# Corrected' }),
+        preparePDFIndex() { assert.fail('PDF index must not be prepared'); },
+    });
+
+    const result = await extractor.readCached(42, {});
+
+    assert.equal(conversions, 0);
+    assert.equal(result.markdown, '# Corrected');
+    assert.equal(result.userEdited, true);
+    assert.equal(result.cacheHit, true);
+    assert.equal(result.provider, 'mktero');
+});
+
+test('readCached returns an existing cache entry without a session', async () => {
+    let conversions = 0;
+    let tokenReads = 0;
+    const extractor = createExtractor({
+        conversion: {
+            async convert() { conversions += 1; },
+        },
+        getAccessToken() {
+            tokenReads += 1;
+            return '';
+        },
+        createCacheKey: async () => 'a'.repeat(64),
+        readRevision: async () => null,
+        isCacheEnabled: () => true,
+        cache: {
+            async get() {
+                return { markdown: '# Cached while signed out' };
+            },
+        },
+        preparePDFIndex() { assert.fail('PDF index must not be prepared'); },
+    });
+
+    const result = await extractor.readCached(42, {});
+
+    assert.equal(conversions, 0);
+    assert.equal(tokenReads, 0);
+    assert.equal(result.markdown, '# Cached while signed out');
+    assert.equal(result.cacheHit, true);
+    assert.equal(result.provider, 'mktero');
+});

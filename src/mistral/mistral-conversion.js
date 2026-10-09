@@ -49,45 +49,18 @@ export class MistralConversion {
         throwIfAborted(signal);
         const warnings = [];
 
-        if (!forceRefresh && cacheEnabled && key && this.cache) {
-            try {
-                let cached = await this.cache.get(key);
-                let migrated = false;
-                if (!cached && this.createPreviousCacheKeys) {
-                    const previousKeys = await this.createPreviousCacheKeys(fileData);
-                    throwIfAborted(signal);
-                    for (const previousKey of new Set(previousKeys)) {
-                        if (!previousKey || previousKey === key) continue;
-                        cached = await this.cache.get(previousKey);
-                        throwIfAborted(signal);
-                        migrated = Boolean(cached);
-                        if (cached) break;
-                    }
-                }
-                throwIfAborted(signal);
-                if (cached) {
-                    const result = await this.#recoverFigures(cached, { fileData, signal, onProgress });
-                    throwIfAborted(signal);
-                    if (migrated || result !== cached) {
-                        try { await this.cache.put(key, result, { signal }); }
-                        catch (error) {
-                            throwIfAborted(signal);
-                            this.#reportError(error);
-                            warnings.push(CACHE_WRITE_WARNING);
-                        }
-                    }
-                    onProgress?.(100);
-                    return {
-                        result: withIdentity(result, this.parserProfile),
-                        origin: 'cache',
-                        warnings,
-                    };
-                }
-            }
-            catch (error) {
-                throwIfAborted(signal);
-                this.#reportError(error);
-                warnings.push(CACHE_READ_WARNING);
+        if (!forceRefresh) {
+            const cached = await this.readCached({
+                key,
+                fileData,
+                cacheEnabled,
+                signal,
+                onProgress,
+                warnings,
+            });
+            if (cached) {
+                onProgress?.(100);
+                return cached;
             }
         }
 
@@ -126,6 +99,59 @@ export class MistralConversion {
             origin: 'fresh',
             warnings,
         };
+    }
+
+    async readCached({
+        key,
+        fileData,
+        cacheEnabled = false,
+        signal,
+        onProgress = () => {},
+        warnings,
+    } = {}) {
+        const reportedWarnings = Array.isArray(warnings) ? warnings : [];
+        if (!cacheEnabled || !key || !this.cache) return null;
+        throwIfAborted(signal);
+        try {
+            let cached = await this.cache.get(key);
+            let migrated = false;
+            if (!cached && this.createPreviousCacheKeys) {
+                const previousKeys = await this.createPreviousCacheKeys(fileData);
+                throwIfAborted(signal);
+                for (const previousKey of new Set(previousKeys)) {
+                    if (!previousKey || previousKey === key) continue;
+                    cached = await this.cache.get(previousKey);
+                    throwIfAborted(signal);
+                    migrated = Boolean(cached);
+                    if (cached) break;
+                }
+            }
+            throwIfAborted(signal);
+            if (!cached) return null;
+            const result = await this.#recoverFigures(cached, { fileData, signal, onProgress });
+            throwIfAborted(signal);
+            if (migrated || result !== cached) {
+                try { await this.cache.put(key, result, { signal }); }
+                catch (error) {
+                    throwIfAborted(signal);
+                    if (error?.name === 'AbortError') throw error;
+                    this.#reportError(error);
+                    reportedWarnings.push(CACHE_WRITE_WARNING);
+                }
+            }
+            return {
+                result: withIdentity(result, this.parserProfile),
+                origin: 'cache',
+                warnings: reportedWarnings,
+            };
+        }
+        catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            throwIfAborted(signal);
+            this.#reportError(error);
+            reportedWarnings.push(CACHE_READ_WARNING);
+            return null;
+        }
     }
 
     async #recoverFigures(result, context) {

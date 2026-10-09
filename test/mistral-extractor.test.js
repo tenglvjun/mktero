@@ -204,3 +204,49 @@ test('keeps cache and index failures non-fatal', async () => {
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(indexErrors, [indexError]);
 });
+
+test('readCached returns null without converting when nothing is stored', async () => {
+    let conversions = 0;
+    let indexed = false;
+    const extractor = new MistralDocumentExtractor({
+        zotero: { Items: { getAsync: async () => createPDFItem() } },
+        conversion: {
+            async convert() { conversions += 1; },
+            async readCached() { return null; },
+        },
+        getApiKey: () => 'secret',
+        readFile: async () => new Uint8Array([1]),
+        createCacheKey: async () => 'a'.repeat(64),
+        readRevision: async () => null,
+        preparePDFIndex() { indexed = true; },
+    });
+
+    assert.equal(await extractor.readCached(42, {}), null);
+    assert.equal(conversions, 0);
+    assert.equal(indexed, false);
+});
+
+test('readCached returns a corrected revision without converting', async () => {
+    let conversions = 0;
+    const extractor = new MistralDocumentExtractor({
+        zotero: { Items: { getAsync: async () => createPDFItem() } },
+        conversion: {
+            async convert() { conversions += 1; },
+            async readCached() { conversions += 1; },
+        },
+        getApiKey: () => '',
+        readFile: async () => new Uint8Array([1]),
+        createCacheKey: async () => 'b'.repeat(64),
+        readRevision: async () => ({ markdown: '# Corrected' }),
+        preparePDFIndex() { assert.fail('PDF index must not be prepared'); },
+    });
+
+    const result = await extractor.readCached(42, {});
+
+    assert.equal(conversions, 0);
+    assert.equal(result.markdown, '# Corrected');
+    assert.equal(result.userEdited, true);
+    assert.equal(result.cacheHit, true);
+    assert.equal(result.provider, 'mistral');
+    assert.equal(result.cacheKey, 'b'.repeat(64));
+});
