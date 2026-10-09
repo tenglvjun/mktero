@@ -155,6 +155,7 @@ import { MinerUClient } from './mineru/mineru-client.js';
 import { MinerUConversion } from './mineru/mineru-conversion.js';
 import { MinerULocalClient } from './mineru/local-client.js';
 import { MinerULocalConversion } from './mineru/local-conversion.js';
+import { createMinerUConversionFacade } from './mineru/conversion-facade.js';
 import { LEGACY_FIGURE_PROFILES } from './figures/legacy-figure-profiles.js';
 import { decodeMinerUFigureInput } from './mineru/figure-layout-adapter.js';
 import { prepareMinerUResult } from './mineru/mineru-result.js';
@@ -630,18 +631,13 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache,
         onError: error => Zotero.logError?.(error),
     });
-    const mineruConversion = {
-        convert(options) {
-            if (getMinerUEndpoint(Zotero) !== MINERU_ENDPOINT_LOCAL) {
-                return conversion.convert(options);
-            }
-            return localConversion.convert({
-                ...options,
-                apiKey: getMinerULocalApiKey(Zotero),
-                apiBase: getMinerULocalApiBase(Zotero),
-            });
-        },
-    };
+    const mineruConversion = createMinerUConversionFacade({
+        getEndpoint: () => getMinerUEndpoint(Zotero),
+        cloud: conversion,
+        local: localConversion,
+        getLocalApiKey: () => getMinerULocalApiKey(Zotero),
+        getLocalApiBase: () => getMinerULocalApiBase(Zotero),
+    });
     const mineruExtractor = new MinerUDocumentExtractor({
         zotero: Zotero,
         conversion: mineruConversion,
