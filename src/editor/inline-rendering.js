@@ -873,8 +873,12 @@ export function createInlineRenderingExtension({
             },
             mousedown(event, view) {
                 const interaction = referenceInteraction(event, view, context);
-                if (!interaction && event.button === 0) {
-                    context.annotationPopup?.close();
+                const targetsAnnotationPopup = event.composedPath?.()
+                    .some(target => context.annotationPopup?.contains(target));
+                if (!interaction
+                    && !targetsAnnotationPopup
+                    && event.button === 0) {
+                    context.annotationPopup?.close({ saveNote: true });
                 }
                 if (event.button === 0
                     && interaction

@@ -51,6 +51,7 @@ import {
 } from './document-search-highlight.js';
 import {
     createSelectionFlashExtension,
+    setRetainedSelection,
     setSelectionFlash,
 } from './selection-flash.js';
 
@@ -150,6 +151,10 @@ export function createInlineMarkdownEditor({
     const ownerWindow = parent.ownerDocument?.defaultView;
     if (!ownerWindow) throw new Error(t('error.editorWindowRequired'));
     acquireDOMGlobals(ownerWindow);
+    let view;
+    const clearRetainedSelectionHighlight = () => {
+        view?.dispatch({ effects: setRetainedSelection.of(null) });
+    };
     const imagePreview = createImagePreview(parent, { localization });
     const citationPopup = createCitationPopup(parent, { localization });
     const annotationPopup = createAnnotationPopup(parent, {
@@ -180,6 +185,7 @@ export function createInlineMarkdownEditor({
         copySelectionTranslation,
         openSourceLocation,
         openAnnotationInPDF,
+        onNoteEditorClose: clearRetainedSelectionHighlight,
         onSourceNavigationError,
     });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
@@ -241,7 +247,6 @@ export function createInlineMarkdownEditor({
     let correctionBusy = false;
     let tableCorrectionEditing = false;
     let activeTableCorrection = null;
-    let view;
     let correctionToolbar;
     let stalledViewportRepairFrame = null;
     let correctionViewportFallbackEnabled = false;
@@ -847,6 +852,7 @@ export function createInlineMarkdownEditor({
                 event.target,
                 event
             ),
+            onOpenNote: () => retainSelectionHighlight(selection),
             selection,
             selectionContext: {
                 side: 'source',
@@ -860,13 +866,23 @@ export function createInlineMarkdownEditor({
             canCopySource: Boolean(evidence),
         });
     };
+    const retainSelectionHighlight = selection => {
+        const range = selection?.ranges?.[0];
+        if (!range) return;
+        view.dispatch({
+            effects: setRetainedSelection.of({
+                from: range.from,
+                to: range.to,
+            }),
+        });
+    };
     const closeSelectionActions = event => {
         const targetsPopup = annotationPopup.contains(event.target)
             || event.composedPath?.().some(target => (
                 target?.nodeType && annotationPopup.contains(target)
             ));
         if (event.button === 0 && !targetsPopup) {
-            annotationPopup.close();
+            annotationPopup.close({ saveNote: true });
         }
     };
     const interactionRoot = parent.getRootNode?.() || ownerWindow.document;
@@ -877,7 +893,7 @@ export function createInlineMarkdownEditor({
             || event.target === interactionRoot.host) {
             return;
         }
-        annotationPopup.close();
+        annotationPopup.close({ saveNote: true });
     };
     interactionRoot.addEventListener(
         'mousedown',
