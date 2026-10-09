@@ -4,7 +4,72 @@ import {
     createMarkdownSourceMap,
     resolvePDFPageIndexHint,
     resolveSourceMapRegion,
+    resolveSourceMapSelectionLocation,
 } from '../src/core/markdown-source-map.js';
+
+test('resolves a selection location across mapped blocks', () => {
+    const sourceMap = [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: 40,
+        locations: [{ pageIndex: 3, bbox: [100, 120, 900, 220] }],
+    }, {
+        type: 'text',
+        markdownFrom: 42,
+        markdownTo: 90,
+        locations: [{ pageIndex: 3, bbox: [80, 240, 900, 420] }],
+    }, {
+        type: 'text',
+        markdownFrom: 92,
+        markdownTo: 140,
+        locations: [{ pageIndex: 4, bbox: [80, 100, 900, 200] }],
+    }];
+
+    // A selection inside one block keeps that block's region.
+    assert.deepEqual(
+        resolveSourceMapSelectionLocation(
+            sourceMap,
+            { from: 10, to: 20 },
+            140
+        ),
+        { pageIndex: 3, bbox: [100, 120, 900, 220] }
+    );
+    // Spanning two blocks on one page unites their regions.
+    assert.deepEqual(
+        resolveSourceMapSelectionLocation(
+            sourceMap,
+            { from: 10, to: 60 },
+            140
+        ),
+        { pageIndex: 3, bbox: [80, 120, 900, 420] }
+    );
+    // Spanning pages navigates to the selection's first page.
+    assert.deepEqual(
+        resolveSourceMapSelectionLocation(
+            sourceMap,
+            { from: 10, to: 120 },
+            140
+        ),
+        { pageIndex: 3, bbox: [80, 120, 900, 420] }
+    );
+    // An unmapped gap between blocks has no region.
+    assert.equal(
+        resolveSourceMapSelectionLocation(
+            sourceMap,
+            { from: 40, to: 42 },
+            140
+        ),
+        null
+    );
+    assert.equal(
+        resolveSourceMapSelectionLocation(
+            sourceMap,
+            { from: 10, to: 20 },
+            15
+        ),
+        null
+    );
+});
 
 test('resolves an OCR region only when one mapped block is covered', () => {
     const sourceMap = [{

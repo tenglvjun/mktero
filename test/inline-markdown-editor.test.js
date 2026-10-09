@@ -918,6 +918,73 @@ test('opens a reliably mapped PDF source from the selection actions', async () =
     dom.window.close();
 });
 
+test('opens a united PDF region for a selection spanning mapped blocks', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const first = 'First mapped paragraph.';
+    const second = 'Second mapped paragraph.';
+    const markdown = `${first}\n\n${second}`;
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        openSourceLocation: location => opened.push(location),
+    });
+
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: first.length,
+            locations: [{ pageIndex: 2, bbox: [100, 200, 900, 300] }],
+        }, {
+            type: 'text',
+            markdownFrom: first.length + 2,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 2, bbox: [100, 320, 900, 420] }],
+        }],
+    });
+
+    const firstText = textNodeContaining(
+        document.querySelector('.cm-content'),
+        first
+    );
+    const secondText = textNodeContaining(
+        document.querySelector('.cm-content'),
+        second
+    );
+    const selection = dom.window.getSelection();
+    const range = document.createRange();
+    range.setStart(firstText, 0);
+    range.setEnd(secondText, second.length);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    secondText.parentElement.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    const action = document.querySelector(
+        '.mktero-markdown-selection-actions [data-action="view-in-pdf"]'
+    );
+    assert.ok(action);
+    action.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(opened, [{
+        pageIndex: 2,
+        bbox: [100, 200, 900, 420],
+    }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('opens the continuation page for a selected cross-page text range', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
