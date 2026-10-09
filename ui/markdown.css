@@ -2865,6 +2865,13 @@ main {
     outline-offset: 2px;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-selection-retained {
+    border-radius: 3px;
+    background: Highlight;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-selection-flash {
     border-radius: 3px;
     background: color-mix(in srgb, var(--accent) 48%, transparent);

@@ -83,6 +83,9 @@ export function createAnchoredPopup(parent, {
             return;
         }
         popup.appendChild(content);
+        popup.addEventListener('mousedown', event => {
+            event.stopPropagation();
+        });
         popup.addEventListener('mouseenter', cancelClose);
         if (dismissOnMouseLeave) {
             popup.addEventListener('mouseleave', scheduleClose);

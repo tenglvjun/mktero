@@ -1611,6 +1611,7 @@ test('edits PDF annotation notes safely after clicking the note marker', async (
     input.value = 'Revised safely';
     popup.querySelector('.mktero-annotation-note-save').click();
     await Promise.resolve();
+    await Promise.resolve();
     assert.deepEqual(updatedNote, {
         annotationID: 'HIGH0001',
         comment: 'Revised safely',
@@ -1667,10 +1668,69 @@ test('adds a note after clicking a PDF annotation without a comment', async () =
     input.value = 'New note';
     popup.querySelector('.mktero-annotation-note-save').click();
     await Promise.resolve();
+    await Promise.resolve();
 
     assert.deepEqual(updatedNote, {
         annotationID: 'HIGH0001',
         comment: 'New note',
+    });
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('saves an open annotation note when clicking outside it', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><button id="outside">Outside</button><div id="editor"></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    let updatedNote;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        updateAnnotationComment(annotationID, comment) {
+            updatedNote = { annotationID, comment };
+        },
+    });
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important',
+                comment: 'Review this',
+                color: '#ffd400',
+                pageLabel: '4',
+                ranges: [{ from: 0, to: 9 }],
+            }],
+            unmatched: [],
+        },
+    });
+    document.querySelector('.cm-mktero-pdf-annotation-note').dispatchEvent(
+        new dom.window.MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+        })
+    );
+    const popup = document.querySelector('.mktero-annotation-popup');
+    popup.querySelector('.mktero-annotation-note-input').value = 'Saved outside';
+
+    document.querySelector('#outside').dispatchEvent(
+        new dom.window.MouseEvent('mousedown', {
+            bubbles: true,
+            button: 0,
+        })
+    );
+    await Promise.resolve();
+
+    assert.deepEqual(updatedNote, {
+        annotationID: 'HIGH0001',
+        comment: 'Saved outside',
     });
     assert.equal(document.querySelector('.mktero-annotation-popup'), null);
 
@@ -1843,6 +1903,7 @@ test('shows note, PDF navigation, color, and delete actions when focusing a PDF 
     const noteInput = notePopup.querySelector('.mktero-annotation-note-input');
     noteInput.value = 'Revised note';
     notePopup.querySelector('.mktero-annotation-note-save').click();
+    await Promise.resolve();
     await Promise.resolve();
     assert.deepEqual(updatedNote, {
         annotationID: 'HIGH0001',
@@ -8750,6 +8811,42 @@ test('creates a local highlight from the selected Markdown text', async () => {
     dom.window.close();
 });
 
+test('keeps the selected Markdown highlighted while its note editor is open', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Select this Markdown text.',
+        async createMarkdownAnnotation(annotation) {
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+
+    document.querySelector('[data-action="add-note"]').click();
+    document.getSelection().removeAllRanges();
+
+    const highlighted = document.querySelector('.cm-mktero-selection-retained');
+    assert.equal(highlighted?.textContent, 'Select this Markdown text.');
+    assert.ok(document.querySelector('.mktero-annotation-note-input'));
+
+    document.querySelector('.mktero-annotation-note-cancel').click();
+    assert.equal(document.querySelector('.cm-mktero-selection-retained'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('creates a local highlight and note from the selection note action', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -8783,8 +8880,17 @@ test('creates a local highlight and note from the selection note action', async 
     const input = document.querySelector('.mktero-annotation-note-input');
     input.value = 'My Markdown note';
     document.querySelector('.mktero-annotation-note-save').click();
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise(resolve => {
+        const observer = new dom.window.MutationObserver(() => {
+            if (document.querySelector('.mktero-annotation-popup')) return;
+            observer.disconnect();
+            resolve();
+        });
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+        });
+    });
 
     assert.equal(created.text, 'Select this Markdown text.');
     assert.equal(created.comment, 'My Markdown note');

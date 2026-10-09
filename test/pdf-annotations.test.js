@@ -216,6 +216,46 @@ test('creates editable annotation notes in XHTML and falls back to the page inde
     dom.window.close();
 });
 
+test('saves a changed annotation note when dismissed from outside', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    let saved;
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        async updateAnnotationComment(annotationID, comment) {
+            saved = { annotationID, comment };
+        },
+    });
+    popup.openNote({
+        anchor: document.querySelector('#anchor'),
+        annotation: {
+            id: 'HIGH0002',
+            type: 'highlight',
+            text: 'Visible',
+            comment: 'Review this',
+            color: '#ffd400',
+        },
+    });
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    input.value = 'Saved from outside';
+
+    popup.close({ saveNote: true });
+    await Promise.resolve();
+
+    assert.deepEqual(saved, {
+        annotationID: 'HIGH0002',
+        comment: 'Saved from outside',
+    });
+    assert.equal(parent.querySelector('.mktero-annotation-popup'), null);
+
+    popup.destroy();
+    dom.window.close();
+});
+
 test('saves an edited annotation note and closes its popup', async () => {
     const dom = new JSDOM(
         '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
@@ -259,6 +299,7 @@ test('saves an edited annotation note and closes its popup', async () => {
     const saveButton = parent.querySelector('.mktero-annotation-note-save');
     saveButton.focus();
     saveButton.click();
+    await Promise.resolve();
 
     assert.deepEqual(saved, {
         annotationID: 'HIGH0002',
@@ -269,6 +310,50 @@ test('saves an edited annotation note and closes its popup', async () => {
     resolveSave();
     await closed;
 
+    dom.window.close();
+});
+
+test('keeps a failed outside note save open with its draft', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        async updateAnnotationComment() {
+            throw new Error('private database details');
+        },
+    });
+    popup.openNote({
+        anchor: document.querySelector('#anchor'),
+        annotation: {
+            id: 'HIGH0002',
+            type: 'highlight',
+            text: 'Visible',
+            comment: 'Review this',
+            color: '#ffd400',
+        },
+    });
+    parent.querySelector('.mktero-annotation-note-input').value = 'Keep this draft';
+
+    popup.close({ saveNote: true });
+    await new Promise(resolve => {
+        setImmediate(resolve);
+    });
+
+    const editor = parent.querySelector('.mktero-annotation-popup');
+    const error = editor?.querySelector('.mktero-annotation-note-error');
+    assert.equal(error?.hidden, false);
+    assert.equal(error?.textContent, 'Note save failed');
+    assert.equal(
+        editor?.querySelector('.mktero-annotation-note-input')?.value,
+        'Keep this draft'
+    );
+    assert.doesNotMatch(parent.textContent, /private database details/);
+
+    popup.destroy();
     dom.window.close();
 });
 
@@ -314,13 +399,22 @@ test('shows a safe localized error when saving an annotation note fails', async 
     saveButton.focus();
     saveButton.click();
     await errorShown;
+    await new Promise(resolve => {
+        setImmediate(resolve);
+    });
+    const restoredInput = parent.querySelector(
+        '.mktero-annotation-note-input'
+    );
+    const restoredError = parent.querySelector(
+        '.mktero-annotation-note-error'
+    );
 
-    assert.equal(error.hidden, false);
-    assert.equal(error.textContent, 'Note save failed');
+    assert.equal(restoredError.hidden, false);
+    assert.equal(restoredError.textContent, 'Note save failed');
     assert.doesNotMatch(parent.textContent, /private database details/);
-    assert.equal(input.value, 'Keep this draft');
-    assert.equal(input.readOnly, false);
-    assert.equal(document.activeElement, input);
+    assert.equal(restoredInput.value, 'Keep this draft');
+    assert.equal(restoredInput.readOnly, false);
+    assert.equal(document.activeElement, restoredInput);
     assert.ok(parent.querySelector('.mktero-annotation-popup'));
 
     popup.destroy();

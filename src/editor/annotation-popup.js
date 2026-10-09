@@ -44,6 +44,7 @@ export function createAnnotationPopup(parent, {
     copySelectionTranslation,
     openSourceLocation,
     openAnnotationInPDF,
+    onNoteEditorClose,
     onSourceNavigationError,
 } = {}) {
     const t = localization.t.bind(localization);
@@ -56,6 +57,7 @@ export function createAnnotationPopup(parent, {
     let hoverOpenTimer = null;
     let hoverOpenAnchor = null;
     let activeSelectionTranslationCancel = null;
+    let saveNoteBeforeDismiss = null;
 
     const cancelScheduledOpen = anchor => {
         if (hoverOpenTimer === null
@@ -77,57 +79,99 @@ export function createAnnotationPopup(parent, {
         cancel?.();
     };
 
-    const close = () => {
+    const close = ({ saveNote = false } = {}) => {
+        const save = saveNote ? saveNoteBeforeDismiss : null;
+        const noteWasOpen = saveNoteBeforeDismiss !== null;
+        saveNoteBeforeDismiss = null;
         cancelScheduledOpen();
         cancelActiveSelectionTranslation();
         selectionLocked = false;
         anchoredPopup.close();
+        if (noteWasOpen) onNoteEditorClose?.();
+        save?.();
     };
     const openPopup = (options, { lockSelection = false } = {}) => {
         anchoredPopup.open(options);
         selectionLocked = lockSelection && anchoredPopup.isOpen();
     };
 
-    const openNote = ({ anchor, annotation }) => {
+    const openNote = ({ anchor, annotation, comment, errorText }) => {
         if (!annotation) return;
         close();
         openPopup({
             anchor,
             label: t('annotation.noteEditor'),
             popupClassName: 'mktero-annotation-popup--note-editor',
-            renderContent({ document, close, reposition }) {
-                return createAnnotationNoteEditor(document, annotation, t, {
-                    saveComment: typeof updateAnnotationComment === 'function'
-                        ? comment => updateAnnotationComment(
-                            annotation.id,
-                            comment
-                        )
-                        : undefined,
-                    close,
-                    reposition,
-                });
+            renderContent({ document, reposition }) {
+                const editor = createAnnotationNoteEditor(
+                    document,
+                    annotation,
+                    t,
+                    {
+                        comment,
+                        errorText,
+                        saveComment: typeof updateAnnotationComment === 'function'
+                            ? comment => updateAnnotationComment(
+                                annotation.id,
+                                comment
+                            )
+                            : undefined,
+                        close,
+                        reopen: (failedComment, failedError) => openNote({
+                            anchor,
+                            annotation,
+                            comment: failedComment,
+                            errorText: failedError,
+                        }),
+                        reposition,
+                    }
+                );
+                saveNoteBeforeDismiss = editor.save;
+                return editor.form;
             },
             focusContent: focusNoteInput,
         });
     };
-    const openDraftNote = ({ anchor, annotation, selectionContext }) => {
+    const openDraftNote = ({
+        anchor,
+        annotation,
+        selectionContext,
+        comment,
+        errorText,
+    }) => {
         if (!annotation) return;
         close();
         openPopup({
             anchor,
             label: t('annotation.noteEditor'),
             popupClassName: 'mktero-annotation-popup--note-editor',
-            renderContent({ document, close, reposition }) {
-                return createAnnotationNoteEditor(document, annotation, t, {
-                    saveComment: typeof createMarkdownAnnotation === 'function'
-                        ? comment => createMarkdownAnnotation({
-                            ...annotation,
-                            comment,
-                        }, selectionContext)
-                        : undefined,
-                    close,
-                    reposition,
-                });
+            renderContent({ document, reposition }) {
+                const editor = createAnnotationNoteEditor(
+                    document,
+                    annotation,
+                    t,
+                    {
+                        comment,
+                        errorText,
+                        saveComment: typeof createMarkdownAnnotation === 'function'
+                            ? comment => createMarkdownAnnotation({
+                                ...annotation,
+                                comment,
+                            }, selectionContext)
+                            : undefined,
+                        close,
+                        reopen: (failedComment, failedError) => openDraftNote({
+                            anchor,
+                            annotation,
+                            selectionContext,
+                            comment: failedComment,
+                            errorText: failedError,
+                        }),
+                        reposition,
+                    }
+                );
+                saveNoteBeforeDismiss = editor.save;
+                return editor.form;
             },
             focusContent: focusNoteInput,
         });
@@ -139,6 +183,7 @@ export function createAnnotationPopup(parent, {
         sourceLocation,
         canCopySource = false,
         selectionContext,
+        onOpenNote,
     }) => {
         if (!selection) return;
         cancelScheduledOpen();
@@ -213,11 +258,14 @@ export function createAnnotationPopup(parent, {
                                 }
                             }
                             : undefined,
-                        openNote: () => openDraftNote({
-                            anchor,
-                            annotation,
-                            selectionContext,
-                        }),
+                        openNote: () => {
+                            onOpenNote?.();
+                            openDraftNote({
+                                anchor,
+                                annotation,
+                                selectionContext,
+                            });
+                        },
                         close,
                         reposition,
                         registerPopupCancel: cancel => {
@@ -323,7 +371,14 @@ function createAnnotationNoteEditor(
     document,
     annotation,
     translate,
-    { saveComment, close, reposition }
+    {
+        comment,
+        errorText = '',
+        saveComment,
+        close,
+        reopen,
+        reposition,
+    }
 ) {
     const form = document.createElementNS(XHTML_NAMESPACE, 'form');
     form.className = 'mktero-annotation-note-editor';
@@ -339,7 +394,9 @@ function createAnnotationNoteEditor(
     input.maxLength = MAX_PDF_ANNOTATION_TEXT_LENGTH;
     input.setAttribute('aria-label', translate('annotation.noteInput'));
     input.setAttribute('placeholder', translate('annotation.notePlaceholder'));
-    input.textContent = String(annotation.comment || '');
+    input.textContent = String(
+        comment === undefined ? annotation.comment || '' : comment
+    );
     const canUpdate = typeof saveComment === 'function';
     input.readOnly = !canUpdate;
     form.appendChild(input);
@@ -348,7 +405,8 @@ function createAnnotationNoteEditor(
     error.className = 'mktero-annotation-note-error';
     error.setAttribute('role', 'status');
     error.setAttribute('aria-live', 'polite');
-    error.hidden = true;
+    error.textContent = errorText;
+    error.hidden = !errorText;
 
     const footer = document.createElementNS(XHTML_NAMESPACE, 'div');
     footer.className = 'mktero-annotation-note-footer';
@@ -365,35 +423,52 @@ function createAnnotationNoteEditor(
     footer.append(cancelButton, saveButton);
     form.append(error, footer);
 
-    form.addEventListener('submit', async event => {
-        event.preventDefault();
-        if (!canUpdate) return;
+    let saving = null;
+    const save = event => {
+        event?.preventDefault?.();
+        if (!canUpdate || saving) return saving;
         input.focus();
         input.readOnly = true;
         cancelButton.disabled = true;
         saveButton.disabled = true;
         error.hidden = true;
-        try {
-            await saveComment(input.value);
-            close?.();
-        }
-        catch (cause) {
-            error.textContent = annotationErrorMessage(
-                cause,
-                translate,
-                'annotation.noteSaveFailed'
-            );
-            error.hidden = false;
-            reposition?.();
-        }
-        finally {
-            input.readOnly = false;
-            cancelButton.disabled = false;
-            saveButton.disabled = false;
-            if (form.isConnected) input.focus();
-        }
-    });
-    return form;
+        saving = Promise.resolve()
+            .then(() => saveComment(input.value))
+            .then(() => {
+                close?.();
+            })
+            .catch(cause => {
+                error.textContent = annotationErrorMessage(
+                    cause,
+                    translate,
+                    'annotation.noteSaveFailed'
+                );
+                error.hidden = false;
+                const restoreFailedSave = () => reopen?.(
+                    input.value,
+                    error.textContent
+                );
+                if (form.isConnected) {
+                    restoreFailedSave();
+                    input.focus();
+                }
+                else {
+                    queueMicrotask(restoreFailedSave);
+                }
+                reposition?.();
+            })
+            .finally(() => {
+                saving = null;
+                input.readOnly = false;
+                cancelButton.disabled = false;
+                saveButton.disabled = false;
+            });
+        return saving;
+    };
+
+    form.addEventListener('submit', save);
+    saveButton.addEventListener('click', save);
+    return { form, save };
 }
 
 function createMarkdownSelectionActions(
