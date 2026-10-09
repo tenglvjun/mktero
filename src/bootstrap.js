@@ -182,6 +182,7 @@ import { createRuntimeAbortController } from './platform/abort-controller.js';
 import {
     createZoteroConversionProgress,
     installZoteroConversionProgressButton,
+    resolveAbandonedExportProgressStatus,
     signalProgressAlreadyRunning,
 } from './platform/zotero-conversion-progress.js';
 import {
@@ -278,6 +279,8 @@ const obsidianExportButtonDisposers = new Map();
 const cancelledPreparations = new Set();
 let obsidianExportController = null;
 let obsidianExportRowsOpened = false;
+let obsidianExportStatus = '';
+let obsidianExportStatusOverwritten = false;
 
 const runtime = {
     id: null,
@@ -3186,16 +3189,21 @@ function confirmObsidianOverwrite(ownerWindow, path) {
 async function exportSelectedObsidian(targets) {
     if (!runtime.obsidianExporter?.export || !targets?.length) return;
     if (obsidianExportController) {
+        const message = runtimeTranslate('obsidianBatch.alreadyRunning');
         signalProgressAlreadyRunning({
             running: true,
             progress: runtime.obsidianExportProgress,
-            message: runtimeTranslate('obsidianBatch.alreadyRunning'),
+            message,
             ensureProgress: ensureObsidianExportProgress,
         });
+        obsidianExportStatus = message;
+        obsidianExportStatusOverwritten = true;
         return;
     }
     const controller = createZoteroAbortController();
     const progressBeforeBatch = Boolean(runtime.obsidianExportProgress);
+    const previousStatus = obsidianExportStatus;
+    obsidianExportStatusOverwritten = false;
     obsidianExportController = controller;
     try {
         await runSelectedObsidianExport(targets, controller);
@@ -3204,13 +3212,18 @@ async function exportSelectedObsidian(targets) {
         if (obsidianExportController === controller) {
             obsidianExportController = null;
         }
-        // A second click during vault selection opens the status line before
-        // this batch owns any rows. Do not leave that notice up if this
-        // batch never starts, and do not clear a previous batch's summary.
-        if (!obsidianExportRowsOpened && !progressBeforeBatch) {
-            runtime.obsidianExportProgress?.setStatus('');
+        const nextStatus = resolveAbandonedExportProgressStatus({
+            rowsOpened: obsidianExportRowsOpened,
+            progressExisted: progressBeforeBatch,
+            alreadyRunningSignaled: obsidianExportStatusOverwritten,
+            previousStatus,
+        });
+        if (nextStatus !== null) {
+            runtime.obsidianExportProgress?.setStatus(nextStatus);
+            obsidianExportStatus = nextStatus;
         }
         obsidianExportRowsOpened = false;
+        obsidianExportStatusOverwritten = false;
     }
 }
 
@@ -3235,7 +3248,8 @@ async function runSelectedObsidianExport(targets, controller) {
     for (const group of groups) {
         progress?.add(group.identity, obsidianExportGroupTitle(group.title));
     }
-    progress?.setStatus(runtimeTranslate('obsidianBatch.statusHint'));
+    obsidianExportStatus = runtimeTranslate('obsidianBatch.statusHint');
+    progress?.setStatus(obsidianExportStatus);
     progress?.open();
 
     const batch = createObsidianExportBatch({
@@ -3272,7 +3286,8 @@ async function runSelectedObsidianExport(targets, controller) {
             result = mergeObsidianExportOverwrite(result, overwritten);
         }
     }
-    progress?.setStatus(summarizeObsidianExportBatch(result, runtimeTranslate));
+    obsidianExportStatus = summarizeObsidianExportBatch(result, runtimeTranslate);
+    progress?.setStatus(obsidianExportStatus);
 }
 
 async function loadCachedObsidianDocument(itemID, { signal } = {}) {

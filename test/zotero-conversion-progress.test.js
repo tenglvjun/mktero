@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     createZoteroConversionProgress,
     installZoteroConversionProgressButton,
+    resolveAbandonedExportProgressStatus,
     signalProgressAlreadyRunning,
 } from '../src/platform/zotero-conversion-progress.js';
 
@@ -196,6 +197,11 @@ test('uses a custom queue id without touching mktero-prepare', () => {
     const requested = [];
     const prepare = progressWindow('Preparing Markdown');
     const exporting = progressWindow('Processing');
+    exporting.arguments = [{
+        progressQueue: {
+            getID: () => 'mktero-obsidian-export',
+        },
+    }];
     let includeExport = false;
     const queue = {
         addListener() {},
@@ -373,6 +379,11 @@ test('signals an already-running export before the progress object exists', () =
 test('marks an export window that appears after open returns', () => {
     const prepare = progressWindow('Preparing Markdown');
     const exporting = progressWindow('Processing');
+    exporting.arguments = [{
+        progressQueue: {
+            getID: () => 'mktero-obsidian-export',
+        },
+    }];
     const visible = [prepare];
     const queued = [];
     const progress = createZoteroConversionProgress({
@@ -446,6 +457,11 @@ test('preparation does not claim an export progress window', () => {
 
 test('toolbar reopen marks a late export progress window', () => {
     const exporting = progressWindow('Processing');
+    exporting.arguments = [{
+        progressQueue: {
+            getID: () => 'mktero-obsidian-export',
+        },
+    }];
     const visible = [];
     const queued = [];
     let opened = 0;
@@ -505,6 +521,155 @@ test('toolbar reopen marks a late export progress window', () => {
         'mktero-obsidian-export'
     );
     assert.equal(exporting.document.title, 'Exporting Markdown to Obsidian');
+});
+
+test('does not mark a prepare dialog as the export queue', () => {
+    const prepare = progressWindow('Processing');
+    const visible = [];
+    const queued = [];
+    const progress = createZoteroConversionProgress({
+        queueID: 'mktero-obsidian-export',
+        title: 'Exporting Markdown to Obsidian',
+        schedule(callback, delay) {
+            queued.push({ callback, delay });
+        },
+        zotero: progressQueues({ open() {} }),
+        services: windowService(() => visible),
+    });
+
+    progress.open();
+    visible.push(prepare);
+    queued.shift().callback();
+    prepare.arguments = [{
+        progressQueue: {
+            getID: () => 'mktero-prepare',
+        },
+    }];
+    queued.shift().callback();
+
+    assert.notEqual(
+        prepare.attributes.get('data-mktero-queue'),
+        'mktero-obsidian-export',
+    );
+    assert.notEqual(prepare.document.title, 'Exporting Markdown to Obsidian');
+
+    const guessed = progressWindow('Processing');
+    guessed.arguments = [{
+        progressQueue: {
+            getID: () => 'mktero-prepare',
+        },
+    }];
+    guessed.document.getElementById('progress-queue-root').setAttribute(
+        'data-mktero-queue',
+        'mktero-obsidian-export',
+    );
+    const preparing = createZoteroConversionProgress({
+        title: 'Preparing Markdown',
+        schedule: callback => callback(),
+        zotero: progressQueues({ open() {} }),
+        services: windowService(() => [guessed]),
+    });
+    preparing.open();
+    assert.equal(guessed.document.title, 'Preparing Markdown');
+    assert.notEqual(
+        guessed.attributes.get('data-mktero-queue'),
+        'mktero-obsidian-export',
+    );
+});
+
+test('disposed export button does not mark a later progress window', () => {
+    const exporting = progressWindow('Processing');
+    exporting.arguments = [{
+        progressQueue: {
+            getID: () => 'mktero-obsidian-export',
+        },
+    }];
+    const visible = [];
+    const queued = [];
+    const button = {
+        id: '',
+        hidden: true,
+        attributes: new Map(),
+        setAttribute(name, value) {
+            this.attributes.set(name, value);
+        },
+        addEventListener(name, callback) {
+            this[name] = callback;
+        },
+        removeEventListener() {},
+        remove() {
+            this.removed = true;
+        },
+    };
+    const box = { appendChild(node) { this.child = node; } };
+    const dispose = installZoteroConversionProgressButton({
+        queueID: 'mktero-obsidian-export',
+        title: 'Exporting Markdown to Obsidian',
+        schedule(callback, delay) {
+            queued.push({ callback, delay });
+        },
+        services: windowService(() => visible),
+        zotero: {
+            ProgressQueues: {
+                get: () => ({
+                    getTotal: () => 1,
+                    addListener() {},
+                    removeListener() {},
+                    getDialog: () => ({ open() {} }),
+                }),
+            },
+        },
+        window: {
+            document: {
+                getElementById: id => (id === 'zotero-pq-buttons' ? box : null),
+                createElement: () => button,
+            },
+        },
+    });
+
+    button.command();
+    assert.ok(queued.length >= 1);
+    dispose();
+    visible.push(exporting);
+    for (const item of queued) item.callback();
+
+    assert.equal(exporting.attributes.has('data-mktero-queue'), false);
+    assert.notEqual(exporting.document.title, 'Exporting Markdown to Obsidian');
+    assert.equal(button.removed, true);
+});
+
+test('restores the previous summary when an abandoned batch overwrote it', () => {
+    const previous = 'Exported 2. Not ready 1.';
+    assert.equal(resolveAbandonedExportProgressStatus({
+        rowsOpened: false,
+        progressExisted: true,
+        alreadyRunningSignaled: true,
+        previousStatus: previous,
+    }), previous);
+    assert.equal(resolveAbandonedExportProgressStatus({
+        rowsOpened: false,
+        progressExisted: true,
+        alreadyRunningSignaled: true,
+        previousStatus: '',
+    }), '');
+    assert.equal(resolveAbandonedExportProgressStatus({
+        rowsOpened: false,
+        progressExisted: false,
+        alreadyRunningSignaled: true,
+        previousStatus: '',
+    }), '');
+    assert.equal(resolveAbandonedExportProgressStatus({
+        rowsOpened: false,
+        progressExisted: true,
+        alreadyRunningSignaled: false,
+        previousStatus: previous,
+    }), null);
+    assert.equal(resolveAbandonedExportProgressStatus({
+        rowsOpened: true,
+        progressExisted: true,
+        alreadyRunningSignaled: true,
+        previousStatus: previous,
+    }), null);
 });
 
 function progressQueues(dialog) {

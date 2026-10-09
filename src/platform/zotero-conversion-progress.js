@@ -5,6 +5,7 @@ const STYLE_RETRY_MS = 0;
 const CLAIM_RETRY_MS = 50;
 const CLAIM_ATTEMPTS = 40;
 const cancelListeners = new Map();
+const appliedTitles = new WeakMap();
 
 export function createZoteroConversionProgress({
     zotero,
@@ -57,11 +58,9 @@ export function createZoteroConversionProgress({
             dialog?.setStatus?.(message || '');
         },
         open() {
-            const before = listProgressWindows(services);
             dialog?.open?.();
             bindQueueWindow({
                 services,
-                before,
                 queueID,
                 title,
                 schedule,
@@ -76,6 +75,22 @@ export function createZoteroConversionProgress({
             }
         },
     };
+}
+
+export function resolveAbandonedExportProgressStatus({
+    rowsOpened = false,
+    progressExisted = false,
+    alreadyRunningSignaled = false,
+    previousStatus = '',
+} = {}) {
+    if (rowsOpened) return null;
+    // A second click during vault selection overwrites the status before this
+    // batch owns any rows. Restore the previous summary when one existed.
+    // Clear the notice otherwise. Do not clear a summary this batch did not
+    // overwrite, including when a progress object was left by an earlier batch.
+    if (alreadyRunningSignaled) return previousStatus || '';
+    if (!progressExisted) return '';
+    return null;
 }
 
 export function signalProgressAlreadyRunning({
@@ -127,16 +142,26 @@ export function installZoteroConversionProgressButton({
     button.setAttribute('tooltiptext', title);
     button.setAttribute('aria-label', title);
     if (iconURL) button.setAttribute('image', iconURL);
+    let active = true;
+    let cancelScheduledClaim = () => {};
+    const scheduleClaim = (callback, delay) => {
+        if (!active) return;
+        const cancel = schedule(() => {
+            if (!active) return;
+            callback();
+        }, delay);
+        cancelScheduledClaim = typeof cancel === 'function' ? cancel : () => {};
+    };
     const openDialog = () => {
+        if (!active) return;
         const dialog = zotero.ProgressQueues.get(queueID)?.getDialog?.();
-        const before = listProgressWindows(services);
         dialog?.open?.();
         bindQueueWindow({
             services,
-            before,
             queueID,
             title,
-            schedule,
+            schedule: scheduleClaim,
+            active: () => active,
         });
     };
     const show = () => {
@@ -151,10 +176,11 @@ export function installZoteroConversionProgressButton({
     button.hidden = Number(queue.getTotal?.() || 0) < 1;
     box.appendChild(button);
 
-    let active = true;
     return () => {
         if (!active) return;
         active = false;
+        cancelScheduledClaim();
+        cancelScheduledClaim = () => {};
         queue.removeListener?.('nonempty', show);
         queue.removeListener?.('empty', hide);
         button.removeEventListener('command', openDialog);
@@ -184,11 +210,13 @@ function bindCancelListener(queue, onCancel) {
 }
 
 function bindQueueWindow(state) {
+    if (typeof state.active === 'function' && !state.active()) return;
     const attempt = state.attempt || 0;
-    markOwnedProgressWindows(state.services, state.before, state.queueID);
+    reconcileProgressMarks(state.services);
+    markOwnedProgressWindows(state.services, state.queueID);
     retitle(state.services, state.title, state.queueID);
     const claimed = state.queueID === DEFAULT_QUEUE_ID
-        || hasClaimedWindow(state.services, state.queueID);
+        || hasConfirmedQueueWindow(state.services, state.queueID);
     const next = nextClaimAttempt(state, attempt, claimed);
     if (!next) return;
     state.schedule(() => bindQueueWindow(next), next.delay);
@@ -246,36 +274,43 @@ function listProgressWindows(services) {
     return found;
 }
 
-function markOwnedProgressWindows(services, before, queueID) {
+function markOwnedProgressWindows(services, queueID) {
     if (queueID === DEFAULT_QUEUE_ID) return;
-    const seen = new Set((before || []).map(entry => entry.win));
-    const entries = listProgressWindows(services);
-    for (const entry of entries) {
-        if (progressWindowOwner(entry.win, entry.root) === queueID) {
-            markRoot(entry.root, queueID);
-        }
+    // Do not guess from "the only new window". A prepare dialog can appear
+    // before window.arguments is readable, and a wrong mark makes the prepare
+    // queue skip it. Claim only a dialog whose queue id matches.
+    for (const entry of listProgressWindows(services)) {
+        if (progressWindowQueueID(entry.win) !== queueID) continue;
+        correctRootMark(entry.root, queueID);
     }
-    // A dialog that has not loaded window.arguments yet can only be claimed
-    // when it is the single new progress window. Guessing among several new
-    // windows would let preparation and export mark each other.
-    const unmarkedNew = entries.filter(entry => (
-        !seen.has(entry.win) && !progressWindowOwner(entry.win, entry.root)
-    ));
-    if (unmarkedNew.length === 1) markRoot(unmarkedNew[0].root, queueID);
 }
 
-function hasClaimedWindow(services, queueID) {
+function reconcileProgressMarks(services) {
+    for (const entry of listProgressWindows(services)) {
+        const real = progressWindowQueueID(entry.win);
+        if (!real) continue;
+        const marked = markedQueueID(entry.root);
+        if (!marked || marked === real) continue;
+        correctRootMark(entry.root, real);
+        restoreAppliedTitle(entry.win, marked);
+    }
+}
+
+function hasConfirmedQueueWindow(services, queueID) {
     return listProgressWindows(services).some(entry => (
-        progressWindowOwner(entry.win, entry.root) === queueID
-        && entry.root?.getAttribute?.('data-mktero-queue') === queueID
+        progressWindowQueueID(entry.win) === queueID
+        && markedQueueID(entry.root) === queueID
     ));
 }
 
 function progressWindowOwner(win, root) {
-    if (typeof root?.getAttribute === 'function') {
-        const marked = root.getAttribute('data-mktero-queue') || '';
-        if (marked) return marked;
-    }
+    // A later readable getID() corrects a speculative data-mktero-queue mark.
+    const real = progressWindowQueueID(win);
+    if (real) return real;
+    return markedQueueID(root);
+}
+
+function progressWindowQueueID(win) {
     try {
         const id = win?.arguments?.[0]?.progressQueue?.getID?.();
         return typeof id === 'string' ? id : '';
@@ -285,10 +320,14 @@ function progressWindowOwner(win, root) {
     }
 }
 
-function markRoot(root, queueID) {
-    if (typeof root?.setAttribute !== 'function') return;
-    const marked = root.getAttribute?.('data-mktero-queue') || '';
-    if (marked && marked !== queueID) return;
+function markedQueueID(root) {
+    if (typeof root?.getAttribute !== 'function') return '';
+    return root.getAttribute('data-mktero-queue') || '';
+}
+
+function correctRootMark(root, queueID) {
+    if (!queueID || typeof root?.setAttribute !== 'function') return;
+    if (markedQueueID(root) === queueID) return;
     root.setAttribute('data-mktero-queue', queueID);
 }
 
@@ -299,15 +338,46 @@ function retitle(services, title, queueID = DEFAULT_QUEUE_ID) {
     // queue id stay with the original prepare queue.
     for (const { win, root } of listProgressWindows(services)) {
         const owner = progressWindowOwner(win, root);
-        if (owner && owner !== queueID) continue;
+        if (owner && owner !== queueID) {
+            restoreAppliedTitle(win, queueID);
+            continue;
+        }
         if (!owner && queueID !== DEFAULT_QUEUE_ID) continue;
-        if (queueID !== DEFAULT_QUEUE_ID) markRoot(root, queueID);
-        win.document.title = title;
+        if (queueID !== DEFAULT_QUEUE_ID) correctRootMark(root, queueID);
+        applyWindowTitle(win, queueID, title);
     }
+}
+
+function applyWindowTitle(win, queueID, title) {
+    if (!win?.document) return;
+    if (win.document.title === title) return;
+    if (!appliedTitles.has(win)) {
+        appliedTitles.set(win, {
+            queueID,
+            title,
+            previous: win.document.title,
+        });
+    }
+    win.document.title = title;
+}
+
+function restoreAppliedTitle(win, queueID) {
+    const applied = appliedTitles.get(win);
+    if (!applied || applied.queueID !== queueID) return;
+    if (win?.document && win.document.title === applied.title) {
+        win.document.title = applied.previous;
+    }
+    appliedTitles.delete(win);
 }
 
 function defaultSchedule(callback, delay) {
     const timer = globalThis.setTimeout;
-    if (typeof timer === 'function') timer(callback, delay);
-    else callback();
+    if (typeof timer !== 'function') {
+        callback();
+        return () => {};
+    }
+    const id = timer(callback, delay);
+    return () => {
+        globalThis.clearTimeout?.(id);
+    };
 }
