@@ -189,3 +189,142 @@ test('adds a tab-bar button that reopens a minimized preparation window', () => 
         window: { document: { getElementById: () => box } },
     }), null);
 });
+
+test('uses a custom queue id without touching mktero-prepare', () => {
+    const requested = [];
+    const prepare = progressWindow('Preparing Markdown');
+    const exporting = progressWindow('Processing');
+    let includeExport = false;
+    const queue = {
+        addListener() {},
+        getDialog() {
+            return {
+                open() {
+                    includeExport = true;
+                },
+                setStatus() {},
+            };
+        },
+    };
+    const progress = createZoteroConversionProgress({
+        queueID: 'mktero-obsidian-export',
+        title: 'Exporting Markdown to Obsidian',
+        schedule: callback => callback(),
+        zotero: {
+            ProgressQueue: {
+                ROW_QUEUED: 1,
+                ROW_PROCESSING: 2,
+                ROW_FAILED: 3,
+                ROW_SUCCEEDED: 4,
+            },
+            ProgressQueues: {
+                get(id) {
+                    requested.push(id);
+                    assert.notEqual(id, 'mktero-prepare');
+                    return null;
+                },
+                create(options) {
+                    requested.push(options.id);
+                    assert.notEqual(options.id, 'mktero-prepare');
+                    return queue;
+                },
+            },
+        },
+        services: {
+            wm: {
+                getEnumerator() {
+                    const windows = includeExport
+                        ? [prepare, exporting]
+                        : [prepare];
+                    let index = 0;
+                    return {
+                        hasMoreElements: () => index < windows.length,
+                        getNext: () => windows[index++],
+                    };
+                },
+            },
+        },
+    });
+
+    progress.open();
+
+    assert.deepEqual(requested, [
+        'mktero-obsidian-export',
+        'mktero-obsidian-export',
+    ]);
+    assert.equal(requested.includes('mktero-prepare'), false);
+    assert.equal(prepare.document.title, 'Preparing Markdown');
+    assert.equal(exporting.document.title, 'Exporting Markdown to Obsidian');
+    assert.equal(
+        exporting.attributes.get('data-mktero-queue'),
+        'mktero-obsidian-export'
+    );
+    assert.equal(prepare.attributes.has('data-mktero-queue'), false);
+});
+
+test('installs a custom queue button without using the prepare button id', () => {
+    const requested = [];
+    const button = {
+        id: '',
+        hidden: true,
+        attributes: new Map(),
+        setAttribute(name, value) {
+            this.attributes.set(name, value);
+        },
+        addEventListener() {},
+        removeEventListener() {},
+        remove() {},
+    };
+    const box = { appendChild(node) { this.child = node; } };
+    const queue = {
+        getTotal: () => 1,
+        addListener() {},
+        removeListener() {},
+        getDialog: () => ({ open() {} }),
+    };
+    const dispose = installZoteroConversionProgressButton({
+        queueID: 'mktero-obsidian-export',
+        zotero: {
+            ProgressQueues: {
+                get(id) {
+                    requested.push(id);
+                    return id === 'mktero-obsidian-export' ? queue : null;
+                },
+            },
+        },
+        window: {
+            document: {
+                getElementById: id => (id === 'zotero-pq-buttons' ? box : null),
+                createElement: () => button,
+            },
+        },
+        title: 'Exporting Markdown to Obsidian',
+    });
+
+    assert.deepEqual(requested, ['mktero-obsidian-export']);
+    assert.equal(requested.includes('mktero-prepare'), false);
+    assert.equal(button.id, 'zotero-tb-pq-mktero-obsidian-export');
+    assert.notEqual(button.id, 'zotero-tb-pq-mktero-prepare');
+    dispose();
+});
+
+function progressWindow(title) {
+    const attributes = new Map();
+    const root = {
+        getAttribute(name) {
+            return attributes.get(name) || '';
+        },
+        setAttribute(name, value) {
+            attributes.set(name, value);
+        },
+    };
+    return {
+        attributes,
+        document: {
+            title,
+            getElementById(id) {
+                return id === 'progress-queue-root' ? root : null;
+            },
+        },
+    };
+}

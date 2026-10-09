@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     createObsidianExportBatch,
     selectObsidianExportGroups,
+    summarizeObsidianExportBatch,
 } from '../src/core/obsidian-export-batch.js';
 
 function target(itemID, title, libraryID, itemKey) {
@@ -418,4 +419,32 @@ test('keeps going when a progress listener throws', async () => {
     assert.equal(events[0].group.identity, '1:SSSSSSSS');
     assert.deepEqual(events[0].result, { status: 'exported' });
     assert.equal(events[1].group.title, 'Two');
+});
+
+test('summarizes export counts for the progress status line', () => {
+    const result = {
+        status: 'completed',
+        exported: [{ identity: '1:AAAAAAAA' }, { identity: '1:BBBBBBBB' }],
+        notReady: [{ identity: '1:CCCCCCCC' }],
+        preparing: [],
+        duplicate: [{ itemID: 9 }, { itemID: 10 }, { itemID: 11 }],
+        conflict: [{ identity: '1:DDDDDDDD' }],
+        failed: [{ identity: '1:EEEEEEEE', message: 'disk' }],
+    };
+    assert.equal(
+        summarizeObsidianExportBatch(result, (key, variables) => (
+            `${key}=${variables.count}`
+        )),
+        'obsidianBatch.exported=2 obsidianBatch.notReady=1 '
+            + 'obsidianBatch.preparing=0 obsidianBatch.duplicate=3 '
+            + 'obsidianBatch.conflict=1 obsidianBatch.failed=1'
+    );
+    const english = summarizeObsidianExportBatch(result);
+    assert.match(english, /Exported 2/);
+    assert.match(english, /No Markdown: 1/);
+    assert.match(english, /Still preparing: 0/);
+    assert.match(english, /Extra PDFs: 3/);
+    assert.match(english, /Skipped changed notes: 1/);
+    assert.match(english, /Failed: 1/);
+    assert.match(summarizeObsidianExportBatch(null), /Exported 0/);
 });

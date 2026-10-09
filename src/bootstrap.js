@@ -81,6 +81,11 @@ import {
 import { refreshMkteroAccount } from './account/account-client.js';
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
+import {
+    createObsidianExportBatch,
+    selectObsidianExportGroups,
+    summarizeObsidianExportBatch,
+} from './core/obsidian-export-batch.js';
 import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
     collectMatchedAnnotationRanges,
@@ -265,8 +270,12 @@ import {
 const backgroundFigureRestorations = new Set();
 const batchItemWatchers = new Map();
 const backgroundContinuations = new Map();
+const OBSIDIAN_EXPORT_QUEUE_ID = 'mktero-obsidian-export';
+const OBSIDIAN_ITEM_KEY = /^[A-Z0-9]{8}$/;
 const progressButtonDisposers = new Map();
+const obsidianExportButtonDisposers = new Map();
 const cancelledPreparations = new Set();
+let obsidianExportController = null;
 
 const runtime = {
     id: null,
@@ -294,6 +303,8 @@ const runtime = {
     savedMarkdownResolver: null,
     markdownExporter: null,
     obsidianExporter: null,
+    extractor: null,
+    obsidianExportProgress: null,
     rootURI: null,
     preferencePaneID: null,
     localization: null,
@@ -733,6 +744,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             mktero: mkteroExtractor,
         },
     });
+    runtime.extractor = extractor;
     runtime.service = new MarkdownDocumentService({
         extractor,
         annotationOverlay,
@@ -949,6 +961,7 @@ async function loadFigureWorkerSource(rootURI) {
 globalThis.shutdown = function shutdown() {
     runtime.pendingSelectionReveals?.clear();
     abortAllConversions();
+    abortObsidianExport();
     abortAllTranslations();
     destroyAllRevisionSessions();
     runtime.reasoningCatalogStore?.dispose();
@@ -988,6 +1001,8 @@ globalThis.shutdown = function shutdown() {
     runtime.conversionBatch = null;
     runtime.conversionActivity = null;
     runtime.conversionProgress = null;
+    runtime.obsidianExportProgress = null;
+    runtime.extractor = null;
     runtime.cache = null;
     runtime.readiness = null;
     runtime.readinessColumn = null;
@@ -1028,10 +1043,12 @@ globalThis.uninstall = async function uninstall() {};
 globalThis.onMainWindowLoad = function onMainWindowLoad({ window }) {
     registerMainWindowContextMenu(window);
     installProgressButton(window);
+    installObsidianExportProgressButton(window);
 };
 globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
     disposeMainWindowContextMenu(window);
     disposeProgressButton(window);
+    disposeObsidianExportProgressButton(window);
     runtime.citationPresenter?.closeForWindow(window);
 };
 
@@ -1632,6 +1649,58 @@ function disposeProgressButtons() {
     for (const window of [...progressButtonDisposers.keys()]) {
         disposeProgressButton(window);
     }
+}
+
+function ensureObsidianExportProgress() {
+    if (runtime.obsidianExportProgress) return runtime.obsidianExportProgress;
+    runtime.obsidianExportProgress = createZoteroConversionProgress({
+        zotero: Zotero,
+        services: typeof Services === 'undefined' ? null : Services,
+        title: runtimeTranslate('obsidianBatch.windowTitle'),
+        queueID: OBSIDIAN_EXPORT_QUEUE_ID,
+        onCancel: () => {
+            obsidianExportController?.abort();
+        },
+    });
+    if (runtime.obsidianExportProgress) installObsidianExportProgressButtons();
+    return runtime.obsidianExportProgress;
+}
+
+function installObsidianExportProgressButtons() {
+    const windows = Zotero.getMainWindows?.()
+        || [Zotero.getMainWindow?.()].filter(Boolean);
+    for (const window of windows) installObsidianExportProgressButton(window);
+}
+
+function installObsidianExportProgressButton(window) {
+    if (!window || !runtime.obsidianExportProgress) return;
+    disposeObsidianExportProgressButton(window);
+    const rootURI = runtime.rootURI || '';
+    const dispose = installZoteroConversionProgressButton({
+        zotero: Zotero,
+        window,
+        title: runtimeTranslate('obsidianBatch.windowTitle'),
+        iconURL: `${rootURI}${rootURI.endsWith('/') ? '' : '/'}ui/icons/mktero.svg`,
+        queueID: OBSIDIAN_EXPORT_QUEUE_ID,
+    });
+    if (dispose) obsidianExportButtonDisposers.set(window, dispose);
+}
+
+function disposeObsidianExportProgressButton(window) {
+    obsidianExportButtonDisposers.get(window)?.();
+    obsidianExportButtonDisposers.delete(window);
+}
+
+function disposeObsidianExportProgressButtons() {
+    for (const window of [...obsidianExportButtonDisposers.keys()]) {
+        disposeObsidianExportProgressButton(window);
+    }
+}
+
+function abortObsidianExport() {
+    obsidianExportController?.abort();
+    runtime.obsidianExportProgress?.cancel();
+    disposeObsidianExportProgressButtons();
 }
 
 async function convertBatchItem(item, { signal, onProgress }) {
@@ -3110,6 +3179,221 @@ function confirmObsidianOverwrite(ownerWindow, path) {
     );
 }
 
+async function exportSelectedObsidian(targets) {
+    if (!runtime.obsidianExporter?.export || !targets?.length) return;
+    if (obsidianExportController) {
+        runtime.obsidianExportProgress?.setStatus(
+            runtimeTranslate('obsidianBatch.alreadyRunning')
+        );
+        return;
+    }
+    const controller = createZoteroAbortController();
+    obsidianExportController = controller;
+    try {
+        await runSelectedObsidianExport(targets, controller);
+    }
+    finally {
+        if (obsidianExportController === controller) {
+            obsidianExportController = null;
+        }
+    }
+}
+
+async function runSelectedObsidianExport(targets, controller) {
+    const identified = [];
+    for (const target of targets) {
+        const identity = await obsidianExportTargetIdentity(target);
+        if (identity) identified.push(identity);
+    }
+    const groups = selectObsidianExportGroups(identified);
+    if (!groups.length || controller.signal.aborted) return;
+
+    const exporter = runtime.obsidianExporter;
+    if (!exporter?.resolveVault || !exporter.export) return;
+    const vaultPath = String(await exporter.resolveVault({
+        ownerWindow: Zotero.getMainWindow?.() || null,
+    }) || '').trim();
+    if (!vaultPath || controller.signal.aborted) return;
+
+    const progress = ensureObsidianExportProgress();
+    for (const group of groups) {
+        progress?.add(group.identity, obsidianExportGroupTitle(group.title));
+    }
+    progress?.setStatus(runtimeTranslate('obsidianBatch.statusHint'));
+    progress?.open();
+
+    const batch = createObsidianExportBatch({
+        load: (pdf, options) => loadCachedObsidianDocument(pdf.itemID, options),
+        exportDocument: (document, options) => exporter.export({
+            ownerWindow: Zotero.getMainWindow?.() || null,
+            title: document?.title,
+            markdown: document?.markdown || '',
+            assets: document?.assets,
+            assetBasePath: document?.assetBasePath,
+            metadata: document?.metadata,
+            translations: document?.translations || [],
+            vaultPath,
+            conflictPolicy: options?.conflictPolicy,
+        }),
+        isPreparing: isItemPreparing,
+        onEvent: handleObsidianExportEvent,
+    });
+    let result = await batch.run(groups, {
+        signal: controller.signal,
+        conflictPolicy: 'skip',
+    });
+    if (!controller.signal.aborted && result.conflict.length > 0) {
+        const overwrite = confirmObsidianBatchOverwrite(result.conflict.length);
+        if (overwrite && !controller.signal.aborted) {
+            const identities = new Set(result.conflict.map(item => item.identity));
+            const conflictGroups = groups.filter(group => (
+                identities.has(group.identity)
+            ));
+            const overwritten = await batch.run(conflictGroups, {
+                signal: controller.signal,
+                conflictPolicy: 'overwrite',
+            });
+            result = mergeObsidianExportOverwrite(result, overwritten);
+        }
+    }
+    progress?.setStatus(summarizeObsidianExportBatch(result, runtimeTranslate));
+}
+
+async function loadCachedObsidianDocument(itemID, { signal } = {}) {
+    const live = runtime.presenter?.get(itemID)?.model;
+    if (live?.status === 'ready' && live.renderMode !== 'html') {
+        return obsidianExportInput(itemID, live);
+    }
+    if (typeof runtime.extractor?.readCached !== 'function') {
+        throw new Error('Converted Markdown is unavailable');
+    }
+    const cached = await runtime.extractor.readCached(itemID, { signal });
+    if (!cached) return null;
+    return obsidianExportInput(itemID, cached);
+}
+
+async function obsidianExportInput(itemID, model) {
+    return {
+        title: model.title,
+        markdown: model.markdown || '',
+        assets: model.assets,
+        assetBasePath: model.assetBasePath,
+        metadata: await obsidianMetadataForItem(itemID, model),
+        translations: await obsidianTranslationsForModel(model),
+    };
+}
+
+// Parent identity comes from the item record. Do not read PDF bytes here.
+async function obsidianExportTargetIdentity(target) {
+    const itemID = target?.itemID;
+    if (!Number.isSafeInteger(itemID) || itemID <= 0) return null;
+    let pdf = null;
+    try {
+        pdf = await zoteroItemRecord(itemID);
+    }
+    catch {
+        return null;
+    }
+    if (!pdf) return null;
+    const parentID = pdf.parentItemID || pdf.parentID;
+    let parent = pdf.parentItem || null;
+    if (parentID && parentID !== itemID) {
+        if (!parent) {
+            try {
+                parent = await zoteroItemRecord(parentID);
+            }
+            catch {
+                return null;
+            }
+        }
+        if (!parent) return null;
+    }
+    if (!parent) parent = pdf;
+    const libraryID = parent.libraryID;
+    const itemKey = parent.key;
+    if (!Number.isSafeInteger(libraryID) || libraryID < 0) return null;
+    if (typeof itemKey !== 'string' || !OBSIDIAN_ITEM_KEY.test(itemKey)) {
+        return null;
+    }
+    return {
+        itemID,
+        libraryID,
+        itemKey,
+        title: target.title,
+    };
+}
+
+async function zoteroItemRecord(itemID) {
+    const loaded = Zotero.Items?.get?.(itemID);
+    if (loaded) return loaded;
+    if (typeof Zotero.Items?.getAsync !== 'function') return null;
+    return Zotero.Items.getAsync(itemID);
+}
+
+function handleObsidianExportEvent(event) {
+    const progress = runtime.obsidianExportProgress;
+    const identity = event?.group?.identity;
+    if (!progress || identity == null) return;
+    const status = {
+        exported: 'succeeded',
+        notReady: 'failed',
+        preparing: 'failed',
+        conflict: 'failed',
+        failed: 'failed',
+    }[event.type];
+    if (!status) return;
+    const message = event.type === 'failed' && event.result?.message
+        ? event.result.message
+        : runtimeTranslate(`obsidianBatch.${event.type}`, { count: 1 });
+    updateProgressRow(progress, identity, status, message);
+}
+
+function confirmObsidianBatchOverwrite(count) {
+    const services = typeof Services === 'undefined' ? null : Services;
+    if (!services?.prompt?.confirm) return false;
+    return services.prompt.confirm(
+        Zotero.getMainWindow?.() || null,
+        runtimeTranslate('obsidianBatch.overwriteTitle'),
+        runtimeTranslate('obsidianBatch.overwriteMessage', { count })
+    );
+}
+
+function mergeObsidianExportOverwrite(skipped, overwritten) {
+    const finished = new Set();
+    for (const name of ['exported', 'notReady', 'preparing', 'conflict', 'failed']) {
+        for (const item of overwritten?.[name] || []) {
+            if (item?.identity != null) finished.add(item.identity);
+        }
+    }
+    const seenDuplicates = new Set((skipped.duplicate || []).map(item => item.itemID));
+    return {
+        status: overwritten?.status === 'cancelled' ? 'cancelled' : skipped.status,
+        exported: [...skipped.exported, ...(overwritten?.exported || [])],
+        notReady: [...skipped.notReady, ...(overwritten?.notReady || [])],
+        preparing: [...skipped.preparing, ...(overwritten?.preparing || [])],
+        duplicate: [
+            ...skipped.duplicate,
+            ...(overwritten?.duplicate || []).filter(item => (
+                !seenDuplicates.has(item.itemID)
+            )),
+        ],
+        conflict: [
+            ...skipped.conflict.filter(item => !finished.has(item.identity)),
+            ...(overwritten?.conflict || []),
+        ],
+        failed: [...skipped.failed, ...(overwritten?.failed || [])],
+    };
+}
+
+function obsidianExportGroupTitle(title) {
+    const text = String(title || '')
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!text) return 'PDF';
+    return text.length > 300 ? `${text.slice(0, 299)}…` : text;
+}
+
 async function saveSnapshotForModel(pdfItemOrID, model) {
     if (model?.status !== 'ready' || model.renderMode === 'html') {
         throw new Error('The Markdown document is unavailable');
@@ -3319,6 +3603,7 @@ function registerMainWindowContextMenu(window) {
         rootURI: runtime.rootURI,
         onOpen: openItemAsMarkdown,
         onPrepare: prepareSelectedMarkdown,
+        onExportObsidian: exportSelectedObsidian,
         onOpenSavedNote: openSavedMarkdownNote,
         isPreparing: isItemPreparing,
         isSavedMarkdownNote: item => (
@@ -3331,6 +3616,7 @@ function registerMainWindowContextMenu(window) {
         zotero: Zotero,
         window,
         onPrepare: prepareSelectedMarkdown,
+        onExportObsidian: exportSelectedObsidian,
         onError: handleOpenError,
         translate: runtimeTranslate,
     });

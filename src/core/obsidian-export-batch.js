@@ -1,4 +1,14 @@
+import { translateEnglish } from '../i18n/localization.js';
+
 const ITEM_KEY = /^[A-Z0-9]{8}$/;
+const SUMMARY_COUNTS = [
+    'exported',
+    'notReady',
+    'preparing',
+    'duplicate',
+    'conflict',
+    'failed',
+];
 
 export function selectObsidianExportGroups(targets) {
     const groups = [];
@@ -20,6 +30,13 @@ export function selectObsidianExportGroups(targets) {
         group.pdfs.push({ itemID: pdf.itemID, title: pdf.title });
     }
     return groups;
+}
+
+export function summarizeObsidianExportBatch(result, translate = translateEnglish) {
+    const counts = obsidianExportBatchCounts(result);
+    return SUMMARY_COUNTS.map(name => translate(`obsidianBatch.${name}`, {
+        count: counts[name],
+    })).join(' ');
 }
 
 export function createObsidianExportBatch({
@@ -248,4 +265,19 @@ function emptyResult() {
         conflict: [],
         failed: [],
     };
+}
+
+function obsidianExportBatchCounts(result) {
+    return {
+        exported: countOf(result?.exported),
+        notReady: countOf(result?.notReady),
+        preparing: countOf(result?.preparing),
+        duplicate: countOf(result?.duplicate),
+        conflict: countOf(result?.conflict),
+        failed: countOf(result?.failed),
+    };
+}
+
+function countOf(value) {
+    return Array.isArray(value) ? value.length : 0;
 }

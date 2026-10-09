@@ -1,5 +1,4 @@
-const QUEUE_ID = 'mktero-prepare';
-const BUTTON_ID = `zotero-tb-pq-${QUEUE_ID}`;
+const DEFAULT_QUEUE_ID = 'mktero-prepare';
 const STYLE_RETRY_MS = 0;
 const cancelListeners = new Map();
 
@@ -9,6 +8,7 @@ export function createZoteroConversionProgress({
     title = 'Preparing Markdown',
     onCancel = null,
     schedule = defaultSchedule,
+    queueID = DEFAULT_QUEUE_ID,
 } = {}) {
     const queues = zotero?.ProgressQueues;
     const statuses = zotero?.ProgressQueue;
@@ -18,10 +18,10 @@ export function createZoteroConversionProgress({
         return null;
     }
 
-    let queue = queues.get(QUEUE_ID);
+    let queue = queues.get(queueID);
     if (!queue) {
         queue = queues.create({
-            id: QUEUE_ID,
+            id: queueID,
             // The dialog resolves these through Zotero's own string bundle.
             title: 'general.processing',
             columns: ['itemFields.title', 'general.processing'],
@@ -53,8 +53,12 @@ export function createZoteroConversionProgress({
             dialog?.setStatus?.(message || '');
         },
         open() {
+            const before = listProgressWindows(services);
             dialog?.open?.();
-            const applyTitle = () => retitle(services, title);
+            const applyTitle = () => {
+                markNewProgressWindows(services, before, queueID);
+                retitle(services, title, queueID);
+            };
             applyTitle();
             schedule(applyTitle, STYLE_RETRY_MS);
         },
@@ -74,21 +78,23 @@ export function installZoteroConversionProgressButton({
     window,
     title = 'Preparing Markdown',
     iconURL = '',
+    queueID = DEFAULT_QUEUE_ID,
 } = {}) {
     const document = window?.document;
     const box = document?.getElementById?.('zotero-pq-buttons');
-    const queue = zotero?.ProgressQueues?.get?.(QUEUE_ID);
+    const buttonID = `zotero-tb-pq-${queueID}`;
+    const queue = zotero?.ProgressQueues?.get?.(queueID);
     if (!box || !queue || typeof queue.addListener !== 'function') return null;
 
-    document.getElementById(BUTTON_ID)?.remove();
+    document.getElementById(buttonID)?.remove();
     const button = document.createXULElement?.('toolbarbutton')
         || document.createElement('toolbarbutton');
-    button.id = BUTTON_ID;
+    button.id = buttonID;
     button.setAttribute('tooltiptext', title);
     button.setAttribute('aria-label', title);
     if (iconURL) button.setAttribute('image', iconURL);
     const openDialog = () => {
-        zotero.ProgressQueues.get(QUEUE_ID)?.getDialog?.()?.open?.();
+        zotero.ProgressQueues.get(queueID)?.getDialog?.()?.open?.();
     };
     const show = () => {
         button.hidden = false;
@@ -134,19 +140,44 @@ function bindCancelListener(queue, onCancel) {
     queue.addListener('cancel', listener);
 }
 
-function retitle(services, title) {
-    if (!title || typeof services?.wm?.getEnumerator !== 'function') return;
+function listProgressWindows(services) {
+    const found = [];
+    if (typeof services?.wm?.getEnumerator !== 'function') return found;
     try {
         const windows = services.wm.getEnumerator(null);
         while (windows.hasMoreElements()) {
             const win = windows.getNext();
             const root = win?.document?.getElementById?.('progress-queue-root');
-            if (!root) continue;
-            win.document.title = title;
+            if (root) found.push({ win, root });
         }
     }
     catch {
         // A missing window manager must not affect preparation.
+    }
+    return found;
+}
+
+function markNewProgressWindows(services, before, queueID) {
+    const seen = new Set((before || []).map(entry => entry.win));
+    for (const entry of listProgressWindows(services)) {
+        if (seen.has(entry.win)) continue;
+        if (typeof entry.root?.setAttribute !== 'function') continue;
+        if (entry.root.getAttribute?.('data-mktero-queue')) continue;
+        entry.root.setAttribute('data-mktero-queue', queueID);
+    }
+}
+
+function retitle(services, title, queueID = DEFAULT_QUEUE_ID) {
+    if (!title) return;
+    // A window already claimed by another queue must keep its own title.
+    // Unmarked windows stay with the original prepare queue.
+    for (const { win, root } of listProgressWindows(services)) {
+        const marked = typeof root?.getAttribute === 'function'
+            ? root.getAttribute('data-mktero-queue') || ''
+            : '';
+        if (marked && marked !== queueID) continue;
+        if (!marked && queueID !== DEFAULT_QUEUE_ID) continue;
+        win.document.title = title;
     }
 }
 
