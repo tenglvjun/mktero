@@ -198,6 +198,128 @@ test('rejects a selected folder that is not an Obsidian vault', async () => {
     assert.equal(writes.some(write => write.type === 'text'), false);
 });
 
+test('writes into a pre-resolved vault without opening the file picker', async () => {
+    const writes = [];
+    const files = new Map();
+    const exporter = createZoteroObsidianExporter({
+        createFilePicker: () => {
+            throw new Error('picker should not open');
+        },
+        ioUtils: createIOUtils(writes, {
+            existingPaths: ['/chosen/.obsidian'],
+            files,
+        }),
+        pathUtils,
+        createID: () => 'request-id',
+        getVaultPath: () => '',
+        setVaultPath: () => {
+            throw new Error('saved vault should not change');
+        },
+        getSubdirectory: () => 'Mktero',
+        profilePath: '/profile',
+        confirmOverwrite: async () => true,
+        now: () => new Date('2026-09-28T02:40:00.000Z'),
+    });
+
+    const result = await exporter.export(exportInput({
+        vaultPath: '/chosen',
+        translations: [],
+    }));
+
+    assert.equal(result.status, 'exported');
+    assert.equal(result.path, '/chosen/Mktero/Paper/Paper.md');
+    assert.match(files.get(result.path), /# Paper/);
+});
+
+test('skips a hand-edited note without asking when the conflict policy is skip', async () => {
+    const writes = [];
+    const files = new Map();
+    const ioUtils = createIOUtils(writes, {
+        existingPaths: ['/vault/.obsidian'],
+        files,
+    });
+    let confirmCalls = 0;
+    const exporter = createExporter({
+        writes,
+        ioUtils,
+        vaultPath: '/vault',
+        confirmOverwrite: async () => {
+            confirmCalls += 1;
+            return true;
+        },
+    });
+    await exporter.export(exportInput({
+        markdown: '# Original\n',
+        translations: [],
+    }));
+    files.set(
+        '/vault/Mktero/Paper/Paper.md',
+        files.get('/vault/Mktero/Paper/Paper.md').replace(
+            '# Original\n',
+            '# Original\n\nHand edit\n'
+        )
+    );
+    writes.length = 0;
+
+    const skipped = await exporter.export(exportInput({
+        markdown: '# Updated\n',
+        translations: [],
+        conflictPolicy: 'skip',
+    }));
+
+    assert.equal(confirmCalls, 0);
+    assert.equal(skipped.status, 'conflict');
+    assert.equal(skipped.conflicts[0].language, 'original');
+    assert.equal(
+        skipped.conflicts[0].path,
+        '/vault/Mktero/Paper/Paper.md'
+    );
+    assert.equal(writes.some(write => write.type === 'text'
+        && write.path.endsWith('Paper.md')), false);
+    assert.match(files.get('/vault/Mktero/Paper/Paper.md'), /Hand edit/);
+});
+
+test('overwrites a hand-edited note without asking when the conflict policy is overwrite', async () => {
+    const writes = [];
+    const files = new Map();
+    const ioUtils = createIOUtils(writes, {
+        existingPaths: ['/vault/.obsidian'],
+        files,
+    });
+    const exporter = createExporter({
+        writes,
+        ioUtils,
+        vaultPath: '/vault',
+        confirmOverwrite: async () => {
+            throw new Error('overwrite should not ask');
+        },
+    });
+    await exporter.export(exportInput({
+        markdown: '# Original\n',
+        translations: [],
+    }));
+    files.set(
+        '/vault/Mktero/Paper/Paper.md',
+        files.get('/vault/Mktero/Paper/Paper.md').replace(
+            '# Original\n',
+            '# Original\n\nHand edit\n'
+        )
+    );
+
+    const result = await exporter.export(exportInput({
+        markdown: '# Updated\n',
+        translations: [],
+        conflictPolicy: 'overwrite',
+    }));
+
+    assert.equal(result.status, 'exported');
+    assert.match(files.get('/vault/Mktero/Paper/Paper.md'), /# Updated/);
+    assert.doesNotMatch(
+        files.get('/vault/Mktero/Paper/Paper.md'),
+        /Hand edit/
+    );
+});
+
 function exportInput(overrides = {}) {
     return {
         ownerWindow: {},
