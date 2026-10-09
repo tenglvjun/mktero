@@ -182,6 +182,7 @@ import { createRuntimeAbortController } from './platform/abort-controller.js';
 import {
     createZoteroConversionProgress,
     installZoteroConversionProgressButton,
+    signalProgressAlreadyRunning,
 } from './platform/zotero-conversion-progress.js';
 import {
     createZoteroAnnotationActions,
@@ -276,6 +277,7 @@ const progressButtonDisposers = new Map();
 const obsidianExportButtonDisposers = new Map();
 const cancelledPreparations = new Set();
 let obsidianExportController = null;
+let obsidianExportRowsOpened = false;
 
 const runtime = {
     id: null,
@@ -1634,6 +1636,7 @@ function installProgressButton(window) {
     const dispose = installZoteroConversionProgressButton({
         zotero: Zotero,
         window,
+        services: typeof Services === 'undefined' ? null : Services,
         title: runtimeTranslate('batch.windowTitle'),
         iconURL: `${rootURI}${rootURI.endsWith('/') ? '' : '/'}ui/icons/mktero.svg`,
     });
@@ -1679,6 +1682,7 @@ function installObsidianExportProgressButton(window) {
     const dispose = installZoteroConversionProgressButton({
         zotero: Zotero,
         window,
+        services: typeof Services === 'undefined' ? null : Services,
         title: runtimeTranslate('obsidianBatch.windowTitle'),
         iconURL: `${rootURI}${rootURI.endsWith('/') ? '' : '/'}ui/icons/mktero.svg`,
         queueID: OBSIDIAN_EXPORT_QUEUE_ID,
@@ -3182,12 +3186,16 @@ function confirmObsidianOverwrite(ownerWindow, path) {
 async function exportSelectedObsidian(targets) {
     if (!runtime.obsidianExporter?.export || !targets?.length) return;
     if (obsidianExportController) {
-        runtime.obsidianExportProgress?.setStatus(
-            runtimeTranslate('obsidianBatch.alreadyRunning')
-        );
+        signalProgressAlreadyRunning({
+            running: true,
+            progress: runtime.obsidianExportProgress,
+            message: runtimeTranslate('obsidianBatch.alreadyRunning'),
+            ensureProgress: ensureObsidianExportProgress,
+        });
         return;
     }
     const controller = createZoteroAbortController();
+    const progressBeforeBatch = Boolean(runtime.obsidianExportProgress);
     obsidianExportController = controller;
     try {
         await runSelectedObsidianExport(targets, controller);
@@ -3196,6 +3204,13 @@ async function exportSelectedObsidian(targets) {
         if (obsidianExportController === controller) {
             obsidianExportController = null;
         }
+        // A second click during vault selection opens the status line before
+        // this batch owns any rows. Do not leave that notice up if this
+        // batch never starts, and do not clear a previous batch's summary.
+        if (!obsidianExportRowsOpened && !progressBeforeBatch) {
+            runtime.obsidianExportProgress?.setStatus('');
+        }
+        obsidianExportRowsOpened = false;
     }
 }
 
@@ -3215,6 +3230,7 @@ async function runSelectedObsidianExport(targets, controller) {
     }) || '').trim();
     if (!vaultPath || controller.signal.aborted) return;
 
+    obsidianExportRowsOpened = true;
     const progress = ensureObsidianExportProgress();
     for (const group of groups) {
         progress?.add(group.identity, obsidianExportGroupTitle(group.title));
