@@ -1,14 +1,13 @@
 import { translateEnglish } from '../i18n/localization.js';
 
 const ITEM_KEY = /^[A-Z0-9]{8}$/;
-const SUMMARY_COUNTS = [
-    'exported',
-    'notReady',
-    'preparing',
-    'duplicate',
-    'conflict',
-    'failed',
-];
+const ROW_LABELS = Object.freeze({
+    exported: 'obsidianBatch.rowExported',
+    notReady: 'obsidianBatch.rowNotReady',
+    preparing: 'obsidianBatch.rowPreparing',
+    conflict: 'obsidianBatch.rowConflict',
+    failed: 'obsidianBatch.rowFailed',
+});
 
 export function selectObsidianExportGroups(targets) {
     const groups = [];
@@ -34,9 +33,16 @@ export function selectObsidianExportGroups(targets) {
 
 export function summarizeObsidianExportBatch(result, translate = translateEnglish) {
     const counts = obsidianExportBatchCounts(result);
-    return SUMMARY_COUNTS.map(name => translate(`obsidianBatch.${name}`, {
-        count: counts[name],
-    })).join(' ');
+    return [
+        translate('obsidianBatch.exported', { count: counts.exported }),
+        translate('obsidianBatch.notExported', { count: counts.notExported }),
+    ].join(' ');
+}
+
+export function obsidianExportRowMessage(type, translate = translateEnglish, errorMessage = '') {
+    if (type === 'failed' && errorMessage) return String(errorMessage);
+    const key = ROW_LABELS[type];
+    return key ? translate(key) : '';
 }
 
 export function selectObsidianExportConfirmations(result) {
@@ -319,14 +325,22 @@ function emptyResult() {
 }
 
 function obsidianExportBatchCounts(result) {
+    const exportedIdentities = new Set(
+        (result?.exported || [])
+            .map(item => item?.identity)
+            .filter(identity => identity != null)
+    );
+    const notExported = ['notReady', 'preparing', 'conflict', 'failed']
+        .reduce((sum, name) => sum + countUnexported(result?.[name], exportedIdentities), 0);
     return {
         exported: countOf(result?.exported),
-        notReady: countOf(result?.notReady),
-        preparing: countOf(result?.preparing),
-        duplicate: countOf(result?.duplicate),
-        conflict: countOf(result?.conflict),
-        failed: countOf(result?.failed),
+        notExported,
     };
+}
+
+function countUnexported(items, exportedIdentities) {
+    if (!Array.isArray(items)) return 0;
+    return items.filter(item => !exportedIdentities.has(item?.identity)).length;
 }
 
 function countOf(value) {

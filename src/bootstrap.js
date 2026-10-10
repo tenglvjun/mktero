@@ -84,6 +84,7 @@ import { createConversionBatch } from './core/conversion-batch.js';
 import {
     createObsidianExportBatch,
     mergeObsidianExportOverwrite,
+    obsidianExportRowMessage,
     selectObsidianExportConfirmations,
     selectObsidianExportGroups,
     summarizeObsidianExportBatch,
@@ -1822,7 +1823,10 @@ function batchStatusMessage(summary) {
 }
 
 function itemHasReadableMarkdown(itemID) {
-    const item = Zotero.Items?.get?.(itemID);
+    return itemHasReadableMarkdownItem(Zotero.Items?.get?.(itemID));
+}
+
+function itemHasReadableMarkdownItem(item) {
     return runtime.readiness?.isReady(
         item,
         currentConversionParserProfile()
@@ -3376,9 +3380,11 @@ function handleObsidianExportEvent(event) {
         failed: 'failed',
     }[event.type];
     if (!status) return;
-    const message = event.type === 'failed' && event.result?.message
-        ? event.result.message
-        : runtimeTranslate(`obsidianBatch.${event.type}`, { count: 1 });
+    const message = obsidianExportRowMessage(
+        event.type,
+        runtimeTranslate,
+        event.type === 'failed' ? event.result?.message : ''
+    );
     updateProgressRow(progress, identity, status, message);
 }
 
@@ -3613,6 +3619,7 @@ function registerMainWindowContextMenu(window) {
         onExportObsidian: exportSelectedObsidian,
         onOpenSavedNote: openSavedMarkdownNote,
         isPreparing: isItemPreparing,
+        hasMarkdown: itemHasReadableMarkdownItem,
         isSavedMarkdownNote: item => (
             runtime.savedMarkdownStore?.isSavedMarkdownNote(item) || false
         ),
@@ -3624,6 +3631,7 @@ function registerMainWindowContextMenu(window) {
         window,
         onPrepare: prepareSelectedMarkdown,
         onExportObsidian: exportSelectedObsidian,
+        hasMarkdown: itemHasReadableMarkdownItem,
         onError: handleOpenError,
         translate: runtimeTranslate,
     });

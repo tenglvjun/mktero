@@ -4,10 +4,12 @@ import test from 'node:test';
 import {
     createObsidianExportBatch,
     mergeObsidianExportOverwrite,
+    obsidianExportRowMessage,
     selectObsidianExportConfirmations,
     selectObsidianExportGroups,
     summarizeObsidianExportBatch,
 } from '../src/core/obsidian-export-batch.js';
+import { translateMessage } from '../src/i18n/localization.js';
 
 function target(itemID, title, libraryID, itemKey) {
     return { itemID, title, libraryID, itemKey };
@@ -466,16 +468,31 @@ test('summarizes export counts for the progress status line', () => {
         summarizeObsidianExportBatch(result, (key, variables) => (
             `${key}=${variables.count}`
         )),
-        'obsidianBatch.exported=2 obsidianBatch.notReady=1 '
-            + 'obsidianBatch.preparing=0 obsidianBatch.duplicate=3 '
-            + 'obsidianBatch.conflict=1 obsidianBatch.failed=1'
+        'obsidianBatch.exported=2 obsidianBatch.notExported=3'
     );
     const english = summarizeObsidianExportBatch(result);
-    assert.match(english, /Exported 2/);
-    assert.match(english, /No Markdown: 1/);
-    assert.match(english, /Still preparing: 0/);
-    assert.match(english, /Extra PDFs: 3/);
-    assert.match(english, /Skipped changed notes: 1/);
-    assert.match(english, /Failed: 1/);
-    assert.match(summarizeObsidianExportBatch(null), /Exported 0/);
+    assert.equal(english, 'Exported 2. Not exported: 3.');
+    assert.equal(
+        summarizeObsidianExportBatch(result, (key, variables) => (
+            translateMessage('zh-CN', key, variables)
+        )),
+        '已导出 2。 未导出 3。'
+    );
+    assert.equal(summarizeObsidianExportBatch(null), 'Exported 0. Not exported: 0.');
+});
+
+test('progress rows name the outcome without repeating the batch count', () => {
+    assert.equal(obsidianExportRowMessage('notReady'), 'No Markdown');
+    assert.equal(obsidianExportRowMessage('exported'), 'Exported');
+    assert.equal(obsidianExportRowMessage('preparing'), 'Still preparing');
+    assert.equal(obsidianExportRowMessage('conflict'), 'Skipped changed note');
+    assert.equal(obsidianExportRowMessage('failed'), 'Failed');
+    assert.equal(obsidianExportRowMessage('failed', undefined, 'disk full'), 'disk full');
+    assert.equal(
+        obsidianExportRowMessage('notReady', (key, variables) => (
+            translateMessage('zh-CN', key, variables)
+        )),
+        '没有 Markdown'
+    );
+    assert.doesNotMatch(obsidianExportRowMessage('notReady'), /\d/);
 });

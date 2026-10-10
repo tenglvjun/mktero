@@ -434,15 +434,18 @@ test('prepares PDFs in the selected collection and ignores its subcollections', 
     assert.equal(document.querySelector('#mktero-prepare-collection-markdown'), null);
 });
 
-test('hides Obsidian export for a single PDF and keeps Read as Markdown', () => {
-    const harness = createMenuHarness([pdfItem(42)]);
+test('shows Obsidian export for one item only when it has Markdown', async () => {
+    const pdf = pdfItem(42);
+    const harness = createMenuHarness([pdf]);
+    const exported = [];
     const dispose = registerItemContextMenu({
         zotero: { Items: { get: () => null } },
         window: harness.window,
         rootURI: 'resource://mktero/',
         onOpen: () => {},
         onPrepare: () => assert.fail('a single PDF must not prepare'),
-        onExportObsidian: () => assert.fail('a single PDF must not export'),
+        onExportObsidian: targets => exported.push(targets),
+        hasMarkdown: item => item === pdf,
         onError: assert.fail,
     });
 
@@ -452,7 +455,13 @@ test('hides Obsidian export for a single PDF and keeps Read as Markdown', () => 
 
     assert.equal(readItem.hidden, false);
     assert.equal(readItem.getAttribute('label'), 'Read as Markdown with Mktero');
-    assert.ok(exportItem);
+    assert.equal(exportItem.hidden, false);
+    exportItem.dispatchEvent(new harness.document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(exported, [[{ itemID: 42, title: 'PDF' }]]);
+
+    harness.select([pdfItem(43)]);
+    showMenu(harness.document);
     assert.equal(exportItem.hidden, true);
     dispose();
 });
@@ -473,6 +482,7 @@ test('exports selected PDFs to Obsidian without preparing or opening', async () 
         onOpen: itemID => opened.push(itemID),
         onPrepare: targets => prepared.push(targets),
         onExportObsidian: targets => exported.push(targets),
+        hasMarkdown: item => item === first,
         onError: assert.fail,
     });
 
@@ -500,6 +510,30 @@ test('exports selected PDFs to Obsidian without preparing or opening', async () 
     dispose();
     assert.equal(harness.document.querySelector('#mktero-read-as-markdown'), null);
     assert.equal(harness.document.querySelector('#mktero-export-obsidian'), null);
+});
+
+test('hides Obsidian export when no selected item has Markdown', () => {
+    const harness = createMenuHarness([pdfItem(1), pdfItem(2)]);
+    registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        rootURI: 'resource://mktero/',
+        onOpen: () => {},
+        onPrepare: () => {},
+        onExportObsidian: () => assert.fail('nothing converted must not export'),
+        hasMarkdown: () => false,
+        onError: assert.fail,
+    });
+
+    showMenu(harness.document);
+    assert.equal(
+        harness.document.querySelector('#mktero-export-obsidian').hidden,
+        true
+    );
+    assert.equal(
+        harness.document.querySelector('#mktero-read-as-markdown').hidden,
+        false
+    );
 });
 
 test('hides Obsidian export when the callback is omitted', () => {
@@ -561,6 +595,7 @@ test('exports collection PDFs to Obsidian with the same targets as prepare', asy
         },
         onPrepare: targets => prepared.push(targets),
         onExportObsidian: targets => exported.push(targets),
+        hasMarkdown: item => item === direct,
         onError: assert.fail,
     });
 
@@ -587,6 +622,41 @@ test('exports collection PDFs to Obsidian with the same targets as prepare', asy
     dispose();
     assert.equal(document.querySelector('#mktero-prepare-collection-markdown'), null);
     assert.equal(document.querySelector('#mktero-export-collection-obsidian'), null);
+});
+
+test('hides collection Obsidian export when no item has Markdown', () => {
+    const direct = pdfItem(7);
+    const { document } = parseHTML(
+        '<html><body><div id="zotero-collectionmenu"></div></body></html>'
+    );
+    document.createXULElement = tagName => document.createElement(tagName);
+    registerCollectionContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: {
+            document,
+            ZoteroPane: {
+                getSelectedCollections: () => [{
+                    getChildItems: () => [direct],
+                }],
+            },
+        },
+        onPrepare: () => {},
+        onExportObsidian: () => assert.fail('an unconverted collection must not export'),
+        hasMarkdown: () => false,
+        onError: assert.fail,
+    });
+
+    document.querySelector('#zotero-collectionmenu').dispatchEvent(
+        new document.defaultView.Event('popupshowing', { bubbles: true })
+    );
+    assert.equal(
+        document.querySelector('#mktero-export-collection-obsidian').hidden,
+        true
+    );
+    assert.equal(
+        document.querySelector('#mktero-prepare-collection-markdown').hidden,
+        false
+    );
 });
 
 test('hides collection Obsidian export when the callback is omitted', () => {
