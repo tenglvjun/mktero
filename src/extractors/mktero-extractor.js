@@ -66,105 +66,27 @@ export class MkteroDocumentExtractor {
     }
 
     async extract(itemID, { onProgress, signal, forceRefresh = false } = {}) {
-        throwIfAborted(signal);
-        const item = await this.zotero.Items.getAsync(itemID);
-        if (!item?.isPDFAttachment?.()) {
-            throw new Error('Only PDF attachments can be converted');
-        }
-
-        const filePath = await item.getFilePathAsync();
-        if (!filePath) {
-            throw new Error('The local PDF file is unavailable');
-        }
-
-        const fileData = await this.readFile(filePath);
-        throwIfAborted(signal);
-        this.#preparePDFIndex(itemID, fileData, signal);
-
-        const title = item.parentItem?.getDisplayTitle?.()
-            || item.getDisplayTitle?.()
-            || 'Untitled PDF';
-        const warnings = [];
-        let cacheKey = null;
-        let sourceHash = null;
-        if (this.createCacheKey) {
-            try {
-                cacheKey = await this.createCacheKey(fileData, {
-                    parserProfile: MINERU_PARSER_PROFILE_ID,
-                });
-            }
-            catch (error) {
-                this.#reportCacheError(error);
-                warnings.push('The local Markdown cache is unavailable.');
-            }
-        }
-        sourceHash = await readSourceHash(
-            this.createSourceHash,
-            fileData,
-            error => this.#reportCacheError(error)
-        );
-
-        const cacheEnabled = Boolean(this.isCacheEnabled());
-        if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
-            const revision = await this.#readRevision({
-                itemID,
-                cacheKey,
-                fileData,
-                signal,
-            });
-            throwIfAborted(signal);
-            if (revision?.snapshot) {
-                onProgress?.(100);
-                const result = await this.prepareResult({
-                    ...revision.snapshot,
-                    userEdited: true,
-                }, {
-                    fileData,
-                    signal,
-                    onProgress,
-                });
-                return createResult(
-                    title,
-                    result,
-                    true,
-                    warnings,
-                    revision.cacheKey,
-                    false,
-                    sourceHash
-                );
-            }
-        }
-        if (!forceRefresh && cacheKey) {
-            const cached = await this.#readCachedResult({
-                cacheKey,
-                fileData,
-                cacheEnabled,
-                signal,
-                warnings,
-                onProgress,
-            });
-            throwIfAborted(signal);
-            if (cached) {
-                onProgress?.(100);
-                return createResult(
-                    title,
-                    cached,
-                    true,
-                    warnings,
-                    cacheKey,
-                    false,
-                    sourceHash
-                );
-            }
-        }
+        const opened = await this.#openPDF(itemID, signal);
+        this.#preparePDFIndex(itemID, opened.fileData, signal);
+        const prepared = await this.#prepareCachedRead(opened, {
+            itemID,
+            signal,
+            forceRefresh,
+        });
+        const cached = await this.#cachedExtractResult(opened, prepared, {
+            signal,
+            onProgress,
+            forceRefresh,
+        });
+        if (cached) return cached;
 
         let converted;
         try {
             converted = await this.conversion.convert({
                 apiBase: this.getApiBase(),
                 getAccessToken: this.getAccessToken,
-                fileName: item.attachmentFilename || `zotero-${itemID}.pdf`,
-                fileData,
+                fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
+                fileData: opened.fileData,
                 onProgress,
                 signal,
             });
@@ -176,30 +98,149 @@ export class MkteroDocumentExtractor {
             throw error;
         }
 
-        warnings.push(...(converted.warnings || []));
-        const prepared = await this.prepareResult(converted.result, {
-            fileData,
+        prepared.warnings.push(...(converted.warnings || []));
+        const preparedResult = await this.prepareResult(converted.result, {
+            fileData: opened.fileData,
             signal,
             onProgress,
         });
         throwIfAborted(signal);
-        const result = await this.recoverFigures(prepared, {
-            fileData,
+        const result = await this.recoverFigures(preparedResult, {
+            fileData: opened.fileData,
             signal,
             onProgress,
         });
         throwIfAborted(signal);
-        if (cacheKey && cacheEnabled) {
-            await this.#saveCachedResult(cacheKey, result, signal, warnings);
+        if (prepared.cacheKey && prepared.cacheEnabled) {
+            await this.#saveCachedResult(
+                prepared.cacheKey,
+                result,
+                signal,
+                prepared.warnings
+            );
         }
         return createResult(
-            title,
+            opened.title,
             result,
             converted.origin === 'cache',
+            prepared.warnings,
+            prepared.cacheKey,
+            converted.origin === 'resumed',
+            prepared.sourceHash
+        );
+    }
+
+    async readCached(itemID, { signal, onProgress } = {}) {
+        const opened = await this.#openPDF(itemID, signal);
+        const prepared = await this.#prepareCachedRead(opened, {
+            itemID,
+            signal,
+            forceRefresh: false,
+        });
+        return this.#cachedExtractResult(opened, prepared, {
+            signal,
+            onProgress,
+            forceRefresh: false,
+        });
+    }
+
+    async #openPDF(itemID, signal) {
+        throwIfAborted(signal);
+        const item = await this.zotero.Items.getAsync(itemID);
+        if (!item?.isPDFAttachment?.()) {
+            throw new Error('Only PDF attachments can be converted');
+        }
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            throw new Error('The local PDF file is unavailable');
+        }
+        const fileData = await this.readFile(filePath);
+        throwIfAborted(signal);
+        const title = item.parentItem?.getDisplayTitle?.()
+            || item.getDisplayTitle?.()
+            || 'Untitled PDF';
+        return { item, fileData, title };
+    }
+
+    async #prepareCachedRead({ fileData }, { itemID, signal, forceRefresh }) {
+        const warnings = [];
+        let cacheKey = null;
+        if (this.createCacheKey) {
+            try {
+                cacheKey = await this.createCacheKey(fileData, {
+                    parserProfile: MINERU_PARSER_PROFILE_ID,
+                });
+            }
+            catch (error) {
+                this.#reportCacheError(error);
+                warnings.push('The local Markdown cache is unavailable.');
+            }
+        }
+        const sourceHash = await readSourceHash(
+            this.createSourceHash,
+            fileData,
+            error => this.#reportCacheError(error)
+        );
+        let revision = null;
+        if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
+            revision = await this.#readRevision({
+                itemID,
+                cacheKey,
+                fileData,
+                signal,
+            });
+            throwIfAborted(signal);
+        }
+        return {
+            cacheEnabled: Boolean(this.isCacheEnabled()),
             warnings,
             cacheKey,
-            converted.origin === 'resumed',
-            sourceHash
+            sourceHash,
+            revision,
+        };
+    }
+
+    async #cachedExtractResult(opened, prepared, { signal, onProgress, forceRefresh }) {
+        if (prepared.revision?.snapshot) {
+            onProgress?.(100);
+            const result = await this.prepareResult({
+                ...prepared.revision.snapshot,
+                userEdited: true,
+            }, {
+                fileData: opened.fileData,
+                signal,
+                onProgress,
+            });
+            return createResult(
+                opened.title,
+                result,
+                true,
+                prepared.warnings,
+                prepared.revision.cacheKey,
+                false,
+                prepared.sourceHash
+            );
+        }
+        if (forceRefresh || !prepared.cacheKey) return null;
+        const cached = await this.#readCachedResult({
+            cacheKey: prepared.cacheKey,
+            fileData: opened.fileData,
+            cacheEnabled: prepared.cacheEnabled,
+            signal,
+            warnings: prepared.warnings,
+            onProgress,
+        });
+        throwIfAborted(signal);
+        if (!cached) return null;
+        onProgress?.(100);
+        return createResult(
+            opened.title,
+            cached,
+            true,
+            prepared.warnings,
+            prepared.cacheKey,
+            false,
+            prepared.sourceHash
         );
     }
 
@@ -289,6 +330,7 @@ export class MkteroDocumentExtractor {
             return await this.cache.get(cacheKey);
         }
         catch (error) {
+            if (error?.name === 'AbortError') throw error;
             this.#reportCacheError(error);
             warnings.push('The local Markdown cache could not be read.');
             return null;

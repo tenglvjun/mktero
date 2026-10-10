@@ -222,3 +222,29 @@ the title changes. If the note was edited in Obsidian, or the file belongs to
 another item, Mktero asks before overwriting it. Mktero does not delete extra
 files you later add under `assets/`. Obsidian Sync, iCloud, or git can carry
 the vault; Mktero does not.
+
+### Batch export
+
+The item menu shows `Export selected Markdown to Obsidian` only when at
+least one selected item already has converted Markdown, using the same check
+as the Markdown column. One selected item shows the export beside reading
+only when that item has Markdown; reading is not replaced. A selection with
+no converted Markdown does not show it. A collection shows `Export collection
+Markdown to Obsidian` only when at least one of that collection's own items
+has converted Markdown. It uses the same collection scope as `Prepare
+collection Markdown`: that collection's own items, not items that belong only
+to a subcollection.
+
+Only Markdown that has already been converted is exported. A cache miss does
+not start OCR or conversion. One Zotero parent item becomes one note. If
+several converted PDFs belong to the same item, the first one with a cache is
+exported and the others are skipped.
+
+The vault is resolved once for the batch. If none is saved, Mktero asks once;
+cancelling that choice writes nothing. Notes still go in the vault's `Mktero`
+folder. Mktero does not sync the vault. Notes Mktero previously wrote, and
+that were not edited in Obsidian, update without asking. Notes edited in
+Obsidian, or files that belong to another item, are skipped and asked about
+once at the end. Cancel stops items that have not started. Files already
+written are not rolled back. This is not an account feature and not automatic
+sync.

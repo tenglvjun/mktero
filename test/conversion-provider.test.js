@@ -17,15 +17,18 @@ test('dispatches extraction to the configured provider', async () => {
         providers: {
             mineru: {
                 extract: async () => assert.fail('MinerU was selected'),
+                readCached: async () => null,
             },
             mistral: {
                 extract: async (...args) => {
                     calls.push(args);
                     return result;
                 },
+                readCached: async () => null,
             },
             mktero: {
                 extract: async () => assert.fail('Mktero was selected'),
+                readCached: async () => null,
             },
         },
     });
@@ -41,15 +44,18 @@ test('falls back to Mktero for an invalid provider value', async () => {
         providers: {
             mineru: {
                 extract: async () => assert.fail('MinerU was selected'),
+                readCached: async () => null,
             },
             mistral: {
                 extract: async () => assert.fail('Mistral was selected'),
+                readCached: async () => null,
             },
             mktero: {
                 extract: async itemID => {
                     selected = itemID;
                     return { provider: 'mktero' };
                 },
+                readCached: async () => null,
             },
         },
     });
@@ -70,18 +76,21 @@ test('reads the provider for each extraction and preserves the signal', async ()
                     calls.push(['mineru', ...args]);
                     return { provider: 'mineru' };
                 },
+                readCached: async () => null,
             },
             mistral: {
                 extract: async (...args) => {
                     calls.push(['mistral', ...args]);
                     return { provider: 'mistral' };
                 },
+                readCached: async () => null,
             },
             mktero: {
                 extract: async (...args) => {
                     calls.push(['mktero', ...args]);
                     return { provider: 'mktero' };
                 },
+                readCached: async () => null,
             },
         },
     });
@@ -138,4 +147,49 @@ test('requires every provider extractor', () => {
         }),
         /mktero document extractor is required/
     );
+    assert.throws(
+        () => new ConversionProviderRouter({
+            getProvider: () => 'mineru',
+            providers: {
+                mineru: { extract() {}, readCached() {} },
+                mistral: { extract() {} },
+                mktero: { extract() {}, readCached() {} },
+            },
+        }),
+        /mistral document extractor is required/
+    );
+});
+
+test('forwards readCached to the active provider without extracting', async () => {
+    let configured = 'mistral';
+    const calls = [];
+    const options = { signal: new AbortController().signal };
+    const router = new ConversionProviderRouter({
+        getProvider: () => configured,
+        providers: {
+            mineru: {
+                extract: async () => assert.fail('extract was called'),
+                readCached: async () => assert.fail('MinerU was selected'),
+            },
+            mistral: {
+                extract: async () => assert.fail('extract was called'),
+                readCached: async (...args) => {
+                    calls.push(args);
+                    return null;
+                },
+            },
+            mktero: {
+                extract: async () => assert.fail('extract was called'),
+                readCached: async (...args) => {
+                    calls.push(['mktero', ...args]);
+                    return null;
+                },
+            },
+        },
+    });
+
+    assert.equal(await router.readCached(9, options), null);
+    configured = 'unsupported';
+    assert.equal(await router.readCached(3, options), null);
+    assert.deepEqual(calls, [[9, options], ['mktero', 3, options]]);
 });

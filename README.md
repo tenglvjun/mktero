@@ -76,7 +76,8 @@ local cache avoids repeating conversions for the same PDF and parser profile.
   Zotero library, using Semantic Scholar, OpenCitations, and OpenAlex when
   identifiers are available.
 - Save a portable Zotero snapshot, or export corrected Markdown and its
-  extracted figures to a local folder or an Obsidian vault.
+  extracted figures to a local folder or an Obsidian vault. Optionally write
+  already converted Markdown to an Obsidian vault in a batch.
 - Show a Markdown column in the item list when this computer still has a
   readable cached conversion for the current settings. While a PDF is queued
   or converting, that column shows a session-only spinner. The ready marker

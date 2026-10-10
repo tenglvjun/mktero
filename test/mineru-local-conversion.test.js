@@ -66,3 +66,22 @@ test('stores a fresh local result and does not keep figure layout', async () => 
     assert.equal(stored[0].result.markdown, '# Fresh local');
     assert.equal(stored[0].result.figureMap, undefined);
 });
+
+test('readCached returns null without parsing when the local cache has no entry', async () => {
+    const calls = { submit: 0, parse: 0, collect: 0 };
+    const conversion = new MinerULocalConversion({
+        client: {
+            async submit() { calls.submit += 1; },
+            async parse() { calls.parse += 1; },
+            async collect() { calls.collect += 1; },
+        },
+        cache: { async get() { return null; } },
+    });
+
+    assert.equal(await conversion.readCached({
+        key: 'a'.repeat(64),
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    }), null);
+    assert.deepEqual(calls, { submit: 0, parse: 0, collect: 0 });
+});

@@ -79,20 +79,36 @@ export class MinerUConversion {
         const emitProgressive = typeof onProgressiveFigures === 'function'
             ? event => onProgressiveFigures({ ...event, cacheKey: key })
             : null;
-        const selected = await this.#withKeyOperation(key, () => (
-            this.#selectTask({
+        const reportBounded = (progress, state) => onProgress(Math.min(96, progress), state);
+        const selected = await this.#withKeyOperation(key, async () => {
+            const resumed = await this.#selectResumableTask({ key, forceRefresh });
+            if (resumed?.origin) return resumed;
+            if (!forceRefresh) {
+                const cached = await this.#readCached({
+                    key,
+                    fileData,
+                    cacheEnabled,
+                    signal,
+                    onProgress: reportBounded,
+                    onProgressiveFigures: emitProgressive,
+                    warnings,
+                });
+                if (cached) return cached;
+            }
+            const task = await this.#submitTask({
                 key,
                 apiKey,
                 fileName,
                 fileData,
-                cacheEnabled,
-                forceRefresh,
-                onProgress: (progress, state) => onProgress(Math.min(96, progress), state),
-                onProgressiveFigures: emitProgressive,
+                onProgress: reportBounded,
                 signal,
-                warnings,
-            })
-        ));
+            });
+            return {
+                task,
+                origin: 'fresh',
+                supersededTask: resumed?.supersededTask || null,
+            };
+        });
         throwIfAborted(signal);
 
         if (selected.origin === 'cache') {
@@ -174,86 +190,92 @@ export class MinerUConversion {
         return { result, origin: 'fresh', warnings: [] };
     }
 
-    async #selectTask({
+    async readCached(options = {}) {
+        if (!options?.key) return null;
+        return this.#withKeyOperation(
+            options.key,
+            () => this.#readCached(options)
+        );
+    }
+
+    async #readCached({
         key,
-        apiKey,
-        fileName,
         fileData,
-        cacheEnabled,
-        forceRefresh,
-        onProgress,
-        onProgressiveFigures,
+        cacheEnabled = false,
         signal,
+        onProgress = () => {},
+        onProgressiveFigures = null,
         warnings,
-    }) {
-        let supersededTask = null;
-        if (forceRefresh) {
-            supersededTask = await this.#tryReadPendingTask(key);
-        }
-        else {
-            const active = this.#currentTask(key);
-            if (active) return { task: active, origin: 'resumed' };
-
-            const pending = await this.#readPendingTask(key);
-            if (pending) {
-                this.#rememberTask(key, pending);
-                return { task: pending, origin: 'resumed' };
-            }
-            let cached = await this.#readCache(key, cacheEnabled, warnings);
-            let migrated = false;
-            if (!cached && cacheEnabled && this.createPreviousCacheKeys) {
-                try {
-                    const previousKeys = await this.createPreviousCacheKeys(fileData);
-                    throwIfAborted(signal);
-                    for (const previousKey of new Set(previousKeys)) {
-                        if (!previousKey || previousKey === key) continue;
-                        cached = await this.#readCache(previousKey, cacheEnabled, warnings);
-                        throwIfAborted(signal);
-                        migrated = Boolean(cached);
-                        if (cached) break;
-                    }
-                }
-                catch (error) { throwIfAborted(signal); this.#reportError(error); }
-            }
-            if (cached) {
-                const wasPending = cached.figureRestoration?.status === 'pending';
-                let resolved = cached;
-                if (cached.figureRestoration?.status === 'pending'
-                    && cached.restorationInput && this.restoreCachedInput) {
-                    try {
-                        resolved = await this.restoreCachedInput(cached.restorationInput, {
-                            fileData, signal, onProgress, onEvent: onProgressiveFigures,
-                        });
-                    }
-                    catch (error) {
-                        throwIfAborted(signal);
-                        this.#reportError(error);
-                        resolved = cached;
-                    }
-                }
-                const result = await this.#recoverFigures(resolved, { fileData, signal, onProgress });
+    } = {}) {
+        const reportedWarnings = Array.isArray(warnings) ? warnings : [];
+        if (!key) return null;
+        throwIfAborted(signal);
+        let cached = await this.#readCache(key, cacheEnabled, reportedWarnings);
+        throwIfAborted(signal);
+        let migrated = false;
+        if (!cached && cacheEnabled && this.createPreviousCacheKeys) {
+            try {
+                const previousKeys = await this.createPreviousCacheKeys(fileData);
                 throwIfAborted(signal);
-                if (cacheEnabled && (migrated || result !== cached || wasPending)) {
-                    try { await this.cache.put(key, result, { signal }); }
-                    catch (error) {
-                        throwIfAborted(signal);
-                        this.#reportError(error);
-                        warnings.push('The Markdown result could not be saved to the local cache.');
-                    }
+                for (const previousKey of new Set(previousKeys)) {
+                    if (!previousKey || previousKey === key) continue;
+                    cached = await this.#readCache(previousKey, cacheEnabled, reportedWarnings);
+                    throwIfAborted(signal);
+                    migrated = Boolean(cached);
+                    if (cached) break;
                 }
-                return { result, origin: 'cache' };
+            }
+            catch (error) {
+                throwIfAborted(signal);
+                if (error?.name === 'AbortError') throw error;
+                this.#reportError(error);
             }
         }
+        if (!cached) return null;
+        const wasPending = cached.figureRestoration?.status === 'pending';
+        let resolved = cached;
+        if (wasPending && cached.restorationInput && this.restoreCachedInput) {
+            try {
+                resolved = await this.restoreCachedInput(cached.restorationInput, {
+                    fileData,
+                    signal,
+                    onProgress,
+                    onEvent: onProgressiveFigures,
+                });
+            }
+            catch (error) {
+                throwIfAborted(signal);
+                if (error?.name === 'AbortError') throw error;
+                this.#reportError(error);
+                resolved = cached;
+            }
+        }
+        const result = await this.#recoverFigures(resolved, { fileData, signal, onProgress });
+        throwIfAborted(signal);
+        if (cacheEnabled && (migrated || result !== cached || wasPending)) {
+            try { await this.cache.put(key, result, { signal }); }
+            catch (error) {
+                throwIfAborted(signal);
+                if (error?.name === 'AbortError') throw error;
+                this.#reportError(error);
+                reportedWarnings.push('The Markdown result could not be saved to the local cache.');
+            }
+        }
+        return { result, origin: 'cache', warnings: reportedWarnings };
+    }
 
-        const task = await this.#submitTask({
-            key,
-            apiKey,
-            fileName,
-            fileData,
-            onProgress,
-            signal,
-        });
-        return { task, origin: 'fresh', supersededTask };
+    async #selectResumableTask({ key, forceRefresh }) {
+        if (forceRefresh) {
+            return { supersededTask: await this.#tryReadPendingTask(key) };
+        }
+        const active = this.#currentTask(key);
+        if (active) return { task: active, origin: 'resumed' };
+        const pending = await this.#readPendingTask(key);
+        if (pending) {
+            this.#rememberTask(key, pending);
+            return { task: pending, origin: 'resumed' };
+        }
+        return null;
     }
 
     async #readCache(key, cacheEnabled, warnings) {
@@ -263,6 +285,7 @@ export class MinerUConversion {
             return cached && (cacheEnabled || cached.userEdited) ? cached : null;
         }
         catch (error) {
+            if (error?.name === 'AbortError') throw error;
             this.#reportError(error);
             warnings.push('The local Markdown cache could not be read.');
             return null;

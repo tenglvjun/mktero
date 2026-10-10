@@ -48,104 +48,27 @@ export class MistralDocumentExtractor {
     }
 
     async extract(itemID, { onProgress, signal, forceRefresh = false } = {}) {
-        throwIfAborted(signal);
-        const item = await this.zotero.Items.getAsync(itemID);
-        if (!item?.isPDFAttachment?.()) {
-            throw new Error('Only PDF attachments can be converted');
-        }
-
-        const filePath = await item.getFilePathAsync();
-        if (!filePath) {
-            throw new Error('The local PDF file is unavailable');
-        }
-
-        const fileData = await this.readFile(filePath);
-        throwIfAborted(signal);
-        this.#preparePDFIndex(itemID, fileData, signal);
-
-        const title = item.parentItem?.getDisplayTitle?.()
-            || item.getDisplayTitle?.()
-            || 'Untitled PDF';
-        const cacheEnabled = Boolean(this.isCacheEnabled());
-        const warnings = [];
-        let cacheKey = null;
-        let sourceHash = null;
-        if (this.createCacheKey) {
-            try {
-                cacheKey = await this.createCacheKey(fileData, {
-                    parserProfile: this.parserProfile,
-                });
-            }
-            catch (error) {
-                this.#reportCacheError(error);
-                warnings.push('The local Markdown cache is unavailable.');
-            }
-        }
-        sourceHash = await readSourceHash(
-            this.createSourceHash,
-            fileData,
-            error => this.#reportCacheError(error)
-        );
-
-        if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
-            let revisionKey = cacheKey;
-            let revisionProfile = this.parserProfile;
-            let revision = await this.readRevision({
-                itemID,
-                cacheKey,
-                signal,
-            });
-            throwIfAborted(signal);
-            if (!revision && this.createCacheKey) {
-                try {
-                    const visited = new Set([cacheKey]);
-                    for (const parserProfile of [...MISTRAL_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mistral]) {
-                        const legacyKey = await this.createCacheKey(fileData, { parserProfile });
-                        throwIfAborted(signal);
-                        if (legacyKey && !visited.has(legacyKey)) {
-                            visited.add(legacyKey);
-                            revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
-                            throwIfAborted(signal);
-                            if (revision) {
-                                revisionKey = legacyKey;
-                                revisionProfile = parserProfile;
-                                break;
-                            }
-                        }
-                    }
-                }
-                catch (error) {
-                    throwIfAborted(signal);
-                    this.#reportCacheError(error);
-                }
-            }
-            throwIfAborted(signal);
-            if (revision) {
-                onProgress?.(100);
-                return createResult(
-                    title,
-                    {
-                        ...revision,
-                        userEdited: true,
-                    },
-                    true,
-                    warnings,
-                    revisionKey,
-                    revisionProfile,
-                    sourceHash,
-                );
-            }
+        const opened = await this.#openPDF(itemID, signal);
+        this.#preparePDFIndex(itemID, opened.fileData, signal);
+        const prepared = await this.#prepareCachedRead(opened, {
+            itemID,
+            signal,
+            forceRefresh,
+        });
+        if (prepared.revision) {
+            onProgress?.(100);
+            return this.#revisionResult(opened, prepared);
         }
 
         const apiKey = String(this.getApiKey() || '').trim();
         let converted;
         try {
             converted = await this.conversion.convert({
-                key: cacheKey,
+                key: prepared.cacheKey,
                 apiKey,
-                fileName: item.attachmentFilename || `zotero-${itemID}.pdf`,
-                fileData,
-                cacheEnabled,
+                fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
+                fileData: opened.fileData,
+                cacheEnabled: prepared.cacheEnabled,
                 forceRefresh,
                 onProgress,
                 signal,
@@ -159,17 +82,159 @@ export class MistralDocumentExtractor {
             throw error;
         }
 
-        warnings.push(...(converted.warnings || []));
+        prepared.warnings.push(...(converted.warnings || []));
         const result = converted.result || {};
-        warnings.push(...(result.warnings || []));
+        prepared.warnings.push(...(result.warnings || []));
         return createResult(
-            title,
+            opened.title,
             result,
             converted.origin === 'cache',
-            warnings,
-            cacheKey,
+            prepared.warnings,
+            prepared.cacheKey,
             this.parserProfile,
-            sourceHash,
+            prepared.sourceHash,
+        );
+    }
+
+    async readCached(itemID, { signal, onProgress } = {}) {
+        const opened = await this.#openPDF(itemID, signal);
+        const prepared = await this.#prepareCachedRead(opened, {
+            itemID,
+            signal,
+            forceRefresh: false,
+        });
+        if (prepared.revision) {
+            onProgress?.(100);
+            return this.#revisionResult(opened, prepared);
+        }
+        const converted = await this.conversion.readCached({
+            key: prepared.cacheKey,
+            fileData: opened.fileData,
+            cacheEnabled: prepared.cacheEnabled,
+            signal,
+            onProgress,
+        });
+        if (!converted) return null;
+        onProgress?.(100);
+        prepared.warnings.push(...(converted.warnings || []));
+        const result = converted.result || {};
+        prepared.warnings.push(...(result.warnings || []));
+        return createResult(
+            opened.title,
+            result,
+            true,
+            prepared.warnings,
+            prepared.cacheKey,
+            this.parserProfile,
+            prepared.sourceHash,
+        );
+    }
+
+    async #openPDF(itemID, signal) {
+        throwIfAborted(signal);
+        const item = await this.zotero.Items.getAsync(itemID);
+        if (!item?.isPDFAttachment?.()) {
+            throw new Error('Only PDF attachments can be converted');
+        }
+        const filePath = await item.getFilePathAsync();
+        if (!filePath) {
+            throw new Error('The local PDF file is unavailable');
+        }
+        const fileData = await this.readFile(filePath);
+        throwIfAborted(signal);
+        const title = item.parentItem?.getDisplayTitle?.()
+            || item.getDisplayTitle?.()
+            || 'Untitled PDF';
+        return { item, fileData, title };
+    }
+
+    async #prepareCachedRead({ fileData }, { itemID, signal, forceRefresh }) {
+        const cacheEnabled = Boolean(this.isCacheEnabled());
+        const warnings = [];
+        let cacheKey = null;
+        if (this.createCacheKey) {
+            try {
+                cacheKey = await this.createCacheKey(fileData, {
+                    parserProfile: this.parserProfile,
+                });
+            }
+            catch (error) {
+                this.#reportCacheError(error);
+                warnings.push('The local Markdown cache is unavailable.');
+            }
+        }
+        const sourceHash = await readSourceHash(
+            this.createSourceHash,
+            fileData,
+            error => this.#reportCacheError(error)
+        );
+        const revision = await this.#findRevision({
+            itemID,
+            cacheKey,
+            fileData,
+            signal,
+            forceRefresh,
+        });
+        return { cacheEnabled, warnings, cacheKey, sourceHash, revision };
+    }
+
+    async #findRevision({ itemID, cacheKey, fileData, signal, forceRefresh }) {
+        if (forceRefresh || !cacheKey || typeof this.readRevision !== 'function') return null;
+        let revisionKey = cacheKey;
+        let revisionProfile = this.parserProfile;
+        let revision = await this.readRevision({
+            itemID,
+            cacheKey,
+            signal,
+        });
+        throwIfAborted(signal);
+        if (!revision && this.createCacheKey) {
+            try {
+                const visited = new Set([cacheKey]);
+                for (const parserProfile of [
+                    ...MISTRAL_PREVIOUS_PARSER_PROFILE_IDS,
+                    LEGACY_FIGURE_PROFILES.mistral,
+                ]) {
+                    const legacyKey = await this.createCacheKey(fileData, { parserProfile });
+                    throwIfAborted(signal);
+                    if (legacyKey && !visited.has(legacyKey)) {
+                        visited.add(legacyKey);
+                        revision = await this.readRevision({ itemID, cacheKey: legacyKey, signal });
+                        throwIfAborted(signal);
+                        if (revision) {
+                            revisionKey = legacyKey;
+                            revisionProfile = parserProfile;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (error) {
+                throwIfAborted(signal);
+                this.#reportCacheError(error);
+            }
+        }
+        throwIfAborted(signal);
+        if (!revision) return null;
+        return {
+            snapshot: revision,
+            cacheKey: revisionKey,
+            parserProfile: revisionProfile,
+        };
+    }
+
+    #revisionResult(opened, prepared) {
+        return createResult(
+            opened.title,
+            {
+                ...prepared.revision.snapshot,
+                userEdited: true,
+            },
+            true,
+            prepared.warnings,
+            prepared.revision.cacheKey,
+            prepared.revision.parserProfile,
+            prepared.sourceHash,
         );
     }
 

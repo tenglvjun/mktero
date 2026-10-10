@@ -28,16 +28,31 @@ export class ConversionProviderRouter {
                 );
             }
         }
+        for (const provider of SUPPORTED_PROVIDERS) {
+            if (typeof providers[provider]?.readCached !== 'function') {
+                throw new TypeError(
+                    `A ${provider} document extractor is required`
+                );
+            }
+        }
         this.getProvider = getProvider;
         this.providers = providers;
     }
 
     extract(itemID, options) {
+        return this.#extractor().extract(itemID, options);
+    }
+
+    readCached(itemID, options) {
+        return this.#extractor().readCached(itemID, options);
+    }
+
+    #extractor() {
         const configured = String(this.getProvider() || '').trim();
         const provider = SUPPORTED_PROVIDERS.has(configured)
             ? configured
             : MKTERO_PROVIDER;
-        return this.providers[provider].extract(itemID, options);
+        return this.providers[provider];
     }
 }
 

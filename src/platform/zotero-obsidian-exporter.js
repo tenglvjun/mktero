@@ -22,6 +22,7 @@ const MAX_INDEX_ENTRIES = 5_000;
 const MAX_NOTE_BYTES = MAX_EXPORT_MARKDOWN_BYTES + (64 * 1024);
 const BODY_HASH = /^[a-f0-9]{64}$/;
 const DIRECTORY_NAME = /^(?!\.\.?$)[^<>:"/\\|?*\u0000-\u001f\u007f]{1,180}$/;
+const CONFLICT_POLICIES = new Set(['ask', 'skip', 'overwrite']);
 
 export function createZoteroObsidianExporter({
     createFilePicker,
@@ -58,7 +59,19 @@ export function createZoteroObsidianExporter({
     if (typeof getProfilePath !== 'function') {
         throw new TypeError('An Obsidian export profile path is required');
     }
+    async function resolveVault({ ownerWindow }) {
+        return resolveVaultPath({
+            ownerWindow,
+            createFilePicker,
+            ioUtils,
+            pathUtils,
+            translate,
+            getVaultPath,
+            setVaultPath,
+        });
+    }
     return {
+        resolveVault,
         async export({
             ownerWindow,
             title,
@@ -67,19 +80,25 @@ export function createZoteroObsidianExporter({
             assetBasePath,
             metadata,
             translations = [],
+            vaultPath = '',
+            conflictPolicy = 'ask',
         }) {
-            const vaultPath = await resolveVaultPath({
-                ownerWindow,
-                createFilePicker,
-                ioUtils,
-                pathUtils,
-                translate,
-                getVaultPath,
-                setVaultPath,
-            });
-            if (!vaultPath) return { status: 'cancelled' };
+            if (!CONFLICT_POLICIES.has(conflictPolicy)) {
+                throw new TypeError(
+                    'Obsidian conflict policy must be ask, skip, or overwrite'
+                );
+            }
+            const requestedVault = String(vaultPath || '').trim();
+            const resolvedVault = requestedVault
+                ? await requireObsidianVault(
+                    requestedVault,
+                    ioUtils,
+                    pathUtils
+                )
+                : await resolveVault({ ownerWindow });
+            if (!resolvedVault) return { status: 'cancelled' };
             const { outputRoot } = resolveObsidianOutputRoot(
-                vaultPath,
+                resolvedVault,
                 getSubdirectory(),
                 pathUtils.join
             );
@@ -166,12 +185,29 @@ export function createZoteroObsidianExporter({
             }
             for (const version of prepared) {
                 if (version.decision !== 'confirm') continue;
+                if (conflictPolicy === 'overwrite') {
+                    version.write = true;
+                    continue;
+                }
+                if (conflictPolicy === 'skip') {
+                    version.write = false;
+                    version.conflict = true;
+                    continue;
+                }
                 version.write = Boolean(await confirmOverwrite({
                     ownerWindow,
                     path: version.outputPath,
                 }));
             }
             if (!prepared.some(version => version.write)) {
+                if (conflictPolicy === 'skip'
+                    && prepared.some(version => version.conflict)) {
+                    return {
+                        status: 'conflict',
+                        conflicts: conflictRecords(prepared),
+                        versions: versionResults(prepared),
+                    };
+                }
                 return { status: 'cancelled' };
             }
             const exportID = normalizeExportID(createID());
@@ -247,11 +283,8 @@ export function createZoteroObsidianExporter({
                     : prepared.find(version => version.write).outputPath,
                 assetDirectoryPath,
                 assetCount: originalPlan.assets.length,
-                versions: prepared.map(version => ({
-                    language: version.language,
-                    path: version.outputPath,
-                    status: version.write ? 'exported' : 'cancelled',
-                })),
+                versions: versionResults(prepared),
+                conflicts: conflictRecords(prepared),
             };
         },
     };
@@ -369,6 +402,28 @@ async function resolveVaultPath({
 
 async function isObsidianVault(vaultPath, ioUtils, pathUtils) {
     return Boolean(await ioUtils.exists(pathUtils.join(vaultPath, '.obsidian')));
+}
+
+async function requireObsidianVault(vaultPath, ioUtils, pathUtils) {
+    if (!await isObsidianVault(vaultPath, ioUtils, pathUtils)) {
+        throw new Error('The selected folder is not an Obsidian vault');
+    }
+    return vaultPath;
+}
+
+function conflictRecords(prepared) {
+    return prepared.filter(version => version.conflict).map(version => ({
+        language: version.language,
+        path: version.outputPath,
+    }));
+}
+
+function versionResults(prepared) {
+    return prepared.map(version => ({
+        language: version.language,
+        path: version.outputPath,
+        status: version.write ? 'exported' : 'cancelled',
+    }));
 }
 
 async function chooseDirectoryName({
