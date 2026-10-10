@@ -6556,3 +6556,260 @@ test('showRestoredFigure reuses crop bytes and refreshes the object URL without 
         view.destroy();
     }
 });
+
+function noteAnnotation(fields) {
+    return {
+        type: 'highlight',
+        comment: '',
+        pageLabel: '1',
+        ranges: [{ from: 0, to: 1 }],
+        ...fields,
+    };
+}
+
+function readyNotesModel(annotations, fields = {}) {
+    return createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Alpha beta gamma.',
+        annotationOverlay: {
+            matched: annotations,
+            unmatched: [],
+        },
+        ...fields,
+    });
+}
+
+function createNotesView(model) {
+    return createView(model, {}, {
+        localization: createLocalization({ zoteroLocale: 'zh-CN' }),
+    });
+}
+
+test('hides note search and filters when a paper has no notes', () => {
+    const { view, shadow } = createNotesView(readyNotesModel([]));
+
+    assert.equal(shadow.querySelector('.markdown-notes-search-toggle'), null);
+    assert.equal(shadow.querySelector('.markdown-notes-search').hidden, true);
+    assert.equal(shadow.querySelector('.markdown-notes-filters').hidden, true);
+    assert.equal(shadow.querySelector('.markdown-notes-count').hidden, true);
+    assert.equal(
+        shadow.querySelector('.markdown-notes-empty').textContent,
+        '暂无笔记'
+    );
+    assert.equal(
+        shadow.querySelector('.markdown-notes-empty').getAttribute('data-notes-empty'),
+        'none'
+    );
+    view.destroy();
+});
+
+test('filters visible notes by the colors used in the paper', () => {
+    const { view, shadow } = createNotesView(readyNotesModel([
+        noteAnnotation({
+            id: 'yellow',
+            text: 'Alpha',
+            color: '#ffd400',
+            ranges: [{ from: 0, to: 5 }],
+        }),
+        noteAnnotation({
+            id: 'red',
+            text: 'Beta',
+            color: '#ff6666',
+            ranges: [{ from: 6, to: 10 }],
+        }),
+    ]));
+    const red = shadow.querySelector(
+        '.markdown-notes-color-filter[data-note-color="#ff6666"]'
+    );
+
+    assert.equal(shadow.querySelector('.markdown-notes-search').hidden, false);
+    assert.equal(shadow.querySelectorAll('.markdown-notes-color-filter').length, 8);
+    assert.equal(
+        shadow.querySelector(
+            '.markdown-notes-color-filter[data-note-color="#2ea8e5"]'
+        ).disabled,
+        true
+    );
+    assert.equal(red.getAttribute('aria-pressed'), 'false');
+    red.click();
+
+    assert.deepEqual(
+        [...shadow.querySelectorAll('.markdown-note-link')].map(link => (
+            link.getAttribute('data-annotation-id')
+        )),
+        ['red']
+    );
+    const yellow = shadow.querySelector(
+        '.markdown-notes-color-filter[data-note-color="#ffd400"]'
+    );
+    yellow.click();
+    assert.deepEqual(
+        [...shadow.querySelectorAll('.markdown-note-link')].map(link => (
+            link.getAttribute('data-annotation-id')
+        )),
+        ['red', 'yellow']
+    );
+    shadow.querySelector(
+        '.markdown-notes-color-filter[data-note-color="#ff6666"]'
+    ).click();
+    assert.deepEqual(
+        [...shadow.querySelectorAll('.markdown-note-link')].map(link => (
+            link.getAttribute('data-annotation-id')
+        )),
+        ['yellow']
+    );
+    view.destroy();
+});
+
+test('filters notes by quote or comment and leaves document search alone', () => {
+    const { view, shadow } = createNotesView(readyNotesModel([
+        noteAnnotation({ id: 'quote', text: 'Alpha term', comment: '' }),
+        noteAnnotation({
+            id: 'comment',
+            text: 'Beta',
+            comment: 'Remember the caveat',
+            color: '#ff6666',
+        }),
+    ]));
+
+    const input = shadow.querySelector('.markdown-notes-search-input');
+    assert.equal(input.closest('.markdown-notes-search').hidden, false);
+    input.value = 'caveat';
+    input.dispatchEvent(new input.ownerDocument.defaultView.Event('input'));
+
+    assert.deepEqual(
+        [...shadow.querySelectorAll('.markdown-note-link')].map(link => (
+            link.getAttribute('data-annotation-id')
+        )),
+        ['comment']
+    );
+    assert.equal(shadow.querySelector('.markdown-document-search-panel').hidden, true);
+    assert.equal(shadow.querySelector('.markdown-document-search-input').value, '');
+    shadow.querySelector('#mktero-document-search-toggle').click();
+    assert.equal(shadow.querySelector('.markdown-document-search-panel').hidden, false);
+    view.handleDocumentSearchShortcut({
+        key: 'Escape',
+        target: input,
+        preventDefault() {},
+        stopPropagation() {},
+    });
+    assert.equal(shadow.querySelector('.markdown-document-search-panel').hidden, false);
+
+    assert.equal(
+        shadow.querySelector(
+            '.markdown-notes-color-filter[data-note-color="#ffd400"]'
+        ).disabled,
+        true
+    );
+    const red = shadow.querySelector(
+        '.markdown-notes-color-filter[data-note-color="#ff6666"]'
+    );
+    red.click();
+    assert.deepEqual(
+        [...shadow.querySelectorAll('.markdown-note-link')].map(link => (
+            link.getAttribute('data-annotation-id')
+        )),
+        ['comment']
+    );
+    shadow.querySelector(
+        '.markdown-notes-color-filter[data-note-color="#ff6666"]'
+    ).click();
+
+    dispatchKeyboardEvent(input, 'Escape');
+    assert.equal(shadow.querySelector('.markdown-notes-search').hidden, false);
+    assert.equal(shadow.querySelector('.markdown-notes-search-input').value, '');
+    assert.equal(shadow.querySelector('.markdown-document-search-panel').hidden, false);
+    assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 2);
+    view.destroy();
+});
+
+test('shows a distinct empty state when note search matches nothing', () => {
+    const { view, shadow } = createNotesView(readyNotesModel([
+        noteAnnotation({ id: 'plain', text: 'Alpha', comment: '   ' }),
+        noteAnnotation({
+            id: 'noted',
+            text: 'Beta',
+            comment: 'Keep',
+            color: '#ff6666',
+        }),
+    ]));
+
+    assert.equal(shadow.querySelector('.markdown-notes-comments-toggle'), null);
+    const input = shadow.querySelector('.markdown-notes-search-input');
+    input.value = 'missing';
+    input.dispatchEvent(new input.ownerDocument.defaultView.Event('input'));
+
+    assert.equal(shadow.querySelector('.markdown-note-link'), null);
+    assert.equal(
+        shadow.querySelector('.markdown-notes-empty').textContent,
+        '没有匹配的笔记'
+    );
+    assert.equal(
+        shadow.querySelector('.markdown-notes-empty').getAttribute('data-notes-empty'),
+        'filtered'
+    );
+    view.destroy();
+});
+
+test('does not mark a filtered-out note as the current reading note', () => {
+    const { view, shadow } = createNotesView(readyNotesModel([
+        noteAnnotation({
+            id: 'early',
+            text: 'Alpha',
+            color: '#ffd400',
+            ranges: [{ from: 0, to: 5 }],
+        }),
+        noteAnnotation({
+            id: 'later',
+            text: 'Gamma',
+            color: '#ff6666',
+            ranges: [{ from: 11, to: 16 }],
+        }),
+    ]));
+
+    view.syncActiveNavigation(11);
+    assert.equal(
+        shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('data-annotation-id'),
+        'later'
+    );
+    shadow.querySelector(
+        '.markdown-notes-color-filter[data-note-color="#ffd400"]'
+    ).click();
+    assert.equal(shadow.querySelector('.markdown-note-link.is-active'), null);
+    assert.equal(
+        shadow.querySelector('.markdown-note-link').getAttribute('data-annotation-id'),
+        'early'
+    );
+    view.destroy();
+});
+
+test('keeps the note filter for the same item and clears it for another item', () => {
+    const annotations = [
+        noteAnnotation({ id: 'yellow', text: 'Alpha', color: '#ffd400' }),
+        noteAnnotation({
+            id: 'red',
+            text: 'Beta',
+            comment: 'Keep',
+            color: '#ff6666',
+        }),
+    ];
+    const model = readyNotesModel(annotations, { itemID: 42 });
+    const { view, shadow } = createNotesView(model);
+
+    const input = shadow.querySelector('.markdown-notes-search-input');
+    input.value = 'keep';
+    input.dispatchEvent(new input.ownerDocument.defaultView.Event('input'));
+    view.render(model);
+
+    assert.equal(shadow.querySelector('.markdown-notes-search').hidden, false);
+    assert.equal(shadow.querySelector('.markdown-notes-search-input').value, 'keep');
+    assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 1);
+
+    view.render(readyNotesModel(annotations, { itemID: 99 }));
+    assert.equal(shadow.querySelector('.markdown-notes-search').hidden, false);
+    assert.equal(shadow.querySelector('.markdown-notes-search-input').value, '');
+    assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 2);
+    view.destroy();
+});

@@ -661,23 +661,106 @@ main {
     user-select: none;
 }
 
-.markdown-notes-title {
+.markdown-notes-header {
     position: sticky;
     z-index: 1;
     top: 0;
+    background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised));
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.markdown-notes-title-row {
     display: flex;
     min-height: 50px;
     align-items: center;
     gap: 8px;
+    padding: 0 10px 0 16px;
+}
+
+.markdown-notes-title {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
     margin: 0;
-    padding: 0 16px;
-    border-bottom: 1px solid var(--border-subtle);
+    padding: 0;
     color: var(--text);
-    background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised));
+    background: transparent;
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
+}
+
+.markdown-notes-title-actions {
+    display: flex;
+    margin-left: auto;
+    align-items: center;
+    gap: 4px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+}
+
+.markdown-notes-count {
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.markdown-notes-search {
+    padding: 0 10px 8px;
+}
+
+.markdown-notes-search-input {
+    box-sizing: border-box;
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    background: var(--surface-raised);
+    font: 12px var(--ui-font);
+}
+
+.markdown-notes-filters {
+    padding: 0 10px 10px;
+}
+
+.markdown-notes-color-filters {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.markdown-notes-color-filter {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
+    border-radius: 50%;
+    background: var(--mktero-annotation-color);
+    cursor: pointer;
+}
+
+.markdown-notes-color-filter[aria-pressed='true'] {
+    border-color: var(--text);
+    box-shadow: inset 0 0 0 2px var(--surface);
+}
+
+.markdown-notes-color-filter:disabled {
+    cursor: default;
+    opacity: 0.35;
+}
+
+.markdown-notes-color-filter:focus-visible,
+.markdown-notes-search-input:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: 1px;
 }
 
 .markdown-notes-list {
