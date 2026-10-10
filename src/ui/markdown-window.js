@@ -52,6 +52,12 @@ import {
     accessibleAnnotationText,
     comparePdfAnnotations,
 } from '../core/pdf-annotation.js';
+import {
+    createEmptyNoteListFilter,
+    filterNoteList,
+    findActiveNoteOffset,
+    reconcileNoteListFilter,
+} from './note-list-filter.js';
 import { createLocalization } from '../i18n/localization.js';
 import { findGitHubRepositories } from '../markdown/github-repository-links.js';
 import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
@@ -377,6 +383,12 @@ class MarkdownTabView {
         this.documentSearchComposing = false;
         this.documentSearchResult = { matches: [], truncated: false };
         this.documentSearchActiveIndex = -1;
+        this.noteListFilter = createEmptyNoteListFilter();
+        this.noteListItemID = null;
+        this.noteNavigationOffsets = [];
+        this.noteSearchComposing = false;
+        this.displayedAnnotationOverlay = null;
+        this.displayedMarkdownLength = 0;
         this.activeTranslationFailureID = null;
         this.listeners = [];
         this.sidePanels = Object.fromEntries(
@@ -1427,6 +1439,40 @@ class MarkdownTabView {
             this.t('viewer.notesTitle')
         );
         notesTitle.appendChild(notesTitleLabel);
+        const notesCount = this.createElement('span', {
+            class: 'markdown-notes-count',
+        });
+        const notesTitleActions = this.createElement('span', {
+            class: 'markdown-notes-title-actions',
+        });
+        notesTitleActions.appendChild(notesCount);
+        const notesTitleRow = this.createElement('div', {
+            class: 'markdown-notes-title-row',
+        });
+        appendChildren(notesTitleRow, notesTitle, notesTitleActions);
+        const notesSearchInput = this.createElement('input', {
+            id: 'mktero-notes-search',
+            class: 'markdown-notes-search-input',
+            type: 'search',
+            autocomplete: 'off',
+            autocorrect: 'off',
+            spellcheck: 'false',
+            'aria-label': this.t('viewer.notesSearch'),
+            placeholder: this.t('viewer.notesSearchPlaceholder'),
+        });
+        const notesSearch = this.createElement('div', {
+            class: 'markdown-notes-search',
+        });
+        notesSearch.appendChild(notesSearchInput);
+        notesSearch.hidden = true;
+        const notesFilters = this.createElement('div', {
+            class: 'markdown-notes-filters',
+        });
+        notesFilters.hidden = true;
+        const notesHeader = this.createElement('div', {
+            class: 'markdown-notes-header',
+        });
+        appendChildren(notesHeader, notesTitleRow, notesSearch, notesFilters);
         const notesList = this.createElement('ol', {
             class: 'markdown-notes-list',
         });
@@ -1435,7 +1481,7 @@ class MarkdownTabView {
             class: 'markdown-notes',
             'aria-label': this.t('viewer.notes'),
         });
-        appendChildren(notes, notesTitle, notesList);
+        appendChildren(notes, notesHeader, notesList);
         notes.style.setProperty(
             '--notes-width',
             `${this.sidePanels.notes.width}px`
@@ -1488,8 +1534,13 @@ class MarkdownTabView {
             outlineResizer: outlineControls.resizer,
             outlineToggle: outlineControls.toggle,
             notes,
+            notesHeader,
             notesTitle,
             notesTitleLabel,
+            notesCount,
+            notesSearch,
+            notesSearchInput,
+            notesFilters,
             notesList,
             notesResizer: notesControls.resizer,
             notesToggle: notesControls.toggle,
@@ -2868,6 +2919,30 @@ class MarkdownTabView {
                 this.editor.scrollToOffset?.(offset);
             }
         });
+        this.listen(this.elements.notesSearchInput, 'compositionstart', () => {
+            this.noteSearchComposing = true;
+        });
+        this.listen(this.elements.notesSearchInput, 'compositionend', () => {
+            this.noteSearchComposing = false;
+            this.onNoteSearchInput();
+        });
+        this.listen(this.elements.notesSearchInput, 'input', () => {
+            if (this.noteSearchComposing) return;
+            this.onNoteSearchInput();
+        });
+        this.listen(this.elements.notesSearchInput, 'keydown', event => {
+            if (event.key !== 'Escape' || !this.noteListFilter.query) return;
+            event.preventDefault();
+            event.stopPropagation();
+            this.noteListFilter = { ...this.noteListFilter, query: '' };
+            this.syncNotesFromModel();
+        });
+        this.listen(this.elements.notesFilters, 'click', event => {
+            const color = event.target?.closest?.('.markdown-notes-color-filter');
+            if (!color || !this.elements.notesFilters.contains(color)) return;
+            if (color.disabled) return;
+            this.toggleNoteColor(color.getAttribute('data-note-color'));
+        });
         this.bindSidePanelActions('outline');
         this.bindSidePanelActions('notes');
         this.listen(this.ownerWindow, 'resize', () => {
@@ -4062,6 +4137,10 @@ class MarkdownTabView {
             return;
         }
         if (event.key === 'Escape' && !this.hasOpenReaderMenu()) {
+            if (event.target === this.elements.notesSearchInput
+                && this.noteListFilter.query) {
+                return;
+            }
             consumeDocumentSearchShortcut(event);
             this.closeDocumentSearch();
         }
@@ -4589,10 +4668,7 @@ class MarkdownTabView {
             );
         }
         this.renderOutlineList();
-        this.elements.notes.setAttribute('aria-label', this.t('viewer.notes'));
-        this.elements.notesTitleLabel.textContent = this.t('viewer.notesTitle');
-        this.elements.notesList.querySelector('.markdown-notes-empty')
-            ?.replaceChildren(this.t('viewer.notesEmpty'));
+        this.syncNoteListLabels();
         this.syncSidePanelControlLabels('outline');
         this.syncSidePanelControlLabels('notes');
     }
@@ -5666,28 +5742,166 @@ class MarkdownTabView {
         return attributes;
     }
 
+    onNoteSearchInput() {
+        const query = this.elements.notesSearchInput.value;
+        if (query === this.noteListFilter.query) return;
+        this.noteListFilter = { ...this.noteListFilter, query };
+        this.syncNotesFromModel();
+    }
+
+    toggleNoteColor(color) {
+        const value = String(color || '').toLowerCase();
+        const selected = new Set(this.noteListFilter.colors);
+        if (selected.has(value)) selected.delete(value);
+        else selected.add(value);
+        this.noteListFilter = {
+            ...this.noteListFilter,
+            colors: [...selected],
+        };
+        this.syncNotesFromModel();
+    }
+
+    syncNotesFromModel() {
+        this.syncNotes(
+            this.displayedAnnotationOverlay,
+            this.displayedMarkdownLength
+        );
+    }
+
+    syncNoteListLabels() {
+        this.elements.notes.setAttribute('aria-label', this.t('viewer.notes'));
+        this.elements.notesTitleLabel.textContent = this.t('viewer.notesTitle');
+        this.elements.notesSearchInput.setAttribute(
+            'aria-label',
+            this.t('viewer.notesSearch')
+        );
+        this.elements.notesSearchInput.placeholder = this.t(
+            'viewer.notesSearchPlaceholder'
+        );
+        const empty = this.elements.notesList.querySelector(
+            '.markdown-notes-empty'
+        );
+        if (empty) {
+            empty.textContent = this.t(
+                empty.getAttribute('data-notes-empty') === 'filtered'
+                    ? 'viewer.notesNoMatches'
+                    : 'viewer.notesEmpty'
+            );
+        }
+    }
+
     syncNotes(annotationOverlay, markdownLength) {
+        this.displayedAnnotationOverlay = annotationOverlay;
+        this.displayedMarkdownLength = markdownLength;
+        const itemID = this.model?.itemID;
+        if (itemID !== this.noteListItemID) {
+            this.noteListItemID = itemID;
+            this.noteListFilter = createEmptyNoteListFilter();
+            this.noteSearchComposing = false;
+        }
+        const ordered = orderedAnnotationEntries(annotationOverlay);
+        this.noteNavigationOffsets = ordered.flatMap(({ annotation, matched }) => {
+            if (!matched) return [];
+            const offset = firstAnnotationOffset(annotation, markdownLength);
+            return offset === null ? [] : [offset];
+        });
+        const filtered = filterNoteList(ordered, this.noteListFilter);
+        this.noteListFilter = reconcileNoteListFilter(
+            this.noteListFilter,
+            filtered
+        );
+        const view = filterNoteList(ordered, this.noteListFilter);
+        this.renderNoteListChrome(view);
         const list = this.elements.notesList;
         list.replaceChildren();
-        const entries = orderedAnnotationEntries(annotationOverlay);
-        if (!entries.length) {
-            list.appendChild(this.createElement(
-                'li',
-                { class: 'markdown-notes-empty' },
-                this.t('viewer.notesEmpty')
-            ));
-            this.syncActiveNavigation(this.activeNavigationOffset);
-            return;
+        if (!view.totalCount) {
+            list.appendChild(this.createNotesEmpty('none'));
         }
-
-        for (const { annotation, matched } of entries) {
-            list.appendChild(this.createNoteItem(
-                annotation,
-                matched,
-                markdownLength
-            ));
+        else if (!view.entries.length) {
+            list.appendChild(this.createNotesEmpty('filtered'));
+        }
+        else {
+            for (const { annotation, matched } of view.entries) {
+                list.appendChild(this.createNoteItem(
+                    annotation,
+                    matched,
+                    markdownLength
+                ));
+            }
         }
         this.syncActiveNavigation(this.activeNavigationOffset);
+    }
+
+    createNotesEmpty(reason) {
+        return this.createElement(
+            'li',
+            {
+                class: 'markdown-notes-empty',
+                'data-notes-empty': reason,
+            },
+            this.t(reason === 'filtered'
+                ? 'viewer.notesNoMatches'
+                : 'viewer.notesEmpty')
+        );
+    }
+
+    renderNoteListChrome(view) {
+        const showSearch = view.showSearch;
+        this.elements.notesCount.hidden = view.totalCount === 0;
+        this.elements.notesCount.textContent = view.totalCount === 0
+            ? ''
+            : this.t(
+                view.filterActive
+                    ? 'viewer.notesCountFiltered'
+                    : 'viewer.notesCount',
+                {
+                    count: view.totalCount,
+                    shown: view.shownCount,
+                    total: view.totalCount,
+                }
+            );
+        this.elements.notesSearch.hidden = !showSearch;
+        const input = this.elements.notesSearchInput;
+        const query = this.noteListFilter.query;
+        if (!this.noteSearchComposing
+            && input.value !== query
+            && (query === '' || this.document.activeElement !== input)) {
+            input.value = query;
+        }
+        this.elements.notesFilters.hidden = !view.showColorFilter;
+        this.elements.notesFilters.replaceChildren();
+        if (!view.showColorFilter) return;
+        this.elements.notesFilters.appendChild(
+            this.createNoteColorFilters(view.colors)
+        );
+    }
+
+    createNoteColorFilters(colors) {
+        const group = this.createElement('div', {
+            class: 'markdown-notes-color-filters',
+            role: 'group',
+            'aria-label': this.t('viewer.notesFilterColors'),
+        });
+        for (const color of colors) {
+            const label = this.t('viewer.notesColorFilter', {
+                color: color.name
+                    ? this.t(`annotation.color.${color.name}`)
+                    : color.value,
+                count: color.count,
+            });
+            const button = this.createElement('button', {
+                class: 'markdown-notes-color-filter',
+                type: 'button',
+                'data-note-color': color.value,
+                'aria-pressed': color.selected ? 'true' : 'false',
+                'aria-label': label,
+                title: label,
+                style: `--mktero-annotation-color: ${color.value};`,
+            });
+            if (color.count === 0 && !color.selected) button.disabled = true;
+            group.appendChild(button);
+        }
+        return group;
     }
 
     syncActiveNavigation(offset = 0) {
@@ -5714,15 +5928,21 @@ class MarkdownTabView {
             else link.removeAttribute('aria-current');
         }
 
-        const activeNote = findActiveNavigationItem(
-            [...this.elements.notesList.querySelectorAll(
-                '.markdown-note-link[data-offset]'
-            )],
+        const activeOffset = findActiveNoteOffset(
+            this.noteNavigationOffsets,
             this.activeNavigationOffset
         );
-        for (const link of this.elements.notesList.querySelectorAll(
+        let activeNote = null;
+        const noteLinks = [...this.elements.notesList.querySelectorAll(
             '.markdown-note-link'
-        )) {
+        )];
+        for (const link of noteLinks) {
+            const itemOffset = Number(link.getAttribute('data-offset'));
+            if (activeOffset !== null && itemOffset === activeOffset) {
+                activeNote = link;
+            }
+        }
+        for (const link of noteLinks) {
             const active = link === activeNote;
             link.classList.toggle('is-active', active);
             if (active) link.setAttribute('aria-current', 'location');
