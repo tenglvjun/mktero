@@ -1972,6 +1972,129 @@ test('keeps the account card at zero when the activity request fails', async () 
     controller.destroy();
 });
 
+test('keeps the stored session when a token refresh fails transiently', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <p id="mktero-account-signed-in-email"></p>
+                    <strong id="mktero-account-created"></strong>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
+                </div>
+                <div id="mktero-account-form" hidden></div>
+                <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mktero'],
+        ['extensions.mktero.accountEmail', 'user@example.com'],
+        ['extensions.mktero.accountNickname', 'paper-reader'],
+        ['extensions.mktero.accountRefreshToken', 'refresh'],
+        ['extensions.mktero.accountAccessToken', 'access'],
+        // Already past expiry, so the pane attempts a refresh during start().
+        ['extensions.mktero.accountAccessExpiresAt', Date.now() - 1000],
+    ]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: async () => {
+            throw new Error('offline');
+        },
+    });
+
+    await controller.init();
+
+    // An unreachable server must not sign the user out. The tokens stay stored
+    // so the next attempt retries instead of demanding the password again.
+    assert.equal(values.get('extensions.mktero.accountRefreshToken'), 'refresh');
+    assert.equal(values.get('extensions.mktero.accountAccessToken'), 'access');
+    assert.equal(values.get('extensions.mktero.accountEmail'), 'user@example.com');
+    assert.equal(
+        dom.window.document.getElementById('mktero-account-signed-in-nickname').textContent,
+        'paper-reader'
+    );
+
+    controller.destroy();
+});
+
+test('clears the stored session when the server rejects the refresh token', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <p id="mktero-account-signed-in-email"></p>
+                    <strong id="mktero-account-created"></strong>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
+                </div>
+                <div id="mktero-account-form" hidden></div>
+                <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mktero'],
+        ['extensions.mktero.accountEmail', 'user@example.com'],
+        ['extensions.mktero.accountNickname', 'paper-reader'],
+        ['extensions.mktero.accountRefreshToken', 'refresh'],
+        ['extensions.mktero.accountAccessToken', 'access'],
+        ['extensions.mktero.accountAccessExpiresAt', Date.now() - 1000],
+    ]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: async () => ({
+            ok: false,
+            status: 401,
+            json: async () => ({ error: { code: 'invalid_token' } }),
+        }),
+    });
+
+    await controller.init();
+
+    // A rejected refresh token can never succeed again, so the dead session is
+    // dropped and the pane falls back to the sign-in form.
+    assert.equal(values.get('extensions.mktero.accountRefreshToken'), '');
+    assert.equal(values.get('extensions.mktero.accountAccessToken'), '');
+    assert.equal(values.get('extensions.mktero.accountAccessExpiresAt'), 0);
+
+    controller.destroy();
+});
+
 test('loads the profile and conversion counters after the first sign-in', async () => {
     const dom = new JSDOM(`<!doctype html><body>
         <section id="mktero-preferences-pane">

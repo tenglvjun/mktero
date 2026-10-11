@@ -78,7 +78,10 @@ import {
     getAccountSession,
     saveAccountSession,
 } from './config/account-preferences.js';
-import { refreshMkteroAccount } from './account/account-client.js';
+import {
+    isAccountSessionInvalid,
+    refreshMkteroAccount,
+} from './account/account-client.js';
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import {
@@ -2918,6 +2921,8 @@ async function loadRevisionSessionForItem(itemID) {
 
 // Returns a valid access token for the hosted service, refreshing it first
 // when it is missing or about to expire. Throws when the user is signed out.
+// A transient refresh failure keeps the stored session so the next attempt can
+// retry; only a rejected credential signs the user out.
 async function ensureAccountAccessToken() {
     const session = getAccountSession(Zotero);
     if (!session.refreshToken) {
@@ -2936,6 +2941,11 @@ async function ensureAccountAccessToken() {
         return refreshed.accessToken;
     }
     catch (error) {
+        if (!isAccountSessionInvalid(error)) {
+            const unreachable = new Error('The Mktero account service could not be reached');
+            unreachable.code = 'MKTERO_NETWORK_ERROR';
+            throw unreachable;
+        }
         clearAccountSession(Zotero);
         if (error?.code === 'account_disabled') {
             const disabled = new Error('Mktero account is disabled');

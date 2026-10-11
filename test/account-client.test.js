@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     getMkteroAccount,
     getMkteroConversionStats,
+    isAccountSessionInvalid,
     loginMkteroAccount,
     logoutMkteroAccount,
     refreshMkteroAccount,
@@ -341,5 +342,50 @@ test('reports a network failure as a network error', async () => {
             },
         }),
         error => error.code === 'network'
+    );
+});
+
+test('treats only a rejected credential as a dead session', () => {
+    // The server returns these only when the stored token can never work again.
+    assert.equal(isAccountSessionInvalid({ code: 'invalid_token' }), true);
+    assert.equal(isAccountSessionInvalid({ code: 'user_not_found' }), true);
+    assert.equal(isAccountSessionInvalid({ code: 'account_disabled' }), true);
+    // Everything else is transient, so the caller must keep the session.
+    assert.equal(isAccountSessionInvalid({ code: 'network' }), false);
+    assert.equal(isAccountSessionInvalid({ code: 'request_failed' }), false);
+    assert.equal(isAccountSessionInvalid({ code: 'invalid_response' }), false);
+    assert.equal(isAccountSessionInvalid({ code: 'registration_unavailable' }), false);
+    assert.equal(isAccountSessionInvalid({ code: 'invalid_credentials' }), false);
+    assert.equal(isAccountSessionInvalid(undefined), false);
+    assert.equal(isAccountSessionInvalid(new Error('offline')), false);
+});
+
+test('records the HTTP status but never lets a bare status end the session', async () => {
+    await assert.rejects(
+        refreshMkteroAccount({
+            apiBase: 'http://127.0.0.1:8080',
+            refreshToken: 'refresh',
+            fetchImpl: async () => jsonResponse(401, { error: { code: 'invalid_token' } }),
+        }),
+        error => error.code === 'invalid_token' && error.status === 401
+    );
+
+    // An intermediary can answer 403 with an HTML body. That carries no Mktero
+    // error code, so it must stay transient instead of signing the user out.
+    await assert.rejects(
+        refreshMkteroAccount({
+            apiBase: 'http://127.0.0.1:8080',
+            refreshToken: 'refresh',
+            fetchImpl: async () => ({
+                ok: false,
+                status: 403,
+                json: async () => {
+                    throw new Error('not json');
+                },
+            }),
+        }),
+        error => error.code === 'request_failed'
+            && error.status === 403
+            && isAccountSessionInvalid(error) === false
     );
 });

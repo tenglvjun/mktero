@@ -68,6 +68,7 @@ import {
 import {
     getMkteroAccount,
     getMkteroConversionStats,
+    isAccountSessionInvalid,
     loginMkteroAccount,
     logoutMkteroAccount,
     refreshMkteroAccount,
@@ -1157,8 +1158,12 @@ export function createPreferencesController({
                 nickname: refreshed.nickname || session.nickname,
             });
         }
-        catch {
+        catch (error) {
             if (!paneIsCurrent(generation)) return;
+            // A transient failure keeps the stored session, so a flaky network
+            // or a server restart does not silently sign the pane out. Only a
+            // rejected credential clears it.
+            if (!isAccountSessionInvalid(error)) return;
             clearAccountSession(zotero);
             resetAccountActivity();
         }
