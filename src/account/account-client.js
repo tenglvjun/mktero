@@ -171,7 +171,7 @@ async function requestJSON(fetchImpl, apiBase, path, {
     }
     const body = await readBody(response);
     if (!response.ok) {
-        throw accountError(body?.error?.code || 'request_failed');
+        throw accountError(body?.error?.code || 'request_failed', response.status);
     }
     return body;
 }
@@ -215,8 +215,30 @@ function joinURL(apiBase, path) {
     return `${String(apiBase || '').replace(/\/+$/, '')}${path}`;
 }
 
-function accountError(code) {
+function accountError(code, status = 0) {
     const error = new Error('Mktero account request failed');
     error.code = code || 'request_failed';
+    // The status is diagnostic only. Callers must judge a session by the
+    // server's error code, because a proxy can answer 401 or 403 without an
+    // Mktero error body.
+    error.status = status;
     return error;
+}
+
+// SESSION_INVALID_CODES are the codes the server returns only when the stored
+// credentials can never succeed again. Every other failure is transient: a
+// network error, a timeout, a 5xx, or a body this client could not parse.
+// Callers must keep the session for those so the next attempt retries instead
+// of silently signing the user out. The set matches the codes
+// mktero-conversion-client.js already treats as session-ending.
+const SESSION_INVALID_CODES = Object.freeze(new Set([
+    'invalid_token',
+    'user_not_found',
+    'account_disabled',
+]));
+
+// isAccountSessionInvalid reports whether an account request error proves the
+// local session is permanently unusable.
+export function isAccountSessionInvalid(error) {
+    return SESSION_INVALID_CODES.has(String(error?.code || ''));
 }
