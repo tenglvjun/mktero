@@ -34,7 +34,7 @@ function pixelDeclaration(body, property) {
 test('uses balanced typography for long-form Markdown', () => {
     const host = ruleBody(':host');
 
-    assert.match(host, /--reader-width:\s*60rem/);
+    assert.match(host, /--reader-width:\s*80rem/);
     assert.match(host, /--reader-font-size:\s*18px/);
     assert.match(host, /--reader-line-height:\s*1\.78/);
     assert.match(host, /--reader-text-align:\s*start/);
@@ -82,6 +82,47 @@ test('gives the notes resize handle a grabbable target without covering the scro
     assert.match(
         ruleBody('.markdown-notes-resizer::before'),
         /inset-inline:\s*0/
+    );
+});
+
+test('keeps text, figures, tables, and code on one column edge', () => {
+    // Body text must not carry its own narrower max-width: a column that is
+    // wider than the text leaves figures and tables sticking out past it.
+    const editorLine = ruleBody('.markdown-editor-host > .cm-editor .cm-line');
+    assert.doesNotMatch(editorLine, /max-width/);
+
+    const content = ruleBody('.markdown-editor-host > .cm-editor .cm-content');
+    assert.match(content, /width:\s*calc\(100% - 48px\)/);
+    assert.match(content, /max-width:\s*var\(--reader-width\)/);
+    const snapshot = ruleBody('.markdown-snapshot-host');
+    assert.match(snapshot, /width:\s*calc\(100% - 48px\)/);
+    assert.match(snapshot, /max-width:\s*var\(--reader-width\)/);
+});
+
+test('sets data numerals in tables with lining tabular figures', () => {
+    const tableSelectors = [
+        '.markdown-editor-host > .cm-editor .cm-mktero-table table,\n'
+            + '.markdown-editor-host > .cm-editor .cm-mktero-html-block table',
+        '.markdown-snapshot-host table',
+        '.mktero-table-preview-viewport table',
+        '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-table-panel table',
+        '.mktero-figure-preview-viewport .mktero-figure-table-panel table',
+    ];
+    for (const selector of tableSelectors) {
+        assert.match(
+            ruleBody(selector),
+            /font-variant-numeric:\s*lining-nums tabular-nums/,
+            selector
+        );
+    }
+    assert.match(
+        ruleBody('.page-marker'),
+        /font-variant-numeric:\s*lining-nums/
+    );
+    // Running text keeps old-style figures.
+    assert.match(
+        ruleBody('.markdown-snapshot-host,\n.markdown-editor-host > .cm-editor'),
+        /font-variant-numeric:\s*oldstyle-nums proportional-nums/
     );
 });
 

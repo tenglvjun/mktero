@@ -13,7 +13,7 @@
     --accent-strong: #2854ab;
     --accent-contrast: #ffffff;
     --editor-background: var(--reader-background);
-    --reader-width: 60rem;
+    --reader-width: 80rem;
     --reader-font-size: 18px;
     --reader-line-height: 1.78;
     --reader-text-align: start;
@@ -2536,6 +2536,7 @@ main {
     overflow: hidden;
     font-family: var(--reader-font);
     font-size: var(--reader-table-font-size);
+    font-variant-numeric: lining-nums tabular-nums;
     line-height: var(--reader-table-line-height);
 }
 
@@ -3960,6 +3961,7 @@ main {
     background: var(--reference-preview-surface);
     font-family: var(--reader-font);
     font-size: var(--reader-table-font-size);
+    font-variant-numeric: lining-nums tabular-nums;
     line-height: var(--reader-table-line-height);
 }
 
@@ -4100,6 +4102,7 @@ main {
 
 .mktero-figure-preview-viewport .mktero-figure-table-panel table {
     width: 100%;
+    font-variant-numeric: lining-nums tabular-nums;
 }
 
 .mktero-figure-preview-viewport figcaption {
@@ -4296,6 +4299,7 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-table-panel table {
     width: 100%;
+    font-variant-numeric: lining-nums tabular-nums;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure figcaption {
@@ -4534,6 +4538,7 @@ main {
     border-collapse: collapse;
     font-family: inherit;
     font-size: var(--reader-table-font-size);
+    font-variant-numeric: lining-nums tabular-nums;
     line-height: var(--reader-table-line-height);
 }
 
@@ -4717,6 +4722,7 @@ main {
     color: var(--muted);
     font-family: var(--ui-font);
     font-size: var(--reader-page-marker-font-size);
+    font-variant-numeric: lining-nums;
     line-height: 1.4;
     text-transform: uppercase;
 }
