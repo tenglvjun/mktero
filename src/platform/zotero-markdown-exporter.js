@@ -3,7 +3,6 @@ import {
     createMarkdownExportDirectoryName,
     createMarkdownExportPlan,
     markdownExportTemporarySuffix,
-    usesWindowsPathSeparator,
 } from '../markdown/markdown-export.js';
 import { translateEnglish } from '../i18n/localization.js';
 
@@ -13,6 +12,7 @@ export function createZoteroMarkdownExporter({
     pathUtils,
     createID,
     translate = translateEnglish,
+    isWindows = false,
 }) {
     if (typeof createFilePicker !== 'function') {
         throw new TypeError('A Zotero file picker factory is required');
@@ -22,6 +22,9 @@ export function createZoteroMarkdownExporter({
     }
     if (typeof createID !== 'function') {
         throw new TypeError('A Markdown export ID factory is required');
+    }
+    if (typeof isWindows !== 'boolean') {
+        throw new TypeError('A Windows platform flag is required');
     }
     return {
         async export({ ownerWindow, title, markdown, assets, assetBasePath }) {
@@ -52,7 +55,7 @@ export function createZoteroMarkdownExporter({
                 title,
                 translate('viewer.exportMarkdownDefaultFileName')
             );
-            if (usesWindowsPathSeparator(join)) {
+            if (isWindows) {
                 preferredDocumentName = constrainExportDirectoryName({
                     preferredName: preferredDocumentName,
                     parentPath: selectedDirectory,

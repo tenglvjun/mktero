@@ -30,13 +30,6 @@ export function markdownExportTemporarySuffix(exportID) {
     return `.mktero-${String(exportID).slice(0, 8)}.tmp`;
 }
 
-export function usesWindowsPathSeparator(join) {
-    if (typeof join !== 'function') {
-        throw new TypeError('A path join function is required');
-    }
-    return join('a', 'b') === 'a\\b';
-}
-
 export function exportDirectoryPathsFit(directoryName, {
     parentPath,
     join,
