@@ -193,7 +193,10 @@ does not cancel it; the PDF continues in the background queue.
 and the paper title is `B`, Mktero creates `A/B/B.md` and writes extracted
 figures under `A/B/assets/`, updating their Markdown paths accordingly. If `B`
 already exists, a numbered directory such as `B-2` is created with a matching
-`B-2.md`; existing exports are never overwritten. Image names that collide on
+`B-2.md`; existing exports are never overwritten. On Windows, a long title is
+shortened so the folder, the Markdown file, and the temporary file used while
+writing stay under the 260-character path limit. The same limit applies inside
+an Obsidian vault. Image names that collide on
 case-insensitive filesystems are numbered and their Markdown references are
 updated, so distinct figures cannot overwrite each other. Export does not
 include translated or bilingual views and never runs automatically.

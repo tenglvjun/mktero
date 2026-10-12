@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
+    constrainExportDirectoryName,
     createMarkdownExportDirectoryName,
     createMarkdownExportPlan,
     createMarkdownExportFileName,
+    markdownExportTemporarySuffix,
     MAX_EXPORT_ASSET_BYTES,
     MAX_EXPORT_ASSETS,
     MAX_EXPORT_FILE_STEM_CODE_POINTS,
@@ -35,6 +38,70 @@ test('creates safe default Markdown export file names', () => {
         createMarkdownExportFileName('...', 'document'),
         'document.md'
     );
+});
+
+test('keeps the reported Windows paper title and shortens names that would reach 260', () => {
+    const title = 'Study of (La1-xCax)MnO3. I. Magnetic Structure of LaMnO3 Journal of the Physical Society of Japan';
+    const suffix = markdownExportTemporarySuffix(
+        'dc3b6389-a940-4a5b-a85b-3369e0ab5e76'
+    );
+    assert.equal(suffix, '.mktero-dc3b6389.tmp');
+    const desktop = 'C:\\Users\\86151\\Desktop';
+    const name = constrainExportDirectoryName({
+        parentPath: desktop,
+        preferredName: title,
+        join: path.win32.join,
+        temporarySuffix: suffix,
+    });
+    assert.equal(name, title);
+    assert.equal(path.win32.join(
+        desktop,
+        name,
+        `${name}.md${suffix}`
+    ).length, 241);
+    assert.equal(path.win32.join(
+        'D:\\2399067154',
+        name,
+        `${name}.md${suffix}`
+    ).length, 232);
+
+    const shortened = constrainExportDirectoryName({
+        parentPath: desktop,
+        preferredName: 'x'.repeat(180),
+        join: path.win32.join,
+        temporarySuffix: suffix,
+    });
+    assert.equal(shortened, 'x'.repeat(101));
+    assert.equal(path.win32.join(
+        desktop,
+        `${shortened}-1000`,
+        `${shortened}-1000.md${suffix}`
+    ).length, 259);
+
+    const withFigure = constrainExportDirectoryName({
+        parentPath: desktop,
+        preferredName: title,
+        join: path.win32.join,
+        temporarySuffix: suffix,
+        assetRelativePaths: [`images/${'a'.repeat(200)}`],
+    });
+    assert.equal(withFigure, 'Study of (La1-xC');
+    assert.equal(path.win32.join(
+        desktop,
+        `${withFigure}-1000`,
+        'assets',
+        'images',
+        'a'.repeat(200)
+    ).length, 259);
+});
+
+test('refuses a Windows folder that cannot hold even a one-character export', () => {
+    assert.throws(() => constrainExportDirectoryName({
+        parentPath: `C:\\${'p'.repeat(240)}`,
+        preferredName: 'Paper',
+        join: path.win32.join,
+        temporarySuffix: '.mktero-dc3b6389.tmp',
+    }), /too long to export/);
 });
 
 test('enforces Markdown export name and source budgets at their boundaries', () => {
