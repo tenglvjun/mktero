@@ -127,6 +127,10 @@ const SOURCE_PEEK_DELAY_MS = 80;
 const READING_POSITION_SAVE_DELAY_MS = 500;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
+// Once a drag is under way, only a clearly vertical move (a scrollbar drag
+// that slid sideways) cancels it. Ordinary hand drift must not.
+const SIDE_PANEL_RESIZE_VERTICAL_CANCEL_DISTANCE = 48;
+const SIDE_PANEL_RESIZE_VERTICAL_CANCEL_RATIO = 2;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
     outline: 820,
     notes: 1120,
@@ -3012,9 +3016,14 @@ class MarkdownTabView {
             this.finishSidePanelResize('outline');
             this.finishSidePanelResize('notes');
         });
-        const cancelSidePanelResizes = () => {
-            this.cancelSidePanelResize('outline');
-            this.cancelSidePanelResize('notes');
+        // Changing a panel's width reflows the editor, and CodeMirror answers a
+        // reflow with scroll events of its own. Those come from the drag itself,
+        // so once a drag is active only a wheel (a real scroll) cancels it. A
+        // press that has not started dragging yet is still cancelled by either.
+        const cancelSidePanelResizes = event => {
+            const keepActive = event?.type === 'scroll';
+            this.cancelSidePanelResize('outline', { keepActive });
+            this.cancelSidePanelResize('notes', { keepActive });
         };
         const editorScroller = this.elements.editorHost.querySelector(
             '.cm-scroller'
@@ -5484,22 +5493,29 @@ class MarkdownTabView {
             : event.clientY - panel.resize.pointerStartY;
         const horizontalDistance = Math.abs(deltaX);
         const verticalDistance = Math.abs(deltaY);
-        if (panel.resize.pointerStartY !== null
-            && horizontalDistance <= verticalDistance) {
-            if (panel.resize.active) {
-                this.setSidePanelWidth(name, panel.resize.widthAtStart);
-            }
-            this.finishSidePanelResize(name);
-            return;
-        }
         if (!panel.resize.active) {
+            // The first move after a press is a pixel or two of jitter in any
+            // direction. Wait for a deliberate move before judging it.
             if (Math.max(horizontalDistance, verticalDistance)
                 < SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE) {
+                return;
+            }
+            if (panel.resize.pointerStartY !== null
+                && horizontalDistance <= verticalDistance) {
+                this.finishSidePanelResize(name);
                 return;
             }
             panel.resize.active = true;
             event.preventDefault();
             this.elements.workspace.classList.add(panel.resizeClass);
+        }
+        else if (panel.resize.pointerStartY !== null
+            && verticalDistance > SIDE_PANEL_RESIZE_VERTICAL_CANCEL_DISTANCE
+            && verticalDistance
+                > horizontalDistance * SIDE_PANEL_RESIZE_VERTICAL_CANCEL_RATIO) {
+            this.setSidePanelWidth(name, panel.resize.widthAtStart);
+            this.finishSidePanelResize(name);
+            return;
         }
         this.setSidePanelWidth(
             name,
@@ -5516,8 +5532,9 @@ class MarkdownTabView {
         this.elements.workspace.classList.remove(panel.resizeClass);
     }
 
-    cancelSidePanelResize(name) {
+    cancelSidePanelResize(name, { keepActive = false } = {}) {
         const panel = this.sidePanels[name];
+        if (keepActive && panel.resize?.active) return;
         if (panel.resize?.active) {
             this.setSidePanelWidth(name, panel.resize.widthAtStart);
         }

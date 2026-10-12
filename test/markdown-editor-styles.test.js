@@ -65,6 +65,26 @@ test('uses balanced typography for long-form Markdown', () => {
     assert.doesNotMatch(MARKDOWN_STYLES, /text-rendering:\s*optimizeLegibility/);
 });
 
+test('gives the notes resize handle a grabbable target without covering the scrollbar', () => {
+    // The handle's own box stays 3px wide and starts 4px inside the edge, so
+    // the strip next to the editor scrollbar is never covered.
+    const handle = ruleBody('.markdown-notes-resizer');
+    assert.match(handle, /inset-inline-start:\s*4px/);
+    assert.match(handle, /inset-inline-end:\s*0/);
+
+    // The extra reach goes right, into the notes panel, from the handle's
+    // trailing edge. It must not extend left toward the scrollbar.
+    const reach = ruleBody('.markdown-notes-resizer::after');
+    assert.match(reach, /position:\s*absolute/);
+    assert.match(reach, /inset-inline:\s*100%\s+-6px/);
+
+    // The 3px handle leaves no room for the shared 2px side insets.
+    assert.match(
+        ruleBody('.markdown-notes-resizer::before'),
+        /inset-inline:\s*0/
+    );
+});
+
 test('renders conversion notices as compact overlay toasts', () => {
     const view = ruleBody('.mktero-tab-view');
     assert.match(view, /position:\s*relative/);
