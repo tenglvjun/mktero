@@ -120,6 +120,7 @@ function dispatchShortcut(target, {
     metaKey = false,
     ctrlKey = false,
     shiftKey = false,
+    altKey = false,
 } = {}) {
     const ownerWindow = target.ownerDocument?.defaultView || target;
     const event = new ownerWindow.Event('keydown', {
@@ -132,6 +133,7 @@ function dispatchShortcut(target, {
         metaKey: { value: metaKey },
         ctrlKey: { value: ctrlKey },
         shiftKey: { value: shiftKey },
+        altKey: { value: altKey },
         isComposing: { value: false },
     });
     target.dispatchEvent(event);
@@ -2936,9 +2938,9 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
     }
 });
 
-test('enables the citation return button from editor navigation state', () => {
+test('enables the back and forward buttons from editor navigation state', () => {
     let editorOptions;
-    let returnCalls = 0;
+    const calls = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
         progress: 100,
@@ -2948,26 +2950,196 @@ test('enables the citation return button from editor navigation state', () => {
         editorFactory(options) {
             editorOptions = options;
             const editor = createTestInlineEditor(options);
-            editor.returnToCitation = () => {
-                returnCalls++;
+            editor.goNavigationBack = () => {
+                calls.push('back');
                 editorOptions.onNavigationBackChange(false);
+                editorOptions.onNavigationForwardChange(true);
+                return true;
+            };
+            editor.goNavigationForward = () => {
+                calls.push('forward');
+                editorOptions.onNavigationForwardChange(false);
                 return true;
             };
             return editor;
         },
     });
 
-    const button = shadow.querySelector('#mktero-navigation-back');
+    const back = shadow.querySelector('#mktero-navigation-back');
+    const forward = shadow.querySelector('#mktero-navigation-forward');
     try {
-        assert.equal(button.disabled, true);
-        assert.equal(button.getAttribute('aria-label'), 'Return to citation');
+        assert.equal(back.disabled, true);
+        assert.equal(forward.disabled, true);
+        assert.match(back.getAttribute('aria-label'), /^Go back/);
+        assert.match(forward.getAttribute('aria-label'), /^Go forward/);
 
         editorOptions.onNavigationBackChange(true);
-        assert.equal(button.disabled, false);
-        button.click();
+        assert.equal(back.disabled, false);
+        assert.equal(forward.disabled, true);
+        back.click();
 
-        assert.equal(returnCalls, 1);
-        assert.equal(button.disabled, true);
+        assert.deepEqual(calls, ['back']);
+        assert.equal(back.disabled, true);
+        assert.equal(forward.disabled, false);
+        forward.click();
+
+        assert.deepEqual(calls, ['back', 'forward']);
+        assert.equal(forward.disabled, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('handles the navigation chords when focus is outside the editor', () => {
+    let editorOptions;
+    const calls = [];
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            const editor = createTestInlineEditor(options);
+            editor.goNavigationBack = () => calls.push('back');
+            editor.goNavigationForward = () => calls.push('forward');
+            return editor;
+        },
+    });
+
+    // The harness's events do not cross the shadow boundary, so dispatch on the
+    // host, which is where focus in the outline or toolbar ends up.
+    const press = (key, init = {}) => dispatchShortcut(
+        view.host,
+        { key, ...init }
+    );
+    try {
+        assert.equal(press('ArrowLeft', { altKey: true }).defaultPrevented, false);
+        assert.deepEqual(calls, []);
+
+        editorOptions.onNavigationBackChange(true);
+        editorOptions.onNavigationForwardChange(true);
+        assert.equal(press('ArrowLeft', { altKey: true }).defaultPrevented, true);
+        assert.equal(press('ArrowRight', { altKey: true }).defaultPrevented, true);
+        assert.equal(press('[', { metaKey: true }).defaultPrevented, true);
+        assert.equal(press(']', { metaKey: true }).defaultPrevented, true);
+        assert.deepEqual(calls, ['back', 'forward', 'back', 'forward']);
+
+        // Shift, Ctrl, or an unrelated key must not trigger navigation.
+        assert.equal(press('ArrowLeft', {
+            altKey: true,
+            shiftKey: true,
+        }).defaultPrevented, false);
+        assert.equal(press('ArrowLeft', { ctrlKey: true }).defaultPrevented, false);
+        assert.deepEqual(calls, ['back', 'forward', 'back', 'forward']);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('records the reading position before jumping from the outline or notes', () => {
+    const recorded = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\n## Method\n\nBody.',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.recordNavigationPoint = () => {
+                recorded.push(editor.scrolledOffsets.length);
+            };
+            return editor;
+        },
+    });
+
+    try {
+        const link = shadow.querySelector('.markdown-outline-link[data-offset]');
+        assert.ok(link, 'the outline renders a heading link');
+        link.click();
+
+        // The point is recorded before the scroll, not after it.
+        assert.deepEqual(recorded, [0]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('records one navigation point for a whole document search', () => {
+    const recorded = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nalpha one\n\nalpha two\n\nalpha three',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.recordNavigationPoint = () => recorded.push('record');
+            return editor;
+        },
+    });
+
+    try {
+        view.openDocumentSearch();
+        const input = shadow.querySelector('#mktero-document-search-input');
+        input.value = 'alpha';
+        input.dispatchEvent(new view.ownerWindow.Event('input', { bubbles: true }));
+        view.stepDocumentSearch(1);
+        view.stepDocumentSearch(1);
+        assert.deepEqual(recorded, ['record']);
+
+        // A new search session starts a new trip.
+        view.closeDocumentSearch({ restoreFocus: false });
+        view.openDocumentSearch();
+        view.stepDocumentSearch(1);
+        assert.deepEqual(recorded, ['record', 'record']);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('shows reading progress only while the document scrolls', () => {
+    let editorOptions;
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return createTestInlineEditor(options);
+        },
+    });
+
+    const bar = shadow.querySelector('.markdown-reading-progress');
+    const fill = shadow.querySelector('.markdown-reading-progress-bar');
+    try {
+        assert.equal(bar.hidden, true);
+        assert.equal(bar.getAttribute('role'), 'progressbar');
+
+        editorOptions.onScrollProgress(0.426);
+        assert.equal(bar.hidden, false);
+        assert.equal(fill.style.width, '43%');
+        assert.equal(bar.getAttribute('aria-valuenow'), '43');
+        assert.equal(bar.getAttribute('aria-valuetext'), '43%');
+
+        editorOptions.onScrollProgress(2);
+        assert.equal(fill.style.width, '100%');
+        editorOptions.onScrollProgress(-1);
+        assert.equal(fill.style.width, '0%');
+
+        editorOptions.onScrollProgress(null);
+        assert.equal(bar.hidden, true);
+        editorOptions.onScrollProgress(Number.NaN);
+        assert.equal(bar.hidden, true);
     }
     finally {
         view.destroy();

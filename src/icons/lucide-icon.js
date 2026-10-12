@@ -1,5 +1,6 @@
 import {
     ArrowLeft,
+    ArrowRight,
     BookOpen,
     Check,
     ChevronDown,
@@ -54,6 +55,10 @@ export const LUCIDE_ICONS = Object.freeze({
     arrowLeft: Object.freeze({
         name: 'arrow-left',
         nodes: ArrowLeft,
+    }),
+    arrowRight: Object.freeze({
+        name: 'arrow-right',
+        nodes: ArrowRight,
     }),
     bookOpen: Object.freeze({
         name: 'book-open',

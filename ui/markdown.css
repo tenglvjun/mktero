@@ -1183,6 +1183,8 @@ main {
 .mktero-tab-view.is-focus-mode .markdown-side-panel-resizer,
 .mktero-tab-view.is-focus-mode .markdown-side-panel-toggle,
 .mktero-tab-view.is-focus-mode .markdown-reader-navigation-back,
+.mktero-tab-view.is-focus-mode .markdown-reader-navigation-forward,
+.mktero-tab-view.is-focus-mode .markdown-reading-progress,
 .mktero-tab-view.is-focus-mode .markdown-source-peek-toggle,
 .mktero-tab-view.is-focus-mode .markdown-reader-action--primary,
 .mktero-tab-view.is-focus-mode .markdown-focus-toggle {
@@ -1874,8 +1876,31 @@ main {
     white-space: nowrap;
 }
 
-.markdown-reader-navigation-back {
+.markdown-reader-navigation-back,
+.markdown-reader-navigation-forward {
     flex: 0 0 auto;
+}
+
+/* Back and forward read as one pair, so close the toolbar gap between them. */
+.markdown-reader-navigation-back + .markdown-reader-navigation-forward {
+    margin-inline-start: calc(var(--toolbar-control-gap) * -0.5);
+}
+
+.markdown-reading-progress {
+    position: absolute;
+    z-index: 3;
+    inset-block-end: 0;
+    inset-inline: 0;
+    height: 3px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--muted) 14%, transparent);
+    pointer-events: none;
+}
+
+.markdown-reading-progress-bar {
+    width: 0;
+    height: 100%;
+    background: color-mix(in srgb, var(--accent) 78%, transparent);
 }
 
 .markdown-reader-action-menu .markdown-reader-action {

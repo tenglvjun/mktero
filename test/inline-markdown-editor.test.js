@@ -6084,35 +6084,51 @@ test('jumps to and highlights a clicked citation reference for three seconds', (
     dom.window.close();
 });
 
-test('returns to the citation origin after jumping to its reference', () => {
+const NAVIGATION_MARKDOWN = [
+    '# Paper',
+    '',
+    'Finding [1].',
+    '',
+    '## References',
+    '',
+    '[1] Alpha A. Target reference. 2024.',
+].join('\n');
+
+function createNavigationEditor(options = {}) {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
     });
     const { document } = dom.window;
-    const markdown = [
-        '# Paper',
-        '',
-        'Finding [1].',
-        '',
-        '## References',
-        '',
-        '[1] Alpha A. Target reference. 2024.',
-    ].join('\n');
-    const availability = [];
     const editor = createInlineMarkdownEditor({
         parent: document.querySelector('#editor'),
-        initialMarkdown: markdown,
-        onNavigationBackChange: available => availability.push(available),
+        initialMarkdown: NAVIGATION_MARKDOWN,
+        ...options,
     });
     const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
-    const referenceOffset = markdown.indexOf('[1] Alpha');
-    view.lineBlockAt = position => {
-        assert.equal(position, referenceOffset);
-        return { top: 640 };
-    };
+    view.lineBlockAt = () => ({ top: 640 });
     view.requestMeasure = request => {
         if (request?.read) request.write?.(request.read(view), view);
     };
+    return { dom, document, editor, view };
+}
+
+function pressNavigationKey(dom, document, init) {
+    const event = new dom.window.KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        ...init,
+    });
+    document.querySelector('.cm-content').dispatchEvent(event);
+    return event;
+}
+
+test('goes back and forward across a citation jump', () => {
+    const back = [];
+    const forward = [];
+    const { dom, document, editor, view } = createNavigationEditor({
+        onNavigationBackChange: available => back.push(available),
+        onNavigationForwardChange: available => forward.push(available),
+    });
     view.scrollDOM.scrollTop = 128;
 
     document.querySelector('.cm-mktero-citation').dispatchEvent(
@@ -6123,89 +6139,217 @@ test('returns to the citation origin after jumping to its reference', () => {
         })
     );
 
-    assert.deepEqual(availability, [true]);
+    assert.deepEqual(back, [true]);
     assert.equal(view.scrollDOM.scrollTop, 640);
-    assert.equal(editor.returnToCitation(), true);
+    assert.equal(editor.goNavigationBack(), true);
     assert.equal(view.scrollDOM.scrollTop, 128);
-    assert.deepEqual(availability, [true, false]);
-    assert.equal(editor.returnToCitation(), false);
+    assert.deepEqual(back, [true, false]);
+    assert.deepEqual(forward, [true]);
+    assert.equal(editor.goNavigationBack(), false);
+
+    assert.equal(editor.goNavigationForward(), true);
+    assert.equal(view.scrollDOM.scrollTop, 640);
+    assert.deepEqual(back, [true, false, true]);
+    assert.deepEqual(forward, [true, false]);
+    assert.equal(editor.goNavigationForward(), false);
 
     editor.destroy();
     dom.window.close();
 });
 
-test('clears the citation return point when the Markdown document changes', () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
+test('a new jump after going back discards the forward history', () => {
+    const forward = [];
+    const { dom, editor, view } = createNavigationEditor({
+        onNavigationForwardChange: available => forward.push(available),
     });
-    const { document } = dom.window;
-    const markdown = [
-        '# Paper',
-        '',
-        'Finding [1].',
-        '',
-        '## References',
-        '',
-        '[1] Alpha A. Target reference. 2024.',
-    ].join('\n');
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: markdown,
-    });
-    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
-    view.lineBlockAt = () => ({ top: 640 });
-    view.requestMeasure = request => {
-        if (request?.read) request.write?.(request.read(view), view);
-    };
+    view.scrollDOM.scrollTop = 100;
+    editor.recordNavigationPoint();
+    view.scrollDOM.scrollTop = 500;
+    assert.equal(editor.goNavigationBack(), true);
+    assert.deepEqual(forward, [true]);
 
-    document.querySelector('.cm-mktero-citation').click();
+    view.scrollDOM.scrollTop = 900;
+    editor.recordNavigationPoint();
+
+    assert.deepEqual(forward, [true, false]);
+    assert.equal(editor.goNavigationForward(), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not record a second back step for the same position', () => {
+    const { dom, editor, view } = createNavigationEditor();
+    view.scrollDOM.scrollTop = 300;
+    editor.recordNavigationPoint();
+    view.scrollDOM.scrollTop = 310;
+    editor.recordNavigationPoint();
+
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(editor.goNavigationBack(), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps only the most recent navigation positions', () => {
+    const { dom, editor, view } = createNavigationEditor();
+    for (let index = 0; index < 60; index++) {
+        view.scrollDOM.scrollTop = (index + 1) * 100;
+        editor.recordNavigationPoint();
+    }
+
+    let steps = 0;
+    while (editor.goNavigationBack()) steps++;
+
+    assert.equal(steps, 50);
+    // The oldest ten were dropped, so the walk ends at the 11th recorded point.
+    assert.equal(view.scrollDOM.scrollTop, 1100);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('clears navigation history when the Markdown document changes', () => {
+    const back = [];
+    const forward = [];
+    const { dom, editor, view } = createNavigationEditor({
+        onNavigationBackChange: available => back.push(available),
+        onNavigationForwardChange: available => forward.push(available),
+    });
+    view.scrollDOM.scrollTop = 100;
+    editor.recordNavigationPoint();
+    view.scrollDOM.scrollTop = 400;
+    editor.recordNavigationPoint();
+    editor.goNavigationBack();
+    assert.deepEqual([back.at(-1), forward.at(-1)], [true, true]);
+
     editor.setMarkdown('# Replaced');
 
-    assert.equal(editor.returnToCitation(), false);
+    assert.deepEqual([back.at(-1), forward.at(-1)], [false, false]);
+    assert.equal(editor.goNavigationBack(), false);
+    assert.equal(editor.goNavigationForward(), false);
 
     editor.destroy();
     dom.window.close();
 });
 
-test('returns to a citation with the reader back shortcut', () => {
-    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
-        pretendToBeVisual: true,
-    });
-    const { document } = dom.window;
-    const markdown = [
-        '# Paper',
-        '',
-        'Finding [1].',
-        '',
-        '## References',
-        '',
-        '[1] Alpha A. Target reference. 2024.',
-    ].join('\n');
-    const editor = createInlineMarkdownEditor({
-        parent: document.querySelector('#editor'),
-        initialMarkdown: markdown,
-    });
-    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
-    view.lineBlockAt = () => ({ top: 640 });
-    view.requestMeasure = request => {
-        if (request?.read) request.write?.(request.read(view), view);
-    };
+test('moves through navigation history with the reader shortcuts', () => {
+    const { dom, document, editor, view } = createNavigationEditor();
     view.scrollDOM.scrollTop = 128;
-    document.querySelector('.cm-mktero-citation').click();
+    editor.recordNavigationPoint();
+    view.scrollDOM.scrollTop = 640;
 
-    const shortcut = new dom.window.KeyboardEvent('keydown', {
-        bubbles: true,
-        cancelable: true,
+    const back = pressNavigationKey(dom, document, {
         key: 'ArrowLeft',
         altKey: true,
     });
-    document.querySelector('.cm-content').dispatchEvent(shortcut);
-
-    assert.equal(shortcut.defaultPrevented, true);
+    assert.equal(back.defaultPrevented, true);
     assert.equal(view.scrollDOM.scrollTop, 128);
-    assert.equal(editor.returnToCitation(), false);
+
+    const forward = pressNavigationKey(dom, document, {
+        key: 'ArrowRight',
+        altKey: true,
+    });
+    assert.equal(forward.defaultPrevented, true);
+    assert.equal(view.scrollDOM.scrollTop, 640);
+
+    const metaBack = pressNavigationKey(dom, document, {
+        key: '[',
+        metaKey: true,
+    });
+    assert.equal(metaBack.defaultPrevented, true);
+    assert.equal(view.scrollDOM.scrollTop, 128);
+
+    const metaForward = pressNavigationKey(dom, document, {
+        key: ']',
+        metaKey: true,
+    });
+    assert.equal(metaForward.defaultPrevented, true);
+    assert.equal(view.scrollDOM.scrollTop, 640);
 
     editor.destroy();
+    dom.window.close();
+});
+
+test('lets the window handle the chord only when the editor did not', () => {
+    const { dom, document, editor, view } = createNavigationEditor();
+    let reachedWindow = 0;
+    document.addEventListener('keydown', event => {
+        if (!event.defaultPrevented) reachedWindow++;
+    });
+    view.scrollDOM.scrollTop = 128;
+    editor.recordNavigationPoint();
+    view.scrollDOM.scrollTop = 640;
+
+    const handled = pressNavigationKey(dom, document, {
+        key: 'ArrowLeft',
+        altKey: true,
+    });
+
+    assert.equal(handled.defaultPrevented, true);
+    assert.equal(reachedWindow, 0, 'a handled chord must not bubble on');
+    assert.equal(view.scrollDOM.scrollTop, 128);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not move the reader when there is no navigation history', () => {
+    const { dom, document, editor, view } = createNavigationEditor();
+    view.scrollDOM.scrollTop = 321;
+
+    // CodeMirror's own keymap still owns Alt+Arrow as word movement here, so
+    // the event may be consumed; the viewport must not jump.
+    pressNavigationKey(dom, document, { key: 'ArrowLeft', altKey: true });
+    pressNavigationKey(dom, document, { key: 'ArrowRight', altKey: true });
+    pressNavigationKey(dom, document, { key: '[', metaKey: true });
+    pressNavigationKey(dom, document, { key: ']', metaKey: true });
+
+    assert.equal(view.scrollDOM.scrollTop, 321);
+    assert.equal(editor.goNavigationBack(), false);
+    assert.equal(editor.goNavigationForward(), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('reports scroll progress and hides it when nothing scrolls', async () => {
+    const progress = [];
+    const { dom, document, editor, view } = createNavigationEditor({
+        onScrollProgress: value => progress.push(value),
+    });
+    const frame = () => new Promise(resolve => {
+        dom.window.requestAnimationFrame(() => resolve());
+    });
+    await frame();
+    assert.equal(progress.at(-1), null);
+
+    Object.defineProperty(view.scrollDOM, 'scrollHeight', { value: 1200 });
+    Object.defineProperty(view.scrollDOM, 'clientHeight', { value: 200 });
+    view.scrollDOM.scrollTop = 500;
+    view.scrollDOM.dispatchEvent(new dom.window.Event('scroll'));
+    await frame();
+    await frame();
+    assert.equal(progress.at(-1), 0.5);
+
+    view.scrollDOM.scrollTop = 5000;
+    view.scrollDOM.dispatchEvent(new dom.window.Event('scroll'));
+    await frame();
+    await frame();
+    assert.equal(progress.at(-1), 1);
+
+    const reported = progress.length;
+    view.scrollDOM.dispatchEvent(new dom.window.Event('scroll'));
+    await frame();
+    await frame();
+    assert.equal(progress.length, reported, 'an unchanged value is not repeated');
+
+    editor.destroy();
+    view.scrollDOM.dispatchEvent(new dom.window.Event('scroll'));
+    await frame();
+    assert.equal(progress.length, reported, 'no report after destroy');
+    assert.ok(document);
     dom.window.close();
 });
 
