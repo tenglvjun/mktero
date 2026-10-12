@@ -19,14 +19,13 @@ import {
     findConsecutiveImagePacks,
     parseFigureLayoutMarker,
 } from '../markdown/markdown-figures.js';
+import { findAuthorNoteLatexCommands } from '../markdown/markdown-citations.js';
 import {
-    analyzeMarkdownCitations,
-    findAuthorNoteLatexCommands,
-} from '../markdown/markdown-citations.js';
-import {
-    analyzeMarkdownFigureReferences,
-} from '../markdown/markdown-figure-references.js';
-import { analyzeMarkdownTableReferences } from '../markdown/markdown-table-references.js';
+    computeDocumentFigures,
+    computeFigureReferences,
+    computeMarkdownCitations,
+    computeTableReferences,
+} from '../markdown/markdown-analysis-cache.js';
 import {
     isEditableTextCorrectionBlock,
 } from './correction-interactions.js';
@@ -55,7 +54,6 @@ import {
     installRenderedAnnotations,
 } from './pdf-annotations.js';
 import { MAX_PDF_ANNOTATION_TEXT_LENGTH } from '../core/pdf-annotation.js';
-import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import { collectFigureImageNodes } from '../figures/figure-model.js';
 import {
     findPaperTitleHeading,
@@ -80,6 +78,9 @@ import {
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const MAX_MATCH_CANDIDATES = 10_000;
+// A stable empty range list, so "no ranges" keeps one identity across renders
+// and the rendering field can tell it apart from a real change.
+const NO_CONTEXT_RANGES = Object.freeze([]);
 
 export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
@@ -598,10 +599,12 @@ export function createInlineRenderingExtension({
     onCorrectionError,
     onCorrectionEditingChange,
     translate = translateEnglish,
+    analysisCache = null,
 }) {
     const context = {
         resolveImageURL,
         resolveRestoredFigureURL,
+        analysisCache,
         openLink,
         openImagePreview,
         copyCode,
@@ -636,8 +639,11 @@ export function createInlineRenderingExtension({
         documentTitle: '',
         paperTitleHeading: null,
         translationRanges: [],
+        translationRangesSource: null,
         translationFailures: [],
+        translationFailuresSource: null,
         translationPairs: [],
+        translationPairsSource: null,
         highlightedTranslationBlockID: null,
         annotationTargets: new Map(),
         editingRange: null,
@@ -648,10 +654,14 @@ export function createInlineRenderingExtension({
         citationAnalysis: null,
         citationTargets: new Map(),
         tableReferences: createReferenceAnalysisCache(
-            analyzeMarkdownTableReferences
+            source => computeTableReferences(context.analysisCache, source)
         ),
         figureReferences: createReferenceAnalysisCache(
-            source => analyzeMarkdownFigureReferences(source, { figureViews: context.figureViews }),
+            source => computeFigureReferences(
+                context.analysisCache,
+                source,
+                context.figureViews
+            ),
             { indexTargetsByFrom: true }
         ),
     };
@@ -665,6 +675,12 @@ export function createInlineRenderingExtension({
             ));
             const syntaxTreeChanged = syntaxTree(transaction.startState)
                 !== syntaxTree(transaction.state);
+            // `setDocument` re-dispatches its whole effect list on every model
+            // update, and the normalisers below build fresh arrays, so an
+            // identity check on the effect value alone is not enough. A
+            // document replacement always wins: the length-dependent ranges
+            // have to be re-clipped even when the caller passes the same array.
+            const documentChanged = transaction.docChanged;
             let referenceHighlightChanged = false;
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
@@ -683,84 +699,114 @@ export function createInlineRenderingExtension({
             if (shouldRefresh) context.renderVersion++;
             for (const effect of transaction.effects) {
                 if (effect.is(setReferenceHighlight)) {
+                    if (effect.value === context.highlightedReferenceID) continue;
                     context.highlightedReferenceID = effect.value;
                     referenceHighlightChanged = true;
                 }
                 else if (effect.is(setTableHighlight)) {
+                    if (effect.value === context.highlightedTableID) continue;
                     context.highlightedTableID = effect.value;
                     tableHighlightChanged = true;
                 }
                 else if (effect.is(setFigureHighlight)) {
+                    if (effect.value === context.highlightedFigureID) continue;
                     context.highlightedFigureID = effect.value;
                     figureHighlightChanged = true;
                 }
                 else if (effect.is(setFigureViews)) {
-                    context.figureViews = Array.isArray(effect.value) ? effect.value : null;
+                    const views = Array.isArray(effect.value) ? effect.value : null;
+                    if (!documentChanged && views === context.figureViews) continue;
+                    context.figureViews = views;
                     context.figureReferences.document = null;
                     figureViewsChanged = true;
                 }
                 else if (effect.is(setPendingFigures)) {
-                    context.pendingFigures = effect.value instanceof Map
+                    const pending = effect.value instanceof Map
                         ? effect.value
                         : null;
+                    if (pending === context.pendingFigures) continue;
+                    context.pendingFigures = pending;
                     pendingFiguresChanged = true;
                 }
                 else if (effect.is(setRestoredFigures)) {
-                    context.restoredFigures = effect.value instanceof Map
+                    const restored = effect.value instanceof Map
                         ? effect.value
                         : null;
+                    if (restored === context.restoredFigures) continue;
+                    context.restoredFigures = restored;
                     restoredFiguresChanged = true;
                 }
                 else if (effect.is(setAnnotationOverlay)) {
-                    context.annotationOverlay = effect.value
+                    const overlay = effect.value
                         || createEmptyAnnotationOverlay();
+                    if (overlay === context.annotationOverlay) continue;
+                    context.annotationOverlay = overlay;
                     context.annotationTargets = new Map(
-                        (context.annotationOverlay.matched || []).map(
+                        (overlay.matched || []).map(
                             annotation => [String(annotation.id || ''), annotation]
                         )
                     );
                     annotationOverlayChanged = true;
                 }
                 else if (effect.is(setChromeRanges)) {
-                    context.chromeRanges = Array.isArray(effect.value)
+                    const ranges = Array.isArray(effect.value)
                         ? effect.value
-                        : [];
+                        : NO_CONTEXT_RANGES;
+                    if (!documentChanged && ranges === context.chromeRanges) continue;
+                    context.chromeRanges = ranges;
                     chromeRangesChanged = true;
                 }
                 else if (effect.is(setDocumentTitle)) {
-                    context.documentTitle = String(effect.value || '');
+                    const title = String(effect.value || '');
+                    if (title === context.documentTitle) continue;
+                    context.documentTitle = title;
                     documentTitleChanged = true;
                 }
                 else if (effect.is(setTranslationRanges)) {
+                    const source = effect.value || NO_CONTEXT_RANGES;
+                    if (!documentChanged
+                        && source === context.translationRangesSource) continue;
+                    context.translationRangesSource = source;
                     context.translationRanges = normalizeTranslationRanges(
-                        effect.value,
+                        source,
                         transaction.state.doc.length
                     );
                     translationRangesChanged = true;
                 }
                 else if (effect.is(setTranslationFailures)) {
+                    const source = effect.value || NO_CONTEXT_RANGES;
+                    if (!documentChanged
+                        && source === context.translationFailuresSource) continue;
+                    context.translationFailuresSource = source;
                     context.translationFailures = normalizeTranslationFailures(
-                        effect.value,
+                        source,
                         transaction.state.doc.length
                     );
                     translationFailuresChanged = true;
                 }
                 else if (effect.is(setTranslationPairs)) {
+                    const source = effect.value || NO_CONTEXT_RANGES;
+                    if (!documentChanged
+                        && source === context.translationPairsSource) continue;
+                    context.translationPairsSource = source;
                     context.translationPairs = normalizeTranslationPairs(
-                        effect.value,
+                        source,
                         transaction.state.doc.length
                     );
                     translationPairsChanged = true;
                 }
                 else if (effect.is(setTranslationPairHighlight)) {
                     const id = String(effect.value || '');
-                    context.highlightedTranslationBlockID =
+                    const highlighted =
                         context.translationPairs.some(pair => pair.id === id)
                             ? id
                             : null;
+                    if (highlighted === context.highlightedTranslationBlockID) continue;
+                    context.highlightedTranslationBlockID = highlighted;
                     translationPairHighlightChanged = true;
                 }
                 else if (effect.is(setInlineEditingRange)) {
+                    if (effect.value === context.editingRange) continue;
                     context.editingRange = effect.value;
                     editingRangeChanged = true;
                 }
@@ -1026,8 +1072,12 @@ function mapRangeThroughChanges(range, changes) {
 }
 
 function buildDecorations(state, context) {
+    // One snapshot per rebuild. Materialising the document is cheap but it is
+    // not free on a 900 KB comparison view, and this function used to ask for
+    // it five separate times.
+    const markdown = state.doc.toString();
     context.paperTitleHeading = findPaperTitleHeading(
-        state.doc.toString(),
+        markdown,
         context.documentTitle
     );
     const decorations = [];
@@ -1041,17 +1091,18 @@ function buildDecorations(state, context) {
         analyzedTableReferences.targets.map(target => [target.from, target])
     );
     referenceAnalysis(state, context.figureReferences);
-    const algorithmGroups = findMinerUAlgorithmGroups(state.doc.toString())
+    const algorithmGroups = findMinerUAlgorithmGroups(markdown)
         .filter(group => !rangesOverlapEditing(group, context));
-    const figureGroups = (context.figureViews || analyzeDocumentFigures(state.doc.toString()))
+    const figureGroups = (context.figureViews
+        || computeDocumentFigures(context.analysisCache, markdown))
         .map(group => group.translatedCaption ? { ...group, to: group.imageRange.to } : group)
         .filter(group => !rangesOverlapEditing(group, context));
     const imagePacks = findConsecutiveImagePacks(
-        state.doc.toString(),
+        markdown,
         figureGroups
     ).filter(group => !rangesOverlapEditing(group, context));
     const renderedFigureGroups = [...figureGroups, ...imagePacks];
-    const tableGroups = findAcademicTableGroups(state.doc.toString())
+    const tableGroups = findAcademicTableGroups(markdown)
         .filter(group => !rangesOverlapEditing(group, context));
     const renderedGroups = [
         ...algorithmGroups,
@@ -1498,7 +1549,10 @@ function citationAnalysis(state, context) {
     if (context.citationAnalysisDocument === state.doc) {
         return context.citationAnalysis;
     }
-    const result = analyzeMarkdownCitations(state.doc.toString());
+    const result = computeMarkdownCitations(
+        context.analysisCache,
+        state.doc.toString()
+    );
     context.citationAnalysisDocument = state.doc;
     context.citationAnalysis = result;
     context.citationTargets = new Map(

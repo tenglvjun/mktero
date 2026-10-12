@@ -19,7 +19,6 @@ import {
     resolvePDFPageIndexHint,
     resolveSourceMapRegion,
 } from '../core/markdown-source-map.js';
-import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     AI_TARGET_LANGUAGES,
     isSupportedAITargetLanguage,
@@ -62,23 +61,23 @@ import { createLocalization } from '../i18n/localization.js';
 import { findGitHubRepositories } from '../markdown/github-repository-links.js';
 import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
 import {
-    visibleDocumentChromeRanges,
-} from '../markdown/chrome-ranges.js';
+    computeAlignedMarkdownOutline,
+    computeDocumentFigures,
+    computeMarkdownAssetOutline,
+    computeMarkdownFragmentIndex,
+    computeVisibleChromeRanges,
+    createMarkdownAnalysisCache,
+} from '../markdown/markdown-analysis-cache.js';
 import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
 import {
     createMarkdownFragmentID,
-    createMarkdownFragmentIndex,
     createMarkdownReadingPositionAnchor,
-    extractAlignedMarkdownOutline,
     resolveMarkdownReadingPosition,
 } from '../markdown/markdown-outline.js';
 import {
     selectSourcePeek,
     sourcePeekKey,
 } from '../core/source-peek.js';
-import {
-    extractMarkdownAssetOutline,
-} from '../markdown/markdown-asset-outline.js';
 import { appendRenderedMarkdown } from '../editor/rendered-markdown-dom.js';
 import {
     createTranslationReadingPositionAnchor,
@@ -98,6 +97,9 @@ const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
     ? __MKTERO_MARKDOWN_STYLES__
     : null;
 const DOCUMENT_ACTION_STATUS_TIMEOUT_MS = 5_000;
+// One stable identity for "no ranges", so an unchanged reading mode keeps the
+// same outline inputs and the outline list is not rebuilt for nothing.
+const NO_OUTLINE_RANGES = Object.freeze([]);
 const DOCUMENT_ACTION_FEEDBACK = Object.freeze({
     saveSnapshot: Object.freeze({
         progress: 'viewer.snapshotSaving',
@@ -337,6 +339,15 @@ class MarkdownTabView {
         this.renderedTranslationView = 'original';
         this.renderedTranslationBlockRanges = [];
         this.fragmentIndex = new Map();
+        // Whole-document analyses are the dominant cost of a render on a long
+        // paper, and switching reading mode replaces the CodeMirror document,
+        // which invalidates every cache keyed on `state.doc`. Keying them on
+        // the Markdown string instead keeps the three views of one paper warm.
+        this.analysisCache = createMarkdownAnalysisCache();
+        this.renderedLocalizationLanguage = null;
+        this.renderedActionLabelSignature = null;
+        this.renderedDocumentLayerInputs = null;
+        this.outlineListRendered = false;
         this.renderedSnapshotHTML = undefined;
         this.renderedSnapshotAssets = undefined;
         this.snapshotURLs = new Map();
@@ -445,6 +456,7 @@ class MarkdownTabView {
             document: this.document,
             parent: this.elements.editorHost,
             initialMarkdown: '',
+            analysisCache: this.analysisCache,
             resolveImageURL: source => this.resolveImageURL(source),
             resolveRestoredFigureURL: figure => (
                 this.resolveRestoredFigureURL(figure)
@@ -668,161 +680,193 @@ class MarkdownTabView {
                 this.deferredRenderModel = model;
                 return;
             }
-            const figureViews = analyzeDocumentFigures(markdown, {
-                figureMap: model.figureMap,
-                viewRanges: model.translationBlockRanges,
-                viewKind: translatedView ? 'translation' : comparisonView ? 'comparison' : 'original',
-            });
-            const documentChanged = this.renderedRenderMode !== 'markdown'
-                || this.renderedMarkdown !== markdown;
-            const previousTranslationView = this.renderedTranslationView;
-            const previousTranslationBlockRanges =
-                this.renderedTranslationBlockRanges;
-            const translationAnchor = documentChanged
-                && this.renderedMarkdown !== undefined
-                && this.activeNavigationOffset > 0
-                ? createTranslationReadingPositionAnchor(
-                    this.activeNavigationOffset,
-                    previousTranslationView,
-                    previousTranslationBlockRanges
-                )
-                : null;
-            const restoreAnchor = !translationAnchor && documentChanged
-                && this.renderedMarkdown !== undefined
-                && this.activeNavigationOffset > 0
-                ? createMarkdownReadingPositionAnchor(
-                    this.renderedMarkdown,
-                    this.activeNavigationOffset
-                )
-                : null;
-            const annotationOverlay = translatedView
-                ? createEmptyAnnotationOverlay()
-                : comparisonView
-                    ? mapAnnotationOverlayToComparison(
-                        model.annotationOverlay,
-                        model.translationBlockRanges
-                    )
-                    : model.annotationOverlay || createEmptyAnnotationOverlay();
-            const sourceMap = translatedView
-                ? []
-                : comparisonView
-                    ? mapSourceMapToComparison(
-                        model.sourceMap,
-                        model.translationBlockRanges
-                    )
-                    : Array.isArray(model.sourceMap) ? model.sourceMap : [];
-            const nextPendingFigures = model.pendingFigureAssets instanceof Map
-                ? model.pendingFigureAssets
-                : null;
-            const pendingFiguresReplaced = nextPendingFigures
-                !== this.renderedPendingFigures;
-            this.syncRetainedFigureCrops(nextPendingFigures);
-            const assetsChanged = this.syncAssetURLs();
-            elements.readingLayout.classList.toggle(
-                'is-comparing',
-                comparisonView
-            );
-            const sourceChromeRanges = visibleDocumentChromeRanges(
-                model.markdown || markdown,
-                model.chromeRanges,
-                model.title
-            );
-            const editorChromeRanges = translatedView
-                ? []
-                : comparisonView
-                    ? mapChromeRangesToComparison(
-                        sourceChromeRanges,
-                        model.translationBlockRanges
-                    )
-                    : sourceChromeRanges;
-            this.renderedChromeRanges = editorChromeRanges;
-            this.editor.setDocument({
+            // A translation progress update republishes the same document
+            // with only the progress fields moved, and switching reading mode
+            // back to a view the reader just left republishes a document that
+            // is already on screen. Everything below rebuilds the whole
+            // reading surface, so it runs only when an input the document
+            // layer depends on actually changed identity.
+            const documentLayerInputs = collectDocumentLayerInputs(
+                model,
                 markdown,
-                annotationOverlay,
-                sourceMap,
-                figureViews,
-                ...(model.pendingFigureAssets instanceof Map
-                    ? { pendingFigures: model.pendingFigureAssets }
-                    : {}),
-                chromeRanges: editorChromeRanges,
-                documentTitle: translatedView || comparisonView
-                    ? ''
-                    : model.title,
-                sourceActionRanges: translatedView
-                    ? []
-                    : comparisonView
-                        ? (model.translationBlockRanges || []).flatMap(
-                            range => Number.isSafeInteger(
-                                range?.comparisonSourceFrom
-                            ) && Number.isSafeInteger(
-                                range?.comparisonSourceTo
-                            ) && range.comparisonSourceTo
-                                > range.comparisonSourceFrom
-                                ? [{
-                                    from: range.comparisonSourceFrom,
-                                    to: range.comparisonSourceTo,
-                                }]
-                                : []
-                        )
-                        : null,
-                translationRanges: comparisonView
-                    ? (model.comparisonTranslationRanges || []).map(range => ({
-                        ...range,
-                        ...(translationLanguage
-                            ? { language: translationLanguage }
-                            : {}),
-                    }))
-                    : [],
-                translationFailures: createVisibleTranslationFailures(
-                    model,
-                    translatedView,
-                    comparisonView
-                ),
-                translationPairs: createVisibleTranslationPairs(
-                    model,
-                    translatedView,
-                    comparisonView
-                ),
-            });
-            if (pendingFiguresReplaced) this.replayRetainedFigures();
-            this.renderedPendingFigures = nextPendingFigures;
-            const correctionAnnotationRanges = collectMatchedAnnotationRanges(
-                model.annotationOverlay
-            );
-            this.editor.setCorrectionState?.({
-                enabled: Boolean(model.correctionMode)
-                    && !translatedView
-                    && !comparisonView,
-                blocks: protectEditableBlocksWithAnnotations(
-                    model.editableBlocks,
-                    correctionAnnotationRanges
-                ),
-                correctedBlockIDs: model.correctedBlockIDs || [],
-                annotationRanges: correctionAnnotationRanges,
-            });
-            this.renderedMarkdown = markdown;
-            this.renderedSourceMap = sourceMap;
-            this.renderedRenderMode = 'markdown';
-            this.renderedTranslationView = translationViewName(
                 translatedView,
                 comparisonView
             );
-            this.renderedTranslationBlockRanges = Array.isArray(
-                model.translationBlockRanges
-            ) ? model.translationBlockRanges.map(range => ({ ...range })) : [];
-            this.fragmentIndex = createMarkdownFragmentIndex(markdown);
-            this.syncOutline(
-                comparisonView ? model.markdown || '' : markdown,
-                comparisonView ? model.comparisonSourceRanges : null,
-                translatedView ? [] : sourceChromeRanges,
-                translatedView && !comparisonView ? [] : model.pdfOutline,
-                comparisonView
-                    ? analyzeDocumentFigures(model.markdown, { figureMap: model.figureMap })
-                    : figureViews,
-                translatedView ? '' : model.title
+            const documentLayerUnchanged = sameIdentityList(
+                this.renderedDocumentLayerInputs,
+                documentLayerInputs
             );
-            this.syncNotes(annotationOverlay, markdown.length);
-            if (assetsChanged) this.editor.refreshRendering();
+            this.renderedDocumentLayerInputs = documentLayerInputs;
+            let documentChanged = false;
+            let translationAnchor = null;
+            let restoreAnchor = null;
+            if (!documentLayerUnchanged) {
+                const figureViews = computeDocumentFigures(this.analysisCache, markdown, {
+                    figureMap: model.figureMap,
+                    viewRanges: model.translationBlockRanges,
+                    viewKind: translatedView ? 'translation' : comparisonView ? 'comparison' : 'original',
+                });
+                documentChanged = this.renderedRenderMode !== 'markdown'
+                    || this.renderedMarkdown !== markdown;
+                const previousTranslationView = this.renderedTranslationView;
+                const previousTranslationBlockRanges =
+                    this.renderedTranslationBlockRanges;
+                translationAnchor = documentChanged
+                    && this.renderedMarkdown !== undefined
+                    && this.activeNavigationOffset > 0
+                    ? createTranslationReadingPositionAnchor(
+                        this.activeNavigationOffset,
+                        previousTranslationView,
+                        previousTranslationBlockRanges
+                    )
+                    : null;
+                restoreAnchor = !translationAnchor && documentChanged
+                    && this.renderedMarkdown !== undefined
+                    && this.activeNavigationOffset > 0
+                    ? createMarkdownReadingPositionAnchor(
+                        this.renderedMarkdown,
+                        this.activeNavigationOffset
+                    )
+                    : null;
+                const annotationOverlay = translatedView
+                    ? createEmptyAnnotationOverlay()
+                    : comparisonView
+                        ? mapAnnotationOverlayToComparison(
+                            model.annotationOverlay,
+                            model.translationBlockRanges
+                        )
+                        : model.annotationOverlay || createEmptyAnnotationOverlay();
+                const sourceMap = translatedView
+                    ? []
+                    : comparisonView
+                        ? mapSourceMapToComparison(
+                            model.sourceMap,
+                            model.translationBlockRanges
+                        )
+                        : Array.isArray(model.sourceMap) ? model.sourceMap : [];
+                const nextPendingFigures = model.pendingFigureAssets instanceof Map
+                    ? model.pendingFigureAssets
+                    : null;
+                const pendingFiguresReplaced = nextPendingFigures
+                    !== this.renderedPendingFigures;
+                this.syncRetainedFigureCrops(nextPendingFigures);
+                const assetsChanged = this.syncAssetURLs();
+                elements.readingLayout.classList.toggle(
+                    'is-comparing',
+                    comparisonView
+                );
+                const sourceChromeRanges = computeVisibleChromeRanges(
+                    this.analysisCache,
+                    model.markdown || markdown,
+                    {
+                        storedRanges: model.chromeRanges,
+                        itemTitle: model.title,
+                    }
+                );
+                const editorChromeRanges = translatedView
+                    ? []
+                    : comparisonView
+                        ? mapChromeRangesToComparison(
+                            sourceChromeRanges,
+                            model.translationBlockRanges
+                        )
+                        : sourceChromeRanges;
+                this.renderedChromeRanges = editorChromeRanges;
+                this.editor.setDocument({
+                    markdown,
+                    annotationOverlay,
+                    sourceMap,
+                    figureViews,
+                    ...(model.pendingFigureAssets instanceof Map
+                        ? { pendingFigures: model.pendingFigureAssets }
+                        : {}),
+                    chromeRanges: editorChromeRanges,
+                    documentTitle: translatedView || comparisonView
+                        ? ''
+                        : model.title,
+                    sourceActionRanges: translatedView
+                        ? []
+                        : comparisonView
+                            ? (model.translationBlockRanges || []).flatMap(
+                                range => Number.isSafeInteger(
+                                    range?.comparisonSourceFrom
+                                ) && Number.isSafeInteger(
+                                    range?.comparisonSourceTo
+                                ) && range.comparisonSourceTo
+                                    > range.comparisonSourceFrom
+                                    ? [{
+                                        from: range.comparisonSourceFrom,
+                                        to: range.comparisonSourceTo,
+                                    }]
+                                    : []
+                            )
+                            : null,
+                    translationRanges: comparisonView
+                        ? (model.comparisonTranslationRanges || []).map(range => ({
+                            ...range,
+                            ...(translationLanguage
+                                ? { language: translationLanguage }
+                                : {}),
+                        }))
+                        : [],
+                    translationFailures: createVisibleTranslationFailures(
+                        model,
+                        translatedView,
+                        comparisonView
+                    ),
+                    translationPairs: createVisibleTranslationPairs(
+                        model,
+                        translatedView,
+                        comparisonView
+                    ),
+                });
+                if (pendingFiguresReplaced) this.replayRetainedFigures();
+                this.renderedPendingFigures = nextPendingFigures;
+                const correctionAnnotationRanges = collectMatchedAnnotationRanges(
+                    model.annotationOverlay
+                );
+                this.editor.setCorrectionState?.({
+                    enabled: Boolean(model.correctionMode)
+                        && !translatedView
+                        && !comparisonView,
+                    blocks: protectEditableBlocksWithAnnotations(
+                        model.editableBlocks,
+                        correctionAnnotationRanges
+                    ),
+                    correctedBlockIDs: model.correctedBlockIDs || [],
+                    annotationRanges: correctionAnnotationRanges,
+                });
+                this.renderedMarkdown = markdown;
+                this.renderedSourceMap = sourceMap;
+                this.renderedRenderMode = 'markdown';
+                this.renderedTranslationView = translationViewName(
+                    translatedView,
+                    comparisonView
+                );
+                this.renderedTranslationBlockRanges = Array.isArray(
+                    model.translationBlockRanges
+                ) ? model.translationBlockRanges.map(range => ({ ...range })) : [];
+                this.fragmentIndex = computeMarkdownFragmentIndex(
+                    this.analysisCache,
+                    markdown
+                );
+                this.syncOutline(
+                    comparisonView ? model.markdown || '' : markdown,
+                    comparisonView ? model.comparisonSourceRanges : null,
+                    translatedView ? NO_OUTLINE_RANGES : sourceChromeRanges,
+                    translatedView && !comparisonView ? NO_OUTLINE_RANGES : model.pdfOutline,
+                    comparisonView
+                        ? computeDocumentFigures(
+                            this.analysisCache,
+                            model.markdown,
+                            { figureMap: model.figureMap }
+                        )
+                        : figureViews,
+                    translatedView ? '' : model.title
+                );
+                this.syncNotes(annotationOverlay, markdown.length);
+                if (assetsChanged) this.editor.refreshRendering();
+            }
             const previousCacheKey = this.renderedCacheKey || '';
             const nextCacheKey = typeof model.cacheKey === 'string'
                 ? model.cacheKey
@@ -886,6 +930,8 @@ class MarkdownTabView {
         if (this.destroyed) return;
         this.flushPersistedReadingPosition();
         this.destroyed = true;
+        this.analysisCache.clear();
+        this.renderedDocumentLayerInputs = null;
         this.clearDocumentActionStatus();
         this.clearWarningToast();
         this.clearCorrectionUndo();
@@ -4313,7 +4359,64 @@ class MarkdownTabView {
         this.elements.navigationBack.disabled = !this.navigationBackAvailable;
     }
 
+    // Split in two because `render` runs on every model update, including every
+    // translation progress delta. The static part is ~105 attribute writes that
+    // only a locale change can invalidate; the action labels are the only ones
+    // that follow the model.
     syncLocalization() {
+        const language = typeof this.localization?.language === 'string'
+            ? this.localization.language
+            : null;
+        if (language === null || language !== this.renderedLocalizationLanguage) {
+            this.renderedLocalizationLanguage = language;
+            // Action labels are localized too, so a new language has to rewrite
+            // them even when the model did not move.
+            this.renderedActionLabelSignature = null;
+            this.syncStaticLocalization();
+        }
+        this.syncActionLabels();
+        // The reader font picker follows the active translation view, not the
+        // locale, so it has to be re-synced on every render.
+        this.setReaderFont(this.readerFont);
+    }
+
+    syncActionLabels() {
+        const correctionLabel = this.t(this.model.correctionMode
+            ? 'revision.finish'
+            : 'revision.start');
+        const translationLabelKey = translationActionLabelKey(this.model);
+        const translationLabel = this.model.translationStatus === 'loading'
+            ? this.t(translationLabelKey, {
+                stage: this.t(
+                    `ai.translationStage.${this.model.translationStage || 'preparing'}`
+                ),
+            })
+            : this.t(translationLabelKey);
+        const translateButtonLabel = this.model.translationStatus === 'loading'
+            ? this.t('ai.cancelDocumentTranslationCompact')
+            : translationLabel;
+        const signature = [
+            correctionLabel,
+            translationLabel,
+            translateButtonLabel,
+        ].join('\u0000');
+        if (signature === this.renderedActionLabelSignature) return;
+        this.renderedActionLabelSignature = signature;
+        this.elements.correctionToggle.setAttribute(
+            'aria-label',
+            correctionLabel
+        );
+        this.elements.correctionToggle.setAttribute('title', correctionLabel);
+        this.elements.correctionToggleLabel.textContent = correctionLabel;
+        this.elements.translateDocument.setAttribute(
+            'aria-label',
+            translationLabel
+        );
+        this.elements.translateDocument.setAttribute('title', translationLabel);
+        this.elements.translateDocumentLabel.textContent = translateButtonLabel;
+    }
+
+    syncStaticLocalization() {
         this.host.setAttribute('aria-label', this.t('viewer.label'));
         this.elements.progressHeadingLabel.textContent = this.t('loading.progress');
         this.elements.editorSection.setAttribute(
@@ -4497,15 +4600,6 @@ class MarkdownTabView {
         this.elements.exportObsidianLabel.textContent = this.t(
             'viewer.exportObsidianShort'
         );
-        const correctionLabel = this.t(this.model.correctionMode
-            ? 'revision.finish'
-            : 'revision.start');
-        this.elements.correctionToggle.setAttribute(
-            'aria-label',
-            correctionLabel
-        );
-        this.elements.correctionToggle.setAttribute('title', correctionLabel);
-        this.elements.correctionToggleLabel.textContent = correctionLabel;
         this.elements.retranslateDocument.setAttribute(
             'aria-label',
             this.t('ai.retranslateDocument')
@@ -4517,23 +4611,6 @@ class MarkdownTabView {
         this.elements.retranslateDocumentLabel.textContent = this.t(
             'ai.retranslateDocument'
         );
-        const translationLabelKey = translationActionLabelKey(this.model);
-        const translationLabel = this.model.translationStatus === 'loading'
-            ? this.t(translationLabelKey, {
-                stage: this.t(
-                    `ai.translationStage.${this.model.translationStage || 'preparing'}`
-                ),
-            })
-            : this.t(translationLabelKey);
-        this.elements.translateDocument.setAttribute(
-            'aria-label',
-            translationLabel
-        );
-        this.elements.translateDocument.setAttribute('title', translationLabel);
-        this.elements.translateDocumentLabel.textContent =
-            this.model.translationStatus === 'loading'
-                ? this.t('ai.cancelDocumentTranslationCompact')
-                : translationLabel;
         this.elements.translationViewLabel.textContent = this.t(
             'ai.translationViewLabel'
         );
@@ -4645,7 +4722,6 @@ class MarkdownTabView {
             const key = label.getAttribute('data-i18n');
             if (key) label.textContent = this.t(key);
         }
-        this.setReaderFont(this.readerFont);
         this.setReaderFontSize(this.readerFontSize);
         this.setReaderLineHeight(this.readerLineHeight);
         this.setReaderWidth(this.readerWidth);
@@ -5574,19 +5650,36 @@ class MarkdownTabView {
     syncOutline(
         markdown,
         sourceRanges = null,
-        chromeRanges = [],
-        pdfOutline = [],
+        chromeRanges = NO_OUTLINE_RANGES,
+        pdfOutline = NO_OUTLINE_RANGES,
         figureViews = null,
         itemTitle = ''
     ) {
-        this.outlineMarkdown = String(markdown || '');
-        this.outlineSourceRanges = sourceRanges;
-        this.outlineChromeRanges = Array.isArray(chromeRanges)
+        const nextMarkdown = String(markdown || '');
+        const nextChromeRanges = Array.isArray(chromeRanges)
             ? chromeRanges
-            : [];
-        this.outlinePdfOutline = Array.isArray(pdfOutline) ? pdfOutline : [];
+            : NO_OUTLINE_RANGES;
+        const nextPdfOutline = Array.isArray(pdfOutline)
+            ? pdfOutline
+            : NO_OUTLINE_RANGES;
+        const nextItemTitle = String(itemTitle || '');
+        // The outline is derived purely from these inputs. A republished
+        // document that moves none of them must not rebuild the list, which
+        // costs a full heading extraction plus one list item per heading.
+        const unchanged = this.outlineListRendered
+            && this.outlineMarkdown === nextMarkdown
+            && this.outlineSourceRanges === sourceRanges
+            && this.outlineChromeRanges === nextChromeRanges
+            && this.outlinePdfOutline === nextPdfOutline
+            && this.outlineFigureViews === figureViews
+            && this.outlineItemTitle === nextItemTitle;
+        this.outlineMarkdown = nextMarkdown;
+        this.outlineSourceRanges = sourceRanges;
+        this.outlineChromeRanges = nextChromeRanges;
+        this.outlinePdfOutline = nextPdfOutline;
         this.outlineFigureViews = figureViews;
-        this.outlineItemTitle = String(itemTitle || '');
+        this.outlineItemTitle = nextItemTitle;
+        if (unchanged) return;
         this.renderOutlineList();
     }
 
@@ -5612,6 +5705,7 @@ class MarkdownTabView {
     }
 
     renderOutlineList() {
+        this.outlineListRendered = true;
         const list = this.elements.outlineList;
         list.replaceChildren();
         const items = this.outlineSegment === OUTLINE_SEGMENT_FIGURES
@@ -5644,11 +5738,14 @@ class MarkdownTabView {
     }
 
     outlineHeadingItems() {
-        return extractAlignedMarkdownOutline(
+        return computeAlignedMarkdownOutline(
+            this.analysisCache,
             this.outlineMarkdown,
-            this.outlineChromeRanges,
-            this.outlinePdfOutline,
-            this.outlineItemTitle
+            {
+                chromeRanges: this.outlineChromeRanges,
+                pdfOutline: this.outlinePdfOutline,
+                itemTitle: this.outlineItemTitle,
+            }
         ).map(heading => ({
             text: heading.text,
             offset: mapSourceOffsetToComparison(
@@ -5660,10 +5757,13 @@ class MarkdownTabView {
     }
 
     outlineAssetItems() {
-        return extractMarkdownAssetOutline(
+        return computeMarkdownAssetOutline(
+            this.analysisCache,
             this.outlineMarkdown,
-            this.outlineChromeRanges,
-            { figureViews: this.outlineFigureViews }
+            {
+                chromeRanges: this.outlineChromeRanges,
+                figureViews: this.outlineFigureViews,
+            }
         ).map(asset => ({
             text: asset.text,
             offset: mapSourceOffsetToComparison(
@@ -6607,6 +6707,51 @@ function mapSourceOffsetToComparison(offset, sourceRanges) {
     return range
         ? range.comparisonFrom + offset - range.sourceFrom
         : offset;
+}
+
+// Every value the document layer of `render` derives its output from, in a
+// fixed order. Translation progress, stage, and block counters are deliberately
+// absent: they move on every streaming delta and must not rebuild the reading
+// surface.
+function collectDocumentLayerInputs(
+    model,
+    markdown,
+    translatedView,
+    comparisonView
+) {
+    return [
+        model.renderMode,
+        markdown,
+        translatedView,
+        comparisonView,
+        model.figureMap,
+        model.translationBlockRanges,
+        model.comparisonSourceRanges,
+        model.comparisonTranslationRanges,
+        model.translationBlocks,
+        model.translationFailedBlocks,
+        model.translationTargetLanguage,
+        model.translationStatus,
+        model.annotationOverlay,
+        model.sourceMap,
+        model.chromeRanges,
+        model.title,
+        model.pdfOutline,
+        model.pendingFigureAssets,
+        model.assets,
+        model.correctionMode,
+        model.editableBlocks,
+        model.correctedBlockIDs,
+        model.cacheKey,
+    ];
+}
+
+function sameIdentityList(previous, next) {
+    if (!Array.isArray(previous) || previous.length !== next.length) return false;
+    for (let index = 0; index < next.length; index++) {
+        if (!Object.is(previous[index], next[index])) return false;
+    }
+    return true;
 }
 
 function translationViewName(translatedView, comparisonView) {
