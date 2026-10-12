@@ -376,6 +376,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
         createID: createMarkdownExportID,
         translate: runtimeTranslate,
+        isWindows: mkteroIsWindows(),
     });
     runtime.obsidianExporter = createZoteroObsidianExporter({
         createFilePicker: createZoteroFilePicker,
@@ -383,6 +384,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
         createID: createMarkdownExportID,
         translate: runtimeTranslate,
+        isWindows: mkteroIsWindows(),
         getVaultPath: () => getObsidianVaultPath(Zotero),
         setVaultPath: value => setObsidianVaultPath(Zotero, value),
         getSubdirectory: () => DEFAULT_OBSIDIAN_SUBDIRECTORY,
@@ -3676,6 +3678,13 @@ function createZoteroAbortController() {
         zotero: Zotero,
         services: typeof Services === 'undefined' ? null : Services,
     });
+}
+
+function mkteroIsWindows() {
+    const services = typeof Services === 'undefined' ? null : Services;
+    const os = services?.appinfo?.OS;
+    if (os) return os === 'WINNT';
+    return Zotero.isWin === true;
 }
 
 function createZoteroFilePicker() {

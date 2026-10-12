@@ -6,7 +6,6 @@ import {
     exportDirectoryPathsFit,
     markdownExportTemporarySuffix,
     MAX_EXPORT_MARKDOWN_BYTES,
-    usesWindowsPathSeparator,
 } from '../markdown/markdown-export.js';
 import {
     createObsidianCollisionDirectoryName,
@@ -43,6 +42,7 @@ export function createZoteroObsidianExporter({
     confirmOverwrite,
     now = () => new Date(),
     hashBody = hashMarkdownBody,
+    isWindows = false,
 }) {
     if (typeof createFilePicker !== 'function') {
         throw new TypeError('A Zotero file picker factory is required');
@@ -52,6 +52,9 @@ export function createZoteroObsidianExporter({
     }
     if (typeof createID !== 'function') {
         throw new TypeError('An Obsidian export ID factory is required');
+    }
+    if (typeof isWindows !== 'boolean') {
+        throw new TypeError('A Windows platform flag is required');
     }
     if (typeof getVaultPath !== 'function'
         || typeof setVaultPath !== 'function'
@@ -133,7 +136,7 @@ export function createZoteroObsidianExporter({
             const exportID = normalizeExportID(createID());
             const temporarySuffix = markdownExportTemporarySuffix(exportID);
             const join = (...parts) => pathUtils.join(...parts);
-            const windowsPaths = usesWindowsPathSeparator(join);
+            const windowsPaths = isWindows;
             let preferred = createMarkdownExportDirectoryName(
                 noteMetadata.title,
                 translate('viewer.exportMarkdownDefaultFileName')

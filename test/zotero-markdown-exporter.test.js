@@ -401,6 +401,7 @@ test('exports the reported Windows paper without exceeding 259 characters', asyn
         pathUtils: { join: path.win32.join },
         createID: () => 'dc3b6389-a940-4a5b-a85b-3369e0ab5e76',
         translate: key => key,
+        isWindows: true,
     });
 
     const result = await exporter.export({
@@ -431,6 +432,7 @@ test('shortens a long Windows export so the temporary file still fits', async ()
         pathUtils: { join: path.win32.join },
         createID: () => '72484692-9307-4cae-b3bc-fdaace407986',
         translate: key => key,
+        isWindows: true,
     });
 
     const result = await exporter.export({
@@ -450,6 +452,33 @@ test('shortens a long Windows export so the temporary file still fits', async ()
     assert.notEqual(path.win32.basename(result.path), `${title}.md`);
     assert.equal(writes.at(-1).options.tmpPath.length <= 259, true);
     assert.equal(reservedTmp.length <= 259, true);
+});
+
+test('does not shorten a Windows-looking path unless the platform flag is set', async () => {
+    const title = 'x'.repeat(180);
+    const writes = [];
+    const exporter = createZoteroMarkdownExporter({
+        createFilePicker: () => createFilePicker({
+            result: 0,
+            file: 'E:\\',
+        }),
+        ioUtils: createIOUtils(writes),
+        pathUtils: { join: path.win32.join },
+        createID: () => 'request-id',
+        translate: key => key,
+    });
+
+    const result = await exporter.export({
+        ownerWindow: {},
+        title,
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    assert.equal(
+        result.path,
+        path.win32.join('E:\\', title, `${title}.md`)
+    );
 });
 
 function createFilePicker({ result, file = '/exports' }) {
