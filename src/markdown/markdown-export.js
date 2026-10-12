@@ -6,6 +6,10 @@ export const MAX_EXPORT_MARKDOWN_BYTES = 50 * 1024 * 1024;
 export const MAX_EXPORT_ASSET_BYTES = 25 * 1024 * 1024;
 export const MAX_EXPORT_TOTAL_ASSET_BYTES = 150 * 1024 * 1024;
 export const MAX_EXPORT_ASSETS = 2_000;
+// Windows CreateFile fails at 260 characters with NS_ERROR_FILE_NOT_FOUND.
+export const MAX_WINDOWS_EXPORT_PATH_LENGTH = 259;
+export const MAX_WINDOWS_PATH_COMPONENT_LENGTH = 255;
+export const EXPORT_DIRECTORY_COLLISION_RESERVE = '-1000';
 const RESERVED_WINDOWS_FILE_STEMS = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const MARKDOWN_PARSER = parser.configure(GFM);
 
@@ -20,6 +24,91 @@ export function createMarkdownExportDirectoryName(
 
 export function createMarkdownExportFileName(title, fallbackTitle = 'Mktero') {
     return createMarkdownExportDirectoryName(title, fallbackTitle) + '.md';
+}
+
+export function markdownExportTemporarySuffix(exportID) {
+    return `.mktero-${String(exportID).slice(0, 8)}.tmp`;
+}
+
+export function usesWindowsPathSeparator(join) {
+    if (typeof join !== 'function') {
+        throw new TypeError('A path join function is required');
+    }
+    return join('a', 'b') === 'a\\b';
+}
+
+export function exportDirectoryPathsFit(directoryName, {
+    parentPath,
+    join,
+    temporarySuffix,
+    fileStemsFor = name => [name],
+    assetRelativePaths = [],
+    maxPathLength = MAX_WINDOWS_EXPORT_PATH_LENGTH,
+    maxComponentLength = MAX_WINDOWS_PATH_COMPONENT_LENGTH,
+}) {
+    if (typeof join !== 'function') {
+        throw new TypeError('A path join function is required');
+    }
+    if (!componentFits(directoryName, maxComponentLength)) return false;
+    const fileStems = fileStemsFor(directoryName);
+    if (!Array.isArray(fileStems) || !fileStems.length) return false;
+    for (const fileStem of fileStems) {
+        const fileName = `${fileStem}.md${temporarySuffix}`;
+        if (!componentFits(fileStem, maxComponentLength)
+            || !componentFits(fileName, maxComponentLength)
+            || join(parentPath, directoryName, fileName).length
+                > maxPathLength) {
+            return false;
+        }
+    }
+    for (const relativePath of assetRelativePaths) {
+        const segments = String(relativePath || '').split('/');
+        if (!segments.length
+            || segments.some(segment => (
+                !componentFits(segment, maxComponentLength)
+            ))
+            || join(
+                parentPath,
+                directoryName,
+                'assets',
+                ...segments
+            ).length > maxPathLength) {
+            return false;
+        }
+    }
+    return join(parentPath, directoryName).length <= maxPathLength;
+}
+
+export function constrainExportDirectoryName({
+    preferredName,
+    collisionReserve = EXPORT_DIRECTORY_COLLISION_RESERVE,
+    ...options
+}) {
+    let source = createMarkdownExportDirectoryName(
+        preferredName,
+        preferredName
+    );
+    const seen = new Set();
+    while (source && !seen.has(source)) {
+        seen.add(source);
+        if (exportDirectoryPathsFit(source + collisionReserve, options)) {
+            return source;
+        }
+        source = normalizeExportFileStem(
+            [...source].slice(0, -1).join('')
+        );
+    }
+    throw new Error(
+        'The selected folder path is too long to export this Markdown'
+    );
+}
+
+function componentFits(value, maxComponentLength) {
+    return typeof value === 'string'
+        && value.length > 0
+        && value.length <= maxComponentLength
+        && !value.includes('/')
+        && !value.includes('\\');
 }
 
 function normalizeExportFileStem(value) {

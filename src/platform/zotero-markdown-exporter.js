@@ -1,6 +1,9 @@
 import {
+    constrainExportDirectoryName,
     createMarkdownExportDirectoryName,
     createMarkdownExportPlan,
+    markdownExportTemporarySuffix,
+    usesWindowsPathSeparator,
 } from '../markdown/markdown-export.js';
 import { translateEnglish } from '../i18n/localization.js';
 
@@ -28,10 +31,6 @@ export function createZoteroMarkdownExporter({
                 translate('viewer.exportMarkdownDialogTitle'),
                 picker.modeGetFolder
             );
-            const preferredDocumentName = createMarkdownExportDirectoryName(
-                title,
-                translate('viewer.exportMarkdownDefaultFileName')
-            );
             const result = await picker.show();
             if (result === picker.returnCancel) {
                 return { status: 'cancelled' };
@@ -46,10 +45,27 @@ export function createZoteroMarkdownExporter({
                 assetBasePath,
                 assetDirectoryName: 'assets',
             });
+            const exportID = normalizeExportID(createID());
+            const temporarySuffix = markdownExportTemporarySuffix(exportID);
+            const join = (...parts) => pathUtils.join(...parts);
+            let preferredDocumentName = createMarkdownExportDirectoryName(
+                title,
+                translate('viewer.exportMarkdownDefaultFileName')
+            );
+            if (usesWindowsPathSeparator(join)) {
+                preferredDocumentName = constrainExportDirectoryName({
+                    preferredName: preferredDocumentName,
+                    parentPath: selectedDirectory,
+                    join,
+                    temporarySuffix,
+                    assetRelativePaths: plan.assets.map(asset => (
+                        asset.relativePath
+                    )),
+                });
+            }
             let directoryPath = null;
             let outputPath = null;
             let assetDirectoryPath = null;
-            const exportID = normalizeExportID(createID());
             let temporaryMarkdownPath = null;
             let createdDocumentDirectory = false;
             try {
@@ -65,8 +81,7 @@ export function createZoteroMarkdownExporter({
                     directoryPath,
                     available.name + '.md'
                 );
-                temporaryMarkdownPath = outputPath
-                    + '.mktero-' + exportID + '.tmp';
+                temporaryMarkdownPath = outputPath + temporarySuffix;
                 if (plan.assets.length) {
                     assetDirectoryPath = pathUtils.join(directoryPath, 'assets');
                     await ioUtils.makeDirectory(assetDirectoryPath, {

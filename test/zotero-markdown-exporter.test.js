@@ -118,7 +118,7 @@ test('exports Markdown and images inside a paper directory', async () => {
             path: '/exports/Paper/Paper.md',
             data: '![Figure](assets/images/figure.png)',
             options: {
-                tmpPath: '/exports/Paper/Paper.md.mktero-request-id.tmp',
+                tmpPath: '/exports/Paper/Paper.md.mktero-request-.tmp',
             },
         },
     ]);
@@ -382,10 +382,74 @@ test('removes the new paper directory when an image write fails', async () => {
     assert.deepEqual(
         writes.filter(write => write.type === 'remove').map(write => write.path),
         [
-            '/exports/Paper/Paper.md.mktero-request-id.tmp',
+            '/exports/Paper/Paper.md.mktero-request-.tmp',
             '/exports/Paper',
         ]
     );
+});
+
+test('exports the reported Windows paper without exceeding 259 characters', async () => {
+    const title = 'Study of (La1-xCax)MnO3. I. Magnetic Structure of LaMnO3 Journal of the Physical Society of Japan';
+    const parent = 'C:\\Users\\86151\\Desktop';
+    const writes = [];
+    const exporter = createZoteroMarkdownExporter({
+        createFilePicker: () => createFilePicker({
+            result: 0,
+            file: parent,
+        }),
+        ioUtils: createIOUtils(writes),
+        pathUtils: { join: path.win32.join },
+        createID: () => 'dc3b6389-a940-4a5b-a85b-3369e0ab5e76',
+        translate: key => key,
+    });
+
+    const result = await exporter.export({
+        ownerWindow: {},
+        title,
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    assert.equal(result.path, path.win32.join(parent, title, `${title}.md`));
+    assert.equal(
+        writes.at(-1).options.tmpPath,
+        result.path + '.mktero-dc3b6389.tmp'
+    );
+    assert.equal(writes.at(-1).options.tmpPath.length, 241);
+});
+
+test('shortens a long Windows export so the temporary file still fits', async () => {
+    const title = 'x'.repeat(180);
+    const parent = 'D:\\2399067154';
+    const writes = [];
+    const exporter = createZoteroMarkdownExporter({
+        createFilePicker: () => createFilePicker({
+            result: 0,
+            file: parent,
+        }),
+        ioUtils: createIOUtils(writes),
+        pathUtils: { join: path.win32.join },
+        createID: () => '72484692-9307-4cae-b3bc-fdaace407986',
+        translate: key => key,
+    });
+
+    const result = await exporter.export({
+        ownerWindow: {},
+        title,
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    const reserved = path.win32.basename(path.win32.dirname(result.path))
+        + '-1000';
+    const reservedTmp = path.win32.join(
+        parent,
+        reserved,
+        `${reserved}.md.mktero-72484692.tmp`
+    );
+    assert.notEqual(path.win32.basename(result.path), `${title}.md`);
+    assert.equal(writes.at(-1).options.tmpPath.length <= 259, true);
+    assert.equal(reservedTmp.length <= 259, true);
 });
 
 function createFilePicker({ result, file = '/exports' }) {

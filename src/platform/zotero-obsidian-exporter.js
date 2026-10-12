@@ -1,8 +1,12 @@
 import { sha256Hex } from '../core/sha256.js';
 import {
+    constrainExportDirectoryName,
     createMarkdownExportDirectoryName,
     createMarkdownExportPlan,
+    exportDirectoryPathsFit,
+    markdownExportTemporarySuffix,
     MAX_EXPORT_MARKDOWN_BYTES,
+    usesWindowsPathSeparator,
 } from '../markdown/markdown-export.js';
 import {
     createObsidianCollisionDirectoryName,
@@ -11,6 +15,7 @@ import {
     createObsidianVersionFileStem,
     decideObsidianOverwrite,
     OBSIDIAN_LANGUAGE_LABELS,
+    OBSIDIAN_VIEWS,
     parseObsidianNote,
     resolveObsidianOutputRoot,
     separateObsidianImageCaptions,
@@ -125,10 +130,30 @@ export function createZoteroObsidianExporter({
             });
             const identity = `${noteMetadata.library}:${noteMetadata.item}`;
             const indexRecord = await index.get(identity);
-            const preferred = createMarkdownExportDirectoryName(
+            const exportID = normalizeExportID(createID());
+            const temporarySuffix = markdownExportTemporarySuffix(exportID);
+            const join = (...parts) => pathUtils.join(...parts);
+            const windowsPaths = usesWindowsPathSeparator(join);
+            let preferred = createMarkdownExportDirectoryName(
                 noteMetadata.title,
                 translate('viewer.exportMarkdownDefaultFileName')
             );
+            const pathFit = {
+                parentPath: outputRoot,
+                join,
+                temporarySuffix,
+                fileStemsFor: obsidianExportFileStems,
+                assetRelativePaths: originalPlan.assets.map(asset => (
+                    asset.relativePath
+                )),
+            };
+            if (windowsPaths) {
+                preferred = constrainExportDirectoryName({
+                    ...pathFit,
+                    preferredName: preferred,
+                    collisionReserve: ` ${noteMetadata.item}`,
+                });
+            }
             const directoryName = await chooseDirectoryName({
                 outputRoot,
                 preferred,
@@ -136,6 +161,9 @@ export function createZoteroObsidianExporter({
                 indexRecord,
                 ioUtils,
                 pathUtils,
+                acceptName: windowsPaths
+                    ? name => exportDirectoryPathsFit(name, pathFit)
+                    : null,
             });
             const directoryPath = pathUtils.join(outputRoot, directoryName);
             const prepared = [];
@@ -210,7 +238,6 @@ export function createZoteroObsidianExporter({
                 }
                 return { status: 'cancelled' };
             }
-            const exportID = normalizeExportID(createID());
             const createdDirectory = !await ioUtils.exists(directoryPath);
             let assetDirectoryPath = null;
             const temporaryPaths = [];
@@ -234,7 +261,7 @@ export function createZoteroObsidianExporter({
                 for (const version of prepared) {
                     if (!version.write) continue;
                     const temporaryMarkdownPath = version.outputPath
-                        + '.mktero-' + exportID + '.tmp';
+                        + temporarySuffix;
                     temporaryPaths.push(temporaryMarkdownPath);
                     const versionMetadata = {
                         ...noteMetadata,
@@ -426,6 +453,12 @@ function versionResults(prepared) {
     }));
 }
 
+function obsidianExportFileStems(directoryName) {
+    return OBSIDIAN_VIEWS.map(language => (
+        createObsidianVersionFileStem(directoryName, language)
+    ));
+}
+
 async function chooseDirectoryName({
     outputRoot,
     preferred,
@@ -433,9 +466,11 @@ async function chooseDirectoryName({
     indexRecord,
     ioUtils,
     pathUtils,
+    acceptName = null,
 }) {
     const indexed = indexRecord?.directoryName;
-    if (DIRECTORY_NAME.test(indexed || '')) {
+    if (DIRECTORY_NAME.test(indexed || '')
+        && (!acceptName || acceptName(indexed))) {
         const indexedPath = pathUtils.join(outputRoot, indexed);
         const originalNote = pathUtils.join(indexedPath, indexed + '.md');
         if (!await ioUtils.exists(indexedPath)
