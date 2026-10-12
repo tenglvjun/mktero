@@ -12,7 +12,7 @@ import {
 import { createLocalization } from '../i18n/localization.js';
 import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
-import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
+import { computeDocumentFigures } from '../markdown/markdown-analysis-cache.js';
 import {
     createInlineRenderingExtension,
     pointerTouchesRect,
@@ -56,6 +56,9 @@ import {
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const editorNavigationMeasureKey = {};
+// One stable identity for "no ranges", so the rendering field can skip a
+// rebuild when a model update carries nothing new.
+const NO_EDITOR_RANGES = Object.freeze([]);
 const DOM_GLOBAL_NAMES = [
     'document',
     'window',
@@ -144,6 +147,7 @@ export function createInlineMarkdownEditor({
     onCorrectionError,
     onActiveCorrectionChange,
     localization = createLocalization(),
+    analysisCache = null,
 }) {
     const t = localization.t.bind(localization);
     if (!parent) throw new Error(t('error.editorParentRequired'));
@@ -454,6 +458,7 @@ export function createInlineMarkdownEditor({
                         );
                     },
                     translate: t,
+                    analysisCache,
                 }),
                 editingMode.of([
                     EditorView.editable.of(false),
@@ -925,7 +930,18 @@ export function createInlineMarkdownEditor({
     let currentPendingFigures = null;
     let currentRestoredFigures = new Map();
     let currentChromeRanges = [];
+    let currentChromeRangesSource = null;
+    let currentChromeRangesLength = -1;
     let currentSourceActionRanges = null;
+    // Reused so that "no overlay" keeps one identity and the rendering field
+    // can skip the rebuild it would otherwise trigger on every model update.
+    let sharedEmptyAnnotationOverlay = null;
+    const emptyAnnotationOverlay = () => {
+        if (!sharedEmptyAnnotationOverlay) {
+            sharedEmptyAnnotationOverlay = createEmptyAnnotationOverlay();
+        }
+        return sharedEmptyAnnotationOverlay;
+    };
     let openSelectionKey = null;
     const setDocument = ({
         markdown,
@@ -973,8 +989,20 @@ export function createInlineMarkdownEditor({
         }
         annotationPopup.close();
         currentSourceMap = Array.isArray(sourceMap) ? sourceMap : [];
-        currentFigureViews = figureViews || analyzeDocumentFigures(value, { figureMap });
-        currentChromeRanges = normalizeChromeRanges(chromeRanges, value.length);
+        currentFigureViews = figureViews
+            || computeDocumentFigures(analysisCache, value, { figureMap });
+        const chromeRangesSource = Array.isArray(chromeRanges)
+            ? chromeRanges
+            : null;
+        if (chromeRangesSource !== currentChromeRangesSource
+            || value.length !== currentChromeRangesLength) {
+            currentChromeRangesSource = chromeRangesSource;
+            currentChromeRangesLength = value.length;
+            currentChromeRanges = normalizeChromeRanges(
+                chromeRangesSource,
+                value.length
+            );
+        }
         currentSourceActionRanges = Array.isArray(sourceActionRanges)
             ? normalizeSourceActionRanges(sourceActionRanges, value.length)
             : null;
@@ -993,7 +1021,7 @@ export function createInlineMarkdownEditor({
         const effects = [
             ...referenceFeatureList.map(feature => feature.effect.of(null)),
             setAnnotationOverlay.of(
-                annotationOverlay || createEmptyAnnotationOverlay()
+                annotationOverlay || emptyAnnotationOverlay()
             ),
             setChromeRanges.of(currentChromeRanges),
             setDocumentTitle.of(documentTitle),
@@ -1002,9 +1030,9 @@ export function createInlineMarkdownEditor({
             ...(pendingFiguresReplaced
                 ? [setRestoredFigures.of(currentRestoredFigures)]
                 : []),
-            setTranslationRanges.of(translationRanges || []),
-            setTranslationFailures.of(translationFailures || []),
-            setTranslationPairs.of(translationPairs || []),
+            setTranslationRanges.of(translationRanges || NO_EDITOR_RANGES),
+            setTranslationFailures.of(translationFailures || NO_EDITOR_RANGES),
+            setTranslationPairs.of(translationPairs || NO_EDITOR_RANGES),
             setTranslationPairHighlight.of(null),
             setDocumentSearchHighlight.of({
                 matches: [],
