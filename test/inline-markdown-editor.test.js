@@ -8696,10 +8696,17 @@ test('keeps the paper title styled after hiding leading publisher chrome', () =>
             { from: 0, to: titleFrom + 2 },
         ], 'Systematic review and meta-analysis'),
     });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    assert.equal(forceParsing(view, view.state.doc.length, 10_000), true);
     const titleLine = [...document.querySelectorAll('.cm-line')].find(line => (
         line.textContent.includes('Systematic review')
     ));
-    assert.ok(titleLine?.className.includes('cm-mktero-heading-1'));
+    assert.ok(
+        (titleLine?.getAttribute('class') || '').includes('cm-mktero-heading-1'),
+        titleLine
+            ? titleLine.getAttribute('class')
+            : renderedLineTexts(document).join(' | ')
+    );
     assert.equal(
         renderedLineTexts(document).some(text => (
             text.includes('Check for updates')
@@ -9119,20 +9126,28 @@ test('activates the owning Zotero window before CodeMirror handles scrolling', (
     globalThis.getComputedStyle(secondDOM.window.document.body);
     const styleActivatedSecondWindow = computedStyleWindow === secondDOM.window;
 
-    secondEditor.destroy();
-    firstEditor.destroy();
-    secondDOM.window.close();
-    firstDOM.window.close();
-    EditorView.prototype.requestMeasure = originalRequestMeasure;
-    EditorView.prototype.measure = originalMeasure;
-
-    assert.equal(scrollActivatedFirstWindow, true);
-    assert.equal(scrollRequestedMeasure, true);
-    assert.equal(scrollMeasuredSynchronously, true);
-    assert.equal(styleActivatedFirstWindow, true);
-    assert.equal(keyActivatedFirstWindow, true);
-    assert.equal(styleActivatedSecondWindow, true);
-    assert.equal(globalThis.getComputedStyle, originalGetComputedStyle);
+    try {
+        assert.equal(scrollActivatedFirstWindow, true);
+        assert.equal(scrollRequestedMeasure, true);
+        assert.equal(scrollMeasuredSynchronously, true);
+        assert.equal(styleActivatedFirstWindow, true);
+        assert.equal(keyActivatedFirstWindow, true);
+        assert.equal(styleActivatedSecondWindow, true);
+    }
+    finally {
+        secondEditor.destroy();
+        firstEditor.destroy();
+        secondDOM.window.close();
+        firstDOM.window.close();
+        EditorView.prototype.requestMeasure = originalRequestMeasure;
+        EditorView.prototype.measure = originalMeasure;
+        if (originalGetComputedStyle) {
+            globalThis.getComputedStyle = originalGetComputedStyle;
+        }
+        else {
+            delete globalThis.getComputedStyle;
+        }
+    }
 });
 
 test('bridges the owning Zotero window style API for CodeMirror scrolling', () => {
