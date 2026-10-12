@@ -92,6 +92,11 @@ let activeDOMWindow = null;
 const domWindowReferences = new Map();
 let previousDOMGlobals = null;
 
+const NAVIGATION_HISTORY_LIMIT = 50;
+// A jump that lands within this distance of the previous entry is the same
+// place to the reader, so it must not add a second back step.
+const NAVIGATION_SAME_POSITION_PX = 24;
+
 function requestEditorScroll(view, position, requestedDocument, correctAfterRender = true) {
     view.requestMeasure({
         key: editorNavigationMeasureKey,
@@ -131,6 +136,8 @@ export function createInlineMarkdownEditor({
     onSourceNavigationError,
     onViewportChange,
     onNavigationBackChange,
+    onNavigationForwardChange,
+    onScrollProgress,
     onListReferenceLibraries,
     onGetReferenceStatus,
     onSearchReferenceMetadata,
@@ -255,60 +262,121 @@ export function createInlineMarkdownEditor({
     let correctionViewportFallbackEnabled = false;
     let translationHighlightTimer = null;
     let selectionFlashTimer = null;
-    let citationReturnPoint = null;
-    let citationReturnAvailable = false;
-    const setCitationReturnAvailable = available => {
-        const nextAvailable = Boolean(available);
-        if (citationReturnAvailable === nextAvailable) return;
-        citationReturnAvailable = nextAvailable;
-        onNavigationBackChange?.(nextAvailable);
-    };
-    const clearCitationReturnPoint = () => {
-        citationReturnPoint = null;
-        setCitationReturnAvailable(false);
-    };
-    const captureCitationReturnPoint = (editorView, origin) => {
-        const from = Number(origin?.from);
-        const to = Number(origin?.to);
-        if (!Number.isSafeInteger(from)
-            || !Number.isSafeInteger(to)
-            || from < 0
-            || to <= from
-            || to > editorView.state.doc.length) {
-            return false;
+    let navigationBackStack = [];
+    let navigationForwardStack = [];
+    let navigationBackAvailable = false;
+    let navigationForwardAvailable = false;
+    const syncNavigationAvailability = () => {
+        const back = navigationBackStack.length > 0;
+        const forward = navigationForwardStack.length > 0;
+        if (back !== navigationBackAvailable) {
+            navigationBackAvailable = back;
+            onNavigationBackChange?.(back);
         }
+        if (forward !== navigationForwardAvailable) {
+            navigationForwardAvailable = forward;
+            onNavigationForwardChange?.(forward);
+        }
+    };
+    const clearNavigationHistory = () => {
+        navigationBackStack = [];
+        navigationForwardStack = [];
+        syncNavigationAvailability();
+    };
+    const currentNavigationPoint = editorView => {
         const scrollTop = Number(editorView.scrollDOM?.scrollTop);
-        citationReturnPoint = {
-            document: editorView.state.doc,
-            from,
-            to,
-            scrollTop: Number.isFinite(scrollTop) ? scrollTop : null,
-        };
-        setCitationReturnAvailable(true);
+        return Number.isFinite(scrollTop)
+            ? { document: editorView.state.doc, scrollTop: Math.max(0, scrollTop) }
+            : null;
+    };
+    const pushNavigationPoint = (stack, point) => {
+        const last = stack.at(-1);
+        if (last
+            && last.document === point.document
+            && Math.abs(last.scrollTop - point.scrollTop)
+                < NAVIGATION_SAME_POSITION_PX) {
+            return;
+        }
+        stack.push(point);
+        if (stack.length > NAVIGATION_HISTORY_LIMIT) stack.shift();
+    };
+    // Call this before any jump that moves the reader away from where it is
+    // reading, so the way back is the position the jump started from.
+    const recordNavigationPoint = () => {
+        if (!view) return false;
+        const point = currentNavigationPoint(view);
+        if (!point) return false;
+        pushNavigationPoint(navigationBackStack, point);
+        navigationForwardStack = [];
+        syncNavigationAvailability();
         return true;
     };
-    const returnToCitation = () => {
-        const point = citationReturnPoint;
-        if (!point || point.document !== view?.state.doc) {
-            clearCitationReturnPoint();
+    const stepNavigation = (source, target) => {
+        const point = source.pop();
+        if (!point) {
+            syncNavigationAvailability();
             return false;
         }
-        citationReturnPoint = null;
-        setCitationReturnAvailable(false);
+        if (!view || point.document !== view.state.doc) {
+            clearNavigationHistory();
+            return false;
+        }
+        const here = currentNavigationPoint(view);
+        if (here) pushNavigationPoint(target, here);
+        syncNavigationAvailability();
         activateDOMGlobals(ownerWindow);
         view.focus();
-        if (Number.isFinite(point.scrollTop)) {
-            view.scrollDOM.scrollTop = Math.max(0, point.scrollTop);
-            view.requestMeasure();
-        }
-        else {
-            requestEditorScroll(view, point.from, view.state.doc);
-        }
+        view.scrollDOM.scrollTop = point.scrollTop;
+        view.requestMeasure();
         return true;
     };
-    const activateCitation = (editorView, target, origin) => {
-        captureCitationReturnPoint(editorView, origin);
+    const goNavigationBack = () => stepNavigation(
+        navigationBackStack,
+        navigationForwardStack
+    );
+    const goNavigationForward = () => stepNavigation(
+        navigationForwardStack,
+        navigationBackStack
+    );
+    const activateCitation = (editorView, target) => {
+        recordNavigationPoint();
         referenceFeatures.citation.highlight.activate(editorView, target);
+    };
+    const activateTableReference = (editorView, target) => {
+        recordNavigationPoint();
+        referenceFeatures.table.highlight.activate(editorView, target);
+    };
+    const activateFigureReference = (editorView, target) => {
+        recordNavigationPoint();
+        referenceFeatures.figure.highlight.activate(editorView, target);
+    };
+    let scrollProgressFrame = null;
+    let lastScrollProgress;
+    const reportScrollProgress = () => {
+        scrollProgressFrame = null;
+        if (destroyed || !view || typeof onScrollProgress !== 'function') return;
+        const scroller = view.scrollDOM;
+        const range = Number(scroller?.scrollHeight)
+            - Number(scroller?.clientHeight);
+        const progress = range > 1
+            ? Math.min(1, Math.max(0, Number(scroller.scrollTop) / range))
+            : null;
+        if (progress === lastScrollProgress) return;
+        lastScrollProgress = progress;
+        onScrollProgress(progress);
+    };
+    const scheduleScrollProgress = () => {
+        if (typeof onScrollProgress !== 'function'
+            || scrollProgressFrame !== null) {
+            return;
+        }
+        if (typeof ownerWindow.requestAnimationFrame !== 'function') {
+            reportScrollProgress();
+            return;
+        }
+        scrollProgressFrame = ownerWindow.requestAnimationFrame(
+            reportScrollProgress
+        );
     };
     const cancelStalledViewportRepair = () => {
         if (stalledViewportRepairFrame === null) return;
@@ -402,10 +470,8 @@ export function createInlineMarkdownEditor({
                     figurePreviewPopup,
                     annotationPopup,
                     activateCitation,
-                    activateTableReference:
-                        referenceFeatures.table.highlight.activate,
-                    activateFigureReference:
-                        referenceFeatures.figure.highlight.activate,
+                    activateTableReference,
+                    activateFigureReference,
                     commitCorrection: correction => (
                         onCommitCorrection?.(correction)
                     ),
@@ -498,13 +564,18 @@ export function createInlineMarkdownEditor({
                     keydown(event) {
                         if (!activeCorrection
                             && !tableCorrectionEditing
-                            && !event.isComposing
-                            && citationReturnAvailable
-                            && isCitationReturnShortcut(event)
-                            && returnToCitation()) {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            return true;
+                            && !event.isComposing) {
+                            const moved = navigationBackAvailable
+                                && isNavigationBackShortcut(event)
+                                ? goNavigationBack()
+                                : navigationForwardAvailable
+                                    && isNavigationForwardShortcut(event)
+                                    && goNavigationForward();
+                            if (moved) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                return true;
+                            }
                         }
                         if (!activeCorrection
                             && !tableCorrectionEditing
@@ -556,6 +627,11 @@ export function createInlineMarkdownEditor({
                 createSelectionFlashExtension(),
                 EditorView.lineWrapping,
                 EditorView.updateListener.of(update => {
+                    if (update.docChanged
+                        || update.geometryChanged
+                        || update.viewportChanged) {
+                        scheduleScrollProgress();
+                    }
                     const correctingDocument = update.docChanged
                         && activeCorrection;
                     if (!correctingDocument
@@ -606,6 +682,10 @@ export function createInlineMarkdownEditor({
             parent,
             root: root?.nodeType === 9 || root?.nodeType === 11 ? root : undefined,
         });
+        view.scrollDOM.addEventListener('scroll', scheduleScrollProgress, {
+            passive: true,
+        });
+        scheduleScrollProgress();
     }
     catch (error) {
         for (const feature of referenceFeatureList) feature.popup.destroy();
@@ -971,7 +1051,7 @@ export function createInlineMarkdownEditor({
         pendingCorrectionViewportCenterOffset = viewportCenterOffset;
         if (activeCorrection) correctionViewportFallbackEnabled = true;
         if (value !== view.state.doc.toString()) {
-            clearCitationReturnPoint();
+            clearNavigationHistory();
         }
         activeTableCorrection?.cancel?.({
             focus: false,
@@ -1144,7 +1224,9 @@ export function createInlineMarkdownEditor({
                 }),
             });
         },
-        returnToCitation,
+        recordNavigationPoint,
+        goNavigationBack,
+        goNavigationForward,
         flashRange(from, to) {
             activateDOMGlobals(ownerWindow);
             if (selectionFlashTimer !== null) {
@@ -1202,8 +1284,18 @@ export function createInlineMarkdownEditor({
                     feature.highlight.cancel();
                     feature.popup.destroy();
                 }
-                citationReturnPoint = null;
-                citationReturnAvailable = false;
+                navigationBackStack = [];
+                navigationForwardStack = [];
+                navigationBackAvailable = false;
+                navigationForwardAvailable = false;
+                if (scrollProgressFrame !== null) {
+                    ownerWindow.cancelAnimationFrame?.(scrollProgressFrame);
+                    scrollProgressFrame = null;
+                }
+                view.scrollDOM.removeEventListener(
+                    'scroll',
+                    scheduleScrollProgress
+                );
                 interactionRoot.removeEventListener(
                     'mousedown',
                     closeSelectionActions,
@@ -1762,7 +1854,16 @@ function createTimedTargetHighlight({
     return { activate, cancel };
 }
 
-function isCitationReturnShortcut(event) {
+function isNavigationBackShortcut(event) {
+    return isPlainNavigationChord(event, 'ArrowLeft', '[');
+}
+
+function isNavigationForwardShortcut(event) {
+    return isPlainNavigationChord(event, 'ArrowRight', ']');
+}
+
+// Alt+Arrow and Cmd+bracket, the same chords browsers use for history.
+function isPlainNavigationChord(event, arrowKey, bracketKey) {
     const hasOnlyAlt = event.altKey
         && !event.ctrlKey
         && !event.metaKey
@@ -1771,8 +1872,8 @@ function isCitationReturnShortcut(event) {
         && !event.altKey
         && !event.ctrlKey
         && !event.shiftKey;
-    return hasOnlyAlt && event.key === 'ArrowLeft'
-        || hasOnlyMeta && event.key === '[';
+    return hasOnlyAlt && event.key === arrowKey
+        || hasOnlyMeta && event.key === bracketKey;
 }
 
 function acquireDOMGlobals(ownerWindow) {

@@ -56,6 +56,9 @@ export const MARKDOWN_READER_LINE_HEIGHT_OPTIONS = Object.freeze([
         css: '2.05',
     }),
 ]);
+// `css` is the widest the reading column may grow. The column itself follows
+// the window and stops growing at this cap, so a wide window gets wider lines
+// and text, figures, tables, and code all share one edge.
 export const MARKDOWN_READER_WIDTH_OPTIONS = Object.freeze([
     Object.freeze({
         value: 'narrow',
@@ -65,12 +68,12 @@ export const MARKDOWN_READER_WIDTH_OPTIONS = Object.freeze([
     Object.freeze({
         value: 'standard',
         labelKey: 'viewer.widthStandard',
-        css: '60rem',
+        css: '80rem',
     }),
     Object.freeze({
         value: 'wide',
         labelKey: 'viewer.widthWide',
-        css: '75rem',
+        css: '120rem',
     }),
 ]);
 export const MARKDOWN_READER_ALIGNMENT_OPTIONS = Object.freeze([

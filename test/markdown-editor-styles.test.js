@@ -34,7 +34,7 @@ function pixelDeclaration(body, property) {
 test('uses balanced typography for long-form Markdown', () => {
     const host = ruleBody(':host');
 
-    assert.match(host, /--reader-width:\s*60rem/);
+    assert.match(host, /--reader-width:\s*80rem/);
     assert.match(host, /--reader-font-size:\s*18px/);
     assert.match(host, /--reader-line-height:\s*1\.78/);
     assert.match(host, /--reader-text-align:\s*start/);
@@ -63,6 +63,102 @@ test('uses balanced typography for long-form Markdown', () => {
     );
     assert.match(sharedTypography, /text-wrap:\s*pretty/);
     assert.doesNotMatch(MARKDOWN_STYLES, /text-rendering:\s*optimizeLegibility/);
+});
+
+test('keeps text, figures, tables, and code on one column edge', () => {
+    // Body text must not carry its own narrower max-width: a column that is
+    // wider than the text leaves figures and tables sticking out past it.
+    assert.doesNotMatch(MARKDOWN_STYLES, /reader-text-measure|reader-measure/);
+    const editorLine = ruleBody('.markdown-editor-host > .cm-editor .cm-line');
+    assert.doesNotMatch(editorLine, /max-width/);
+
+    const content = ruleBody('.markdown-editor-host > .cm-editor .cm-content');
+    assert.match(content, /width:\s*calc\(100% - 48px\)/);
+    assert.match(content, /max-width:\s*var\(--reader-width\)/);
+    const snapshot = ruleBody('.markdown-snapshot-host');
+    assert.match(snapshot, /width:\s*calc\(100% - 48px\)/);
+    assert.match(snapshot, /max-width:\s*var\(--reader-width\)/);
+});
+
+test('sets data numerals in tables with lining tabular figures', () => {
+    const tableSelectors = [
+        '.markdown-editor-host > .cm-editor .cm-mktero-table table,\n'
+            + '.markdown-editor-host > .cm-editor .cm-mktero-html-block table',
+        '.markdown-snapshot-host table',
+        '.mktero-table-preview-viewport table',
+        '.markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-table-panel table',
+        '.mktero-figure-preview-viewport .mktero-figure-table-panel table',
+    ];
+    for (const selector of tableSelectors) {
+        assert.match(
+            ruleBody(selector),
+            /font-variant-numeric:\s*lining-nums tabular-nums/,
+            selector
+        );
+    }
+    assert.match(
+        ruleBody('.page-marker'),
+        /font-variant-numeric:\s*lining-nums/
+    );
+    // Running text keeps old-style figures.
+    assert.match(
+        ruleBody('.markdown-snapshot-host,\n.markdown-editor-host > .cm-editor'),
+        /font-variant-numeric:\s*oldstyle-nums proportional-nums/
+    );
+});
+
+test('draws reading progress as a non-interactive bar inside the reading pane', () => {
+    const bar = ruleBody('.markdown-reading-progress');
+    assert.match(bar, /position:\s*absolute/);
+    assert.match(bar, /inset-block-end:\s*0/);
+    assert.match(bar, /pointer-events:\s*none/);
+    assert.equal(pixelDeclaration(bar, 'height'), 3);
+
+    const fill = ruleBody('.markdown-reading-progress-bar');
+    assert.match(fill, /width:\s*0/);
+    assert.match(fill, /background:[^;]*var\(--accent\)/);
+    // The bar is set directly from scroll position and has no transition to
+    // suppress, so it needs no reduced-motion rule.
+    assert.doesNotMatch(bar + fill, /transition|animation/);
+
+    // The layout it sits in must be its positioning context.
+    assert.match(ruleBody('.markdown-reading-layout'), /position:\s*relative/);
+});
+
+test('hides back, forward, and progress chrome in focus mode', () => {
+    const focusRules = MARKDOWN_STYLES.match(
+        /(?:\.mktero-tab-view\.is-focus-mode [^{,]+,\s*)+[^{]*\{[^}]*display:\s*none\s*!important/
+    )?.[0] ?? '';
+    for (const selector of [
+        '.markdown-reader-navigation-back',
+        '.markdown-reader-navigation-forward',
+        '.markdown-reading-progress',
+    ]) {
+        assert.ok(
+            focusRules.includes(`.mktero-tab-view.is-focus-mode ${selector}`),
+            `${selector} must be hidden in focus mode`
+        );
+    }
+});
+
+test('gives the notes resize handle a grabbable target without covering the scrollbar', () => {
+    // The handle's own box stays 3px wide and starts 4px inside the edge, so
+    // the strip next to the editor scrollbar is never covered.
+    const handle = ruleBody('.markdown-notes-resizer');
+    assert.match(handle, /inset-inline-start:\s*4px/);
+    assert.match(handle, /inset-inline-end:\s*0/);
+
+    // The extra reach goes right, into the notes panel, from the handle's
+    // trailing edge. It must not extend left toward the scrollbar.
+    const reach = ruleBody('.markdown-notes-resizer::after');
+    assert.match(reach, /position:\s*absolute/);
+    assert.match(reach, /inset-inline:\s*100%\s+-6px/);
+
+    // The 3px handle leaves no room for the shared 2px side insets.
+    assert.match(
+        ruleBody('.markdown-notes-resizer::before'),
+        /inset-inline:\s*0/
+    );
 });
 
 test('renders conversion notices as compact overlay toasts', () => {

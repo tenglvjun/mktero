@@ -18,6 +18,24 @@ Academic figure captions are recognized in common publisher formats, including
 `Figure N | ...` captions that follow an empty OCR image, so prose figure
 references remain previewable in cached documents.
 
+## Find your place and get back
+
+A thin bar along the bottom edge of the reading pane shows how far through the
+document you are. It appears only while the document is long enough to scroll
+and is hidden in focus mode.
+
+Jumping away from where you are reading records that spot, so you can return to
+it. These jumps are recorded: opening a citation, a table reference, or a
+figure reference; choosing an outline entry or a note; following an in-document
+link; and searching. Stepping through the matches of one search counts as a
+single jump. `Alt+Left` (or `Cmd+[`) goes back and `Alt+Right` (or `Cmd+]`)
+goes forward, like a browser, or use the arrow buttons at the start of the
+toolbar. Going back keeps the place you left, so forward returns to it; a new
+jump after going back discards the forward steps. Up to 50 positions are kept
+for the open document. They are not saved: closing the tab or replacing the
+document, for example by reparsing, clears them. Scrolling by hand does not create
+history entries.
+
 ## Correct recognition errors
 
 Double-click an existing paragraph, heading, or GFM table cell to edit it, then

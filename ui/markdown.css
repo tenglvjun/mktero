@@ -13,7 +13,7 @@
     --accent-strong: #2854ab;
     --accent-contrast: #ffffff;
     --editor-background: var(--reader-background);
-    --reader-width: 60rem;
+    --reader-width: 80rem;
     --reader-font-size: 18px;
     --reader-line-height: 1.78;
     --reader-text-align: start;
@@ -370,11 +370,26 @@ main {
     inset-inline-end: 0;
 }
 
+/* The notes handle stays clear of the editor scrollbar on its left, so it is
+   only 3px wide. Reach into the notes panel on its right for a grabbable
+   target; the edge sits above the panel, so this never covers the scrollbar. */
+.markdown-notes-resizer::after {
+    position: absolute;
+    inset-block: 0;
+    inset-inline: 100% -6px;
+    content: "";
+}
+
 .markdown-side-panel-resizer::before {
     position: absolute;
     inset: 0 2px;
     background: var(--border-subtle);
     content: "";
+}
+
+/* In the 3px notes handle the shared 2px side insets leave no line to draw. */
+.markdown-notes-resizer::before {
+    inset-inline: 0;
 }
 
 .markdown-side-panel-resizer:hover::before,
@@ -1168,6 +1183,8 @@ main {
 .mktero-tab-view.is-focus-mode .markdown-side-panel-resizer,
 .mktero-tab-view.is-focus-mode .markdown-side-panel-toggle,
 .mktero-tab-view.is-focus-mode .markdown-reader-navigation-back,
+.mktero-tab-view.is-focus-mode .markdown-reader-navigation-forward,
+.mktero-tab-view.is-focus-mode .markdown-reading-progress,
 .mktero-tab-view.is-focus-mode .markdown-source-peek-toggle,
 .mktero-tab-view.is-focus-mode .markdown-reader-action--primary,
 .mktero-tab-view.is-focus-mode .markdown-focus-toggle {
@@ -1859,8 +1876,31 @@ main {
     white-space: nowrap;
 }
 
-.markdown-reader-navigation-back {
+.markdown-reader-navigation-back,
+.markdown-reader-navigation-forward {
     flex: 0 0 auto;
+}
+
+/* Back and forward read as one pair, so close the toolbar gap between them. */
+.markdown-reader-navigation-back + .markdown-reader-navigation-forward {
+    margin-inline-start: calc(var(--toolbar-control-gap) * -0.5);
+}
+
+.markdown-reading-progress {
+    position: absolute;
+    z-index: 3;
+    inset-block-end: 0;
+    inset-inline: 0;
+    height: 3px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--muted) 14%, transparent);
+    pointer-events: none;
+}
+
+.markdown-reading-progress-bar {
+    width: 0;
+    height: 100%;
+    background: color-mix(in srgb, var(--accent) 78%, transparent);
 }
 
 .markdown-reader-action-menu .markdown-reader-action {
@@ -2521,6 +2561,7 @@ main {
     overflow: hidden;
     font-family: var(--reader-font);
     font-size: var(--reader-table-font-size);
+    font-variant-numeric: lining-nums tabular-nums;
     line-height: var(--reader-table-line-height);
 }
 
@@ -3945,6 +3986,7 @@ main {
     background: var(--reference-preview-surface);
     font-family: var(--reader-font);
     font-size: var(--reader-table-font-size);
+    font-variant-numeric: lining-nums tabular-nums;
     line-height: var(--reader-table-line-height);
 }
 
@@ -4085,6 +4127,7 @@ main {
 
 .mktero-figure-preview-viewport .mktero-figure-table-panel table {
     width: 100%;
+    font-variant-numeric: lining-nums tabular-nums;
 }
 
 .mktero-figure-preview-viewport figcaption {
@@ -4281,6 +4324,7 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure-table-panel table {
     width: 100%;
+    font-variant-numeric: lining-nums tabular-nums;
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-image .mktero-figure figcaption {
@@ -4519,6 +4563,7 @@ main {
     border-collapse: collapse;
     font-family: inherit;
     font-size: var(--reader-table-font-size);
+    font-variant-numeric: lining-nums tabular-nums;
     line-height: var(--reader-table-line-height);
 }
 
@@ -4702,6 +4747,7 @@ main {
     color: var(--muted);
     font-family: var(--ui-font);
     font-size: var(--reader-page-marker-font-size);
+    font-variant-numeric: lining-nums;
     line-height: 1.4;
     text-transform: uppercase;
 }

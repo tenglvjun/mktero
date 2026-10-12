@@ -120,6 +120,7 @@ function dispatchShortcut(target, {
     metaKey = false,
     ctrlKey = false,
     shiftKey = false,
+    altKey = false,
 } = {}) {
     const ownerWindow = target.ownerDocument?.defaultView || target;
     const event = new ownerWindow.Event('keydown', {
@@ -132,6 +133,7 @@ function dispatchShortcut(target, {
         metaKey: { value: metaKey },
         ctrlKey: { value: ctrlKey },
         shiftKey: { value: shiftKey },
+        altKey: { value: altKey },
         isComposing: { value: false },
     });
     target.dispatchEvent(event);
@@ -2936,9 +2938,9 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
     }
 });
 
-test('enables the citation return button from editor navigation state', () => {
+test('enables the back and forward buttons from editor navigation state', () => {
     let editorOptions;
-    let returnCalls = 0;
+    const calls = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
         progress: 100,
@@ -2948,26 +2950,196 @@ test('enables the citation return button from editor navigation state', () => {
         editorFactory(options) {
             editorOptions = options;
             const editor = createTestInlineEditor(options);
-            editor.returnToCitation = () => {
-                returnCalls++;
+            editor.goNavigationBack = () => {
+                calls.push('back');
                 editorOptions.onNavigationBackChange(false);
+                editorOptions.onNavigationForwardChange(true);
+                return true;
+            };
+            editor.goNavigationForward = () => {
+                calls.push('forward');
+                editorOptions.onNavigationForwardChange(false);
                 return true;
             };
             return editor;
         },
     });
 
-    const button = shadow.querySelector('#mktero-navigation-back');
+    const back = shadow.querySelector('#mktero-navigation-back');
+    const forward = shadow.querySelector('#mktero-navigation-forward');
     try {
-        assert.equal(button.disabled, true);
-        assert.equal(button.getAttribute('aria-label'), 'Return to citation');
+        assert.equal(back.disabled, true);
+        assert.equal(forward.disabled, true);
+        assert.match(back.getAttribute('aria-label'), /^Go back/);
+        assert.match(forward.getAttribute('aria-label'), /^Go forward/);
 
         editorOptions.onNavigationBackChange(true);
-        assert.equal(button.disabled, false);
-        button.click();
+        assert.equal(back.disabled, false);
+        assert.equal(forward.disabled, true);
+        back.click();
 
-        assert.equal(returnCalls, 1);
-        assert.equal(button.disabled, true);
+        assert.deepEqual(calls, ['back']);
+        assert.equal(back.disabled, true);
+        assert.equal(forward.disabled, false);
+        forward.click();
+
+        assert.deepEqual(calls, ['back', 'forward']);
+        assert.equal(forward.disabled, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('handles the navigation chords when focus is outside the editor', () => {
+    let editorOptions;
+    const calls = [];
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            const editor = createTestInlineEditor(options);
+            editor.goNavigationBack = () => calls.push('back');
+            editor.goNavigationForward = () => calls.push('forward');
+            return editor;
+        },
+    });
+
+    // The harness's events do not cross the shadow boundary, so dispatch on the
+    // host, which is where focus in the outline or toolbar ends up.
+    const press = (key, init = {}) => dispatchShortcut(
+        view.host,
+        { key, ...init }
+    );
+    try {
+        assert.equal(press('ArrowLeft', { altKey: true }).defaultPrevented, false);
+        assert.deepEqual(calls, []);
+
+        editorOptions.onNavigationBackChange(true);
+        editorOptions.onNavigationForwardChange(true);
+        assert.equal(press('ArrowLeft', { altKey: true }).defaultPrevented, true);
+        assert.equal(press('ArrowRight', { altKey: true }).defaultPrevented, true);
+        assert.equal(press('[', { metaKey: true }).defaultPrevented, true);
+        assert.equal(press(']', { metaKey: true }).defaultPrevented, true);
+        assert.deepEqual(calls, ['back', 'forward', 'back', 'forward']);
+
+        // Shift, Ctrl, or an unrelated key must not trigger navigation.
+        assert.equal(press('ArrowLeft', {
+            altKey: true,
+            shiftKey: true,
+        }).defaultPrevented, false);
+        assert.equal(press('ArrowLeft', { ctrlKey: true }).defaultPrevented, false);
+        assert.deepEqual(calls, ['back', 'forward', 'back', 'forward']);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('records the reading position before jumping from the outline or notes', () => {
+    const recorded = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\n## Method\n\nBody.',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.recordNavigationPoint = () => {
+                recorded.push(editor.scrolledOffsets.length);
+            };
+            return editor;
+        },
+    });
+
+    try {
+        const link = shadow.querySelector('.markdown-outline-link[data-offset]');
+        assert.ok(link, 'the outline renders a heading link');
+        link.click();
+
+        // The point is recorded before the scroll, not after it.
+        assert.deepEqual(recorded, [0]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('records one navigation point for a whole document search', () => {
+    const recorded = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nalpha one\n\nalpha two\n\nalpha three',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.recordNavigationPoint = () => recorded.push('record');
+            return editor;
+        },
+    });
+
+    try {
+        view.openDocumentSearch();
+        const input = shadow.querySelector('#mktero-document-search-input');
+        input.value = 'alpha';
+        input.dispatchEvent(new view.ownerWindow.Event('input', { bubbles: true }));
+        view.stepDocumentSearch(1);
+        view.stepDocumentSearch(1);
+        assert.deepEqual(recorded, ['record']);
+
+        // A new search session starts a new trip.
+        view.closeDocumentSearch({ restoreFocus: false });
+        view.openDocumentSearch();
+        view.stepDocumentSearch(1);
+        assert.deepEqual(recorded, ['record', 'record']);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('shows reading progress only while the document scrolls', () => {
+    let editorOptions;
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+    }), {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return createTestInlineEditor(options);
+        },
+    });
+
+    const bar = shadow.querySelector('.markdown-reading-progress');
+    const fill = shadow.querySelector('.markdown-reading-progress-bar');
+    try {
+        assert.equal(bar.hidden, true);
+        assert.equal(bar.getAttribute('role'), 'progressbar');
+
+        editorOptions.onScrollProgress(0.426);
+        assert.equal(bar.hidden, false);
+        assert.equal(fill.style.width, '43%');
+        assert.equal(bar.getAttribute('aria-valuenow'), '43');
+        assert.equal(bar.getAttribute('aria-valuetext'), '43%');
+
+        editorOptions.onScrollProgress(2);
+        assert.equal(fill.style.width, '100%');
+        editorOptions.onScrollProgress(-1);
+        assert.equal(fill.style.width, '0%');
+
+        editorOptions.onScrollProgress(null);
+        assert.equal(bar.hidden, true);
+        editorOptions.onScrollProgress(Number.NaN);
+        assert.equal(bar.hidden, true);
     }
     finally {
         view.destroy();
@@ -4370,71 +4542,139 @@ test('cancels a notes resize when a gesture becomes vertical', () => {
     }
 });
 
-test('cancels an accidental notes resize when the editor starts scrolling', () => {
+function setUpNotesResize() {
     const { document, view, shadow } = createView(createModel({
         status: 'ready',
         progress: 100,
         markdown: 'Annotated text',
         sourceKind: 'markdown',
     }));
-    const notes = shadow.querySelector('#mktero-notes');
-    const resizer = shadow.querySelector('#mktero-notes-resizer');
-    const scroller = shadow.querySelector('.cm-scroller');
+    return {
+        document,
+        view,
+        win: document.defaultView,
+        notes: shadow.querySelector('#mktero-notes'),
+        resizer: shadow.querySelector('#mktero-notes-resizer'),
+        scroller: shadow.querySelector('.cm-scroller'),
+        workspace: shadow.querySelector('.markdown-workspace'),
+        width: () => shadow.querySelector('#mktero-notes')
+            .style.getPropertyValue('--notes-width'),
+    };
+}
 
+test('keeps an active notes resize when the reflow makes the editor scroll', () => {
+    // Widening the panel reflows the editor, and CodeMirror answers with
+    // scroll events. They come from the drag itself and must not undo it.
+    const ctx = setUpNotesResize();
     try {
-        dispatchMouseEvent(resizer, 'mousedown', 1000, 300);
-        dispatchMouseEvent(document.defaultView, 'mousemove', 1010, 300);
-        assert.equal(
-            notes.style.getPropertyValue('--notes-width'),
-            '290px'
-        );
+        dispatchMouseEvent(ctx.resizer, 'mousedown', 1000, 300);
+        dispatchMouseEvent(ctx.win, 'mousemove', 1010, 300);
+        assert.equal(ctx.width(), '290px');
 
-        scroller.dispatchEvent(new document.defaultView.Event('scroll'));
-        dispatchMouseEvent(document.defaultView, 'mousemove', 1080, 300);
-        dispatchMouseEvent(document.defaultView, 'mouseup', 1080, 300);
+        ctx.scroller.dispatchEvent(new ctx.win.Event('scroll'));
+        ctx.workspace.dispatchEvent(new ctx.win.Event('scroll'));
+        ctx.document.dispatchEvent(new ctx.win.Event('scroll'));
+        dispatchMouseEvent(ctx.win, 'mousemove', 1080, 300);
+        dispatchMouseEvent(ctx.win, 'mouseup', 1080, 300);
 
-        assert.equal(resizer.getAttribute('aria-valuenow'), '300');
-        assert.equal(
-            notes.style.getPropertyValue('--notes-width'),
-            '300px'
-        );
+        assert.equal(ctx.width(), '220px', 'the drag reached its target');
+        assert.equal(ctx.resizer.getAttribute('aria-valuenow'), '220');
     }
     finally {
-        view.destroy();
+        ctx.view.destroy();
     }
 });
 
-test('cancels a notes resize when an outer editor container starts scrolling', () => {
-    const { document, view, shadow } = createView(createModel({
-        status: 'ready',
-        progress: 100,
-        markdown: 'Annotated text',
-        sourceKind: 'markdown',
-    }));
-    const notes = shadow.querySelector('#mktero-notes');
-    const resizer = shadow.querySelector('#mktero-notes-resizer');
-    const workspace = shadow.querySelector('.markdown-workspace');
-
+test('still cancels an active notes resize when the user wheel-scrolls', () => {
+    const ctx = setUpNotesResize();
     try {
-        dispatchMouseEvent(resizer, 'mousedown', 1000, 300);
-        dispatchMouseEvent(document.defaultView, 'mousemove', 1010, 300);
-        assert.equal(
-            notes.style.getPropertyValue('--notes-width'),
-            '290px'
-        );
+        dispatchMouseEvent(ctx.resizer, 'mousedown', 1000, 300);
+        dispatchMouseEvent(ctx.win, 'mousemove', 1010, 300);
+        assert.equal(ctx.width(), '290px');
 
-        workspace.dispatchEvent(new document.defaultView.Event('scroll'));
-        dispatchMouseEvent(document.defaultView, 'mousemove', 1080, 300);
-        dispatchMouseEvent(document.defaultView, 'mouseup', 1080, 300);
+        ctx.scroller.dispatchEvent(new ctx.win.Event('wheel', { bubbles: true }));
+        dispatchMouseEvent(ctx.win, 'mousemove', 1080, 300);
+        dispatchMouseEvent(ctx.win, 'mouseup', 1080, 300);
 
-        assert.equal(resizer.getAttribute('aria-valuenow'), '300');
-        assert.equal(
-            notes.style.getPropertyValue('--notes-width'),
-            '300px'
-        );
+        assert.equal(ctx.width(), '300px');
+        assert.equal(ctx.resizer.getAttribute('aria-valuenow'), '300');
     }
     finally {
-        view.destroy();
+        ctx.view.destroy();
+    }
+});
+
+test('cancels a notes press that scrolls before it starts dragging', () => {
+    for (const target of ['scroller', 'workspace', 'document']) {
+        const ctx = setUpNotesResize();
+        try {
+            dispatchMouseEvent(ctx.resizer, 'mousedown', 1000, 300);
+            // No move yet: this is a press, not a drag, so a scroll means the
+            // user grabbed the scrollbar next to the handle.
+            (ctx[target]).dispatchEvent(new ctx.win.Event('scroll'));
+            dispatchMouseEvent(ctx.win, 'mousemove', 1080, 300);
+            dispatchMouseEvent(ctx.win, 'mouseup', 1080, 300);
+
+            assert.equal(ctx.width(), '300px', `scroll on ${target}`);
+        }
+        finally {
+            ctx.view.destroy();
+        }
+    }
+});
+
+test('tolerates vertical hand drift once a notes resize is under way', () => {
+    const ctx = setUpNotesResize();
+    try {
+        dispatchMouseEvent(ctx.resizer, 'mousedown', 1000, 300);
+        dispatchMouseEvent(ctx.win, 'mousemove', 1010, 300);
+        // A short, slow adjustment where the pointer wanders further up or
+        // down than it moves across. Vertical distance beats horizontal here,
+        // which a strict "more vertical than horizontal" rule would treat as
+        // a scrollbar drag and undo, though 40px is nowhere near one.
+        dispatchMouseEvent(ctx.win, 'mousemove', 1020, 340);
+        assert.equal(ctx.width(), '280px', 'the resize is still live');
+        dispatchMouseEvent(ctx.win, 'mousemove', 1030, 345);
+        dispatchMouseEvent(ctx.win, 'mouseup', 1030, 345);
+
+        assert.equal(ctx.width(), '270px');
+    }
+    finally {
+        ctx.view.destroy();
+    }
+});
+
+test('cancels an active notes resize that turns decisively vertical', () => {
+    const ctx = setUpNotesResize();
+    try {
+        dispatchMouseEvent(ctx.resizer, 'mousedown', 1000, 300);
+        dispatchMouseEvent(ctx.win, 'mousemove', 1010, 300);
+        assert.equal(ctx.width(), '290px');
+        // 120px down against 12px across: a scrollbar drag, not a resize.
+        dispatchMouseEvent(ctx.win, 'mousemove', 1012, 420);
+        dispatchMouseEvent(ctx.win, 'mouseup', 1012, 420);
+
+        assert.equal(ctx.width(), '300px');
+        assert.equal(ctx.resizer.getAttribute('aria-valuenow'), '300');
+    }
+    finally {
+        ctx.view.destroy();
+    }
+});
+
+test('does not cancel a notes press on a sub-threshold diagonal jitter', () => {
+    const ctx = setUpNotesResize();
+    try {
+        dispatchMouseEvent(ctx.resizer, 'mousedown', 1000, 300);
+        // One pixel of sideways and downward jitter before the real drag.
+        dispatchMouseEvent(ctx.win, 'mousemove', 1000, 301);
+        dispatchMouseEvent(ctx.win, 'mousemove', 990, 303);
+        dispatchMouseEvent(ctx.win, 'mouseup', 990, 303);
+
+        assert.equal(ctx.width(), '310px');
+    }
+    finally {
+        ctx.view.destroy();
     }
 });
 
@@ -4458,39 +4698,6 @@ test('cancels a notes resize when the primary pointer button is released', () =>
 
         dispatchMouseEvent(document.defaultView, 'mousemove', 1080, 300, 0);
         dispatchMouseEvent(document.defaultView, 'mouseup', 1080, 300, 0);
-
-        assert.equal(resizer.getAttribute('aria-valuenow'), '300');
-        assert.equal(
-            notes.style.getPropertyValue('--notes-width'),
-            '300px'
-        );
-    }
-    finally {
-        view.destroy();
-    }
-});
-
-test('cancels a notes resize when the owning document starts scrolling', () => {
-    const { document, view, shadow } = createView(createModel({
-        status: 'ready',
-        progress: 100,
-        markdown: 'Annotated text',
-        sourceKind: 'markdown',
-    }));
-    const notes = shadow.querySelector('#mktero-notes');
-    const resizer = shadow.querySelector('#mktero-notes-resizer');
-
-    try {
-        dispatchMouseEvent(resizer, 'mousedown', 1000, 300);
-        dispatchMouseEvent(document.defaultView, 'mousemove', 1010, 300);
-        assert.equal(
-            notes.style.getPropertyValue('--notes-width'),
-            '290px'
-        );
-
-        document.dispatchEvent(new document.defaultView.Event('scroll'));
-        dispatchMouseEvent(document.defaultView, 'mousemove', 1080, 300);
-        dispatchMouseEvent(document.defaultView, 'mouseup', 1080, 300);
 
         assert.equal(resizer.getAttribute('aria-valuenow'), '300');
         assert.equal(

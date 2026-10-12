@@ -21,6 +21,7 @@ import {
     MARKDOWN_READER_LINE_HEIGHT_DEFAULT,
     MARKDOWN_READER_LINE_HEIGHT_PREF,
     MARKDOWN_READER_WIDTH_DEFAULT,
+    MARKDOWN_READER_WIDTH_OPTIONS,
     MARKDOWN_READER_WIDTH_PREF,
     setMarkdownReaderAlignment,
     setMarkdownReaderFont,
@@ -120,6 +121,17 @@ test('normalizes and persists the Markdown reader font family', () => {
     );
 });
 
+test('lets the reading column grow with the window up to a cap', () => {
+    const caps = MARKDOWN_READER_WIDTH_OPTIONS.map(option => (
+        Number.parseFloat(option.css)
+    ));
+    assert.deepEqual(caps, [45, 80, 120]);
+    assert.deepEqual(caps, [...caps].sort((a, b) => a - b));
+    for (const option of MARKDOWN_READER_WIDTH_OPTIONS) {
+        assert.match(option.css, /^\d+rem$/, 'a cap, not a fixed width');
+    }
+});
+
 test('normalizes and persists Markdown reader line height, width, and alignment', () => {
     const stored = new Map();
     const zotero = {
@@ -145,7 +157,9 @@ test('normalizes and persists Markdown reader line height, width, and alignment'
     assert.equal(stored.get(MARKDOWN_READER_WIDTH_PREF), 'wide');
     assert.equal(setMarkdownReaderWidth(zotero, 'unsupported'), 'standard');
     assert.equal(getMarkdownReaderWidthCss('narrow'), '45rem');
-    assert.equal(getMarkdownReaderWidthCss('invalid'), '60rem');
+    assert.equal(getMarkdownReaderWidthCss('standard'), '80rem');
+    assert.equal(getMarkdownReaderWidthCss('wide'), '120rem');
+    assert.equal(getMarkdownReaderWidthCss('invalid'), '80rem');
 
     assert.equal(getMarkdownReaderAlignment(zotero), MARKDOWN_READER_ALIGNMENT_DEFAULT);
     assert.equal(setMarkdownReaderAlignment(zotero, 'justify'), 'justify');

@@ -127,6 +127,10 @@ const SOURCE_PEEK_DELAY_MS = 80;
 const READING_POSITION_SAVE_DELAY_MS = 500;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
+// Once a drag is under way, only a clearly vertical move (a scrollbar drag
+// that slid sideways) cancels it. Ordinary hand drift must not.
+const SIDE_PANEL_RESIZE_VERTICAL_CANCEL_DISTANCE = 48;
+const SIDE_PANEL_RESIZE_VERTICAL_CANCEL_RATIO = 2;
 const RESPONSIVE_SIDE_PANEL_BREAKPOINTS = Object.freeze({
     outline: 820,
     notes: 1120,
@@ -359,6 +363,8 @@ class MarkdownTabView {
         this.correctionUndoTimer = null;
         this.correctionUndoBlockID = null;
         this.navigationBackAvailable = false;
+        this.navigationForwardAvailable = false;
+        this.searchNavigationRecorded = false;
         this.responsiveResizeObserver = null;
         this.documentActionsOpen = false;
         this.githubReposOpen = false;
@@ -513,6 +519,11 @@ class MarkdownTabView {
                 this.navigationBackAvailable = Boolean(available);
                 this.syncNavigationBack();
             },
+            onNavigationForwardChange: available => {
+                this.navigationForwardAvailable = Boolean(available);
+                this.syncNavigationBack();
+            },
+            onScrollProgress: progress => this.setReadingProgress(progress),
             sourceItemID: this.model.sourceItemID,
             onListReferenceLibraries: options => (
                 this.model.onListReferenceLibraries?.({
@@ -1338,6 +1349,20 @@ class MarkdownTabView {
             class: 'markdown-reading-layout',
         });
         readingLayout.appendChild(primaryPane);
+        const readingProgressBar = this.createElement('div', {
+            class: 'markdown-reading-progress-bar',
+        });
+        const readingProgress = this.createElement('div', {
+            class: 'markdown-reading-progress',
+            role: 'progressbar',
+            'aria-label': this.t('viewer.readingProgress'),
+            'aria-valuemin': '0',
+            'aria-valuemax': '100',
+            'aria-valuenow': '0',
+        });
+        readingProgress.hidden = true;
+        readingProgress.appendChild(readingProgressBar);
+        readingLayout.appendChild(readingProgress);
         const sourcePeekImage = this.createElement('img', {
             class: 'markdown-source-peek-image',
             alt: '',
@@ -1609,6 +1634,9 @@ class MarkdownTabView {
             sourcePeekCaption,
             focusExit,
             navigationBack: documentActions.navigationBack,
+            navigationForward: documentActions.navigationForward,
+            readingProgress,
+            readingProgressBar,
             editorSection,
             actionToggle: documentActions.toggle,
             actionMenu: documentActions.menu,
@@ -1781,10 +1809,26 @@ class MarkdownTabView {
             id: 'mktero-navigation-back',
             class: 'markdown-reader-action markdown-reader-navigation-back',
             type: 'button',
-            'aria-label': this.t('viewer.returnToCitation'),
-            title: this.t('viewer.returnToCitation'),
+            'aria-label': this.t('viewer.navigationBack'),
+            title: this.t('viewer.navigationBack'),
             disabled: 'true',
         });
+        const navigationForward = this.createElement('button', {
+            id: 'mktero-navigation-forward',
+            class: 'markdown-reader-action markdown-reader-navigation-forward',
+            type: 'button',
+            'aria-label': this.t('viewer.navigationForward'),
+            title: this.t('viewer.navigationForward'),
+            disabled: 'true',
+        });
+        navigationForward.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.arrowRight,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
         navigationBack.appendChild(createLucideIcon(
             this.document,
             LUCIDE_ICONS.arrowLeft,
@@ -2413,6 +2457,7 @@ class MarkdownTabView {
         appendChildren(
             editorActions,
             navigationBack,
+            navigationForward,
             readerControls,
             translationControls,
             status,
@@ -2422,6 +2467,7 @@ class MarkdownTabView {
         return {
             toolbar: editorActions,
             navigationBack,
+            navigationForward,
             toggle,
             menu,
             reparse,
@@ -2584,7 +2630,15 @@ class MarkdownTabView {
 
     bindActions() {
         this.listen(this.elements.navigationBack, 'click', () => {
-            this.editor.returnToCitation?.();
+            this.editor.goNavigationBack?.();
+        });
+        this.listen(this.elements.navigationForward, 'click', () => {
+            this.editor.goNavigationForward?.();
+        });
+        // Bubble phase: the editor consumes the chord first when it has focus,
+        // so this only runs when focus is on the outline, notes, or toolbar.
+        this.listen(this.host, 'keydown', event => {
+            this.handleNavigationShortcut(event);
         });
         this.listen(this.elements.documentSearchToggle, 'click', () => {
             if (this.documentSearchOpen) this.closeDocumentSearch();
@@ -2916,6 +2970,7 @@ class MarkdownTabView {
             if (!button || !this.elements.outlineList.contains(button)) return;
             const offset = Number(button.getAttribute('data-offset'));
             if (Number.isFinite(offset)) {
+                this.recordNavigationPoint();
                 this.syncActiveNavigation(offset);
                 this.editor.scrollToOffset?.(offset);
             }
@@ -2961,6 +3016,7 @@ class MarkdownTabView {
             }
             const offset = Number(button.getAttribute('data-offset'));
             if (Number.isFinite(offset)) {
+                this.recordNavigationPoint();
                 this.syncActiveNavigation(offset);
                 this.editor.scrollToOffset?.(offset);
             }
@@ -3012,9 +3068,14 @@ class MarkdownTabView {
             this.finishSidePanelResize('outline');
             this.finishSidePanelResize('notes');
         });
-        const cancelSidePanelResizes = () => {
-            this.cancelSidePanelResize('outline');
-            this.cancelSidePanelResize('notes');
+        // Changing a panel's width reflows the editor, and CodeMirror answers a
+        // reflow with scroll events of its own. Those come from the drag itself,
+        // so once a drag is active only a wheel (a real scroll) cancels it. A
+        // press that has not started dragging yet is still cancelled by either.
+        const cancelSidePanelResizes = event => {
+            const keepActive = event?.type === 'scroll';
+            this.cancelSidePanelResize('outline', { keepActive });
+            this.cancelSidePanelResize('notes', { keepActive });
         };
         const editorScroller = this.elements.editorHost.querySelector(
             '.cm-scroller'
@@ -4246,6 +4307,7 @@ class MarkdownTabView {
         const wasOpen = this.documentSearchOpen;
         this.documentSearchOpen = false;
         this.documentSearchComposing = false;
+        this.searchNavigationRecorded = false;
         this.editor?.setDocumentSearchHighlights?.({
             matches: [],
             activeIndex: -1,
@@ -4292,6 +4354,7 @@ class MarkdownTabView {
         });
         const active = result.matches[this.documentSearchActiveIndex];
         if (reveal && active) {
+            this.recordSearchNavigationPoint();
             this.editor?.scrollToOffset?.(active.from);
         }
     }
@@ -4309,9 +4372,18 @@ class MarkdownTabView {
             matches,
             activeIndex: this.documentSearchActiveIndex,
         });
+        this.recordSearchNavigationPoint();
         this.editor?.scrollToOffset?.(
             matches[this.documentSearchActiveIndex].from
         );
+    }
+
+    // Stepping through matches is one trip: record where the search started
+    // once, so a single "back" returns there instead of replaying every match.
+    recordSearchNavigationPoint() {
+        if (this.searchNavigationRecorded) return;
+        this.searchNavigationRecorded = true;
+        this.recordNavigationPoint();
     }
 
     syncDocumentSearch() {
@@ -4357,6 +4429,54 @@ class MarkdownTabView {
 
     syncNavigationBack() {
         this.elements.navigationBack.disabled = !this.navigationBackAvailable;
+        this.elements.navigationForward.disabled
+            = !this.navigationForwardAvailable;
+    }
+
+    handleNavigationShortcut(event) {
+        if (this.destroyed
+            || event.defaultPrevented
+            || event.isComposing
+            || !isNavigationChord(event)) {
+            return;
+        }
+        const origin = event.composedPath?.()[0] || event.target;
+        if (origin?.isContentEditable
+            || ['INPUT', 'TEXTAREA', 'SELECT'].includes(origin?.tagName)) {
+            return;
+        }
+        const back = isNavigationChord(event) === 'back';
+        const available = back
+            ? this.navigationBackAvailable
+            : this.navigationForwardAvailable;
+        if (!available) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (back) this.editor.goNavigationBack?.();
+        else this.editor.goNavigationForward?.();
+    }
+
+    // Jumps that take the reader away from where they are call this first, so
+    // "back" returns to the place the jump started from.
+    recordNavigationPoint() {
+        this.editor?.recordNavigationPoint?.();
+    }
+
+    setReadingProgress(progress) {
+        const { readingProgress, readingProgressBar } = this.elements || {};
+        if (!readingProgress || !readingProgressBar) return;
+        if (!Number.isFinite(progress)) {
+            readingProgress.hidden = true;
+            return;
+        }
+        const percent = Math.round(Math.min(1, Math.max(0, progress)) * 100);
+        readingProgress.hidden = false;
+        readingProgressBar.style.width = `${percent}%`;
+        readingProgress.setAttribute('aria-valuenow', String(percent));
+        readingProgress.setAttribute(
+            'aria-valuetext',
+            this.t('viewer.readingProgressValue', { percent })
+        );
     }
 
     // Split in two because `render` runs on every model update, including every
@@ -4513,11 +4633,23 @@ class MarkdownTabView {
         );
         this.elements.navigationBack.setAttribute(
             'aria-label',
-            this.t('viewer.returnToCitation')
+            this.t('viewer.navigationBack')
         );
         this.elements.navigationBack.setAttribute(
             'title',
-            this.t('viewer.returnToCitation')
+            this.t('viewer.navigationBack')
+        );
+        this.elements.navigationForward.setAttribute(
+            'aria-label',
+            this.t('viewer.navigationForward')
+        );
+        this.elements.navigationForward.setAttribute(
+            'title',
+            this.t('viewer.navigationForward')
+        );
+        this.elements.readingProgress.setAttribute(
+            'aria-label',
+            this.t('viewer.readingProgress')
         );
         this.elements.actionMenu.setAttribute(
             'aria-label',
@@ -5484,22 +5616,29 @@ class MarkdownTabView {
             : event.clientY - panel.resize.pointerStartY;
         const horizontalDistance = Math.abs(deltaX);
         const verticalDistance = Math.abs(deltaY);
-        if (panel.resize.pointerStartY !== null
-            && horizontalDistance <= verticalDistance) {
-            if (panel.resize.active) {
-                this.setSidePanelWidth(name, panel.resize.widthAtStart);
-            }
-            this.finishSidePanelResize(name);
-            return;
-        }
         if (!panel.resize.active) {
+            // The first move after a press is a pixel or two of jitter in any
+            // direction. Wait for a deliberate move before judging it.
             if (Math.max(horizontalDistance, verticalDistance)
                 < SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE) {
+                return;
+            }
+            if (panel.resize.pointerStartY !== null
+                && horizontalDistance <= verticalDistance) {
+                this.finishSidePanelResize(name);
                 return;
             }
             panel.resize.active = true;
             event.preventDefault();
             this.elements.workspace.classList.add(panel.resizeClass);
+        }
+        else if (panel.resize.pointerStartY !== null
+            && verticalDistance > SIDE_PANEL_RESIZE_VERTICAL_CANCEL_DISTANCE
+            && verticalDistance
+                > horizontalDistance * SIDE_PANEL_RESIZE_VERTICAL_CANCEL_RATIO) {
+            this.setSidePanelWidth(name, panel.resize.widthAtStart);
+            this.finishSidePanelResize(name);
+            return;
         }
         this.setSidePanelWidth(
             name,
@@ -5516,8 +5655,9 @@ class MarkdownTabView {
         this.elements.workspace.classList.remove(panel.resizeClass);
     }
 
-    cancelSidePanelResize(name) {
+    cancelSidePanelResize(name, { keepActive = false } = {}) {
         const panel = this.sidePanels[name];
+        if (keepActive && panel.resize?.active) return;
         if (panel.resize?.active) {
             this.setSidePanelWidth(name, panel.resize.widthAtStart);
         }
@@ -6452,6 +6592,7 @@ class MarkdownTabView {
         }
         const element = this.mount.getElementById?.(id);
         if (element) {
+            if (this.renderedRenderMode !== 'html') this.recordNavigationPoint();
             element.scrollIntoView?.();
             return;
         }
@@ -6469,6 +6610,7 @@ class MarkdownTabView {
             ? this.fragmentIndex.get(id)
             : this.fragmentIndex.get(normalizedID);
         if (!Number.isFinite(offset)) return;
+        this.recordNavigationPoint();
         this.restoreReadingPosition(offset);
     }
 
@@ -7193,6 +7335,27 @@ function isSafeSnapshotLinkURL(value) {
     return /^https?:\/\//i.test(source)
         || /^zotero:\/\//i.test(source)
         || source.startsWith('#');
+}
+
+// 'back' for Alt+Left / Cmd+[, 'forward' for Alt+Right / Cmd+], else false.
+function isNavigationChord(event) {
+    const altOnly = event.altKey
+        && !event.ctrlKey
+        && !event.metaKey
+        && !event.shiftKey;
+    const metaOnly = event.metaKey
+        && !event.altKey
+        && !event.ctrlKey
+        && !event.shiftKey;
+    if (altOnly && event.key === 'ArrowLeft'
+        || metaOnly && event.key === '[') {
+        return 'back';
+    }
+    if (altOnly && event.key === 'ArrowRight'
+        || metaOnly && event.key === ']') {
+        return 'forward';
+    }
+    return false;
 }
 
 function consumeDocumentSearchShortcut(event) {

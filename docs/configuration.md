@@ -16,7 +16,7 @@ Open `Settings -> Mktero` after installation.
 | Translation language | Optional | Choose Simplified/Traditional Chinese, Japanese, Korean, Spanish, French, or Brazilian Portuguese |
 | Automatically translate Markdown selections | Optional, off by default | Translate a stable selection without an extra click; disabling it keeps the manual popup action |
 | Body text font and size | Optional | Choose the reading font and a 14–28 px body size |
-| Line height, column width, and alignment | Optional | Choose tight/standard/loose spacing, a narrow/standard/wide measure, and left-aligned or justified body text. Left aligned is the default |
+| Line height, column width, and alignment | Optional | Choose tight/standard/loose spacing, a narrow/standard/wide measure, and left-aligned or justified body text. Left aligned is the default. The column follows the window width and stops growing at 45rem (narrow), 80rem (standard), or 120rem (wide); text, figures, tables, and code share the same width |
 | PDF source thumbnail | Optional, on by default | Show a live PDF crop of the current paragraph |
 | Reuse conversion results | Optional | Reuse results for the same PDF content and parser profile |
 
