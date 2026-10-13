@@ -53,6 +53,8 @@ local cache avoids repeating conversions for the same PDF and parser profile.
   selection can open its Markdown paragraph when that mapping is unique.
 - Browse the outline or a figure/table index, preview citations, affiliations,
   figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
+- Copy a display formula's LaTeX or a code block's text from the reader. Both
+  actions stay local and never change the cached Markdown.
 - Rebuild figures from the local PDF when layout evidence, page coordinates,
   and Markdown ranges agree. Restoration runs in a background worker and
   replaces placeholders in place, so slow figures never block reading.

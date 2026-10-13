@@ -3948,6 +3948,38 @@ test('enhances code blocks in saved HTML snapshots', async () => {
     }
 });
 
+test('enhances display formulas in saved HTML snapshots', async () => {
+    const copied = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        renderMode: 'html',
+        snapshotHTML: '<p>Before</p><pre class="math">$$E = mc^2$$</pre>',
+        snapshotAssets: [],
+        onCopyCode: code => copied.push(code),
+    }));
+
+    try {
+        const block = shadow.querySelector(
+            '#mktero-snapshot .cm-mktero-math-block'
+        );
+        assert.ok(block);
+        assert.equal(
+            block.querySelector('pre.math').textContent,
+            '$$E = mc^2$$'
+        );
+        const copyButton = block.querySelector('[data-action="copy-math"]');
+        assert.ok(copyButton);
+        copyButton.click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(copied, ['E = mc^2']);
+        assert.equal(copyButton.textContent, 'LaTeX copied');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('sanitizes a modified snapshot before mounting it in the Zotero chrome', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',

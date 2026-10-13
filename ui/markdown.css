@@ -4693,6 +4693,78 @@ main {
     cursor: text;
     -moz-user-select: text;
     user-select: text;
+    /* Anchors the copy-LaTeX action to the formula's top corner. */
+    position: relative;
+}
+
+.markdown-snapshot-host .cm-mktero-math-block {
+    position: relative;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-toolbar,
+.markdown-snapshot-host .cm-mktero-math-toolbar {
+    position: absolute;
+    top: 6px;
+    inset-inline-end: 8px;
+    display: flex;
+    gap: 6px;
+    /* Kept in the tab order so a keyboard user reveals it by focusing it. */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-display:hover .cm-mktero-math-toolbar,
+.markdown-editor-host > .cm-editor .cm-mktero-math-display:focus-within .cm-mktero-math-toolbar,
+.markdown-snapshot-host .cm-mktero-math-block:hover .cm-mktero-math-toolbar,
+.markdown-snapshot-host .cm-mktero-math-block:focus-within .cm-mktero-math-toolbar,
+.markdown-editor-host > .cm-editor .cm-mktero-math-toolbar:focus-within,
+.markdown-snapshot-host .cm-mktero-math-toolbar:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (hover: none) {
+    .markdown-editor-host > .cm-editor .cm-mktero-math-toolbar,
+    .markdown-snapshot-host .cm-mktero-math-toolbar {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-copy,
+.markdown-snapshot-host .cm-mktero-math-copy {
+    min-height: 24px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    box-shadow: 0 1px 2px rgb(32 37 43 / 8%);
+    color: var(--muted);
+    cursor: pointer;
+    font: 600 10px/1 var(--ui-font);
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-copy:hover:not(:disabled),
+.markdown-editor-host > .cm-editor .cm-mktero-math-copy:focus-visible,
+.markdown-snapshot-host .cm-mktero-math-copy:hover:not(:disabled),
+.markdown-snapshot-host .cm-mktero-math-copy:focus-visible {
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface-raised));
+    color: var(--accent-strong);
+    outline: none;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-copy[data-state='copied'],
+.markdown-snapshot-host .cm-mktero-math-copy[data-state='copied'] {
+    color: var(--success);
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-copy[data-state='failed'],
+.markdown-snapshot-host .cm-mktero-math-copy[data-state='failed'] {
+    color: var(--error);
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display {

@@ -1,5 +1,8 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
-import { enhanceRenderedCodeBlocks } from '../editor/inline-rendering.js';
+import {
+    enhanceRenderedCodeBlocks,
+    enhanceRenderedMathBlocks,
+} from '../editor/inline-rendering.js';
 import {
     annotationPageLabel,
     safeAnnotationColor,
@@ -6732,6 +6735,12 @@ class MarkdownTabView {
         sanitizeSnapshotFragment(template.content, this.snapshotURLs);
         elements.snapshotHost.replaceChildren(...template.content.childNodes);
         enhanceRenderedCodeBlocks(elements.snapshotHost, this.document, {
+            copyCode: typeof this.model?.onCopyCode === 'function'
+                ? code => this.copyCode(code)
+                : null,
+            translate: this.t,
+        });
+        enhanceRenderedMathBlocks(elements.snapshotHost, this.document, {
             copyCode: typeof this.model?.onCopyCode === 'function'
                 ? code => this.copyCode(code)
                 : null,

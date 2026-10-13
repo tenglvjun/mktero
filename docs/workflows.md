@@ -18,6 +18,17 @@ Academic figure captions are recognized in common publisher formats, including
 `Figure N | ...` captions that follow an empty OCR image, so prose figure
 references remain previewable in cached documents.
 
+## Copy a formula or a code block
+
+A display formula shows a copy action in its top corner when you point at it,
+and a code block has one in its toolbar. Copying a formula puts the TeX behind
+the rendered formula on the clipboard, including the OCR repairs Mktero applied
+so the formula could be typeset. Every display formula in a saved snapshot
+offers the same action when that snapshot is open in the reader.
+
+Both actions read the rendered document only. They send nothing, and they do
+not change the cached OCR Markdown, the corrections, or the note.
+
 ## Find your place and get back
 
 A thin bar along the bottom edge of the reading pane shows how far through the
