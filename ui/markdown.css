@@ -1101,9 +1101,11 @@ main {
     pointer-events: none;
 }
 
+/* Below .markdown-reader-toolbar (z-index: 5): dropdowns open over the
+   reading area and must never hide behind this card. */
 .markdown-source-peek {
     position: absolute;
-    z-index: 8;
+    z-index: 4;
     inset-block-start: 12px;
     inset-inline-end: 12px;
     display: flex;

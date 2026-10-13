@@ -651,6 +651,34 @@ test('styles secondary document actions as a toolbar popover', () => {
     assert.match(reparsing, /animation:\s*mktero-spin 0\.85s linear infinite/);
 });
 
+test('keeps the PDF source peek below the reader toolbar dropdowns', () => {
+    const peek = ruleBody('.markdown-source-peek');
+    const toolbar = ruleBody('.markdown-reader-toolbar');
+    const layout = ruleBody('.markdown-reading-layout');
+
+    // The peek floats over the reading area, so the layout below the toolbar
+    // is its positioning context. On the editor it would cover the toolbar
+    // strip itself.
+    assert.match(peek, /position:\s*absolute/);
+    assert.match(peek, /inset-block-start:\s*12px/);
+    assert.match(peek, /inset-inline-end:\s*12px/);
+    assert.match(layout, /position:\s*relative/);
+
+    // The toolbar is its own stacking context, and the document-actions menu
+    // lives inside it. The peek must stay under that context or an open menu
+    // hides behind the card.
+    assert.match(toolbar, /z-index:\s*5/);
+    const zIndex = body => {
+        const match = body.match(/z-index:\s*(-?\d+)/);
+        assert.ok(match, 'Missing z-index declaration');
+        return Number(match[1]);
+    };
+    assert.ok(
+        zIndex(peek) < zIndex(toolbar),
+        'the source peek must paint below the reader toolbar dropdowns'
+    );
+});
+
 test('keeps document translation status legible without crowding the toolbar', () => {
     const action = ruleBody('.markdown-translation-action');
     const controls = ruleBody('.markdown-translation-controls');
