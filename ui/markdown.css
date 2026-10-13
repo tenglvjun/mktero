@@ -4541,6 +4541,8 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-table,
 .markdown-editor-host > .cm-editor .cm-mktero-html-table {
+    /* Anchors the copy actions to the table's top corner. */
+    position: relative;
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
@@ -4701,8 +4703,14 @@ main {
     position: relative;
 }
 
+.markdown-snapshot-host .cm-mktero-table-copy-block {
+    position: relative;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-math-toolbar,
-.markdown-snapshot-host .cm-mktero-math-toolbar {
+.markdown-editor-host > .cm-editor .cm-mktero-table-toolbar,
+.markdown-snapshot-host .cm-mktero-math-toolbar,
+.markdown-snapshot-host .cm-mktero-table-toolbar {
     position: absolute;
     top: 6px;
     inset-inline-end: 8px;
@@ -4719,21 +4727,33 @@ main {
 .markdown-snapshot-host .cm-mktero-math-block:hover .cm-mktero-math-toolbar,
 .markdown-snapshot-host .cm-mktero-math-block:focus-within .cm-mktero-math-toolbar,
 .markdown-editor-host > .cm-editor .cm-mktero-math-toolbar:focus-within,
-.markdown-snapshot-host .cm-mktero-math-toolbar:focus-within {
+.markdown-snapshot-host .cm-mktero-math-toolbar:focus-within,
+.markdown-editor-host > .cm-editor .cm-mktero-table:hover .cm-mktero-table-toolbar,
+.markdown-editor-host > .cm-editor .cm-mktero-table:focus-within .cm-mktero-table-toolbar,
+.markdown-editor-host > .cm-editor .cm-mktero-html-table:hover .cm-mktero-table-toolbar,
+.markdown-editor-host > .cm-editor .cm-mktero-html-table:focus-within .cm-mktero-table-toolbar,
+.markdown-editor-host > .cm-editor .cm-mktero-table-toolbar:focus-within,
+.markdown-snapshot-host .cm-mktero-table-copy-block:hover .cm-mktero-table-toolbar,
+.markdown-snapshot-host .cm-mktero-table-copy-block:focus-within .cm-mktero-table-toolbar,
+.markdown-snapshot-host .cm-mktero-table-toolbar:focus-within {
     opacity: 1;
     pointer-events: auto;
 }
 
 @media (hover: none) {
     .markdown-editor-host > .cm-editor .cm-mktero-math-toolbar,
-    .markdown-snapshot-host .cm-mktero-math-toolbar {
+    .markdown-editor-host > .cm-editor .cm-mktero-table-toolbar,
+    .markdown-snapshot-host .cm-mktero-math-toolbar,
+    .markdown-snapshot-host .cm-mktero-table-toolbar {
         opacity: 1;
         pointer-events: auto;
     }
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-copy,
-.markdown-snapshot-host .cm-mktero-math-copy {
+.markdown-editor-host > .cm-editor .cm-mktero-table-copy,
+.markdown-snapshot-host .cm-mktero-math-copy,
+.markdown-snapshot-host .cm-mktero-table-copy {
     min-height: 24px;
     padding: 4px 8px;
     border: 1px solid var(--border);
@@ -4749,8 +4769,12 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-copy:hover:not(:disabled),
 .markdown-editor-host > .cm-editor .cm-mktero-math-copy:focus-visible,
+.markdown-editor-host > .cm-editor .cm-mktero-table-copy:hover:not(:disabled),
+.markdown-editor-host > .cm-editor .cm-mktero-table-copy:focus-visible,
 .markdown-snapshot-host .cm-mktero-math-copy:hover:not(:disabled),
-.markdown-snapshot-host .cm-mktero-math-copy:focus-visible {
+.markdown-snapshot-host .cm-mktero-math-copy:focus-visible,
+.markdown-snapshot-host .cm-mktero-table-copy:hover:not(:disabled),
+.markdown-snapshot-host .cm-mktero-table-copy:focus-visible {
     border-color: color-mix(in srgb, var(--accent) 30%, transparent);
     background: color-mix(in srgb, var(--accent) 9%, var(--surface-raised));
     color: var(--accent-strong);
@@ -4758,12 +4782,16 @@ main {
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-copy[data-state='copied'],
-.markdown-snapshot-host .cm-mktero-math-copy[data-state='copied'] {
+.markdown-editor-host > .cm-editor .cm-mktero-table-copy[data-state='copied'],
+.markdown-snapshot-host .cm-mktero-math-copy[data-state='copied'],
+.markdown-snapshot-host .cm-mktero-table-copy[data-state='copied'] {
     color: var(--success);
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-copy[data-state='failed'],
-.markdown-snapshot-host .cm-mktero-math-copy[data-state='failed'] {
+.markdown-editor-host > .cm-editor .cm-mktero-table-copy[data-state='failed'],
+.markdown-snapshot-host .cm-mktero-math-copy[data-state='failed'],
+.markdown-snapshot-host .cm-mktero-table-copy[data-state='failed'] {
     color: var(--error);
 }
 

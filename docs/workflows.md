@@ -18,16 +18,34 @@ Academic figure captions are recognized in common publisher formats, including
 `Figure N | ...` captions that follow an empty OCR image, so prose figure
 references remain previewable in cached documents.
 
-## Copy a formula or a code block
+## Copy a formula, a code block, or a table
 
-A display formula shows a copy action in its top corner when you point at it,
-and a code block has one in its toolbar. Copying a formula puts the TeX behind
-the rendered formula on the clipboard, including the OCR repairs Mktero applied
-so the formula could be typeset. Every display formula in a saved snapshot
+A display formula and a table show their copy actions in the top corner when
+you point at them, and a code block has one in its toolbar.
+
+Copying a formula puts the TeX behind the rendered formula on the clipboard,
+including the OCR repairs Mktero applied so the formula could be typeset. A
+formula that was too large to render, or that used a command Mktero refuses to
+render, copies its source instead. Every display formula in a saved snapshot
 offers the same action when that snapshot is open in the reader.
 
-Both actions read the rendered document only. They send nothing, and they do
-not change the cached OCR Markdown, the corrections, or the note.
+A table offers `Copy as Markdown` and `Copy as CSV`. When the reader rendered
+the table from a GFM block, the Markdown action is that block, so it pastes
+back as the same table. A table the paper carries as HTML, and every table in a
+saved snapshot, is converted back into a pipe table instead: the `thead` row
+becomes the header (the first row is promoted when there is none), merged cells
+are expanded, column alignment comes from the cells' own `align` attribute, and
+bold, italic, code, links, formulas, and superscripts keep their meaning.
+
+The CSV action writes comma-separated rows with plain-text cells: inline markup
+such as bold text, links, and formulas is reduced to what you read on screen,
+and a citation keeps its `[1]` marker. Cells that contain a comma or a quote are
+quoted the RFC 4180 way, and the caption is not part of the data. A copy is
+refused, rather than truncated, when a table is larger than the reader's export
+budget.
+
+All of these actions read the rendered document only. They send nothing, and
+they do not change the cached OCR Markdown, the corrections, or the note.
 
 ## Find your place and get back
 

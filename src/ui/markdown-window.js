@@ -4,6 +4,9 @@ import {
     enhanceRenderedMathBlocks,
 } from '../editor/inline-rendering.js';
 import {
+    enhanceRenderedTableBlocks,
+} from '../editor/table-copy-actions.js';
+import {
     annotationPageLabel,
     safeAnnotationColor,
 } from '../editor/pdf-annotations.js';
@@ -6741,6 +6744,12 @@ class MarkdownTabView {
             translate: this.t,
         });
         enhanceRenderedMathBlocks(elements.snapshotHost, this.document, {
+            copyCode: typeof this.model?.onCopyCode === 'function'
+                ? code => this.copyCode(code)
+                : null,
+            translate: this.t,
+        });
+        enhanceRenderedTableBlocks(elements.snapshotHost, this.document, {
             copyCode: typeof this.model?.onCopyCode === 'function'
                 ? code => this.copyCode(code)
                 : null,
