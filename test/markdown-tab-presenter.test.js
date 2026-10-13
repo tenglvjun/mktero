@@ -922,3 +922,21 @@ test('localizes new loading tabs from the Zotero locale', () => {
 
     assert.equal(presentation.view.renderCalls.length, 1);
 });
+
+test('hints the history chord of the platform it runs on', () => {
+    const mac = createPresenter(createMainWindow(), createViewHarness(), {
+        isMac: true,
+    });
+    const other = createPresenter(createMainWindow(), createViewHarness(), {
+        isMac: false,
+    });
+
+    assert.deepEqual(mac.navigationShortcuts, {
+        back: '⌘[',
+        forward: '⌘]',
+    });
+    assert.deepEqual(other.navigationShortcuts, {
+        back: 'Alt+←',
+        forward: 'Alt+→',
+    });
+});

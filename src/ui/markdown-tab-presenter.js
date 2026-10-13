@@ -29,6 +29,7 @@ import {
 } from '../config/reader-preferences.js';
 import { createLocalization } from '../i18n/localization.js';
 import { createMarkdownTabView } from './markdown-window.js';
+import { navigationShortcutLabels } from './reader-shortcuts.js';
 import { createEmptyTranslationState } from './markdown-tab-state.js';
 import {
     installMkteroSessionStateFilter,
@@ -63,6 +64,9 @@ export class MarkdownTabPresenter {
         this.readerWidth = getMarkdownReaderWidth(zotero);
         this.readerAlignment = getMarkdownReaderAlignment(zotero);
         this.readerSourcePeek = getMarkdownReaderSourcePeek(zotero);
+        this.navigationShortcuts = navigationShortcutLabels({
+            isMac: zotero?.isMac === true,
+        });
         this.presentations = new Map();
         this.disposeReaderFontObserver = observeMarkdownReaderFont(
             zotero,
@@ -349,6 +353,7 @@ export class MarkdownTabPresenter {
             onReaderAlignmentChange: value => (
                 this.updateReaderAlignment(value)
             ),
+            navigationShortcuts: this.navigationShortcuts,
             readerSourcePeek: this.readerSourcePeek,
             onReaderSourcePeekChange: enabled => (
                 this.updateReaderSourcePeek(enabled)

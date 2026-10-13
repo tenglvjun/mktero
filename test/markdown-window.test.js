@@ -71,6 +71,7 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         onReaderLineHeightChange: options.onReaderLineHeightChange,
         onReaderWidthChange: options.onReaderWidthChange,
         onReaderAlignmentChange: options.onReaderAlignmentChange,
+        navigationShortcuts: options.navigationShortcuts,
         readerSourcePeek: options.readerSourcePeek,
         onReaderSourcePeekChange: options.onReaderSourcePeekChange,
         sourcePeekDelay: options.sourcePeekDelay,
@@ -7091,4 +7092,171 @@ test('keeps the note filter for the same item and clears it for another item', (
     assert.equal(shadow.querySelector('.markdown-notes-search-input').value, '');
     assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 2);
     view.destroy();
+});
+
+test('names the platform history chord in the navigation hints', () => {
+    const mac = createView(createModel(), {}, {
+        navigationShortcuts: { back: '⌘[', forward: '⌘]' },
+    });
+    const other = createView(createModel(), {}, {
+        navigationShortcuts: { back: 'Alt+←', forward: 'Alt+→' },
+    });
+
+    try {
+        const back = mac.shadow.querySelector('#mktero-navigation-back');
+        const forward = mac.shadow.querySelector('#mktero-navigation-forward');
+        assert.equal(
+            back.getAttribute('title'),
+            'Go back to the previous position (⌘[)'
+        );
+        assert.equal(back.getAttribute('aria-label'), back.getAttribute('title'));
+        assert.equal(forward.getAttribute('title'), 'Go forward (⌘])');
+
+        assert.equal(
+            other.shadow.querySelector('#mktero-navigation-back')
+                .getAttribute('title'),
+            'Go back to the previous position (Alt+←)'
+        );
+    }
+    finally {
+        mac.view.destroy();
+        other.view.destroy();
+    }
+});
+
+test('defaults the navigation hint to the Alt chord', () => {
+    const { view, shadow } = createView(createModel());
+
+    try {
+        assert.equal(
+            shadow.querySelector('#mktero-navigation-forward')
+                .getAttribute('title'),
+            'Go forward (Alt+→)'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+function createNavigationShortcutView({ visible = true } = {}) {
+    const created = createView(createModel({ status: 'ready' }), {}, {
+        editorFactory: options => {
+            const editor = createTestInlineEditor(options);
+            editor.backCount = 0;
+            editor.forwardCount = 0;
+            editor.goNavigationBack = () => { editor.backCount++; };
+            editor.goNavigationForward = () => { editor.forwardCount++; };
+            return editor;
+        },
+    });
+    // The window-level listener only fires for a pane that is on screen.
+    created.document.body.appendChild(created.view.root);
+    created.view.navigationBackAvailable = true;
+    created.view.navigationForwardAvailable = true;
+    // A pane behind another Zotero tab measures as empty.
+    created.view.host.getClientRects = () => (visible
+        ? [{ width: 800, height: 600 }]
+        : []);
+    return created;
+}
+
+test('handles the history chord pressed outside the reading pane', () => {
+    const { document, view } = createNavigationShortcutView();
+
+    try {
+        // Focus sits on the Zotero chrome, as it does right after a toolbar
+        // click, so the event never enters the pane's shadow root.
+        const back = dispatchShortcut(document.body, {
+            key: '[',
+            metaKey: true,
+        });
+        assert.equal(back.defaultPrevented, true);
+        assert.equal(view.editor.backCount, 1);
+        assert.equal(view.editor.forwardCount, 0);
+
+        const forward = dispatchShortcut(document.body, {
+            key: ']',
+            metaKey: true,
+        });
+        assert.equal(forward.defaultPrevented, true);
+        assert.equal(view.editor.forwardCount, 1);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('matches the history chord by physical key, not only by character', () => {
+    const { document, view } = createNavigationShortcutView();
+
+    try {
+        // A non-US layout or an input method can report another `key` for the
+        // same physical press.
+        const event = dispatchShortcut(document.body, {
+            key: 'Process',
+            code: 'BracketLeft',
+            metaKey: true,
+        });
+
+        assert.equal(event.defaultPrevented, true);
+        assert.equal(view.editor.backCount, 1);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('ignores the history chord while another tab is in front', () => {
+    const { document, view } = createNavigationShortcutView({
+        visible: false,
+    });
+
+    try {
+        const event = dispatchShortcut(document.body, {
+            key: '[',
+            metaKey: true,
+        });
+
+        assert.equal(event.defaultPrevented, false);
+        assert.equal(view.editor.backCount, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('leaves the history chord to a text field that has focus', () => {
+    const { document, view, shadow } = createNavigationShortcutView();
+
+    try {
+        const input = shadow.querySelector('#mktero-notes-search');
+        assert.ok(input);
+        const event = dispatchShortcut(input, { key: '[', metaKey: true });
+
+        assert.equal(event.defaultPrevented, false);
+        assert.equal(view.editor.backCount, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('leaves the history chord to a text editing chord in a field', () => {
+    const { document, view, shadow } = createNavigationShortcutView();
+
+    try {
+        const input = shadow.querySelector('#mktero-notes-search');
+        assert.ok(input);
+        const event = dispatchShortcut(input, {
+            key: 'ArrowLeft',
+            altKey: true,
+        });
+
+        assert.equal(event.defaultPrevented, false);
+        assert.equal(view.editor.backCount, 0);
+    }
+    finally {
+        view.destroy();
+    }
 });
