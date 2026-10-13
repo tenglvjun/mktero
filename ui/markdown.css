@@ -4752,6 +4752,35 @@ main {
     text-transform: uppercase;
 }
 
+/* Page markers are rendered buttons: clicking one opens the PDF page. */
+.page-marker[role="button"] {
+    width: fit-content;
+    padding: 2px 8px;
+    margin-inline-start: -8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: pointer;
+    transition:
+        color 120ms ease,
+        background-color 120ms ease,
+        border-color 120ms ease;
+}
+
+.page-marker[role="button"]:hover {
+    color: var(--text);
+    background: rgb(41 52 65 / 8%);
+}
+
+.page-marker[role="button"]:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.page-marker[role="button"]:focus:not(:focus-visible) {
+    outline: none;
+}
+
 @container mktero-view (max-width: 720px) {
     .loading-card { margin-top: 32px; padding: 20px; }
     .markdown-snapshot-host p,

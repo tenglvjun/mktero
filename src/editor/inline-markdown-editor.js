@@ -9,6 +9,10 @@ import {
 import {
     resolveSourceMapSelectionLocation,
 } from '../core/markdown-source-map.js';
+import {
+    findMarkdownPageMarkers,
+    resolvePageMarkerSourceLocation,
+} from '../core/markdown-page-markers.js';
 import { createLocalization } from '../i18n/localization.js';
 import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
@@ -469,6 +473,9 @@ export function createInlineMarkdownEditor({
                     tablePreviewPopup,
                     figurePreviewPopup,
                     annotationPopup,
+                    openPageMarker: offset => (
+                        openPageMarkerSourceLocation(offset)
+                    ),
                     activateCitation,
                     activateTableReference,
                     activateFigureReference,
@@ -1005,6 +1012,20 @@ export function createInlineMarkdownEditor({
         true
     );
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
+    const openPageMarkerSourceLocation = offset => {
+        if (typeof openSourceLocation !== 'function') return;
+        const markdown = view?.state?.doc?.toString?.() || '';
+        const location = pageMarkerLocationAt(
+            currentSourceMap,
+            markdown,
+            offset,
+            markdown.length
+        );
+        if (!location) return;
+        Promise.resolve(openSourceLocation(location)).catch(error => {
+            onSourceNavigationError?.(error);
+        });
+    };
     let currentSourceMap = [];
     let currentFigureViews = [];
     let currentPendingFigures = null;
@@ -1752,6 +1773,21 @@ function createSourcedEvidence(markdown, sourceMap, target, figureViews) {
 function selectionSourceLocation(sourceMap, target, documentLength) {
     const range = target?.ranges?.length === 1 ? target.ranges[0] : null;
     return resolveSourceMapSelectionLocation(sourceMap, range, documentLength);
+}
+
+// The offset is a page-boundary comment rendered as a page marker; find that
+// marker's index and map it to the nearest source location.
+function pageMarkerLocationAt(sourceMap, markdown, offset, documentLength) {
+    if (!Number.isSafeInteger(offset)) return null;
+    const markers = findMarkdownPageMarkers(markdown);
+    const index = markers.findIndex(marker => marker.from === offset);
+    if (index < 0) return null;
+    return resolvePageMarkerSourceLocation(
+        sourceMap,
+        markers,
+        index,
+        documentLength
+    );
 }
 
 function clampSelectionFocusToPointerLine(view, selection, pointer) {

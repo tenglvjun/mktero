@@ -41,6 +41,41 @@ export function openRenderedLink(event, openLink) {
     return true;
 }
 
+/**
+ * Handle clicks on a page-boundary marker inside a rendered block. The
+ * widget's `from` is the block start, so the marker is the page comment at
+ * that offset; the callback receives the marker's document offset.
+ */
+export function openRenderedPageMarker(event, blockFrom, openPageMarker) {
+    if (event.button !== 0 || typeof openPageMarker !== 'function') {
+        return false;
+    }
+    const marker = event.target?.closest?.('.page-marker');
+    if (!marker) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    openPageMarker(Number.isSafeInteger(blockFrom) ? blockFrom : null);
+    return true;
+}
+
+/**
+ * Make page markers keyboard-operable. Only applies when navigation is
+ * available, so the read-only snapshot and note surfaces keep plain text.
+ */
+export function installPageMarkerButtons(container, openPageMarker) {
+    if (typeof openPageMarker !== 'function') return;
+    for (const marker of container.querySelectorAll('.page-marker')) {
+        marker.setAttribute('role', 'button');
+        marker.setAttribute('tabindex', '0');
+        marker.addEventListener('keydown', event => {
+            if (!['Enter', ' '].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            openPageMarker(null);
+        });
+    }
+}
+
 export function installRenderedImagePreview(
     container,
     openImagePreview,

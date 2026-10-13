@@ -9872,3 +9872,161 @@ test('renders inline math that contains link-like brackets instead of raw source
     editor.destroy();
     dom.window.close();
 });
+
+test('opens the PDF page when a rendered page marker is clicked', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Para one.\n\n<!-- zotero-page: 4 -->\n\nPara two.';
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        openSourceLocation: location => opened.push(location),
+    });
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'page',
+            markdownFrom: markdown.indexOf('\n\nPara two.') + 2,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 3, bbox: [0, 0, 1000, 1000] }],
+        }],
+    });
+
+    const marker = document.querySelector('.page-marker');
+    assert.ok(marker);
+    assert.equal(marker.getAttribute('role'), 'button');
+    assert.equal(marker.getAttribute('tabindex'), '0');
+    marker.dispatchEvent(new dom.window.MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+    }));
+    await Promise.resolve();
+
+    assert.deepEqual(opened, [{ pageIndex: 3, bbox: [0, 0, 1000, 1000] }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('opens the nearest mapped block after a page marker without one', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Intro.\n\n<!-- zotero-page: 2 -->\n\nMapped paragraph.';
+    const opened = [];
+    const location = { pageIndex: 1, bbox: [10, 20, 900, 200] };
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        openSourceLocation: target => opened.push(target),
+    });
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: markdown.indexOf('Mapped paragraph.'),
+            markdownTo: markdown.length,
+            locations: [location],
+        }],
+    });
+
+    document.querySelector('.page-marker').dispatchEvent(
+        new dom.window.MouseEvent('mousedown', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+        })
+    );
+    await Promise.resolve();
+
+    assert.deepEqual(opened, [location]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('navigates a page marker to the labeled page without any source map', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Para one.\n\n<!-- zotero-page: 2 -->\n\nPara two.';
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        openSourceLocation: location => opened.push(location),
+    });
+    editor.setDocument({ markdown, sourceMap: [] });
+
+    document.querySelector('.page-marker').dispatchEvent(
+        new dom.window.MouseEvent('mousedown', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+        })
+    );
+    await Promise.resolve();
+
+    assert.deepEqual(opened, [{ pageIndex: 1, bbox: [0, 0, 1000, 1000] }]);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('reports a page marker navigation failure without surfacing an error UI', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '<!-- zotero-page: 2 -->\n\nPara.';
+    const failure = new Error('navigation failed');
+    const reported = [];
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        openSourceLocation: async () => {
+            throw failure;
+        },
+        onSourceNavigationError: error => reported.push(error),
+    });
+    editor.setDocument({
+        markdown,
+        sourceMap: [{
+            type: 'page',
+            markdownFrom: markdown.indexOf('\n\n') + 2,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 1, bbox: [0, 0, 1000, 1000] }],
+        }],
+    });
+
+    document.querySelector('.page-marker').dispatchEvent(
+        new dom.window.MouseEvent('mousedown', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+        })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(reported, [failure]);
+    assert.equal(document.querySelector('.mktero-annotation-action-error'), null);
+
+    editor.destroy();
+    dom.window.close();
+});

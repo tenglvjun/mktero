@@ -40,9 +40,11 @@ import {
 } from './translation-presentation.js';
 import {
     appendRenderedMarkdown,
+    installPageMarkerButtons,
     installRenderedCitations,
     installRenderedImagePreview,
     openRenderedLink,
+    openRenderedPageMarker,
 } from './rendered-markdown-dom.js';
 import { replacePendingFigureImages } from './figure-placeholder.js';
 import {
@@ -107,6 +109,7 @@ class RenderedMarkdownWidget extends WidgetType {
         resolveImageURL,
         openLink,
         openImagePreview,
+        openPageMarker,
         copyCode,
         renderVersion,
         citations = [],
@@ -127,6 +130,7 @@ class RenderedMarkdownWidget extends WidgetType {
         this.resolveImageURL = resolveImageURL;
         this.openLink = openLink;
         this.openImagePreview = openImagePreview;
+        this.openPageMarker = openPageMarker;
         this.copyCode = copyCode;
         this.renderVersion = renderVersion;
         this.citations = citations;
@@ -204,8 +208,12 @@ class RenderedMarkdownWidget extends WidgetType {
 
         container.addEventListener('mousedown', event => {
             if (event.target?.closest?.('img')) return;
+            if (openRenderedPageMarker(event, this.from, this.openPageMarker)) {
+                return;
+            }
             openRenderedLink(event, this.openLink);
         });
+        installPageMarkerButtons(container, this.openPageMarker);
         installRenderedImagePreview(
             container,
             this.openImagePreview,
@@ -591,6 +599,7 @@ export function createInlineRenderingExtension({
     tablePreviewPopup,
     figurePreviewPopup,
     annotationPopup,
+    openPageMarker = null,
     activateCitation,
     activateTableReference,
     activateFigureReference,
@@ -619,6 +628,7 @@ export function createInlineRenderingExtension({
         tablePreviewPopup,
         figurePreviewPopup,
         annotationPopup,
+        openPageMarker,
         activateCitation,
         activateTableReference,
         activateFigureReference,
