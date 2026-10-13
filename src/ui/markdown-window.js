@@ -1,4 +1,5 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
+import { navigationShortcutLabels } from './reader-shortcuts.js';
 import {
     enhanceRenderedCodeBlocks,
     enhanceRenderedMathBlocks,
@@ -250,6 +251,8 @@ export function createMarkdownTabView({
     onReaderWidthChange = null,
     onReaderAlignmentChange = null,
     readerSourcePeek = MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
+    // The hint names this platform's history chord; the reader accepts both.
+    navigationShortcuts = navigationShortcutLabels(),
     onReaderSourcePeekChange = null,
     sourcePeekDelay = SOURCE_PEEK_DELAY_MS,
     readingPositionDelay = READING_POSITION_SAVE_DELAY_MS,
@@ -272,6 +275,7 @@ export function createMarkdownTabView({
         onReaderWidthChange,
         onReaderAlignmentChange,
         readerSourcePeek,
+        navigationShortcuts,
         onReaderSourcePeekChange,
         sourcePeekDelay,
         readingPositionDelay,
@@ -297,6 +301,7 @@ class MarkdownTabView {
         onReaderWidthChange,
         onReaderAlignmentChange,
         readerSourcePeek,
+        navigationShortcuts,
         onReaderSourcePeekChange,
         sourcePeekDelay,
         readingPositionDelay,
@@ -331,6 +336,7 @@ class MarkdownTabView {
         this.readerSourcePeek = normalizeMarkdownReaderSourcePeek(
             readerSourcePeek
         );
+        this.navigationShortcuts = navigationShortcuts;
         this.onReaderSourcePeekChange = onReaderSourcePeekChange;
         this.sourcePeekDelay = Number.isFinite(sourcePeekDelay)
             ? Math.max(0, sourcePeekDelay)
@@ -1810,21 +1816,46 @@ class MarkdownTabView {
         };
     }
 
+    navigationLabel(key, direction) {
+        return this.t(key, { shortcut: this.navigationShortcuts[direction] });
+    }
+
+    syncNavigationLabels() {
+        const labels = [
+            [this.elements.navigationBack, 'viewer.navigationBack', 'back'],
+            [
+                this.elements.navigationForward,
+                'viewer.navigationForward',
+                'forward',
+            ],
+        ];
+        for (const [element, key, direction] of labels) {
+            const label = this.navigationLabel(key, direction);
+            element.setAttribute('aria-label', label);
+            element.setAttribute('title', label);
+        }
+    }
+
     createDocumentActions() {
+        const backLabel = this.navigationLabel('viewer.navigationBack', 'back');
+        const forwardLabel = this.navigationLabel(
+            'viewer.navigationForward',
+            'forward'
+        );
         const navigationBack = this.createElement('button', {
             id: 'mktero-navigation-back',
             class: 'markdown-reader-action markdown-reader-navigation-back',
             type: 'button',
-            'aria-label': this.t('viewer.navigationBack'),
-            title: this.t('viewer.navigationBack'),
+            'aria-label': backLabel,
+            title: backLabel,
             disabled: 'true',
         });
         const navigationForward = this.createElement('button', {
             id: 'mktero-navigation-forward',
             class: 'markdown-reader-action markdown-reader-navigation-forward',
             type: 'button',
-            'aria-label': this.t('viewer.navigationForward'),
-            title: this.t('viewer.navigationForward'),
+            'aria-label': forwardLabel,
+            title: forwardLabel,
             disabled: 'true',
         });
         navigationForward.appendChild(createLucideIcon(
@@ -2689,6 +2720,12 @@ class MarkdownTabView {
             this.handleDocumentSearchShortcut(event, {
                 requireForeground: true,
             });
+        }, true);
+        // Capture phase on the window: the pane's own host listener only sees
+        // keys pressed while focus is inside the shadow root, and the chord
+        // has to work from the PDF pane, the outline, or the chrome too.
+        this.listen(this.ownerWindow, 'keydown', event => {
+            this.handleNavigationShortcut(event, { requireForeground: true });
         }, true);
         this.listen(this.elements.actionToggle, 'click', () => {
             if (this.elements.actionToggle.disabled) return;
@@ -4439,19 +4476,14 @@ class MarkdownTabView {
             = !this.navigationForwardAvailable;
     }
 
-    handleNavigationShortcut(event) {
-        if (this.destroyed
-            || event.defaultPrevented
-            || event.isComposing
-            || !isNavigationChord(event)) {
-            return;
-        }
+    handleNavigationShortcut(event, { requireForeground = false } = {}) {
+        if (this.destroyed || event.isComposing) return;
+        const direction = navigationChord(event);
+        if (!direction) return;
+        if (requireForeground && !this.isMarkdownTabForeground()) return;
         const origin = event.composedPath?.()[0] || event.target;
-        if (origin?.isContentEditable
-            || ['INPUT', 'TEXTAREA', 'SELECT'].includes(origin?.tagName)) {
-            return;
-        }
-        const back = isNavigationChord(event) === 'back';
+        if (isTextEditingOrigin(origin)) return;
+        const back = direction === 'back';
         const available = back
             ? this.navigationBackAvailable
             : this.navigationForwardAvailable;
@@ -4637,22 +4669,7 @@ class MarkdownTabView {
             'title',
             this.t('viewer.findClose')
         );
-        this.elements.navigationBack.setAttribute(
-            'aria-label',
-            this.t('viewer.navigationBack')
-        );
-        this.elements.navigationBack.setAttribute(
-            'title',
-            this.t('viewer.navigationBack')
-        );
-        this.elements.navigationForward.setAttribute(
-            'aria-label',
-            this.t('viewer.navigationForward')
-        );
-        this.elements.navigationForward.setAttribute(
-            'title',
-            this.t('viewer.navigationForward')
-        );
+        this.syncNavigationLabels();
         this.elements.readingProgress.setAttribute(
             'aria-label',
             this.t('viewer.readingProgress')
@@ -7356,7 +7373,37 @@ function isSafeSnapshotLinkURL(value) {
 }
 
 // 'back' for Alt+Left / Cmd+[, 'forward' for Alt+Right / Cmd+], else false.
-function isNavigationChord(event) {
+// The window-level listener sees keys pressed anywhere in the window, so a
+// caret that belongs to a field keeps the chord: Alt+Arrow and Cmd+bracket are
+// text editing chords there.
+const TEXT_INPUT_TYPES = new Set([
+    'text',
+    'search',
+    'email',
+    'url',
+    'tel',
+    'password',
+    'number',
+    'date',
+    'datetime-local',
+    'month',
+    'time',
+    'week',
+]);
+
+function isTextEditingOrigin(element) {
+    if (!element) return false;
+    if (element.isContentEditable) return true;
+    const tagName = String(element.tagName || '').toUpperCase();
+    if (['TEXTAREA', 'TEXTBOX', 'SELECT'].includes(tagName)) return true;
+    if (tagName !== 'INPUT') return false;
+    return TEXT_INPUT_TYPES.has(String(element.type || 'text').toLowerCase());
+}
+
+// Alt+Arrow is the history chord on Windows and Linux, Cmd+bracket on macOS.
+// The bracket is matched by position as well as by character: a layout or an
+// input method can report a different `key` for the same physical press.
+function navigationChord(event) {
     const altOnly = event.altKey
         && !event.ctrlKey
         && !event.metaKey
@@ -7365,12 +7412,14 @@ function isNavigationChord(event) {
         && !event.altKey
         && !event.ctrlKey
         && !event.shiftKey;
-    if (altOnly && event.key === 'ArrowLeft'
-        || metaOnly && event.key === '[') {
+    const key = String(event.key || '');
+    const code = String(event.code || '');
+    if (altOnly && key === 'ArrowLeft'
+        || metaOnly && (key === '[' || code === 'BracketLeft')) {
         return 'back';
     }
-    if (altOnly && event.key === 'ArrowRight'
-        || metaOnly && event.key === ']') {
+    if (altOnly && key === 'ArrowRight'
+        || metaOnly && (key === ']' || code === 'BracketRight')) {
         return 'forward';
     }
     return false;

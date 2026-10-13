@@ -57,9 +57,10 @@ Jumping away from where you are reading records that spot, so you can return to
 it. These jumps are recorded: opening a citation, a table reference, or a
 figure reference; choosing an outline entry or a note; following an in-document
 link; and searching. Stepping through the matches of one search counts as a
-single jump. `Alt+Left` (or `Cmd+[`) goes back and `Alt+Right` (or `Cmd+]`)
-goes forward, like a browser, or use the arrow buttons at the start of the
-toolbar. Going back keeps the place you left, so forward returns to it; a new
+single jump. `Alt+Left` goes back and `Alt+Right` goes forward on Windows and
+Linux, and `Cmd+[` and `Cmd+]` do the same on macOS; either platform's chord
+works on both, and the arrow buttons at the start of the toolbar are the same
+action. Going back keeps the place you left, so forward returns to it; a new
 jump after going back discards the forward steps. Up to 50 positions are kept
 for the open document. They are not saved: closing the tab or replacing the
 document, for example by reparsing, clears them. Scrolling by hand does not create
