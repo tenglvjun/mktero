@@ -3980,6 +3980,46 @@ test('enhances display formulas in saved HTML snapshots', async () => {
     }
 });
 
+test('enhances tables in saved HTML snapshots', async () => {
+    const copied = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        renderMode: 'html',
+        snapshotHTML: '<p>Before</p><table><tr><th>A</th><th>B</th></tr>'
+            + '<tr><td>1</td><td>2</td></tr></table>',
+        snapshotAssets: [],
+        onCopyCode: code => copied.push(code),
+    }));
+
+    try {
+        const wrapper = shadow.querySelector(
+            '#mktero-snapshot .cm-mktero-table-copy-block'
+        );
+        assert.ok(wrapper);
+        assert.equal(wrapper.querySelector('table').parentElement, wrapper);
+        const markdownButton = wrapper.querySelector(
+            '[data-action="copy-table-markdown"]'
+        );
+        const copyButton = wrapper.querySelector('[data-action="copy-table-csv"]');
+        assert.ok(markdownButton);
+        assert.ok(copyButton);
+        markdownButton.click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(copied, ['| A | B |\n| --- | --- |\n| 1 | 2 |']);
+        assert.equal(markdownButton.textContent, 'Copied');
+        copyButton.click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(copied, [
+            '| A | B |\n| --- | --- |\n| 1 | 2 |',
+            'A,B\r\n1,2',
+        ]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('sanitizes a modified snapshot before mounting it in the Zotero chrome', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',

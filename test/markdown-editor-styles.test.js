@@ -403,20 +403,27 @@ test('keeps rendered display math spacing inside the CodeMirror block widget', (
     assert.match(mathHighlight, /padding:\s*0\.2em 0\.75em/);
 });
 
-test('reveals the formula copy action on hover or keyboard focus', () => {
+test('reveals the formula and table copy actions on hover or focus', () => {
     const displayMath = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-math-display'
     );
     assert.match(displayMath, /position:\s*relative/);
 
-    const snapshotBlock = ruleBody(
+    const snapshotMath = ruleBody(
         '.markdown-snapshot-host .cm-mktero-math-block'
     );
-    assert.match(snapshotBlock, /position:\s*relative/);
+    assert.match(snapshotMath, /position:\s*relative/);
+
+    const snapshotTable = ruleBody(
+        '.markdown-snapshot-host .cm-mktero-table-copy-block'
+    );
+    assert.match(snapshotTable, /position:\s*relative/);
 
     const toolbar = ruleBody([
         '.markdown-editor-host > .cm-editor .cm-mktero-math-toolbar,',
-        '.markdown-snapshot-host .cm-mktero-math-toolbar',
+        '.markdown-editor-host > .cm-editor .cm-mktero-table-toolbar,',
+        '.markdown-snapshot-host .cm-mktero-math-toolbar,',
+        '.markdown-snapshot-host .cm-mktero-table-toolbar',
     ].join('\n'));
     assert.match(toolbar, /position:\s*absolute/);
     assert.match(toolbar, /opacity:\s*0/);
@@ -424,14 +431,16 @@ test('reveals the formula copy action on hover or keyboard focus', () => {
 
     // The hidden action stays reachable by keyboard, so focus must reveal it.
     const revealed = ruleBody(
-        '.markdown-snapshot-host .cm-mktero-math-toolbar:focus-within'
+        '.markdown-snapshot-host .cm-mktero-table-toolbar:focus-within'
     );
     assert.match(revealed, /opacity:\s*1/);
     assert.match(revealed, /pointer-events:\s*auto/);
 
     const copy = ruleBody([
         '.markdown-editor-host > .cm-editor .cm-mktero-math-copy,',
-        '.markdown-snapshot-host .cm-mktero-math-copy',
+        '.markdown-editor-host > .cm-editor .cm-mktero-table-copy,',
+        '.markdown-snapshot-host .cm-mktero-math-copy,',
+        '.markdown-snapshot-host .cm-mktero-table-copy',
     ].join('\n'));
     assert.match(copy, /cursor:\s*pointer/);
     assert.match(copy, /background:\s*var\(--surface-raised\)/);

@@ -31,6 +31,9 @@ import {
     isEditableTextCorrectionBlock,
 } from './correction-interactions.js';
 import {
+    enhanceTableCopyActions,
+} from './table-copy-actions.js';
+import {
     createTableCaption,
     RenderedTableWidget,
 } from './rendered-table-widget.js';
@@ -242,6 +245,14 @@ class RenderedMarkdownWidget extends WidgetType {
                 copyCode: this.copyCode,
                 translate: this.translate,
                 source: this.source,
+            });
+        }
+        if (this.extraClassName.includes('cm-mktero-html-table')) {
+            // An OCR HTML table has no Markdown block behind it, so it offers
+            // the CSV export only.
+            enhanceTableCopyActions(container, container.querySelector('table'), {
+                copyCode: this.copyCode,
+                translate: this.translate,
             });
         }
         return container;
