@@ -20,6 +20,7 @@ import {
     parseFigureLayoutMarker,
 } from '../markdown/markdown-figures.js';
 import { findAuthorNoteLatexCommands } from '../markdown/markdown-citations.js';
+import { stripMathDelimiters } from '../markdown/math-source.js';
 import {
     computeDocumentFigures,
     computeFigureReferences,
@@ -232,6 +233,15 @@ class RenderedMarkdownWidget extends WidgetType {
             enhanceRenderedCodeBlock(container, document, {
                 copyCode: this.copyCode,
                 translate: this.translate,
+            });
+        }
+        if (this.display === 'math-display') {
+            // Appended after the annotation pass, which moves the container's
+            // children into an annotation wrapper when one covers the formula.
+            enhanceRenderedMathBlock(container, document, {
+                copyCode: this.copyCode,
+                translate: this.translate,
+                source: this.source,
             });
         }
         return container;
@@ -504,6 +514,106 @@ function wrapCodeBlockContainer(pre, document) {
     pre.replaceWith(container);
     container.append(pre);
     return container;
+}
+
+/**
+ * Add the copy-LaTeX action to every display formula in a rendered document.
+ *
+ * Saved snapshots keep TeX as text (`<pre class="math">$$…$$</pre>`) instead
+ * of the reader's KaTeX MathML, so they need their own entry point next to
+ * `enhanceRenderedCodeBlocks`.
+ */
+export function enhanceRenderedMathBlocks(
+    root,
+    document,
+    options = {}
+) {
+    for (const pre of root?.querySelectorAll?.('pre.math') || []) {
+        // A host that re-enhances the same tree must not nest another wrapper.
+        if (pre.closest?.('.cm-mktero-math-block')) continue;
+        enhanceRenderedMathBlock(
+            wrapMathBlockContainer(pre, document),
+            document,
+            options
+        );
+    }
+}
+
+function wrapMathBlockContainer(pre, document) {
+    const container = createHTMLNode(document, 'div');
+    container.className = 'cm-mktero-math-block';
+    pre.replaceWith(container);
+    container.append(pre);
+    return container;
+}
+
+function enhanceRenderedMathBlock(
+    container,
+    document,
+    { copyCode, translate = translateEnglish, source = '' } = {}
+) {
+    if (typeof copyCode !== 'function'
+        || container.querySelector('.cm-mktero-math-toolbar')) {
+        return;
+    }
+    const latex = renderedMathSource(container, source);
+    if (!latex) return;
+
+    const toolbar = createHTMLNode(document, 'div');
+    toolbar.className = 'cm-mktero-math-toolbar';
+    const copyButton = createHTMLNode(document, 'button');
+    copyButton.type = 'button';
+    copyButton.className = 'cm-mktero-math-copy';
+    copyButton.dataset.action = 'copy-math';
+    copyButton.setAttribute('aria-label', translate('markdown.mathCopy'));
+    copyButton.title = translate('markdown.mathCopy');
+    copyButton.textContent = translate('markdown.mathCopy');
+    copyButton.addEventListener('click', async event => {
+        // The widget container also listens for mousedown to open links, and
+        // a formula can be wrapped in an annotation that reacts to clicks.
+        event.preventDefault();
+        event.stopPropagation();
+        if (copyButton.disabled) return;
+        copyButton.disabled = true;
+        try {
+            await copyCode(latex);
+            copyButton.dataset.state = 'copied';
+            copyButton.textContent = translate('markdown.mathCopied');
+        }
+        catch {
+            copyButton.dataset.state = 'failed';
+            copyButton.textContent = translate('markdown.mathCopyFailed');
+        }
+        finally {
+            copyButton.disabled = false;
+        }
+    });
+    toolbar.append(copyButton);
+    container.append(toolbar);
+}
+
+/**
+ * Read the LaTeX behind one display formula.
+ *
+ * KaTeX already puts the source it rendered in the MathML `annotation`, which
+ * is the normalized TeX the reader shows. A formula past the math render budget
+ * falls back to `<code class="math-fallback">`, a saved snapshot keeps the raw
+ * source as text, and a widget can always hand over the Markdown it rendered.
+ */
+function renderedMathSource(container, source = '') {
+    const annotation = container.querySelector(
+        'annotation[encoding="application/x-tex"]'
+    );
+    const annotationText = annotation?.textContent?.trim();
+    if (annotationText) return annotationText;
+    const fallback = container.querySelector('.math-fallback');
+    // Container text is the last resort: for rendered MathML it is the flattened
+    // formula, which is worse than the widget's own source.
+    const raw = fallback?.textContent
+        || source
+        || container.textContent
+        || '';
+    return stripMathDelimiters(raw);
 }
 
 function highlightedCodeText(lines) {

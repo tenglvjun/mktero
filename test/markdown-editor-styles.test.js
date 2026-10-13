@@ -403,6 +403,40 @@ test('keeps rendered display math spacing inside the CodeMirror block widget', (
     assert.match(mathHighlight, /padding:\s*0\.2em 0\.75em/);
 });
 
+test('reveals the formula copy action on hover or keyboard focus', () => {
+    const displayMath = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display'
+    );
+    assert.match(displayMath, /position:\s*relative/);
+
+    const snapshotBlock = ruleBody(
+        '.markdown-snapshot-host .cm-mktero-math-block'
+    );
+    assert.match(snapshotBlock, /position:\s*relative/);
+
+    const toolbar = ruleBody([
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-toolbar,',
+        '.markdown-snapshot-host .cm-mktero-math-toolbar',
+    ].join('\n'));
+    assert.match(toolbar, /position:\s*absolute/);
+    assert.match(toolbar, /opacity:\s*0/);
+    assert.match(toolbar, /pointer-events:\s*none/);
+
+    // The hidden action stays reachable by keyboard, so focus must reveal it.
+    const revealed = ruleBody(
+        '.markdown-snapshot-host .cm-mktero-math-toolbar:focus-within'
+    );
+    assert.match(revealed, /opacity:\s*1/);
+    assert.match(revealed, /pointer-events:\s*auto/);
+
+    const copy = ruleBody([
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-copy,',
+        '.markdown-snapshot-host .cm-mktero-math-copy',
+    ].join('\n'));
+    assert.match(copy, /cursor:\s*pointer/);
+    assert.match(copy, /background:\s*var\(--surface-raised\)/);
+});
+
 test('keeps rendered figure spacing inside the CodeMirror block widget', () => {
     const image = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-image'
