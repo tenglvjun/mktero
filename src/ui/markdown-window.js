@@ -1415,6 +1415,10 @@ class MarkdownTabView {
         snapshotHost.hidden = true;
         const documentActions = this.createDocumentActions();
         readingLayout.appendChild(documentActions.documentSearchPanel);
+        // The peek floats over the reading area, below the toolbar. Anchoring
+        // it to the editor would place it over the toolbar and its dropdowns,
+        // which live in the toolbar's own stacking context.
+        readingLayout.appendChild(sourcePeek);
         const correctionBanner = this.createElement('div', {
             class: 'markdown-correction-banner',
             role: 'status',
@@ -1450,7 +1454,6 @@ class MarkdownTabView {
             correctionBanner,
             documentActions.translationProgress,
             readingLayout,
-            sourcePeek,
             correctionUndo,
             snapshotHost
         );

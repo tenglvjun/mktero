@@ -6334,6 +6334,12 @@ test('shows a PDF source peek for the current paragraph and opens the PDF', asyn
         await Promise.resolve();
         await Promise.resolve();
         assert.equal(peek.hidden, false);
+        // The peek hangs off the reading layout, below the toolbar. Anchored
+        // to the editor it would paint over the toolbar's open dropdown.
+        assert.equal(
+            peek.parentElement.classList.contains('markdown-reading-layout'),
+            true
+        );
         assert.equal(image.getAttribute('src'), 'data:image/jpeg;base64,cGVlaw==');
         assert.equal(caption.textContent, 'Page 3');
         assert.equal(rendered.length, 1);
