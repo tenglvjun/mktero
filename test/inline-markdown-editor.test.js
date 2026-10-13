@@ -9986,6 +9986,43 @@ test('navigates a page marker to the labeled page without any source map', async
     dom.window.close();
 });
 
+test('opens the PDF page when a page marker is activated from the keyboard', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Para one.\n\n<!-- zotero-page: 3 -->\n\nPara two.';
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        openSourceLocation: location => opened.push(location),
+    });
+    editor.setDocument({ markdown, sourceMap: [] });
+
+    const marker = document.querySelector('.page-marker');
+    assert.equal(marker.getAttribute('role'), 'button');
+    assert.equal(marker.getAttribute('tabindex'), '0');
+    for (const key of ['Enter', ' ']) {
+        marker.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key,
+        }));
+        await Promise.resolve();
+    }
+
+    assert.deepEqual(opened, [
+        { pageIndex: 2, bbox: [0, 0, 1000, 1000] },
+        { pageIndex: 2, bbox: [0, 0, 1000, 1000] },
+    ]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('reports a page marker navigation failure without surfacing an error UI', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

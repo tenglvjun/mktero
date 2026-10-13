@@ -61,8 +61,10 @@ export function openRenderedPageMarker(event, blockFrom, openPageMarker) {
 /**
  * Make page markers keyboard-operable. Only applies when navigation is
  * available, so the read-only snapshot and note surfaces keep plain text.
+ * The widget's `from` identifies the marker's document offset, matching the
+ * click path, because each rendered block holds a single marker.
  */
-export function installPageMarkerButtons(container, openPageMarker) {
+export function installPageMarkerButtons(container, blockFrom, openPageMarker) {
     if (typeof openPageMarker !== 'function') return;
     for (const marker of container.querySelectorAll('.page-marker')) {
         marker.setAttribute('role', 'button');
@@ -71,7 +73,7 @@ export function installPageMarkerButtons(container, openPageMarker) {
             if (!['Enter', ' '].includes(event.key)) return;
             event.preventDefault();
             event.stopPropagation();
-            openPageMarker(null);
+            openPageMarker(Number.isSafeInteger(blockFrom) ? blockFrom : null);
         });
     }
 }

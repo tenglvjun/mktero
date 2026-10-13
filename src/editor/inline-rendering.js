@@ -213,7 +213,7 @@ class RenderedMarkdownWidget extends WidgetType {
             }
             openRenderedLink(event, this.openLink);
         });
-        installPageMarkerButtons(container, this.openPageMarker);
+        installPageMarkerButtons(container, this.from, this.openPageMarker);
         installRenderedImagePreview(
             container,
             this.openImagePreview,
