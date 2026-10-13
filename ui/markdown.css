@@ -5010,3 +5010,120 @@ main {
         animation: none;
     }
 }
+
+/* Shortcut cheat-sheet panel: a modal reference that lists the reader's
+   chords. Mirrors the citation-graph modal backdrop and dialog structure. */
+.mktero-shortcuts-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    padding: clamp(18px, 4vh, 48px) clamp(18px, 4vw, 64px);
+    background: rgb(20 27 36 / 46%);
+    place-items: center;
+}
+
+.mktero-shortcuts-dialog {
+    display: flex;
+    width: min(480px, 100%);
+    max-height: min(560px, 100%);
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-float);
+}
+
+.mktero-shortcuts-header {
+    display: flex;
+    min-height: 44px;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0 8px 0 16px;
+}
+
+.mktero-shortcuts-title {
+    margin: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 1rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mktero-shortcuts-close {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 6px;
+}
+
+.mktero-shortcuts-close:hover {
+    color: var(--text);
+    background: var(--surface-raised);
+}
+
+.mktero-shortcuts-groups {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.mktero-shortcuts-group-title {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.mktero-shortcuts-list {
+    display: grid;
+    margin: 0;
+    grid-template-columns: auto 1fr;
+    gap: 8px 16px;
+    align-items: center;
+}
+
+.mktero-shortcut-key {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-raised);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    padding: 1px 7px;
+    white-space: nowrap;
+}
+
+.mktero-shortcut-label {
+    margin: 0;
+    color: var(--reader-text);
+    font-size: 0.875rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mktero-shortcuts-backdrop,
+    .mktero-shortcuts-dialog {
+        transition: none;
+    }
+}
