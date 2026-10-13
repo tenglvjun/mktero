@@ -98,6 +98,21 @@ import {
 } from '../icons/lucide-icon.js';
 import { createConfirmationDialog } from './confirmation-dialog.js';
 import { createLoadingPresentation } from './markdown-loading-state.js';
+import {
+    mergeLandmarks,
+    nextLandmark,
+    previousLandmark,
+} from './landmark-navigation.js';
+import {
+    isNextAssetShortcut,
+    isNextHeadingShortcut,
+    isNextNoteShortcut,
+    isPreviousAssetShortcut,
+    isPreviousHeadingShortcut,
+    isPreviousNoteShortcut,
+    isShortcutsPanelShortcut,
+} from './shortcut-matchers.js';
+import { readerShortcutGroups } from './reader-shortcuts.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const BUNDLED_MARKDOWN_STYLES = typeof __MKTERO_MARKDOWN_STYLES__ === 'string'
@@ -416,6 +431,9 @@ class MarkdownTabView {
         this.noteListItemID = null;
         this.noteNavigationOffsets = [];
         this.noteSearchComposing = false;
+        this.landmarkItems = null;
+        this.shortcutsPanelOpen = false;
+        this.shortcutsPanelRestoreFocus = null;
         this.displayedAnnotationOverlay = null;
         this.displayedMarkdownLength = 0;
         this.activeTranslationFailureID = null;
@@ -953,6 +971,9 @@ class MarkdownTabView {
         if (this.destroyed) return;
         this.flushPersistedReadingPosition();
         this.destroyed = true;
+        this.landmarkItems = null;
+        this.shortcutsPanelOpen = false;
+        this.shortcutsPanelRestoreFocus = null;
         this.analysisCache.clear();
         this.renderedDocumentLayerInputs = null;
         this.clearDocumentActionStatus();
@@ -1415,6 +1436,7 @@ class MarkdownTabView {
         snapshotHost.hidden = true;
         const documentActions = this.createDocumentActions();
         readingLayout.appendChild(documentActions.documentSearchPanel);
+        const shortcutsPanel = this.createShortcutsPanel();
         // The peek floats over the reading area, below the toolbar. Anchoring
         // it to the editor would place it over the toolbar and its dropdowns,
         // which live in the toolbar's own stacking context.
@@ -1591,7 +1613,7 @@ class MarkdownTabView {
         appendChildren(content, loading, workspace);
 
         const view = this.createElement('div', { class: 'mktero-tab-view' });
-        appendChildren(view, progress, warning, error, content);
+        appendChildren(view, progress, warning, error, content, shortcutsPanel.panel);
         return {
             view,
             progress,
@@ -1719,6 +1741,8 @@ class MarkdownTabView {
             translationProgress: documentActions.translationProgress,
             translationProgressBar: documentActions.translationProgressBar,
             documentSearchPanel: documentActions.documentSearchPanel,
+            shortcutsPanel: shortcutsPanel.panel,
+            shortcutsClose: shortcutsPanel.close,
             documentSearchInput: documentActions.documentSearchInput,
             documentSearchCount: documentActions.documentSearchCount,
             documentSearchPrevious: documentActions.documentSearchPrevious,
@@ -1837,6 +1861,54 @@ class MarkdownTabView {
             element.setAttribute('aria-label', label);
             element.setAttribute('title', label);
         }
+    }
+
+    createShortcutsPanel() {
+        const close = this.createElement('button', {
+            id: 'mktero-shortcuts-close',
+            class: 'mktero-shortcuts-close',
+            type: 'button',
+            'aria-label': this.t('viewer.shortcutsClose'),
+            title: this.t('viewer.shortcutsClose'),
+        });
+        close.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.x,
+            { size: 16 }
+        ));
+        const title = this.createElement(
+            'h2',
+            {
+                id: 'mktero-shortcuts-title',
+                class: 'mktero-shortcuts-title',
+            },
+            this.t('viewer.shortcutsTitle')
+        );
+        const groups = this.createElement('div', {
+            class: 'mktero-shortcuts-groups',
+        });
+        const dialog = this.createElement('div', {
+            class: 'mktero-shortcuts-dialog',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-labelledby': 'mktero-shortcuts-title',
+        });
+        const header = this.createElement('div', {
+            class: 'mktero-shortcuts-header',
+        });
+        appendChildren(header, title, close);
+        appendChildren(dialog, header, groups);
+        const backdrop = this.createElement('div', {
+            id: 'mktero-shortcuts-panel',
+            class: 'mktero-shortcuts-backdrop',
+        });
+        backdrop.hidden = true;
+        backdrop.appendChild(dialog);
+        this.listen(close, 'click', () => this.closeShortcutsPanel());
+        this.listen(backdrop, 'pointerdown', event => {
+            if (event.target === backdrop) this.closeShortcutsPanel();
+        });
+        return { panel: backdrop, close };
     }
 
     createDocumentActions() {
@@ -2730,6 +2802,12 @@ class MarkdownTabView {
         this.listen(this.ownerWindow, 'keydown', event => {
             this.handleNavigationShortcut(event, { requireForeground: true });
         }, true);
+        this.listen(this.host, 'keydown', event => {
+            this.handleReaderJumpShortcut(event);
+        });
+        this.listen(this.ownerWindow, 'keydown', event => {
+            this.handleReaderJumpShortcut(event, { requireForeground: true });
+        }, true);
         this.listen(this.elements.actionToggle, 'click', () => {
             if (this.elements.actionToggle.disabled) return;
             this.setReaderFontOptionsOpen(false);
@@ -2947,6 +3025,11 @@ class MarkdownTabView {
                 event.preventDefault();
                 this.setDocumentActionsOpen(false);
                 this.elements.actionToggle.focus?.();
+                return;
+            }
+            if (event.key === 'Escape' && this.shortcutsPanelOpen) {
+                event.preventDefault();
+                this.closeShortcutsPanel();
                 return;
             }
             if (event.key === 'Escape' && this.documentSearchOpen) {
@@ -4326,7 +4409,8 @@ class MarkdownTabView {
             || this.readerFontOptionsOpen
             || this.githubReposOpen
             || this.typographyOpen
-            || this.documentActionsOpen;
+            || this.documentActionsOpen
+            || this.shortcutsPanelOpen;
     }
 
     openDocumentSearch() {
@@ -4497,10 +4581,167 @@ class MarkdownTabView {
         else this.editor.goNavigationForward?.();
     }
 
+    // Landmark jumps and the shortcut cheat sheet share one entry point, so
+    // the guard chain runs once and in one order. Bubble-phase host listener
+    // and capture-phase window listener both route here, matching the history
+    // chord's two channels.
+    handleReaderJumpShortcut(event, { requireForeground = false } = {}) {
+        if (this.destroyed || event.isComposing) return;
+        if (requireForeground && !this.isMarkdownTabForeground()) return;
+        if (isShortcutsPanelShortcut(event)) {
+            if (this.shortcutsPanelOpen) return;
+            const origin = event.composedPath?.()[0] || event.target;
+            if (isTextEditingOrigin(origin)) return;
+            consumeDocumentSearchShortcut(event);
+            this.openShortcutsPanel();
+            return;
+        }
+        if (this.shortcutsPanelOpen
+            || this.hasOpenReaderMenu()
+            || this.documentSearchOpen
+            || this.model?.correctionMode === true) {
+            return;
+        }
+        const origin = event.composedPath?.()[0] || event.target;
+        if (isTextEditingOrigin(origin)) return;
+        if (this.model?.status !== 'ready' || this.renderedRenderMode === 'html') {
+            return;
+        }
+        if (isNextHeadingShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.jumpToLandmark('next');
+            return;
+        }
+        if (isPreviousHeadingShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.jumpToLandmark('previous');
+            return;
+        }
+        if (isNextAssetShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.jumpToLandmark('next', LANDMARK_FILTER_FIGURE);
+            return;
+        }
+        if (isPreviousAssetShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.jumpToLandmark('previous', LANDMARK_FILTER_FIGURE);
+            return;
+        }
+        if (isNextNoteShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.jumpToLandmark('next', LANDMARK_FILTER_NOTE);
+            return;
+        }
+        if (isPreviousNoteShortcut(event)) {
+            consumeDocumentSearchShortcut(event);
+            this.jumpToLandmark('previous', LANDMARK_FILTER_NOTE);
+        }
+    }
+
     // Jumps that take the reader away from where they are call this first, so
     // "back" returns to the place the jump started from.
     recordNavigationPoint() {
         this.editor?.recordNavigationPoint?.();
+    }
+
+    // Merge the outline, figure and note offsets once per document change,
+    // not once per keypress. syncOutline/syncNotes reset the cache.
+    ensureLandmarkItems() {
+        if (!Array.isArray(this.landmarkItems)) {
+            this.landmarkItems = mergeLandmarks({
+                headings: this.outlineHeadingItems(),
+                assets: this.outlineAssetItems(),
+                noteOffsets: this.noteNavigationOffsets,
+            });
+        }
+        return this.landmarkItems;
+    }
+
+    jumpToLandmark(direction, filterType = null) {
+        const items = this.ensureLandmarkItems();
+        const filtered = filterType
+            ? items.filter(item => item.type === filterType)
+            : items;
+        const target = direction === 'previous'
+            ? previousLandmark(filtered, this.activeNavigationOffset)
+            : nextLandmark(filtered, this.activeNavigationOffset);
+        if (!target) return;
+        this.recordNavigationPoint();
+        this.syncActiveNavigation(target.offset);
+        this.editor?.scrollToOffset?.(target.offset);
+    }
+
+    // The cheat sheet is a passive reference panel: it blocks the landmark
+    // keys while open, and every close path hands focus back.
+    openShortcutsPanel() {
+        if (this.shortcutsPanelOpen) return;
+        this.shortcutsPanelOpen = true;
+        this.setDocumentActionsOpen(false);
+        this.setReaderFontOptionsOpen(false);
+        this.setTranslationLanguagesOpen(false);
+        this.setGitHubReposOpen(false);
+        this.setTypographyOpen(false);
+        const panel = this.elements.shortcutsPanel;
+        panel.hidden = false;
+        this.shortcutsPanelRestoreFocus
+            = this.document.activeElement instanceof this.ownerWindow.HTMLElement
+                ? this.document.activeElement
+                : null;
+        this.elements.shortcutsClose?.focus?.();
+    }
+
+    closeShortcutsPanel({ restoreFocus = true } = {}) {
+        if (!this.shortcutsPanelOpen) return;
+        this.shortcutsPanelOpen = false;
+        this.elements.shortcutsPanel.hidden = true;
+        const restore = this.shortcutsPanelRestoreFocus;
+        this.shortcutsPanelRestoreFocus = null;
+        if (restoreFocus && restore?.isConnected) restore.focus?.();
+    }
+
+    toggleShortcutsPanel(open) {
+        if (open) this.openShortcutsPanel();
+        else this.closeShortcutsPanel();
+    }
+
+    renderShortcutsPanelContent() {
+        const panel = this.elements.shortcutsPanel;
+        if (!panel) return;
+        const groups = readerShortcutGroups({
+            isMac: this.ownerWindow?.navigator?.platform
+                ?.toLowerCase?.()
+                ?.includes?.('mac') === true,
+        });
+        const body = panel.querySelector('.mktero-shortcuts-groups');
+        if (!body) return;
+        body.replaceChildren();
+        for (const group of groups) {
+            const heading = this.createElement(
+                'h3',
+                { class: 'mktero-shortcuts-group-title' },
+                this.t(group.groupKey)
+            );
+            const list = this.createElement('dl', {
+                class: 'mktero-shortcuts-list',
+            });
+            for (const item of group.items) {
+                const term = this.createElement('dt', {});
+                term.appendChild(this.createElement(
+                    'kbd',
+                    { class: 'mktero-shortcut-key' },
+                    item.keys
+                ));
+                const description = this.createElement(
+                    'dd',
+                    { class: 'mktero-shortcut-label' },
+                    this.t(item.labelKey)
+                );
+                list.appendChild(term);
+                list.appendChild(description);
+            }
+            body.appendChild(heading);
+            body.appendChild(list);
+        }
     }
 
     setReadingProgress(progress) {
@@ -4534,6 +4775,9 @@ class MarkdownTabView {
             // them even when the model did not move.
             this.renderedActionLabelSignature = null;
             this.syncStaticLocalization();
+            // The cheat sheet rebuilds from the localization, so a language
+            // switch re-renders it; an open panel picks the new language live.
+            this.renderShortcutsPanelContent();
         }
         this.syncActionLabels();
         // The reader font picker follows the active translation view, not the
@@ -5845,6 +6089,7 @@ class MarkdownTabView {
         this.outlinePdfOutline = nextPdfOutline;
         this.outlineFigureViews = figureViews;
         this.outlineItemTitle = nextItemTitle;
+        if (!unchanged) this.landmarkItems = null;
         if (unchanged) return;
         this.renderOutlineList();
     }
@@ -6071,6 +6316,7 @@ class MarkdownTabView {
             const offset = firstAnnotationOffset(annotation, markdownLength);
             return offset === null ? [] : [offset];
         });
+        this.landmarkItems = null;
         const filtered = filterNoteList(ordered, this.noteListFilter);
         this.noteListFilter = reconcileNoteListFilter(
             this.noteListFilter,
@@ -7427,6 +7673,9 @@ function navigationChord(event) {
     }
     return false;
 }
+
+const LANDMARK_FILTER_FIGURE = 'figure';
+const LANDMARK_FILTER_NOTE = 'note';
 
 function consumeDocumentSearchShortcut(event) {
     event.preventDefault();
