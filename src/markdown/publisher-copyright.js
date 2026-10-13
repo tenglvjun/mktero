@@ -12,6 +12,13 @@ const IEEE_COPYRIGHT_PATTERN = new RegExp(
     `^${COPYRIGHT_MARK}\\s*(?:19|20)\\d{2}\\s+IEEE\\b`,
     'iu'
 );
+// "© 2023 The Author(s). Published by …" (Portland Press, Springer OA) and
+// other publisher stamps that open with a year and rights holder.
+const PUBLISHER_NOTICE_PATTERN = new RegExp(
+    `^${COPYRIGHT_MARK}\\s*(?:19|20)\\d{2}\\s+The Authors?(?:\\(s\\))?`
+    + '(?:\\s+Published\\s+by\\b|\\s*\\.)',
+    'iu'
+);
 const ACM_ISBN_PATTERN = /^ACM ISBN\b/iu;
 const BARE_DOI_PATTERN = /^(?:https?:\/\/)?(?:dx\.)?doi\.org\/10\.\S+$/iu;
 const RESTRICTIONS_APPLY_PATTERN = /^Restrictions apply\.?$/iu;
@@ -22,6 +29,9 @@ const VENUE_PATTERN = new RegExp(
 );
 const AUTHOR_INITIALS_PATTERN = /\b[A-Z]\.\s*[A-Z]\./u;
 const MARKDOWN_LINK_PATTERN = /^\[([^\]]+)\]\([^)\s]+\)$/u;
+// Publisher download watermarks stamped at the foot of every page. They carry
+// a URL, so a whole line that opens with the phrase is not reading prose.
+const DOWNLOAD_PHRASE_LINE_PATTERN = /^downloaded\s+from\b.{0,300}$/iu;
 
 // ACM and IEEE put a copyright notice in the first-page column beside the
 // abstract. A DOI or venue line alone also appears in running headers and
@@ -72,6 +82,23 @@ export function isPublisherCopyrightParagraph(text) {
     return Boolean(key) && (isCopyrightAnchor(key) || isCopyrightSatellite(key));
 }
 
+// Line-level watermark probes for PDF page items. A download stamp may be
+// merged with the copyright line into one text item, so the phrase is also
+// accepted inside a longer line; the URL, user name and date it carries make
+// a false positive in reading prose implausible.
+export function isPublisherWatermarkLine(text) {
+    const key = String(text || '').replace(/\s+/gu, ' ').trim();
+    if (!key) return false;
+    return DOWNLOAD_PHRASE_LINE_PATTERN.test(key)
+        || isCopyrightAnchor(key);
+}
+
+export function isPageNumberLine(text) {
+    const key = String(text || '').trim();
+    return /^\d{1,4}$/u.test(key)
+        || /^(?:page\s+)?\d+\s+of\s+\d+$/iu.test(key);
+}
+
 function paragraphSpans(markdown) {
     const spans = [];
     let cursor = 0;
@@ -108,6 +135,7 @@ function isCopyrightAnchor(text) {
         || IEEE_AUTHORIZED_PATTERN.test(text)
         || OWNER_COPYRIGHT_PATTERN.test(text)
         || IEEE_COPYRIGHT_PATTERN.test(text)
+        || PUBLISHER_NOTICE_PATTERN.test(text)
         || ACM_ISBN_PATTERN.test(text);
 }
 
