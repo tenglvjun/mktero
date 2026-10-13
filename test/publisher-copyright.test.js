@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     findPublisherCopyrightRanges,
+    isPageNumberLine,
     isPublisherCopyrightGap,
     isPublisherCopyrightParagraph,
+    isPublisherWatermarkLine,
 } from '../src/markdown/publisher-copyright.js';
 
 const ACM_CLUSTER = [
@@ -58,4 +60,24 @@ test('does not treat a permission phrase inside a sentence as a copyright block'
     const prose = 'The authors discuss permission to make digital or hard copies only as an example.';
     assert.equal(isPublisherCopyrightParagraph(prose), false);
     assert.deepEqual(findPublisherCopyrightRanges(prose), []);
+});
+
+test('recognizes publisher watermark lines and page numbers', () => {
+    assert.equal(isPublisherWatermarkLine(
+        '\u00a9 2023 The Author(s). Published by Portland Press Limited on behalf of the Biochemical Society'
+    ), true);
+    assert.equal(isPublisherWatermarkLine(
+        'Downloaded from http://portlandpress.com/clinsci/article-pdf/137/11/881/947163/cs-2022-0713c.pdf '
+            + 'by Shanghai Jiaotong University user on 15 June 2023'
+    ), true);
+    assert.equal(isPublisherWatermarkLine(
+        'Authorized licensed use limited to: Stanford University. Restrictions apply.'
+    ), true);
+    assert.equal(isPublisherWatermarkLine(
+        'Delirium has also been shown to be associated with a significant increase'
+    ), false);
+    assert.equal(isPublisherWatermarkLine('\u00a9 2023 The Author of this book argues'), false);
+    assert.equal(isPageNumberLine('883'), true);
+    assert.equal(isPageNumberLine('Page 4 of 12'), true);
+    assert.equal(isPageNumberLine('38 patients'), false);
 });

@@ -7,6 +7,10 @@ import {
     normalizePdfAnnotationText,
 } from '../markdown/pdf-annotation-text.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
+import {
+    isPageNumberLine,
+    isPublisherWatermarkLine,
+} from '../markdown/publisher-copyright.js';
 import { isValidNormalizedSourceBBox } from '../core/markdown-source-map.js';
 import { sha256Hex } from '../core/sha256.js';
 import {
@@ -25,7 +29,9 @@ const MIN_PAGE_BREAK_MATCH_LENGTH = 24;
 const MIN_PAGE_BREAK_PART_LENGTH = 12;
 const PAGE_BREAK_ANCHOR_LENGTH = 12;
 // The journal watermark sits in the last stretch of the page, so a part that
-// stopped there marks a page break rather than a mismatch.
+// stopped there marks a page break rather than a mismatch. Watermarks the
+// line recognizer identifies are exempt from this bound, so a long download
+// stamp no longer hides the continuation on the next page.
 const PAGE_BREAK_CHROME_WINDOW = 240;
 const MAX_PAGE_BREAK_PAGE_DISTANCE = 3;
 const MAX_PAGE_BREAK_STARTS = 16;
@@ -603,7 +609,9 @@ function walkPageBreakSegments(pages, texts, target, start) {
         return null;
     }
     if (firstLength >= target.length) return null;
-    if (text.length - (start.at + firstLength) > PAGE_BREAK_CHROME_WINDOW) {
+    const trailingLength = text.length - (start.at + firstLength);
+    if (trailingLength > PAGE_BREAK_CHROME_WINDOW
+        && !pageTailIsRecognizedChrome(pages[start.pageIndex], text, start.at + firstLength)) {
         return null;
     }
     const remainder = target.slice(firstLength).replace(/^\s+/u, '');
@@ -1130,6 +1138,8 @@ function crossPageContentRange(
         normalizedText
     );
     if (pageNumber !== null) to = Math.min(to, pageNumber);
+    const chrome = trailingPageChromeStart(pages[pageIndex], normalizedText);
+    if (chrome !== null) to = Math.min(to, chrome);
     while (from < to && /^\s$/u.test(normalizedText[from])) from++;
     while (to > from && /^\s$/u.test(normalizedText[to - 1])) to--;
     return { from, to };
@@ -1178,6 +1188,68 @@ function trailingPageNumberStart(page, normalizedText) {
     return start >= 0 && normalizedText.slice(start, end) === normalizedNumber
         ? start
         : null;
+}
+
+// Publisher watermarks (copyright notices, download stamps) sit after the
+// body text at the foot of the page. Trailing lines that are wholly a
+// watermark or page number are page chrome and are dropped from the
+// cross-page sequence so a passage split by the footer stays contiguous.
+function trailingPageChromeStart(page, normalizedText) {
+    const items = trailingChromeItems(page);
+    if (!items.length) return null;
+    const end = normalizedText.trimEnd().length;
+    let cursor = end;
+    for (const item of items) {
+        const itemText = item.text.trim();
+        const start = cursor - itemText.length;
+        if (start < 0
+            || normalizedText.slice(start, cursor) !== itemText) {
+            return null;
+        }
+        cursor = start;
+        while (cursor > 0 && /^\s$/u.test(normalizedText[cursor - 1])) {
+            cursor -= 1;
+        }
+    }
+    return cursor < end ? cursor : null;
+}
+
+function trailingChromeItems(page) {
+    const chrome = [];
+    for (const line of [...pageTextLines(page)].reverse()) {
+        const text = line.map(item => item.text).join('').trim();
+        if (!text) continue;
+        if (!isPublisherWatermarkLine(text) && !isPageNumberLine(text)) break;
+        chrome.push(...[...line].reverse().filter(item => item.text.trim()));
+        if (chrome.length > 40) break;
+    }
+    return chrome;
+}
+
+// PDF.js splits a watermark line into several items (the copyright mark, the
+// year, the publisher, the printed page number), so chrome is recognized per
+// visual line rather than per item.
+function pageTextLines(page) {
+    const lines = [];
+    for (const item of page?.items || []) {
+        if (typeof item?.text !== 'string') continue;
+        const baseline = item.transform?.[5];
+        const previous = lines.at(-1);
+        if (previous && Math.abs(previous.baseline - baseline) <= 1) {
+            previous.items.push(item);
+            continue;
+        }
+        lines.push({ baseline, items: [item] });
+    }
+    return lines.map(line => line.items);
+}
+
+// The page-break walk only trusts a head that stops inside the page's final
+// stretch. A recognized watermark run (copyright line, download stamp, page
+// number) is that stretch regardless of how long the stamp is.
+function pageTailIsRecognizedChrome(page, normalizedText, contentEnd) {
+    const chromeStart = trailingPageChromeStart(page, normalizedText);
+    return chromeStart !== null && contentEnd >= chromeStart;
 }
 
 function segmentsAreAdjacent(segments) {

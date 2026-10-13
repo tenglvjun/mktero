@@ -207,6 +207,127 @@ test('locates cross-page text across repeated headers and page numbers', async (
     locator.dispose();
 });
 
+test('locates cross-page text split by a publisher watermark longer than the chrome window', async () => {
+    // Portland Press stamps every page with a copyright line, the printed page
+    // number and a download line naming the user and date. Together they run
+    // past the fixed chrome window, so the page-break walk must recognize them
+    // as chrome instead of treating the split as a mismatch.
+    const copyrightLine = '\u00a9 2023 The Author(s). Published by Portland Press Limited '
+        + 'on behalf of the Biochemical Society';
+    const downloadLine = 'Downloaded from http://portlandpress.com/clinsci/article-pdf/'
+        + '137/11/881/947163/cs-2022-0713c.pdf by Shanghai Jiaotong University user '
+        + 'on 15 June 2023';
+    const locator = await createSyntheticLocator([
+        [
+            createTextItem(
+                'Notably, mechanical ventilation was independently associated with 30-day '
+                    + 'mortality. Delirium has also been shown to be associated with a',
+                { y: 120, width: 900, hasEOL: true }
+            ),
+            createTextItem(copyrightLine, { y: 70, width: 700, hasEOL: true }),
+            createTextItem('883', { y: 60, hasEOL: true }),
+            createTextItem(downloadLine, { y: 48, width: 900, hasEOL: true }),
+        ],
+        [
+            createTextItem(
+                'significant increase in mortality in critically ill patients with cancer.',
+                { y: 740, width: 900, hasEOL: true }
+            ),
+            createTextItem(copyrightLine, { y: 70, width: 700, hasEOL: true }),
+            createTextItem('884', { y: 60, hasEOL: true }),
+            createTextItem(downloadLine, { y: 48, width: 900, hasEOL: true }),
+        ],
+    ]);
+
+    const located = await locator.locate(
+        42,
+        'Notably, mechanical ventilation was independently associated with 30-day '
+            + 'mortality. Delirium has also been shown to be associated with a '
+            + 'significant increase in mortality in critically ill patients with cancer.',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.deepEqual(
+        located.segments.map(segment => segment.position.pageIndex),
+        [0, 1]
+    );
+    assert.match(located.segments[0].text, /associated with a$/u);
+    assert.match(located.segments[1].text, /^significant increase/u);
+    locator.dispose();
+});
+
+test('locates cross-page text when the watermark line is split across items', async () => {
+    // PDF.js emits the copyright mark, the year and the publisher as separate
+    // text items, so chrome must be recognized per visual line, not per item.
+    const locator = await createSyntheticLocator([
+        [
+            createTextItem(
+                'The cohort showed a marked increase in mortality and was associated with a',
+                { y: 120, width: 900, hasEOL: true }
+            ),
+            createTextItem('\u00a9', { x: 72, y: 40, width: 8 }),
+            createTextItem(' ', { x: 80, y: 40, width: 4 }),
+            createTextItem(
+                '2023 The Author(s). Published by Portland Press Limited on behalf of the Biochemical Society',
+                { x: 84, y: 40, width: 400 }
+            ),
+            createTextItem('884', { x: 500, y: 40, width: 20, hasEOL: true }),
+            createTextItem(
+                'Downloaded from http://portlandpress.com/clinsci/article-pdf/137/11/881/947163/cs-2022-0713c.pdf '
+                    + 'by Example University user on 15 June 2023',
+                { y: 28, width: 700, hasEOL: true }
+            ),
+        ],
+        [
+            createTextItem(
+                'significant rise in late complications among the survivors.',
+                { y: 740, width: 900, hasEOL: true }
+            ),
+        ],
+    ]);
+
+    const located = await locator.locate(
+        42,
+        'The cohort showed a marked increase in mortality and was associated with a '
+            + 'significant rise in late complications among the survivors.',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.deepEqual(
+        located.segments.map(segment => segment.position.pageIndex),
+        [0, 1]
+    );
+    locator.dispose();
+});
+
+test('does not bridge a page break across body text longer than the chrome window', async () => {
+    // A long tail that is ordinary prose must not be stripped as chrome: the
+    // page-break walk stays bounded and the passage stays unlocatable rather
+    // than being stitched across unrelated text.
+    const bodyTail = 'Unrelated discussion of methodology and cohort selection '
+        + 'continues here for long enough to exceed the chrome window without '
+        + 'ever becoming a copyright notice or a download stamp of any kind. '
+        + 'Further paragraphs elaborate on sample sizes, exclusion criteria and '
+        + 'the statistical procedures applied to the collected observations.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(
+            'The study measured mortality in the training cohort ' + bodyTail,
+            { y: 120, width: 900, hasEOL: true }
+        )],
+        [createTextItem(
+            'and again in the validation cohort.',
+            { y: 740, width: 900, hasEOL: true }
+        )],
+    ]);
+
+    await assert.rejects(
+        locator.locate(42, 'The study measured mortality in the training cohort '
+            + 'and again in the validation cohort.', { pdfPageIndexHint: 0 }),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+    );
+    locator.dispose();
+});
+
 test('keeps repeated cross-page passages ambiguous without a page hint', async () => {
     const locator = await createSyntheticLocator([
         [createTextItem('Shared passage begins', { width: 900, hasEOL: true })],
