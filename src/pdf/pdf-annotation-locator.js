@@ -36,10 +36,10 @@ const PAGE_BREAK_CHROME_WINDOW = 240;
 const MAX_PAGE_BREAK_PAGE_DISTANCE = 3;
 const MAX_PAGE_BREAK_STARTS = 16;
 const MIN_DIFF_MATCH_LENGTH = 48;
-const MAX_DIFF_MATCH_LENGTH = 1_000;
+const MAX_DIFF_MATCH_LENGTH = 2_000;
 const DIFF_ANCHOR_LENGTH = 24;
-const MAX_DIFF_EDIT_RATIO = 0.04;
-const MAX_DIFF_EDITS = 12;
+const MAX_DIFF_EDIT_RATIO = 0.06;
+const MAX_DIFF_EDITS = 16;
 const MAX_DIFF_CANDIDATES = 200;
 const MAX_DIFF_LONG_CANDIDATES = 8;
 const DIFF_LONG_TEXT_LENGTH = 400;
@@ -388,6 +388,32 @@ function locateInIndex(index, text, {
                     quote,
                     attempt.hint,
                     normalizedText => normalizedText.replace(MISENCODED_MAPSTO, '↦')
+                );
+            }
+        }
+        if (!located
+            && target.length >= MIN_GLYPH_FALLBACK_TEXT_LENGTH) {
+            // Try NFC normalization with dotless i replacement to handle:
+            // PDF: "na\u0131 \u0308ve" (dotless i + SPACE + combining diaeresis)
+            // → "naïve" (composed ï)
+            const nfcTransform = text => text
+                .replace(/\u00A8[ \t]*[\u0131i]/gu, 'ï')
+                .replace(/([a-zA-Z\u0131])\s+([\u0300-\u036F])/gu, '$1$2')
+                .replace(/\u0131/gu, 'i')
+                .normalize('NFC');
+            located = findMatchWithTextStrategies(
+                attempt.pages,
+                target,
+                quote,
+                nfcTransform
+            );
+            if (!located) {
+                located = findCrossPageMatch(
+                    index.pages,
+                    target,
+                    quote,
+                    attempt.hint,
+                    nfcTransform
                 );
             }
         }

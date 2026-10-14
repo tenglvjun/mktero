@@ -12,6 +12,11 @@ const NUMERIC_SUPERSCRIPT = /\$\^\{\s*([0-9][0-9,，;；\s–—-]{0,511}?)\s*\}
 const BRACKETED_NUMERIC_SUPERSCRIPT = /\$\^\{\s*\[([0-9][0-9,，;；\s–—-]{0,511}?)\]\s*\}\$/gu;
 const TRADEMARK_SUPERSCRIPT = /\$\^\{([®©™])\}\$/gu;
 const SENTENCE_FOOTNOTE_SUPERSCRIPT = /\$\^\{([0-9]{1,4})\}\$/gu;
+// MinerU writes biological markers as LaTeX ("CD4 $^{+}$, PD-1 $^{hi}$") while the
+// PDF text layer keeps the same marks inline ("CD4+, PD-1hi").
+const MARKER_SUPERSCRIPT = /\$\^\{\s*([+\-−±A-Za-z]{1,12})\s*\}\$/gu;
+// Some PDF text layers emit a spacing diaeresis before a dotless i: "na¨ıve".
+const SPACING_DIAERESIS_I = /\u00A8[ \t]*[\u0131i]/gu;
 const STATISTICAL_NUMERIC_EXPONENT = /\^\{\s*([0-9]{1,4})\s*\}(?=\s*(?:<=|>=|!=|[=<>≤≥≠]))/gu;
 const SENTENCE_END = /[.!?。！？]/u;
 const RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)(<=|>=|!=|[=<>≤≥≠])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
@@ -186,8 +191,20 @@ const ALL_PDF_ANNOTATION_SYMBOL_REPLACEMENTS = [
     ...LATEX_MATH_SYMBOL_REPLACEMENTS,
 ];
 
+// Pre-process raw PDF text before any indexing
+function preprocessPdfText(text) {
+    let processed = String(text || '');
+    // "na¨ıve" (spacing diaeresis + dotless i) and "naı ̈ve" (combining
+    // diaeresis) both become "naïve".
+    processed = processed.replace(SPACING_DIAERESIS_I, 'ï');
+    processed = processed.replace(/([a-zA-Z\u0131])\s+([\u0300-\u036F])/gu, '$1$2');
+    processed = processed.replace(/\u0131/gu, 'i');
+    return processed.normalize('NFC');
+}
+
 export function normalizePdfAnnotationText(text) {
-    return createPdfAnnotationTextIndex(String(text)).text.trim();
+    const preprocessed = preprocessPdfText(text);
+    return createPdfAnnotationTextIndex(preprocessed).text.trim();
 }
 
 export function expandPdfAnnotationSourceRange(source, range) {
@@ -511,6 +528,46 @@ function collectNormalizationMarkup(text) {
             });
         }
         for (let offset = whitespaceFrom; offset < match.index; offset++) {
+            ignoredOffsets.add(offset);
+        }
+    }
+    for (const match of text.matchAll(SPACING_DIAERESIS_I)) {
+        const letterOffset = match.index + match[0].length - 1;
+        for (let offset = match.index; offset < letterOffset; offset++) {
+            ignoredOffsets.add(offset);
+        }
+        replacements.set(letterOffset, {
+            from: match.index,
+            to: match.index + match[0].length,
+            text: 'ï',
+        });
+    }
+    for (const match of text.matchAll(MARKER_SUPERSCRIPT)) {
+        if (!hasInlineSuperscriptContext(text, match.index)) continue;
+        const value = match[1];
+        const contentFrom = match.index + match[0].indexOf(value);
+        const contentTo = contentFrom + value.length;
+        for (
+            let offset = match.index;
+            offset < match.index + match[0].length;
+            offset++
+        ) {
+            if (offset < contentFrom || offset >= contentTo) {
+                ignoredOffsets.add(offset);
+                continue;
+            }
+            const character = text[offset];
+            replacements.set(offset, {
+                from: match.index,
+                to: match.index + match[0].length,
+                text: HYPHENS.has(character) ? '-' : character,
+            });
+        }
+        for (
+            let offset = match.index - 1;
+            offset >= 0 && /[ \t]/u.test(text[offset]);
+            offset--
+        ) {
             ignoredOffsets.add(offset);
         }
     }
