@@ -355,7 +355,23 @@ test('flattens biological marker superscripts onto the PDF text layer', () => {
         target.length
     );
     assert.equal(markdown.slice(range.from, range.to), 'CD4 $^{+}$');
-    assert.equal(normalizePdfAnnotationText('$^{hi}$ alone'), '$^{hi}$ alone');
+    assert.equal(
+        normalizePdfAnnotationText('$^{+}$ Treg had a PD-1 $^{+}$ phenotype'),
+        '+ Treg had a PD-1+ phenotype'
+    );
+});
+
+test('attaches a MinerU Greek symbol to surrounding punctuation', () => {
+    const pdf = 'frequencies of IFN-\u03b3\u2013, TNF-';
+
+    assert.equal(
+        normalizePdfAnnotationText('frequencies of IFN- $\\gamma$ \u2013, TNF-'),
+        normalizePdfAnnotationText(pdf)
+    );
+    assert.equal(
+        normalizePdfAnnotationText('frequencies of IFN- \\gamma \u2013, TNF-'),
+        normalizePdfAnnotationText(pdf)
+    );
 });
 
 test('maps PDF line-end hyphens back to their original source range', () => {

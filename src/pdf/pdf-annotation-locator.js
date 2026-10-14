@@ -1153,12 +1153,12 @@ function crossPageContentRange(
             pages[pageIndex],
             normalizedText
         )) {
-        const header = firstNonEmptyPageItem(pages[pageIndex]);
-        const normalizedHeader = sourceIndexForText(header.text);
-        from = normalizedText.indexOf(normalizedHeader);
-        if (from < 0) from = 0;
-        else from += normalizedHeader.length;
+        const header = firstVisualLineText(pages[pageIndex]);
+        const headerAt = normalizedText.indexOf(header);
+        from = headerAt < 0 ? 0 : headerAt + header.length;
     }
+    const doi = leadingDoiLineEnd(normalizedText, from);
+    if (doi !== null) from = doi;
     const pageNumber = trailingPageNumberStart(
         pages[pageIndex],
         normalizedText
@@ -1176,29 +1176,33 @@ function hasRepeatedPageHeader(
     page,
     normalizedText
 ) {
-    const previousHeader = firstNonEmptyPageItem(previousPage);
-    const header = firstNonEmptyPageItem(page);
+    const previousHeader = firstVisualLineText(previousPage);
+    const header = firstVisualLineText(page);
     if (!previousHeader
-        || !header
-        || previousHeader.sourceFrom !== 0
-        || header.sourceFrom !== 0
-        || previousHeader.text !== header.text
-        || header.text.trim().length < MIN_REPEATED_PAGE_HEADER_LENGTH) {
+        || previousHeader !== header
+        || header.length < MIN_REPEATED_PAGE_HEADER_LENGTH) {
         return false;
     }
-    const normalizedHeader = sourceIndexForText(header.text);
-    return normalizedHeader.length > 0
-        && normalizedText.startsWith(normalizedHeader);
+    return normalizedText.startsWith(header);
 }
 
-function firstNonEmptyPageItem(page) {
-    return page?.items?.find(item => (
-        typeof item?.text === 'string' && item.text.trim()
-    )) || null;
+function firstVisualLineText(page) {
+    const line = pageTextLines(page).find(items => (
+        items.some(item => item.text.trim())
+    ));
+    if (!line) return '';
+    return line.map(item => item.text).join('').trim();
 }
 
-function sourceIndexForText(text) {
-    return String(text).trim();
+function leadingDoiLineEnd(text, from) {
+    let cursor = from;
+    while (cursor < text.length && /^\s$/u.test(text[cursor])) cursor++;
+    const lineEnd = text.indexOf('\n', cursor);
+    const line = text.slice(cursor, lineEnd < 0 ? text.length : lineEnd).trim();
+    if (!/^(?:https?:\/\/)?(?:dx\.)?doi\.org\/10\.\S+$/iu.test(line)) {
+        return null;
+    }
+    return lineEnd < 0 ? text.length : lineEnd;
 }
 
 function trailingPageNumberStart(page, normalizedText) {

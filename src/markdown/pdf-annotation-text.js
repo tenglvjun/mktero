@@ -17,6 +17,7 @@ const SENTENCE_FOOTNOTE_SUPERSCRIPT = /\$\^\{([0-9]{1,4})\}\$/gu;
 const MARKER_SUPERSCRIPT = /\$\^\{\s*([+\-−±A-Za-z]{1,12})\s*\}\$/gu;
 // Some PDF text layers emit a spacing diaeresis before a dotless i: "na¨ıve".
 const SPACING_DIAERESIS_I = /\u00A8[ \t]*[\u0131i]/gu;
+const GREEK_ATTACHMENT_EDGE = /[-\u2010-\u2015\u2212]/u;
 const STATISTICAL_NUMERIC_EXPONENT = /\^\{\s*([0-9]{1,4})\s*\}(?=\s*(?:<=|>=|!=|[=<>≤≥≠]))/gu;
 const SENTENCE_END = /[.!?。！？]/u;
 const RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)(<=|>=|!=|[=<>≤≥≠])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
@@ -543,7 +544,12 @@ function collectNormalizationMarkup(text) {
         });
     }
     for (const match of text.matchAll(MARKER_SUPERSCRIPT)) {
-        if (!hasInlineSuperscriptContext(text, match.index)) continue;
+        // A highlight can start on the marker itself ("TIGIT $^{+}$"
+        // selected from the plus), so the leading superscript still flattens.
+        if (!hasInlineSuperscriptContext(text, match.index)
+            && /\S/u.test(text.slice(0, match.index))) {
+            continue;
+        }
         const value = match[1];
         const contentFrom = match.index + match[0].indexOf(value);
         const contentTo = contentFrom + value.length;
@@ -610,16 +616,46 @@ function markStatisticalNumericExponents(
 function markAnnotationSymbols(text, ignoredOffsets, replacements) {
     for (const replacement of ALL_PDF_ANNOTATION_SYMBOL_REPLACEMENTS) {
         for (const match of text.matchAll(replacement.pattern)) {
+            const symbol = normalizeMathSymbolText(replacement.text);
             replacements.set(match.index, {
                 from: match.index,
                 to: match.index + match[0].length,
-                text: normalizeMathSymbolText(replacement.text),
+                text: symbol,
             });
             markOffsetRange(
                 ignoredOffsets,
                 match.index + 1,
                 match[0].length - 1
             );
+            // MinerU writes "IFN- $\\gamma$ \u2013" (and the visible text keeps
+            // "IFN- \\gamma \u2013"). The PDF text layer stores "IFN-\u03b3\u2013".
+            if (/^\p{Script=Greek}$/u.test(symbol)) {
+                const commandTo = match.index + match[0].length;
+                let before = match.index;
+                while (before > 0 && /[ \t$]/u.test(text[before - 1])) {
+                    before--;
+                }
+                if (before < match.index
+                    && GREEK_ATTACHMENT_EDGE.test(text[before - 1] || '')) {
+                    markOffsetRange(
+                        ignoredOffsets,
+                        before,
+                        match.index - before
+                    );
+                }
+                let after = commandTo;
+                while (after < text.length && /[ \t$]/u.test(text[after])) {
+                    after++;
+                }
+                if (after > commandTo
+                    && GREEK_ATTACHMENT_EDGE.test(text[after] || '')) {
+                    markOffsetRange(
+                        ignoredOffsets,
+                        commandTo,
+                        after - commandTo
+                    );
+                }
+            }
             let spaceFrom = match.index + match[0].length;
             let spaceTo = spaceFrom;
             while (spaceTo < text.length && /[ \t]/u.test(text[spaceTo])) {
