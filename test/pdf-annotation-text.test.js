@@ -338,6 +338,26 @@ test('normalizes bracketed MinerU superscript citations to PDF citation text', (
     );
 });
 
+test('flattens biological marker superscripts onto the PDF text layer', () => {
+    const markdown = 'less naïve CD4 $^{+}$ T cells, a PD-1 $^{hi}$ population, '
+        + 'and 2B4 $^{+}$ PD-1l $^{o}$ cells';
+    const pdf = 'less na\u00A8\u0131ve CD4+ T cells, a PD-1hi population, '
+        + 'and 2B4+ PD-1lo cells';
+    const index = createPdfAnnotationTextIndex(markdown);
+
+    assert.equal(
+        normalizePdfAnnotationText(markdown),
+        normalizePdfAnnotationText(pdf)
+    );
+    const target = 'CD4+';
+    const range = index.sourceRange(
+        index.text.indexOf(target),
+        target.length
+    );
+    assert.equal(markdown.slice(range.from, range.to), 'CD4 $^{+}$');
+    assert.equal(normalizePdfAnnotationText('$^{hi}$ alone'), '$^{hi}$ alone');
+});
+
 test('maps PDF line-end hyphens back to their original source range', () => {
     const source = '😀 Words were inves-\ntigated and evidence-based.';
     const index = createDehyphenatedPdfAnnotationTextIndex(source);
