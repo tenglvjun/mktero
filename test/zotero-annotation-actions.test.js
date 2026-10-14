@@ -491,6 +491,102 @@ test('loads the annotation page before selecting the annotation', async () => {
     ]);
 });
 
+test('waits for a loading reader and jumps to the annotation rectangles', async () => {
+    const attachment = {
+        id: 42,
+        libraryID: 1,
+        isPDFAttachment: () => true,
+    };
+    const rects = [[10, 20, 110, 40]];
+    const calls = [];
+    let ready = false;
+    const reader = {
+        itemID: 42,
+        _initPromise: new Promise(resolve => {
+            setTimeout(() => {
+                ready = true;
+                resolve();
+            }, 20);
+        }),
+        async navigate(location) {
+            // Zotero throws when navigating before the internal reader exists.
+            if (!ready) throw new TypeError('internal reader is not ready');
+            calls.push(location);
+        },
+    };
+    const zotero = {
+        Items: {
+            get: id => (id === 42 ? attachment : null),
+            getByLibraryAndKey: () => ({
+                annotationPosition: JSON.stringify({ pageIndex: 1, rects }),
+            }),
+        },
+        Reader: {
+            _readers: [],
+            async open() {
+                // Opening an unloaded tab returns nothing at first.
+                setTimeout(() => zotero.Reader._readers.push(reader), 10);
+                return undefined;
+            },
+        },
+    };
+    const actions = createZoteroAnnotationActions(zotero);
+
+    await actions.openInPDF(42, 'HIGH0002');
+
+    assert.equal(ready, true);
+    assert.deepEqual(calls, [
+        { pageIndex: 1 },
+        { position: { pageIndex: 1, rects } },
+    ]);
+});
+
+test('logs and falls back to the annotation ID when the reader never loads', async () => {
+    const attachment = {
+        id: 42,
+        libraryID: 1,
+        isPDFAttachment: () => true,
+    };
+    const logged = [];
+    const opened = [];
+    let clock = 0;
+    const zotero = {
+        logError: error => logged.push(error),
+        Items: {
+            get: id => (id === 42 ? attachment : null),
+            getByLibraryAndKey: () => ({
+                annotationPosition: JSON.stringify({
+                    pageIndex: 1,
+                    rects: [[10, 20, 110, 40]],
+                }),
+            }),
+        },
+        Reader: {
+            _readers: [],
+            async open(...args) {
+                opened.push(args);
+                return undefined;
+            },
+        },
+    };
+    const actions = createZoteroAnnotationActions(zotero, {
+        delay: async milliseconds => {
+            clock += Math.max(milliseconds, 1_000);
+        },
+        now: () => clock,
+        readerTimeout: 1_000,
+    });
+
+    await actions.openInPDF(42, 'HIGH0003');
+
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0].code, 'MKTERO_PDF_READER_UNAVAILABLE');
+    assert.deepEqual(opened, [
+        [42],
+        [42, { annotationID: 'HIGH0003' }],
+    ]);
+});
+
 test('opens annotations from different windows through the shared reader manager', async () => {
     const attachments = new Map([
         [42, { isPDFAttachment: () => true }],

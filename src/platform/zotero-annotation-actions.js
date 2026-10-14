@@ -26,6 +26,7 @@ export function createZoteroAnnotationActions(zotero, {
     delay = defaultDelay,
     now = () => Date.now(),
     searchTimeout = 15_000,
+    readerTimeout = 15_000,
 } = {}) {
     const textLocator = locateText || createZoteroPDFTextLocator(zotero, {
         cloneIntoReader,
@@ -46,20 +47,35 @@ export function createZoteroAnnotationActions(zotero, {
             if (typeof zotero.Reader?.open !== 'function') {
                 throw new Error('PDF reader is unavailable');
             }
-            // The reader resolves an annotation position against the page
-            // layout it has already rendered, so selecting an annotation whose
-            // page is still unlaid can land on a neighbouring page. Put the
-            // reader on that page first, then let Zotero select the annotation.
-            const pageIndex = annotationPageIndex(zotero, itemID, key);
-            if (Number.isInteger(pageIndex)) {
-                const opened = await zotero.Reader.open(itemID);
-                const reader = opened || readerForItem(zotero, itemID, null);
-                try {
-                    await reader?.navigate?.({ pageIndex });
+            const target = annotationTarget(zotero, itemID, key);
+            if (!Number.isInteger(target.pageIndex)) {
+                return zotero.Reader.open(itemID, { annotationID: key });
+            }
+            // A reader that is still loading has no internal reader yet, so a
+            // navigation sent too early throws inside Zotero and is lost. Wait
+            // for the reader, jump to the page so it is laid out, then move to
+            // the annotation rectangles. A position jump also flashes the
+            // highlight, which an annotation-ID jump does not.
+            try {
+                const reader = await openReaderWhenReady(zotero, itemID, {
+                    delay,
+                    now,
+                    timeout: readerTimeout,
+                });
+                await reader.navigate({ pageIndex: target.pageIndex });
+                if (target.rects) {
+                    await delay(0);
+                    await reader.navigate({
+                        position: {
+                            pageIndex: target.pageIndex,
+                            rects: target.rects,
+                        },
+                    });
+                    return undefined;
                 }
-                catch {
-                    // The annotation navigation below still selects the item.
-                }
+            }
+            catch (error) {
+                zotero.logError?.(error);
             }
             return zotero.Reader.open(itemID, { annotationID: key });
         },
@@ -740,7 +756,8 @@ function createNormalizedPDFSearchTracker(text) {
     };
 }
 
-function annotationPageIndex(zotero, itemID, key) {
+function annotationTarget(zotero, itemID, key) {
+    const empty = { pageIndex: null, rects: null };
     try {
         const attachment = zotero.Items?.get?.(itemID);
         const item = zotero.Items?.getByLibraryAndKey?.(
@@ -748,16 +765,54 @@ function annotationPageIndex(zotero, itemID, key) {
             key
         );
         const raw = item?.annotationPosition;
-        if (!raw) return null;
+        if (!raw) return empty;
         const position = typeof raw === 'string' ? JSON.parse(raw) : raw;
         const pageIndex = position?.pageIndex;
-        return Number.isInteger(pageIndex) && pageIndex >= 0
-            ? pageIndex
-            : null;
+        if (!Number.isInteger(pageIndex) || pageIndex < 0) return empty;
+        const rects = position.rects;
+        return {
+            pageIndex,
+            rects: Array.isArray(rects)
+                && rects.length > 0
+                && rects.length <= 10_000
+                && rects.every(validRect)
+                ? rects.map(rect => [...rect])
+                : null,
+        };
     }
     catch {
-        return null;
+        return empty;
     }
+}
+
+// Reader.open returns nothing when it only selects an existing but unloaded
+// tab; the reader instance then appears a moment later.
+async function openReaderWhenReady(zotero, itemID, waitOptions) {
+    let reader = await zotero.Reader.open(itemID);
+    reader ||= await waitForReaderValue(
+        () => readerForItem(zotero, itemID, null),
+        waitOptions
+    );
+    if (typeof reader.navigate !== 'function') {
+        throw new Error('PDF reader navigation is unavailable');
+    }
+    await waitForReaderPromise(reader._initPromise, waitOptions);
+    const view = reader._internalReader?._primaryView;
+    if (view) await waitForReaderPromise(view.initializedPromise, waitOptions);
+    return reader;
+}
+
+async function waitForReaderValue(read, { delay, now, timeout }) {
+    const startedAt = now();
+    while (now() - startedAt <= timeout) {
+        const value = read();
+        if (value) return value;
+        await delay(25);
+    }
+    throw annotationSyncError(
+        'MKTERO_PDF_READER_UNAVAILABLE',
+        'Zotero PDF reader initialization timed out'
+    );
 }
 
 function readerForItem(zotero, itemID, openedReader) {
