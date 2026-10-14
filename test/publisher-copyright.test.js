@@ -76,6 +76,9 @@ test('recognizes publisher watermark lines and page numbers', () => {
     assert.equal(isPublisherWatermarkLine(
         'Delirium has also been shown to be associated with a significant increase'
     ), false);
+    assert.equal(isPublisherWatermarkLine(
+        '886 \u00a9 2023 The Author(s). Published by Portland Press Limited on behalf of the Biochemical Society'
+    ), true);
     assert.equal(isPublisherWatermarkLine('\u00a9 2023 The Author of this book argues'), false);
     assert.equal(isPageNumberLine('883'), true);
     assert.equal(isPageNumberLine('Page 4 of 12'), true);

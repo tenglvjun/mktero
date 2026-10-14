@@ -89,8 +89,16 @@ export function isPublisherCopyrightParagraph(text) {
 export function isPublisherWatermarkLine(text) {
     const key = String(text || '').replace(/\s+/gu, ' ').trim();
     if (!key) return false;
-    return DOWNLOAD_PHRASE_LINE_PATTERN.test(key)
-        || isCopyrightAnchor(key);
+    if (DOWNLOAD_PHRASE_LINE_PATTERN.test(key) || isCopyrightAnchor(key)) {
+        return true;
+    }
+    // Portland Press prints the page number on the same baseline as the
+    // copyright line: "886 \u00a9 2023 The Author(s). Published by ...".
+    const withoutPageNumber = key.replace(/^\d{1,4}\s+/u, '');
+    return withoutPageNumber !== key && (
+        DOWNLOAD_PHRASE_LINE_PATTERN.test(withoutPageNumber)
+        || isCopyrightAnchor(withoutPageNumber)
+    );
 }
 
 export function isPageNumberLine(text) {
