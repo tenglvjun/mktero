@@ -14,6 +14,8 @@ const MARKDOWN_HEADING_PATTERN = /^(#{1,6})[ \t]+.+$/gm;
 const NUMBERED_REFERENCE_PATTERN = /^[ \t]*(?:[-*+][ \t]+)?(?:\[(\d{1,4})\]|(\d{1,4})[.)])[ \t]+/gm;
 const MIN_NUMERIC_CITATION_STYLE_CONTAINERS = 2;
 const MIN_INFERRED_NUMBERED_REFERENCES = 3;
+const MIN_BARE_NUMBERED_REFERENCE_GAP_BUDGET = 2;
+const BARE_NUMBERED_REFERENCE_GAP_DIVISOR = 20;
 const MIN_RESUMED_UNNUMBERED_REFERENCES = 3;
 const MAX_RESUMED_REFERENCE_PARAGRAPHS = 6;
 const MAX_REFERENCE_PREFIX_LENGTH = 1_024;
@@ -661,16 +663,7 @@ function parseBareNumberedReferences(markdown, section) {
         };
     });
     if (!entries.length || entries.some(entry => !entry)) return [];
-
-    let previousNumber = 0;
-    for (const entry of entries) {
-        if (entry.number !== previousNumber
-            && entry.number !== previousNumber + 1) {
-            return [];
-        }
-        previousNumber = entry.number;
-    }
-    if (entries[0].number !== 1) return [];
+    if (!bareNumberedEntriesAreContiguousEnough(entries)) return [];
 
     return entries.map(entry => createReference({
         id: `number:${entry.number}`,
@@ -682,6 +675,28 @@ function parseBareNumberedReferences(markdown, section) {
         from: entry.from,
         to: entry.to,
     })).filter(reference => reference.text);
+}
+
+// A dropped OCR entry leaves a hole in an otherwise numbered list. A small
+// hole still identifies the list; a jump or a restart does not.
+function bareNumberedEntriesAreContiguousEnough(entries) {
+    if (entries[0].number !== 1) return false;
+    let previousNumber = 0;
+    for (const entry of entries) {
+        if (entry.number < previousNumber) return false;
+        previousNumber = entry.number;
+    }
+    const lastNumber = entries.at(-1).number;
+    const present = new Set(entries.map(entry => entry.number)).size;
+    const missing = lastNumber - present;
+    return missing <= bareNumberedReferenceGapBudget(lastNumber);
+}
+
+function bareNumberedReferenceGapBudget(lastNumber) {
+    return Math.max(
+        MIN_BARE_NUMBERED_REFERENCE_GAP_BUDGET,
+        Math.floor(lastNumber / BARE_NUMBERED_REFERENCE_GAP_DIVISOR)
+    );
 }
 
 function unnumberedReferenceRanges(markdown, section) {

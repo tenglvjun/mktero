@@ -137,6 +137,101 @@ test('maps superscript citations to bare numbered references', () => {
     );
 });
 
+test('maps bare numbered references when one entry is missing', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Damage is visible in all organs [1]. Sepsis is a global priority [2\u20134].',
+        '',
+        '## References',
+        '',
+        '1 Singer, M. et al. (2016) Definitions for sepsis.',
+        '',
+        '2 Moreno, R. et al. (2023) The SOFA score.',
+        '',
+        '4 Reinhart, K. et al. (2017) A WHO resolution.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.references.map(reference => ({
+            id: reference.id,
+            number: reference.number,
+            text: reference.text,
+        })),
+        [{
+            id: 'number:1',
+            number: 1,
+            text: 'Singer, M. et al. (2016) Definitions for sepsis.',
+        }, {
+            id: 'number:2',
+            number: 2,
+            text: 'Moreno, R. et al. (2023) The SOFA score.',
+        }, {
+            id: 'number:4',
+            number: 4,
+            text: 'Reinhart, K. et al. (2017) A WHO resolution.',
+        }]
+    );
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            referenceIds: citation.referenceIds,
+        })),
+        [{ label: '1', referenceIds: ['number:1'] }, {
+            label: '2\u20134',
+            referenceIds: ['number:2', 'number:4'],
+        }]
+    );
+});
+
+test('does not number a bare reference list that jumps ahead', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'The result was reported [1] and again [15].',
+        '',
+        '## References',
+        '',
+        '1 World Health Organization. Global action plan. 2018.',
+        '',
+        '15 World Health Organization. A later plan. 2020.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.references.map(reference => reference.number),
+        [null, null]
+    );
+    assert.deepEqual(result.citations, []);
+});
+
+test('does not number a bare reference list that restarts', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'The first report [1] disagrees with the later one [2].',
+        '',
+        '## References',
+        '',
+        '1 First working group. Opening report. 2018.',
+        '',
+        '2 Second working group. Follow-up report. 2019.',
+        '',
+        '1 Third working group. Restarted report. 2020.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.references.map(reference => reference.number),
+        [null, null, null]
+    );
+    assert.deepEqual(result.citations, []);
+});
+
 test('extracts IEEE authors before a quoted article title', () => {
     const reference = 'Y. Li, L. Wang, W. Zheng, Y. Zong, L. Qi, Z. Cui, '
         + 'T. Zhang, and T. Song, “A novel bi-hemispheric discrepancy model '
