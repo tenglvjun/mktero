@@ -9,12 +9,14 @@
 
 **Read Zotero PDFs as source-linked Markdown.**
 
-Mktero is a restartless Zotero extension for Zotero 7, 8, 9, and 10. It sends a
-local PDF to your selected OCR service, [MinerU](https://mineru.net/) or
-[Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1), when needed, then
-opens the resulting Markdown, formulas, tables, figures, citations, and
-annotations in a temporary, reading-first Zotero tab. A content-addressed
-local cache avoids repeating conversions for the same PDF and parser profile.
+Mktero is a restartless Zotero extension for Zotero 7, 8, 9, and 10. On a
+cache miss, the default conversion sends that local PDF through your Mktero
+account. No MinerU or Mistral key is required. [MinerU](https://mineru.net/)
+and [Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1) remain available
+if you do not want the PDF sent to Mktero. The result opens as Markdown,
+formulas, tables, figures, citations, and annotations in a temporary,
+reading-first Zotero tab. A content-addressed local cache avoids repeating
+conversions for the same PDF and parser profile.
 
 [Download](https://github.com/tenglvjun/mktero/releases/latest) ·
 [Product page](https://mktero.com/) ·
@@ -22,11 +24,13 @@ local cache avoids repeating conversions for the same PDF and parser profile.
 [Community](#community)
 
 > [!IMPORTANT]
-> Mktero is in beta. On a cache miss, the complete PDF is sent to the selected
-> conversion provider, so configure either a MinerU API Token or a Mistral API
-> Key. Optional AI translation sends protected Markdown batches to the provider
-> configured by you. Review [Privacy and data handling](./docs/privacy.md)
-> before processing sensitive documents.
+> Mktero is in beta. With the default converter, a cache miss sends the complete
+> PDF to the Mktero service for your account. Sign in from `Settings -> Mktero`;
+> no separate OCR key is required. If you switch to MinerU or Mistral, the PDF
+> goes to that service instead and is not sent to Mktero. Optional AI translation
+> sends protected Markdown batches to the provider configured by you. Review
+> [Privacy and data handling](./docs/privacy.md) before processing sensitive
+> documents.
 
 ![Mktero converting, reading, and annotating an academic PDF in Zotero](./docs/assets/mktero-demo.gif)
 
@@ -92,24 +96,26 @@ Other locales fall back to English.
 ## Quick start
 
 > [!TIP]
-> Install the XPI, open `Settings -> Mktero`, add an OCR key, then open a PDF
+> Install the XPI, open `Settings -> Mktero`, sign in to Mktero, then open a PDF
 > and click the Mktero icon in the reader toolbar.
 
 ### Requirements
 
 - **Zotero.** Desktop `7.0` through `10.0.*`.
 - **PDF.** An attachment downloaded and available as a local file.
-- **OCR.** An API key for MinerU cloud or [Mistral](https://console.mistral.ai/api-keys/).
-  MinerU can instead use a self-hosted MinerU 4.0 service; its API key is
-  optional.
-- **Network.** Access to the selected conversion API, or to the configured
-  local MinerU service.
+- **Account.** A Mktero account for the default hosted conversion. Signing in
+  does not require a MinerU or Mistral key.
+- **Own converter, optional.** Switch to MinerU cloud, a self-hosted MinerU 4.0
+  service, or [Mistral](https://console.mistral.ai/api-keys/) if you do not want
+  the PDF sent to Mktero. MinerU cloud and Mistral need your own API key. A
+  local MinerU key is optional.
+- **Network.** Access to the Mktero service, or to the converter you selected.
 
-MinerU and Mistral control file-size, page-count, quota, and
-service-availability limits. See the
+The selected converter controls file-size, page-count, quota, and
+service-availability limits. When you choose MinerU or Mistral, see the
 [MinerU API documentation](https://mineru.net/apiManage/docs) or
 [Mistral OCR documentation](https://docs.mistral.ai/studio/document-processing/basic_ocr)
-for current limits.
+for that service's current limits.
 
 ### Install
 
@@ -124,10 +130,12 @@ prereleases are not offered as automatic updates.
 
 ### Configure
 
-Open `Settings -> Mktero` after installation, choose a conversion provider, and
-enter its API key. AI features and reading options are optional; each AI
-provider keeps its own model, key, and related settings. Credentials are
-stored as ordinary, unencrypted preferences in the active Zotero profile.
+Open `Settings -> Mktero` after installation. The default converter is Mktero:
+sign in or register there. To keep a PDF off the Mktero service, choose MinerU
+or Mistral and enter that service's API key. AI features and reading options
+are optional; each AI provider keeps its own model, key, and related settings.
+Credentials are stored as ordinary, unencrypted preferences in the active
+Zotero profile.
 
 See [Configuration](./docs/configuration.md) for every setting and
 [Privacy and data handling](./docs/privacy.md) for what is sent where.
@@ -171,17 +179,19 @@ See [Configuration](./docs/configuration.md) for every setting and
 
 ## Privacy
 
-- On a cache miss, the complete PDF is sent to the selected MinerU cloud,
-  configured local MinerU service, or Mistral provider.
+- On a cache miss, the default converter sends the complete PDF to the Mktero
+  service for your account.
+- If you select MinerU cloud, a local MinerU service, or Mistral, the complete
+  PDF is sent there instead, and not to Mktero.
 - Credentials, cached Markdown and figures, corrections, translations, and
   reading positions are stored unencrypted in the active Zotero profile and are
   not synced by Mktero.
-- Optional Mktero account sign-in sends the email and password only when you
-  sign in. Registration also emails a verification code. The access token and
-  refresh token stay in the same profile. While the account pane is open, the
-  extension uses that token to request your profile and your conversion-activity
-  counts from the service you selected, and shows them as the account card's
-  counters.
+- Signing in for the default conversion sends the email and password only when
+  you sign in. Registration also emails a verification code. The access token
+  and refresh token stay in the same profile. While the account pane is open,
+  the extension uses that token to request your profile and your
+  conversion-activity counts from the service you selected, and shows them as
+  the account card's counters.
 - Reference, citation, and translation requests are bounded and local-first;
   logs never contain API tokens, presigned URLs, PDF bytes, or authenticated
   responses.
