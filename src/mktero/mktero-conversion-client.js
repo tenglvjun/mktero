@@ -455,11 +455,22 @@ function errorCodeForStatus(status, payload) {
         return 'MKTERO_SIGN_IN_REQUIRED';
     }
     if (code === 'storage_unavailable') return 'MKTERO_UNAVAILABLE';
-    if (code === 'conversion_not_found') return 'MKTERO_JOB_NOT_FOUND';
-    if (code === 'conversion_failed') return 'MKTERO_CONVERSION_FAILED';
+    if (
+        code === 'conversion_not_found'
+        || code === 'conversion_result_not_found'
+        || code === 'upload_expired'
+        || code === 'upload_incomplete'
+        || code === 'invalid_state'
+        || code === 'result_not_ready'
+    ) {
+        return 'MKTERO_JOB_NOT_FOUND';
+    }
+    if (code === 'conversion_failed' || code === 'invalid_upload') {
+        return 'MKTERO_CONVERSION_FAILED';
+    }
     if (status === 401 || status === 403) return 'MKTERO_SIGN_IN_REQUIRED';
     if (status === 404) return 'MKTERO_JOB_NOT_FOUND';
-    if (status === 503) return 'MKTERO_UNAVAILABLE';
+    if (status === 408 || status === 429 || status >= 500) return 'MKTERO_UNAVAILABLE';
     return 'MKTERO_HTTP_ERROR';
 }
 

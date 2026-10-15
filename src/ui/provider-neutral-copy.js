@@ -62,7 +62,7 @@ const ERROR_CODE_KEYS = new Map([
     ['MKTERO_REQUEST_TIMEOUT', 'error.requestTimedOut'],
     ['MKTERO_PARSE_TIMEOUT', 'error.parsingTimedOut'],
     ['MKTERO_NETWORK_ERROR', 'error.networkFailed'],
-    ['MKTERO_HTTP_ERROR', 'error.requestFailed'],
+    ['MKTERO_HTTP_ERROR', 'error.mkteroRequestFailed'],
     ['MKTERO_INVALID_RESPONSE', 'error.invalidResponse'],
     ['MKTERO_ARCHIVE_TOO_LARGE', 'error.resultTooLarge'],
 ]);
@@ -110,9 +110,9 @@ export function removeProviderBranding(message) {
     return String(message || '').replace(/\bMinerU\b/gi, 'PDF conversion service');
 }
 
-// A failed upload or download leg means the request never reached the API, so
-// the generic "could not be reached" copy is misleading: the object store
-// answered. Report the more specific cause when the client tagged the stage.
+// An upload talks to storage, not to the account API. Tell the user whether
+// to retry or to check the network. Do not mention bucket policy or CORS;
+// those are not something the user can change.
 function stageMessageKey(error) {
     if (error?.code === 'MKTERO_NETWORK_ERROR') {
         return error.stage === MKTERO_REQUEST_STAGES.UPLOAD

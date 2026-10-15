@@ -317,6 +317,31 @@ test('keeps the transport failure and stage when the upload cannot connect', asy
     );
 });
 
+test('maps a retryable or unavailable conversion response to an action', async () => {
+    const cases = [
+        ['upload_expired', 410, 'MKTERO_JOB_NOT_FOUND'],
+        ['invalid_upload', 422, 'MKTERO_CONVERSION_FAILED'],
+        ['internal_error', 500, 'MKTERO_UNAVAILABLE'],
+    ];
+    for (const [serviceCode, status, code] of cases) {
+        const client = new MkteroConversionClient({
+            fetch: async () => jsonResponse(status, {
+                error: { code: serviceCode, message: 'hidden' },
+            }),
+            sleep: async () => {},
+        });
+        await assert.rejects(
+            client.convert({
+                apiBase: API_BASE,
+                getAccessToken: () => 'access-token',
+                fileName: 'paper.pdf',
+                fileData: PDF_BYTES,
+            }),
+            error => error.code === code && error.errorCode === serviceCode
+        );
+    }
+});
+
 test('keeps the HTTP status and service error code off the job API', async () => {
     const client = new MkteroConversionClient({
         fetch: async () => jsonResponse(404, {
