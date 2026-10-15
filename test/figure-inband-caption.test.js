@@ -719,3 +719,58 @@ test('composes a wide panel row with a short legend below it', () => {
     assert.ok(candidate.visualBBox[2] >= 837);
     assert.ok(candidate.visualBBox[3] >= 363);
 });
+
+test('joins the caption sentence directly under the figure title', () => {
+    const title = 'Figure 1. Lifetime Incidence Portrayal: Cancer, Sepsis and Mortality';
+    const legend = '(A) Lifetime incidence of developing cancer, (B) percentage of septic patients '
+        + 'who have cancer, and (C) mortality of hospitalized patients with cancer and sepsis. '
+        + 'Created with BioRender.com.';
+    const body = 'with and without cancer was in younger adults, with the relative risk highest '
+        + 'in patients ages 18-44.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({
+            id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block,
+        });
+        return id;
+    };
+    const parent = add({
+        type: 'image', role: 'unknown', bboxKind: 'group', bbox: [70, 87, 840, 365],
+    });
+    const path = 'images/figure-1.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    add({
+        type: 'image', role: 'panel', bboxKind: 'visual-body',
+        bbox: [70, 87, 840, 365], assetPath: path, parentId: parent,
+    });
+    const caption = add({
+        type: 'caption', role: 'caption', bboxKind: 'caption', text: title,
+        bbox: [66, 371, 501, 383], parentId: parent,
+    });
+    const continuation = add({
+        type: 'text', role: 'unknown', bboxKind: 'text', text: legend,
+        bbox: [64, 385, 842, 415],
+    });
+    const prose = add({
+        type: 'text', role: 'body', bboxKind: 'text', text: body,
+        bbox: [64, 453, 844, 529],
+    });
+    const markdown = [`![](${path})`, '', title, '', legend, '', body].join('\n');
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges({
+        provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+        pages: [{
+            pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length },
+        }],
+        contentList: [], providerState: {},
+    }))[0];
+    assert.equal(candidate.decision, 'compose', candidate.reason);
+    assert.deepEqual(candidate.captionBlockIds, [caption, continuation]);
+    assert.ok(!candidate.captionBlockIds.includes(prose));
+    assert.ok(!candidate.ownedTextBlockIds.includes(prose));
+});

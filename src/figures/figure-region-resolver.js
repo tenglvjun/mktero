@@ -242,10 +242,13 @@ function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
             ].filter(block => block.id !== labeled[0].id
                 && !looksLikeGapLabel(block.text, limits)
                 && captionContinues(labeled[0], block, limits));
+            const stacked = stackedCaptionContinuations(
+                blocks, labeled[0], limits
+            ).filter(block => !parts.includes(block));
             // Keep the labelled academic caption first: a side-column note can
             // start a few units higher and must not take over the label.
-            captions = [labeled[0], ...orderCaptionParts(parts)];
-            mergedContinuation = parts.length > 0;
+            captions = [labeled[0], ...orderCaptionParts([...parts, ...stacked])];
+            mergedContinuation = parts.length + stacked.length > 0;
         }
         else if (labeled.length) {
             captions = labeled;
@@ -264,11 +267,15 @@ function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
         const continuations = primary
             ? captionContinuationText(blocks, parents, primary, panelBox, limits)
             : [];
-        if (continuations.length) {
+        const stacked = primary
+            ? stackedCaptionContinuations(blocks, primary, limits)
+                .filter(block => !continuations.includes(block))
+            : [];
+        if (continuations.length || stacked.length) {
             captions = [
                 primary,
                 ...orderCaptionParts(nearby.filter(block => block !== primary)),
-                ...orderCaptionParts(continuations),
+                ...orderCaptionParts([...continuations, ...stacked]),
             ];
             mergedContinuation = true;
         }
@@ -540,6 +547,58 @@ function orderCaptionParts(parts) {
 
 // A note in the band below the panels can continue the caption in a second
 // column even when MinerU records it as figure text.
+// The sentence under "Figure N. Title" is still the caption. It sits a
+// couple of units below the title line; the article paragraph after it
+// leaves a much larger gap.
+const STACKED_CAPTION_MAX_GAP = 8;
+const MAX_STACKED_CAPTION_PARTS = 4;
+
+function stackedCaptionContinuations(blocks, caption, limits) {
+    if (!validBox(caption.bbox)) return [];
+    const parts = [];
+    const taken = new Set([caption.id]);
+    let bottom = caption.bbox[3];
+    let left = caption.bbox[0];
+    let right = caption.bbox[2];
+    while (parts.length < MAX_STACKED_CAPTION_PARTS) {
+        let next = null;
+        let nextGap = Infinity;
+        for (const block of blocks) {
+            if (!stackedCaptionBlock(block, caption, bottom, left, right, taken, limits)) {
+                continue;
+            }
+            const gap = block.bbox[1] - bottom;
+            if (!next || gap < nextGap
+                || (gap === nextGap && block.sourceOrdinal < next.sourceOrdinal)) {
+                next = block;
+                nextGap = gap;
+            }
+        }
+        if (!next) break;
+        parts.push(next);
+        taken.add(next.id);
+        bottom = Math.max(bottom, next.bbox[3]);
+        left = Math.min(left, next.bbox[0]);
+        right = Math.max(right, next.bbox[2]);
+    }
+    return parts;
+}
+
+function stackedCaptionBlock(block, caption, bottom, left, right, taken, limits) {
+    if (taken.has(block.id) || block.pageIndex !== caption.pageIndex) return false;
+    if (!validBox(block.bbox) || block.bboxKind === 'group' || isPanel(block)) return false;
+    if (!block.sourceRanges?.length || block.rangeEvidence === 'unresolved') return false;
+    if (['heading', 'table', 'equation', 'formula', 'code', 'reference'].includes(block.type)) {
+        return false;
+    }
+    const text = String(block.text || '').trim();
+    if (!text || isFigureCaptionText(text)) return false;
+    const gap = block.bbox[1] - bottom;
+    if (gap < -1 || gap > STACKED_CAPTION_MAX_GAP) return false;
+    return overlap(block.bbox[0], block.bbox[2], left, right)
+        >= limits.captionProjectionOverlap;
+}
+
 function captionContinuationText(blocks, parents, caption, panelBox, limits) {
     return blocks.filter(block => (
         block.role === 'figure-text'

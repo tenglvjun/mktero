@@ -1117,12 +1117,12 @@ test('public readCached does not interleave cache.put with an in-flight convert 
     assert.deepEqual(calls, { submit: 1, parse: 0, collect: 1 });
 });
 
-test('current profiles are v16 and v14 ids stay compatible', () => {
-    assert.match(MINERU_PARSER_PROFILE_ID, /figure-region-v16/);
-    assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v16/);
+test('current profiles are v17 and v14 ids stay compatible', () => {
+    assert.match(MINERU_PARSER_PROFILE_ID, /figure-region-v17/);
+    assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v17/);
     assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS[0].includes('figure-region-v14'), true);
-    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0].includes('figure-region-v15'), true);
-    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[1].includes('figure-region-v14'), true);
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0].includes('figure-region-v16'), true);
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[2].includes('figure-region-v14'), true);
     assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
     assert.equal(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.includes(MISTRAL_PARSER_PROFILE_ID), false);
     assert.equal(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.some(profile => (
