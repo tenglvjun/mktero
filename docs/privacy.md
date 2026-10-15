@@ -4,12 +4,12 @@
 
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
-| Complete PDF on a cache miss | Selected MinerU cloud, the configured local MinerU service, or Mistral | Not by Mktero |
+| Complete PDF on a cache miss, with the default Mktero converter | The Mktero service for the signed-in account | Not by Mktero |
+| Complete PDF on a cache miss, after you switch to your own converter | Selected MinerU cloud, the configured local MinerU service, or Mistral | Not by Mktero |
 | MinerU cloud token, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
 | Email and password when signing in or registering, and the registration verification code | The Mktero service you select; the password and code are not saved | Not by Mktero |
 | Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
 | Your account profile and conversion-activity counts, requested with the access token while the account pane is open | The Mktero service you select | Not by Mktero |
-| PDF sent for a hosted conversion | The Mktero service you select | Not by Mktero |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and expiry time | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
@@ -39,6 +39,8 @@ and authenticated responses are not written to logs. Selection translation
 requests contain only the selected text; they
 are not written to the full-document translation cache.
 
-Review the privacy policy of MinerU and any AI or citation provider Mktero uses.
-Do not process confidential PDFs unless their data-handling terms are suitable
+With the default converter, a cache miss sends the complete PDF to the Mktero
+service for your account. Review that service's data handling, and the privacy
+policy of MinerU, Mistral, and any AI or citation provider you choose instead.
+Do not process confidential PDFs unless those data-handling terms are suitable
 for your use case.

@@ -4,12 +4,12 @@
 
 | 数据 | 发送到或存储在 | Zotero 同步 |
 | --- | --- | --- |
-| 缓存未命中时的完整 PDF | 所选 MinerU 云端、配置的本地 MinerU 服务或 Mistral | Mktero 不同步 |
+| 使用默认 Mktero 转换时，缓存未命中的完整 PDF | 已登录账号所使用的 Mktero 服务 | Mktero 不同步 |
+| 改用自己的转换服务后，缓存未命中的完整 PDF | 所选 MinerU 云端、配置的本地 MinerU 服务或 Mistral | Mktero 不同步 |
 | MinerU 云端 Token、本地 MinerU 地址、Mistral API key，以及 AI 凭据 | 当前 Zotero 配置文件，未加密 | 否 |
 | 登录或注册时的邮箱和密码，以及注册验证码 | 你选择的 Mktero 服务；密码和验证码不会保存 | Mktero 不同步 |
 | Mktero 访问令牌和刷新令牌 | 当前 Zotero 配置文件，未加密 | 否 |
 | 账号资料和转换活跃度计数，在账号面板打开时使用访问令牌请求 | 你选择的 Mktero 服务 | Mktero 不同步 |
-| 托管转换时发送的 PDF | 你选择的 Mktero 服务 | Mktero 不同步 |
 | 缓存的 Markdown、图片、图表元数据（含 OCR 片段）、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
 | Markdown 可用索引：文库 ID、条目 key、附件 key、缓存键、解析配置和过期时间 | 当前 Zotero 配置文件，未加密 | 否 |
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
@@ -26,4 +26,4 @@
 
 Mktero 不会把 PDF 标注、本地 PDF.js 索引、Zotero 笔记、完整条目记录、本地路径或缓存 Markdown 发送给文献/PDF Provider。只有标题的文献在用户明确点击“导入文献”后才会发送受限的引用文本；唯一的高置信度匹配会自动继续，不确定的匹配仍需用户确认。引用与文献请求始终匿名访问 Provider，只包含上表所述的受限引用文本、规范化标识符和已确认元数据，不会发送 Zotero key 或 PDF 字节。翻译请求包含受保护的 Markdown 和指令；如果占位符校验连续失败，最后一次重试只发送受影响内容块中的普通文本片段。选区翻译请求只包含选中文本，不会写入全文翻译缓存。日志不会写入 API Token、预签名地址、PDF 字节或带认证的响应。
 
-请同时阅读 MinerU、AI Provider 和引用 Provider 的隐私政策。除非相关数据处理条款符合你的使用场景，否则不要处理机密 PDF。
+使用默认转换时，缓存未命中会把完整 PDF 发送到已登录账号所使用的 Mktero 服务。请同时阅读该服务的数据处理方式，以及你改选的 MinerU、Mistral、AI Provider 和引用 Provider 的隐私政策。除非相关数据处理条款符合你的使用场景，否则不要处理机密 PDF。

@@ -9,10 +9,10 @@
 
 **在 Zotero 中以带来源链接的 Markdown 阅读 PDF。**
 
-Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。需要时，它会将本地 PDF
-发送到所选的 OCR 服务（[MinerU](https://mineru.net/) 或
-[Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1)）进行转换，再在临时的阅读优先
-Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注。内容寻址的本地缓存会按 PDF 内容和解析配置复用转换结果，避免重复处理。
+Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命中时，默认转换会把这份本地 PDF
+经你的 Mktero 账号发送出去，不需要 MinerU 或 Mistral 密钥。如果不想把 PDF 交给 Mktero，仍可以改用
+[MinerU](https://mineru.net/) 或 [Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1)。
+结果会在临时的阅读优先 Zotero 标签页中打开，包括 Markdown、公式、表格、图片、引用和标注。内容寻址的本地缓存会按 PDF 内容和解析配置复用转换结果，避免重复处理。
 
 [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest) ·
 [产品介绍页](https://mktero.com/) ·
@@ -20,9 +20,9 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 [社区](#社区)
 
 > [!IMPORTANT]
-> Mktero 目前处于 Beta 阶段。缓存未命中时，完整 PDF 会发送到所选的转换服务，因此需要
-> 配置 MinerU API Token 或 Mistral API Key。可选的 AI 翻译会把受保护的 Markdown 批次发送给你配置的 Provider。
-> 处理敏感文档前，请阅读[数据与隐私](./docs/privacy.zh-CN.md)。
+> Mktero 目前处于 Beta 阶段。使用默认转换时，缓存未命中会把完整 PDF 发送到你账号所使用的 Mktero 服务。
+> 在 `设置 -> Mktero` 登录即可，不需要另外的 OCR 密钥。若改用 MinerU 或 Mistral，PDF 改发到那里，不再发到 Mktero。
+> 可选的 AI 翻译会把受保护的 Markdown 批次发送给你配置的 Provider。处理敏感文档前，请阅读[数据与隐私](./docs/privacy.zh-CN.md)。
 
 ![Mktero 在 Zotero 中转换、阅读和标注学术 PDF](./docs/assets/mktero-demo.gif)
 
@@ -65,16 +65,17 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 ## 快速开始
 
 > [!TIP]
-> 安装 XPI，打开 `设置 -> Mktero`，填入 OCR 密钥，然后打开 PDF，点击阅读器工具栏的 Mktero 图标。
+> 安装 XPI，打开 `设置 -> Mktero`，登录 Mktero 账号，然后打开 PDF，点击阅读器工具栏的 Mktero 图标。
 
 ### 使用要求
 
 - **Zotero。** 桌面版 `7.0` 至 `10.0.*`。
 - **PDF。** 已下载并可在本机访问的附件。
-- **OCR。** MinerU 云端或 [Mistral](https://console.mistral.ai/api-keys/) 需要 API key。MinerU 也可以改用自部署的 MinerU 4.0 服务，此时 API key 可选。
-- **网络。** 能够访问所选转换 API，或能够访问配置的本地 MinerU 服务。
+- **账号。** 默认的托管转换使用 Mktero 账号。登录不需要 MinerU 或 Mistral 密钥。
+- **自备转换，可选。** 不想把 PDF 交给 Mktero 时，改用 MinerU 云端、自部署的 MinerU 4.0 服务，或 [Mistral](https://console.mistral.ai/api-keys/)。MinerU 云端和 Mistral 需要你自己的 API key。本地 MinerU 的 API key 可选。
+- **网络。** 能够访问 Mktero 服务，或能够访问你改选的转换服务。
 
-文件大小、页数、账户额度和服务可用性由各服务控制，请以
+文件大小、页数、额度和服务可用性由当前所选的转换服务决定。改用 MinerU 或 Mistral 时，以
 [MinerU API 文档](https://mineru.net/apiManage/docs)或
 [Mistral OCR 文档](https://docs.mistral.ai/studio/document-processing/basic_ocr)中的当前限制为准。
 
@@ -90,7 +91,7 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 
 ### 配置
 
-安装后打开 `设置 -> Mktero`，选择转换服务并填写对应的 API key。AI 功能和阅读选项都是可选的，每个 AI 厂商各自保存模型、密钥和相关设置。凭据会作为普通的未加密首选项存储在当前的 Zotero 配置文件中。
+安装后打开 `设置 -> Mktero`。默认转换服务是 Mktero：在这里登录或注册。不想把 PDF 交给 Mktero 服务时，改选 MinerU 或 Mistral 并填写该服务的 API key。AI 功能和阅读选项都是可选的，每个 AI 厂商各自保存模型、密钥和相关设置。凭据会作为普通的未加密首选项存储在当前的 Zotero 配置文件中。
 
 所有设置项见[配置](./docs/configuration.zh-CN.md)，发送与存储位置见[数据与隐私](./docs/privacy.zh-CN.md)。
 
@@ -122,9 +123,10 @@ Zotero 标签页中打开 Markdown、公式、表格、图片、引用和标注�
 
 ## 数据与隐私
 
-- 缓存未命中时，完整 PDF 会发送到所选的 MinerU 云端、配置的本地 MinerU 服务或 Mistral 服务。
+- 使用默认转换时，缓存未命中会把完整 PDF 发送到你账号所使用的 Mktero 服务。
+- 若改选 MinerU 云端、本地 MinerU 服务或 Mistral，完整 PDF 改发到那里，不再发到 Mktero。
 - 凭据、缓存的 Markdown 和图片、校对、译文和阅读位置会以未加密形式存储在当前 Zotero 配置文件中，Mktero 不会同步这些数据。
-- 可选的 Mktero 账号登录只会在点击登录时发送邮箱和密码。注册会另外向邮箱发送验证码。访问令牌和刷新令牌同样只保存在当前配置文件中。账号面板打开时，扩展会使用该令牌向你选择的服务请求账号资料和转换活跃度计数，并以账号卡片上的统计展示。
+- 为默认转换登录时，只会在点击登录时发送邮箱和密码。注册会另外向邮箱发送验证码。访问令牌和刷新令牌同样只保存在当前配置文件中。账号面板打开时，扩展会使用该令牌向你选择的服务请求账号资料和转换活跃度计数，并以账号卡片上的统计展示。
 - 引用、文献和翻译请求都是受限且本地优先的；日志不会包含 API Token、预签名地址、PDF 字节或带认证的响应。
 
 完整说明和数据表见[数据与隐私](./docs/privacy.zh-CN.md)。
