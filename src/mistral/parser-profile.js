@@ -45,11 +45,15 @@ const PUBLISHER_COPYRIGHT_PARSER_OPTIONS = Object.freeze({
 // Shipped v14 cache identity. Keep this literal so a profile bump cannot rewrite it.
 export const MISTRAL_FIGURE_REGION_V14_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v5-retain-chrome-ranges","textFlow":"same-and-cross-page-column-continuation-v3","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v14","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
 
+// Shipped v15 cache identity. Keep this literal so a profile bump cannot rewrite it.
+export const MISTRAL_FIGURE_REGION_V15_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v15","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}}';
+
 export const MISTRAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MISTRAL_FIGURE_REGION_V15_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V14_PARSER_PROFILE_ID,
     JSON.stringify({
         ...FIGURE_PANEL_PAIR_PARSER_OPTIONS,
-        figureStructure: FIGURE_PIPELINE_PROFILE,
+        figureStructure: 'figure-region-v15',
         figureReadingOrder: 'verified-pdf-title-order-v1',
     }),
     JSON.stringify({
@@ -76,7 +80,8 @@ export const MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS = Object.freeze(
         try {
             const parsed = JSON.parse(profile);
             return parsed.textFlow === PUBLISHER_COPYRIGHT_PARSER_OPTIONS.textFlow
-                && parsed.headerFooter === PUBLISHER_COPYRIGHT_PARSER_OPTIONS.headerFooter;
+                && parsed.headerFooter === PUBLISHER_COPYRIGHT_PARSER_OPTIONS.headerFooter
+                && parsed.figureStructure === FIGURE_PIPELINE_PROFILE;
         }
         catch {
             return false;
