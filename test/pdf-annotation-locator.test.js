@@ -2330,6 +2330,27 @@ test('uses tolerant quote context to disambiguate repeated PDF text', async () =
     locator.dispose();
 });
 
+
+test('locates a formula paragraph whose PDF glyphs are not the LaTeX source', async () => {
+    const selectedText = "Formally, the anchor initializes a Bayesian belief state over an individual's physiological set point \\hat{G} = \\mu +\\sum_{i}\\beta_{i}g_{i} , where \\beta_{i} are GWAS-derived effect sizes and g_{i}\\in \\{0,1,2\\} are risk-allele counts. Each incoming physiological measurement P then produces a non-constitutional deviation \\delta = P - \\hat{G} whose distribution \\delta \\sim \\mathcal{N}(P - \\mu_G,\\sigma_G^2 +\\sigma_\\varepsilon^2) separates the signal attributable to environment and state from the constitutionally fixed baseline. As behavioral data accrue, the prior decays according to \\hat{G}t = w(t)\\hat{G}{\\mathrm{genomic}} + [1 - w(t)]\\bar{P}_t , transitioning from genome-dominated to empirical-baseline-dominated inference. The central AI contributi";
+    const locator = await createSyntheticLocator([[
+        createTextItem("Formally, the anchor initializes a Bayesian belief state over an individual\u2019s physiological\nset point \u02c6G = \u00b5 + P\ni \u03b2igi, where \u03b2i are GWAS-derived effect sizes and gi \u2208 {0, 1, 2} are risk-\nallele counts. Each incoming physiological measurement P then produces a non-constitutional\ndeviation \u03b4 = P \u2212 \u02c6G whose distribution \u03b4 \u223c N (P \u2212 \u00b5G, \u03c32\nG + \u03c32\n\u03b5 ) separates the signal at-\ntributable to environment and state from the constitutionally fixed baseline. As behavioral\ndata accrue, the prior decays according to \u02c6Gt = w(t) \u02c6Ggenomic + [1 \u2212 w(t)] \u00afPt, transitioning\nfrom genome-dominated to empirical-baseline-dominated inference. The central AI contribu-\ntion is a causal decompositi", {
+            width: 460,
+            height: 9,
+            transform: [9, 0, 0, 9, 72, 700],
+        }),
+    ]]);
+
+    const located = await locator.locate(42, selectedText, {
+        pdfPageIndexHint: 0,
+    });
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.text, selectedText);
+    assert.ok(located.position.rects.length >= 1);
+    locator.dispose();
+});
+
 async function createSyntheticLocator(pageItems, {
     cache = null,
     onError = () => {},

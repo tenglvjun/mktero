@@ -22,7 +22,10 @@ const MAX_PAGE_TEXT_LENGTH = 1_000_000;
 const MAX_TOTAL_TEXT_LENGTH = 10_000_000;
 const MAX_TEXT_ITEMS = 250_000;
 
-export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v10`;
+// text-v11 folds math accents, numeric exponents, and relation spacing.
+// A text-v10 index stored those characters, so its offsets would no longer
+// address the raw PDF text.
+export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v11`;
 
 // Zotero's DOM-free plugin sandbox cannot dynamically import the packaged
 // worker URL when PDF.js falls back to its in-process worker implementation.
