@@ -48,24 +48,52 @@ test('localizes known conversion errors and hides unknown internal messages', ()
     );
 });
 
-test('reports an object-store upload failure with a specific cause', () => {
+test('tells the user to retry an upload instead of fixing storage', () => {
     const localization = createLocalization({ zoteroLocale: 'zh-CN' });
     const translate = localization.t.bind(localization);
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const translateEnglish = english.t.bind(english);
 
     const rejected = new Error('The PDF upload to Mktero failed');
     rejected.code = 'MKTERO_UPLOAD_FAILED';
     rejected.stage = 'upload';
     rejected.status = 403;
-    assert.match(localizeConversionError(rejected, translate), /存储桶的 CORS 策略/);
+    assert.equal(localizeConversionError(rejected, translate), '无法把 PDF 上传到 Mktero。请重试。');
+    assert.equal(
+        localizeConversionError(rejected, translateEnglish),
+        'The PDF could not be uploaded to Mktero. Try again.'
+    );
+    assert.doesNotMatch(localizeConversionError(rejected, translate), /CORS|存储桶/);
+    assert.doesNotMatch(localizeConversionError(rejected, translateEnglish), /CORS|bucket/i);
 
     const unreachable = new Error('The Mktero conversion request failed');
     unreachable.code = 'MKTERO_NETWORK_ERROR';
     unreachable.stage = 'upload';
     unreachable.cause = new TypeError('NetworkError when attempting to fetch resource');
-    assert.match(
+    assert.equal(
         localizeConversionError(unreachable, translate),
-        /无法连接存储服务/
+        '上传 PDF 时无法连接到 Mktero。请检查当前网络后重试。'
     );
+    assert.doesNotMatch(localizeConversionError(unreachable, translate), /CORS|存储桶/);
+
+    const download = new Error('The Mktero result download failed');
+    download.code = 'MKTERO_DOWNLOAD_FAILED';
+    download.stage = 'download';
+    assert.equal(
+        localizeConversionError(download, translate),
+        '无法从 Mktero 下载转换后的 Markdown。请重试。'
+    );
+
+    const converted = new Error('The Mktero conversion failed');
+    converted.code = 'MKTERO_CONVERSION_FAILED';
+    assert.equal(
+        localizeConversionError(converted, translate),
+        'Mktero 服务无法转换此 PDF。请重试。'
+    );
+
+    const request = new Error('The Mktero conversion request failed');
+    request.code = 'MKTERO_HTTP_ERROR';
+    assert.equal(localizeConversionError(request, translate), 'Mktero 转换请求失败。请重试。');
 
     // An API-stage transport failure keeps the generic message.
     const apiFailure = new Error('The Mktero conversion request failed');
