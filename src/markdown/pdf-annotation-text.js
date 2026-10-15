@@ -20,8 +20,25 @@ const SPACING_DIAERESIS_I = /\u00A8[ \t]*[\u0131i]/gu;
 const GREEK_ATTACHMENT_EDGE = /[-\u2010-\u2015\u2212]/u;
 const STATISTICAL_NUMERIC_EXPONENT = /\^\{\s*([0-9]{1,4})\s*\}(?=\s*(?:<=|>=|!=|[=<>≤≥≠]))/gu;
 const SENTENCE_END = /[.!?。！？]/u;
-const RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)(<=|>=|!=|[=<>≤≥≠])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
-const LATEX_RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)(\\(?:geq|ge|leq|le|neq|ne))(?![A-Za-z])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
+const RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)(<=|>=|!=|[=<>≤≥≠])(\s*)(?=[\p{L}\p{N}([{\-+−±.\\]|\\[A-Za-z])/gu;
+const LATEX_RELATIONAL_OPERATOR_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)(\\(?:geq|ge|leq|le|neq|ne))(?![A-Za-z])(\s*)(?=[\p{L}\p{N}([{\-+−±.\\]|\\[A-Za-z])/gu;
+// \in and \sim sit between letters in Markdown, while the PDF text layer
+// keeps spaces around the same relation. The operator itself stays.
+const LATEX_MATH_RELATION_WHITESPACE_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)(\\(?:in|sim|approx|simeq|equiv|propto))(?![A-Za-z])(\s*)(?=[\p{L}\p{N}([{\-+−±.\\]|\\[A-Za-z])/gu;
+const UNICODE_MATH_RELATION_WHITESPACE_PATTERN = /([\p{L}\p{N})\]}([{])(\s*)([∈∉∼≈≃≡∝])(\s*)(?=[\p{L}\p{N}([{\-+−±.])/gu;
+const NUMERIC_SET_COMMA_WHITESPACE_PATTERN = /(?<=\d),(\s+)(?=\d)/gu;
+// A subscript extracted under a large operator is its own text item, so
+// "P iβ" is "Σiβ" with a gap. Only the gap before a Greek letter is dropped.
+const SUBSCRIPT_BEFORE_GREEK_WHITESPACE_PATTERN = /(?<=\p{L})(\s+)(?=\p{L}\s*\p{Script=Greek})/gu;
+// A superscript drawn above a subscript comes out before that subscript,
+// with a gap where the line broke: "σ2 G" rather than "σG2".
+const SUPERSCRIPT_SCRIPT_WHITESPACE_PATTERN = /(?<=\d)(\s+)(?=\p{L}(?!\p{L})\s*[+),])/gu;
+const LATEX_ACCENT_PATTERN = /(?<!\\)\\(?:widehat|widetilde|overline|hat|bar|tilde|vec|dot|ddot|check|breve|acute|grave)(?![A-Za-z])[ \t]*(?:\{([^{}]*)\}|([A-Za-z]))/gu;
+const LATEX_WRAPPED_GROUP_PATTERN = /(?<!\\)\{[ \t]*(\\(?:mathcal|mathbb|mathbf|mathit|mathsf|mathtt|mathrm|text|textnormal)[ \t]*\{[^{}]{1,64}\})[ \t]*\}/gu;
+const LATEX_BRACED_NUMERIC_SUPERSCRIPT_PATTERN = /(?<![$\\])\^[ \t]*\{[ \t]*(\d{1,4})[ \t]*\}/gu;
+const LATEX_SINGLE_NUMERIC_SUPERSCRIPT_PATTERN = /(?<![$\\])\^(\d{1,4})(?!\d)/gu;
+// PDF.js reports a hat or bar as its own glyph in front of the base letter.
+const PDF_MATH_ACCENT = /[\u02C6\u02C9\u00AF\u0302\u0304\u0305]/gu;
 const OPENING_DELIMITER_SIGNED_NUMBER_WHITESPACE_PATTERN = /[([{](\s+)(?=(?:[+\-−±]|(?<!\\)\\pm)\s*\d)/gu;
 const SIGNED_NUMBER_WHITESPACE_PATTERN = /(?:[+\-−±]|(?<!\\)\\pm)(\s+)(?=\d)/gu;
 const DEGREE_SYMBOL_WHITESPACE_PATTERN = /([\p{N})\]}])(\s+)(?=°)/gu;
@@ -31,6 +48,22 @@ const LATEX_BRACED_SUBSCRIPT_PATTERN = /(?<!\\)_[ \t]*\{[ \t]*(\\(?:[A-Za-z]+)|[
 const LATEX_TAG_PATTERN = /(?<!\\)\\tag\{([^}]{0,32})\}/gu;
 const EQUATION_NUMBER_WHITESPACE_PATTERN = /,(\s+)(?=\(\d{1,4}\))/gu;
 const LATEX_SINGLE_SUBSCRIPT_PATTERN = /(?<!\\)_([A-Za-z0-9])/gu;
+const LATEX_COMMAND_SUBSCRIPT_PATTERN = /(?<!\\)_(\\[A-Za-z]+)(?![A-Za-z])/gu;
+const LATEX_ACCENT_COMMAND_NAMES = new Set([
+    'widehat',
+    'widetilde',
+    'overline',
+    'hat',
+    'bar',
+    'tilde',
+    'vec',
+    'dot',
+    'ddot',
+    'check',
+    'breve',
+    'acute',
+    'grave',
+]);
 const LATEX_MATH_COMMAND_NAMES = new Set([
     'alpha',
     'beta',
@@ -74,9 +107,14 @@ const LATEX_MATH_COMMAND_NAMES = new Set([
     'Psi',
     'Omega',
     'in',
+    'sum',
+    'prod',
+    'int',
 ]);
 const PDF_ANNOTATION_SYMBOL_REPLACEMENTS = [
     { pattern: /(?<!\\)\\%/gu, text: '%' },
+    { pattern: /(?<!\\)\\\{/gu, text: '{' },
+    { pattern: /(?<!\\)\\\}/gu, text: '}' },
     { pattern: /(?<![\\;])(?:\\;)?\^\{\\circ\}/gu, text: '°' },
     { pattern: /(?<!\\)\\pm(?![A-Za-z])/gu, text: '±' },
     { pattern: /(?<!\\)\\(?:geq|ge)(?![A-Za-z])/gu, text: '≥' },
@@ -438,9 +476,12 @@ function collectNormalizationMarkup(text) {
     const ignoredOffsets = new Set();
     const replacements = new Map();
     markAnnotationSymbols(text, ignoredOffsets, replacements);
+    markLatexAccents(text, ignoredOffsets, replacements);
     markLatexSubscripts(text, ignoredOffsets, replacements);
+    markLatexNumericSuperscripts(text, ignoredOffsets, replacements);
     markLatexTags(text, ignoredOffsets, replacements);
     markStatisticalNumericExponents(text, ignoredOffsets, replacements);
+    markPdfMathAccents(text, ignoredOffsets);
     markMathematicalWhitespace(text, ignoredOffsets);
     for (const match of text.matchAll(CITATION_WRAPPER)) {
         if (!isNumericCitationContent(match[1])) continue;
@@ -671,6 +712,10 @@ function markAnnotationSymbols(text, ignoredOffsets, replacements) {
             }
         }
     }
+    for (const match of text.matchAll(LATEX_WRAPPED_GROUP_PATTERN)) {
+        ignoredOffsets.add(match.index);
+        ignoredOffsets.add(match.index + match[0].length - 1);
+    }
     for (const match of text.matchAll(LATEX_TEXT_WRAPPER_PATTERN)) {
         replacements.set(match.index, {
             from: match.index,
@@ -685,13 +730,101 @@ function markAnnotationSymbols(text, ignoredOffsets, replacements) {
     }
 }
 
+function markLatexAccents(text, ignoredOffsets, replacements) {
+    for (const match of text.matchAll(LATEX_ACCENT_PATTERN)) {
+        const inner = accentBaseText(match[1] ?? match[2] ?? '');
+        if (!inner) continue;
+        const from = match.index;
+        const to = from + match[0].length;
+        for (let offset = from; offset < to; offset++) {
+            replacements.delete(offset);
+            ignoredOffsets.delete(offset);
+        }
+        replacements.set(from, { from, to, text: inner });
+        markOffsetRange(ignoredOffsets, from + 1, match[0].length - 1);
+    }
+}
+
+function accentBaseText(value) {
+    const inner = String(value || '').trim();
+    const command = /^\\([A-Za-z]+)$/u.exec(inner);
+    if (!command) return inner;
+    return LATEX_MATH_SYMBOLS.get(command[1]) || inner;
+}
+
+function markLatexNumericSuperscripts(text, ignoredOffsets, replacements) {
+    for (const pattern of [
+        LATEX_BRACED_NUMERIC_SUPERSCRIPT_PATTERN,
+        LATEX_SINGLE_NUMERIC_SUPERSCRIPT_PATTERN,
+    ]) {
+        for (const match of text.matchAll(pattern)) {
+            if (replacements.has(match.index)) continue;
+            if (!isLikelyLatexNumericSuperscript(
+                text,
+                match.index,
+                match.index + match[0].length
+            )) continue;
+            const value = match[1];
+            const contentFrom = match.index + match[0].indexOf(value);
+            replacements.set(contentFrom, {
+                from: match.index,
+                to: match.index + match[0].length,
+                text: value,
+            });
+            for (
+                let offset = match.index;
+                offset < match.index + match[0].length;
+                offset++
+            ) {
+                if (offset === contentFrom) continue;
+                replacements.delete(offset);
+                ignoredOffsets.add(offset);
+            }
+        }
+    }
+}
+
+function isLikelyLatexNumericSuperscript(text, offset, end) {
+    let previous = offset;
+    while (previous > 0 && /[ \t]/u.test(text[previous - 1])) previous--;
+    if (previous <= 0 || text[previous - 1] === '$') return false;
+    if (!/[\p{L}\p{N})\]}]/u.test(text[previous - 1])) return false;
+    // "x^{2}." is prose, not an exponent the PDF text layer inlines. An
+    // exponent inside a formula is followed by more mathematics.
+    let next = end;
+    while (next < text.length && /[ \t]/u.test(text[next])) next++;
+    return next >= text.length || !/[.!?。！？]/u.test(text[next]);
+}
+
+// A hat or bar drawn as its own PDF glyph is not part of the base letter.
+function markPdfMathAccents(text, ignoredOffsets) {
+    for (const match of text.matchAll(PDF_MATH_ACCENT)) {
+        const before = match.index > 0
+            ? String.fromCodePoint(text.codePointAt(
+                previousCodePointOffset(text, match.index)
+            ))
+            : '';
+        const afterIndex = match.index + match[0].length;
+        const after = afterIndex < text.length
+            ? String.fromCodePoint(text.codePointAt(afterIndex))
+            : '';
+        if (!/\p{L}/u.test(before) && !/\p{L}/u.test(after)) continue;
+        markOffsetRange(ignoredOffsets, match.index, match[0].length);
+    }
+}
+
 function markLatexSubscripts(text, ignoredOffsets, replacements) {
     for (const pattern of [
         LATEX_BRACED_SUBSCRIPT_PATTERN,
         LATEX_SINGLE_SUBSCRIPT_PATTERN,
+        LATEX_COMMAND_SUBSCRIPT_PATTERN,
     ]) {
         for (const match of text.matchAll(pattern)) {
             if (!isLikelyLatexSubscript(text, match.index)) continue;
+            if (pattern === LATEX_COMMAND_SUBSCRIPT_PATTERN
+                && !LATEX_MATH_SYMBOLS.has(match[1].slice(1))) {
+                continue;
+            }
             let spaceFrom = match.index;
             while (spaceFrom > 0 && /[ \t]/u.test(text[spaceFrom - 1])) {
                 spaceFrom--;
@@ -761,6 +894,7 @@ function isLikelyLatexSubscript(text, offset) {
         // A command identifies unbraced subscripts; unknown commands stay inert.
         return !command.escaped && (
             LATEX_MATH_COMMAND_NAMES.has(command.name)
+            || LATEX_ACCENT_COMMAND_NAMES.has(command.name)
             || command.name === 'mathrm'
             || command.name === 'text'
         );
@@ -871,8 +1005,21 @@ function markMathematicalWhitespace(text, ignoredOffsets) {
     for (const pattern of [
         RELATIONAL_OPERATOR_PATTERN,
         LATEX_RELATIONAL_OPERATOR_PATTERN,
+        LATEX_MATH_RELATION_WHITESPACE_PATTERN,
+        UNICODE_MATH_RELATION_WHITESPACE_PATTERN,
     ]) {
         markRelationalOperatorWhitespace(text, pattern, ignoredOffsets);
+    }
+    for (const match of text.matchAll(NUMERIC_SET_COMMA_WHITESPACE_PATTERN)) {
+        markOffsetRange(ignoredOffsets, match.index + 1, match[1].length);
+    }
+    for (const match of text.matchAll(
+        SUBSCRIPT_BEFORE_GREEK_WHITESPACE_PATTERN
+    )) {
+        markOffsetRange(ignoredOffsets, match.index, match[1].length);
+    }
+    for (const match of text.matchAll(SUPERSCRIPT_SCRIPT_WHITESPACE_PATTERN)) {
+        markOffsetRange(ignoredOffsets, match.index, match[1].length);
     }
     for (const match of text.matchAll(EQUATION_NUMBER_WHITESPACE_PATTERN)) {
         markOffsetRange(

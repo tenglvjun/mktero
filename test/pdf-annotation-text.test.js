@@ -128,12 +128,12 @@ test('normalizes LaTeX Greek symbols and braced subscripts from PDF text', () =>
     const pdf = 'Raw Layer stores traces 𝜏𝑖 ∈ Ttrain,𝑘 collected from training.';
     const markdownIndex = createPdfAnnotationTextIndex(markdown);
     const pdfIndex = createPdfAnnotationTextIndex(pdf);
-    const normalized = 'Raw Layer stores traces τi ∈ Ttrain,k collected from training.';
+    const normalized = 'Raw Layer stores traces τi∈Ttrain,k collected from training.';
 
     assert.equal(markdownIndex.text, normalized);
     assert.equal(pdfIndex.text, normalized);
 
-    const formula = 'τi ∈ Ttrain,k';
+    const formula = 'τi∈Ttrain,k';
     const formulaRange = markdownIndex.sourceRange(
         normalized.indexOf(formula),
         formula.length
@@ -421,5 +421,32 @@ test('folds hyphen variants without losing their original source range', () => {
     assert.equal(
         source.slice(range.from, range.to),
         'pre-\nexercise and evidence-based'
+    );
+});
+
+test('flattens LaTeX accents, sums, and exponents onto inline PDF glyphs', () => {
+    const markdown = 'set point \\hat{G} = \\mu +\\sum_{i}\\beta_{i} and '
+        + '\\bar{P}_t with \\sigma_G^2 +\\sigma_\\varepsilon^2, '
+        + 'g_{i}\\in \\{0,1,2\\}.';
+    const index = createPdfAnnotationTextIndex(markdown);
+
+    assert.equal(
+        index.text,
+        'set point G=μ +Σiβi and Pt with σG2 +σε2, gi∈{0,1,2}.'
+    );
+    const target = 'G=μ';
+    const range = index.sourceRange(index.text.indexOf(target), 1);
+    assert.equal(markdown.slice(range.from, range.to), '\\hat{G}');
+    assert.equal(
+        createPdfAnnotationTextIndex('set point \u02C6G and \u0304Pt').text,
+        'set point G and Pt'
+    );
+    assert.equal(
+        normalizePdfAnnotationText('gi ∈ {0, 1, 2}'),
+        'gi∈{0,1,2}'
+    );
+    assert.equal(
+        normalizePdfAnnotationText('\\hat{G}{\\mathrm{genomic}}'),
+        'Ggenomic'
     );
 });
