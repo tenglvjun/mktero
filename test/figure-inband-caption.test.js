@@ -621,3 +621,156 @@ test('keeps the placeholder legend when the next page has no matching caption', 
     assert.equal(candidate.decision, 'compose');
     assert.deepEqual(candidate.captionBlockIds, [placeholderID]);
 });
+
+function makeWidePanelRowInput() {
+    const blocks = [];
+    const assets = [];
+    const chunks = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({
+            id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block,
+        });
+        return id;
+    };
+    const addPanel = (bbox, name, parentId) => {
+        const path = `images/${name}.png`;
+        assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+        const id = add({
+            type: 'image', role: 'panel', bboxKind: 'visual-body', bbox: [...bbox],
+            assetPath: path, parentId,
+        });
+        chunks.push(`![](${path})`);
+        return id;
+    };
+    const row = add({
+        type: 'image', role: 'unknown', bboxKind: 'group',
+        bbox: [72, 89, 528, 306],
+    });
+    const panelA = addPanel([72, 89, 255, 303], 'row-a', row);
+    const panelB = addPanel([338, 108, 528, 306], 'row-b', row);
+    const panelCParent = add({
+        type: 'image', role: 'unknown', bboxKind: 'group',
+        bbox: [645, 107, 837, 336],
+    });
+    const panelC = addPanel([645, 107, 837, 306], 'row-c', panelCParent);
+    const marker = add({
+        type: 'text', role: 'unknown', bboxKind: 'text', text: '(C)',
+        bbox: [560, 89, 600, 110],
+    });
+    chunks.push('(C)');
+    const men = add({
+        type: 'text', role: 'unknown', bboxKind: 'text',
+        text: '1 in 2 men and 1 in 3 women are diagnosed with cancer in their lifetime',
+        bbox: [72, 310, 250, 328],
+    });
+    const septic = add({
+        type: 'text', role: 'unknown', bboxKind: 'text',
+        text: '1 in 5 septic patients have cancer',
+        bbox: [338, 310, 520, 328],
+    });
+    chunks.push(men && '1 in 2 men and 1 in 3 women are diagnosed with cancer in their lifetime');
+    chunks.push('1 in 5 septic patients have cancer');
+    const legendParent = add({
+        type: 'image', role: 'unknown', bboxKind: 'group',
+        bbox: [353, 339, 518, 383],
+    });
+    const legend = addPanel([353, 339, 518, 363], 'row-legend', legendParent);
+    const captionText = 'Figure 1. Lifetime Incidence Portrayal: Cancer, Sepsis and Mortality';
+    const caption = add({
+        type: 'caption', role: 'caption', bboxKind: 'caption', text: captionText,
+        bbox: [66, 371, 501, 383], parentId: legendParent,
+    });
+    chunks.push(captionText);
+    const markdown = chunks.filter(Boolean).join('\n\n');
+    return {
+        panelA, panelB, panelC, legend, marker, men, septic, caption,
+        input: {
+            provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+            pages: [{
+                pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+                coordinateFrame: 'display-cropbox', rotation: 0,
+                geometryEvidence: 'fixture',
+                markdownRange: { from: 0, to: markdown.length },
+            }],
+            contentList: [], providerState: {},
+        },
+    };
+}
+
+test('composes a wide panel row with a short legend below it', () => {
+    const { input, panelA, panelB, panelC, legend, marker, men, septic, caption } =
+        makeWidePanelRowInput();
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    const candidate = candidates[0];
+    assert.equal(candidate.decision, 'compose', candidate.reason);
+    assert.equal(candidate.label, 'Figure 1.');
+    assert.deepEqual(candidate.captionBlockIds, [caption]);
+    assert.deepEqual(new Set(candidate.panelBlockIds), new Set([
+        panelA, panelB, panelC, legend,
+    ]));
+    for (const id of [marker, men, septic]) {
+        assert.ok(candidate.ownedTextBlockIds.includes(id), id);
+    }
+    assert.ok(candidate.visualBBox[0] <= 72);
+    assert.ok(candidate.visualBBox[2] >= 837);
+    assert.ok(candidate.visualBBox[3] >= 363);
+});
+
+test('joins the caption sentence directly under the figure title', () => {
+    const title = 'Figure 1. Lifetime Incidence Portrayal: Cancer, Sepsis and Mortality';
+    const legend = '(A) Lifetime incidence of developing cancer, (B) percentage of septic patients '
+        + 'who have cancer, and (C) mortality of hospitalized patients with cancer and sepsis. '
+        + 'Created with BioRender.com.';
+    const body = 'with and without cancer was in younger adults, with the relative risk highest '
+        + 'in patients ages 18-44.';
+    const blocks = [];
+    const assets = [];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({
+            id, sourceOrdinal, pageIndex: 0, sourceRanges: [],
+            rangeEvidence: 'unresolved', ...block,
+        });
+        return id;
+    };
+    const parent = add({
+        type: 'image', role: 'unknown', bboxKind: 'group', bbox: [70, 87, 840, 365],
+    });
+    const path = 'images/figure-1.png';
+    assets.push({ path, mimeType: 'image/png', data: createTestPNG() });
+    add({
+        type: 'image', role: 'panel', bboxKind: 'visual-body',
+        bbox: [70, 87, 840, 365], assetPath: path, parentId: parent,
+    });
+    const caption = add({
+        type: 'caption', role: 'caption', bboxKind: 'caption', text: title,
+        bbox: [66, 371, 501, 383], parentId: parent,
+    });
+    const continuation = add({
+        type: 'text', role: 'unknown', bboxKind: 'text', text: legend,
+        bbox: [64, 385, 842, 415],
+    });
+    const prose = add({
+        type: 'text', role: 'body', bboxKind: 'text', text: body,
+        bbox: [64, 453, 844, 529],
+    });
+    const markdown = [`![](${path})`, '', title, '', legend, '', body].join('\n');
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges({
+        provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+        pages: [{
+            pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0,
+            geometryEvidence: 'fixture', markdownRange: { from: 0, to: markdown.length },
+        }],
+        contentList: [], providerState: {},
+    }))[0];
+    assert.equal(candidate.decision, 'compose', candidate.reason);
+    assert.deepEqual(candidate.captionBlockIds, [caption, continuation]);
+    assert.ok(!candidate.captionBlockIds.includes(prose));
+    assert.ok(!candidate.ownedTextBlockIds.includes(prose));
+});

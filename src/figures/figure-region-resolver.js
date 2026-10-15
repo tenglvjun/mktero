@@ -242,10 +242,13 @@ function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
             ].filter(block => block.id !== labeled[0].id
                 && !looksLikeGapLabel(block.text, limits)
                 && captionContinues(labeled[0], block, limits));
+            const stacked = stackedCaptionContinuations(
+                blocks, labeled[0], limits
+            ).filter(block => !parts.includes(block));
             // Keep the labelled academic caption first: a side-column note can
             // start a few units higher and must not take over the label.
-            captions = [labeled[0], ...orderCaptionParts(parts)];
-            mergedContinuation = parts.length > 0;
+            captions = [labeled[0], ...orderCaptionParts([...parts, ...stacked])];
+            mergedContinuation = parts.length + stacked.length > 0;
         }
         else if (labeled.length) {
             captions = labeled;
@@ -264,11 +267,15 @@ function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
         const continuations = primary
             ? captionContinuationText(blocks, parents, primary, panelBox, limits)
             : [];
-        if (continuations.length) {
+        const stacked = primary
+            ? stackedCaptionContinuations(blocks, primary, limits)
+                .filter(block => !continuations.includes(block))
+            : [];
+        if (continuations.length || stacked.length) {
             captions = [
                 primary,
                 ...orderCaptionParts(nearby.filter(block => block !== primary)),
-                ...orderCaptionParts(continuations),
+                ...orderCaptionParts([...continuations, ...stacked]),
             ];
             mergedContinuation = true;
         }
@@ -347,7 +354,8 @@ function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
         if (block.role === 'caption' && !explicitLabel && !inBandText) {
             continue;
         }
-        if (explicitText || explicitLabel || inBandText || (block.type === 'text' && (
+        if (explicitText || explicitLabel || inBandText || containedPanelCaption(block, panelBox, limits)
+            || (block.type === 'text' && (
             panels.some(panel => consume(budget)
                 && intersectionArea(panel.bbox, block.bbox) / area(block.bbox) >= limits.interiorTextRatio)
             || (contains(labelBox, block.bbox) && looksLikeGapLabel(block.text, limits))
@@ -433,12 +441,23 @@ function validBox(box) {
 }
 
 function adjacent(a, b, limits) {
-    const maxGap = Math.min(limits.panelMaxGap, Math.max(limits.panelMinGap,
-        limits.panelGapFactor * Math.min(a[2] - a[0], a[3] - a[1], b[2] - b[0], b[3] - b[1])));
-    return (overlap(a[0], a[2], b[0], b[2]) >= limits.panelProjectionOverlap
-        && Math.max(0, Math.max(a[1], b[1]) - Math.min(a[3], b[3])) <= maxGap)
-        || (overlap(a[1], a[3], b[1], b[3]) >= limits.panelProjectionOverlap
-        && Math.max(0, Math.max(a[0], b[0]) - Math.min(a[2], b[2])) <= maxGap);
+    const verticalGap = Math.max(0, Math.max(a[1], b[1]) - Math.min(a[3], b[3]));
+    const horizontalGap = Math.max(0, Math.max(a[0], b[0]) - Math.min(a[2], b[2]));
+    // A row of panels is separated horizontally. Budget that gap from the row
+    // height, not from the narrower panel, or the last panel falls off.
+    if (overlap(a[1], a[3], b[1], b[3]) >= limits.panelProjectionOverlap
+        && horizontalGap <= panelGapBudget(Math.min(a[3] - a[1], b[3] - b[1]), limits)) {
+        return true;
+    }
+    // A short legend under a panel shares the panel's width. Budget the
+    // vertical gap from that width so the legend's own height cannot reject it.
+    return overlap(a[0], a[2], b[0], b[2]) >= limits.panelProjectionOverlap
+        && verticalGap <= panelGapBudget(Math.min(a[2] - a[0], b[2] - b[0]), limits);
+}
+
+function panelGapBudget(span, limits) {
+    return Math.min(limits.panelMaxGap, Math.max(limits.panelMinGap,
+        limits.panelGapFactor * span));
 }
 
 export function captionNear(caption, box, limits) {
@@ -528,6 +547,58 @@ function orderCaptionParts(parts) {
 
 // A note in the band below the panels can continue the caption in a second
 // column even when MinerU records it as figure text.
+// The sentence under "Figure N. Title" is still the caption. It sits a
+// couple of units below the title line; the article paragraph after it
+// leaves a much larger gap.
+const STACKED_CAPTION_MAX_GAP = 8;
+const MAX_STACKED_CAPTION_PARTS = 4;
+
+function stackedCaptionContinuations(blocks, caption, limits) {
+    if (!validBox(caption.bbox)) return [];
+    const parts = [];
+    const taken = new Set([caption.id]);
+    let bottom = caption.bbox[3];
+    let left = caption.bbox[0];
+    let right = caption.bbox[2];
+    while (parts.length < MAX_STACKED_CAPTION_PARTS) {
+        let next = null;
+        let nextGap = Infinity;
+        for (const block of blocks) {
+            if (!stackedCaptionBlock(block, caption, bottom, left, right, taken, limits)) {
+                continue;
+            }
+            const gap = block.bbox[1] - bottom;
+            if (!next || gap < nextGap
+                || (gap === nextGap && block.sourceOrdinal < next.sourceOrdinal)) {
+                next = block;
+                nextGap = gap;
+            }
+        }
+        if (!next) break;
+        parts.push(next);
+        taken.add(next.id);
+        bottom = Math.max(bottom, next.bbox[3]);
+        left = Math.min(left, next.bbox[0]);
+        right = Math.max(right, next.bbox[2]);
+    }
+    return parts;
+}
+
+function stackedCaptionBlock(block, caption, bottom, left, right, taken, limits) {
+    if (taken.has(block.id) || block.pageIndex !== caption.pageIndex) return false;
+    if (!validBox(block.bbox) || block.bboxKind === 'group' || isPanel(block)) return false;
+    if (!block.sourceRanges?.length || block.rangeEvidence === 'unresolved') return false;
+    if (['heading', 'table', 'equation', 'formula', 'code', 'reference'].includes(block.type)) {
+        return false;
+    }
+    const text = String(block.text || '').trim();
+    if (!text || isFigureCaptionText(text)) return false;
+    const gap = block.bbox[1] - bottom;
+    if (gap < -1 || gap > STACKED_CAPTION_MAX_GAP) return false;
+    return overlap(block.bbox[0], block.bbox[2], left, right)
+        >= limits.captionProjectionOverlap;
+}
+
 function captionContinuationText(blocks, parents, caption, panelBox, limits) {
     return blocks.filter(block => (
         block.role === 'figure-text'
@@ -625,6 +696,16 @@ function isInBandAnnotationText(block, panelBox, captions, limits) {
     if (!contains(padded(panelBox, padding), block.bbox)) return false;
     return captions.every(part => !validBox(part.bbox)
         || intersectionArea(part.bbox, block.bbox) === 0);
+}
+
+function containedPanelCaption(block, panelBox, limits) {
+    if (block.type !== 'text') return false;
+    if (block.role !== 'unknown' && block.role !== undefined) return false;
+    if (!validBox(block.bbox) || !contains(panelBox, block.bbox)) return false;
+    const value = String(block.text || '').trim();
+    if (!value || GAP_PROSE_END_PATTERN.test(value)) return false;
+    if (value.split(/\r?\n/u).length > limits.maxGapTextLines) return false;
+    return [...value].length <= limits.ownedCaptionTextCodePoints;
 }
 
 export function looksLikeGapLabel(text, limits) {
