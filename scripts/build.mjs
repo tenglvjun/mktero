@@ -27,6 +27,9 @@ const citationGraphStyles = await readFile(
 const buildMode = process.env.MKTERO_BUILD === 'debug' ? 'debug' : 'release';
 const buildDefines = {
     __MKTERO_BUILD__: JSON.stringify(buildMode),
+    // Injected from manifest.json so the reported version shares one source of
+    // truth with the XPI file name and updates.json.
+    __MKTERO_VERSION__: JSON.stringify(manifest.version),
 };
 const xpiName = `mktero-${manifest.version}.xpi`;
 const xpiPath = path.join(buildRoot, xpiName);

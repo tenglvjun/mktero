@@ -1,6 +1,13 @@
+import { mkteroVersion } from '../config/runtime-config.js';
+
 const JSON_HEADERS = Object.freeze({
     Accept: 'application/json',
     'Content-Type': 'application/json',
+    // Operations telemetry for mktero-server: which extension build is calling.
+    // Every request in this module goes to the Mktero account API, so the
+    // header is attached once here instead of per call. It must never be added
+    // to a third-party provider request.
+    'X-Mktero-Version': mkteroVersion(),
 });
 
 export async function sendSignupCode({
