@@ -99,6 +99,8 @@ test('converts through the hosted service and decodes the MinerU archive', async
     assert.equal(requests[1].url, 'https://r2.example/upload');
     assert.equal(requests[1].options.method, 'PUT');
     assert.equal(requests[1].options.headers.Authorization, undefined);
+    // A presigned URL must not gain a header its signature does not cover.
+    assert.equal(requests[1].options.headers['X-Mktero-Version'], undefined);
     assert.equal(requests[1].options.body, PDF_BYTES);
 
     assert.equal(

@@ -3,6 +3,7 @@ import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import { CONVERSION_PROGRESS } from '../core/conversion-progress.js';
 import { sha256Hex } from '../core/sha256.js';
+import { mkteroVersion } from '../config/runtime-config.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 600;
@@ -13,6 +14,22 @@ const DEFAULT_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const JSON_HEADERS = Object.freeze({
     Accept: 'application/json',
     'Content-Type': 'application/json',
+});
+
+// API_HEADERS is JSON_HEADERS plus this extension's self-reported build, for
+// requests to the Mktero account API only.
+//
+// It must never reach the two object-storage calls in this module. The PDF
+// upload and the result download go to presigned R2 URLs, where an extra header
+// that the signature does not cover invalidates the request and provokes a CORS
+// preflight the bucket is not configured to answer. Those calls pass
+// job.upload_headers and result.headers straight through #send unchanged.
+//
+// The header is therefore attached at the API call site rather than inside
+// #send, so the storage paths cannot pick it up by accident.
+const API_HEADERS = Object.freeze({
+    ...JSON_HEADERS,
+    'X-Mktero-Version': mkteroVersion(),
 });
 
 // Job states reported by the hosted service.
@@ -317,7 +334,7 @@ export class MkteroConversionClient {
         const response = await this.#send({
             url: joinURL(apiBase, path),
             method,
-            headers: JSON_HEADERS,
+            headers: API_HEADERS,
             body: body == null ? null : JSON.stringify(body),
             signal,
             timeoutMs,
