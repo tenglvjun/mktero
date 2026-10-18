@@ -731,7 +731,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             createAbortController: createZoteroAbortController,
         }),
         getApiBase: () => getAccountApiBase(Zotero),
-        getAccessToken: () => ensureAccountAccessToken(),
+        getAccessToken: options => ensureAccountAccessToken(options),
         readFile: path => IOUtils.read(path),
         preparePDFIndex: (itemID, options) => preparePDFIndexForItem(
             itemID,
@@ -2922,15 +2922,18 @@ async function loadRevisionSessionForItem(itemID) {
 }
 
 // Returns a valid access token for the hosted service, refreshing it first
-// when it is missing or about to expire. Throws when the user is signed out.
+// when it is missing, about to expire, or the caller observed a 401
+// (`{ forceRefresh: true }`). Throws when the user is signed out.
 // A transient refresh failure keeps the stored session so the next attempt can
 // retry; only a rejected credential signs the user out.
-async function ensureAccountAccessToken() {
+async function ensureAccountAccessToken(options = {}) {
     const session = getAccountSession(Zotero);
     if (!session.refreshToken) {
         throw new MkteroSignInRequiredError();
     }
-    if (!accessTokenNeedsRefresh(session)) return session.accessToken;
+    if (options?.forceRefresh !== true && !accessTokenNeedsRefresh(session)) {
+        return session.accessToken;
+    }
     try {
         const refreshed = await refreshMkteroAccount({
             apiBase: getAccountApiBase(Zotero),
