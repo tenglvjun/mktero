@@ -5,6 +5,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { strToU8, zipSync } from 'fflate';
+import { pdfjsBuiltinPolyfillPlugin } from './pdfjs-builtin-polyfill.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const executable = process.env.MKTERO_ZOTERO_PATH || '/Applications/Zotero.app/Contents/MacOS/zotero';
@@ -20,7 +21,8 @@ await rm(path.join(output, 'validation.json'), { force: true });
 await rm(path.join(output, 'stage.json'), { force: true });
 await build({ entryPoints: [path.join(root, 'scripts/figure-region-zotero-harness.mjs')],
     outfile: path.join(output, 'harness.js'), bundle: true, format: 'iife',
-    globalName: 'MkteroFigureValidation', target: ['firefox115'], logLevel: 'silent' });
+    globalName: 'MkteroFigureValidation', target: ['firefox115'], logLevel: 'silent',
+    plugins: [pdfjsBuiltinPolyfillPlugin()] });
 const manifest = JSON.stringify({
     manifest_version: 2, name: 'Mktero Figure Validation', version: '0.0.0',
     applications: { zotero: { id: 'figure-validation@mktero.local',

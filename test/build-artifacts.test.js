@@ -86,6 +86,13 @@ test('builds reproducible release assets and Zotero update metadata', async () =
         strFromU8(packageEntries['licenses/pdfjs.txt']),
         /Apache License/
     );
+    for (const bundled of ['bootstrap.js', 'figure.worker.js', 'pdf.worker.mjs']) {
+        assert.match(
+            strFromU8(packageEntries[bundled]),
+            /existing\.configurable === false/,
+            `${bundled} must keep native built-ins that Zotero 11 cannot redefine`
+        );
+    }
     assert.match(
         strFromU8(packageEntries['licenses/shiki.txt']),
         /MIT License/
