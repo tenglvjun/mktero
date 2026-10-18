@@ -11,6 +11,10 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_UPLOAD_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 2 * 60_000;
 const DEFAULT_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+// One original PUT plus two renewed PUTs. A renewal that does not yield a URL
+// stops the loop early; it does not reset this budget.
+const MAX_UPLOAD_RENEWALS = 2;
+const CANCEL_TIMEOUT_MS = 2_000;
 const JSON_HEADERS = Object.freeze({
     Accept: 'application/json',
     'Content-Type': 'application/json',
@@ -62,7 +66,9 @@ const STAGE_DOWNLOAD = MKTERO_REQUEST_STAGES.DOWNLOAD;
  *
  * The service keeps the PDF and the MinerU credentials on its side: this client
  * only creates a job, PUTs the PDF to a presigned URL, waits for the job to
- * finish, and downloads the unchanged MinerU ZIP result.
+ * finish, and downloads the unchanged MinerU ZIP result. A failed upload renews
+ * the presigned URL and retries. Aborting or giving up after the job exists
+ * asks the service to cancel it, without delaying the caller.
  */
 export class MkteroConversionClient {
     constructor({
@@ -75,6 +81,7 @@ export class MkteroConversionClient {
         uploadTimeoutMs = DEFAULT_UPLOAD_TIMEOUT_MS,
         downloadTimeoutMs = DEFAULT_DOWNLOAD_TIMEOUT_MS,
         maxArchiveBytes = DEFAULT_MAX_ARCHIVE_BYTES,
+        cancelTimeoutMs = CANCEL_TIMEOUT_MS,
         createAbortController = createRuntimeAbortController,
     } = {}) {
         if (!fetch) throw new TypeError('A fetch implementation is required');
@@ -90,6 +97,7 @@ export class MkteroConversionClient {
         this.uploadTimeoutMs = uploadTimeoutMs;
         this.downloadTimeoutMs = downloadTimeoutMs;
         this.maxArchiveBytes = maxArchiveBytes;
+        this.cancelTimeoutMs = cancelTimeoutMs;
         this.createAbortController = createAbortController;
     }
 
@@ -114,65 +122,77 @@ export class MkteroConversionClient {
         const bytes = toUint8Array(fileData, 'PDF file data');
         throwIfAborted(signal);
 
-        notifyProgress(onProgress, CONVERSION_PROGRESS.PREPARING);
-        const job = await this.#createJob({
-            apiBase,
-            getAccessToken,
-            fileName,
-            bytes,
-            metadata,
-            sha256: await pdfSHA256(bytes),
-            signal,
-        });
-        throwIfAborted(signal);
-
-        let finished = job;
-        if (job.status === STATUS_SUCCEEDED && !job.upload_url) {
-            notifyProgress(onProgress, CONVERSION_PROGRESS.DOWNLOADING);
-        } else if (!job.upload_url && job.status === STATUS_WAITING_FOR_SHARED_PARSE) {
-            finished = await this.#waitForResult({
+        // Assigned only after the service returns a job id. Batch cancel and
+        // shutdown abort this signal; they do not send their own DELETE, and a
+        // queued item that never entered convert() has no job to cancel.
+        let job = null;
+        try {
+            notifyProgress(onProgress, CONVERSION_PROGRESS.PREPARING);
+            job = await this.#createJob({
                 apiBase,
                 getAccessToken,
-                job,
-                onProgress,
+                fileName,
+                bytes,
+                metadata,
+                sha256: await pdfSHA256(bytes),
                 signal,
             });
-        } else {
-            await this.#upload({
-                job,
-                bytes,
+            throwIfAborted(signal);
+
+            let finished = job;
+            if (job.status === STATUS_SUCCEEDED && !job.upload_url) {
+                notifyProgress(onProgress, CONVERSION_PROGRESS.DOWNLOADING);
+            } else if (!job.upload_url && job.status === STATUS_WAITING_FOR_SHARED_PARSE) {
+                finished = await this.#waitForResult({
+                    apiBase,
+                    getAccessToken,
+                    job,
+                    onProgress,
+                    signal,
+                });
+            } else {
+                await this.#upload({
+                    apiBase,
+                    getAccessToken,
+                    job,
+                    bytes,
+                    onProgress,
+                    signal,
+                });
+                throwIfAborted(signal);
+
+                await this.#complete({ apiBase, getAccessToken, job, signal });
+                notifyProgress(onProgress, CONVERSION_PROGRESS.QUEUED);
+
+                finished = await this.#waitForResult({
+                    apiBase,
+                    getAccessToken,
+                    job,
+                    onProgress,
+                    signal,
+                });
+            }
+
+            const archive = await this.#downloadResult({
+                apiBase,
+                getAccessToken,
+                job: finished,
                 onProgress,
                 signal,
             });
             throwIfAborted(signal);
 
-            await this.#complete({ apiBase, getAccessToken, job, signal });
-            notifyProgress(onProgress, CONVERSION_PROGRESS.QUEUED);
-
-            finished = await this.#waitForResult({
-                apiBase,
-                getAccessToken,
-                job,
-                onProgress,
-                signal,
-            });
+            const result = this.extractResultFromZip(archive);
+            return {
+                result,
+                origin: 'network',
+                warnings: [],
+            };
         }
-
-        const archive = await this.#downloadResult({
-            apiBase,
-            getAccessToken,
-            job: finished,
-            onProgress,
-            signal,
-        });
-        throwIfAborted(signal);
-
-        const result = this.extractResultFromZip(archive);
-        return {
-            result,
-            origin: 'network',
-            warnings: [],
-        };
+        catch (error) {
+            this.#abandonJob({ apiBase, getAccessToken, job });
+            throw error;
+        }
     }
 
     async #createJob({
@@ -210,13 +230,61 @@ export class MkteroConversionClient {
         return job;
     }
 
-    async #upload({ job, bytes, onProgress, signal }) {
+    async #upload({ apiBase, getAccessToken, job, bytes, onProgress, signal }) {
+        let current = job;
+        let lastError = null;
+        for (let attempt = 0; attempt <= MAX_UPLOAD_RENEWALS; attempt += 1) {
+            throwIfAborted(signal);
+            // Retries stay on the same stage. There is no separate retry copy.
+            notifyProgress(onProgress, CONVERSION_PROGRESS.UPLOADING);
+            try {
+                await this.#putPDF({ job: current, bytes, signal });
+                return;
+            }
+            catch (error) {
+                if (signal?.aborted || isAbortError(error)) throw error;
+                lastError = error;
+                if (!isRetryableUploadFailure(error) || attempt === MAX_UPLOAD_RENEWALS) {
+                    throw error;
+                }
+            }
+
+            let renewed;
+            try {
+                renewed = await this.#renewUploadURL({
+                    apiBase,
+                    getAccessToken,
+                    job: current,
+                    signal,
+                });
+            }
+            catch (error) {
+                if (signal?.aborted || isAbortError(error)) throw error;
+                // A rejected session is actionable on its own. Any other renewal
+                // failure leaves the upload error the caller already has.
+                if (isTerminalAuthError(error) || isTokenProviderFailure(error)) {
+                    throw error;
+                }
+                throw lastError;
+            }
+            // The service returns the current job without a URL once the upload
+            // is no longer awaiting. Retrying would loop until the budget ends.
+            if (!renewed?.upload_url) throw lastError;
+            current = {
+                ...current,
+                ...renewed,
+                job_id: renewed.job_id || current.job_id,
+            };
+        }
+        throw lastError;
+    }
+
+    async #putPDF({ job, bytes, signal }) {
         const method = String(job.upload_method || 'PUT').toUpperCase();
         const headers = { ...(job.upload_headers || {}) };
         if (!hasHeader(headers, 'content-type')) {
             headers['Content-Type'] = 'application/pdf';
         }
-        notifyProgress(onProgress, CONVERSION_PROGRESS.UPLOADING);
         const response = await this.#send({
             url: job.upload_url,
             method,
@@ -234,6 +302,73 @@ export class MkteroConversionClient {
                 'MKTERO_UPLOAD_FAILED',
                 { status: response.status, stage: STAGE_UPLOAD }
             );
+        }
+    }
+
+    async #renewUploadURL({ apiBase, getAccessToken, job, signal }) {
+        const path = `/api/v1/conversions/${encodeURIComponent(job.job_id)}/upload-url`;
+        try {
+            return await this.#requestRenewal({
+                apiBase,
+                getAccessToken,
+                path,
+                signal,
+            });
+        }
+        catch (error) {
+            if (signal?.aborted || isAbortError(error) || !isUnauthorizedResponse(error)) {
+                throw error;
+            }
+        }
+        // 401: the access token was rejected. The token provider owns refresh;
+        // replay the renewal once with whatever it returns next.
+        await getAccessToken({ forceRefresh: true });
+        throwIfAborted(signal);
+        return this.#requestRenewal({
+            apiBase,
+            getAccessToken,
+            path,
+            signal,
+        });
+    }
+
+    #requestRenewal({ apiBase, getAccessToken, path, signal }) {
+        return this.#requestJSON({
+            apiBase,
+            getAccessToken,
+            path,
+            method: 'POST',
+            signal,
+            timeoutMs: this.requestTimeoutMs,
+            label: 'conversion upload URL',
+        });
+    }
+
+    // Fire-and-forget. convert() must reject without waiting for this DELETE:
+    // batch cancel and shutdown abort the caller signal and are already
+    // unwinding. Closing a tab does not abort; the run continues in the
+    // background. The DELETE has its own short timeout and must not see the
+    // caller's signal, or the aborted signal would stop it from leaving.
+    #abandonJob({ apiBase, getAccessToken, job }) {
+        const jobId = String(job?.job_id || '').trim();
+        if (!jobId || typeof getAccessToken !== 'function') return;
+        const pending = this.#cancelJob({ apiBase, getAccessToken, jobId });
+        void pending.catch(() => {});
+    }
+
+    async #cancelJob({ apiBase, getAccessToken, jobId }) {
+        try {
+            await this.#requestJSON({
+                apiBase,
+                getAccessToken,
+                path: `/api/v1/conversions/${encodeURIComponent(jobId)}`,
+                method: 'DELETE',
+                timeoutMs: this.cancelTimeoutMs,
+                label: 'conversion cancel',
+            });
+        }
+        catch {
+            // Terminal jobs, 409 after queued, and transport failures are ignored.
         }
     }
 
@@ -554,6 +689,35 @@ function isKnownError(error) {
 
 function isAbortError(error) {
     return error?.name === 'AbortError';
+}
+
+function isRetryableUploadFailure(error) {
+    if (isAbortError(error) || error?.code === 'ABORT_ERR') return false;
+    if (error?.code === 'MKTERO_NETWORK_ERROR' || error?.code === 'MKTERO_REQUEST_TIMEOUT') {
+        return true;
+    }
+    const status = Number(error?.status);
+    if (!Number.isInteger(status)) return false;
+    // Object storage answers an expired presigned URL with 403. That is not an
+    // account denial: the account API is never the upload target. Other 4xx,
+    // including 408, are not retried; a client-side timeout is MKTERO_REQUEST_TIMEOUT.
+    if (status === 403) return true;
+    return status >= 500 && status <= 599;
+}
+
+function isUnauthorizedResponse(error) {
+    return error?.status === 401;
+}
+
+function isTerminalAuthError(error) {
+    return error?.code === 'MKTERO_SIGN_IN_REQUIRED'
+        || error?.code === 'MKTERO_ACCOUNT_DISABLED';
+}
+
+// ensureAccountAccessToken throws these without a request stage. A renewal
+// HTTP failure always carries one, so the upload error stays the one to show.
+function isTokenProviderFailure(error) {
+    return error?.code === 'MKTERO_NETWORK_ERROR' && !error.stage;
 }
 
 function abortReason(signal) {
