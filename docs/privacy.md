@@ -11,6 +11,7 @@
 | Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
 | Your account profile and conversion-activity counts, requested with the access token while the account pane is open | The Mktero service you select | Not by Mktero |
 | Mktero extension version, sent with requests to the Mktero service and recorded when you sign in or refresh your token, so the operator can see which builds are still in use | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
+| Research invitation email, the token link, the answers you submit, and the research-email opt-out | The Mktero service you select; the link token is not saved by the website | Not by Mktero |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and expiry time | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
@@ -47,6 +48,12 @@ Mktero service: it is never attached to a request that goes to object storage,
 to a MinerU or Mistral converter, or to an AI or citation provider you
 configure. It is not part of your account profile, so no product screen
 displays it back to you.
+
+Research invitations are sent by the Mktero service, not by the extension.
+The extension does not send or store survey answers. Turn invitations off on
+the website account page, or with the link in an invitation sent after that
+control was added. Turning them off does not affect verification codes,
+password resets, or conversion, and does not delete answers already submitted.
 
 With the default converter, a cache miss sends the complete PDF to the Mktero
 service for your account. Review that service's data handling, and the privacy
