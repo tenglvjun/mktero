@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { zipSync } from 'fflate';
+import { pdfjsBuiltinPolyfillPlugin } from './pdfjs-builtin-polyfill.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const buildRoot = path.join(projectRoot, 'build');
@@ -24,6 +25,7 @@ const citationGraphStyles = await readFile(
     path.join(projectRoot, 'ui/citation-graph.css'),
     'utf8'
 );
+const pdfjsPolyfillPlugin = pdfjsBuiltinPolyfillPlugin();
 const buildMode = process.env.MKTERO_BUILD === 'debug' ? 'debug' : 'release';
 const buildDefines = {
     __MKTERO_BUILD__: JSON.stringify(buildMode),
@@ -73,6 +75,7 @@ await Promise.all([
         platform: 'browser',
         target: ['firefox115'],
         legalComments: 'none',
+        plugins: [pdfjsPolyfillPlugin],
         define: {
             ...buildDefines,
             __MKTERO_MARKDOWN_STYLES__: JSON.stringify(markdownStyles),
@@ -95,6 +98,7 @@ await Promise.all([
         platform: 'browser',
         target: ['firefox115'],
         legalComments: 'none',
+        plugins: [pdfjsPolyfillPlugin],
         define: { ...buildDefines, process: 'undefined', Buffer: 'undefined' },
     }),
     build({
@@ -105,6 +109,7 @@ await Promise.all([
         platform: 'browser',
         target: ['firefox115'],
         legalComments: 'none',
+        plugins: [pdfjsPolyfillPlugin],
         define: { ...buildDefines, process: 'undefined', Buffer: 'undefined' },
     }),
     build({
@@ -115,6 +120,7 @@ await Promise.all([
         platform: 'browser',
         target: ['firefox115'],
         legalComments: 'none',
+        plugins: [pdfjsPolyfillPlugin],
         define: { ...buildDefines, process: 'undefined', Buffer: 'undefined' },
     }),
     build({
@@ -126,6 +132,7 @@ await Promise.all([
         platform: 'browser',
         target: ['firefox115'],
         legalComments: 'none',
+        plugins: [pdfjsPolyfillPlugin],
         define: { process: 'undefined', Buffer: 'undefined' },
     }),
 ]);

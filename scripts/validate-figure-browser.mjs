@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { pdfjsBuiltinPolyfillPlugin } from './pdfjs-builtin-polyfill.mjs';
 import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,7 +14,8 @@ const { chromium, firefox } = await import(pathToFileURL(playwrightPath).href);
 await mkdir(output, { recursive: true });
 await build({ entryPoints: [path.join(root, 'scripts/figure-region-zotero-harness.mjs')],
     outfile: path.join(output, 'harness.js'), bundle: true, format: 'iife',
-    globalName: 'MkteroFigureValidation', target: ['firefox115'], logLevel: 'silent' });
+    globalName: 'MkteroFigureValidation', target: ['firefox115'], logLevel: 'silent',
+    plugins: [pdfjsBuiltinPolyfillPlugin()] });
 const server = createServer(async (request, response) => {
     try {
         const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);

@@ -7,6 +7,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { strToU8, zipSync } from 'fflate';
+import { pdfjsBuiltinPolyfillPlugin } from './pdfjs-builtin-polyfill.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const executable = process.env.MKTERO_ZOTERO_PATH || '/Applications/Zotero.app/Contents/MacOS/zotero';
@@ -32,6 +33,7 @@ await build({
     target: ['firefox115'],
     legalComments: 'none',
     define: { process: 'undefined', Buffer: 'undefined' },
+    plugins: [pdfjsBuiltinPolyfillPlugin()],
     logLevel: 'warning',
 });
 await build({
@@ -53,6 +55,7 @@ await build({
     target: ['firefox115'],
     legalComments: 'none',
     define: { process: 'undefined', Buffer: 'undefined' },
+    plugins: [pdfjsBuiltinPolyfillPlugin()],
     logLevel: 'warning',
 });
 
