@@ -72,16 +72,10 @@ import {
     MkteroSignInRequiredError,
 } from './extractors/mktero-extractor.js';
 import {
-    accessTokenNeedsRefresh,
     clearAccountSession,
     getAccountApiBase,
-    getAccountSession,
-    saveAccountSession,
 } from './config/account-preferences.js';
-import {
-    isAccountSessionInvalid,
-    refreshMkteroAccount,
-} from './account/account-client.js';
+import { ensureAccountAccessToken as ensureMkteroAccessToken } from './account/account-session.js';
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import {
@@ -2921,44 +2915,8 @@ async function loadRevisionSessionForItem(itemID) {
     return replaceRevisionSession(itemID, saved.base);
 }
 
-// Returns a valid access token for the hosted service, refreshing it first
-// when it is missing, about to expire, or the caller observed a 401
-// (`{ forceRefresh: true }`). Throws when the user is signed out.
-// A transient refresh failure keeps the stored session so the next attempt can
-// retry; only a rejected credential signs the user out.
-async function ensureAccountAccessToken(options = {}) {
-    const session = getAccountSession(Zotero);
-    if (!session.refreshToken) {
-        throw new MkteroSignInRequiredError();
-    }
-    if (options?.forceRefresh !== true && !accessTokenNeedsRefresh(session)) {
-        return session.accessToken;
-    }
-    try {
-        const refreshed = await refreshMkteroAccount({
-            apiBase: getAccountApiBase(Zotero),
-            refreshToken: session.refreshToken,
-        });
-        saveAccountSession(Zotero, {
-            ...refreshed,
-            email: refreshed.email || session.email,
-        });
-        return refreshed.accessToken;
-    }
-    catch (error) {
-        if (!isAccountSessionInvalid(error)) {
-            const unreachable = new Error('The Mktero account service could not be reached');
-            unreachable.code = 'MKTERO_NETWORK_ERROR';
-            throw unreachable;
-        }
-        clearAccountSession(Zotero);
-        if (error?.code === 'account_disabled') {
-            const disabled = new Error('Mktero account is disabled');
-            disabled.code = 'MKTERO_ACCOUNT_DISABLED';
-            throw disabled;
-        }
-        throw new MkteroSignInRequiredError();
-    }
+function ensureAccountAccessToken(options = {}) {
+    return ensureMkteroAccessToken(Zotero, options);
 }
 
 function currentMinerUParserProfile() {

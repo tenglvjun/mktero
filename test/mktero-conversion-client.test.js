@@ -245,6 +245,57 @@ test('asks the user to sign in when the token is rejected', async () => {
     );
 });
 
+test('refreshes the access token once when creating a job is unauthorized', async () => {
+    let creates = 0;
+    let token = 'expired-token';
+    const archive = resultArchive();
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            if (url.endsWith('/conversions') && options.method === 'POST') {
+                creates += 1;
+                if (creates === 1) {
+                    assert.equal(options.headers.Authorization, 'Bearer expired-token');
+                    return jsonResponse(401, {
+                        error: { code: 'invalid_token', message: 'token is invalid or expired' },
+                    });
+                }
+                assert.equal(options.headers.Authorization, 'Bearer refreshed-token');
+                return awaitingUpload('job-auth', 'https://r2.example/upload');
+            }
+            if (options.method === 'PUT') return uploadResponse(200);
+            if (url.endsWith('/complete')) {
+                return jsonResponse(202, { job_id: 'job-auth', status: 'queued' });
+            }
+            if (url.endsWith('/job-auth')) {
+                return jsonResponse(200, {
+                    job_id: 'job-auth',
+                    status: 'succeeded',
+                    progress: 100,
+                });
+            }
+            if (url.endsWith('/result-url')) {
+                return jsonResponse(200, {
+                    result_url: 'https://r2.example/result.zip',
+                    method: 'GET',
+                });
+            }
+            if (url === 'https://r2.example/result.zip') return archiveResponse(archive);
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+        sleep: async () => {},
+    });
+
+    const converted = await client.convert(convertOptions({
+        getAccessToken: (options = {}) => {
+            if (options?.forceRefresh) token = 'refreshed-token';
+            return token;
+        },
+    }));
+
+    assert.match(converted.result.markdown, /Converted/);
+    assert.equal(creates, 2);
+});
+
 test('reports a disabled account instead of asking for sign-in', async () => {
     const client = new MkteroConversionClient({
         fetch: async () => jsonResponse(403, {
