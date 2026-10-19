@@ -1,13 +1,17 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     ACCOUNT_REFRESH_LOCK_PREF,
     ensureAccountAccessToken,
     MkteroSignInRequiredError,
+    REFRESH_LOCK_TTL_MS,
+    REFRESH_REQUEST_TIMEOUT_MS,
 } from '../src/account/account-session.js';
 import {
+    clearAccountSession,
     getAccountSession,
     saveAccountSession,
+    setAccountApiBase,
 } from '../src/config/account-preferences.js';
 
 const NOW = 1_700_000_000_000;
@@ -209,6 +213,30 @@ test('clears the session when the account is disabled', async () => {
     assert.equal(getAccountSession(zotero).refreshToken, '');
 });
 
+test('does not clear a newer account when an old refresh reports disabled', async () => {
+    const zotero = signedInZotero();
+    await assert.rejects(
+        ensureAccountAccessToken(zotero, {
+            now: () => NOW,
+            fetchImpl: async () => {
+                saveAccountSession(zotero, {
+                    email: 'other@example.com',
+                    nickname: 'other-reader',
+                    accessToken: 'other-access',
+                    refreshToken: 'other-refresh',
+                    accessExpiresAt: NOW + 60 * 60 * 1000,
+                });
+                return jsonResponse(403, {
+                    error: { code: 'account_disabled' },
+                });
+            },
+        }),
+        error => error.code === 'MKTERO_SIGN_IN_REQUIRED'
+    );
+    assert.equal(getAccountSession(zotero).refreshToken, 'other-refresh');
+    assert.equal(getAccountSession(zotero).accessToken, 'other-access');
+});
+
 test('forces one refresh when the access token was rejected before it expired', async () => {
     let calls = 0;
     const zotero = signedInZotero({ accessExpiresAt: NOW + 60 * 60 * 1000 });
@@ -222,4 +250,183 @@ test('forces one refresh when the access token was rejected before it expired', 
     });
     assert.equal(calls, 1);
     assert.equal(token, 'access-new');
+});
+
+test('does not restore a session when a refresh response arrives after logout', async () => {
+    const zotero = signedInZotero();
+    let resolveResponse;
+    let markStarted;
+    const started = new Promise(resolve => {
+        markStarted = resolve;
+    });
+    const pending = ensureAccountAccessToken(zotero, {
+        now: () => NOW,
+        fetchImpl: async () => {
+            markStarted();
+            return new Promise(resolve => {
+                resolveResponse = resolve;
+            });
+        },
+    });
+    await started;
+
+    clearAccountSession(zotero);
+    resolveResponse(refreshedSessionResponse());
+
+    await assert.rejects(
+        pending,
+        error => error.code === 'MKTERO_SIGN_IN_REQUIRED'
+    );
+    const session = getAccountSession(zotero);
+    assert.equal(session.refreshToken, '');
+    assert.equal(session.accessToken, '');
+    assert.equal(session.email, '');
+    assert.equal(zotero.Prefs.dump()[ACCOUNT_REFRESH_LOCK_PREF], '');
+});
+
+test('does not overwrite a different account when a refresh response arrives late', async () => {
+    const zotero = signedInZotero();
+    let resolveResponse;
+    let markStarted;
+    const started = new Promise(resolve => {
+        markStarted = resolve;
+    });
+    const pending = ensureAccountAccessToken(zotero, {
+        now: () => NOW,
+        fetchImpl: async () => {
+            markStarted();
+            return new Promise(resolve => {
+                resolveResponse = resolve;
+            });
+        },
+    });
+    await started;
+
+    saveAccountSession(zotero, {
+        email: 'other@example.com',
+        nickname: 'other-reader',
+        accessToken: 'other-access',
+        refreshToken: 'other-refresh',
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+    });
+    resolveResponse(refreshedSessionResponse());
+
+    await assert.rejects(
+        pending,
+        error => error.code === 'MKTERO_SIGN_IN_REQUIRED'
+    );
+    assert.deepEqual(getAccountSession(zotero), {
+        email: 'other@example.com',
+        nickname: 'other-reader',
+        accessToken: 'other-access',
+        refreshToken: 'other-refresh',
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+    });
+});
+
+test('adopts a valid same-account session that another bundle saved during refresh', async () => {
+    const zotero = signedInZotero();
+    let resolveResponse;
+    let markStarted;
+    const started = new Promise(resolve => {
+        markStarted = resolve;
+    });
+    const pending = ensureAccountAccessToken(zotero, {
+        now: () => NOW,
+        fetchImpl: async () => {
+            markStarted();
+            return new Promise(resolve => {
+                resolveResponse = resolve;
+            });
+        },
+    });
+    await started;
+
+    saveAccountSession(zotero, {
+        email: 'USER@example.com',
+        nickname: 'paper-reader',
+        accessToken: 'peer-access',
+        refreshToken: 'peer-refresh',
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+    });
+    resolveResponse(refreshedSessionResponse());
+
+    assert.equal(await pending, 'peer-access');
+    assert.equal(getAccountSession(zotero).refreshToken, 'peer-refresh');
+    assert.equal(getAccountSession(zotero).accessToken, 'peer-access');
+});
+
+test('does not adopt an old-host refresh after switching API endpoints', async () => {
+    const zotero = signedInZotero();
+    let resolveResponse;
+    let markStarted;
+    const started = new Promise(resolve => {
+        markStarted = resolve;
+    });
+    const pending = ensureAccountAccessToken(zotero, {
+        now: () => NOW,
+        fetchImpl: async () => {
+            markStarted();
+            return new Promise(resolve => {
+                resolveResponse = resolve;
+            });
+        },
+    });
+    await started;
+
+    setAccountApiBase(zotero, 'http://127.0.0.1:9090');
+    saveAccountSession(zotero, {
+        email: 'user@example.com',
+        nickname: 'new-host-session',
+        accessToken: 'new-host-access',
+        refreshToken: 'new-host-refresh',
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+    });
+    resolveResponse(refreshedSessionResponse());
+
+    await assert.rejects(
+        pending,
+        error => error.code === 'MKTERO_SIGN_IN_REQUIRED'
+    );
+    const session = getAccountSession(zotero);
+    assert.equal(session.refreshToken, 'new-host-refresh');
+    assert.equal(session.accessToken, 'new-host-access');
+    assert.equal(session.nickname, 'new-host-session');
+});
+
+test('a hung refresh times out before the lock expires and keeps the session', async t => {
+    t.after(() => mock.timers.reset());
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const zotero = signedInZotero();
+    let calls = 0;
+    let markStarted;
+    const started = new Promise(resolve => {
+        markStarted = resolve;
+    });
+    const pending = ensureAccountAccessToken(zotero, {
+        now: () => NOW,
+        fetchImpl: () => {
+            calls += 1;
+            markStarted();
+            return new Promise(() => {});
+        },
+    });
+    const outcome = assert.rejects(
+        pending,
+        error => error.code === 'MKTERO_NETWORK_ERROR'
+    );
+    // The request has started only after the shared lock is held.
+    await started;
+    assert.equal(calls, 1);
+    assert.notEqual(zotero.Prefs.dump()[ACCOUNT_REFRESH_LOCK_PREF], '');
+
+    mock.timers.tick(REFRESH_REQUEST_TIMEOUT_MS);
+    await outcome;
+
+    // The request gives up before the cross-bundle lock expires.
+    assert.ok(REFRESH_REQUEST_TIMEOUT_MS < REFRESH_LOCK_TTL_MS);
+    const session = getAccountSession(zotero);
+    assert.equal(session.refreshToken, 'refresh-old');
+    assert.equal(session.accessToken, 'access-old');
+    assert.equal(zotero.Prefs.dump()[ACCOUNT_REFRESH_LOCK_PREF], '');
 });

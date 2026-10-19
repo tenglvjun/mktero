@@ -12,7 +12,10 @@ import {
 
 export const ACCOUNT_REFRESH_LOCK_PREF = 'extensions.mktero.accountRefreshLock';
 
-const REFRESH_LOCK_TTL_MS = 30 * 1000;
+export const REFRESH_LOCK_TTL_MS = 30 * 1000;
+// Shorter than the lock, so a hung request ends before the lock can expire and
+// let another caller present the same refresh token.
+export const REFRESH_REQUEST_TIMEOUT_MS = 20 * 1000;
 const PEER_POLL_MS = 25;
 const MAX_PEER_POLLS = 1200;
 
@@ -80,7 +83,7 @@ async function performRefresh(zotero, {
     const initial = getAccountSession(zotero);
     if (!initial.refreshToken) throw new MkteroSignInRequiredError();
 
-    if (readActiveLock(zotero)) {
+    if (readActiveLock(zotero, clock())) {
         const adopted = await waitForPeer(
             zotero,
             initial.refreshToken,
@@ -90,7 +93,7 @@ async function performRefresh(zotero, {
         if (adopted) return adopted;
     }
 
-    const lockId = acquireLock(zotero);
+    const lockId = acquireLock(zotero, clock());
     if (!lockId) {
         const adopted = await waitForPeer(
             zotero,
@@ -135,33 +138,62 @@ async function refreshWhileHoldingLock(zotero, {
     }
 
     const usedToken = session.refreshToken;
+    const apiBase = getAccountApiBase(zotero);
     try {
         const refreshed = await refreshMkteroAccount({
-            apiBase: getAccountApiBase(zotero),
+            apiBase,
             refreshToken: usedToken,
             fetchImpl,
             now: clock,
+            timeoutMs: REFRESH_REQUEST_TIMEOUT_MS,
         });
+        const current = getAccountSession(zotero);
+        // The refresh response may arrive after logout, API-base switching, or
+        // a new account has replaced the session. Never let an old request
+        // resurrect or overwrite that newer state. A different token for the
+        // same account can be a peer bundle that completed the rotation first;
+        // adopt it when it is already usable.
+        // This refresh belongs to the API endpoint used when it started. Do
+        // not adopt or write a session created after the user switched hosts.
+        if (getAccountApiBase(zotero) !== apiBase) {
+            throw new MkteroSignInRequiredError();
+        }
+        if (current.refreshToken !== usedToken) {
+            if (sameAccount(current, session)
+                && current.accessToken
+                && !accessTokenNeedsRefresh(current, clock())) {
+                return current.accessToken;
+            }
+            throw new MkteroSignInRequiredError();
+        }
         saveAccountSession(zotero, {
             ...refreshed,
-            email: refreshed.email || session.email,
-            nickname: refreshed.nickname || session.nickname,
+            email: refreshed.email || current.email,
+            nickname: refreshed.nickname || current.nickname,
         });
         return refreshed.accessToken;
     }
     catch (error) {
+        if (error?.code === 'MKTERO_SIGN_IN_REQUIRED') throw error;
         if (!isAccountSessionInvalid(error)) throw networkError();
+        const current = getAccountSession(zotero);
         if (error.code === 'account_disabled') {
+            // Do not clear a session that replaced the one this request used.
+            if (current.refreshToken !== usedToken) {
+                throw new MkteroSignInRequiredError();
+            }
             clearAccountSession(zotero);
             const disabled = new Error('Mktero account is disabled');
             disabled.code = 'MKTERO_ACCOUNT_DISABLED';
             throw disabled;
         }
-        const current = getAccountSession(zotero);
-        // invalid_token also means another refresh already rotated this token.
-        // Clearing here would throw away the pair that rotation just stored.
         if (current.refreshToken && current.refreshToken !== usedToken) {
-            if (current.accessToken) return current.accessToken;
+            if (getAccountApiBase(zotero) === apiBase
+                && sameAccount(current, session)
+                && current.accessToken
+                && !accessTokenNeedsRefresh(current, clock())) {
+                return current.accessToken;
+            }
             throw new MkteroSignInRequiredError();
         }
         clearAccountSession(zotero);
@@ -169,11 +201,17 @@ async function refreshWhileHoldingLock(zotero, {
     }
 }
 
+function sameAccount(left, right) {
+    const leftEmail = String(left?.email || '').trim().toLowerCase();
+    const rightEmail = String(right?.email || '').trim().toLowerCase();
+    return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
+}
+
 async function waitForPeer(zotero, refreshAtStart, clock, sleep) {
     for (let attempt = 0; attempt < MAX_PEER_POLLS; attempt += 1) {
         const adopted = adoptedAccessToken(zotero, refreshAtStart, clock);
         if (adopted) return adopted;
-        const lock = readActiveLock(zotero);
+        const lock = readActiveLock(zotero, clock());
         if (!getAccountSession(zotero).refreshToken && !lock) {
             throw new MkteroSignInRequiredError();
         }
@@ -194,8 +232,7 @@ function adoptedAccessToken(zotero, refreshAtStart, clock) {
     return session.accessToken;
 }
 
-function acquireLock(zotero) {
-    const now = Date.now();
+function acquireLock(zotero, now = Date.now()) {
     if (readActiveLock(zotero, now)) return '';
     refreshLockSerial += 1;
     const id = `${now.toString(36)}-${refreshLockSerial}-${Math.random().toString(36).slice(2)}`;

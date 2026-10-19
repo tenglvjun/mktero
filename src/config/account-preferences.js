@@ -56,6 +56,28 @@ export function saveAccountSession(zotero, session) {
     );
 }
 
+// saveAccountProfile updates the display fields of the stored session and
+// leaves the tokens alone. Profile requests run while a conversion may refresh
+// the session; writing a whole earlier snapshot back would restore a refresh
+// token the server has already rotated away and sign the user out.
+//
+// `expectedEmail` is the account the request was made for. The write is
+// skipped, and false is returned, when the user has signed out in the meantime
+// or signed in as someone else, so a late response cannot resurrect a session.
+export function saveAccountProfile(zotero, { email, nickname } = {}, {
+    expectedEmail = '',
+} = {}) {
+    const current = getAccountSession(zotero);
+    if (!isAccountSignedIn(current)) return false;
+    const expected = String(expectedEmail || '').trim().toLowerCase();
+    if (expected && current.email.toLowerCase() !== expected) return false;
+    const nextEmail = String(email || '').trim();
+    const nextNickname = String(nickname || '').trim();
+    writeString(zotero, ACCOUNT_EMAIL_PREF, nextEmail || current.email);
+    writeString(zotero, ACCOUNT_NICKNAME_PREF, nextNickname || current.nickname);
+    return true;
+}
+
 export function clearAccountSession(zotero) {
     for (const pref of SESSION_PREFS) {
         zotero?.Prefs?.set?.(

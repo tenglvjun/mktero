@@ -389,3 +389,52 @@ test('records the HTTP status but never lets a bare status end the session', asy
             && isAccountSessionInvalid(error) === false
     );
 });
+
+test('a refresh that never answers ends as a network error and aborts the request', async () => {
+    let seenSignal = null;
+    await assert.rejects(
+        refreshMkteroAccount({
+            apiBase: 'http://127.0.0.1:8080',
+            refreshToken: 'refresh',
+            timeoutMs: 20,
+            fetchImpl: (_url, init) => new Promise(() => {
+                seenSignal = init.signal;
+            }),
+        }),
+        error => error.code === 'network' && isAccountSessionInvalid(error) === false
+    );
+    assert.ok(seenSignal, 'the request should carry an abort signal');
+    assert.equal(seenSignal.aborted, true);
+});
+
+test('a refresh that answers in time is not cut short', async () => {
+    const refreshed = await refreshMkteroAccount({
+        apiBase: 'http://127.0.0.1:8080',
+        refreshToken: 'refresh',
+        timeoutMs: 1000,
+        now: () => 0,
+        fetchImpl: async () => jsonResponse(200, {
+            access_token: 'a',
+            refresh_token: 'r',
+            expires_in: 60,
+        }),
+    });
+    assert.equal(refreshed.refreshToken, 'r');
+});
+
+test('requests without a timeout carry no abort signal', async () => {
+    let init = null;
+    await refreshMkteroAccount({
+        apiBase: 'http://127.0.0.1:8080',
+        refreshToken: 'refresh',
+        fetchImpl: async (_url, received) => {
+            init = received;
+            return jsonResponse(200, {
+                access_token: 'a',
+                refresh_token: 'r',
+                expires_in: 60,
+            });
+        },
+    });
+    assert.equal('signal' in init, false);
+});
