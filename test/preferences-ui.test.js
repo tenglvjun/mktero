@@ -2299,3 +2299,190 @@ function createControl(properties = {}) {
         },
     };
 }
+
+function accountRaceFixture({ fetchImpl }) {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider"><option value="mktero">Mktero</option></select>
+            <div id="mktero-account-panel">
+                <div id="mktero-account-signed-in" hidden>
+                    <span id="mktero-account-avatar"></span>
+                    <strong id="mktero-account-signed-in-nickname"></strong>
+                    <button id="mktero-account-edit-nickname"></button>
+                    <p id="mktero-account-signed-in-email"></p>
+                    <strong id="mktero-account-created"></strong>
+                    <button id="mktero-account-logout"></button>
+                    <span id="mktero-stat-total">0</span>
+                    <span id="mktero-stat-month">0</span>
+                    <span id="mktero-stat-today">0</span>
+                </div>
+                <div id="mktero-account-form" hidden></div>
+                <div id="mktero-account-api-base-row" hidden><input id="mktero-account-api-base"></div>
+                <div id="mktero-account-nickname-dialog" hidden>
+                    <input id="mktero-account-nickname">
+                    <p id="mktero-account-dialog-status"></p>
+                    <button id="mktero-account-nickname-dialog-cancel"></button>
+                    <button id="mktero-account-save-nickname"></button>
+                </div>
+            </div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mktero'],
+        ['extensions.mktero.accountEmail', 'user@example.com'],
+        ['extensions.mktero.accountNickname', 'paper-reader'],
+        ['extensions.mktero.accountRefreshToken', 'refresh-1'],
+        ['extensions.mktero.accountAccessToken', 'access-1'],
+        ['extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000],
+    ]);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value) => values.set(key, value),
+            },
+            logError: () => {},
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+        accountFetch: fetchImpl,
+    });
+    return { dom, values, controller };
+}
+
+function rotateStoredSession(values) {
+    values.set('extensions.mktero.accountRefreshToken', 'refresh-2');
+    values.set('extensions.mktero.accountAccessToken', 'access-2');
+    values.set('extensions.mktero.accountAccessExpiresAt', Date.now() + 7200_000);
+}
+
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('a profile response does not overwrite tokens a conversion refreshed meanwhile', async () => {
+    let releaseProfile;
+    const profileGate = new Promise(resolve => {
+        releaseProfile = resolve;
+    });
+    const { values, controller, dom } = accountRaceFixture({
+        fetchImpl: async url => {
+            if (String(url).includes('/me/stats')) {
+                return { ok: true, json: async () => ({ total: 1, month: 1, today: 0 }) };
+            }
+            await profileGate;
+            return {
+                ok: true,
+                json: async () => ({
+                    email: 'user@example.com',
+                    nickname: 'server-name',
+                    created_at: '2026-09-01T00:00:00Z',
+                }),
+            };
+        },
+    });
+
+    const starting = controller.init();
+    await tick();
+    // The refresh lands while GET /me is still in flight.
+    rotateStoredSession(values);
+    releaseProfile();
+    await starting;
+
+    assert.equal(values.get('extensions.mktero.accountRefreshToken'), 'refresh-2');
+    assert.equal(values.get('extensions.mktero.accountAccessToken'), 'access-2');
+    assert.equal(values.get('extensions.mktero.accountNickname'), 'server-name');
+    assert.equal(
+        dom.window.document.getElementById('mktero-account-signed-in-nickname').textContent,
+        'server-name'
+    );
+    controller.destroy();
+});
+
+test('a late profile response does not bring back a session the user signed out of', async () => {
+    let releaseProfile;
+    const profileGate = new Promise(resolve => {
+        releaseProfile = resolve;
+    });
+    const { values, controller, dom } = accountRaceFixture({
+        fetchImpl: async url => {
+            if (String(url).includes('/me/stats')) {
+                return { ok: true, json: async () => ({ total: 1, month: 1, today: 0 }) };
+            }
+            if (!String(url).endsWith('/api/v1/me')) {
+                return { ok: true, status: 204, json: async () => null };
+            }
+            await profileGate;
+            return {
+                ok: true,
+                json: async () => ({
+                    email: 'user@example.com',
+                    nickname: 'server-name',
+                    created_at: '2026-09-01T00:00:00Z',
+                }),
+            };
+        },
+    });
+
+    const starting = controller.init();
+    await tick();
+    dom.window.document.getElementById('mktero-account-logout')
+        .dispatchEvent(new dom.window.Event('click'));
+    await tick();
+    assert.equal(values.get('extensions.mktero.accountRefreshToken'), '');
+    releaseProfile();
+    await starting;
+
+    assert.equal(values.get('extensions.mktero.accountRefreshToken'), '');
+    assert.equal(values.get('extensions.mktero.accountAccessToken'), '');
+    assert.equal(values.get('extensions.mktero.accountEmail'), '');
+    assert.equal(values.get('extensions.mktero.accountNickname'), '');
+    controller.destroy();
+});
+
+test('saving a nickname does not overwrite tokens a conversion refreshed meanwhile', async () => {
+    let releasePatch;
+    const patchGate = new Promise(resolve => {
+        releasePatch = resolve;
+    });
+    const { values, controller, dom } = accountRaceFixture({
+        fetchImpl: async (url, init) => {
+            if (String(url).includes('/me/stats')) {
+                return { ok: true, json: async () => ({ total: 1, month: 1, today: 0 }) };
+            }
+            if (init?.method === 'PATCH') {
+                await patchGate;
+                return { ok: true, json: async () => ({ nickname: 'renamed' }) };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    email: 'user@example.com',
+                    nickname: 'paper-reader',
+                    created_at: '2026-09-01T00:00:00Z',
+                }),
+            };
+        },
+    });
+    await controller.init();
+    const doc = dom.window.document;
+
+    doc.getElementById('mktero-account-edit-nickname')
+        .dispatchEvent(new dom.window.Event('click'));
+    doc.getElementById('mktero-account-nickname').value = 'renamed';
+    doc.getElementById('mktero-account-save-nickname')
+        .dispatchEvent(new dom.window.Event('click'));
+    await tick();
+    rotateStoredSession(values);
+    releasePatch();
+    await tick();
+    await tick();
+
+    assert.equal(values.get('extensions.mktero.accountNickname'), 'renamed');
+    assert.equal(values.get('extensions.mktero.accountRefreshToken'), 'refresh-2');
+    assert.equal(values.get('extensions.mktero.accountAccessToken'), 'access-2');
+    controller.destroy();
+});

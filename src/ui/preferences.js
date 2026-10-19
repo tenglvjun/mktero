@@ -81,6 +81,7 @@ import {
     getAccountApiBase,
     getAccountSession,
     isAccountSignedIn,
+    saveAccountProfile,
     saveAccountSession,
     setAccountApiBase,
 } from '../config/account-preferences.js';
@@ -807,11 +808,14 @@ export function createPreferencesController({
                 fetchImpl: accountFetch,
             });
             if (!paneIsCurrent(generation)) return;
-            saveAccountSession(zotero, {
-                ...session,
-                email: profile.email || session.email,
-                nickname: profile.nickname || session.nickname,
-            });
+            // Profile fields only. A conversion may have rotated the tokens
+            // while this request was in flight.
+            // A skipped write means the user signed out or switched accounts
+            // while the request was in flight; the response no longer applies.
+            if (!saveAccountProfile(zotero, profile, { expectedEmail: session.email })) {
+                renderAccount();
+                return;
+            }
             if (accountCreated) {
                 accountCreated.textContent = formatMemberSince(
                     profile.createdAt,
@@ -925,10 +929,11 @@ export function createPreferencesController({
                 nickname,
                 fetchImpl: accountFetch,
             });
-            saveAccountSession(zotero, {
-                ...session,
-                nickname: updated.nickname || nickname,
-            });
+            saveAccountProfile(
+                zotero,
+                { nickname: updated.nickname || nickname },
+                { expectedEmail: session.email }
+            );
             if (accountProfileNicknameInput) {
                 accountProfileNicknameInput.value = updated.nickname || nickname;
             }

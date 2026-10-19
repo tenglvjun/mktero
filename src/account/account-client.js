@@ -1,4 +1,5 @@
 import { mkteroVersion } from '../config/runtime-config.js';
+import { createRuntimeAbortController } from '../platform/abort-controller.js';
 
 const JSON_HEADERS = Object.freeze({
     Accept: 'application/json',
@@ -65,14 +66,20 @@ export async function loginMkteroAccount({
     return sessionFromBody(body, now);
 }
 
+// timeoutMs bounds the request. A hung refresh would otherwise hold the shared
+// refresh promise and the prefs lock until the lock expired, which lets a
+// second caller present the same refresh token. A timeout is reported as a
+// network error, so the stored session is kept.
 export async function refreshMkteroAccount({
     apiBase,
     refreshToken,
     fetchImpl = globalThis.fetch,
     now = Date.now,
+    timeoutMs = 0,
 } = {}) {
-    const body = await postJSON(fetchImpl, apiBase, '/api/v1/auth/refresh', {
-        refresh_token: refreshToken,
+    const body = await requestJSON(fetchImpl, apiBase, '/api/v1/auth/refresh', {
+        payload: { refresh_token: refreshToken },
+        timeoutMs,
     });
     return sessionFromBody(body, now);
 }
@@ -157,6 +164,7 @@ async function requestJSON(fetchImpl, apiBase, path, {
     method = 'POST',
     payload,
     token = '',
+    timeoutMs = 0,
 } = {}) {
     if (typeof fetchImpl !== 'function') {
         throw accountError('network');
@@ -165,22 +173,71 @@ async function requestJSON(fetchImpl, apiBase, path, {
     if (token) headers.Authorization = `Bearer ${token}`;
     // A GET carries no body; only the JSON-writing methods serialize a payload.
     const sendsBody = method !== 'GET' && method !== 'HEAD';
+    const init = {
+        method,
+        headers,
+        body: sendsBody ? JSON.stringify(payload ?? {}) : undefined,
+    };
+    const deadline = timeoutMs > 0 ? startDeadline(timeoutMs) : null;
+    if (deadline?.signal) init.signal = deadline.signal;
     let response;
+    let body;
     try {
-        response = await fetchImpl(joinURL(apiBase, path), {
-            method,
-            headers,
-            body: sendsBody ? JSON.stringify(payload ?? {}) : undefined,
-        });
+        const exchange = (async () => {
+            const received = await fetchImpl(joinURL(apiBase, path), init);
+            return { received, parsed: await readBody(received) };
+        })();
+        // After a timeout wins the race, a late failure here has no consumer.
+        exchange.catch(() => {});
+        const settled = deadline
+            ? await Promise.race([exchange, deadline.expired])
+            : await exchange;
+        response = settled.received;
+        body = settled.parsed;
     }
     catch {
         throw accountError('network');
     }
-    const body = await readBody(response);
+    finally {
+        deadline?.clear();
+    }
     if (!response.ok) {
         throw accountError(body?.error?.code || 'request_failed', response.status);
     }
     return body;
+}
+
+// startDeadline rejects `expired` after timeoutMs and aborts the request when
+// the runtime offers an AbortController. A runtime without one still times out.
+function startDeadline(timeoutMs) {
+    let controller = null;
+    try {
+        controller = createRuntimeAbortController();
+    }
+    catch {
+        controller = null;
+    }
+    let timer = null;
+    const expired = new Promise((_resolve, reject) => {
+        timer = setTimeout(() => {
+            try {
+                controller?.abort();
+            }
+            catch {
+                // The rejection below is what ends the request.
+            }
+            reject(new Error('Mktero account request timed out'));
+        }, timeoutMs);
+    });
+    // The race below may already have settled; keep a late rejection quiet.
+    expired.catch(() => {});
+    return {
+        signal: controller?.signal,
+        expired,
+        clear() {
+            clearTimeout(timer);
+        },
+    };
 }
 
 async function readBody(response) {
