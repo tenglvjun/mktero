@@ -68,14 +68,13 @@ import {
 import {
     getMkteroAccount,
     getMkteroConversionStats,
-    isAccountSessionInvalid,
     loginMkteroAccount,
     logoutMkteroAccount,
-    refreshMkteroAccount,
     registerMkteroAccount,
     sendSignupCode,
     updateMkteroNickname,
 } from '../account/account-client.js';
+import { ensureAccountAccessToken } from '../account/account-session.js';
 import {
     accessTokenNeedsRefresh,
     clearAccountSession,
@@ -1146,26 +1145,19 @@ export function createPreferencesController({
         if (!accessTokenNeedsRefresh(session)) return;
         const generation = paneGeneration;
         try {
-            const refreshed = await refreshMkteroAccount({
-                apiBase: getAccountApiBase(zotero),
-                refreshToken: session.refreshToken,
-                fetchImpl: accountFetch,
-            });
-            if (!paneIsCurrent(generation)) return;
-            saveAccountSession(zotero, {
-                ...refreshed,
-                email: refreshed.email || session.email,
-                nickname: refreshed.nickname || session.nickname,
-            });
+            // The conversion path refreshes through the same helper. Sharing it
+            // keeps the preferences pane from rotating the token a second time
+            // and signing the user out.
+            await ensureAccountAccessToken(zotero, { fetchImpl: accountFetch });
         }
         catch (error) {
             if (!paneIsCurrent(generation)) return;
-            // A transient failure keeps the stored session, so a flaky network
-            // or a server restart does not silently sign the pane out. Only a
-            // rejected credential clears it.
-            if (!isAccountSessionInvalid(error)) return;
-            clearAccountSession(zotero);
-            resetAccountActivity();
+            // A transient failure keeps the stored session. The helper clears
+            // it only after the server rejects the credential itself.
+            if (error?.code === 'MKTERO_SIGN_IN_REQUIRED'
+                || error?.code === 'MKTERO_ACCOUNT_DISABLED') {
+                resetAccountActivity();
+            }
         }
     }
 

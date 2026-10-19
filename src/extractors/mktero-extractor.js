@@ -3,14 +3,9 @@ import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_PARSER_PROFILE_ID,
 } from '../mineru/parser-profile.js';
+import { MkteroSignInRequiredError } from '../account/account-session.js';
 
-export class MkteroSignInRequiredError extends Error {
-    constructor() {
-        super('Sign in to Mktero before converting');
-        this.name = 'MkteroSignInRequiredError';
-        this.code = 'MKTERO_SIGN_IN_REQUIRED';
-    }
-}
+export { MkteroSignInRequiredError };
 
 /**
  * Converts a PDF through the hosted Mktero service.

@@ -305,25 +305,8 @@ export class MkteroConversionClient {
         }
     }
 
-    async #renewUploadURL({ apiBase, getAccessToken, job, signal }) {
+    #renewUploadURL({ apiBase, getAccessToken, job, signal }) {
         const path = `/api/v1/conversions/${encodeURIComponent(job.job_id)}/upload-url`;
-        try {
-            return await this.#requestRenewal({
-                apiBase,
-                getAccessToken,
-                path,
-                signal,
-            });
-        }
-        catch (error) {
-            if (signal?.aborted || isAbortError(error) || !isUnauthorizedResponse(error)) {
-                throw error;
-            }
-        }
-        // 401: the access token was rejected. The token provider owns refresh;
-        // replay the renewal once with whatever it returns next.
-        await getAccessToken({ forceRefresh: true });
-        throwIfAborted(signal);
         return this.#requestRenewal({
             apiBase,
             getAccessToken,
@@ -365,6 +348,7 @@ export class MkteroConversionClient {
                 method: 'DELETE',
                 timeoutMs: this.cancelTimeoutMs,
                 label: 'conversion cancel',
+                replayUnauthorized: false,
             });
         }
         catch {
@@ -465,6 +449,7 @@ export class MkteroConversionClient {
         signal,
         timeoutMs,
         label,
+        replayUnauthorized = true,
     }) {
         const response = await this.#send({
             url: joinURL(apiBase, path),
@@ -480,7 +465,7 @@ export class MkteroConversionClient {
         });
         const payload = await readBoundedJSON(response, signal);
         if (!response.ok) {
-            throw codedError(
+            const error = codedError(
                 'The Mktero conversion request failed',
                 errorCodeForStatus(response.status, payload),
                 {
@@ -489,6 +474,24 @@ export class MkteroConversionClient {
                     errorCode: payload?.error?.code || '',
                 }
             );
+            // A 401 is an expired access token, not a dead login. Refresh once
+            // and replay. Cancel is not replayed: it is already being abandoned.
+            if (replayUnauthorized && isUnauthorizedResponse(error)) {
+                await getAccessToken({ forceRefresh: true });
+                throwIfAborted(signal);
+                return this.#requestJSON({
+                    apiBase,
+                    getAccessToken,
+                    path,
+                    method,
+                    body,
+                    signal,
+                    timeoutMs,
+                    label,
+                    replayUnauthorized: false,
+                });
+            }
+            throw error;
         }
         return payload;
     }
