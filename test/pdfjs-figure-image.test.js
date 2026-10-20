@@ -98,6 +98,25 @@ function fixture(count = 2, { irregular = false, wrongPixels = false, externalLa
     document: { markdown, assets, sourceMap, assetBasePath: '' } };
 }
 
+// Downscaling the crop to a few pixels makes a one-pixel legend depend on
+// platform interpolation. Read the top of the recovered image directly.
+function topBandInk(image) {
+    const height = Math.max(8, Math.ceil(image.height * 0.08));
+    const canvas = createCanvas(image.width, height);
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0, image.width, height, 0, 0, image.width, height);
+    const pixels = context.getImageData(0, 0, image.width, height).data;
+    let ink = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index + 3] > 8
+            && (pixels[index] < 220 || pixels[index + 1] < 220 || pixels[index + 2] < 220)) {
+            ink += 1;
+        }
+    }
+    canvas.width = canvas.height = 0;
+    return ink;
+}
+
 function harness({ waitDecode, onClose } = {}) {
     const canvases = [];
     let decoded = 0;
@@ -144,12 +163,8 @@ for (const [count, options] of [[2, {}], [4, {}], [16, {}], [4, { irregular: tru
             assert.ok(figure.visualBBox[1] < sample.request.panels[0].bbox[1]);
             const image = await loadImage(result.assets.at(-1).data);
             assert.ok(image.width > 800 && image.height > 600);
-            const canvas = createCanvas(80, 60);
-            canvas.getContext('2d').drawImage(image, 0, 0, 80, 60);
-            const pixels = canvas.getContext('2d').getImageData(0, 0, 80, 4).data;
-            assert.ok(Array.from(pixels).filter((value, index) => index % 4 !== 3 && value < 100).length > 4,
+            assert.ok(topBandInk(image) > 24,
                 'The shared legend and first label must remain in the top band');
-            canvas.width = canvas.height = 0;
         }
         finally { await h.renderer.disposeAll(); }
         assert.ok(h.released());
