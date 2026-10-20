@@ -10203,3 +10203,114 @@ test('reports a page marker navigation failure without surfacing an error UI', a
     editor.destroy();
     dom.window.close();
 });
+
+test('reports an unsaved block correction for a closing tab to save', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'The study included 5O participants.';
+    const submissions = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        onCommitCorrection: async correction => submissions.push(correction),
+    });
+    editor.setCorrectionState({
+        enabled: true,
+        blocks: [{
+            id: 'paragraph-1',
+            type: 'paragraph',
+            from: 0,
+            to: markdown.length,
+            markdown,
+        }],
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    view.posAtCoords = () => 1;
+    const content = document.querySelector('.cm-content');
+    const begin = () => content.dispatchEvent(new dom.window.MouseEvent(
+        'dblclick',
+        { bubbles: true, cancelable: true, button: 0 }
+    ));
+
+    assert.equal(editor.getPendingCorrection(), null);
+    begin();
+    assert.equal(editor.getPendingCorrection(), null);
+    const typoFrom = markdown.indexOf('5O');
+    view.dispatch({
+        changes: { from: typoFrom, to: typoFrom + 2, insert: '50' },
+    });
+    assert.deepEqual(editor.getPendingCorrection(), {
+        blockID: 'paragraph-1',
+        replacementMarkdown: 'The study included 50 participants.',
+    });
+
+    document.querySelector('.mktero-correction-editor-cancel').click();
+    assert.equal(editor.getPendingCorrection(), null);
+
+    begin();
+    view.dispatch({
+        changes: { from: typoFrom, to: typoFrom + 2, insert: 'fifty' },
+    });
+    document.querySelector('.mktero-correction-editor-save').click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(submissions.length, 1);
+    assert.equal(editor.getPendingCorrection(), null);
+
+    editor.destroy();
+    assert.equal(editor.getPendingCorrection(), null);
+    dom.window.close();
+});
+
+test('reports an unsaved table cell correction for a closing tab to save', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '| Name | Value |',
+        '| --- | ---: |',
+        '| Score | 42 |',
+    ].join('\n');
+    const commits = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        onCommitCorrection: async correction => commits.push(correction),
+    });
+    editor.setCorrectionState({
+        enabled: true,
+        blocks: [{
+            id: 'table-1',
+            type: 'table',
+            from: 0,
+            to: markdown.length,
+            markdown,
+        }],
+        correctedBlockIDs: [],
+    });
+    const valueCell = document.querySelector(
+        '.cm-mktero-table tbody td:last-child'
+    );
+
+    enterTableCellEditing(valueCell, dom.window);
+    assert.equal(valueCell.getAttribute('contenteditable'), 'true');
+    assert.equal(editor.getPendingCorrection(), null);
+    valueCell.textContent = '43';
+    valueCell.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    const pending = editor.getPendingCorrection();
+    assert.equal(pending.blockID, 'table-1');
+    assert.match(pending.replacementMarkdown, /\| Score \| 43 \|/);
+
+    valueCell.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+    }));
+    assert.equal(editor.getPendingCorrection(), null);
+    assert.deepEqual(commits, []);
+
+    editor.destroy();
+    dom.window.close();
+});

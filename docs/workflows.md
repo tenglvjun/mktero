@@ -69,10 +69,14 @@ history entries.
 ## Correct recognition errors
 
 Double-click an existing paragraph, heading, or GFM table cell to edit it, then
-save or cancel explicitly. Existing paragraphs and headings can also be
+save or cancel explicitly. Closing the tab saves an edit that is still open;
+press `Escape` or Cancel to discard it.
+Existing paragraphs and headings can also be
 deleted and restored from `Manage corrections`. Corrections are stored
 separately from the conversion cache and are tied to the PDF content and the
-selected provider's parser profile. They cannot insert or reorder blocks, add images, or add raw
+selected provider's parser profile. If saved corrections can no longer be
+read, the document opens with the original recognition result and a warning;
+the next saved correction or a reparse replaces the unreadable data. They cannot insert or reorder blocks, add images, or add raw
 HTML. Saving a correction preserves the reading position and keeps the full
 document available while scrolling. Prose around formulas and OCR
 dollar-wrapped citation tokens remains

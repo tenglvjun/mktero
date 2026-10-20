@@ -218,7 +218,23 @@ export class RenderedTableWidget extends WidgetType {
                 error,
                 save: commit,
                 cancel,
+                pendingCorrection,
             });
+        };
+        const pendingCorrection = () => {
+            if (!editing) return null;
+            const nextValue = normalizeCellValue(cell.textContent);
+            if (nextValue === originalValue) return null;
+            return {
+                blockID: this.correctionBlock.id,
+                replacementMarkdown: serializeTableCellChange({
+                    model,
+                    values,
+                    index,
+                    nextValue,
+                    columnCount,
+                }),
+            };
         };
         const finishEditing = () => {
             if (!editing) return false;

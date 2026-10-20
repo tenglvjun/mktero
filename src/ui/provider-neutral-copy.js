@@ -67,7 +67,14 @@ const ERROR_CODE_KEYS = new Map([
     ['MKTERO_ARCHIVE_TOO_LARGE', 'error.resultTooLarge'],
 ]);
 
+export const MARKDOWN_REVISION_WARNINGS = Object.freeze({
+    discarded: 'Saved corrections for this document could not be read, so the original recognition result is shown. Your next saved correction replaces them.',
+    unavailable: 'Saved corrections could not be read, so the original recognition result is shown. Corrections are unavailable until the document is reopened.',
+});
+
 const WARNING_MESSAGE_KEYS = new Map([
+    [MARKDOWN_REVISION_WARNINGS.discarded, 'warning.correctionsDiscarded'],
+    [MARKDOWN_REVISION_WARNINGS.unavailable, 'warning.correctionsUnavailable'],
     [
         'The local Markdown cache is unavailable.',
         'warning.cacheUnavailable',

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     createMarkdownRevisionSessionRegistry,
+    invalidMarkdownRevisionError,
     openMarkdownRevisionSession,
 } from '../src/core/markdown-revision-session.js';
 
@@ -496,10 +497,17 @@ test('rejects deletion of a table from calls and stored revisions', async () => 
     tampered.corrections[0].replacementMarkdown = '';
     store.setSaved(tampered);
 
-    await assert.rejects(
-        () => openMarkdownRevisionSession({ baseDocument, store }),
-        /only paragraphs and headings/i
-    );
+    const errors = [];
+    const reopened = await openMarkdownRevisionSession({
+        baseDocument,
+        store,
+        onError: error => errors.push(error),
+    });
+    assert.equal(reopened.snapshot().markdown, markdown);
+    assert.equal(reopened.hasUnreadableStoredRevision(), true);
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, 'MARKDOWN_REVISION_INVALID');
+    assert.match(errors[0].message, /only paragraphs and headings/i);
 });
 
 test('keeps the in-memory revision unchanged when persistence fails', async () => {
@@ -752,10 +760,16 @@ test('adds protected formula blocks when reopening a legacy revision', async () 
     }];
     store.setSaved(tampered);
 
-    await assert.rejects(
-        () => openMarkdownRevisionSession({ baseDocument, store }),
-        /Invalid saved Markdown correction/
-    );
+    const errors = [];
+    const reopened = await openMarkdownRevisionSession({
+        baseDocument,
+        store,
+        onError: error => errors.push(error),
+    });
+    assert.equal(reopened.snapshot().markdown, markdown);
+    assert.equal(reopened.snapshot().correctionCount, 0);
+    assert.equal(reopened.hasUnreadableStoredRevision(), true);
+    assert.match(errors[0]?.message, /Invalid saved Markdown correction/);
 });
 
 test('does not install a revision session that finishes opening after close', async () => {
@@ -872,4 +886,148 @@ test('shifts chromeRanges with unrelated corrections and drops overlapping ones'
         replacementMarkdown: 'page',
     });
     assert.deepEqual(dropped.chromeRanges, []);
+});
+
+function trackStoreCalls(store) {
+    const calls = [];
+    for (const method of ['load', 'save', 'delete']) {
+        const original = store[method].bind(store);
+        store[method] = (...args) => {
+            calls.push(method);
+            return original(...args);
+        };
+    }
+    return calls;
+}
+
+async function saveParagraphCorrection(baseDocument, store) {
+    const session = await openMarkdownRevisionSession({ baseDocument, store });
+    const paragraph = session.snapshot().editableBlocks.find(block => (
+        block.originalMarkdown.includes('5O participants')
+    ));
+    await session.commit({
+        blockID: paragraph.id,
+        replacementMarkdown: 'The study included fifty participants.',
+    });
+}
+
+test('opens the original document when saved revision blocks no longer match it', async () => {
+    const store = createMemoryStore();
+    const baseDocument = createBaseDocument();
+    await saveParagraphCorrection(baseDocument, store);
+    // A changed block parser gives the same base different block IDs.
+    const stale = store.getSaved();
+    stale.blocks = stale.blocks.map(block => ({
+        ...block,
+        id: `stale-${block.id}`,
+    }));
+    stale.corrections = stale.corrections.map(correction => ({
+        ...correction,
+        blockID: `stale-${correction.blockID}`,
+    }));
+    store.setSaved(stale);
+    const calls = trackStoreCalls(store);
+    const errors = [];
+
+    const session = await openMarkdownRevisionSession({
+        baseDocument,
+        store,
+        onError: error => errors.push(error),
+    });
+
+    assert.equal(session.snapshot().markdown, baseDocument.markdown);
+    assert.equal(session.snapshot().correctionCount, 0);
+    assert.equal(session.hasUnreadableStoredRevision(), true);
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, 'MARKDOWN_REVISION_INVALID');
+    assert.match(errors[0].message, /do not match its base/);
+    assert.deepEqual(calls, ['load']);
+    assert.deepEqual(store.getSaved(), stale);
+
+    const conclusion = session.snapshot().editableBlocks.find(block => (
+        block.originalMarkdown === 'Conclusion.'
+    ));
+    await session.commit({
+        blockID: conclusion.id,
+        replacementMarkdown: 'Summary.',
+    });
+    assert.deepEqual(calls, ['load', 'delete', 'save']);
+    assert.equal(session.hasUnreadableStoredRevision(), false);
+
+    const heading = session.snapshot().editableBlocks.find(block => (
+        block.type === 'heading'
+    ));
+    await session.commit({
+        blockID: heading.id,
+        replacementMarkdown: '# Trial',
+    });
+    assert.deepEqual(calls, ['load', 'delete', 'save', 'save']);
+
+    const reopened = await openMarkdownRevisionSession({ baseDocument, store });
+    assert.equal(reopened.hasUnreadableStoredRevision(), false);
+    assert.equal(
+        reopened.snapshot().markdown,
+        baseDocument.markdown
+            .replace('# Study', '# Trial')
+            .replace('Conclusion.', 'Summary.')
+    );
+});
+
+test('keeps saved corrections untouched when the revision store cannot be read', async () => {
+    const store = createMemoryStore();
+    const baseDocument = createBaseDocument();
+    await saveParagraphCorrection(baseDocument, store);
+    const saved = store.getSaved();
+    const readError = Object.assign(new Error('The file is locked'), {
+        name: 'NotReadableError',
+    });
+    store.load = async () => {
+        throw readError;
+    };
+    const errors = [];
+
+    await assert.rejects(
+        () => openMarkdownRevisionSession({
+            baseDocument,
+            store,
+            onError: error => errors.push(error),
+        }),
+        error => error === readError
+    );
+    assert.deepEqual(errors, []);
+    assert.deepEqual(store.getSaved(), saved);
+});
+
+test('removes a damaged stored revision on the next save through the registry', async () => {
+    const store = createMemoryStore();
+    const deleted = [];
+    store.load = async () => {
+        throw invalidMarkdownRevisionError('Invalid revision metadata');
+    };
+    store.delete = async cacheKey => {
+        deleted.push(cacheKey);
+    };
+    const errors = [];
+    const registry = createMarkdownRevisionSessionRegistry();
+
+    const entry = await registry.open(42, createBaseDocument(), {
+        store,
+        onError: error => errors.push(error),
+    });
+    assert.equal(entry.session.hasUnreadableStoredRevision(), true);
+    assert.equal(errors[0]?.message, 'Invalid revision metadata');
+
+    // Saving the original text keeps no correction, so only the damaged
+    // entry is removed.
+    const paragraph = entry.session.snapshot().editableBlocks.find(block => (
+        block.type === 'paragraph'
+    ));
+    await entry.session.commit({
+        blockID: paragraph.id,
+        replacementMarkdown: paragraph.originalMarkdown,
+    });
+    assert.deepEqual(deleted, [CACHE_KEY]);
+    assert.equal(store.getSaved(), null);
+    assert.equal(entry.session.hasUnreadableStoredRevision(), false);
+    await registry.destroyAll();
 });

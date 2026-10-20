@@ -90,6 +90,7 @@ import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
     collectMatchedAnnotationRanges,
     createMarkdownRevisionSessionRegistry,
+    isInvalidMarkdownRevisionError,
     snapshotStoredMarkdownRevision,
 } from './core/markdown-revision-session.js';
 import { selectionRevealChanges } from './core/markdown-selection-reveal.js';
@@ -237,6 +238,7 @@ import {
     translateEnglish,
 } from './i18n/localization.js';
 import {
+    MARKDOWN_REVISION_WARNINGS,
     localizeConversionError,
     localizeConversionResult,
 } from './ui/provider-neutral-copy.js';
@@ -970,7 +972,6 @@ globalThis.shutdown = function shutdown() {
     abortAllConversions();
     abortObsidianExport();
     abortAllTranslations();
-    destroyAllRevisionSessions();
     runtime.reasoningCatalogStore?.dispose();
     runtime.disposeReasoningCatalogHost?.();
     runtime.disposeAnnotationObserver?.();
@@ -991,7 +992,10 @@ globalThis.shutdown = function shutdown() {
     disposeAllContextMenus();
     runtime.actionsTags?.dispose();
     runtime.citationPresenter?.dispose();
+    // Closing the tabs saves any open correction into its revision session,
+    // so the sessions are destroyed only after the presenter.
     runtime.presenter?.dispose();
+    destroyAllRevisionSessions();
     if (runtime.preferencePaneID) {
         Zotero.PreferencePanes.unregister?.(runtime.preferencePaneID);
     }
@@ -2029,12 +2033,23 @@ async function exportObsidianForDocument(documentID, options) {
 async function readRevisionSnapshot({ itemID, cacheKey, signal }) {
     if (!runtime.revisionStore) return null;
     throwIfRevisionAborted(signal);
-    const saved = await runtime.revisionStore.load(cacheKey);
-    throwIfRevisionAborted(signal);
-    if (!saved) return null;
-    const entry = await replaceRevisionSession(itemID, saved.base, { signal });
-    throwIfRevisionAborted(signal);
-    return { ...entry.session.snapshot(), itemID };
+    try {
+        const saved = await runtime.revisionStore.load(cacheKey);
+        throwIfRevisionAborted(signal);
+        if (!saved) return null;
+        const entry = await replaceRevisionSession(itemID, saved.base, {
+            signal,
+        });
+        throwIfRevisionAborted(signal);
+        return { ...entry.session.snapshot(), itemID };
+    }
+    catch (error) {
+        if (signal?.aborted || error?.name === 'AbortError') throw error;
+        // Unreadable corrections must not block the OCR result. The revision
+        // session reports them when the document attaches its corrections.
+        if (!isInvalidMarkdownRevisionError(error)) Zotero.logError?.(error);
+        return null;
+    }
 }
 
 async function attachReadingPosition(result) {
@@ -2092,17 +2107,37 @@ async function attachRevisionSession(itemID, result, signal) {
     throwIfRevisionAborted(signal);
     let entry = runtime.revisionSessions?.get(itemID);
     if (!entry || entry.cacheKey !== result.cacheKey) {
-        entry = await replaceRevisionSession(itemID, {
-            itemID,
-            cacheKey: result.cacheKey,
-            markdown: result.markdown,
-            sourceMap: result.sourceMap || [],
-            figureMap: result.figureMap || null,
-            assets: result.assets || [],
-            assetBasePath: result.assetBasePath || '',
-            extractedPages: result.extractedPages,
-            totalPages: result.totalPages,
-        }, { signal });
+        try {
+            entry = await replaceRevisionSession(itemID, {
+                itemID,
+                cacheKey: result.cacheKey,
+                markdown: result.markdown,
+                sourceMap: result.sourceMap || [],
+                figureMap: result.figureMap || null,
+                assets: result.assets || [],
+                assetBasePath: result.assetBasePath || '',
+                extractedPages: result.extractedPages,
+                totalPages: result.totalPages,
+            }, { signal });
+        }
+        catch (error) {
+            if (signal?.aborted || error?.name === 'AbortError') throw error;
+            // A read failure can be temporary, so the saved corrections stay
+            // on disk and this tab opens without correction editing.
+            Zotero.logError?.(error);
+            return {
+                ...result,
+                editableBlocks: [],
+                correctedBlockIDs: [],
+                correctionCount: 0,
+                hasCorrections: false,
+                correctionMode: false,
+                warnings: uniqueWarnings([
+                    ...(result.warnings || []),
+                    MARKDOWN_REVISION_WARNINGS.unavailable,
+                ]),
+            };
+        }
     }
     throwIfRevisionAborted(signal);
     entry.baseWarnings = [...(result.warnings || [])];
@@ -2111,6 +2146,12 @@ async function attachRevisionSession(itemID, result, signal) {
         ...entry.session.snapshot(),
         itemID,
         correctionMode: false,
+        ...(entry.session.hasUnreadableStoredRevision?.() ? {
+            warnings: uniqueWarnings([
+                ...(result.warnings || []),
+                MARKDOWN_REVISION_WARNINGS.discarded,
+            ]),
+        } : {}),
     };
 }
 
@@ -2123,6 +2164,7 @@ async function replaceRevisionSession(itemID, baseDocument, { signal } = {}) {
     return registry.open(itemID, baseDocument, {
         signal,
         store,
+        onError: error => Zotero.logError?.(error),
     });
 }
 
@@ -2607,6 +2649,11 @@ async function requestItemReparse(itemID, entryPoint) {
             await entry.session.restoreAll();
         }
     }
+    else if (entry?.session.hasUnreadableStoredRevision?.()) {
+        // Reparsing starts over, so unreadable corrections are cleared now
+        // instead of warning again when the new result opens.
+        await runtime.revisionStore?.delete(entry.cacheKey);
+    }
     setCorrectionMode(itemID, false);
     abortDocumentTranslations(itemID);
     await closeRevisionSession(itemID);
@@ -2910,7 +2957,17 @@ async function loadRevisionSessionForItem(itemID) {
     const cacheKey = await createMarkdownCacheKey(await IOUtils.read(filePath), {
         parserProfile,
     });
-    const saved = await runtime.revisionStore.load(cacheKey);
+    let saved;
+    try {
+        saved = await runtime.revisionStore.load(cacheKey);
+    }
+    catch (error) {
+        if (!isInvalidMarkdownRevisionError(error)) throw error;
+        // Reparsing starts over, so a damaged entry is removed here.
+        Zotero.logError?.(error);
+        await runtime.revisionStore.delete(cacheKey);
+        return null;
+    }
     if (!saved) return null;
     return replaceRevisionSession(itemID, saved.base);
 }
@@ -3838,14 +3895,22 @@ async function loadSelectionSource(itemID) {
     if (!cached || typeof cached.markdown !== 'string' || !Array.isArray(cached.sourceMap)) {
         return null;
     }
-    const stored = await runtime.revisionStore.load(cacheKey);
-    if (!stored) {
-        return {
-            markdown: cached.markdown,
-            sourceMap: cached.sourceMap,
-            documentLength: cached.markdown.length,
-        };
+    const baseSource = {
+        markdown: cached.markdown,
+        sourceMap: cached.sourceMap,
+        documentLength: cached.markdown.length,
+    };
+    let stored;
+    try {
+        stored = await runtime.revisionStore.load(cacheKey);
     }
+    catch (error) {
+        // A document whose corrections cannot be read opens with the original
+        // result, so the selection maps onto that text.
+        Zotero.logError?.(error);
+        return baseSource;
+    }
+    if (!stored) return baseSource;
     try {
         const corrected = snapshotStoredMarkdownRevision(stored, cacheKey);
         if (typeof corrected.markdown !== 'string' || !Array.isArray(corrected.sourceMap)) {
@@ -3859,7 +3924,7 @@ async function loadSelectionSource(itemID) {
     }
     catch (error) {
         Zotero.logError?.(error);
-        return null;
+        return isInvalidMarkdownRevisionError(error) ? baseSource : null;
     }
 }
 
