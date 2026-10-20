@@ -3,6 +3,44 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createAnchoredPopup } from '../src/editor/anchored-popup.js';
 
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+
+// jsdom keeps focus on a control that becomes disabled or hidden. Gecko and
+// Blink move focus to the body and fire focusout without a relatedTarget.
+function blurToBody(window, element) {
+    const { disabled, hidden } = element;
+    const document = element.ownerDocument;
+    const suppress = event => event.stopImmediatePropagation();
+    document.addEventListener('blur', suppress, true);
+    document.addEventListener('focusout', suppress, true);
+    element.disabled = false;
+    element.hidden = false;
+    element.blur();
+    element.disabled = disabled;
+    element.hidden = hidden;
+    document.removeEventListener('blur', suppress, true);
+    document.removeEventListener('focusout', suppress, true);
+    element.dispatchEvent(new window.FocusEvent('focusout', {
+        bubbles: true,
+        relatedTarget: null,
+    }));
+}
+
+function stubTimers(window) {
+    const scheduled = [];
+    let nextTimerID = 1;
+    window.setTimeout = (callback, delay) => {
+        const timer = { callback, delay, id: nextTimerID++ };
+        scheduled.push(timer);
+        return timer.id;
+    };
+    window.clearTimeout = timerID => {
+        const index = scheduled.findIndex(timer => timer.id === timerID);
+        if (index >= 0) scheduled.splice(index, 1);
+    };
+    return scheduled;
+}
+
 test('closes the prior anchor, invokes cleanup once, and renders XHTML', () => {
     const dom = new JSDOM(
         '<!doctype html><div id="parent"><button id="one"></button>'
@@ -48,5 +86,72 @@ test('closes the prior anchor, invokes cleanup once, and renders XHTML', () => {
     ));
     assert.equal(closed, 2);
     assert.equal(popup.isOpen(), false);
+    dom.window.close();
+});
+
+test('stays open when its own focused control becomes disabled or hidden', () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><span id="anchor"></span></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const anchor = document.querySelector('#anchor');
+    const popup = createAnchoredPopup(parent, {
+        className: 'popup',
+        idPrefix: 'test-popup',
+    });
+    const scheduled = stubTimers(dom.window);
+    let closed = 0;
+    let busyButton;
+    let sectionButton;
+    let section;
+    let plainButton;
+    popup.open({
+        anchor,
+        label: 'Actions',
+        dismissOnMouseLeave: false,
+        onClose: () => closed++,
+        renderContent({ document: ownerDocument }) {
+            const content = ownerDocument.createElementNS(
+                XHTML_NAMESPACE,
+                'div'
+            );
+            busyButton = ownerDocument.createElementNS(
+                XHTML_NAMESPACE,
+                'button'
+            );
+            section = ownerDocument.createElementNS(XHTML_NAMESPACE, 'div');
+            sectionButton = ownerDocument.createElementNS(
+                XHTML_NAMESPACE,
+                'button'
+            );
+            plainButton = ownerDocument.createElementNS(
+                XHTML_NAMESPACE,
+                'button'
+            );
+            section.appendChild(sectionButton);
+            content.append(busyButton, section, plainButton);
+            return content;
+        },
+    });
+
+    busyButton.focus();
+    busyButton.disabled = true;
+    blurToBody(dom.window, busyButton);
+    assert.deepEqual(scheduled, []);
+
+    sectionButton.focus();
+    section.hidden = true;
+    blurToBody(dom.window, sectionButton);
+    assert.deepEqual(scheduled, []);
+    assert.equal(popup.isOpen(), true);
+
+    plainButton.focus();
+    blurToBody(dom.window, plainButton);
+    assert.deepEqual(scheduled.map(timer => timer.delay), [120]);
+    scheduled.shift().callback();
+    assert.equal(popup.isOpen(), false);
+    assert.equal(closed, 1);
     dom.window.close();
 });
