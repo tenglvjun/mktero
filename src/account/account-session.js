@@ -4,6 +4,7 @@ import {
 } from './account-client.js';
 import {
     accessTokenNeedsRefresh,
+    ACCOUNT_REFRESH_ATTEMPT_ID_PREF,
     clearAccountSession,
     getAccountApiBase,
     getAccountSession,
@@ -12,12 +13,12 @@ import {
 
 export const ACCOUNT_REFRESH_LOCK_PREF = 'extensions.mktero.accountRefreshLock';
 
-export const REFRESH_LOCK_TTL_MS = 30 * 1000;
+export const REFRESH_LOCK_TTL_MS = 60 * 1000;
 // Shorter than the lock, so a hung request ends before the lock can expire and
 // let another caller present the same refresh token.
 export const REFRESH_REQUEST_TIMEOUT_MS = 20 * 1000;
 const PEER_POLL_MS = 25;
-const MAX_PEER_POLLS = 1200;
+const MAX_PEER_POLLS = 2400;
 
 // One promise per Zotero runtime. bootstrap.js and preferences.js are separate
 // bundles, so this map only collapses callers that share a bundle. The prefs
@@ -48,6 +49,7 @@ export async function ensureAccountAccessToken(zotero, {
     fetchImpl,
     now = Date.now,
     sleep = delay,
+    secureRandom = globalThis.crypto,
 } = {}) {
     if (!zotero) throw new TypeError('A Zotero runtime is required');
     const clock = typeof now === 'function' ? now : () => now;
@@ -61,6 +63,7 @@ export async function ensureAccountAccessToken(zotero, {
         clock,
         forceRefresh: forceRefresh === true,
         sleep,
+        secureRandom,
     }));
 }
 
@@ -79,6 +82,7 @@ async function performRefresh(zotero, {
     clock,
     forceRefresh,
     sleep,
+    secureRandom,
 }) {
     const initial = getAccountSession(zotero);
     if (!initial.refreshToken) throw new MkteroSignInRequiredError();
@@ -111,6 +115,7 @@ async function performRefresh(zotero, {
             clock,
             forceRefresh,
             initial,
+            secureRandom,
         });
     }
     finally {
@@ -123,6 +128,7 @@ async function refreshWhileHoldingLock(zotero, {
     clock,
     forceRefresh,
     initial,
+    secureRandom,
 }) {
     const session = getAccountSession(zotero);
     if (!session.refreshToken) throw new MkteroSignInRequiredError();
@@ -139,14 +145,26 @@ async function refreshWhileHoldingLock(zotero, {
 
     const usedToken = session.refreshToken;
     const apiBase = getAccountApiBase(zotero);
+    const attemptID = getRefreshAttemptID(zotero, secureRandom);
+    const refresh = () => refreshMkteroAccount({
+        apiBase,
+        refreshToken: usedToken,
+        refreshAttemptID: attemptID,
+        fetchImpl,
+        now: clock,
+        timeoutMs: REFRESH_REQUEST_TIMEOUT_MS,
+    });
     try {
-        const refreshed = await refreshMkteroAccount({
-            apiBase,
-            refreshToken: usedToken,
-            fetchImpl,
-            now: clock,
-            timeoutMs: REFRESH_REQUEST_TIMEOUT_MS,
-        });
+        let refreshed;
+        try {
+            refreshed = await refresh();
+        }
+        catch (error) {
+            // A timeout or transport failure may happen after the server has
+            // committed rotation. Replaying the same ID recovers the same pair.
+            if (error?.code !== 'network') throw error;
+            refreshed = await refresh();
+        }
         const current = getAccountSession(zotero);
         // The refresh response may arrive after logout, API-base switching, or
         // a new account has replaced the session. Never let an old request
@@ -199,6 +217,32 @@ async function refreshWhileHoldingLock(zotero, {
         clearAccountSession(zotero);
         throw new MkteroSignInRequiredError();
     }
+}
+
+function getRefreshAttemptID(zotero, secureRandom) {
+    const stored = String(zotero?.Prefs?.get?.(ACCOUNT_REFRESH_ATTEMPT_ID_PREF, true) || '')
+        .trim()
+        .toLowerCase();
+    if (/^[0-9a-f]{32}$/.test(stored)) return stored;
+    const attemptID = createRefreshAttemptID(secureRandom);
+    zotero?.Prefs?.set?.(ACCOUNT_REFRESH_ATTEMPT_ID_PREF, attemptID, true);
+    return attemptID;
+}
+
+export function createRefreshAttemptID(secureRandom = globalThis.crypto) {
+    if (typeof secureRandom?.randomUUID === 'function') {
+        const attemptID = secureRandom.randomUUID().replaceAll('-', '').toLowerCase();
+        if (/^[0-9a-f]{32}$/.test(attemptID)) return attemptID;
+    }
+    if (typeof secureRandom?.getRandomValues === 'function') {
+        const bytes = new Uint8Array(16);
+        secureRandom.getRandomValues(bytes);
+        const attemptID = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+        if (/^[0-9a-f]{32}$/.test(attemptID)) return attemptID;
+    }
+    const error = new Error('Secure random number generation is unavailable');
+    error.code = 'MKTERO_NETWORK_ERROR';
+    throw error;
 }
 
 function sameAccount(left, right) {

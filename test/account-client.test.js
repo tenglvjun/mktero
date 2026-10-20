@@ -138,6 +138,30 @@ test('registration uses the same token response as login', async () => {
     );
 });
 
+test('sends the refresh attempt ID so a retried rotation can be replayed', async () => {
+    let body;
+    const session = await refreshMkteroAccount({
+        apiBase: 'http://127.0.0.1:8080',
+        refreshToken: 'old-refresh',
+        refreshAttemptID: '0123456789abcdef0123456789abcdef',
+        now: () => 0,
+        fetchImpl: async (_url, options) => {
+            body = JSON.parse(options.body);
+            return jsonResponse(200, {
+                access_token: 'new-access',
+                refresh_token: 'new-refresh',
+                expires_in: 3600,
+            });
+        },
+    });
+
+    assert.deepEqual(body, {
+        refresh_token: 'old-refresh',
+        refresh_attempt_id: '0123456789abcdef0123456789abcdef',
+    });
+    assert.equal(session.refreshToken, 'new-refresh');
+});
+
 test('refresh and logout use the refresh token and do not echo secrets in errors', async () => {
     const refreshed = await refreshMkteroAccount({
         apiBase: 'http://127.0.0.1:8080',

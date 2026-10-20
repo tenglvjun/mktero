@@ -73,12 +73,16 @@ export async function loginMkteroAccount({
 export async function refreshMkteroAccount({
     apiBase,
     refreshToken,
+    refreshAttemptID = '',
     fetchImpl = globalThis.fetch,
     now = Date.now,
     timeoutMs = 0,
 } = {}) {
     const body = await requestJSON(fetchImpl, apiBase, '/api/v1/auth/refresh', {
-        payload: { refresh_token: refreshToken },
+        payload: {
+            refresh_token: refreshToken,
+            ...(refreshAttemptID ? { refresh_attempt_id: refreshAttemptID } : {}),
+        },
         timeoutMs,
     });
     return sessionFromBody(body, now);
