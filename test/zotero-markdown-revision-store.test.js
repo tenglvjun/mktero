@@ -260,8 +260,142 @@ test('reports corrupt revision metadata without deleting user files', async t =>
         pathUtils: { join: path.join, parent: path.dirname },
     });
 
-    await assert.rejects(() => store.load(CACHE_KEY), /invalid revision metadata/i);
+    await assert.rejects(() => store.load(CACHE_KEY), error => (
+        /invalid revision metadata/i.test(error.message)
+        && error.code === 'MARKDOWN_REVISION_INVALID'
+    ));
     assert.equal(await readFile(metadataPath, 'utf8'), '{invalid');
+});
+
+test('replaces a damaged revision entry on the next correction save', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-revisions-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, parent: path.dirname },
+    };
+    const baseDocument = {
+        itemID: 42,
+        cacheKey: CACHE_KEY,
+        markdown: '# Paper\n\nThe result was 9O%.\n\nConclusion.',
+        sourceMap: [],
+        assets: [],
+        assetBasePath: '',
+        extractedPages: 1,
+        totalPages: 1,
+    };
+    const first = await openMarkdownRevisionSession({
+        baseDocument,
+        store: new ZoteroMarkdownRevisionStore(options),
+    });
+    await first.commit({
+        blockID: first.snapshot().editableBlocks[1].id,
+        replacementMarkdown: 'The result was 90%.',
+    });
+    // A truncated base keeps valid metadata, so the store would otherwise
+    // keep the damaged base when a later correction is saved.
+    await writeFile(
+        path.join(rootPath, 'entries', CACHE_KEY, 'base.md'),
+        '# Pap'
+    );
+    await assert.rejects(
+        () => new ZoteroMarkdownRevisionStore(options).load(CACHE_KEY),
+        error => error.code === 'MARKDOWN_REVISION_INVALID'
+    );
+
+    const errors = [];
+    const recovered = await openMarkdownRevisionSession({
+        baseDocument,
+        store: new ZoteroMarkdownRevisionStore(options),
+        onError: error => errors.push(error),
+    });
+    assert.equal(recovered.snapshot().markdown, baseDocument.markdown);
+    assert.equal(recovered.hasUnreadableStoredRevision(), true);
+    assert.match(errors[0]?.message, /base size is invalid/);
+    await recovered.commit({
+        blockID: recovered.snapshot().editableBlocks[2].id,
+        replacementMarkdown: 'Summary.',
+    });
+
+    const reopened = await openMarkdownRevisionSession({
+        baseDocument,
+        store: new ZoteroMarkdownRevisionStore(options),
+    });
+    assert.equal(reopened.hasUnreadableStoredRevision(), false);
+    assert.equal(
+        reopened.snapshot().markdown,
+        '# Paper\n\nThe result was 9O%.\n\nSummary.'
+    );
+    assert.equal(
+        await readFile(
+            path.join(rootPath, 'entries', CACHE_KEY, 'base.md'),
+            'utf8'
+        ),
+        baseDocument.markdown
+    );
+});
+
+test('reports a missing revision file as damaged and a failed read as retryable', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-revisions-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const ioUtils = createNodeIOUtils();
+    const nodeStat = ioUtils.stat;
+    // IOUtils rejects a missing path with a NotFoundError DOMException.
+    ioUtils.stat = async filePath => {
+        try {
+            return await nodeStat(filePath);
+        }
+        catch (error) {
+            if (error?.code !== 'ENOENT') throw error;
+            throw Object.assign(new Error('File not found'), {
+                name: 'NotFoundError',
+            });
+        }
+    };
+    const store = new ZoteroMarkdownRevisionStore({
+        rootPath,
+        ioUtils,
+        pathUtils: { join: path.join, parent: path.dirname },
+    });
+    const baseDocument = {
+        itemID: 42,
+        cacheKey: CACHE_KEY,
+        markdown: '# Paper\n\nThe result was 9O%.',
+        sourceMap: [],
+        assets: [],
+        assetBasePath: '',
+        extractedPages: 1,
+        totalPages: 1,
+    };
+    const session = await openMarkdownRevisionSession({ baseDocument, store });
+    await session.commit({
+        blockID: session.snapshot().editableBlocks[1].id,
+        replacementMarkdown: 'The result was 90%.',
+    });
+    const sourceMapPath = path.join(
+        rootPath,
+        'entries',
+        CACHE_KEY,
+        'source-map.json'
+    );
+    await rm(sourceMapPath);
+    await assert.rejects(() => store.load(CACHE_KEY), error => (
+        error.code === 'MARKDOWN_REVISION_INVALID'
+        && /source map is missing/.test(error.message)
+    ));
+
+    await writeFile(sourceMapPath, '[]');
+    const readError = Object.assign(new Error('The file is locked'), {
+        name: 'NotReadableError',
+    });
+    ioUtils.stat = async () => {
+        throw readError;
+    };
+    await assert.rejects(
+        () => store.load(CACHE_KEY),
+        error => error === readError
+    );
 });
 
 test('rejects an individual revision image above the existing image budget', async () => {

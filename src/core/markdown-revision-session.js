@@ -13,6 +13,7 @@ const MAX_CORRECTION_BYTES = 256 * 1024;
 const CACHE_KEY_PATTERN = /^[a-f0-9]{64}$/;
 const HEADING_PATTERN = /^ATXHeading[1-6]$/;
 const ANNOTATION_PROTECTION_ERROR_CODE = 'MARKDOWN_ANNOTATION_PROTECTED';
+const INVALID_REVISION_ERROR_CODE = 'MARKDOWN_REVISION_INVALID';
 const ANNOTATION_CONTEXT_LENGTH = 256;
 const MAX_ANNOTATION_RANGE_CANDIDATES = 1_000;
 
@@ -58,24 +59,57 @@ export function protectEditableBlocksWithAnnotations(blocks, annotationRanges) {
     });
 }
 
+export function invalidMarkdownRevisionError(message, cause) {
+    const error = new Error(
+        message,
+        cause === undefined ? undefined : { cause }
+    );
+    error.code = INVALID_REVISION_ERROR_CODE;
+    return error;
+}
+
+export function isInvalidMarkdownRevisionError(error) {
+    return error?.code === INVALID_REVISION_ERROR_CODE;
+}
+
 export async function openMarkdownRevisionSession({
     baseDocument,
     store,
     now = Date.now,
+    onError,
 }) {
     validateBaseDocument(baseDocument);
     if (!store?.load || !store?.save || !store?.delete) {
         throw new TypeError('A Markdown revision store is required');
     }
-    const stored = await store.load(baseDocument.cacheKey);
-    const revision = stored
-        ? validateStoredRevision(stored, baseDocument.cacheKey)
-        : createRevision(baseDocument);
-    return new MarkdownRevisionSession({ revision, store, now });
+    let revision;
+    let unreadableStoredRevision = false;
+    try {
+        const stored = await store.load(baseDocument.cacheKey);
+        revision = stored
+            ? readStoredRevision(stored, baseDocument.cacheKey)
+            : createRevision(baseDocument);
+    }
+    catch (error) {
+        // A read failure may be temporary, so it must not let a later save
+        // replace corrections that are still intact on disk.
+        if (!isInvalidMarkdownRevisionError(error)) throw error;
+        // Unusable saved corrections must not hide the document. They are
+        // kept on disk until the next save replaces them.
+        onError?.(error);
+        revision = createRevision(baseDocument);
+        unreadableStoredRevision = true;
+    }
+    return new MarkdownRevisionSession({
+        revision,
+        store,
+        now,
+        unreadableStoredRevision,
+    });
 }
 
 export function snapshotStoredMarkdownRevision(stored, cacheKey) {
-    return materializeRevision(validateStoredRevision(stored, cacheKey));
+    return materializeRevision(readStoredRevision(stored, cacheKey));
 }
 
 export function createMarkdownRevisionSessionRegistry({
@@ -143,15 +177,20 @@ export function createMarkdownRevisionSessionRegistry({
 }
 
 class MarkdownRevisionSession {
-    constructor({ revision, store, now }) {
+    constructor({ revision, store, now, unreadableStoredRevision = false }) {
         this.revision = revision;
         this.store = store;
         this.now = now;
+        this.unreadableStoredRevision = unreadableStoredRevision;
         this.operationTail = Promise.resolve();
     }
 
     snapshot() {
         return materializeRevision(this.revision);
+    }
+
+    hasUnreadableStoredRevision() {
+        return this.unreadableStoredRevision;
     }
 
     commit({
@@ -244,7 +283,14 @@ class MarkdownRevisionSession {
     }
 
     async #persist(revision) {
-        if (!revision.corrections.length) {
+        if (this.unreadableStoredRevision) {
+            // The store keeps an existing base immutable, so a damaged entry
+            // is removed before the first correction made over it is saved.
+            await this.store.delete(revision.base.cacheKey);
+            this.unreadableStoredRevision = false;
+            if (!revision.corrections.length) return;
+        }
+        else if (!revision.corrections.length) {
             await this.store.delete(revision.base.cacheKey);
             return;
         }
@@ -269,6 +315,17 @@ function createRevision(baseDocument) {
         blocks: collectEditableBlocks(base.markdown),
         corrections: [],
     };
+}
+
+function readStoredRevision(value, cacheKey) {
+    try {
+        return validateStoredRevision(value, cacheKey);
+    }
+    catch (error) {
+        throw isInvalidMarkdownRevisionError(error)
+            ? error
+            : invalidMarkdownRevisionError(error.message, error);
+    }
 }
 
 function validateStoredRevision(value, cacheKey) {

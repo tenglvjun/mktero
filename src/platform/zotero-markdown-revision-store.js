@@ -1,6 +1,7 @@
 import { serializeFigureMap, parseFigureMapJSON } from '../figures/figure-map-serialization.js';
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { sha256Hex } from '../core/sha256.js';
+import { invalidMarkdownRevisionError } from '../core/markdown-revision-session.js';
 
 const STORE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'metadata.json';
@@ -109,12 +110,15 @@ export class ZoteroMarkdownRevisionStore {
             correctionData = JSON.parse(correctionsJSON);
         }
         catch (error) {
-            throw new Error('Invalid Markdown revision data', { cause: error });
+            throw invalidMarkdownRevisionError(
+                'Invalid Markdown revision data',
+                error
+            );
         }
         if (!Array.isArray(sourceMap)
             || !Array.isArray(correctionData?.blocks)
             || !Array.isArray(correctionData?.corrections)) {
-            throw new Error('Invalid Markdown revision data');
+            throw invalidMarkdownRevisionError('Invalid Markdown revision data');
         }
         let figureMap;
         if (validSize(metadata.figureMapBytes, FIGURE_LIMITS.maxMapBytes) && metadata.figureMapBytes > 0) {
@@ -251,33 +255,51 @@ export class ZoteroMarkdownRevisionStore {
     }
 
     async #readMetadata(metadataPath, cacheKey) {
+        const json = await this.io.readUTF8(metadataPath);
         let metadata;
         try {
-            metadata = JSON.parse(await this.io.readUTF8(metadataPath));
+            metadata = JSON.parse(json);
         }
         catch (error) {
-            throw new Error('Invalid revision metadata', { cause: error });
+            throw invalidMarkdownRevisionError(
+                'Invalid revision metadata',
+                error
+            );
         }
         validateMetadata(metadata, cacheKey);
         return metadata;
     }
 
     async #readSizedUTF8(filePath, expectedBytes, maxBytes, label) {
-        const info = await this.io.stat(filePath);
+        const info = await this.#statRevisionFile(filePath, label);
         if (!Number.isSafeInteger(info?.size)
             || info.size !== expectedBytes
             || info.size > maxBytes) {
-            throw new Error(`${label} size is invalid`);
+            throw invalidMarkdownRevisionError(`${label} size is invalid`);
         }
         return this.io.readUTF8(filePath);
     }
 
     async #readSizedBinary(filePath, expectedBytes, label) {
-        const info = await this.io.stat(filePath);
+        const info = await this.#statRevisionFile(filePath, label);
         if (!Number.isSafeInteger(info?.size) || info.size !== expectedBytes) {
-            throw new Error(`${label} size is invalid`);
+            throw invalidMarkdownRevisionError(`${label} size is invalid`);
         }
         return this.io.read(filePath);
+    }
+
+    // A file named by valid metadata but missing from disk leaves an entry
+    // that cannot be read again; other stat failures may be temporary.
+    async #statRevisionFile(filePath, label) {
+        try {
+            return await this.io.stat(filePath);
+        }
+        catch (error) {
+            if (error?.name === 'NotFoundError') {
+                throw invalidMarkdownRevisionError(`${label} is missing`, error);
+            }
+            throw error;
+        }
     }
 
     async #ensureRoot() {
@@ -387,7 +409,7 @@ function validateMetadata(metadata, cacheKey) {
         || typeof metadata.assetBasePath !== 'string'
         || !Array.isArray(metadata.assets)
         || metadata.assets.length > MAX_ASSETS) {
-        throw new Error('Invalid revision metadata');
+        throw invalidMarkdownRevisionError('Invalid revision metadata');
     }
     let totalAssetBytes = 0;
     for (const asset of metadata.assets) {
@@ -396,12 +418,12 @@ function validateMetadata(metadata, cacheKey) {
             || !asset.path
             || typeof asset.mimeType !== 'string'
             || !validSize(asset.size, MAX_SINGLE_ASSET_BYTES)) {
-            throw new Error('Invalid revision metadata');
+            throw invalidMarkdownRevisionError('Invalid revision metadata');
         }
         totalAssetBytes += asset.size;
     }
     if (totalAssetBytes > MAX_TOTAL_ASSET_BYTES) {
-        throw new Error('Invalid revision metadata');
+        throw invalidMarkdownRevisionError('Invalid revision metadata');
     }
 }
 
