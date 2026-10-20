@@ -92,7 +92,12 @@ export function createAnchoredPopup(parent, {
         }
         popup.addEventListener('focusin', cancelClose);
         popup.addEventListener('focusout', event => {
-            if (!popup?.contains(event.relatedTarget)) scheduleClose();
+            if (popup?.contains(event.relatedTarget)) return;
+            if (!event.relatedTarget
+                && lostFocusToPopupState(popup, event.target)) {
+                return;
+            }
+            scheduleClose();
         });
         popup.addEventListener('keydown', event => {
             if (event.key !== 'Escape') return;
@@ -160,6 +165,16 @@ function positionPopup(popup, anchor, ownerWindow, viewportPadding) {
     popup.style.top = `${Math.round(
         placeAbove ? Math.max(viewportPadding, above) : below
     )}px`;
+}
+
+// Gecko and Blink blur a focused control that becomes disabled or hidden and
+// report no relatedTarget. That is the popup changing its own state, such as a
+// button starting async work, not the user leaving the popup.
+function lostFocusToPopupState(popup, target) {
+    if (!popup || !target?.isConnected || !popup.contains(target)) {
+        return false;
+    }
+    return Boolean(target.disabled || target.closest?.('[hidden]'));
 }
 
 function clamp(value, minimum, maximum) {

@@ -33,6 +33,42 @@ function textNodeContaining(element, text) {
     return null;
 }
 
+// jsdom keeps focus on a control that becomes disabled or hidden. Gecko and
+// Blink move focus to the body and fire focusout without a relatedTarget.
+function blurFocusedControlToBody(window, element) {
+    const { disabled, hidden } = element;
+    const document = element.ownerDocument;
+    const suppress = event => event.stopImmediatePropagation();
+    document.addEventListener('blur', suppress, true);
+    document.addEventListener('focusout', suppress, true);
+    element.disabled = false;
+    element.hidden = false;
+    element.blur();
+    element.disabled = disabled;
+    element.hidden = hidden;
+    document.removeEventListener('blur', suppress, true);
+    document.removeEventListener('focusout', suppress, true);
+    element.dispatchEvent(new window.FocusEvent('focusout', {
+        bubbles: true,
+        relatedTarget: null,
+    }));
+}
+
+function stubPopupTimers(window) {
+    const scheduled = [];
+    let nextTimerID = 1;
+    window.setTimeout = (callback, delay) => {
+        const timer = { callback, delay, id: nextTimerID++ };
+        scheduled.push(timer);
+        return timer.id;
+    };
+    window.clearTimeout = timerID => {
+        const index = scheduled.findIndex(timer => timer.id === timerID);
+        if (index >= 0) scheduled.splice(index, 1);
+    };
+    return scheduled;
+}
+
 function renderedLineTexts(document) {
     return [...document.querySelectorAll('.cm-line')].map(line => (
         line.textContent
@@ -7335,6 +7371,106 @@ test('clears streamed selection text on cancellation and ignores late deltas', (
     onTextDelta(' late', 'Partial translation late');
     assert.equal(result.hidden, true);
     assert.equal(result.textContent, '');
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('keeps translating when the clicked translate button drops focus', async () => {
+    const dom = new JSDOM('<!doctype html><div id="popup-parent"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const parent = document.querySelector('#popup-parent');
+    const anchor = document.createElement('span');
+    parent.appendChild(anchor);
+    let resolveTranslation;
+    let cancellations = 0;
+    const popup = createAnnotationPopup(parent, {
+        translateSelection: () => new Promise(resolve => {
+            resolveTranslation = resolve;
+        }),
+        cancelSelectionTranslation: () => {
+            cancellations += 1;
+        },
+    });
+
+    popup.openSelection({
+        anchor,
+        selection: { text: 'Selected text' },
+        selectionContext: { side: 'source' },
+    });
+    const scheduled = stubPopupTimers(dom.window);
+    const actions = parent.querySelector('.mktero-markdown-selection-actions');
+    const translateButton = actions.querySelector(
+        '[data-action="translate-selection"]'
+    );
+    // Windows and Linux focus a button on click. Starting the request then
+    // disables and hides that button, which blurs it.
+    translateButton.focus();
+    translateButton.click();
+    blurFocusedControlToBody(dom.window, translateButton);
+
+    assert.deepEqual(scheduled, []);
+    assert.equal(popup.isSelectionOpen(), true);
+    assert.equal(actions.dataset.translationStatus, 'loading');
+    resolveTranslation({ text: '译文' });
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(actions.dataset.translationStatus, 'success');
+    assert.equal(
+        actions.querySelector('.mktero-selection-translation-result').textContent,
+        '译文'
+    );
+    assert.equal(cancellations, 0);
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('keeps a source navigation error visible after its button drops focus', async () => {
+    const dom = new JSDOM('<!doctype html><div id="popup-parent"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const parent = document.querySelector('#popup-parent');
+    const anchor = document.createElement('span');
+    parent.appendChild(anchor);
+    let rejectNavigation;
+    const reported = [];
+    const popup = createAnnotationPopup(parent, {
+        openSourceLocation: () => new Promise((_resolve, reject) => {
+            rejectNavigation = reject;
+        }),
+        onSourceNavigationError: error => reported.push(error),
+    });
+
+    popup.openSelection({
+        anchor,
+        selection: { text: 'Selected text' },
+        selectionContext: { side: 'source' },
+        sourceLocation: { pageIndex: 0 },
+    });
+    const scheduled = stubPopupTimers(dom.window);
+    const sourceButton = parent.querySelector('[data-action="view-in-pdf"]');
+    sourceButton.focus();
+    sourceButton.click();
+    blurFocusedControlToBody(dom.window, sourceButton);
+    assert.deepEqual(scheduled, []);
+
+    const failure = new Error('not found');
+    failure.code = 'MKTERO_PDF_TEXT_NOT_FOUND';
+    rejectNavigation(failure);
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(reported, [failure]);
+    assert.equal(popup.isSelectionOpen(), true);
+    const error = parent.querySelector('.mktero-annotation-action-error');
+    assert.equal(error.hidden, false);
+    assert.equal(
+        error.textContent,
+        'The selected text could not be found in the PDF.'
+    );
 
     popup.destroy();
     dom.window.close();
