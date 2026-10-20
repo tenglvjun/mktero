@@ -970,6 +970,7 @@ class MarkdownTabView {
     destroy() {
         if (this.destroyed) return;
         this.flushPersistedReadingPosition();
+        this.flushPendingCorrection();
         this.destroyed = true;
         this.landmarkItems = null;
         this.shortcutsPanelOpen = false;
@@ -3803,6 +3804,32 @@ class MarkdownTabView {
 
     reportCorrectionError(error) {
         this.zotero?.logError?.(error);
+    }
+
+    // Zotero cannot veto a tab close, so an open correction is saved instead
+    // of discarded. The commit must start synchronously: the tab's onClose
+    // closes the revision session right after destroy(), and that close waits
+    // only for operations already queued on the session.
+    flushPendingCorrection() {
+        let correction = null;
+        try {
+            correction = this.editor?.getPendingCorrection?.() || null;
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+            return;
+        }
+        if (!correction
+            || typeof this.model.onCommitCorrection !== 'function') {
+            return;
+        }
+        try {
+            Promise.resolve(this.model.onCommitCorrection(correction))
+                .catch(error => this.zotero?.logError?.(error));
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
     }
 
     showCorrectionUndo(blockID) {

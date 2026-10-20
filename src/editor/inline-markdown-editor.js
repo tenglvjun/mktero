@@ -792,22 +792,22 @@ export function createInlineMarkdownEditor({
         endActiveCorrection({ revert: true });
         return true;
     };
+    const activeCorrectionPayload = active => ({
+        blockID: active.blockID,
+        replacementMarkdown: view.state.sliceDoc(active.from, active.to),
+        ...(active.annotationRanges.length ? {
+            annotationRanges: active.annotationRanges,
+        } : {}),
+    });
     const commitActiveCorrection = async () => {
         if (!activeCorrection || correctionBusy || !activeCorrection.dirty) {
             return false;
         }
         const active = activeCorrection;
-        const replacementMarkdown = view.state.sliceDoc(active.from, active.to);
         correctionBusy = true;
         correctionToolbar?.setBusy(true);
         try {
-            await onCommitCorrection({
-                blockID: active.blockID,
-                replacementMarkdown,
-                ...(active.annotationRanges.length ? {
-                    annotationRanges: active.annotationRanges,
-                } : {}),
-            });
+            await onCommitCorrection(activeCorrectionPayload(active));
             if (activeCorrection?.blockID === active.blockID) {
                 endActiveCorrection();
             }
@@ -1160,6 +1160,17 @@ export function createInlineMarkdownEditor({
         },
         hasActiveCorrection() {
             return Boolean(activeCorrection);
+        },
+        // A closing tab cannot be vetoed, so its owner saves this draft
+        // before destroy() cancels the open block or table cell.
+        getPendingCorrection() {
+            if (destroyed) return null;
+            if (activeCorrection) {
+                return activeCorrection.dirty
+                    ? activeCorrectionPayload(activeCorrection)
+                    : null;
+            }
+            return activeTableCorrection?.pendingCorrection?.() || null;
         },
         setDocument,
         showRestoredFigure(figure) {

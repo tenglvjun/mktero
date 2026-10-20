@@ -970,7 +970,6 @@ globalThis.shutdown = function shutdown() {
     abortAllConversions();
     abortObsidianExport();
     abortAllTranslations();
-    destroyAllRevisionSessions();
     runtime.reasoningCatalogStore?.dispose();
     runtime.disposeReasoningCatalogHost?.();
     runtime.disposeAnnotationObserver?.();
@@ -991,7 +990,10 @@ globalThis.shutdown = function shutdown() {
     disposeAllContextMenus();
     runtime.actionsTags?.dispose();
     runtime.citationPresenter?.dispose();
+    // Closing the tabs saves any open correction into its revision session,
+    // so the sessions are destroyed only after the presenter.
     runtime.presenter?.dispose();
+    destroyAllRevisionSessions();
     if (runtime.preferencePaneID) {
         Zotero.PreferencePanes.unregister?.(runtime.preferencePaneID);
     }

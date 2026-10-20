@@ -7517,3 +7517,69 @@ test("'?' works from a text field focus target but not from an input", () => {
         view.destroy();
     }
 });
+
+test('saves an open correction before a closing tab destroys its editor', async () => {
+    const markdown = 'The study included 5O participants.';
+    const events = [];
+    const errors = [];
+    let pending = {
+        blockID: 'paragraph-1',
+        replacementMarkdown: 'The study included 50 participants.',
+    };
+    let failSave = false;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+        correctionMode: true,
+        editableBlocks: [{
+            id: 'paragraph-1',
+            type: 'paragraph',
+            from: 0,
+            to: markdown.length,
+        }],
+        onSetCorrectionMode() {},
+        onCommitCorrection(correction) {
+            events.push(['commit', correction]);
+            return failSave
+                ? Promise.reject(new Error('disk full'))
+                : Promise.resolve({});
+        },
+    });
+    const editorFactory = () => ({
+        getPendingCorrection: () => pending,
+        setDocument() {},
+        setCorrectionState() {},
+        refreshRendering() {},
+        destroy() {
+            events.push(['destroy-editor']);
+        },
+    });
+    const zotero = { logError: error => errors.push(error.message) };
+
+    const first = createView(model, zotero, { editorFactory });
+    first.view.destroy();
+    // The tab closes its revision session right after destroy() returns, so
+    // the commit must already be queued.
+    assert.deepEqual(events, [
+        ['commit', pending],
+        ['destroy-editor'],
+    ]);
+    first.view.destroy();
+    assert.equal(events.length, 2);
+
+    events.length = 0;
+    failSave = true;
+    const second = createView(model, zotero, { editorFactory });
+    second.view.destroy();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(events.map(([type]) => type), ['commit', 'destroy-editor']);
+    assert.deepEqual(errors, ['disk full']);
+
+    events.length = 0;
+    pending = null;
+    const third = createView(model, zotero, { editorFactory });
+    third.view.destroy();
+    assert.deepEqual(events, [['destroy-editor']]);
+});
