@@ -477,6 +477,196 @@ test('aborts live AI SDK requests across bootstrap translation lifecycles', {
     assert.ok(errors.every(error => !String(error).includes('test-token')));
 });
 
+test('translates in a main window opened after the startup window closed', {
+    timeout: 15_000,
+}, async t => {
+    const previousGlobals = captureGlobals([
+        'Zotero',
+        'IOUtils',
+        'PathUtils',
+        'fetch',
+        'startup',
+        'shutdown',
+        'onMainWindowLoad',
+        'onMainWindowUnload',
+        'Services',
+        '__MKTERO_MARKDOWN_STYLES__',
+    ]);
+    const profilePath = await mkdtemp(path.join(
+        os.tmpdir(),
+        'mktero-translation-reopen-'
+    ));
+    const pdfPath = path.join(profilePath, 'paper.pdf');
+    const pdfData = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    await writeFile(pdfPath, pdfData);
+    const ioUtils = createNodeIOUtils();
+    const pathUtils = {
+        join: path.join,
+        parent: path.dirname,
+        filename: path.basename,
+        tempDir: path.join(profilePath, 'tmp'),
+    };
+    const chatRequests = [];
+    const timers = [];
+    const errors = [];
+    let toolbarHandler;
+    // On macOS Zotero keeps running after its main window closes. The closed
+    // window's fetch and timers then throw, as Gecko does.
+    const createReopenableWindow = name => {
+        const view = createMainWindow(AbortController, []);
+        const assertOpen = () => {
+            if (!view.closed) return;
+            const error = new Error(`NS_ERROR_NOT_INITIALIZED from ${name}`);
+            error.name = 'NS_ERROR_NOT_INITIALIZED';
+            throw error;
+        };
+        view.closed = false;
+        view.setTimeout = (_callback, delay) => {
+            assertOpen();
+            timers.push(`${name} ${delay}`);
+            return timers.length;
+        };
+        view.clearTimeout = () => assertOpen();
+        view.fetch = async (url, { signal } = {}) => {
+            assertOpen();
+            if (!String(url).endsWith('/chat/completions')) {
+                throw new Error('offline test transport');
+            }
+            chatRequests.push({ window: name, signal });
+            return new Promise((_, reject) => {
+                const abort = () => {
+                    const error = signal.reason || new Error('aborted');
+                    if (!error.name) error.name = 'AbortError';
+                    reject(error);
+                };
+                if (signal.aborted) abort();
+                else signal.addEventListener('abort', abort, { once: true });
+            });
+        };
+        return view;
+    };
+    const firstWindow = createReopenableWindow('first');
+    const secondWindow = createReopenableWindow('second');
+    let currentWindow = firstWindow;
+    const item = {
+        id: 42,
+        attachmentFilename: 'paper.pdf',
+        parentItem: null,
+        isPDFAttachment: () => true,
+        getDisplayTitle: () => 'Paper',
+        getFilePathAsync: async () => pdfPath,
+        getAnnotations: () => [],
+    };
+    const preferences = new Map([
+        ['extensions.mktero.cacheEnabled', true],
+        ['extensions.mktero.aiProvider', 'custom'],
+        ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
+        ['extensions.mktero.aiApiBase', 'https://ai.example.com/v1'],
+        ['extensions.mktero.aiApiKey', 'test-token'],
+        ['extensions.mktero.aiModel', 'test-chat'],
+        ['extensions.mktero.aiTargetLanguage', 'zh-CN'],
+        ['extensions.mktero.aiRequestTimeoutMs', 120_000],
+        ['extensions.mktero.aiMaxOutputTokens', 2_048],
+    ]);
+    globalThis.Zotero = {
+        version: '9.0.6',
+        locale: 'en-US',
+        uiReadyPromise: Promise.resolve(),
+        Profile: { dir: profilePath },
+        Session: { state: { windows: [] } },
+        Prefs: { get: key => preferences.get(key) ?? '' },
+        Items: {
+            getAsync: async () => item,
+            loadDataTypes: async () => {},
+        },
+        PreferencePanes: {
+            register: async options => options.id,
+            unregister() {},
+        },
+        Reader: {
+            registerEventListener(_type, handler) {
+                toolbarHandler = handler;
+            },
+        },
+        getMainWindow: () => currentWindow,
+        debug() {},
+        logError(error) { errors.push(error); },
+    };
+    globalThis.IOUtils = ioUtils;
+    globalThis.PathUtils = pathUtils;
+    globalThis.Services = { obs: createObserverService() };
+    globalThis.__MKTERO_MARKDOWN_STYLES__ = readFileSync(
+        new URL('../ui/markdown.css', import.meta.url),
+        'utf8'
+    );
+    globalThis.fetch = async () => {
+        throw new Error('offline sandbox test transport');
+    };
+
+    t.after(async () => {
+        globalThis.shutdown?.();
+        firstWindow.document.defaultView.close();
+        secondWindow.document.defaultView.close();
+        restoreGlobals(previousGlobals);
+        await rm(profilePath, { recursive: true, force: true });
+    });
+
+    const cacheKey = await createMinerUCacheKey(pdfData);
+    await createZoteroMarkdownCache({
+        zotero: globalThis.Zotero,
+        ioUtils,
+        pathUtils,
+    }).put(cacheKey, {
+        markdown: '# Paper\n\nTranslate this paragraph.',
+        assets: [],
+        sourceMap: [],
+        extractedPages: 1,
+        totalPages: 1,
+    });
+    await import('../src/bootstrap.js?translation-window-reopen-regression');
+    await globalThis.startup({
+        id: 'mktero@tenglvjun.github.io',
+        rootURI: 'resource://mktero/',
+    });
+    const openTranslatableTab = async view => {
+        const toolbarButtons = [];
+        toolbarHandler({
+            reader: { type: 'pdf', itemID: 42 },
+            doc: createToolbarDocument(),
+            append: button => toolbarButtons.push(button),
+        });
+        toolbarButtons[0].click();
+        const root = await waitFor(() => view.tabRoot('tab-1'));
+        await waitFor(() => !root.shadowRoot.querySelector(
+            '#mktero-translate-document'
+        )?.disabled);
+        return root.shadowRoot;
+    };
+
+    startTranslation(await openTranslatableTab(firstWindow));
+    const firstRequest = await waitFor(() => chatRequests[0]);
+    assert.equal(firstRequest.window, 'first');
+    firstWindow.Zotero_Tabs.close('tab-1');
+    await waitFor(() => firstRequest.signal.aborted);
+
+    globalThis.onMainWindowUnload({ window: firstWindow });
+    firstWindow.closed = true;
+    currentWindow = secondWindow;
+    globalThis.onMainWindowLoad({ window: secondWindow });
+
+    startTranslation(await openTranslatableTab(secondWindow));
+    const secondRequest = await waitFor(() => chatRequests[1]);
+    assert.equal(secondRequest.window, 'second');
+    // The reasoning catalog loads once at startup, then one timer per request.
+    assert.deepEqual(timers, ['first 30000', 'first 120000', 'second 120000']);
+    secondWindow.Zotero_Tabs.close('tab-1');
+    await waitFor(() => secondRequest.signal.aborted);
+    assert.deepEqual(
+        errors.filter(error => /NS_ERROR_NOT_INITIALIZED/u.test(String(error?.stack || error))),
+        []
+    );
+});
+
 test('uses the language menu without changing the default translation language', {
     timeout: 10_000,
 }, async t => {

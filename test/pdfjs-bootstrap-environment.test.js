@@ -92,3 +92,43 @@ test('adopts document and FontFace so PDF.js can load standard fonts', async () 
         else globalThis.FontFace = previousFontFace;
     }
 });
+
+test('bridges session-long PDF.js globals from the hidden DOM window first', async () => {
+    const NativeAbortController = globalThis.AbortController;
+    const NativeAbortSignal = globalThis.AbortSignal;
+    const nativeStructuredClone = globalThis.structuredClone;
+    const previousZotero = globalThis.Zotero;
+    const previousServices = globalThis.Services;
+    delete globalThis.AbortController;
+    delete globalThis.AbortSignal;
+    delete globalThis.structuredClone;
+    // The startup main window can close while Zotero keeps running on macOS;
+    // a structuredClone bound to it would then throw.
+    const mainWindow = {
+        AbortController: class ClosedWindowAbortController {},
+        AbortSignal: class ClosedWindowAbortSignal {},
+        structuredClone() { throw new Error('NS_ERROR_NOT_INITIALIZED'); },
+    };
+    globalThis.Zotero = { getMainWindow: () => mainWindow };
+    globalThis.Services = { appShell: { hiddenDOMWindow: {
+        AbortController: NativeAbortController,
+        AbortSignal: NativeAbortSignal,
+        structuredClone: nativeStructuredClone,
+    } } };
+
+    try {
+        await import('../src/pdf/pdfjs-bootstrap-environment.js?hidden-window');
+        assert.equal(globalThis.AbortController, NativeAbortController);
+        assert.equal(globalThis.AbortSignal, NativeAbortSignal);
+        assert.deepEqual(globalThis.structuredClone({ page: 1 }), { page: 1 });
+    }
+    finally {
+        globalThis.AbortController = NativeAbortController;
+        globalThis.AbortSignal = NativeAbortSignal;
+        globalThis.structuredClone = nativeStructuredClone;
+        if (previousZotero === undefined) delete globalThis.Zotero;
+        else globalThis.Zotero = previousZotero;
+        if (previousServices === undefined) delete globalThis.Services;
+        else globalThis.Services = previousServices;
+    }
+});

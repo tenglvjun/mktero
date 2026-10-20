@@ -110,3 +110,59 @@ test('rejects cancellation while the browser is encoding and ignores late callba
     await rejected;
     callback(new Blob([createTestPNG()], { type: 'image/png' }));
 });
+
+test('uses the main window that is open when each canvas operation runs', async () => {
+    const created = [];
+    const createWindow = name => {
+        const view = {
+            closed: false,
+            Blob,
+            URL: {
+                createObjectURL: () => `blob:${name}`,
+                revokeObjectURL() {},
+            },
+            Image: class {
+                set src(value) {
+                    this.source = value;
+                    this.naturalWidth = 8;
+                    this.naturalHeight = 8;
+                    queueMicrotask(() => this.onload?.());
+                }
+                removeAttribute() { this.source = null; }
+            },
+        };
+        view.document = {
+            defaultView: view,
+            createElementNS() {
+                // A closed window's document can no longer create elements.
+                if (view.closed) throw new Error('NS_ERROR_NOT_INITIALIZED');
+                created.push(name);
+                return {};
+            },
+        };
+        return view;
+    };
+    const first = createWindow('first');
+    const second = createWindow('second');
+    let current = first;
+    const env = createZoteroFigureCanvasEnvironment({ getMainWindow: () => current });
+
+    env.createCanvas(4, 4);
+    first.closed = true;
+    current = second;
+    env.createCanvas(4, 4);
+    assert.equal(env.ownerDocument, second.document);
+    assert.deepEqual({ ...env }.ownerDocument, second.document);
+    const decoded = await env.decodeImage({ mimeType: 'image/png', data: createTestPNG() });
+    assert.equal(decoded.image.source, 'blob:second');
+    decoded.close();
+    assert.deepEqual(created, ['first', 'second']);
+});
+
+test('reports an unavailable document instead of using a closed window', () => {
+    const view = { closed: false };
+    view.document = { defaultView: view, createElementNS: () => ({}) };
+    const env = createZoteroFigureCanvasEnvironment({ getMainWindow: () => view });
+    view.closed = true;
+    assert.throws(() => env.createCanvas(4, 4), /Figure canvas document is unavailable/u);
+});

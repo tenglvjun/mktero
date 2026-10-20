@@ -1,5 +1,6 @@
 import '../platform/web-streams.js';
 import './pdfjs-runtime-compat.js';
+import { lifetimeZoteroWindow } from '../platform/zotero-window.js';
 
 const PDFJS_WINDOW_GLOBALS = [
     'Path2D',
@@ -12,12 +13,15 @@ const PDFJS_WINDOW_GLOBALS = [
     'FontFace',
 ];
 
-const mainWindow = globalThis.Zotero?.getMainWindow?.();
-const windowAbortController = mainWindow?.AbortController;
-const windowAbortSignal = mainWindow?.AbortSignal;
-const windowDOMMatrix = mainWindow?.DOMMatrix;
-const windowDOMException = mainWindow?.DOMException;
-const windowStructuredClone = mainWindow?.structuredClone;
+// These globals are bridged once and kept for the whole extension session, so
+// they come from a window that lives as long as Zotero (see zotero-window.js).
+// A structuredClone bound to a main window that later closes would throw.
+const bridgeWindow = lifetimeZoteroWindow();
+const windowAbortController = bridgeWindow?.AbortController;
+const windowAbortSignal = bridgeWindow?.AbortSignal;
+const windowDOMMatrix = bridgeWindow?.DOMMatrix;
+const windowDOMException = bridgeWindow?.DOMException;
+const windowStructuredClone = bridgeWindow?.structuredClone;
 
 export function adoptPDFJSWindowGlobals(view) {
     if (!view) return;
@@ -103,7 +107,7 @@ export class MkteroFilterFactory {
     destroy() {}
 }
 
-adoptPDFJSWindowGlobals(mainWindow);
+adoptPDFJSWindowGlobals(bridgeWindow);
 
 // PDF.js constructs this browser primitive while its module loads, even when
 // Mktero only uses getTextContent in Zotero's DOM-free bootstrap sandbox.
@@ -136,5 +140,5 @@ if (typeof globalThis.AbortSignal !== 'function'
 
 if (typeof globalThis.structuredClone !== 'function'
     && typeof windowStructuredClone === 'function') {
-    globalThis.structuredClone = windowStructuredClone.bind(mainWindow);
+    globalThis.structuredClone = windowStructuredClone.bind(bridgeWindow);
 }
