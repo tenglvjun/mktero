@@ -1,5 +1,8 @@
 import { translateEnglish } from '../i18n/localization.js';
 import { MKTERO_REQUEST_STAGES } from '../mktero/mktero-conversion-client.js';
+import {
+    MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING,
+} from '../core/markdown-local-annotations.js';
 
 const ERROR_MESSAGE_KEYS = new Map([
     ['Only PDF attachments can be converted', 'error.onlyPdf'],
@@ -94,6 +97,10 @@ const WARNING_MESSAGE_KEYS = new Map([
     [
         'Local Markdown annotations could not be loaded.',
         'warning.localAnnotationsUnavailable',
+    ],
+    [
+        MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING,
+        'warning.localAnnotationsSetAside',
     ],
     [
         'Some local Markdown annotations could not be synchronized to the PDF.',

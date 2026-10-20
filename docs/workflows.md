@@ -99,7 +99,11 @@ endings immediately below figures and display formulas.
 Selecting Markdown text can create a local annotation immediately; Mktero then
 creates the corresponding Zotero annotation only when the local PDF text index
 can identify one reliable match. Repeated or ambiguous text remains local and
-can be retried instead of receiving a guessed PDF position. When a highlight
+can be retried instead of receiving a guessed PDF position. If saved local
+annotations cannot be fully read, Mktero keeps the original file as a backup
+named `item-<id>.corrupt-<timestamp>.json` in `mktero-annotations/v1` in the
+Zotero profile, shows a warning, keeps the annotations that are still
+readable, and accepts new annotations. When a highlight
 overlaps a citation, table reference, or figure reference, that semantic
 reference keeps interaction priority; annotation actions remain available from
 the surrounding highlighted text or its note marker.
