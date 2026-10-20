@@ -925,6 +925,87 @@ test('binds the provider fetch function to its runtime window', async () => {
     assert.match(calls[0].input, /chat\/completions$/);
 });
 
+test('keeps injected and window request timers in separate pairs', async () => {
+    const calls = [];
+    const runtimeWindow = {
+        fetch: () => jsonResponse({
+            choices: [{ message: { role: 'assistant', content: 'Done' } }],
+        }),
+        setTimeout: () => { calls.push('window.set'); return 1; },
+        clearTimeout: timerID => calls.push(`window.clear ${timerID}`),
+    };
+    const request = { settings: SETTINGS, messages: [{ role: 'user', content: 'Test' }] };
+
+    // A custom timer ID must never reach the window's clearTimeout.
+    await new AISDKGateway({ runtimeWindow, setTimer: () => 'custom' })
+        .generateText(request);
+    // A lone clearTimer cannot clear window timer handles, so it is ignored.
+    await new AISDKGateway({
+        runtimeWindow,
+        clearTimer: timerID => calls.push(`custom.clear ${timerID}`),
+    }).generateText(request);
+
+    assert.deepEqual(calls, ['window.set', 'window.clear 1']);
+});
+
+test('keeps working after the Zotero main window closes and reopens', async () => {
+    const log = [];
+    // A closed Gecko window throws from its fetch and timers.
+    const createWindow = name => {
+        const view = {
+            closed: false,
+            fetch(input) {
+                if (view.closed) throw new Error('NS_ERROR_NOT_INITIALIZED');
+                log.push(`${name}.fetch ${String(input).replace(/^.*\//u, '')}`);
+                return jsonResponse({
+                    choices: [{ message: { role: 'assistant', content: `From ${name}` } }],
+                });
+            },
+            setTimeout(_callback, delay) {
+                if (view.closed) throw new Error('NS_ERROR_NOT_INITIALIZED');
+                log.push(`${name}.setTimeout ${delay}`);
+                return `${name}-timer`;
+            },
+            clearTimeout(timerID) {
+                if (view.closed) throw new Error('NS_ERROR_NOT_INITIALIZED');
+                log.push(`${name}.clearTimeout ${timerID}`);
+            },
+        };
+        return view;
+    };
+    const first = createWindow('first');
+    const second = createWindow('second');
+    let current = first;
+    const gateway = new AISDKGateway({
+        runtimeWindow: () => current,
+        stream: async () => ({
+            textStream: { async *[Symbol.asyncIterator]() { yield 'Streamed'; } },
+            usage: Promise.resolve({}),
+            response: Promise.resolve({ modelId: 'stream-model' }),
+            finishReason: Promise.resolve('stop'),
+        }),
+    });
+    const request = { settings: SETTINGS, messages: [{ role: 'user', content: 'Test' }] };
+
+    assert.equal((await gateway.generateText(request)).text, 'From first');
+    first.closed = true;
+    current = second;
+    assert.equal((await gateway.streamText(request)).text, 'Streamed');
+    assert.equal((await gateway.generateText(request)).text, 'From second');
+
+    const timeout = SETTINGS.requestTimeoutMs;
+    assert.deepEqual(log, [
+        `first.setTimeout ${timeout}`,
+        'first.fetch completions',
+        'first.clearTimeout first-timer',
+        `second.setTimeout ${timeout}`,
+        'second.clearTimeout second-timer',
+        `second.setTimeout ${timeout}`,
+        'second.fetch completions',
+        'second.clearTimeout second-timer',
+    ]);
+});
+
 test('accepts response bytes created in the Zotero window realm', async () => {
     const payload = JSON.stringify({
         choices: [{

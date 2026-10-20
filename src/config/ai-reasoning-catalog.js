@@ -137,18 +137,6 @@ export function createAIReasoningCatalogStore({
     }
 }
 
-export function bindZoteroWindowFetch(zotero) {
-    try {
-        const runtimeWindow = zotero?.getMainWindow?.();
-        return typeof runtimeWindow?.fetch === 'function'
-            ? runtimeWindow.fetch.bind(runtimeWindow)
-            : undefined;
-    }
-    catch {
-        return undefined;
-    }
-}
-
 export function attachAIReasoningCatalogHost(zotero, store) {
     if (!zotero || !store) return () => {};
     const host = zotero.Mktero && typeof zotero.Mktero === 'object'

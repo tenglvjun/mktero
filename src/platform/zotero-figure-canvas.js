@@ -1,25 +1,36 @@
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { figureImageDimensions } from '../figures/figure-image-dimensions.js';
 import { throwIfFigureAborted, waitForFigureOperation } from '../figures/figure-async.js';
+import { liveZoteroWindow } from './zotero-window.js';
 
 const XHTML = 'http://www.w3.org/1999/xhtml';
 
-export function createZoteroFigureCanvasEnvironment(zotero) {
-    const ownerDocument = zotero?.getMainWindow?.()?.document;
-    if (typeof ownerDocument?.createElementNS !== 'function') {
-        throw new Error('Figure canvas document is unavailable');
-    }
+export function createZoteroFigureCanvasEnvironment(zotero, {
+    services = globalThis.Services,
+} = {}) {
+    // Resolve the document on every call: on macOS the main window open at
+    // startup can close while Zotero keeps running, and its document is dead.
+    const currentDocument = () => {
+        const ownerDocument = liveZoteroWindow({ zotero, services })?.document;
+        if (typeof ownerDocument?.createElementNS !== 'function') {
+            throw new Error('Figure canvas document is unavailable');
+        }
+        return ownerDocument;
+    };
+    currentDocument();
     return {
-        ownerDocument,
+        get ownerDocument() {
+            return currentDocument();
+        },
         createCanvas(width, height) {
-            const canvas = ownerDocument.createElementNS(XHTML, 'canvas');
+            const canvas = currentDocument().createElementNS(XHTML, 'canvas');
             canvas.width = width;
             canvas.height = height;
             return canvas;
         },
         async decodeImage(asset, { signal } = {}) {
             throwIfFigureAborted(signal);
-            const view = ownerDocument.defaultView;
+            const view = currentDocument().defaultView;
             const dimensions = figureImageDimensions(asset);
             if (!dimensions || dimensions.width < 1 || dimensions.height < 1
                 || dimensions.width * dimensions.height > FIGURE_LIMITS.maxDecodedImagePixels
@@ -72,7 +83,10 @@ export function createZoteroFigureCanvasEnvironment(zotero) {
                 || dataURL.length > prefix.length + Math.ceil(FIGURE_LIMITS.maxCropBytes / 3) * 4) {
                 throw new Error('Figure PNG encoding is unavailable');
             }
-            const decode = ownerDocument.defaultView?.atob?.bind(ownerDocument.defaultView) || globalThis.atob;
+            // Decode with the window that owns this canvas, not whichever
+            // window is current now.
+            const canvasView = canvas.ownerDocument?.defaultView;
+            const decode = canvasView?.atob?.bind(canvasView) || globalThis.atob;
             const binary = decode(dataURL.slice(prefix.length));
             if (!binary.length || binary.length > FIGURE_LIMITS.maxCropBytes) {
                 throw new Error('Figure PNG exceeds the encoding limit');

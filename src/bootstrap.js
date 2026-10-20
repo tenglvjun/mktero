@@ -47,7 +47,6 @@ import {
 } from './config/ai-preferences.js';
 import {
     attachAIReasoningCatalogHost,
-    bindZoteroWindowFetch,
     createAIReasoningCatalogStore,
 } from './config/ai-reasoning-catalog.js';
 import { CitationGraph } from './citations/citation-graph.js';
@@ -180,6 +179,11 @@ import {
     createZoteroMinerUPendingTaskStore,
 } from './mineru/pending-task-store.js';
 import { createRuntimeAbortController } from './platform/abort-controller.js';
+import {
+    createWindowFetch,
+    createWindowTimers,
+    liveZoteroWindow,
+} from './platform/zotero-window.js';
 import {
     createZoteroConversionProgress,
     installZoteroConversionProgressButton,
@@ -406,7 +410,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.translationService = new MarkdownTranslationService({
         aiGateway: new AISDKGateway({
             createAbortController: createZoteroAbortController,
-            runtimeWindow: Zotero.getMainWindow?.(),
+            runtimeWindow: () => liveZoteroWindow(),
             onDebug: message => Zotero.debug(message),
         }),
         cache,
@@ -801,16 +805,11 @@ globalThis.startup = async function startup({ id, rootURI }) {
             }
         }
     );
-    const runtimeWindow = Zotero.getMainWindow?.();
+    const catalogWindow = () => liveZoteroWindow();
     runtime.reasoningCatalogStore = createAIReasoningCatalogStore({
-        fetch: bindZoteroWindowFetch(Zotero),
+        fetch: createWindowFetch(catalogWindow),
         createAbortController: createZoteroAbortController,
-        setTimer: typeof runtimeWindow?.setTimeout === 'function'
-            ? runtimeWindow.setTimeout.bind(runtimeWindow)
-            : undefined,
-        clearTimer: typeof runtimeWindow?.clearTimeout === 'function'
-            ? runtimeWindow.clearTimeout.bind(runtimeWindow)
-            : undefined,
+        ...createWindowTimers(catalogWindow),
     });
     runtime.disposeReasoningCatalogHost = attachAIReasoningCatalogHost(
         Zotero,

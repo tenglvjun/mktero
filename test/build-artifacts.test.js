@@ -230,6 +230,40 @@ test('bridges Web Streams from the hidden DOM window when the main window is una
     assert.equal(context.TextDecoderStream, streams.TextDecoderStream);
 });
 
+test('bridges session-long Web Streams and console from the hidden DOM window first', async () => {
+    const source = await readFile(
+        path.join(projectRoot, 'src', 'platform', 'web-streams.js'),
+        'utf8'
+    );
+    const windowGlobals = () => ({
+        ReadableStream: class ReadableStream {},
+        TransformStream: class TransformStream {},
+        WritableStream: class WritableStream {},
+        TextDecoderStream: class TextDecoderStream {},
+        TextEncoderStream: class TextEncoderStream {},
+        console: { warn() {}, log() {} },
+    });
+    // The startup main window can close while Zotero keeps running on macOS.
+    const mainWindow = windowGlobals();
+    const hiddenWindow = windowGlobals();
+    const context = vm.createContext({
+        console: undefined,
+        Zotero: { getMainWindow: () => mainWindow },
+        Services: { appShell: { hiddenDOMWindow: hiddenWindow } },
+    });
+    vm.runInContext(source, context);
+    for (const name of [
+        'ReadableStream',
+        'TransformStream',
+        'WritableStream',
+        'TextDecoderStream',
+        'TextEncoderStream',
+    ]) {
+        assert.equal(context[name], hiddenWindow[name], name);
+    }
+    assert.equal(vm.runInContext('console', context), hiddenWindow.console);
+});
+
 test('bridges console from the Zotero main window before AI SDK loading', async () => {
     const source = await readFile(
         path.join(projectRoot, 'src', 'platform', 'web-streams.js'),

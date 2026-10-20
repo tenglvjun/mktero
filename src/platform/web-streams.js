@@ -2,12 +2,26 @@
 // `console` even though the owning browser window provides them. AI SDK Core
 // evaluates its event-stream parser and warning logger while the extension
 // bundle loads, so these must be bridged before importing the SDK.
+//
+// The SDK's parser subclasses TransformStream at module evaluation, so the
+// bridged constructors are fixed for the whole extension session. They come
+// from the hidden DOM window, which lives as long as Zotero. On macOS the main
+// window open at startup can close while Zotero keeps running, and streams
+// from a closed window are unusable. The main window is only the fallback.
+// This file stays import-free; zotero-window.js applies the same order.
 let mainWindow = null;
-try {
-    mainWindow = globalThis.Zotero?.getMainWindow?.() || null;
-}
-catch {
-    mainWindow = null;
+let mainWindowResolved = false;
+
+function resolveMainWindow() {
+    if (mainWindowResolved) return mainWindow;
+    mainWindowResolved = true;
+    try {
+        mainWindow = globalThis.Zotero?.getMainWindow?.() || null;
+    }
+    catch {
+        mainWindow = null;
+    }
+    return mainWindow;
 }
 
 let hiddenWindow = null;
@@ -53,14 +67,14 @@ for (const name of [
     'TextEncoderStream',
 ]) {
     if (typeof globalThis[name] === 'function') continue;
-    const Constructor = resolveConstructor(mainWindow, name)
-        || resolveConstructor(resolveHiddenWindow(), name);
+    const Constructor = resolveConstructor(resolveHiddenWindow(), name)
+        || resolveConstructor(resolveMainWindow(), name);
     if (Constructor) globalThis[name] = Constructor;
 }
 
 if (typeof globalThis.console?.warn !== 'function') {
-    globalThis.console = resolveConsole(mainWindow)
-        || resolveConsole(resolveHiddenWindow())
+    globalThis.console = resolveConsole(resolveHiddenWindow())
+        || resolveConsole(resolveMainWindow())
         || createSandboxConsole();
 }
 

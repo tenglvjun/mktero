@@ -35,6 +35,10 @@ import {
 import {
     createRuntimeAbortController,
 } from '../platform/abort-controller.js';
+import {
+    createWindowFetch,
+    createWindowTimers,
+} from '../platform/zotero-window.js';
 
 const MAX_AI_MESSAGES = 100;
 const MAX_REASONING_FALLBACKS = 64;
@@ -43,9 +47,14 @@ const LOCAL_PROVIDER_API_KEY = 'mktero-local';
 
 export class AISDKGateway {
     constructor({
-        runtimeWindow = resolveRuntimeWindow(),
-        fetch = bindRuntimeMethod(runtimeWindow, 'fetch')
-            || globalThis.fetch?.bind(globalThis),
+        // A window, or a function returning the window to use for each
+        // request. Fetch and timers resolve through it per request, so a
+        // Zotero main window that closes and reopens is never used dead.
+        runtimeWindow = resolveRuntimeWindow,
+        fetch = createWindowFetch(runtimeWindow, {
+            // Used when no window offers fetch, e.g. the resolver yields null.
+            fallback: globalThis.fetch?.bind(globalThis),
+        }),
         createAbortController = createRuntimeAbortController,
         setTimer,
         clearTimer,
@@ -67,10 +76,12 @@ export class AISDKGateway {
         }
         this.fetch = fetch;
         this.createAbortController = createAbortController;
-        this.setTimer = setTimer
-            || bindRuntimeMethod(runtimeWindow, 'setTimeout');
-        this.clearTimer = clearTimer
-            || bindRuntimeMethod(runtimeWindow, 'clearTimeout');
+        // setTimer and clearTimer are a pair: a timer ID from one source means
+        // nothing to the other, so an injected setTimer is cleared only by the
+        // clearTimer injected with it, and a lone clearTimer is ignored.
+        const windowTimers = createWindowTimers(runtimeWindow);
+        this.setTimer = setTimer || windowTimers.setTimer;
+        this.clearTimer = setTimer ? clearTimer : windowTimers.clearTimer;
         this.generate = generate;
         this.stream = stream;
         this.onDebug = typeof onDebug === 'function' ? onDebug : null;
@@ -604,13 +615,6 @@ function resolveRuntimeWindow() {
         // The Zotero global may not be available during module tests or shutdown.
     }
     return globalThis;
-}
-
-function bindRuntimeMethod(runtimeWindow, method) {
-    const value = runtimeWindow?.[method];
-    return typeof value === 'function'
-        ? value.bind(runtimeWindow)
-        : undefined;
 }
 
 function reasoningRequestPolicy(configuration) {
