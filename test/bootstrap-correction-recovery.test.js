@@ -104,6 +104,17 @@ test('saves an open correction when its tab closes and opens past damaged correc
         editorView.dispatch({ changes: { from: 0, to: 4, insert: replacement } });
     };
 
+    // The test reads through its own store instance while bootstrap's store
+    // may be replacing the corrections file, so a failed read is retried.
+    const loadSavedRevision = async () => {
+        try {
+            return await store.load(cacheKey);
+        }
+        catch {
+            return null;
+        }
+    };
+
     // Closing the tab without pressing Save keeps the open correction.
     const first = await openTab('tab-1', 'Body text');
     editFirstBlock(first, 'Unsaved body');
@@ -133,13 +144,8 @@ test('saves an open correction when its tab closes and opens past damaged correc
     editFirstBlock(recovered, 'Recovered body');
     recovered.querySelector('.mktero-correction-editor-save').click();
     const replaced = await waitFor(async () => {
-        try {
-            const revision = await store.load(cacheKey);
-            return revision?.corrections?.length ? revision : null;
-        }
-        catch {
-            return null;
-        }
+        const revision = await loadSavedRevision();
+        return revision?.corrections?.length ? revision : null;
     });
     assert.equal(replaced.base.markdown, source.markdown);
     assert.match(replaced.corrections[0].replacementMarkdown, /^Recovered body/);
@@ -179,7 +185,7 @@ test('saves an open correction when its tab closes and opens past damaged correc
     editorView.dispatch({ changes: { from: 0, to: 'Recovered'.length, insert: 'Shutdown' } });
     globalThis.shutdown();
     const shutdownSave = await waitFor(async () => {
-        const revision = await store.load(cacheKey);
+        const revision = await loadSavedRevision();
         return /^Shutdown body/.test(revision?.corrections?.[0]?.replacementMarkdown || '')
             ? revision
             : null;
