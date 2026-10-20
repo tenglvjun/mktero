@@ -1,6 +1,11 @@
+import {
+    invalidMarkdownAnnotationStoreError,
+} from '../core/markdown-local-annotations.js';
+
 const STORE_SCHEMA_VERSION = 1;
 const MAX_STORE_BYTES = 4 * 1024 * 1024;
 const MAX_STORED_ANNOTATIONS = 5_000;
+const MAX_BACKUP_NAME_ATTEMPTS = 1_000;
 
 export function createZoteroMarkdownAnnotationStore({
     zotero,
@@ -17,7 +22,7 @@ export function createZoteroMarkdownAnnotationStore({
 }
 
 export class MarkdownAnnotationStore {
-    constructor({ rootPath, ioUtils, pathUtils }) {
+    constructor({ rootPath, ioUtils, pathUtils, now = Date.now }) {
         if (!rootPath) throw new TypeError('An annotation store path is required');
         if (!ioUtils) throw new TypeError('An IOUtils adapter is required');
         if (typeof ioUtils.stat !== 'function') {
@@ -27,6 +32,7 @@ export class MarkdownAnnotationStore {
         this.rootPath = rootPath;
         this.io = ioUtils;
         this.path = pathUtils;
+        this.now = now;
         this.operationTail = Promise.resolve();
     }
 
@@ -44,6 +50,13 @@ export class MarkdownAnnotationStore {
         return this.#withOperation(() => this.#put(itemID, annotations));
     }
 
+    // Keeps an unreadable file under a backup name so a later put cannot
+    // overwrite it. Resolves false when there is no file to keep.
+    setAside(itemID) {
+        validateItemID(itemID);
+        return this.#withOperation(() => this.#setAside(itemID));
+    }
+
     async #get(itemID) {
         const filePath = this.#filePath(itemID);
         if (!(await this.io.exists(filePath))) return [];
@@ -51,10 +64,23 @@ export class MarkdownAnnotationStore {
         if (!Number.isFinite(fileInfo?.size) || fileInfo.size < 0) {
             throw new Error('Unable to verify Markdown annotation store size');
         }
+        // put() never writes past this limit, so a larger file is damaged.
         if (fileInfo.size > MAX_STORE_BYTES) {
-            throw new Error('Markdown annotation store exceeds the safety limit');
+            throw invalidMarkdownAnnotationStoreError(
+                'Markdown annotation store exceeds the safety limit'
+            );
         }
-        const metadata = JSON.parse(await this.io.readUTF8(filePath));
+        const json = await this.io.readUTF8(filePath);
+        let metadata;
+        try {
+            metadata = JSON.parse(json);
+        }
+        catch (error) {
+            throw invalidMarkdownAnnotationStoreError(
+                'Invalid Markdown annotation store',
+                error
+            );
+        }
         validateMetadata(metadata, itemID);
         return metadata.annotations;
     }
@@ -74,6 +100,30 @@ export class MarkdownAnnotationStore {
         await this.io.writeUTF8(filePath, serialized, {
             tmpPath: `${filePath}.tmp`,
         });
+    }
+
+    async #setAside(itemID) {
+        const filePath = this.#filePath(itemID);
+        if (!(await this.io.exists(filePath))) return false;
+        if (typeof this.io.move !== 'function') {
+            throw new Error('An IOUtils move adapter is required');
+        }
+        const stamp = Math.max(0, Math.trunc(this.now()));
+        let backupPath;
+        let attempt = 0;
+        do {
+            if (attempt >= MAX_BACKUP_NAME_ATTEMPTS) {
+                throw new Error('No free Markdown annotation backup name');
+            }
+            const suffix = attempt ? `-${attempt}` : '';
+            backupPath = this.path.join(
+                this.rootPath,
+                `item-${itemID}.corrupt-${stamp}${suffix}.json`
+            );
+            attempt++;
+        } while (await this.io.exists(backupPath));
+        await this.io.move(filePath, backupPath, { noOverwrite: true });
+        return true;
     }
 
     async #ensureRoot() {
@@ -114,6 +164,8 @@ function validateMetadata(metadata, itemID) {
         || metadata.itemID !== itemID
         || !Array.isArray(metadata.annotations)
         || metadata.annotations.length > MAX_STORED_ANNOTATIONS) {
-        throw new Error('Invalid Markdown annotation store');
+        throw invalidMarkdownAnnotationStoreError(
+            'Invalid Markdown annotation store'
+        );
     }
 }

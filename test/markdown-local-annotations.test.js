@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     createMarkdownAnnotationTextQuote,
+    invalidMarkdownAnnotationStoreError,
+    MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING,
     MarkdownLocalAnnotations,
     markdownAnnotationRangeMatchesSource,
     mergeAnnotationOverlays,
@@ -1343,4 +1345,136 @@ test('keeps repeated Markdown text ambiguous without a matching quote', async ()
 
     assert.equal(result.matched.length, 0);
     assert.equal(result.unmatched[0].reason, 'ambiguous');
+});
+
+function createSetAsideStore(stored) {
+    const calls = [];
+    let value = stored;
+    return {
+        calls,
+        async get() {
+            calls.push('get');
+            if (value instanceof Error) throw value;
+            return structuredClone(value);
+        },
+        async put(_itemID, annotations) {
+            calls.push('put');
+            value = structuredClone(annotations);
+        },
+        async setAside() {
+            calls.push('setAside');
+            value = [];
+            return true;
+        },
+        read: () => value,
+    };
+}
+
+const SET_ASIDE_DRAFT = {
+    text: 'Selected text',
+    comment: '',
+    color: '#ffd400',
+    ranges: [{ from: 0, to: 13 }],
+};
+
+test('sets aside a stored collection that no longer validates', async () => {
+    const store = createSetAsideStore([{
+        id: 'mktero-old-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'Selected text',
+        color: 'not-a-color',
+        ranges: [{ from: 0, to: 13 }],
+    }]);
+    const errors = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        onError: error => errors.push(error),
+    });
+
+    const opened = await annotations.resolve(42, 'Selected text');
+    assert.deepEqual(opened.matched, []);
+    assert.equal(opened.warning, MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING);
+    assert.equal(errors[0]?.code, 'MARKDOWN_ANNOTATION_STORE_INVALID');
+    assert.match(errors[0]?.message, /Invalid Markdown annotation/);
+    assert.equal(
+        (await annotations.resolve(42, 'Selected text')).warning,
+        MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING
+    );
+
+    await annotations.create(42, SET_ASIDE_DRAFT);
+    assert.deepEqual(store.calls, ['get', 'setAside', 'get', 'get', 'put']);
+    assert.deepEqual(
+        store.read().map(annotation => annotation.id),
+        ['mktero-local-1']
+    );
+    assert.equal(
+        (await annotations.resolve(42, 'Selected text')).warning,
+        undefined
+    );
+});
+
+test('does not write over local annotations that could not be read', async () => {
+    const readError = Object.assign(new Error('The file is locked'), {
+        name: 'NotReadableError',
+    });
+    const store = createSetAsideStore(readError);
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+    });
+
+    await assert.rejects(
+        () => annotations.create(42, SET_ASIDE_DRAFT),
+        error => error === readError
+    );
+    assert.deepEqual(
+        (await annotations.resolve(42, 'Selected text')).warning,
+        'Local Markdown annotations could not be loaded.'
+    );
+    assert.deepEqual(store.calls, ['get', 'get']);
+});
+
+test('does not write over a damaged annotation file that could not be set aside', async () => {
+    const damaged = invalidMarkdownAnnotationStoreError(
+        'Invalid Markdown annotation store'
+    );
+    const moveError = new Error('The backup could not be written');
+    const errors = [];
+    const store = {
+        calls: [],
+        async get() {
+            this.calls.push('get');
+            throw damaged;
+        },
+        async put() {
+            this.calls.push('put');
+        },
+        async setAside() {
+            this.calls.push('setAside');
+            throw moveError;
+        },
+    };
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        onError: error => errors.push(error),
+    });
+
+    await assert.rejects(
+        () => annotations.create(42, SET_ASIDE_DRAFT),
+        error => error === damaged
+    );
+    assert.deepEqual(store.calls, ['get', 'setAside']);
+    assert.deepEqual(errors, [moveError]);
+
+    // A store without setAside keeps the previous behavior.
+    delete store.setAside;
+    store.calls.length = 0;
+    await assert.rejects(
+        () => annotations.update(42, 'mktero-local-1', { comment: 'x' }),
+        error => error === damaged
+    );
+    assert.deepEqual(store.calls, ['get']);
 });

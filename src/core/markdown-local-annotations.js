@@ -34,6 +34,9 @@ const MAX_MATCHABLE_MARKDOWN_LENGTH = 8 * 1024 * 1024;
 const MAX_TOTAL_SOURCE_RANGE_LENGTH = 8 * 1024 * 1024;
 const MAX_SOURCE_MAP_PAGE_HINT_WORK = 10_000_000;
 const LOCAL_ANNOTATION_ID = /^mktero-[a-z0-9-]{1,128}$/i;
+const INVALID_STORE_ERROR_CODE = 'MARKDOWN_ANNOTATION_STORE_INVALID';
+export const MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING
+    = 'Saved local Markdown annotations could not be fully read. The original file was kept as a backup, and new annotations can be added.';
 const SYNCHRONIZATION_FAILURE_REASONS = new Map([
     ['MKTERO_PDF_INDEX_UNAVAILABLE', 'pdf-index-unavailable'],
     ['MKTERO_PDF_TEXT_NOT_FOUND', 'text-not-found'],
@@ -41,6 +44,19 @@ const SYNCHRONIZATION_FAILURE_REASONS = new Map([
     ['MKTERO_PDF_READER_UNAVAILABLE', 'reader-unavailable'],
     ['MKTERO_PDF_TEXT_SEARCH_TIMEOUT', 'search-timeout'],
 ]);
+
+export function invalidMarkdownAnnotationStoreError(message, cause) {
+    const error = new Error(
+        message,
+        cause === undefined ? undefined : { cause }
+    );
+    error.code = INVALID_STORE_ERROR_CODE;
+    return error;
+}
+
+export function isInvalidMarkdownAnnotationStoreError(error) {
+    return error?.code === INVALID_STORE_ERROR_CODE;
+}
 
 export class MarkdownLocalAnnotations {
     constructor({
@@ -66,6 +82,7 @@ export class MarkdownLocalAnnotations {
         this.synchronizationTasks = new Map();
         this.synchronizationFailures = new Map();
         this.blockedSynchronizations = new Map();
+        this.setAsideItems = new Set();
         this.active = true;
     }
 
@@ -90,6 +107,9 @@ export class MarkdownLocalAnnotations {
             !resolution.blockedSynchronizationIDs.has(id)
         ));
         this.#requestSynchronization(itemID, retryIDs);
+        if (this.setAsideItems.has(itemID)) {
+            result.warning ||= MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING;
+        }
         if ([...result.matched, ...result.unmatched]
             .some(annotation => failures?.has(annotation.id))) {
             result.warning ||= 'Some local Markdown annotations could not be synchronized to the PDF.';
@@ -101,7 +121,7 @@ export class MarkdownLocalAnnotations {
         let annotations;
         let resolved;
         try {
-            annotations = normalizeCollection(await this.store.get(itemID));
+            annotations = await this.#readCollection(itemID);
             resolved = resolveAnnotations(markdown, annotations);
         }
         catch (error) {
@@ -167,12 +187,12 @@ export class MarkdownLocalAnnotations {
                 source: 'markdown',
                 type: 'highlight',
             });
-            const annotations = normalizeCollection(await this.store.get(itemID));
+            const annotations = await this.#readCollection(itemID);
             if (annotations.length >= MAX_LOCAL_ANNOTATIONS) {
                 throw new Error('Markdown annotation count exceeds the safety limit');
             }
             validateAggregateBudget([...annotations, annotation]);
-            await this.store.put(itemID, [...annotations, annotation]);
+            await this.#writeUserChange(itemID, [...annotations, annotation]);
             return resolvedAnnotation(annotation, annotation.ranges[0]);
         });
         this.#clearSynchronizationFailure(itemID, created.id);
@@ -183,7 +203,7 @@ export class MarkdownLocalAnnotations {
 
     async update(itemID, annotationID, changes) {
         const updated = await this.#withOperation(itemID, async () => {
-            const annotations = normalizeCollection(await this.store.get(itemID));
+            const annotations = await this.#readCollection(itemID);
             const targetID = String(annotationID || '');
             const index = annotations.findIndex(annotation => (
                 annotation.id === targetID
@@ -200,7 +220,7 @@ export class MarkdownLocalAnnotations {
                 annotationIndex === index ? annotation : existing
             ));
             validateAggregateBudget(updated);
-            await this.store.put(itemID, updated);
+            await this.#writeUserChange(itemID, updated);
             return resolvedAnnotation(annotation, annotation.ranges[0]);
         });
         this.#clearSynchronizationFailure(itemID, updated.id);
@@ -212,16 +232,14 @@ export class MarkdownLocalAnnotations {
     async delete(itemID, annotationID) {
         const targetID = String(annotationID || '');
         await this.#withOperation(itemID, async () => {
-            const annotations = normalizeCollection(
-                await this.store.get(itemID)
-            );
+            const annotations = await this.#readCollection(itemID);
             const updated = annotations.filter(annotation => (
                 annotation.id !== targetID
             ));
             if (updated.length === annotations.length) {
                 throw new Error('Markdown annotation is unavailable');
             }
-            await this.store.put(itemID, updated);
+            await this.#writeUserChange(itemID, updated);
         });
         this.#clearSynchronizationFailure(itemID, targetID);
         this.#clearSynchronizationBlocks(itemID, [targetID]);
@@ -237,7 +255,7 @@ export class MarkdownLocalAnnotations {
         );
         if (!normalizedMappings.size) return;
         await this.#withOperation(itemID, async () => {
-            const annotations = normalizeCollection(await this.store.get(itemID));
+            const annotations = await this.#readCollection(itemID);
             const updated = annotations.map(annotation => {
                 const mapping = normalizedMappings.get(annotation.id);
                 if (!mapping) return annotation;
@@ -273,7 +291,7 @@ export class MarkdownLocalAnnotations {
 
     async synchronizePending(itemID, context = null) {
         const annotationIDs = await this.#withOperation(itemID, async () => (
-            normalizeCollection(await this.store.get(itemID))
+            (await this.#readCollection(itemID))
                 .map(annotation => annotation.id)
         ));
         this.#requestSynchronization(itemID, annotationIDs, context);
@@ -282,7 +300,7 @@ export class MarkdownLocalAnnotations {
     async retrySynchronization(itemID, annotationID, context = null) {
         const targetID = String(annotationID || '');
         await this.#withOperation(itemID, async () => {
-            const annotations = normalizeCollection(await this.store.get(itemID));
+            const annotations = await this.#readCollection(itemID);
             if (!annotations.some(annotation => annotation.id === targetID)) {
                 throw new Error('Markdown annotation is unavailable');
             }
@@ -300,6 +318,66 @@ export class MarkdownLocalAnnotations {
         this.synchronizationRequests.clear();
         this.synchronizationContexts.clear();
         this.blockedSynchronizations.clear();
+        this.setAsideItems.clear();
+    }
+
+    // Callers hold the item's operation lock.
+    async #readCollection(itemID) {
+        let stored;
+        try {
+            stored = await this.store.get(itemID);
+        }
+        catch (error) {
+            // A read failure may be temporary, so nothing is written over
+            // annotations that could still be intact on disk.
+            if (!isInvalidMarkdownAnnotationStoreError(error)) throw error;
+            await this.#setAside(itemID, error);
+            return [];
+        }
+        let normalized;
+        try {
+            normalized = normalizeStoredCollection(stored);
+        }
+        catch (error) {
+            await this.#setAside(
+                itemID,
+                invalidMarkdownAnnotationStoreError(error.message, error)
+            );
+            return [];
+        }
+        if (!normalized.rejectedError) return normalized.annotations;
+        // One damaged entry must not hide the others: the whole file is kept
+        // as a backup and the entries that still validate are written back.
+        await this.#setAside(itemID, invalidMarkdownAnnotationStoreError(
+            normalized.rejectedError.message,
+            normalized.rejectedError
+        ));
+        if (normalized.annotations.length) {
+            await this.store.put(itemID, normalized.annotations);
+        }
+        return normalized.annotations;
+    }
+
+    // Damaged annotations are user data, so they are kept under another name
+    // instead of being deleted. The item then takes new annotations.
+    async #setAside(itemID, error) {
+        if (typeof this.store.setAside !== 'function') throw error;
+        try {
+            await this.store.setAside(itemID);
+        }
+        catch (setAsideError) {
+            this.#reportError(setAsideError);
+            throw error;
+        }
+        this.#reportError(error);
+        this.setAsideItems.add(itemID);
+    }
+
+    // Background writes (anchor refresh, remapping, synchronization) keep the
+    // set-aside warning; it clears once the reader edits an annotation.
+    async #writeUserChange(itemID, annotations) {
+        await this.store.put(itemID, annotations);
+        this.setAsideItems.delete(itemID);
     }
 
     #requestSynchronization(itemID, annotationIDs, context = null) {
@@ -348,7 +426,7 @@ export class MarkdownLocalAnnotations {
             const context = this.synchronizationContexts.get(itemID) || null;
             this.synchronizationContexts.delete(itemID);
             const annotations = await this.#withOperation(itemID, async () => (
-                normalizeCollection(await this.store.get(itemID))
+                (await this.#readCollection(itemID))
                     .filter(annotation => annotationIDs.has(annotation.id))
             ));
             for (const annotation of annotations) {
@@ -378,9 +456,7 @@ export class MarkdownLocalAnnotations {
             }, context);
             if (saved?.deferred) return;
             const status = await this.#withOperation(itemID, async () => {
-                const current = normalizeCollection(
-                    await this.store.get(itemID)
-                );
+                const current = await this.#readCollection(itemID);
                 const target = current.find(existing => (
                     existing.id === annotation.id
                 ));
@@ -735,13 +811,24 @@ function sameTextQuote(left, right) {
     return left?.prefix === right?.prefix && left?.suffix === right?.suffix;
 }
 
-function normalizeCollection(value) {
+// Entries are validated one at a time so one damaged annotation does not
+// hide the rest. The collection as a whole must still fit the budgets.
+function normalizeStoredCollection(value) {
     if (!Array.isArray(value) || value.length > MAX_LOCAL_ANNOTATIONS) {
         throw new Error('Invalid Markdown annotation collection');
     }
-    const annotations = value.map(normalizeAnnotation);
+    const annotations = [];
+    let rejectedError = null;
+    for (const entry of value) {
+        try {
+            annotations.push(normalizeAnnotation(entry));
+        }
+        catch (error) {
+            rejectedError ||= error;
+        }
+    }
     validateAggregateBudget(annotations);
-    return annotations;
+    return { annotations, rejectedError };
 }
 
 function normalizeAnnotation(value) {
