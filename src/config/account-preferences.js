@@ -13,6 +13,8 @@ export const ACCOUNT_ACCESS_TOKEN_PREF = 'extensions.mktero.accountAccessToken';
 export const ACCOUNT_REFRESH_TOKEN_PREF = 'extensions.mktero.accountRefreshToken';
 export const ACCOUNT_ACCESS_EXPIRES_AT_PREF =
     'extensions.mktero.accountAccessExpiresAt';
+export const ACCOUNT_REFRESH_ATTEMPT_ID_PREF =
+    'extensions.mktero.accountRefreshAttemptID';
 export const ACCOUNT_API_BASE_PREF = 'extensions.mktero.accountApiBase';
 
 const SESSION_PREFS = [
@@ -21,6 +23,7 @@ const SESSION_PREFS = [
     ACCOUNT_ACCESS_TOKEN_PREF,
     ACCOUNT_REFRESH_TOKEN_PREF,
     ACCOUNT_ACCESS_EXPIRES_AT_PREF,
+    ACCOUNT_REFRESH_ATTEMPT_ID_PREF,
 ];
 
 export function getAccountSession(zotero) {
@@ -54,6 +57,7 @@ export function saveAccountSession(zotero, session) {
         Number.isFinite(expiresAt) ? expiresAt : 0,
         true
     );
+    zotero?.Prefs?.set?.(ACCOUNT_REFRESH_ATTEMPT_ID_PREF, '', true);
 }
 
 // saveAccountProfile updates the display fields of the stored session and

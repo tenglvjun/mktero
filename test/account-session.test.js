@@ -394,6 +394,52 @@ test('does not adopt an old-host refresh after switching API endpoints', async (
     assert.equal(session.nickname, 'new-host-session');
 });
 
+test('replays the same persisted refresh attempt after a rotated response times out', async t => {
+    t.after(() => mock.timers.reset());
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const zotero = signedInZotero();
+    const requests = [];
+    let rotation = null;
+    const fetchImpl = async (_url, options) => {
+        const body = JSON.parse(options.body);
+        requests.push(body);
+        if (!rotation) {
+            rotation = {
+                previousToken: body.refresh_token,
+                attemptID: body.refresh_attempt_id,
+            };
+            // The service commits the rotation but the first HTTP response is lost.
+            return new Promise(() => {});
+        }
+        if (body.refresh_token === rotation.previousToken
+            && body.refresh_attempt_id === rotation.attemptID) {
+            return refreshedSessionResponse();
+        }
+        return jsonResponse(401, { error: { code: 'invalid_token' } });
+    };
+
+    const pending = ensureAccountAccessToken(zotero, {
+        now: () => NOW,
+        secureRandom: { randomUUID: () => '01234567-89ab-cdef-0123-456789abcdef' },
+        fetchImpl,
+    });
+    for (let attempt = 0; attempt < 10 && requests.length === 0; attempt += 1) {
+        await Promise.resolve();
+    }
+    assert.equal(requests.length, 1);
+    mock.timers.tick(REFRESH_REQUEST_TIMEOUT_MS);
+
+    assert.equal(await pending, 'access-new');
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].refresh_attempt_id, '0123456789abcdef0123456789abcdef');
+    assert.equal(requests[1].refresh_attempt_id, requests[0].refresh_attempt_id);
+    assert.equal(requests[0].refresh_token, 'refresh-old');
+    assert.equal(requests[1].refresh_token, 'refresh-old');
+    assert.equal(getAccountSession(zotero).refreshToken, 'refresh-new');
+    assert.equal(getAccountSession(zotero).accessToken, 'access-new');
+    assert.equal(zotero.Prefs.dump()['extensions.mktero.accountRefreshAttemptID'], '');
+});
+
 test('a hung refresh times out before the lock expires and keeps the session', async t => {
     t.after(() => mock.timers.reset());
     mock.timers.enable({ apis: ['setTimeout'] });
@@ -421,10 +467,15 @@ test('a hung refresh times out before the lock expires and keeps the session', a
     assert.notEqual(zotero.Prefs.dump()[ACCOUNT_REFRESH_LOCK_PREF], '');
 
     mock.timers.tick(REFRESH_REQUEST_TIMEOUT_MS);
+    // Let the first timeout's rejection chain schedule its one retry before
+    // advancing the fake clock again.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 2);
+    mock.timers.tick(REFRESH_REQUEST_TIMEOUT_MS);
     await outcome;
 
-    // The request gives up before the cross-bundle lock expires.
-    assert.ok(REFRESH_REQUEST_TIMEOUT_MS < REFRESH_LOCK_TTL_MS);
+    // Both the original attempt and its recovery retry give up before the lock expires.
+    assert.ok(REFRESH_REQUEST_TIMEOUT_MS * 2 < REFRESH_LOCK_TTL_MS);
     const session = getAccountSession(zotero);
     assert.equal(session.refreshToken, 'refresh-old');
     assert.equal(session.accessToken, 'access-old');

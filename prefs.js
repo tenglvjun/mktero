@@ -10,6 +10,7 @@ pref("extensions.mktero.accountAccessToken", "");
 pref("extensions.mktero.accountRefreshToken", "");
 pref("extensions.mktero.accountAccessExpiresAt", 0);
 pref("extensions.mktero.accountRefreshLock", "");
+pref("extensions.mktero.accountRefreshAttemptID", "");
 pref("extensions.mktero.mistralApiKey", "");
 pref("extensions.mktero.cacheEnabled", true);
 pref("extensions.mktero.readerFontSize", 18);
