@@ -72,6 +72,9 @@ export function createAnnotationPopup(parent, {
     const isSelectionOpen = () => (
         selectionLocked && anchoredPopup.isOpen()
     );
+    const isNoteOpen = () => (
+        saveNoteBeforeDismiss !== null && anchoredPopup.isOpen()
+    );
 
     const cancelActiveSelectionTranslation = () => {
         const cancel = activeSelectionTranslationCancel;
@@ -136,7 +139,7 @@ export function createAnnotationPopup(parent, {
                         reposition,
                     }
                 );
-                saveNoteBeforeDismiss = editor.save;
+                saveNoteBeforeDismiss = editor.saveIfChanged;
                 return editor.form;
             },
             focusContent: focusNoteInput,
@@ -181,7 +184,7 @@ export function createAnnotationPopup(parent, {
                         reposition,
                     }
                 );
-                saveNoteBeforeDismiss = editor.save;
+                saveNoteBeforeDismiss = editor.saveIfChanged;
                 return editor.form;
             },
             focusContent: focusNoteInput,
@@ -327,14 +330,14 @@ export function createAnnotationPopup(parent, {
         });
     };
     const scheduleOpenActions = ({ anchor, annotation, beforeOpen }) => {
-        if (!anchor || !annotation || isSelectionOpen()) return;
+        if (!anchor || !annotation || isSelectionOpen() || isNoteOpen()) return;
         if (hoverOpenTimer !== null && hoverOpenAnchor === anchor) return;
         cancelScheduledOpen();
         hoverOpenAnchor = anchor;
         hoverOpenTimer = ownerWindow.setTimeout(() => {
             hoverOpenTimer = null;
             hoverOpenAnchor = null;
-            if (isSelectionOpen() || !anchor.isConnected) return;
+            if (isSelectionOpen() || isNoteOpen() || !anchor.isConnected) return;
             beforeOpen?.();
             openActions({ anchor, annotation });
         }, ANNOTATION_HOVER_OPEN_DELAY_MS);
@@ -351,6 +354,7 @@ export function createAnnotationPopup(parent, {
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
         isSelectionOpen,
+        isNoteOpen,
         contains: anchoredPopup.contains,
         destroy: close,
     };
@@ -483,7 +487,16 @@ function createAnnotationNoteEditor(
 
     form.addEventListener('submit', save);
     saveButton.addEventListener('click', save);
-    return { form, save };
+    // Dismissing the editor without Save keeps what the reader typed, but an
+    // untouched editor writes nothing. A new draft is otherwise saved as a
+    // highlight with no note, which nobody asked for by clicking away.
+    const storedComment = String(annotation.comment || '').trim();
+    const saveIfChanged = () => {
+        const draft = input.value.trim();
+        if (draft === storedComment) return null;
+        return save();
+    };
+    return { form, save, saveIfChanged };
 }
 
 function createMarkdownSelectionActions(

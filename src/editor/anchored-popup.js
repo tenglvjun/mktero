@@ -13,6 +13,21 @@ export function createAnchoredPopup(parent, {
     let ignoredOpenAnchor = null;
     let closeTimer = null;
     let closeHandler = null;
+    // Where each anchor element last was. An editor rebuild can replace the
+    // rendered element an open popup points at, and a detached element
+    // reports an empty rect at the window origin.
+    const anchorRects = new WeakMap();
+
+    const anchorRect = target => {
+        const isElement = typeof target?.nodeType === 'number';
+        if (isElement && target.isConnected === false) {
+            const last = anchorRects.get(target);
+            if (last) return last;
+        }
+        const rect = target.getBoundingClientRect();
+        if (isElement) anchorRects.set(target, rect);
+        return rect;
+    };
 
     const cancelClose = () => {
         if (closeTimer === null) return;
@@ -46,7 +61,7 @@ export function createAnchoredPopup(parent, {
 
     const reposition = () => {
         if (!popup || !anchor) return;
-        positionPopup(popup, anchor, ownerWindow, viewportPadding);
+        positionPopup(popup, anchorRect(anchor), ownerWindow, viewportPadding);
     };
 
     const open = ({
@@ -136,9 +151,8 @@ export function createAnchoredPopup(parent, {
     };
 }
 
-function positionPopup(popup, anchor, ownerWindow, viewportPadding) {
+function positionPopup(popup, anchorRect, ownerWindow, viewportPadding) {
     const gap = 10;
-    const anchorRect = anchor.getBoundingClientRect();
     const popupRect = popup.getBoundingClientRect();
     const viewportWidth = ownerWindow.innerWidth || 1024;
     const viewportHeight = ownerWindow.innerHeight || 768;
