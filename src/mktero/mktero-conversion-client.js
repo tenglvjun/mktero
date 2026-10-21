@@ -450,6 +450,7 @@ export class MkteroConversionClient {
         timeoutMs,
         label,
         replayUnauthorized = true,
+        forceTokenRefresh = false,
     }) {
         const response = await this.#send({
             url: joinURL(apiBase, path),
@@ -462,6 +463,7 @@ export class MkteroConversionClient {
             stage: STAGE_API,
             authorize: true,
             getAccessToken,
+            forceTokenRefresh,
         });
         const payload = await readBoundedJSON(response, signal);
         if (!response.ok) {
@@ -477,8 +479,6 @@ export class MkteroConversionClient {
             // A 401 is an expired access token, not a dead login. Refresh once
             // and replay. Cancel is not replayed: it is already being abandoned.
             if (replayUnauthorized && isUnauthorizedResponse(error)) {
-                await getAccessToken({ forceRefresh: true });
-                throwIfAborted(signal);
                 return this.#requestJSON({
                     apiBase,
                     getAccessToken,
@@ -489,6 +489,7 @@ export class MkteroConversionClient {
                     timeoutMs,
                     label,
                     replayUnauthorized: false,
+                    forceTokenRefresh: true,
                 });
             }
             throw error;
@@ -507,6 +508,7 @@ export class MkteroConversionClient {
         stage = STAGE_API,
         authorize,
         getAccessToken = null,
+        forceTokenRefresh = false,
     }) {
         throwIfAborted(signal);
         const controller = this.createAbortController();
@@ -516,17 +518,22 @@ export class MkteroConversionClient {
         let timedOut = false;
         const relayAbort = () => controller.abort(signal?.reason);
         signal?.addEventListener('abort', relayAbort, { once: true });
-        const timeoutID = timeoutMs > 0
-            ? setTimeout(() => {
-                timedOut = true;
-                controller.abort();
-            }, timeoutMs)
-            : null;
+        let timeoutID = null;
 
         try {
             const requestHeaders = { ...headers };
             if (authorize) {
-                const token = String(await getAccessToken() || '').trim();
+                // Waiting for a token can take up to the account refresh lock
+                // TTL when another refresh is in flight or a crashed one left
+                // its lock. A cancelled conversion stops waiting at once. The
+                // request timeout still covers only the transfer: a refresh
+                // that ends within the lock TTL keeps the conversion going.
+                const token = String(await settleUnlessAborted(
+                    forceTokenRefresh
+                        ? getAccessToken({ forceRefresh: true })
+                        : getAccessToken(),
+                    signal
+                ) || '').trim();
                 if (!token) {
                     throw codedError(
                         'Sign in to Mktero before converting',
@@ -534,6 +541,12 @@ export class MkteroConversionClient {
                     );
                 }
                 requestHeaders.Authorization = `Bearer ${token}`;
+            }
+            if (timeoutMs > 0) {
+                timeoutID = setTimeout(() => {
+                    timedOut = true;
+                    controller.abort();
+                }, timeoutMs);
             }
             return await this.fetch(url, {
                 method,
@@ -733,6 +746,32 @@ function abortReason(signal) {
 function throwIfAborted(signal) {
     if (!signal?.aborted) return;
     throw abortReason(signal);
+}
+
+// settleUnlessAborted rejects when `signal` aborts first. The operation keeps
+// running: an account refresh is shared with other callers, and stopping it
+// halfway could lose a rotated refresh token.
+function settleUnlessAborted(value, signal) {
+    const pending = Promise.resolve(value);
+    if (!signal) return pending;
+    if (signal.aborted) {
+        pending.catch(() => {});
+        return Promise.reject(abortReason(signal));
+    }
+    return new Promise((resolve, reject) => {
+        const onAbort = () => {
+            pending.catch(() => {});
+            reject(abortReason(signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        pending.then(result => {
+            signal.removeEventListener('abort', onAbort);
+            resolve(result);
+        }, error => {
+            signal.removeEventListener('abort', onAbort);
+            reject(error);
+        });
+    });
 }
 
 async function waitFor(sleep, delayMs, signal) {

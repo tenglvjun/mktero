@@ -970,3 +970,108 @@ test('does not retry forever when renewal returns no upload URL', async () => {
     assert.equal(requests.filter(request => request.url.endsWith('/upload-url')).length, 1);
     assert.equal(requests.filter(request => request.options.method === 'DELETE').length, 1);
 });
+
+async function settleWithin(promise, ms) {
+    let timer;
+    const guard = new Promise(resolve => {
+        timer = setTimeout(() => resolve({ pending: true }), ms);
+    });
+    try {
+        return await Promise.race([
+            promise.then(value => ({ value }), error => ({ error })),
+            guard,
+        ]);
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
+
+test('stops waiting for an access token when the conversion is cancelled', async () => {
+    const controller = new AbortController();
+    const requests = [];
+    let tokenRequested;
+    const requested = new Promise(resolve => { tokenRequested = resolve; });
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+        sleep: async () => {},
+    });
+
+    // The account session can wait up to its lock TTL for a refresh that a
+    // crashed Zotero left behind.
+    const converting = client.convert(convertOptions({
+        signal: controller.signal,
+        getAccessToken: () => {
+            tokenRequested();
+            return new Promise(() => {});
+        },
+    }));
+    await requested;
+    controller.abort();
+
+    const outcome = await settleWithin(converting, 1000);
+    assert.equal(outcome.pending, undefined);
+    assert.equal(outcome.error?.name, 'AbortError');
+    assert.equal(requests.length, 0);
+});
+
+test('stops waiting for a forced token refresh when the conversion is cancelled', async () => {
+    const controller = new AbortController();
+    const requests = [];
+    let refreshRequested;
+    const requested = new Promise(resolve => { refreshRequested = resolve; });
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return jsonResponse(401, {
+                error: { code: 'invalid_token', message: 'token is invalid or expired' },
+            });
+        },
+        sleep: async () => {},
+    });
+
+    const converting = client.convert(convertOptions({
+        signal: controller.signal,
+        getAccessToken: (options = {}) => {
+            if (!options?.forceRefresh) return 'expired-token';
+            refreshRequested();
+            return new Promise(() => {});
+        },
+    }));
+    await requested;
+    controller.abort();
+
+    const outcome = await settleWithin(converting, 1000);
+    assert.equal(outcome.pending, undefined);
+    assert.equal(outcome.error?.name, 'AbortError');
+    assert.equal(requests.length, 1);
+});
+
+test('times a request from when its access token is ready', async () => {
+    const client = new MkteroConversionClient({
+        requestTimeoutMs: 1,
+        fetch: async (url, options) => {
+            if (options.signal.aborted) {
+                throw new DOMException('The operation was aborted', 'AbortError');
+            }
+            return jsonResponse(403, {
+                error: { code: 'account_disabled', message: 'account is disabled' },
+            });
+        },
+        sleep: async () => {},
+    });
+
+    // The refresh ends after the request timeout, but inside the refresh lock
+    // TTL, so the request is still sent.
+    await assert.rejects(
+        client.convert(convertOptions({
+            getAccessToken: () => new Promise(resolve => {
+                setTimeout(() => resolve('access-token'), 30);
+            }),
+        })),
+        error => error.code === 'MKTERO_ACCOUNT_DISABLED'
+    );
+});

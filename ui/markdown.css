@@ -4830,6 +4830,10 @@ main {
     white-space: pre-wrap;
 }
 
+.markdown-source-fallback {
+    overflow-wrap: anywhere;
+}
+
 .missing-image {
     display: block;
     margin: 20px 0;

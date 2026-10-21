@@ -1831,7 +1831,7 @@ test('drives the account card tabs and the signed-in identity', async () => {
     values.set('extensions.mktero.accountNickname', 'paper-reader');
     values.set('extensions.mktero.accountRefreshToken', 'refresh');
     values.set('extensions.mktero.accountAccessToken', 'access');
-    values.set('extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000);
+    values.set('extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000));
     controller.destroy();
 
     const requested = [];
@@ -1939,7 +1939,7 @@ test('keeps the account card at zero when the activity request fails', async () 
         ['extensions.mktero.accountNickname', 'paper-reader'],
         ['extensions.mktero.accountRefreshToken', 'refresh'],
         ['extensions.mktero.accountAccessToken', 'access'],
-        ['extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
     ]);
     const controller = createPreferencesController({
         document: dom.window.document,
@@ -2000,7 +2000,7 @@ test('keeps the stored session when a token refresh fails transiently', async ()
         ['extensions.mktero.accountRefreshToken', 'refresh'],
         ['extensions.mktero.accountAccessToken', 'access'],
         // Already past expiry, so the pane attempts a refresh during start().
-        ['extensions.mktero.accountAccessExpiresAt', Date.now() - 1000],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() - 1000)],
     ]);
     const controller = createPreferencesController({
         document: dom.window.document,
@@ -2062,7 +2062,7 @@ test('clears the stored session when the server rejects the refresh token', asyn
         ['extensions.mktero.accountNickname', 'paper-reader'],
         ['extensions.mktero.accountRefreshToken', 'refresh'],
         ['extensions.mktero.accountAccessToken', 'access'],
-        ['extensions.mktero.accountAccessExpiresAt', Date.now() - 1000],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() - 1000)],
     ]);
     const controller = createPreferencesController({
         document: dom.window.document,
@@ -2090,7 +2090,7 @@ test('clears the stored session when the server rejects the refresh token', asyn
     // dropped and the pane falls back to the sign-in form.
     assert.equal(values.get('extensions.mktero.accountRefreshToken'), '');
     assert.equal(values.get('extensions.mktero.accountAccessToken'), '');
-    assert.equal(values.get('extensions.mktero.accountAccessExpiresAt'), 0);
+    assert.equal(values.get('extensions.mktero.accountAccessExpiresAtMs'), '');
 
     controller.destroy();
 });
@@ -2335,7 +2335,7 @@ function accountRaceFixture({ fetchImpl }) {
         ['extensions.mktero.accountNickname', 'paper-reader'],
         ['extensions.mktero.accountRefreshToken', 'refresh-1'],
         ['extensions.mktero.accountAccessToken', 'access-1'],
-        ['extensions.mktero.accountAccessExpiresAt', Date.now() + 3600_000],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
     ]);
     const controller = createPreferencesController({
         document: dom.window.document,
@@ -2358,7 +2358,7 @@ function accountRaceFixture({ fetchImpl }) {
 function rotateStoredSession(values) {
     values.set('extensions.mktero.accountRefreshToken', 'refresh-2');
     values.set('extensions.mktero.accountAccessToken', 'access-2');
-    values.set('extensions.mktero.accountAccessExpiresAt', Date.now() + 7200_000);
+    values.set('extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 7200_000));
 }
 
 const tick = () => new Promise(resolve => setImmediate(resolve));

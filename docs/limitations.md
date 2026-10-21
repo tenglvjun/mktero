@@ -42,4 +42,7 @@
   only from source text in Markdown reading views, is not cached, and may incur
   AI provider usage costs.
 - Archives, Markdown, images, source maps, PDF indexes, and KaTeX rendering have
-  local resource limits and fail safely when those limits are exceeded.
+  local resource limits and fail safely when those limits are exceeded. A
+  Markdown block that cannot be rendered, such as a list nested hundreds of
+  levels deep, is shown as its escaped source text; the rest of the document
+  keeps its formatting.
