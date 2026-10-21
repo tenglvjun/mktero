@@ -139,7 +139,7 @@ export function createAnnotationPopup(parent, {
                         reposition,
                     }
                 );
-                saveNoteBeforeDismiss = editor.save;
+                saveNoteBeforeDismiss = editor.saveIfChanged;
                 return editor.form;
             },
             focusContent: focusNoteInput,
@@ -184,7 +184,7 @@ export function createAnnotationPopup(parent, {
                         reposition,
                     }
                 );
-                saveNoteBeforeDismiss = editor.save;
+                saveNoteBeforeDismiss = editor.saveIfChanged;
                 return editor.form;
             },
             focusContent: focusNoteInput,
@@ -487,7 +487,16 @@ function createAnnotationNoteEditor(
 
     form.addEventListener('submit', save);
     saveButton.addEventListener('click', save);
-    return { form, save };
+    // Dismissing the editor without Save keeps what the reader typed, but an
+    // untouched editor writes nothing. A new draft is otherwise saved as a
+    // highlight with no note, which nobody asked for by clicking away.
+    const storedComment = String(annotation.comment || '').trim();
+    const saveIfChanged = () => {
+        const draft = input.value.trim();
+        if (draft === storedComment) return null;
+        return save();
+    };
+    return { form, save, saveIfChanged };
 }
 
 function createMarkdownSelectionActions(
