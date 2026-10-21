@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
     accessTokenNeedsRefresh,
     ACCOUNT_REFRESH_MARGIN_MS,
@@ -26,6 +27,94 @@ function memoryPrefs(initial = {}) {
         },
     };
 }
+
+// firefoxPrefs models Zotero.Prefs over Firefox's preference service. A pref
+// keeps the type of its prefs.js default, or of the first value written, and
+// an integer pref holds a signed 32-bit value: XPConnect converts the number
+// with ToInt32 before setIntPref, so larger numbers wrap.
+async function firefoxPrefs(userValues = {}) {
+    const source = await readFile(new URL('../prefs.js', import.meta.url), 'utf8');
+    const defaults = new Map();
+    for (const [, key, raw] of source.matchAll(/^pref\("([^"]+)",\s*(.+)\);$/gmu)) {
+        defaults.set(key, JSON.parse(raw));
+    }
+    const user = new Map(Object.entries(userValues));
+    const read = key => (user.has(key) ? user.get(key) : defaults.get(key));
+    const typeOf = value => (typeof value === 'number' ? 'int' : typeof value);
+    return {
+        get(key) {
+            return read(key);
+        },
+        set(key, value) {
+            const current = read(key);
+            const type = typeOf(current === undefined ? value : current);
+            if (type === 'int') user.set(key, Number(value) | 0);
+            else if (type === 'boolean') user.set(key, Boolean(value));
+            else user.set(key, String(value));
+        },
+        clear(key) {
+            user.delete(key);
+        },
+        hasUserValue(key) {
+            return user.has(key);
+        },
+    };
+}
+
+const LEGACY_EXPIRES_AT_PREF = 'extensions.mktero.accountAccessExpiresAt';
+
+test('keeps a real access-token expiry exactly through Zotero preferences', async () => {
+    const zotero = { Prefs: await firefoxPrefs() };
+    // A login at 01:29 UTC stores an expiry one hour later. Millisecond
+    // timestamps are far larger than a signed 32-bit integer.
+    const now = Date.UTC(2026, 9, 21, 1, 29, 17, 224);
+    const expiresAt = now + 60 * 60 * 1000;
+    saveAccountSession(zotero, {
+        email: 'user@example.com',
+        accessToken: 'access',
+        refreshToken: 'refresh',
+        accessExpiresAt: expiresAt,
+    });
+
+    const session = getAccountSession(zotero);
+    assert.equal(session.accessExpiresAt, expiresAt);
+    assert.equal(accessTokenNeedsRefresh(session, now), false);
+    assert.equal(
+        accessTokenNeedsRefresh(session, expiresAt - ACCOUNT_REFRESH_MARGIN_MS),
+        true
+    );
+});
+
+test('ignores and clears the wrapped expiry an earlier version stored', async () => {
+    const prefs = await firefoxPrefs({
+        // 2026-10-21T02:29:17.224Z after the 32-bit wrap.
+        [LEGACY_EXPIRES_AT_PREF]: 1_548_394_792,
+        'extensions.mktero.accountEmail': 'user@example.com',
+        'extensions.mktero.accountAccessToken': 'access-1',
+        'extensions.mktero.accountRefreshToken': 'refresh-1',
+    });
+    const zotero = { Prefs: prefs };
+    const now = Date.UTC(2026, 9, 21, 1, 40);
+
+    // No usable expiry yet, so the first request refreshes once.
+    assert.equal(getAccountSession(zotero).accessExpiresAt, 0);
+    assert.equal(accessTokenNeedsRefresh(getAccountSession(zotero), now), true);
+
+    saveAccountSession(zotero, {
+        email: 'user@example.com',
+        accessToken: 'access-2',
+        refreshToken: 'refresh-2',
+        accessExpiresAt: now + 60 * 60 * 1000,
+    });
+    assert.equal(prefs.hasUserValue(LEGACY_EXPIRES_AT_PREF), false);
+    assert.equal(accessTokenNeedsRefresh(getAccountSession(zotero), now), false);
+
+    prefs.set(LEGACY_EXPIRES_AT_PREF, 1_548_394_792);
+    clearAccountSession(zotero);
+    assert.equal(prefs.hasUserValue(LEGACY_EXPIRES_AT_PREF), false);
+    assert.equal(getAccountSession(zotero).accessExpiresAt, 0);
+    assert.equal(isAccountSignedIn(getAccountSession(zotero)), false);
+});
 
 test('stores both tokens and refreshes shortly before the access token expires', () => {
     const zotero = { Prefs: memoryPrefs() };

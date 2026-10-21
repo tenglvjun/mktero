@@ -11,8 +11,15 @@ export const ACCOUNT_EMAIL_PREF = 'extensions.mktero.accountEmail';
 export const ACCOUNT_NICKNAME_PREF = 'extensions.mktero.accountNickname';
 export const ACCOUNT_ACCESS_TOKEN_PREF = 'extensions.mktero.accountAccessToken';
 export const ACCOUNT_REFRESH_TOKEN_PREF = 'extensions.mktero.accountRefreshToken';
+// The access-token expiry is a millisecond timestamp stored as a decimal
+// string. It used to be an integer pref, but Firefox integer prefs are signed
+// 32-bit, so every timestamp wrapped to a value long in the past and each
+// authenticated request refreshed, and rotated, the tokens first.
 export const ACCOUNT_ACCESS_EXPIRES_AT_PREF =
-    'extensions.mktero.accountAccessExpiresAt';
+    'extensions.mktero.accountAccessExpiresAtMs';
+// LEGACY_ACCESS_EXPIRES_AT_PREF holds that wrapped value in existing profiles.
+// It is never read; saving or clearing the session removes it.
+const LEGACY_ACCESS_EXPIRES_AT_PREF = 'extensions.mktero.accountAccessExpiresAt';
 export const ACCOUNT_REFRESH_ATTEMPT_ID_PREF =
     'extensions.mktero.accountRefreshAttemptID';
 export const ACCOUNT_API_BASE_PREF = 'extensions.mktero.accountApiBase';
@@ -51,13 +58,13 @@ export function saveAccountSession(zotero, session) {
     writeString(zotero, ACCOUNT_NICKNAME_PREF, session?.nickname);
     writeString(zotero, ACCOUNT_ACCESS_TOKEN_PREF, session?.accessToken);
     writeString(zotero, ACCOUNT_REFRESH_TOKEN_PREF, session?.refreshToken);
-    const expiresAt = Number(session?.accessExpiresAt);
-    zotero?.Prefs?.set?.(
+    writeString(
+        zotero,
         ACCOUNT_ACCESS_EXPIRES_AT_PREF,
-        Number.isFinite(expiresAt) ? expiresAt : 0,
-        true
+        serializeExpiresAt(session?.accessExpiresAt)
     );
     zotero?.Prefs?.set?.(ACCOUNT_REFRESH_ATTEMPT_ID_PREF, '', true);
+    clearLegacyExpiresAt(zotero);
 }
 
 // saveAccountProfile updates the display fields of the stored session and
@@ -83,13 +90,8 @@ export function saveAccountProfile(zotero, { email, nickname } = {}, {
 }
 
 export function clearAccountSession(zotero) {
-    for (const pref of SESSION_PREFS) {
-        zotero?.Prefs?.set?.(
-            pref,
-            pref === ACCOUNT_ACCESS_EXPIRES_AT_PREF ? 0 : '',
-            true
-        );
-    }
+    for (const pref of SESSION_PREFS) zotero?.Prefs?.set?.(pref, '', true);
+    clearLegacyExpiresAt(zotero);
 }
 
 export function getAccountApiBase(zotero) {
@@ -124,6 +126,22 @@ function writeString(zotero, key, value) {
 }
 
 function readExpiresAt(zotero) {
-    const value = Number(zotero?.Prefs?.get?.(ACCOUNT_ACCESS_EXPIRES_AT_PREF, true));
-    return Number.isFinite(value) ? value : 0;
+    const value = Number(readString(zotero, ACCOUNT_ACCESS_EXPIRES_AT_PREF));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function serializeExpiresAt(value) {
+    const expiresAt = Math.trunc(Number(value));
+    return Number.isFinite(expiresAt) && expiresAt > 0 ? String(expiresAt) : '';
+}
+
+// Removing the stale pref is housekeeping. A failure must not break the
+// session write that just succeeded.
+function clearLegacyExpiresAt(zotero) {
+    try {
+        zotero?.Prefs?.clear?.(LEGACY_ACCESS_EXPIRES_AT_PREF, true);
+    }
+    catch {
+        // The stale value is never read.
+    }
 }

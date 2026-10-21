@@ -46,8 +46,136 @@ const SAFE_TABLE_TAGS = new Set([
     'sup',
     'code',
 ]);
+// OCR output is untrusted. A run of a few thousand `*` overflows marked's
+// stack, so a block that fails to render is shown as its escaped source and
+// the rest of the document keeps its formatting. Lists or quotes nested
+// hundreds deep take seconds and, deeper still, can exhaust memory, which
+// cannot be caught, so such a block is never parsed. Marked reads a nested
+// line again for each enclosing level, so a line costs about the square of its
+// indentation. The limit bounds that sum to a few hundred milliseconds; long
+// blocks with shallow indentation, such as long quotes or aligned tables, stay
+// far below it.
+const MAX_BLOCK_NESTING_COST = 100_000_000;
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 
-export function renderMarkdownHTML(
+export function renderMarkdownHTML(markdown, options = {}) {
+    if (typeof markdown !== 'string') {
+        throw new TypeError('Markdown must be a string');
+    }
+    const blocks = splitMarkdownBlocks(markdown);
+    const costly = blocks.map(isCostlyMarkdownBlock);
+    if (!costly.some(Boolean)) {
+        try {
+            return renderMarkdownDocumentHTML(markdown, options);
+        }
+        catch {
+            // A block the guard did not predict failed. Each block is
+            // rendered on its own below, so only that block loses formatting.
+        }
+        if (blocks.length <= 1) return renderMarkdownSourceFallback(markdown);
+        const mathBudget = createMathRenderBudget();
+        return blocks.map(block => (
+            renderMarkdownBlockHTML(block, options, mathBudget)
+        )).join('');
+    }
+    // Blocks between the costly ones are rendered together, so a figure with
+    // its caption, or a reference-style link, in that stretch still works.
+    // They share one math budget, as a single render would.
+    const mathBudget = createMathRenderBudget();
+    let html = '';
+    let run = [];
+    const flush = () => {
+        if (run.length) {
+            html += renderMarkdownBlockHTML(run.join('\n\n'), options, mathBudget);
+        }
+        run = [];
+    };
+    blocks.forEach((block, index) => {
+        if (!costly[index]) {
+            run.push(block);
+            return;
+        }
+        flush();
+        html += renderMarkdownSourceFallback(block);
+    });
+    flush();
+    return html;
+}
+
+function renderMarkdownBlockHTML(markdown, options, mathBudget) {
+    try {
+        return renderMarkdownDocumentHTML(markdown, options, mathBudget);
+    }
+    catch {
+        return renderMarkdownSourceFallback(markdown);
+    }
+}
+
+function renderMarkdownSourceFallback(markdown) {
+    const source = markdown.trim();
+    if (!source) return '';
+    return '<p class="markdown-source-fallback">'
+        + escapeHTML(source).replace(/\r?\n/g, '<br>')
+        + '</p>\n';
+}
+
+// splitMarkdownBlocks splits at blank lines outside fenced code. It only
+// finds and isolates the blocks the parser must not see whole.
+function splitMarkdownBlocks(markdown) {
+    const blocks = [];
+    let current = [];
+    let fence = null;
+    for (const line of markdown.split('\n')) {
+        if (fence) {
+            current.push(line);
+            if (closesFence(line, fence)) fence = null;
+            continue;
+        }
+        if (!line.trim()) {
+            if (current.length) blocks.push(current.join('\n'));
+            current = [];
+            continue;
+        }
+        current.push(line);
+        fence = FENCE_OPEN.exec(line)?.[1] || null;
+    }
+    if (current.length) blocks.push(current.join('\n'));
+    return blocks;
+}
+
+function closesFence(line, fence) {
+    const trimmed = line.replace(/^ {0,3}/, '').trimEnd();
+    return trimmed.length >= fence.length
+        && [...trimmed].every(character => character === fence[0]);
+}
+
+function isCostlyMarkdownBlock(block) {
+    let cost = 0;
+    let fence = null;
+    for (const line of block.split('\n')) {
+        // Fenced code is not nested Markdown, however far it is indented.
+        if (fence) {
+            if (closesFence(line, fence)) fence = null;
+            continue;
+        }
+        const opened = FENCE_OPEN.exec(line);
+        if (opened) {
+            fence = opened[1];
+            continue;
+        }
+        let columns = 0;
+        for (const character of line) {
+            if (character === ' ' || character === '>') columns += 1;
+            else if (character === '\t') columns += 4;
+            else break;
+        }
+        cost += columns * columns;
+        if (cost > MAX_BLOCK_NESTING_COST) return true;
+    }
+    return false;
+}
+
+function renderMarkdownDocumentHTML(
     markdown,
     {
         resolveImageURL = () => null,
@@ -55,14 +183,11 @@ export function renderMarkdownHTML(
         target = 'mktero',
         translate = translateEnglish,
         exposeImageAssetPath = false,
-    } = {}
+    } = {},
+    mathBudget = createMathRenderBudget()
 ) {
-    if (typeof markdown !== 'string') {
-        throw new TypeError('Markdown must be a string');
-    }
     const renderingMarkdown = normalizeMisassignedAcademicCaptions(markdown);
 
-    const mathBudget = createMathRenderBudget();
     const renderer = createSafeRenderer(resolveImageURL, mathBudget, {
         resolveImageAttachmentKey,
         target,

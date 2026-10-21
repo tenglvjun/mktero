@@ -1370,3 +1370,90 @@ test('renders a figure legend whose note precedes the academic label', () => {
     assert.match(figcaption, /Data were acquired from 12 odors/);
     assert.match(figcaption, /Odor-odor correlation at different level processing/);
 });
+
+test('shows a block marked cannot parse as its escaped source', () => {
+    // A few thousand stars overflow marked's stack.
+    const broken = `<img src=x onerror=alert(1)>${'*'.repeat(5_000)}x${'*'.repeat(5_000)}`;
+    const html = renderMarkdownHTML(`# Results\n\nBefore **bold**.\n\n${broken}\n\nAfter *italic*.`);
+
+    assert.match(html, /<h1>Results<\/h1>/);
+    assert.match(html, /<p>Before <strong>bold<\/strong>\.<\/p>/);
+    assert.match(html, /<p>After <em>italic<\/em>\.<\/p>/);
+    assert.match(html, /<p class="markdown-source-fallback">&lt;img src=x onerror=alert\(1\)&gt;\*{5000}x\*{5000}<\/p>/);
+    assert.doesNotMatch(html, /<img/);
+});
+
+test('keeps rendering the other blocks when one block fails', () => {
+    const html = renderMarkdownHTML([
+        'Intro with **bold**.',
+        '![Broken](images/broken.png)\nLine two',
+        '![Figure](images/figure.png)',
+    ].join('\n\n'), {
+        resolveImageURL(path) {
+            if (path === 'images/broken.png') throw new Error('Damaged asset');
+            return 'blob:figure';
+        },
+    });
+
+    assert.match(html, /<p>Intro with <strong>bold<\/strong>\.<\/p>/);
+    assert.match(html, /<p class="markdown-source-fallback">!\[Broken\]\(images\/broken\.png\)<br>Line two<\/p>/);
+    assert.match(html, /<img src="blob:figure" alt="Figure"/);
+});
+
+test('does not parse lists or quotes nested hundreds deep', () => {
+    const list = Array.from({ length: 3_000 }, (_, depth) => `${'  '.repeat(depth)}- <b>x</b>`).join('\n');
+    const quote = Array.from({ length: 1_000 }, (_, depth) => `${'>'.repeat(depth + 1)} x`).join('\n');
+    // Moderately deep, but wide: each item is read again at every level.
+    const wide = [
+        ...Array.from({ length: 120 }, (_, depth) => `${'  '.repeat(depth)}- x`),
+        ...Array.from({ length: 2_000 }, () => `${'  '.repeat(120)}- y`),
+    ].join('\n');
+    const startedAt = performance.now();
+    const html = renderMarkdownHTML(`Intro **bold**.\n\n${list}\n\n${quote}\n\n${wide}`);
+    const elapsed = performance.now() - startedAt;
+
+    assert.ok(elapsed < 1500, `rendering took ${elapsed.toFixed(0)}ms`);
+    assert.match(html, /<p>Intro <strong>bold<\/strong>\.<\/p>/);
+    assert.equal(html.match(/class="markdown-source-fallback"/g)?.length, 3);
+    assert.doesNotMatch(html, /<ul>|<blockquote>|<b>/);
+    assert.match(html, /- &lt;b&gt;x&lt;\/b&gt;/);
+});
+
+test('renders deep but ordinary nesting, indented code, and large tables normally', () => {
+    const list = Array.from({ length: 30 }, (_, depth) => `${'  '.repeat(depth)}- level ${depth}`).join('\n');
+    const code = `\`\`\`\n${Array.from({ length: 5_000 }, () => `${' '.repeat(24)}call_with(x_value);`).join('\n')}\n\`\`\``;
+    const table = ['| Row | Value |', '|---|---|', ...Array.from({ length: 3_000 }, (_, row) => `| ${row} | **v** ${row} |`)].join('\n');
+    // Many lines with shallow indentation are long, not deeply nested.
+    const quote = Array.from({ length: 50_001 }, (_, line) => `> Quoted line ${line}`).join('\n');
+    const aligned = Array.from({ length: 2_001 }, (_, line) => `${' '.repeat(60)}${line} aligned`).join('\n');
+    const startedAt = performance.now();
+    const html = renderMarkdownHTML([list, code, table, quote, aligned].join('\n\n'));
+    const elapsed = performance.now() - startedAt;
+
+    assert.ok(elapsed < 1500, `rendering took ${elapsed.toFixed(0)}ms`);
+    assert.doesNotMatch(html, /markdown-source-fallback/);
+    assert.equal(html.match(/<ul>/g)?.length, 30);
+    assert.equal(html.match(/<pre><code>/g)?.length, 2);
+    assert.equal(html.match(/<tr>/g)?.length, 3_001);
+    assert.match(html, /<blockquote>\n<p>Quoted line 0/);
+});
+
+test('keeps blank lines inside fenced code when another block falls back', () => {
+    const broken = `${'*'.repeat(5_000)}x${'*'.repeat(5_000)}`;
+    const html = renderMarkdownHTML(`\`\`\`\nfirst()\n\nsecond()\n\`\`\`\n\n${broken}`);
+
+    assert.match(html, /<pre><code>first\(\)\n\nsecond\(\)\n<\/code><\/pre>/);
+    assert.match(html, /markdown-source-fallback/);
+});
+
+test('keeps one math budget for a document rendered block by block', () => {
+    const formulas = Array.from({ length: 1_200 }, () => '$x$').join('\n\n');
+    const nested = Array.from({ length: 600 }, (_, depth) => `${'  '.repeat(depth)}- x`).join('\n');
+    const broken = `${'*'.repeat(5_000)}x${'*'.repeat(5_000)}`;
+
+    for (const extra of [nested, broken]) {
+        const html = renderMarkdownHTML(`${formulas}\n\n${extra}`);
+        assert.match(html, /markdown-source-fallback/);
+        assert.equal(html.match(/class="katex"/g)?.length, 1_000);
+    }
+});

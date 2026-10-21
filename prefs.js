@@ -8,7 +8,7 @@ pref("extensions.mktero.accountEmail", "");
 pref("extensions.mktero.accountNickname", "");
 pref("extensions.mktero.accountAccessToken", "");
 pref("extensions.mktero.accountRefreshToken", "");
-pref("extensions.mktero.accountAccessExpiresAt", 0);
+pref("extensions.mktero.accountAccessExpiresAtMs", "");
 pref("extensions.mktero.accountRefreshLock", "");
 pref("extensions.mktero.accountRefreshAttemptID", "");
 pref("extensions.mktero.mistralApiKey", "");

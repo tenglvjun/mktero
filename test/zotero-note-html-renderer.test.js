@@ -125,3 +125,14 @@ test('keeps malicious Markdown inert in portable notes', () => {
     assert.doesNotMatch(html, /<script|onerror|src\s*=\s*["']https?:/i);
     assert.doesNotMatch(html, /href\s*=\s*["']javascript:/i);
 });
+
+test('saves a block Markdown cannot render as escaped text', () => {
+    const html = renderZoteroNoteHTML(
+        `Before **bold**.\n\nNoise <script>x</script>${'*'.repeat(5_000)}x${'*'.repeat(5_000)}\n\nAfter.`
+    );
+
+    assert.match(html, /<p>Before <strong>bold<\/strong>\.<\/p>/);
+    assert.match(html, /<p class="markdown-source-fallback">Noise &lt;script&gt;x&lt;\/script&gt;\*{5000}x\*{5000}<\/p>/);
+    assert.match(html, /<p>After\.<\/p>/);
+    assert.doesNotMatch(html, /<script>/);
+});
