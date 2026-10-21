@@ -992,9 +992,15 @@ globalThis.shutdown = function shutdown() {
     runtime.actionsTags?.dispose();
     runtime.citationPresenter?.dispose();
     // Closing the tabs saves any open correction into its revision session,
-    // so the sessions are destroyed only after the presenter.
-    runtime.presenter?.dispose();
-    destroyAllRevisionSessions();
+    // so the sessions are destroyed only after the presenter. A failure while
+    // closing the tabs must not skip that.
+    try {
+        runtime.presenter?.dispose();
+    }
+    catch (error) {
+        Zotero.logError?.(error);
+    }
+    const revisionSessionsDestroyed = destroyAllRevisionSessions();
     if (runtime.preferencePaneID) {
         Zotero.PreferencePanes.unregister?.(runtime.preferencePaneID);
     }
@@ -1047,6 +1053,10 @@ globalThis.shutdown = function shutdown() {
     runtime.reasoningCatalogStore = null;
     runtime.disposeReasoningCatalogHost = null;
     runtime.id = null;
+    // Zotero waits for a promise returned by shutdown before it closes the
+    // database or replaces the extension, so the corrections saved by the
+    // closing tabs reach the profile first.
+    return revisionSessionsDestroyed;
 };
 
 globalThis.uninstall = async function uninstall() {};
@@ -1056,6 +1066,7 @@ globalThis.onMainWindowLoad = function onMainWindowLoad({ window }) {
     installObsidianExportProgressButton(window);
 };
 globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
+    runtime.presenter?.closeForWindow(window);
     disposeMainWindowContextMenu(window);
     disposeProgressButton(window);
     disposeObsidianExportProgressButton(window);
@@ -2173,7 +2184,7 @@ async function closeRevisionSession(itemID) {
 
 function destroyAllRevisionSessions() {
     const sessions = runtime.revisionSessions;
-    void sessions?.destroyAll()
+    return Promise.resolve(sessions?.destroyAll())
         .catch(error => Zotero.logError?.(error));
 }
 

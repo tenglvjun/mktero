@@ -940,3 +940,150 @@ test('hints the history chord of the platform it runs on', () => {
         forward: 'Alt+→',
     });
 });
+
+test('opens a new tab when the window that held the document has closed', () => {
+    const firstWindow = createMainWindow({ id: 'first-document' });
+    const secondWindow = createMainWindow({ id: 'second-document' });
+    let activeWindow = firstWindow;
+    const harness = createViewHarness();
+    const reasons = [];
+    const presenter = createPresenter(firstWindow, harness, {
+        getMainWindow: () => activeWindow,
+    });
+
+    const first = presenter.open(42, {
+        onClose: ({ reason }) => reasons.push(reason),
+    });
+    // macOS keeps Zotero running after its main window closes. If that
+    // window's teardown never reached the tab, the document is still known.
+    firstWindow.closed = true;
+    activeWindow = secondWindow;
+    const reopened = presenter.open(42, {
+        onClose: ({ reason }) => reasons.push(reason),
+    });
+
+    assert.equal(reopened.created, true);
+    assert.equal(first.view.destroyCalls, 1);
+    assert.deepEqual(reasons, ['user']);
+    assert.equal(secondWindow.added.length, 1);
+    assert.equal(harness.calls[1].document, secondWindow.document);
+    assert.equal(presenter.get(42).view, reopened.view);
+});
+
+test('releases the documents of a closing window without calling its tabs', () => {
+    const firstWindow = createMainWindow({ id: 'first-document' });
+    const secondWindow = createMainWindow({ id: 'second-document' });
+    let activeWindow = firstWindow;
+    const harness = createViewHarness();
+    const reasons = [];
+    const presenter = createPresenter(firstWindow, harness, {
+        getMainWindow: () => activeWindow,
+    });
+    const onClose = itemID => ({ reason }) => reasons.push([itemID, reason]);
+
+    const kept = presenter.open(42, { onClose: onClose(42) });
+    const closedByZotero = presenter.open(44, { onClose: onClose(44) });
+    activeWindow = secondWindow;
+    const other = presenter.open(43, { onClose: onClose(43) });
+    firstWindow.Zotero_Tabs.close(closedByZotero.tabID);
+    firstWindow.closed.length = 0;
+
+    presenter.closeForWindow(firstWindow);
+    presenter.closeForWindow(firstWindow);
+
+    assert.deepEqual(reasons, [[44, 'user'], [42, 'user']]);
+    assert.equal(kept.view.destroyCalls, 1);
+    assert.equal(closedByZotero.view.destroyCalls, 1);
+    assert.equal(presenter.get(42), null);
+    assert.equal(presenter.get(44), null);
+    assert.deepEqual(firstWindow.closed, []);
+    assert.equal(presenter.get(43).view, other.view);
+    assert.equal(other.view.destroyCalls, 0);
+});
+
+test('forgets and reports a closed document when its view fails to destroy', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const reasons = [];
+    const errors = [];
+    const presenter = createPresenter(mainWindow, harness, {
+        logError: error => errors.push(error.message),
+    });
+
+    const first = presenter.open(42, {
+        onClose: ({ reason }) => reasons.push(reason),
+    });
+    first.view.destroy = () => {
+        throw new Error('NS_ERROR_NOT_INITIALIZED');
+    };
+    assert.doesNotThrow(() => mainWindow.Zotero_Tabs.close(first.tabID));
+
+    assert.equal(presenter.get(42), null);
+    assert.deepEqual(reasons, ['user']);
+    assert.deepEqual(errors, ['NS_ERROR_NOT_INITIALIZED']);
+    assert.equal(presenter.open(42).created, true);
+});
+
+test('opens a new tab when Zotero no longer knows the document tab', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const reasons = [];
+    const errors = [];
+    const presenter = createPresenter(mainWindow, harness, {
+        logError: error => errors.push(error.message),
+    });
+
+    const first = presenter.open(42, {
+        onClose: ({ reason }) => reasons.push(reason),
+    });
+    mainWindow.Zotero_Tabs.select = () => {
+        // Zotero_Tabs.select reads the type of the tab it looked up.
+        throw new TypeError("Cannot read properties of undefined (reading 'type')");
+    };
+    const reopened = presenter.open(42, {
+        onClose: ({ reason }) => reasons.push(reason),
+    });
+
+    assert.equal(reopened.created, true);
+    assert.equal(first.view.destroyCalls, 1);
+    assert.deepEqual(reasons, ['user']);
+    assert.equal(errors.length, 1);
+    assert.equal(mainWindow.added.length, 2);
+});
+
+test('releases a document whose tab Zotero closed without reporting it', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const reasons = [];
+    const errors = [];
+    const presenter = createPresenter(mainWindow, harness, {
+        logError: error => errors.push(error.message),
+    });
+    presenter.open(42, {
+        sourceItemID: 42,
+        onClose: ({ reason }) => reasons.push(['pdf', reason]),
+    });
+    presenter.open(43, {
+        onClose: ({ reason }) => reasons.push(['other', reason]),
+    });
+    let closeCalls = 0;
+    mainWindow.Zotero_Tabs.close = () => {
+        closeCalls++;
+        if (closeCalls === 2) throw new Error('Tab bar is gone');
+    };
+
+    presenter.open(900, {
+        sourceItemID: 42,
+        onClose: ({ reason }) => reasons.push(['note', reason]),
+    });
+    assert.doesNotThrow(() => presenter.dispose());
+
+    assert.deepEqual(reasons, [
+        ['pdf', 'replacement'],
+        ['other', 'shutdown'],
+        ['note', 'shutdown'],
+    ]);
+    assert.deepEqual(errors, ['Tab bar is gone']);
+    assert.deepEqual(harness.views.map(view => view.destroyCalls), [1, 1, 1]);
+    assert.equal(presenter.list().length, 0);
+});

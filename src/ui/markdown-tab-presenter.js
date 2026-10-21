@@ -149,7 +149,13 @@ export class MarkdownTabPresenter {
         }
         this.ensureTabIconStyle(owner.document);
 
-        const existing = this.presentations.get(documentID);
+        let existing = this.presentations.get(documentID);
+        // A document whose window is gone, or that already closed, cannot be
+        // selected again. Release it and open a new tab instead.
+        if (existing && !presentationWindowIsOpen(existing)) {
+            this.finishPresentation(existing, MARKDOWN_TAB_CLOSE_REASONS.USER);
+            existing = null;
+        }
         if (existing) {
             if (sourceItemID !== null && sourceItemID !== undefined) {
                 existing.model.itemID = sourceItemID;
@@ -284,8 +290,10 @@ export class MarkdownTabPresenter {
             if (onReadingPositionChange !== undefined) {
                 existing.model.onReadingPositionChange = onReadingPositionChange;
             }
-            tabs.select(existing.tabID);
-            return { ...existing, created: false };
+            if (this.selectPresentation(existing, owner)) {
+                return { ...existing, created: false };
+            }
+            this.finishPresentation(existing, MARKDOWN_TAB_CLOSE_REASONS.USER);
         }
 
         const model = createInitialModel(
@@ -378,23 +386,12 @@ export class MarkdownTabPresenter {
                 select: true,
                 preventJumpback: true,
                 onClose: () => {
-                    if (presentation?.closed) return;
-                    const reason = presentation?.closeReason
-                        || MARKDOWN_TAB_CLOSE_REASONS.USER;
-                    if (presentation) {
-                        presentation.closed = true;
-                        presentation.closeReason = null;
-                    }
-                    presentation?.view.destroy?.();
-                    if (this.presentations.get(documentID)?.tabID === tabID) {
-                        this.presentations.delete(documentID);
-                    }
-                    try {
-                        presentation?.onClose?.({ reason });
-                    }
-                    catch (error) {
-                        this.zotero.logError?.(error);
-                    }
+                    if (!presentation) return;
+                    this.finishPresentation(
+                        presentation,
+                        presentation.closeReason
+                            || MARKDOWN_TAB_CLOSE_REASONS.USER
+                    );
                 },
             });
             tabID = result.id;
@@ -407,8 +404,10 @@ export class MarkdownTabPresenter {
         }
 
         presentation = {
+            owner,
             tabs,
             tabID,
+            documentID,
             view,
             model,
             closed: false,
@@ -621,10 +620,77 @@ export class MarkdownTabPresenter {
         this.tabIconStyle = null;
     }
 
+    // closeForWindow releases the documents of a main window that is going
+    // away. Zotero closes its tabs while the window unloads, but a failure
+    // earlier in that teardown skips the rest, and macOS keeps Zotero running
+    // so the documents would otherwise stay open. The closing window's tab
+    // manager is not called again.
+    closeForWindow(window) {
+        if (!window) return;
+        for (const presentation of [...this.presentations.values()]) {
+            if (presentation.owner !== window) continue;
+            this.finishPresentation(
+                presentation,
+                MARKDOWN_TAB_CLOSE_REASONS.USER
+            );
+        }
+    }
+
     closePresentation(presentation, reason) {
         if (!presentation || presentation.closed) return;
         presentation.closeReason = reason;
-        presentation.tabs.close?.(presentation.tabID);
+        try {
+            presentation.tabs.close?.(presentation.tabID);
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+        }
+        // Zotero runs the tab's onClose synchronously. When the tab is no
+        // longer known to its window, or closing it threw, the document is
+        // released here instead.
+        this.finishPresentation(presentation, reason);
+    }
+
+    // finishPresentation runs once per document: it saves and destroys the
+    // view, forgets the document, and reports the close. A failure in one
+    // step does not skip the others.
+    finishPresentation(presentation, reason) {
+        if (!presentation) return;
+        const first = !presentation.closed;
+        presentation.closed = true;
+        presentation.closeReason = null;
+        // Destroying the view saves an open correction, and that save looks
+        // the document up, so the document is forgotten only afterwards.
+        if (first) {
+            try {
+                presentation.view.destroy?.();
+            }
+            catch (error) {
+                this.zotero.logError?.(error);
+            }
+        }
+        if (this.presentations.get(presentation.documentID) === presentation) {
+            this.presentations.delete(presentation.documentID);
+        }
+        if (!first) return;
+        try {
+            presentation.onClose?.({ reason });
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+        }
+    }
+
+    selectPresentation(presentation, owner) {
+        try {
+            presentation.tabs.select(presentation.tabID);
+            if (presentation.owner !== owner) presentation.owner.focus?.();
+            return true;
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+            return false;
+        }
     }
 
     ensureTabIconStyle(document) {
@@ -672,6 +738,18 @@ export class MarkdownTabPresenter {
 
     removeStaleSessionTabs() {
         removeStaleMkteroSessionTabs(this.zotero);
+    }
+}
+
+// A closed main window can no longer select or close its tabs. Reading a
+// property of a destroyed window can itself throw.
+function presentationWindowIsOpen(presentation) {
+    if (presentation.closed) return false;
+    try {
+        return presentation.owner?.closed !== true;
+    }
+    catch {
+        return false;
     }
 }
 

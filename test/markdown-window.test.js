@@ -7583,3 +7583,55 @@ test('saves an open correction before a closing tab destroys its editor', async 
     third.view.destroy();
     assert.deepEqual(events, [['destroy-editor']]);
 });
+
+test('saves an open correction when the closing window cannot clear its timers', () => {
+    const markdown = [
+        '# Methods',
+        '',
+        'The study included 5O participants.',
+    ].join('\n');
+    const commits = [];
+    const positions = [];
+    const errors = [];
+    const pending = {
+        blockID: 'paragraph-1',
+        replacementMarkdown: 'The study included 50 participants.',
+    };
+    let editorOptions;
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        cacheKey: 'c'.repeat(64),
+        sourceKind: 'markdown',
+        onCommitCorrection(correction) {
+            commits.push(correction);
+            return Promise.resolve({});
+        },
+        onReadingPositionChange: anchor => positions.push(anchor),
+    }), { logError: error => errors.push(error.message) }, {
+        readingPositionDelay: 1000,
+        // A main window that is unloading still runs scripts, but its timer
+        // functions can throw.
+        configureWindow(window) {
+            window.setTimeout = () => 7;
+            window.clearTimeout = () => {
+                throw new Error('NS_ERROR_NOT_INITIALIZED');
+            };
+        },
+        editorFactory(options) {
+            editorOptions = options;
+            return {
+                ...createTestInlineEditor(options),
+                getPendingCorrection: () => pending,
+            };
+        },
+    });
+    editorOptions.onViewportChange(markdown.indexOf('The study'));
+    assert.equal(positions.length, 0);
+
+    assert.doesNotThrow(() => view.destroy());
+
+    assert.deepEqual(commits, [pending]);
+    assert.ok(errors.includes('NS_ERROR_NOT_INITIALIZED'));
+});
