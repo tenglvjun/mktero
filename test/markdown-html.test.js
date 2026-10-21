@@ -1448,12 +1448,21 @@ test('keeps blank lines inside fenced code when another block falls back', () =>
 
 test('keeps one math budget for a document rendered block by block', () => {
     const formulas = Array.from({ length: 1_200 }, () => '$x$').join('\n\n');
+    // Deep nesting is rejected before marked runs, so the formulas are one
+    // stretch and have to share the budget of a single render.
     const nested = Array.from({ length: 600 }, (_, depth) => `${'  '.repeat(depth)}- x`).join('\n');
-    const broken = `${'*'.repeat(5_000)}x${'*'.repeat(5_000)}`;
+    const costly = renderMarkdownHTML(`${formulas}\n\n${nested}`);
+    assert.match(costly, /markdown-source-fallback/);
+    assert.equal(costly.match(/class="katex"/g)?.length, 1_000);
 
-    for (const extra of [nested, broken]) {
-        const html = renderMarkdownHTML(`${formulas}\n\n${extra}`);
-        assert.match(html, /markdown-source-fallback/);
-        assert.equal(html.match(/class="katex"/g)?.length, 1_000);
-    }
+    // A thrown render takes the other split. The throw comes from the caller,
+    // not from marked: a paragraph of asterisks overflows only some stacks,
+    // and CI renders it.
+    const thrown = renderMarkdownHTML(`${formulas}\n\n![Broken](images/broken.png)`, {
+        resolveImageURL() {
+            throw new Error('Damaged asset');
+        },
+    });
+    assert.match(thrown, /markdown-source-fallback/);
+    assert.equal(thrown.match(/class="katex"/g)?.length, 1_000);
 });

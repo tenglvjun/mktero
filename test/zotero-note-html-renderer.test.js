@@ -134,5 +134,5 @@ test('saves a block Markdown cannot render as escaped text', () => {
     assert.match(html, /<p>Before <strong>bold<\/strong>\.<\/p>/);
     assert.match(html, /<p class="markdown-source-fallback">Noise &lt;script&gt;x&lt;\/script&gt;\*{5000}x\*{5000}<\/p>/);
     assert.match(html, /<p>After\.<\/p>/);
-    assert.doesNotMatch(html, /<script>/);
+    assert.equal(html.toLowerCase().includes('<script'), false);
 });
