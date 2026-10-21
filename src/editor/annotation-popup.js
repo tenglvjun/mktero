@@ -94,6 +94,16 @@ export function createAnnotationPopup(parent, {
         anchoredPopup.open(options);
         selectionLocked = lockSelection && anchoredPopup.isOpen();
     };
+    // The anchored popup can also close a note editor by itself, on Escape or
+    // when focus leaves it. Without this, the pending save survives the editor
+    // and the next outside click writes a note the reader already dismissed.
+    const dismissNoteEditor = reason => {
+        const save = saveNoteBeforeDismiss;
+        if (!save) return;
+        saveNoteBeforeDismiss = null;
+        onNoteEditorClose?.();
+        if (reason !== 'escape') save();
+    };
 
     const openNote = ({ anchor, annotation, comment, errorText }) => {
         if (!annotation) return;
@@ -130,6 +140,7 @@ export function createAnnotationPopup(parent, {
                 return editor.form;
             },
             focusContent: focusNoteInput,
+            onClose: dismissNoteEditor,
         });
     };
     const openDraftNote = ({
@@ -174,6 +185,7 @@ export function createAnnotationPopup(parent, {
                 return editor.form;
             },
             focusContent: focusNoteInput,
+            onClose: dismissNoteEditor,
         });
     };
     const openSelection = ({
@@ -399,6 +411,9 @@ function createAnnotationNoteEditor(
     );
     const canUpdate = typeof saveComment === 'function';
     input.readOnly = !canUpdate;
+    input.addEventListener('copy', event => {
+        copyQuoteFromEmptyNoteInput(event, input, annotation);
+    });
     form.appendChild(input);
 
     const error = document.createElementNS(XHTML_NAMESPACE, 'div');
@@ -863,6 +878,17 @@ function createMarkdownSelectionActions(
     }
     content.appendChild(error);
     return content;
+}
+
+// Opening a note moves focus into its input while the quoted Markdown stays
+// highlighted. Copy then targets the empty input, so hand the clipboard the
+// quote the reader still sees selected.
+function copyQuoteFromEmptyNoteInput(event, input, annotation) {
+    if (input.selectionStart !== input.selectionEnd) return;
+    const quote = String(annotation?.text || '');
+    if (!quote.trim() || !event.clipboardData) return;
+    event.clipboardData.setData('text/plain', quote);
+    event.preventDefault();
 }
 
 function focusNoteInput(popup) {

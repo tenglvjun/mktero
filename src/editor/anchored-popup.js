@@ -20,7 +20,9 @@ export function createAnchoredPopup(parent, {
         closeTimer = null;
     };
 
-    const close = () => {
+    // `reason` is 'escape' or 'dismiss' when the popup closes itself, and
+    // undefined when its owner calls close().
+    const close = reason => {
         cancelClose();
         const onClose = closeHandler;
         closeHandler = null;
@@ -31,7 +33,7 @@ export function createAnchoredPopup(parent, {
         popup?.remove();
         popup = null;
         anchor = null;
-        onClose?.();
+        onClose?.(reason);
     };
 
     const scheduleClose = () => {
@@ -39,7 +41,7 @@ export function createAnchoredPopup(parent, {
         const root = parent.getRootNode?.();
         const activeElement = root?.activeElement || document.activeElement;
         if (popup?.contains(activeElement)) return;
-        closeTimer = ownerWindow.setTimeout(close, 120);
+        closeTimer = ownerWindow.setTimeout(() => close('dismiss'), 120);
     };
 
     const reposition = () => {
@@ -104,7 +106,7 @@ export function createAnchoredPopup(parent, {
             const returnFocus = anchor;
             event.preventDefault();
             event.stopPropagation();
-            close();
+            close('escape');
             ignoredOpenAnchor = returnFocus;
             returnFocus?.focus?.();
             ownerWindow.setTimeout(() => {
