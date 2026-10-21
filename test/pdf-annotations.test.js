@@ -357,6 +357,251 @@ test('keeps a failed outside note save open with its draft', async () => {
     dom.window.close();
 });
 
+function dispatchCopy(window, target) {
+    const data = new Map();
+    const event = new window.Event('copy', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+    });
+    Object.defineProperty(event, 'clipboardData', {
+        value: {
+            setData(type, value) {
+                data.set(type, value);
+            },
+        },
+    });
+    target.dispatchEvent(event);
+    return { data, defaultPrevented: event.defaultPrevented };
+}
+
+function openSelectionNoteEditor(window, parent, options = {}) {
+    const anchor = parent.querySelector('#anchor');
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        ...options,
+    });
+    popup.openSelection({
+        anchor,
+        selection: {
+            text: 'Selected Markdown text',
+            ranges: [{ from: 0, to: 22 }],
+        },
+        selectionContext: { side: 'source' },
+    });
+    parent.querySelector('[data-action="add-note"]').click();
+    return popup;
+}
+
+test('copies the quoted text from a note editor with no text selected', () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const parent = dom.window.document.querySelector('#parent');
+    const popup = openSelectionNoteEditor(dom.window, parent, {
+        createMarkdownAnnotation: async annotation => annotation,
+    });
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    assert.equal(dom.window.document.activeElement, input);
+    assert.equal(input.selectionStart, input.selectionEnd);
+
+    const copied = dispatchCopy(dom.window, input);
+
+    assert.equal(copied.defaultPrevented, true);
+    assert.equal(copied.data.get('text/plain'), 'Selected Markdown text');
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('copies the quote rather than a selection outside the note editor', () => {
+    const dom = new JSDOM(
+        '<!doctype html><p id="reader">Other reader text</p>'
+            + '<div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const popup = openSelectionNoteEditor(dom.window, parent, {
+        createMarkdownAnnotation: async annotation => annotation,
+    });
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('#reader'));
+    document.getSelection().addRange(range);
+
+    const copied = dispatchCopy(dom.window, input);
+
+    assert.equal(copied.data.get('text/plain'), 'Selected Markdown text');
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('leaves a text selection inside the note input to the native copy', () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        async updateAnnotationComment() {},
+    });
+    popup.openNote({
+        anchor: document.querySelector('#anchor'),
+        annotation: {
+            id: 'HIGH0002',
+            type: 'highlight',
+            text: 'Visible',
+            comment: 'Review this',
+            color: '#ffd400',
+        },
+    });
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    input.setSelectionRange(0, 6);
+
+    const copied = dispatchCopy(dom.window, input);
+
+    assert.equal(copied.defaultPrevented, false);
+    assert.equal(copied.data.size, 0);
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('discards a draft note closed with Escape instead of saving it later', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const parent = dom.window.document.querySelector('#parent');
+    const created = [];
+    let closedNoteEditors = 0;
+    const popup = openSelectionNoteEditor(dom.window, parent, {
+        async createMarkdownAnnotation(annotation) {
+            created.push(annotation);
+            return annotation;
+        },
+        onNoteEditorClose: () => {
+            closedNoteEditors += 1;
+        },
+    });
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    input.value = 'Unsaved draft';
+
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+    }));
+    assert.equal(parent.querySelector('.mktero-annotation-popup'), null);
+
+    // The next click outside the reader dismisses popups with saveNote.
+    popup.close({ saveNote: true });
+    await new Promise(resolve => {
+        setImmediate(resolve);
+    });
+
+    assert.deepEqual(created, []);
+    assert.equal(closedNoteEditors, 1);
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('does not save an edited note after Escape discarded it', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    let saved = null;
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        async updateAnnotationComment(annotationID, comment) {
+            saved = { annotationID, comment };
+        },
+    });
+    popup.openNote({
+        anchor: document.querySelector('#anchor'),
+        annotation: {
+            id: 'HIGH0002',
+            type: 'highlight',
+            text: 'Visible',
+            comment: 'Review this',
+            color: '#ffd400',
+        },
+    });
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    input.value = 'Discard this edit';
+
+    input.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+    }));
+    popup.close({ saveNote: true });
+    await new Promise(resolve => {
+        setImmediate(resolve);
+    });
+
+    assert.equal(saved, null);
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('saves a changed note when focus leaves its editor', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><button id="anchor">Open</button></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    let saved = null;
+    let closedNoteEditors = 0;
+    const popup = createAnnotationPopup(parent, {
+        localization: { t: translate },
+        async updateAnnotationComment(annotationID, comment) {
+            saved = { annotationID, comment };
+        },
+        onNoteEditorClose: () => {
+            closedNoteEditors += 1;
+        },
+    });
+    popup.openNote({
+        anchor: document.querySelector('#anchor'),
+        annotation: {
+            id: 'HIGH0002',
+            type: 'highlight',
+            text: 'Visible',
+            comment: 'Review this',
+            color: '#ffd400',
+        },
+    });
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    input.value = 'Saved after focus left';
+
+    input.blur();
+    await new Promise(resolve => {
+        setTimeout(resolve, 160);
+    });
+
+    assert.deepEqual(saved, {
+        annotationID: 'HIGH0002',
+        comment: 'Saved after focus left',
+    });
+    assert.equal(parent.querySelector('.mktero-annotation-popup'), null);
+    assert.equal(closedNoteEditors, 1);
+
+    popup.destroy();
+    dom.window.close();
+});
+
 test('shows a safe localized error when saving an annotation note fails', async () => {
     const dom = new JSDOM(
         '<!doctype html><div id="parent"><button id="anchor">Open</button></div>'

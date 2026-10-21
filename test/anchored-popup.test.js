@@ -155,3 +155,49 @@ test('stays open when its own focused control becomes disabled or hidden', () =>
     assert.equal(closed, 1);
     dom.window.close();
 });
+
+test('tells its close handler whether Escape, focus loss, or the caller closed it', () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><span id="anchor"></span></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const anchor = document.querySelector('#anchor');
+    const popup = createAnchoredPopup(parent, {
+        className: 'popup',
+        idPrefix: 'test-popup',
+    });
+    const scheduled = stubTimers(dom.window);
+    const reasons = [];
+    let button;
+    const openPopup = () => popup.open({
+        anchor,
+        label: 'Actions',
+        forceOpen: true,
+        onClose: reason => reasons.push(reason),
+        renderContent({ document: ownerDocument }) {
+            button = ownerDocument.createElementNS(XHTML_NAMESPACE, 'button');
+            return button;
+        },
+    });
+
+    openPopup();
+    document.querySelector('.popup').dispatchEvent(new dom.window.KeyboardEvent(
+        'keydown',
+        { key: 'Escape', bubbles: true, cancelable: true }
+    ));
+
+    openPopup();
+    button.focus();
+    blurToBody(dom.window, button);
+    const dismissal = scheduled.find(timer => timer.delay === 120);
+    scheduled.splice(scheduled.indexOf(dismissal), 1);
+    dismissal.callback();
+
+    openPopup();
+    popup.close();
+
+    assert.deepEqual(reasons, ['escape', 'dismiss', undefined]);
+    dom.window.close();
+});
