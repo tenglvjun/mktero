@@ -235,8 +235,16 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         null
     );
 
-    await waitFor(() => !graphButton.disabled);
-    graphButton.click();
+    // The unloaded window's Markdown tab is released with it, so the graph is
+    // opened again from the new tab of the next window.
+    toolbarButtons[0].click();
+    const reopenedRoot = await waitFor(() => mainWindow.tabRoot('tab-2'));
+    const reopenedGraphButton = await waitFor(() => {
+        const button = reopenedRoot.shadowRoot
+            .querySelector('#mktero-citation-graph');
+        return button && !button.hidden && !button.disabled ? button : null;
+    });
+    reopenedGraphButton.click();
     await waitFor(() => mainWindow.document.querySelector(
         '.mktero-citation-graph-modal-host'
     ));

@@ -120,20 +120,39 @@ export function createMarkdownRevisionSessionRegistry({
     }
     const entries = new Map();
     const pending = new Map();
+    // Sessions that left `entries` but may still be saving. destroyAll waits
+    // for them too: a tab that closes while its window unloads starts its
+    // save before shutdown runs.
+    const closing = new Set();
+
+    const destroyEntry = entry => {
+        let destroyed;
+        try {
+            destroyed = Promise.resolve(entry.session.destroy());
+        }
+        catch (error) {
+            destroyed = Promise.reject(error);
+        }
+        closing.add(destroyed);
+        const forget = () => closing.delete(destroyed);
+        destroyed.then(forget, forget);
+        return destroyed;
+    };
 
     const close = async itemID => {
         pending.delete(itemID);
         const entry = entries.get(itemID);
         if (!entry) return;
         entries.delete(itemID);
-        await entry.session.destroy();
+        await destroyEntry(entry);
     };
 
     const destroyAll = async () => {
         pending.clear();
         const active = [...entries.values()];
         entries.clear();
-        await Promise.all(active.map(entry => entry.session.destroy()));
+        for (const entry of active) destroyEntry(entry);
+        await Promise.all([...closing]);
     };
 
     return {

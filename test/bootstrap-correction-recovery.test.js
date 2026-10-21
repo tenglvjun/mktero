@@ -20,7 +20,7 @@ test('saves an open correction when its tab closes and opens past damaged correc
     const errors = [];
     let serial = 0;
     let toolbarHandler;
-    const owner = {
+    const createOwner = () => ({
         document: window.document,
         AbortController,
         Zotero_Tabs: {
@@ -39,7 +39,9 @@ test('saves an open correction when its tab closes and opens past damaged correc
                 tabs.delete(id);
             },
         },
-    };
+    });
+    const owner = createOwner();
+    let currentOwner = owner;
     const ioUtils = nodeIO();
     const pathUtils = { join: path.join, parent: path.dirname, filename: path.basename,
         tempDir: path.join(profilePath, 'tmp') };
@@ -58,7 +60,7 @@ test('saves an open correction when its tab closes and opens past damaged correc
         },
         PreferencePanes: { register: async options => options.id, unregister() {} },
         Reader: { registerEventListener: (_type, handler) => { toolbarHandler = handler; } },
-        getMainWindow: () => owner, debug() {}, logError: error => errors.push(error),
+        getMainWindow: () => currentOwner, debug() {}, logError: error => errors.push(error),
     };
     const globals = {
         Zotero: zotero, IOUtils: ioUtils, PathUtils: pathUtils,
@@ -94,14 +96,14 @@ test('saves an open correction when its tab closes and opens past damaged correc
         await waitFor(() => shadow.querySelector('.cm-content')?.textContent.includes(expectedText));
         return shadow;
     };
-    const editFirstBlock = (shadow, replacement) => {
+    const editFirstBlock = (shadow, replacement, replacedLength = 4) => {
         shadow.querySelector('#mktero-correction-toggle').click();
         const editorView = EditorView.findFromDOM(shadow.querySelector('.cm-editor'));
         editorView.posAtCoords = () => 2;
         const content = shadow.querySelector('.cm-content');
         content.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true, cancelable: true, button: 0 }));
         assert.equal(content.getAttribute('contenteditable'), 'true');
-        editorView.dispatch({ changes: { from: 0, to: 4, insert: replacement } });
+        editorView.dispatch({ changes: { from: 0, to: replacedLength, insert: replacement } });
     };
 
     // The test reads through its own store instance while bootstrap's store
@@ -174,23 +176,26 @@ test('saves an open correction when its tab closes and opens past damaged correc
     assert.match((await store.load(cacheKey)).corrections[0].replacementMarkdown, /^Recovered body/);
     owner.Zotero_Tabs.close('tab-4');
 
-    // Shutdown closes the tabs before their revision sessions are destroyed.
-    const reopenedRecovered = await openTab('tab-5', 'Recovered body');
-    const editorView = EditorView.findFromDOM(reopenedRecovered.querySelector('.cm-editor'));
-    reopenedRecovered.querySelector('#mktero-correction-toggle').click();
-    editorView.posAtCoords = () => 2;
-    const content = reopenedRecovered.querySelector('.cm-content');
-    content.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true, cancelable: true, button: 0 }));
-    assert.equal(content.getAttribute('contenteditable'), 'true');
-    editorView.dispatch({ changes: { from: 0, to: 'Recovered'.length, insert: 'Shutdown' } });
-    globalThis.shutdown();
-    const shutdownSave = await waitFor(async () => {
-        const revision = await loadSavedRevision();
-        return /^Shutdown body/.test(revision?.corrections?.[0]?.replacementMarkdown || '')
-            ? revision
-            : null;
-    });
+    // A main window can close without closing its tabs, and macOS keeps Zotero
+    // running. The open correction is saved, and the document opens again in
+    // the next window instead of selecting a tab that no longer exists.
+    const closingWindow = await openTab('tab-5', 'Recovered body');
+    editFirstBlock(closingWindow, 'Window', 'Recovered'.length);
+    globalThis.onMainWindowUnload({ window: owner });
+    assert.equal(tabs.has('tab-5'), true);
+    currentOwner = createOwner();
+    await openTab('tab-6', 'Window body');
+    assert.match((await store.load(cacheKey)).corrections[0].replacementMarkdown, /^Window body/);
+
+    // Shutdown closes the tabs before their revision sessions are destroyed,
+    // and returns the saves so Zotero waits for them.
+    const reopenedRecovered = tabs.get('tab-6').container
+        .querySelector('.mktero-tab-host').shadowRoot;
+    editFirstBlock(reopenedRecovered, 'Shutdown', 'Window'.length);
+    await globalThis.shutdown();
+    const shutdownSave = await store.load(cacheKey);
     assert.equal(shutdownSave.corrections.length, 1);
+    assert.match(shutdownSave.corrections[0].replacementMarkdown, /^Shutdown body/);
 });
 
 async function waitFor(read) {

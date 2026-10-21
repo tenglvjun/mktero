@@ -969,8 +969,17 @@ class MarkdownTabView {
 
     destroy() {
         if (this.destroyed) return;
-        this.flushPersistedReadingPosition();
+        // The open correction is saved first. While the main window closes,
+        // its timer functions can throw; saving the reading position may then
+        // fail, but that must not keep the correction or the rest of the
+        // teardown from running.
         this.flushPendingCorrection();
+        try {
+            this.flushPersistedReadingPosition();
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
         this.destroyed = true;
         this.landmarkItems = null;
         this.shortcutsPanelOpen = false;

@@ -1031,3 +1031,54 @@ test('removes a damaged stored revision on the next save through the registry', 
     assert.equal(entry.session.hasUnreadableStoredRevision(), false);
     await registry.destroyAll();
 });
+
+test('waits during shutdown for a session that a closing tab is still saving', async () => {
+    const saves = new Map();
+    const finished = [];
+    const registry = createMarkdownRevisionSessionRegistry({
+        openSession: ({ baseDocument }) => Promise.resolve({
+            destroy: () => new Promise(resolve => {
+                saves.set(baseDocument.itemID, () => {
+                    finished.push(baseDocument.itemID);
+                    resolve();
+                });
+            }),
+        }),
+    });
+    await registry.open(42, createBaseDocument());
+    await registry.open(43, { ...createBaseDocument(), itemID: 43 });
+
+    // The tab's close leaves the registry before its save completes.
+    const closing = registry.close(42);
+    let shutDown = false;
+    const shutdown = registry.destroyAll().then(() => { shutDown = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(shutDown, false);
+
+    saves.get(43)();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(shutDown, false);
+
+    saves.get(42)();
+    await shutdown;
+    await closing;
+    assert.deepEqual(finished, [43, 42]);
+    // A settled close is not awaited again.
+    await registry.destroyAll();
+});
+
+test('reports a failed save of a closing session during shutdown', async () => {
+    const registry = createMarkdownRevisionSessionRegistry({
+        openSession: () => Promise.resolve({
+            destroy: async () => {
+                throw new Error('disk full');
+            },
+        }),
+    });
+    await registry.open(42, createBaseDocument());
+
+    const closing = assert.rejects(registry.close(42), /disk full/);
+    await assert.rejects(registry.destroyAll(), /disk full/);
+    await closing;
+    await registry.destroyAll();
+});
