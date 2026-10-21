@@ -1443,9 +1443,15 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
         document.querySelector('.cm-mktero-pdf-annotation-note'),
         null
     );
-    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+    // The open editor survives the refresh: the reader's text is neither
+    // replaced by the refreshed comment nor saved behind their back.
+    assert.equal(
+        document.querySelector('.mktero-annotation-note-input')?.value,
+        'Remember this finding'
+    );
 
     editor.destroy();
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
     dom.window.close();
 });
 
@@ -1836,6 +1842,301 @@ test('saves an open annotation note when clicking outside it', async () => {
         comment: 'Saved outside',
     });
     assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+function refreshedAnnotationOverlay(comment = 'Review this') {
+    // Every annotation refresh publishes a new overlay object, even when the
+    // annotations themselves did not change.
+    return {
+        matched: [{
+            id: 'HIGH0001',
+            type: 'highlight',
+            text: 'Important',
+            comment,
+            color: '#ffd400',
+            pageLabel: '4',
+            ranges: [{ from: 0, to: 9 }],
+        }],
+        unmatched: [],
+    };
+}
+
+function openSelectionNoteDraft(dom, document) {
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    document.querySelector('[data-action="add-note"]').click();
+    return document.querySelector('.mktero-annotation-note-input');
+}
+
+function waitForAnnotationPopupToClose(dom, document) {
+    return new Promise(resolve => {
+        if (!document.querySelector('.mktero-annotation-popup')) {
+            resolve();
+            return;
+        }
+        const observer = new dom.window.MutationObserver(() => {
+            if (document.querySelector('.mktero-annotation-popup')) return;
+            observer.disconnect();
+            resolve();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    });
+}
+
+test('keeps a note draft open when only the annotations refresh', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Select this Markdown text.';
+    const created = [];
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        async createMarkdownAnnotation(annotation) {
+            created.push(annotation);
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const input = openSelectionNoteDraft(dom, document);
+    input.value = 'Half-typed note';
+
+    // A background sync republishes the same document with a new overlay.
+    editor.setDocument({
+        markdown,
+        annotationOverlay: { matched: [], unmatched: [] },
+    });
+
+    const kept = document.querySelector('.mktero-annotation-note-input');
+    assert.equal(kept, input);
+    assert.equal(kept.value, 'Half-typed note');
+    assert.equal(
+        document.querySelector('.cm-mktero-selection-retained')?.textContent,
+        markdown
+    );
+    assert.deepEqual(created, []);
+
+    document.querySelector('.mktero-annotation-note-save').click();
+    await waitForAnnotationPopupToClose(dom, document);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].comment, 'Half-typed note');
+    assert.deepEqual(created[0].ranges, [{ from: 0, to: 26 }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps an annotation note editor open when its annotations refresh', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let updatedNote = null;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        updateAnnotationComment(annotationID, comment) {
+            updatedNote = { annotationID, comment };
+        },
+    });
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+    document.querySelector('.cm-mktero-pdf-annotation-note').dispatchEvent(
+        new dom.window.MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+        })
+    );
+    const input = document.querySelector('.mktero-annotation-note-input');
+    input.value = 'Still typing';
+
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+
+    assert.equal(document.querySelector('.mktero-annotation-note-input'), input);
+    assert.equal(input.value, 'Still typing');
+    assert.equal(updatedNote, null);
+
+    document.querySelector('.mktero-annotation-note-save').click();
+    await waitForAnnotationPopupToClose(dom, document);
+    assert.deepEqual(updatedNote, {
+        annotationID: 'HIGH0001',
+        comment: 'Still typing',
+    });
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('saves an open annotation note before the document is replaced', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let updatedNote = null;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        updateAnnotationComment(annotationID, comment) {
+            updatedNote = { annotationID, comment };
+        },
+    });
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+    document.querySelector('.cm-mktero-pdf-annotation-note').dispatchEvent(
+        new dom.window.MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+        })
+    );
+    document.querySelector('.mktero-annotation-note-input').value = 'Keep me';
+
+    editor.setDocument({
+        markdown: 'Important result, with a restored figure.',
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+    await waitForAnnotationPopupToClose(dom, document);
+
+    assert.deepEqual(updatedNote, {
+        annotationID: 'HIGH0001',
+        comment: 'Keep me',
+    });
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('still closes annotation actions when only the annotations refresh', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+    document.querySelector('.cm-mktero-pdf-annotation').dispatchEvent(
+        new dom.window.FocusEvent('focusin', { bubbles: true })
+    );
+    assert.ok(document.querySelector('.mktero-annotation-popup'));
+
+    editor.setDocument({
+        markdown: 'Important result.',
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps a note draft open when the reader scrolls underneath it', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Select this Markdown text.',
+        async createMarkdownAnnotation(annotation) {
+            return { ...annotation, id: 'mktero-local-1' };
+        },
+    });
+    const input = openSelectionNoteDraft(dom, document);
+    input.value = 'Half-typed note';
+    const scroller = document.querySelector('.cm-scroller');
+
+    // CodeMirror also scrolls by itself to keep its anchor after a refresh.
+    scroller.dispatchEvent(new dom.window.Event('scroll'));
+    scroller.dispatchEvent(new dom.window.WheelEvent('wheel', {
+        bubbles: true,
+    }));
+
+    assert.equal(document.querySelector('.mktero-annotation-note-input'), input);
+    assert.equal(input.value, 'Half-typed note');
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not swap an open note editor for actions on a hovered highlight', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    let updatedNote = null;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+        updateAnnotationComment(annotationID, comment) {
+            updatedNote = { annotationID, comment };
+        },
+    });
+    editor.setDocument({
+        markdown: 'Important result. Second finding.',
+        annotationOverlay: {
+            matched: [
+                refreshedAnnotationOverlay().matched[0],
+                {
+                    id: 'HIGH0002',
+                    type: 'highlight',
+                    text: 'Second',
+                    comment: '',
+                    color: '#ffd400',
+                    ranges: [{ from: 18, to: 24 }],
+                },
+            ],
+            unmatched: [],
+        },
+    });
+    document.querySelector('.cm-mktero-pdf-annotation-note').dispatchEvent(
+        new dom.window.MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+        })
+    );
+    const input = document.querySelector('.mktero-annotation-note-input');
+    input.value = 'On my way to Save';
+
+    document.querySelector('[data-annotation-id="HIGH0002"]').dispatchEvent(
+        new dom.window.MouseEvent('mouseover', { bubbles: true })
+    );
+    await new Promise(resolve => {
+        setTimeout(resolve, 260);
+    });
+
+    assert.equal(document.querySelector('.mktero-annotation-note-input'), input);
+    assert.equal(input.value, 'On my way to Save');
+    assert.equal(updatedNote, null);
 
     editor.destroy();
     dom.window.close();

@@ -72,6 +72,9 @@ export function createAnnotationPopup(parent, {
     const isSelectionOpen = () => (
         selectionLocked && anchoredPopup.isOpen()
     );
+    const isNoteOpen = () => (
+        saveNoteBeforeDismiss !== null && anchoredPopup.isOpen()
+    );
 
     const cancelActiveSelectionTranslation = () => {
         const cancel = activeSelectionTranslationCancel;
@@ -327,14 +330,14 @@ export function createAnnotationPopup(parent, {
         });
     };
     const scheduleOpenActions = ({ anchor, annotation, beforeOpen }) => {
-        if (!anchor || !annotation || isSelectionOpen()) return;
+        if (!anchor || !annotation || isSelectionOpen() || isNoteOpen()) return;
         if (hoverOpenTimer !== null && hoverOpenAnchor === anchor) return;
         cancelScheduledOpen();
         hoverOpenAnchor = anchor;
         hoverOpenTimer = ownerWindow.setTimeout(() => {
             hoverOpenTimer = null;
             hoverOpenAnchor = null;
-            if (isSelectionOpen() || !anchor.isConnected) return;
+            if (isSelectionOpen() || isNoteOpen() || !anchor.isConnected) return;
             beforeOpen?.();
             openActions({ anchor, annotation });
         }, ANNOTATION_HOVER_OPEN_DELAY_MS);
@@ -351,6 +354,7 @@ export function createAnnotationPopup(parent, {
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
         isSelectionOpen,
+        isNoteOpen,
         contains: anchoredPopup.contains,
         destroy: close,
     };

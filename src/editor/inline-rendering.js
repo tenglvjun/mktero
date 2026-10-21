@@ -2424,8 +2424,10 @@ function closeReferencePopupsExcept(context, retainedPopup) {
     }
 }
 
+// Hover must not replace selection actions or a note the reader is typing.
 function selectionActionsLocked(context) {
-    return Boolean(context.annotationPopup?.isSelectionOpen?.());
+    return Boolean(context.annotationPopup?.isSelectionOpen?.()
+        || context.annotationPopup?.isNoteOpen?.());
 }
 
 function previewReferenceTypes(context) {

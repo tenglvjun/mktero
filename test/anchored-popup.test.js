@@ -201,3 +201,56 @@ test('tells its close handler whether Escape, focus loss, or the caller closed i
     assert.deepEqual(reasons, ['escape', 'dismiss', undefined]);
     dom.window.close();
 });
+
+test('keeps its place when the anchor it points at is replaced', () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="parent"><span id="anchor"></span></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const parent = document.querySelector('#parent');
+    const anchor = document.querySelector('#anchor');
+    // A detached element reports an empty rect at the window origin.
+    anchor.getBoundingClientRect = () => (anchor.isConnected ? {
+        top: 300,
+        right: 460,
+        bottom: 320,
+        left: 400,
+        width: 60,
+        height: 20,
+    } : {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        width: 0,
+        height: 0,
+    });
+    const popup = createAnchoredPopup(parent, {
+        className: 'popup',
+        idPrefix: 'test-popup',
+    });
+    let reposition;
+    const render = ({ document: ownerDocument, reposition: next }) => {
+        reposition = next;
+        return ownerDocument.createElementNS(XHTML_NAMESPACE, 'div');
+    };
+    popup.open({ anchor, label: 'Note', renderContent: render });
+    const element = document.querySelector('.popup');
+    const placed = [element.style.left, element.style.top];
+    assert.notDeepEqual(placed, ['12px', '12px']);
+
+    // An editor rebuild replaces the rendered highlight the popup points at.
+    anchor.remove();
+    reposition();
+    assert.deepEqual([element.style.left, element.style.top], placed);
+
+    // Reopening against that detached anchor, such as after a failed save,
+    // reuses where it last was instead of the window's top-left corner.
+    popup.open({ anchor, label: 'Note', renderContent: render, forceOpen: true });
+    const reopened = document.querySelector('.popup');
+    assert.deepEqual([reopened.style.left, reopened.style.top], placed);
+
+    popup.close();
+    dom.window.close();
+});

@@ -429,7 +429,14 @@ export function createInlineMarkdownEditor({
                 return;
             }
             if (event.type === 'scroll' || event.type === 'wheel') {
-                for (const popup of interactionPopups) popup.close();
+                // An open note editor holds typed text and stays fixed in the
+                // window, so scrolling the reader underneath it, or
+                // CodeMirror restoring its scroll anchor after a refresh,
+                // must not dismiss it.
+                const keepNote = annotationPopup.isNoteOpen();
+                for (const popup of interactionPopups) {
+                    if (!(keepNote && popup === annotationPopup)) popup.close();
+                }
             }
             const isEditorScroll = event.type === 'scroll'
                 && event.target === view.scrollDOM;
@@ -1064,6 +1071,7 @@ export function createInlineMarkdownEditor({
             translationHighlightTimer = null;
         }
         const value = String(markdown || '');
+        const documentChanged = value !== view.state.doc.toString();
         const viewportCenterOffset = Number.isSafeInteger(
             activeCorrection?.viewportCenterOffset
         )
@@ -1071,7 +1079,7 @@ export function createInlineMarkdownEditor({
             : editorViewportCenterOffset(view);
         pendingCorrectionViewportCenterOffset = viewportCenterOffset;
         if (activeCorrection) correctionViewportFallbackEnabled = true;
-        if (value !== view.state.doc.toString()) {
+        if (documentChanged) {
             clearNavigationHistory();
         }
         activeTableCorrection?.cancel?.({
@@ -1088,7 +1096,11 @@ export function createInlineMarkdownEditor({
             feature.popup.close();
             feature.highlight.cancel();
         }
-        annotationPopup.close();
+        // Annotation syncs republish the same Markdown while the reader may be
+        // typing a note. Keep that editor and its draft; save it before a
+        // different document replaces the text it quotes.
+        if (documentChanged) annotationPopup.close({ saveNote: true });
+        else if (!annotationPopup.isNoteOpen()) annotationPopup.close();
         currentSourceMap = Array.isArray(sourceMap) ? sourceMap : [];
         currentFigureViews = figureViews
             || computeDocumentFigures(analysisCache, value, { figureMap });
