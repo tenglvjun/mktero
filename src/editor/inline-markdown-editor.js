@@ -1936,6 +1936,10 @@ function isPlainNavigationChord(event, arrowKey, bracketKey) {
 }
 
 function acquireDOMGlobals(ownerWindow) {
+    // A page that runs the editor in its own window already has the right DOM
+    // globals, and `document`/`window` are read-only there. Only Zotero's
+    // bootstrap scope, which is not a window, needs them rebound.
+    if (ownerWindow === globalThis) return;
     if (!domWindowReferences.size) {
         previousDOMGlobals = new Map();
         for (const name of DOM_GLOBAL_NAMES) {
@@ -1953,7 +1957,7 @@ function acquireDOMGlobals(ownerWindow) {
 }
 
 function activateDOMGlobals(ownerWindow) {
-    if (activeDOMWindow === ownerWindow) return;
+    if (ownerWindow === globalThis || activeDOMWindow === ownerWindow) return;
     for (const name of DOM_GLOBAL_NAMES) {
         if (name === 'document') {
             globalThis[name] = ownerWindow.document;

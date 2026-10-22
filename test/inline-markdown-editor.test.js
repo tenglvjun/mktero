@@ -9731,6 +9731,77 @@ test('activates the owning Zotero window before CodeMirror handles scrolling', (
     }
 });
 
+// In a web page the editor's window is the global object, whose `document`
+// and `window` are getter-only. Rebinding them would throw in strict mode.
+test('runs in a page whose global object is the owning window', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    // Getter-only, like a browser window's own properties.
+    const readOnly = [
+        'document',
+        'window',
+        'getComputedStyle',
+        'IntersectionObserver',
+        'MutationObserver',
+        'ResizeObserver',
+    ];
+    // Window members CodeMirror reads through `view.win`; Node's global object
+    // lacks them, so they forward to the jsdom window.
+    const forwarded = [
+        'addEventListener',
+        'removeEventListener',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+        'getSelection',
+        'matchMedia',
+        'innerHeight',
+        'innerWidth',
+        'visualViewport',
+        'devicePixelRatio',
+        'scrollX',
+        'scrollY',
+    ].filter(name => !(name in globalThis));
+    const names = [...readOnly, ...forwarded];
+    const previous = new Map(names.map(name => [
+        name,
+        Object.getOwnPropertyDescriptor(globalThis, name),
+    ]));
+    for (const name of names) {
+        Object.defineProperty(globalThis, name, {
+            configurable: true,
+            get: () => {
+                const value = dom.window[name];
+                return typeof value === 'function' && !/^[A-Z]/.test(name)
+                    ? value.bind(dom.window)
+                    : value;
+            },
+        });
+    }
+    Object.defineProperty(dom.window.document, 'defaultView', {
+        configurable: true,
+        get: () => globalThis,
+    });
+    let editor;
+    try {
+        editor = createInlineMarkdownEditor({
+            parent: dom.window.document.querySelector('#editor'),
+            initialMarkdown: '# Page window\n\nBody text.',
+        });
+        editor.focus();
+        assert.equal(editor.getMarkdown(), '# Page window\n\nBody text.');
+        assert.equal(globalThis.document, dom.window.document);
+    }
+    finally {
+        editor?.destroy();
+        for (const [name, descriptor] of previous) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+            else delete globalThis[name];
+        }
+        dom.window.close();
+    }
+});
+
 test('bridges the owning Zotero window style API for CodeMirror scrolling', () => {
     const previousGetComputedStyle = Object.getOwnPropertyDescriptor(
         globalThis,
