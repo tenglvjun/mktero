@@ -319,6 +319,53 @@ test('swaps pending figure images for animated placeholders and restores them', 
     dom.window.close();
 });
 
+test('a new document does not inherit a selection from the previous one', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const original = 'First paragraph.\n\nSecond paragraph with a selected phrase.';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: original,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    const from = original.indexOf('selected phrase');
+    view.dispatch({ selection: { anchor: from, head: from + 'selected phrase'.length } });
+
+    // Switching the reader to a translation swaps the whole text. Mapping
+    // the old range through that change would select the entire new text.
+    editor.setDocument({ markdown: '第一段。\n\n第二段里有一个选中的短语。' });
+    assert.equal(view.state.selection.main.empty, true);
+    assert.equal(view.state.selection.main.head, 0);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a selection in text the next document starts with is kept', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const streamed = '第一段已经译完。\n\n第二段';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: streamed,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    view.dispatch({ selection: { anchor: 1, head: 6 } });
+
+    editor.setDocument({ markdown: `${streamed}正在翻译，后面还有文字。` });
+    assert.deepEqual(
+        { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head },
+        { anchor: 1, head: 6 }
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('showRestoredFigure swaps one finished crop without resetting the document', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

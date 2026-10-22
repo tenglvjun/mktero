@@ -1162,8 +1162,17 @@ export function createInlineMarkdownEditor({
             view.dispatch({ effects });
             return;
         }
+        // Mapping a selection through a whole-document replacement would
+        // select the entire new text, as when switching to a translation
+        // mid-selection. A selection inside text both versions start with
+        // (a streamed translation growing at the end) keeps its offsets;
+        // any other collapses to the start.
+        const current = view.state.doc.toString();
+        const shared = sharedPrefixLength(current, value);
+        const keep = view.state.selection.ranges.every(range => range.to <= shared);
         view.dispatch({
             changes: { from: 0, to: view.state.doc.length, insert: value },
+            selection: keep ? view.state.selection : { anchor: 0 },
             effects,
         });
     };
@@ -1656,6 +1665,13 @@ function createCorrectionToolbarButton(document, className, label = '') {
         button.setAttribute('title', label);
     }
     return button;
+}
+
+function sharedPrefixLength(left, right) {
+    const limit = Math.min(left.length, right.length);
+    let index = 0;
+    while (index < limit && left.charCodeAt(index) === right.charCodeAt(index)) index += 1;
+    return index;
 }
 
 function createHTMLNode(document, tagName) {
