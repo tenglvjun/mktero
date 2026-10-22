@@ -7615,12 +7615,46 @@ test("'?' works from a text field focus target but not from an input", () => {
     }
 });
 
-test('selecting the markdown tab focuses the reading surface', async () => {
+function installManualTimers(window) {
+    // linkedom's window.setTimeout is the process timer. Replacing it
+    // without restoring it leaves every later test waiting forever.
+    const previousSetTimeout = window.setTimeout;
+    const previousClearTimeout = window.clearTimeout;
+    const timers = [];
+    window.setTimeout = callback => {
+        const timer = { callback };
+        timers.push(timer);
+        return timer;
+    };
+    window.clearTimeout = timer => {
+        const index = timers.indexOf(timer);
+        if (index >= 0) timers.splice(index, 1);
+    };
+    return {
+        timers,
+        restore() {
+            window.setTimeout = previousSetTimeout;
+            window.clearTimeout = previousClearTimeout;
+        },
+    };
+}
+
+function runManualTimer(timers) {
+    const timer = timers.at(-1);
+    assert.ok(timer);
+    timer.callback();
+}
+
+test('selecting the markdown tab focuses the reading surface', () => {
     let focused = 0;
+    let timers;
     const { document, view } = createView(
         createModel({ status: 'ready', markdown: 'Hello' }),
         {},
         {
+            configureWindow(window) {
+                timers = installManualTimers(window);
+            },
             editorFactory(options) {
                 const editor = createTestInlineEditor(options);
                 const focus = editor.focus.bind(editor);
@@ -7636,25 +7670,29 @@ test('selecting the markdown tab focuses the reading surface', async () => {
 
     try {
         view.handleTabSelection(true);
-        await new Promise(resolve => setTimeout(resolve, 0));
+        runManualTimer(timers.timers);
         assert.equal(focused, 1);
 
         focused = 0;
         view.handleTabSelection(false);
-        await new Promise(resolve => setTimeout(resolve, 0));
         assert.equal(focused, 0);
     }
     finally {
         view.destroy();
+        timers.restore();
     }
 });
 
-test('selecting the markdown tab leaves a note editor focused', async () => {
+test('selecting the markdown tab leaves a note editor focused', () => {
     let focused = 0;
+    let timers;
     const { document, view, shadow } = createView(
         createModel({ status: 'ready', markdown: 'Hello' }),
         {},
         {
+            configureWindow(window) {
+                timers = installManualTimers(window);
+            },
             editorFactory(options) {
                 const editor = createTestInlineEditor(options);
                 editor.focus = () => {
@@ -7676,7 +7714,7 @@ test('selecting the markdown tab leaves a note editor focused', async () => {
 
     try {
         view.handleTabSelection(true);
-        await new Promise(resolve => setTimeout(resolve, 0));
+        runManualTimer(timers.timers);
         assert.equal(focused, 0);
 
         const field = shadow.querySelector('#mktero-notes-search');
@@ -7693,11 +7731,12 @@ test('selecting the markdown tab leaves a note editor focused', async () => {
             },
         });
         view.handleTabSelection(true);
-        await new Promise(resolve => setTimeout(resolve, 0));
+        runManualTimer(timers.timers);
         assert.equal(focused, 0);
     }
     finally {
         view.destroy();
+        timers.restore();
     }
 });
 
