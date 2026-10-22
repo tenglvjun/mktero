@@ -61,7 +61,12 @@ export function createAnchoredPopup(parent, {
 
     const reposition = () => {
         if (!popup || !anchor) return;
-        positionPopup(popup, anchorRect(anchor), ownerWindow, viewportPadding);
+        positionPopup(
+            popup,
+            anchorRect(anchor),
+            popupBoundary(parent, ownerWindow),
+            viewportPadding
+        );
     };
 
     const open = ({
@@ -151,22 +156,53 @@ export function createAnchoredPopup(parent, {
     };
 }
 
-function positionPopup(popup, anchorRect, ownerWindow, viewportPadding) {
+// The visible area a popup may occupy: the window viewport intersected with
+// the shadow host that holds the reader. Zotero lays the item pane and other
+// chrome over the window beside the tab, so clamping to the window alone lets
+// a popup slide underneath them.
+function popupBoundary(parent, ownerWindow) {
+    const viewport = {
+        left: 0,
+        top: 0,
+        right: ownerWindow.innerWidth || 1024,
+        bottom: ownerWindow.innerHeight || 768,
+    };
+    const host = parent.getRootNode?.()?.host;
+    const rect = host?.getBoundingClientRect?.();
+    if (!rect || !(rect.width > 0) || !(rect.height > 0)) return viewport;
+    const boundary = {
+        left: Math.max(viewport.left, rect.left),
+        top: Math.max(viewport.top, rect.top),
+        right: Math.min(viewport.right, rect.right),
+        bottom: Math.min(viewport.bottom, rect.bottom),
+    };
+    if (boundary.right <= boundary.left || boundary.bottom <= boundary.top) {
+        return viewport;
+    }
+    return boundary;
+}
+
+function positionPopup(popup, anchorRect, boundary, viewportPadding) {
     const gap = 10;
+    const available = Math.max(
+        0,
+        boundary.right - boundary.left - viewportPadding * 2
+    );
+    popup.style.maxWidth = `${Math.floor(available)}px`;
     const popupRect = popup.getBoundingClientRect();
-    const viewportWidth = ownerWindow.innerWidth || 1024;
-    const viewportHeight = ownerWindow.innerHeight || 768;
-    const width = Math.min(popupRect.width, viewportWidth - viewportPadding * 2);
+    const width = Math.min(popupRect.width, available);
+    const minLeft = boundary.left + viewportPadding;
+    const minTop = boundary.top + viewportPadding;
     const preferredLeft = anchorRect.left + anchorRect.width / 2 - width / 2;
     const left = clamp(
         preferredLeft,
-        viewportPadding,
-        Math.max(viewportPadding, viewportWidth - width - viewportPadding)
+        minLeft,
+        Math.max(minLeft, boundary.right - width - viewportPadding)
     );
     const above = anchorRect.top - popupRect.height - gap;
     const below = anchorRect.bottom + gap;
-    const placeAbove = above >= viewportPadding
-        || below + popupRect.height > viewportHeight;
+    const placeAbove = above >= minTop
+        || below + popupRect.height > boundary.bottom;
     const arrowLeft = clamp(
         anchorRect.left + anchorRect.width / 2 - left,
         12,
@@ -179,7 +215,7 @@ function positionPopup(popup, anchorRect, ownerWindow, viewportPadding) {
     );
     popup.style.left = `${Math.round(left)}px`;
     popup.style.top = `${Math.round(
-        placeAbove ? Math.max(viewportPadding, above) : below
+        placeAbove ? Math.max(minTop, above) : below
     )}px`;
 }
 
