@@ -2811,6 +2811,8 @@ class MarkdownTabView {
         // Capture phase on the window: the pane's own host listener only sees
         // keys pressed while focus is inside the shadow root, and the chord
         // has to work from the PDF pane, the outline, or the chrome too.
+        // A context-pane note is another frame in this window; those keys
+        // stay with the note.
         this.listen(this.ownerWindow, 'keydown', event => {
             this.handleNavigationShortcut(event, { requireForeground: true });
         }, true);
@@ -4396,6 +4398,9 @@ class MarkdownTabView {
     handleDocumentSearchShortcut(event, { requireForeground = false } = {}) {
         if (this.destroyed || event.isComposing) return;
         if (requireForeground && !this.isMarkdownTabForeground()) return;
+        if (requireForeground && this.shortcutBlockedByForeignFocus(event)) {
+            return;
+        }
         if (isDocumentSearchOpenShortcut(event)) {
             consumeDocumentSearchShortcut(event);
             this.openDocumentSearch();
@@ -4460,6 +4465,39 @@ class MarkdownTabView {
         if (this.destroyed || !this.host?.isConnected) return;
         if (this.shouldLeaveFocusAlone()) return;
         this.editor?.focus?.();
+    }
+
+    // The note editor is an iframe in this same window. Its Cmd+F and
+    // history chord are delivered here with the frame, or with the caret's
+    // own document, as the target. Either one belongs to the note.
+    shortcutBlockedByForeignFocus(event) {
+        const seen = new Set();
+        const candidates = [
+            event.originalTarget,
+            event.explicitOriginalTarget,
+        ];
+        if (typeof event.composedPath === 'function') {
+            candidates.push(...event.composedPath());
+        }
+        candidates.push(event.target);
+        for (const node of candidates) {
+            if (!node || seen.has(node)) continue;
+            seen.add(node);
+            if (isTextEditingOrigin(node) || isExternalTextFocus(node)) {
+                return true;
+            }
+            const ownerDocument = node.ownerDocument;
+            if (ownerDocument && ownerDocument !== this.document
+                && node.nodeType === 1) {
+                return true;
+            }
+        }
+        const active = this.document.activeElement;
+        return Boolean(
+            active
+            && active !== this.host
+            && isExternalTextFocus(active)
+        );
     }
 
     // Focus inside the shadow means the reader already has the keyboard.
@@ -4659,6 +4697,9 @@ class MarkdownTabView {
         const direction = navigationChord(event);
         if (!direction) return;
         if (requireForeground && !this.isMarkdownTabForeground()) return;
+        if (requireForeground && this.shortcutBlockedByForeignFocus(event)) {
+            return;
+        }
         const origin = event.composedPath?.()[0] || event.target;
         if (isTextEditingOrigin(origin)) return;
         const back = direction === 'back';

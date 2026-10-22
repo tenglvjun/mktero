@@ -122,6 +122,7 @@ function dispatchShortcut(target, {
     ctrlKey = false,
     shiftKey = false,
     altKey = false,
+    originalTarget,
 } = {}) {
     const ownerWindow = target.ownerDocument?.defaultView || target;
     const event = new ownerWindow.Event('keydown', {
@@ -137,8 +138,22 @@ function dispatchShortcut(target, {
         altKey: { value: altKey },
         isComposing: { value: false },
     });
+    if (originalTarget) {
+        Object.defineProperty(event, 'originalTarget', {
+            value: originalTarget,
+        });
+    }
     target.dispatchEvent(event);
     return event;
+}
+
+function focusElement(document, element) {
+    Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get() {
+            return element;
+        },
+    });
 }
 
 function dispatchMouseEvent(target, type, clientX, clientY = 0, buttons) {
@@ -6592,6 +6607,52 @@ test('opens document find from a window Cmd+F when the Mktero tab is visible', (
     }
 });
 
+test('leaves find chords to a focused note editor', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Find BERT here.',
+        sourceKind: 'markdown',
+    }));
+    document.body.appendChild(view.root);
+    view.host.getClientRects = () => [{ width: 800, height: 600 }];
+    const note = document.createElement('iframe');
+    document.body.appendChild(note);
+    const panel = shadow.querySelector('#mktero-document-search-panel');
+
+    try {
+        dispatchShortcut(view.host, { key: 'f', metaKey: true, code: 'KeyF' });
+        assert.equal(panel.hidden, false);
+        const input = shadow.querySelector('#mktero-document-search-input');
+        input.value = 'BERT';
+        input.dispatchEvent(new document.defaultView.Event('input', {
+            bubbles: true,
+        }));
+
+        focusElement(document, note);
+        const find = dispatchShortcut(document.body, {
+            key: 'f',
+            metaKey: true,
+            code: 'KeyF',
+        });
+        const next = dispatchShortcut(note, {
+            key: 'g',
+            metaKey: true,
+            code: 'KeyG',
+        });
+
+        assert.equal(find.defaultPrevented, false);
+        assert.equal(next.defaultPrevented, false);
+        assert.equal(
+            shadow.querySelector('.markdown-document-search-count').textContent,
+            '1/1'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('does not steal window Cmd+F when the Mktero tab is not visible', () => {
     const { document, view, shadow } = createView(createModel({
         status: 'ready',
@@ -7261,6 +7322,38 @@ test('leaves the history chord to a text editing chord in a field', () => {
 
         assert.equal(event.defaultPrevented, false);
         assert.equal(view.editor.backCount, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('leaves the history chord to a focused note editor', () => {
+    const { document, view } = createNavigationShortcutView();
+    const { document: noteDocument } = parseHTML(
+        '<html><body><div id="caret"></div></body></html>'
+    );
+    const caret = noteDocument.getElementById('caret');
+    caret.setAttribute('contenteditable', 'true');
+    const note = document.createElement('iframe');
+    document.body.appendChild(note);
+
+    try {
+        focusElement(document, note);
+        const chord = dispatchShortcut(document.body, {
+            key: '[',
+            metaKey: true,
+            originalTarget: caret,
+        });
+        const frameChord = dispatchShortcut(note, {
+            key: ']',
+            metaKey: true,
+        });
+
+        assert.equal(chord.defaultPrevented, false);
+        assert.equal(frameChord.defaultPrevented, false);
+        assert.equal(view.editor.backCount, 0);
+        assert.equal(view.editor.forwardCount, 0);
     }
     finally {
         view.destroy();
