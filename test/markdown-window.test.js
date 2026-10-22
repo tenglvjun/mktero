@@ -122,6 +122,7 @@ function dispatchShortcut(target, {
     ctrlKey = false,
     shiftKey = false,
     altKey = false,
+    originalTarget,
 } = {}) {
     const ownerWindow = target.ownerDocument?.defaultView || target;
     const event = new ownerWindow.Event('keydown', {
@@ -137,8 +138,22 @@ function dispatchShortcut(target, {
         altKey: { value: altKey },
         isComposing: { value: false },
     });
+    if (originalTarget) {
+        Object.defineProperty(event, 'originalTarget', {
+            value: originalTarget,
+        });
+    }
     target.dispatchEvent(event);
     return event;
+}
+
+function focusElement(document, element) {
+    Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get() {
+            return element;
+        },
+    });
 }
 
 function dispatchMouseEvent(target, type, clientX, clientY = 0, buttons) {
@@ -6592,6 +6607,52 @@ test('opens document find from a window Cmd+F when the Mktero tab is visible', (
     }
 });
 
+test('leaves find chords to a focused note editor', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Find BERT here.',
+        sourceKind: 'markdown',
+    }));
+    document.body.appendChild(view.root);
+    view.host.getClientRects = () => [{ width: 800, height: 600 }];
+    const note = document.createElement('iframe');
+    document.body.appendChild(note);
+    const panel = shadow.querySelector('#mktero-document-search-panel');
+
+    try {
+        dispatchShortcut(view.host, { key: 'f', metaKey: true, code: 'KeyF' });
+        assert.equal(panel.hidden, false);
+        const input = shadow.querySelector('#mktero-document-search-input');
+        input.value = 'BERT';
+        input.dispatchEvent(new document.defaultView.Event('input', {
+            bubbles: true,
+        }));
+
+        focusElement(document, note);
+        const find = dispatchShortcut(document.body, {
+            key: 'f',
+            metaKey: true,
+            code: 'KeyF',
+        });
+        const next = dispatchShortcut(note, {
+            key: 'g',
+            metaKey: true,
+            code: 'KeyG',
+        });
+
+        assert.equal(find.defaultPrevented, false);
+        assert.equal(next.defaultPrevented, false);
+        assert.equal(
+            shadow.querySelector('.markdown-document-search-count').textContent,
+            '1/1'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('does not steal window Cmd+F when the Mktero tab is not visible', () => {
     const { document, view, shadow } = createView(createModel({
         status: 'ready',
@@ -7267,6 +7328,38 @@ test('leaves the history chord to a text editing chord in a field', () => {
     }
 });
 
+test('leaves the history chord to a focused note editor', () => {
+    const { document, view } = createNavigationShortcutView();
+    const { document: noteDocument } = parseHTML(
+        '<html><body><div id="caret"></div></body></html>'
+    );
+    const caret = noteDocument.getElementById('caret');
+    caret.setAttribute('contenteditable', 'true');
+    const note = document.createElement('iframe');
+    document.body.appendChild(note);
+
+    try {
+        focusElement(document, note);
+        const chord = dispatchShortcut(document.body, {
+            key: '[',
+            metaKey: true,
+            originalTarget: caret,
+        });
+        const frameChord = dispatchShortcut(note, {
+            key: ']',
+            metaKey: true,
+        });
+
+        assert.equal(chord.defaultPrevented, false);
+        assert.equal(frameChord.defaultPrevented, false);
+        assert.equal(view.editor.backCount, 0);
+        assert.equal(view.editor.forwardCount, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 function createLandmarkView({ markdown, annotationOverlay, correctionMode } = {}) {
     const jumps = [];
     const recorded = [];
@@ -7293,12 +7386,16 @@ function createLandmarkView({ markdown, annotationOverlay, correctionMode } = {}
     return created;
 }
 
+function dispatchViewShortcut(shadow, init) {
+    return dispatchShortcut(shadow.querySelector('#mktero-content'), init);
+}
+
 test('N jumps to the next heading and records the position', () => {
-    const { document, view, jumps, recorded } = createLandmarkView();
+    const { view, shadow, jumps, recorded } = createLandmarkView();
 
     try {
         view.syncActiveNavigation(0);
-        const event = dispatchShortcut(document.body, { key: 'n' });
+        const event = dispatchViewShortcut(shadow, { key: 'n' });
 
         assert.equal(event.defaultPrevented, true);
         assert.equal(recorded.length, 1);
@@ -7312,17 +7409,17 @@ test('N jumps to the next heading and records the position', () => {
 });
 
 test('P jumps to the previous heading, and the first P does nothing', () => {
-    const { document, view, jumps } = createLandmarkView();
+    const { view, shadow, jumps } = createLandmarkView();
 
     try {
         view.syncActiveNavigation(0);
-        dispatchShortcut(document.body, { key: 'p' });
+        dispatchViewShortcut(shadow, { key: 'p' });
         assert.deepEqual(jumps, []);
 
         view.syncActiveNavigation(
             '# Overview\n\n## Methods\n\n### Results'.length
         );
-        dispatchShortcut(document.body, { key: 'p' });
+        dispatchViewShortcut(shadow, { key: 'p' });
         assert.deepEqual(jumps, [24]);
     }
     finally {
@@ -7332,7 +7429,7 @@ test('P jumps to the previous heading, and the first P does nothing', () => {
 
 test('N and P walk through every heading in order', () => {
     const markdown = '# Overview\n\n## Methods\n\n### Results';
-    const { document, view, jumps } = createLandmarkView({ markdown });
+    const { view, shadow, jumps } = createLandmarkView({ markdown });
 
     try {
         view.syncActiveNavigation(0);
@@ -7340,11 +7437,11 @@ test('N and P walk through every heading in order', () => {
             markdown.indexOf('## Methods'),
             markdown.indexOf('### Results'),
         ]) {
-            dispatchShortcut(document.body, { key: 'n' });
+            dispatchViewShortcut(shadow, { key: 'n' });
             assert.equal(jumps.at(-1), expected);
         }
         // Past the last heading: no scroll, still consumed.
-        const event = dispatchShortcut(document.body, { key: 'n' });
+        const event = dispatchViewShortcut(shadow, { key: 'n' });
         assert.equal(event.defaultPrevented, true);
         assert.equal(jumps.length, 2);
     }
@@ -7355,11 +7452,11 @@ test('N and P walk through every heading in order', () => {
 
 test('Shift+N jumps to figures and tables only', () => {
     const markdown = '# Overview\n\n## Methods\n\n![Figure 1: Trial](mktero-asset://f1.png)\n\n### Results';
-    const { document, view, jumps } = createLandmarkView({ markdown });
+    const { view, shadow, jumps } = createLandmarkView({ markdown });
 
     try {
         view.syncActiveNavigation(0);
-        dispatchShortcut(document.body, { key: 'N', shiftKey: true });
+        dispatchViewShortcut(shadow, { key: 'N', shiftKey: true });
         // The asset outline anchors a figure at its image, not at a heading.
         const figureOffset = jumps.at(-1);
         assert.ok(Number.isFinite(figureOffset));
@@ -7368,7 +7465,7 @@ test('Shift+N jumps to figures and tables only', () => {
                 && figureOffset < markdown.indexOf('### Results')
         );
         // No further figure: a second press scrolls nowhere.
-        dispatchShortcut(document.body, { key: 'N', shiftKey: true });
+        dispatchViewShortcut(shadow, { key: 'N', shiftKey: true });
         assert.equal(jumps.length, 1);
     }
     finally {
@@ -7378,7 +7475,7 @@ test('Shift+N jumps to figures and tables only', () => {
 
 test('Alt+N jumps to matched annotations', () => {
     const markdown = 'Before text Important result after text.';
-    const { document, view, jumps } = createLandmarkView({
+    const { view, shadow, jumps } = createLandmarkView({
         markdown,
         annotationOverlay: {
             matched: [{
@@ -7397,7 +7494,7 @@ test('Alt+N jumps to matched annotations', () => {
 
     try {
         view.syncActiveNavigation(0);
-        dispatchShortcut(document.body, { key: 'n', altKey: true });
+        dispatchViewShortcut(shadow, { key: 'n', altKey: true });
         assert.deepEqual(jumps, [12]);
     }
     finally {
@@ -7406,15 +7503,15 @@ test('Alt+N jumps to matched annotations', () => {
 });
 
 test('landmark keys do nothing in correction mode', () => {
-    const { document, view, jumps } = createLandmarkView({
+    const { view, shadow, jumps } = createLandmarkView({
         correctionMode: true,
     });
 
     try {
         for (const event of [
-            dispatchShortcut(document.body, { key: 'n' }),
-            dispatchShortcut(document.body, { key: 'N', shiftKey: true }),
-            dispatchShortcut(document.body, { key: 'n', altKey: true }),
+            dispatchViewShortcut(shadow, { key: 'n' }),
+            dispatchViewShortcut(shadow, { key: 'N', shiftKey: true }),
+            dispatchViewShortcut(shadow, { key: 'n', altKey: true }),
         ]) {
             assert.equal(event.defaultPrevented, false);
         }
@@ -7426,11 +7523,11 @@ test('landmark keys do nothing in correction mode', () => {
 });
 
 test('landmark keys do nothing while a reader menu is open', () => {
-    const { document, view, jumps } = createLandmarkView();
+    const { view, shadow, jumps } = createLandmarkView();
 
     try {
         view.typographyOpen = true;
-        dispatchShortcut(document.body, { key: 'n' });
+        dispatchViewShortcut(shadow, { key: 'n' });
         assert.deepEqual(jumps, []);
     }
     finally {
@@ -7440,11 +7537,11 @@ test('landmark keys do nothing while a reader menu is open', () => {
 
 test('landmark keys are inert while the document is loading', () => {
     const created = createLandmarkView();
-    const { document, view, jumps } = created;
+    const { view, shadow, jumps } = created;
 
     try {
         view.render(createModel({ status: 'loading', progress: 10 }));
-        dispatchShortcut(document.body, { key: 'n' });
+        dispatchViewShortcut(shadow, { key: 'n' });
         assert.deepEqual(jumps, []);
     }
     finally {
@@ -7460,7 +7557,7 @@ test("'?' opens the shortcut cheat sheet and Escape closes it", () => {
         assert.ok(panel);
         assert.equal(panel.hidden, true);
 
-        dispatchShortcut(document.body, { key: '?' });
+        dispatchViewShortcut(shadow, { key: '?' });
         assert.equal(panel.hidden, false);
         assert.equal(view.shortcutsPanelOpen, true);
         assert.equal(
@@ -7468,7 +7565,7 @@ test("'?' opens the shortcut cheat sheet and Escape closes it", () => {
             'Keyboard shortcuts'
         );
         // The panel blocks the landmark keys while open.
-        dispatchShortcut(document.body, { key: 'n' });
+        dispatchViewShortcut(shadow, { key: 'n' });
         assert.deepEqual(jumps, []);
 
         dispatchShortcut(document.body, { key: 'Escape' });
@@ -7481,10 +7578,10 @@ test("'?' opens the shortcut cheat sheet and Escape closes it", () => {
 });
 
 test('the cheat sheet lists the platform chords and localized labels', () => {
-    const { document, view, shadow } = createLandmarkView();
+    const { view, shadow } = createLandmarkView();
 
     try {
-        dispatchShortcut(document.body, { key: '?' });
+        dispatchViewShortcut(shadow, { key: '?' });
         const keys = [...shadow.querySelectorAll('.mktero-shortcut-key')]
             .map(element => element.textContent);
         const labels = [...shadow.querySelectorAll('.mktero-shortcut-label')]
@@ -7503,7 +7600,7 @@ test('the cheat sheet lists the platform chords and localized labels', () => {
 });
 
 test("'?' works from a text field focus target but not from an input", () => {
-    const { document, view, shadow } = createLandmarkView();
+    const { view, shadow } = createLandmarkView();
 
     try {
         const input = shadow.querySelector('#mktero-notes-search');
@@ -7512,6 +7609,157 @@ test("'?' works from a text field focus target but not from an input", () => {
 
         assert.equal(event.defaultPrevented, false);
         assert.equal(view.shortcutsPanelOpen, false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+function installManualTimers(window) {
+    // linkedom's window.setTimeout is the process timer. Replacing it
+    // without restoring it leaves every later test waiting forever.
+    const previousSetTimeout = window.setTimeout;
+    const previousClearTimeout = window.clearTimeout;
+    const timers = [];
+    window.setTimeout = callback => {
+        const timer = { callback };
+        timers.push(timer);
+        return timer;
+    };
+    window.clearTimeout = timer => {
+        const index = timers.indexOf(timer);
+        if (index >= 0) timers.splice(index, 1);
+    };
+    return {
+        timers,
+        restore() {
+            window.setTimeout = previousSetTimeout;
+            window.clearTimeout = previousClearTimeout;
+        },
+    };
+}
+
+function runManualTimer(timers) {
+    const timer = timers.at(-1);
+    assert.ok(timer);
+    timer.callback();
+}
+
+test('selecting the markdown tab focuses the reading surface', () => {
+    let focused = 0;
+    let timers;
+    const { document, view } = createView(
+        createModel({ status: 'ready', markdown: 'Hello' }),
+        {},
+        {
+            configureWindow(window) {
+                timers = installManualTimers(window);
+            },
+            editorFactory(options) {
+                const editor = createTestInlineEditor(options);
+                const focus = editor.focus.bind(editor);
+                editor.focus = () => {
+                    focused += 1;
+                    focus();
+                };
+                return editor;
+            },
+        }
+    );
+    document.body.appendChild(view.root);
+
+    try {
+        view.handleTabSelection(true);
+        runManualTimer(timers.timers);
+        assert.equal(focused, 1);
+
+        focused = 0;
+        view.handleTabSelection(false);
+        assert.equal(focused, 0);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
+test('selecting the markdown tab leaves a note editor focused', () => {
+    let focused = 0;
+    let timers;
+    const { document, view, shadow } = createView(
+        createModel({ status: 'ready', markdown: 'Hello' }),
+        {},
+        {
+            configureWindow(window) {
+                timers = installManualTimers(window);
+            },
+            editorFactory(options) {
+                const editor = createTestInlineEditor(options);
+                editor.focus = () => {
+                    focused += 1;
+                };
+                return editor;
+            },
+        }
+    );
+    document.body.appendChild(view.root);
+    const note = document.createElement('iframe');
+    document.body.appendChild(note);
+    Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get() {
+            return note;
+        },
+    });
+
+    try {
+        view.handleTabSelection(true);
+        runManualTimer(timers.timers);
+        assert.equal(focused, 0);
+
+        const field = shadow.querySelector('#mktero-notes-search');
+        Object.defineProperty(shadow, 'activeElement', {
+            configurable: true,
+            get() {
+                return field;
+            },
+        });
+        Object.defineProperty(document, 'activeElement', {
+            configurable: true,
+            get() {
+                return view.host;
+            },
+        });
+        view.handleTabSelection(true);
+        runManualTimer(timers.timers);
+        assert.equal(focused, 0);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
+test('landmark keys do nothing while a note outside the markdown view is focused', () => {
+    const { document, view, shadow, jumps } = createLandmarkView();
+
+    try {
+        view.syncActiveNavigation(0);
+        const note = document.createElement('textarea');
+        document.body.appendChild(note);
+        const typed = dispatchShortcut(note, { key: 'n' });
+        const shifted = dispatchShortcut(note, { key: 'N', shiftKey: true });
+        const question = dispatchShortcut(document.body, { key: '?' });
+
+        assert.equal(typed.defaultPrevented, false);
+        assert.equal(shifted.defaultPrevented, false);
+        assert.equal(question.defaultPrevented, false);
+        assert.deepEqual(jumps, []);
+        assert.equal(view.shortcutsPanelOpen, false);
+
+        const inside = dispatchViewShortcut(shadow, { key: 'n' });
+        assert.equal(inside.defaultPrevented, true);
+        assert.equal(jumps.length, 1);
     }
     finally {
         view.destroy();

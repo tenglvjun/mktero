@@ -545,6 +545,10 @@ export function createInlineMarkdownEditor({
                     EditorView.editable.of(false),
                     EditorState.readOnly.of(true),
                 ]),
+                // A read-only surface is not contenteditable. Without a tab
+                // stop, Firefox neither focuses it on click nor honors
+                // view.focus(), so the reader's own keys never arrive.
+                EditorView.contentAttributes.of({ tabindex: '0' }),
                 EditorState.transactionFilter.of(transaction => {
                     if (!transaction.docChanged || !activeCorrection) {
                         return transaction;

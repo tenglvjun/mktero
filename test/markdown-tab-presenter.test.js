@@ -105,6 +105,10 @@ function createViewHarness() {
                 destroy() {
                     this.destroyCalls++;
                 },
+                tabSelectionCalls: [],
+                handleTabSelection(selected) {
+                    this.tabSelectionCalls.push(selected);
+                },
             };
             views.push(view);
             return view;
@@ -123,6 +127,22 @@ function createPresenter(mainWindow, harness, zoteroOverrides = {}) {
         createView: harness.createView.bind(harness),
     });
 }
+
+test('focuses the reader when its Zotero tab is selected', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+
+    presenter.open(42);
+    const view = harness.views[0];
+    const container = mainWindow.added[0].container;
+
+    assert.deepEqual(view.tabSelectionCalls, [true]);
+    container.onTabSelectionChanged(false);
+    container.onTabSelectionChanged(true);
+    assert.deepEqual(view.tabSelectionCalls, [true, false, true]);
+    presenter.dispose();
+});
 
 test('opens Markdown directly in a Zotero tab and reuses it for the same PDF', () => {
     const mainWindow = createMainWindow();
