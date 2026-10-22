@@ -51,6 +51,7 @@ import {
     openRenderedPageMarker,
 } from './rendered-markdown-dom.js';
 import { replacePendingFigureImages } from './figure-placeholder.js';
+import { rootSelectionFor } from './root-selection.js';
 import {
     blockHeightRecorder,
     createBlockHeightIdentity,
@@ -708,7 +709,8 @@ function resolveCodeTheme(document) {
 }
 
 function hasActiveCodeSelection(document, codeElement) {
-    const selection = document.defaultView?.getSelection?.();
+    const selection = rootSelectionFor(codeElement)
+        || document.defaultView?.getSelection?.();
     if (!selection?.rangeCount || selection.isCollapsed) return false;
     for (let index = 0; index < selection.rangeCount; index++) {
         try {
@@ -1935,14 +1937,14 @@ function referenceInteraction(event, view, context) {
 }
 
 function hasSelectedInteractionText(view, element) {
-    const selection = view.dom.ownerDocument.getSelection?.();
+    const selection = rootSelectionFor(view.dom);
     if (!selection || selection.isCollapsed) return false;
     return element.contains(selection.anchorNode)
         || element.contains(selection.focusNode);
 }
 
 export function selectedMarkdownAnnotation(view, chromeRanges = []) {
-    const selection = view.dom.ownerDocument.getSelection?.();
+    const selection = rootSelectionFor(view.dom);
     if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
         return null;
     }

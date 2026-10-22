@@ -41,6 +41,7 @@ import {
 } from './inline-rendering.js';
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
+import { rootSelectionFor } from './root-selection.js';
 import { createAnnotationPopup } from './annotation-popup.js';
 import {
     isCorrectionInteractionTarget,
@@ -913,7 +914,7 @@ export function createInlineMarkdownEditor({
             return;
         }
         activateDOMGlobals(ownerWindow);
-        const domSelection = ownerWindow.document.getSelection?.();
+        const domSelection = rootSelectionFor(parent);
         clampSelectionFocusToPointerLine(view, domSelection, event);
         const selection = selectedMarkdownAnnotation(view, currentChromeRanges);
         if (!selection) return;
@@ -1983,7 +1984,7 @@ function installDOMActivation(parent, ownerWindow, refreshViewport) {
         parent.addEventListener(type, activate, true);
     }
     const onSelectionChange = () => {
-        const anchor = ownerWindow.document.getSelection?.().anchorNode;
+        const anchor = rootSelectionFor(parent)?.anchorNode;
         if (anchor && parent.contains(anchor)) activate();
     };
     ownerWindow.document.addEventListener('selectionchange', onSelectionChange);
