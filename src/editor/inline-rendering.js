@@ -52,6 +52,12 @@ import {
 } from './rendered-markdown-dom.js';
 import { replacePendingFigureImages } from './figure-placeholder.js';
 import {
+    blockHeightRecorder,
+    createBlockHeightIdentity,
+    createBlockHeightMemory,
+    holdBlockHeightWhileImagesLoad,
+} from './block-height-memory.js';
+import {
     annotationHasComment,
     annotationAttributes,
     annotationClassName,
@@ -87,6 +93,7 @@ const MAX_MATCH_CANDIDATES = 10_000;
 // A stable empty range list, so "no ranges" keeps one identity across renders
 // and the rendering field can tell it apart from a real change.
 const NO_CONTEXT_RANGES = Object.freeze([]);
+const INLINE_WIDGET_DISPLAYS = new Set(['inline', 'image-inline', 'math']);
 
 export const setReferenceHighlight = StateEffect.define();
 export const setTableHighlight = StateEffect.define();
@@ -125,6 +132,7 @@ class RenderedMarkdownWidget extends WidgetType {
         pendingFigures = null,
         restoredFigures = null,
         resolveRestoredFigureURL = null,
+        blockHeights = null,
     }) {
         super();
         this.source = source;
@@ -150,6 +158,20 @@ class RenderedMarkdownWidget extends WidgetType {
         this.pendingFigures = pendingFigures;
         this.restoredFigures = restoredFigures;
         this.resolveRestoredFigureURL = resolveRestoredFigureURL;
+        this.blockHeights = blockHeights;
+        this.blockHeightIdentity = INLINE_WIDGET_DISPLAYS.has(display)
+            ? null
+            : createBlockHeightIdentity(
+                display,
+                from,
+                renderSource === source
+                    ? source
+                    : `${source}\u0000${renderSource}`
+            );
+    }
+
+    get estimatedHeight() {
+        return this.blockHeights?.estimate(this.blockHeightIdentity) ?? -1;
     }
 
     eq(other) {
@@ -172,7 +194,7 @@ class RenderedMarkdownWidget extends WidgetType {
 
     toDOM(view) {
         const document = view.dom.ownerDocument;
-        const inline = ['inline', 'image-inline', 'math'].includes(this.display);
+        const inline = INLINE_WIDGET_DISPLAYS.has(this.display);
         const container = document.createElement(inline ? 'span' : 'div');
         container.className = [
             'cm-mktero-rendered',
@@ -230,6 +252,13 @@ class RenderedMarkdownWidget extends WidgetType {
                 this.translate,
                 this.restoredFigures,
                 this.resolveRestoredFigureURL,
+            );
+        }
+        if (!inline) {
+            holdBlockHeightWhileImagesLoad(
+                container,
+                view,
+                this.estimatedHeight
             );
         }
         if (this.display === 'code-block') {
@@ -758,6 +787,7 @@ export function createInlineRenderingExtension({
         onCorrectionError,
         onCorrectionEditingChange,
         translate,
+        blockHeights: createBlockHeightMemory(),
         renderVersion: 0,
         highlightedReferenceID: null,
         highlightedTableID: null,
@@ -1014,6 +1044,7 @@ export function createInlineRenderingExtension({
     });
     return [
         renderingField,
+        blockHeightRecorder(context.blockHeights),
         Prec.highest(EditorView.domEventHandlers({
             mouseover(event, view) {
                 if (selectionActionsLocked(context)) return false;
