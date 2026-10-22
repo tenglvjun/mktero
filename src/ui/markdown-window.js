@@ -406,6 +406,7 @@ class MarkdownTabView {
         this.renderedCacheKey = '';
         this.didRestorePersistedPosition = false;
         this.readingPositionTimer = null;
+        this.readingFocusTimer = null;
         this.lastPersistedReadingSignature = '';
         this.renderedSourceMap = [];
         this.sourcePeekTimer = null;
@@ -981,6 +982,7 @@ class MarkdownTabView {
             this.zotero?.logError?.(error);
         }
         this.destroyed = true;
+        this.cancelReadingSurfaceFocus();
         this.landmarkItems = null;
         this.shortcutsPanelOpen = false;
         this.shortcutsPanelRestoreFocus = null;
@@ -2812,12 +2814,14 @@ class MarkdownTabView {
         this.listen(this.ownerWindow, 'keydown', event => {
             this.handleNavigationShortcut(event, { requireForeground: true });
         }, true);
-        this.listen(this.host, 'keydown', event => {
+        // N/P and "?" are ordinary typing keys. The listener stays inside
+        // the Markdown shadow tree: Zotero's note editor is another frame in
+        // this same window, and a window-level listener scrolls the reader
+        // while that note is focused. Selecting the tab focuses this surface,
+        // because opening it otherwise leaves the keyboard on the Zotero chrome.
+        this.listen(this.mount, 'keydown', event => {
             this.handleReaderJumpShortcut(event);
         });
-        this.listen(this.ownerWindow, 'keydown', event => {
-            this.handleReaderJumpShortcut(event, { requireForeground: true });
-        }, true);
         this.listen(this.elements.actionToggle, 'click', () => {
             if (this.elements.actionToggle.disabled) return;
             this.setReaderFontOptionsOpen(false);
@@ -4418,6 +4422,57 @@ class MarkdownTabView {
         }
     }
 
+    // Zotero selects the tab before this view exists, and again when the
+    // user comes back to it. Opening a tab does not focus the reader, so
+    // claim the reading surface unless a note or another field has the caret.
+    handleTabSelection(selected) {
+        if (this.destroyed) return;
+        if (!selected) {
+            this.cancelReadingSurfaceFocus();
+            return;
+        }
+        this.scheduleReadingSurfaceFocus();
+    }
+
+    scheduleReadingSurfaceFocus() {
+        const win = this.ownerWindow;
+        this.cancelReadingSurfaceFocus();
+        const run = () => {
+            this.readingFocusTimer = null;
+            this.focusReadingSurface();
+        };
+        if (typeof win?.setTimeout !== 'function') {
+            run();
+            return;
+        }
+        // After Zotero's own focus timeout, so a context-pane note that just
+        // took the caret is already the active element.
+        this.readingFocusTimer = win.setTimeout(run, 0);
+    }
+
+    cancelReadingSurfaceFocus() {
+        if (this.readingFocusTimer == null) return;
+        this.ownerWindow?.clearTimeout?.(this.readingFocusTimer);
+        this.readingFocusTimer = null;
+    }
+
+    focusReadingSurface() {
+        if (this.destroyed || !this.host?.isConnected) return;
+        if (this.shouldLeaveFocusAlone()) return;
+        this.editor?.focus?.();
+    }
+
+    // Focus inside the shadow means the reader already has the keyboard.
+    // An iframe or note-editor is the context pane: typing there must not
+    // be pulled back into the article.
+    shouldLeaveFocusAlone() {
+        const inner = this.mount?.activeElement || null;
+        if (inner) return true;
+        const active = this.document.activeElement;
+        if (!active || active === this.host) return false;
+        return isExternalTextFocus(active);
+    }
+
     isMarkdownTabForeground() {
         if (!this.host?.isConnected || this.host.hidden || this.root?.hidden) {
             return false;
@@ -4618,12 +4673,12 @@ class MarkdownTabView {
     }
 
     // Landmark jumps and the shortcut cheat sheet share one entry point, so
-    // the guard chain runs once and in one order. Bubble-phase host listener
-    // and capture-phase window listener both route here, matching the history
-    // chord's two channels.
-    handleReaderJumpShortcut(event, { requireForeground = false } = {}) {
+    // the guard chain runs once and in one order. The listener is on the
+    // Markdown shadow root, so a key only arrives here when that view has
+    // focus. Text fields inside the view (find, note search, a comment)
+    // still keep the key.
+    handleReaderJumpShortcut(event) {
         if (this.destroyed || event.isComposing) return;
-        if (requireForeground && !this.isMarkdownTabForeground()) return;
         if (isShortcutsPanelShortcut(event)) {
             if (this.shortcutsPanelOpen) return;
             const origin = event.composedPath?.()[0] || event.target;
@@ -7683,6 +7738,18 @@ function isTextEditingOrigin(element) {
     if (['TEXTAREA', 'TEXTBOX', 'SELECT'].includes(tagName)) return true;
     if (tagName !== 'INPUT') return false;
     return TEXT_INPUT_TYPES.has(String(element.type || 'text').toLowerCase());
+}
+
+// The parent window's active element is the frame, not the caret inside it.
+function isExternalTextFocus(element) {
+    if (!element || element.nodeType !== 1) return false;
+    if (isTextEditingOrigin(element)) return true;
+    const tagName = String(element.localName || '').toLowerCase();
+    if (tagName === 'iframe' || tagName === 'browser' || tagName === 'frame') {
+        return true;
+    }
+    return typeof element.closest === 'function'
+        && Boolean(element.closest('note-editor'));
 }
 
 // Alt+Arrow is the history chord on Windows and Linux, Cmd+bracket on macOS.

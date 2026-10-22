@@ -396,6 +396,12 @@ export class MarkdownTabPresenter {
             });
             tabID = result.id;
             result.container.appendChild(view.root);
+            // The deck element is what Zotero notifies when this tab is
+            // selected. The first select already happened inside add().
+            result.container.onTabSelectionChanged = selected => {
+                view.handleTabSelection?.(selected);
+            };
+            view.handleTabSelection?.(true);
         }
         catch (error) {
             view.destroy?.();
