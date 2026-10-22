@@ -41,6 +41,7 @@ import {
 } from './inline-rendering.js';
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
+import { rootSelectionFor } from './root-selection.js';
 import { createAnnotationPopup } from './annotation-popup.js';
 import {
     isCorrectionInteractionTarget,
@@ -913,7 +914,7 @@ export function createInlineMarkdownEditor({
             return;
         }
         activateDOMGlobals(ownerWindow);
-        const domSelection = ownerWindow.document.getSelection?.();
+        const domSelection = rootSelectionFor(parent);
         clampSelectionFocusToPointerLine(view, domSelection, event);
         const selection = selectedMarkdownAnnotation(view, currentChromeRanges);
         if (!selection) return;
@@ -1161,8 +1162,17 @@ export function createInlineMarkdownEditor({
             view.dispatch({ effects });
             return;
         }
+        // Mapping a selection through a whole-document replacement would
+        // select the entire new text, as when switching to a translation
+        // mid-selection. A selection inside text both versions start with
+        // (a streamed translation growing at the end) keeps its offsets;
+        // any other collapses to the start.
+        const current = view.state.doc.toString();
+        const shared = sharedPrefixLength(current, value);
+        const keep = view.state.selection.ranges.every(range => range.to <= shared);
         view.dispatch({
             changes: { from: 0, to: view.state.doc.length, insert: value },
+            selection: keep ? view.state.selection : { anchor: 0 },
             effects,
         });
     };
@@ -1657,6 +1667,13 @@ function createCorrectionToolbarButton(document, className, label = '') {
     return button;
 }
 
+function sharedPrefixLength(left, right) {
+    const limit = Math.min(left.length, right.length);
+    let index = 0;
+    while (index < limit && left.charCodeAt(index) === right.charCodeAt(index)) index += 1;
+    return index;
+}
+
 function createHTMLNode(document, tagName) {
     if (typeof document.createElementNS === 'function') {
         return document.createElementNS(XHTML_NAMESPACE, tagName);
@@ -1936,6 +1953,10 @@ function isPlainNavigationChord(event, arrowKey, bracketKey) {
 }
 
 function acquireDOMGlobals(ownerWindow) {
+    // A page that runs the editor in its own window already has the right DOM
+    // globals, and `document`/`window` are read-only there. Only Zotero's
+    // bootstrap scope, which is not a window, needs them rebound.
+    if (ownerWindow === globalThis) return;
     if (!domWindowReferences.size) {
         previousDOMGlobals = new Map();
         for (const name of DOM_GLOBAL_NAMES) {
@@ -1953,7 +1974,7 @@ function acquireDOMGlobals(ownerWindow) {
 }
 
 function activateDOMGlobals(ownerWindow) {
-    if (activeDOMWindow === ownerWindow) return;
+    if (ownerWindow === globalThis || activeDOMWindow === ownerWindow) return;
     for (const name of DOM_GLOBAL_NAMES) {
         if (name === 'document') {
             globalThis[name] = ownerWindow.document;
@@ -1979,7 +2000,7 @@ function installDOMActivation(parent, ownerWindow, refreshViewport) {
         parent.addEventListener(type, activate, true);
     }
     const onSelectionChange = () => {
-        const anchor = ownerWindow.document.getSelection?.().anchorNode;
+        const anchor = rootSelectionFor(parent)?.anchorNode;
         if (anchor && parent.contains(anchor)) activate();
     };
     ownerWindow.document.addEventListener('selectionchange', onSelectionChange);

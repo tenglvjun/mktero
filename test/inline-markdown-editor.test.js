@@ -319,6 +319,53 @@ test('swaps pending figure images for animated placeholders and restores them', 
     dom.window.close();
 });
 
+test('a new document does not inherit a selection from the previous one', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const original = 'First paragraph.\n\nSecond paragraph with a selected phrase.';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: original,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    const from = original.indexOf('selected phrase');
+    view.dispatch({ selection: { anchor: from, head: from + 'selected phrase'.length } });
+
+    // Switching the reader to a translation swaps the whole text. Mapping
+    // the old range through that change would select the entire new text.
+    editor.setDocument({ markdown: '第一段。\n\n第二段里有一个选中的短语。' });
+    assert.equal(view.state.selection.main.empty, true);
+    assert.equal(view.state.selection.main.head, 0);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a selection in text the next document starts with is kept', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const streamed = '第一段已经译完。\n\n第二段';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: streamed,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    view.dispatch({ selection: { anchor: 1, head: 6 } });
+
+    editor.setDocument({ markdown: `${streamed}正在翻译，后面还有文字。` });
+    assert.deepEqual(
+        { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head },
+        { anchor: 1, head: 6 }
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('showRestoredFigure swaps one finished crop without resetting the document', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -9728,6 +9775,77 @@ test('activates the owning Zotero window before CodeMirror handles scrolling', (
         else {
             delete globalThis.getComputedStyle;
         }
+    }
+});
+
+// In a web page the editor's window is the global object, whose `document`
+// and `window` are getter-only. Rebinding them would throw in strict mode.
+test('runs in a page whose global object is the owning window', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    // Getter-only, like a browser window's own properties.
+    const readOnly = [
+        'document',
+        'window',
+        'getComputedStyle',
+        'IntersectionObserver',
+        'MutationObserver',
+        'ResizeObserver',
+    ];
+    // Window members CodeMirror reads through `view.win`; Node's global object
+    // lacks them, so they forward to the jsdom window.
+    const forwarded = [
+        'addEventListener',
+        'removeEventListener',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+        'getSelection',
+        'matchMedia',
+        'innerHeight',
+        'innerWidth',
+        'visualViewport',
+        'devicePixelRatio',
+        'scrollX',
+        'scrollY',
+    ].filter(name => !(name in globalThis));
+    const names = [...readOnly, ...forwarded];
+    const previous = new Map(names.map(name => [
+        name,
+        Object.getOwnPropertyDescriptor(globalThis, name),
+    ]));
+    for (const name of names) {
+        Object.defineProperty(globalThis, name, {
+            configurable: true,
+            get: () => {
+                const value = dom.window[name];
+                return typeof value === 'function' && !/^[A-Z]/.test(name)
+                    ? value.bind(dom.window)
+                    : value;
+            },
+        });
+    }
+    Object.defineProperty(dom.window.document, 'defaultView', {
+        configurable: true,
+        get: () => globalThis,
+    });
+    let editor;
+    try {
+        editor = createInlineMarkdownEditor({
+            parent: dom.window.document.querySelector('#editor'),
+            initialMarkdown: '# Page window\n\nBody text.',
+        });
+        editor.focus();
+        assert.equal(editor.getMarkdown(), '# Page window\n\nBody text.');
+        assert.equal(globalThis.document, dom.window.document);
+    }
+    finally {
+        editor?.destroy();
+        for (const [name, descriptor] of previous) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+            else delete globalThis[name];
+        }
+        dom.window.close();
     }
 });
 
