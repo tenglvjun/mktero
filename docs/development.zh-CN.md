@@ -26,3 +26,21 @@ node scripts/figure-corpus-check.mjs --update             # 复核后刷新
 ```
 
 修改图组规则后，运行检查并复核差异。验证新论文时，把它的压缩包加入语料目录，并提交生成的 `<id>.expected.json`。缺失的压缩包会被跳过；压缩包字节发生变化时会失败，直到重新验证并更新。
+
+## 浏览器预览
+
+`preview/` 在普通网页中挂载真实的 Markdown 阅读器（`createMarkdownTabView`），外层是 Zotero 风格的窗口和一篇示例论文，用于网站展示和浏览器兼容检查。论文、译文、批注和模拟的 PDF 页面都是夹具数据；页面不发出任何网络请求，CSP 也禁止对外连接。XPI 不包含这部分内容。
+
+```bash
+npm run build:preview   # 生成 build/preview/，用静态服务打开该目录
+```
+
+加上 `?lang=zh` 使用中文界面，加上 `?diagnostics=1` 运行页内检查并显示结果。要检查多个浏览器引擎，把 `MKTERO_PLAYWRIGHT_PATH` 指向一个已安装的 Playwright 模块（它不是本仓库的依赖）：
+
+```bash
+export MKTERO_PLAYWRIGHT_PATH=/path/to/node_modules/playwright/index.mjs
+MKTERO_PREVIEW_BROWSERS=chromium,chrome,firefox,webkit,safari \
+  node scripts/validate-preview-browser.mjs
+```
+
+报告和截图写入 `build/preview-validation/`。真实 Safari 通过 `safaridriver` 运行，需要在 Safari 设置中开启“允许远程自动化”；未开启时 Safari 会被标记为跳过。

@@ -79,7 +79,11 @@ documentation-only. Report any command that could not be run.
 - `ui/`: packaged XHTML, CSS, and icons.
 - `docs/`: README-linked user documentation. The directory is gitignored except
   for an explicit allowlist in `.gitignore`; see the cross-file checklist.
-- `scripts/`: build, figure validation harnesses, and the figure-corpus check.
+- `preview/`: browser preview of the reader for the website and browser
+  compatibility checks (`npm run build:preview`). Fixture data only; not part
+  of the XPI. See `docs/development.md`.
+- `scripts/`: build, figure validation harnesses, the figure-corpus check, and
+  the browser preview build and validation.
 - `test/`: Node test runner coverage, with jsdom or linkedom where DOM behavior
   is needed.
 

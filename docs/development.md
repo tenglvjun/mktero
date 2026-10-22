@@ -37,3 +37,30 @@ After changing figure rules, run the check and review the diff. When you verify
 another paper, add its archive to the corpus directory and commit the generated
 `<id>.expected.json`. Missing archives are skipped; an archive whose bytes
 changed fails until it is re-verified and updated.
+
+## Browser preview
+
+`preview/` mounts the real Markdown reader (`createMarkdownTabView`) in a plain
+web page, inside a Zotero-style window with a sample paper, for the website and
+for browser compatibility checks. The paper, translation, annotations, and
+simulated PDF pages are fixtures; the page makes no network requests and its
+CSP blocks connections. The XPI does not include it.
+
+```bash
+npm run build:preview   # writes build/preview/; serve that directory to open it
+```
+
+Add `?lang=zh` for the Chinese interface and `?diagnostics=1` to run the
+in-page checks and show their results. To check several engines, point
+`MKTERO_PLAYWRIGHT_PATH` at an installed Playwright module (it is not a
+dependency of this repository):
+
+```bash
+export MKTERO_PLAYWRIGHT_PATH=/path/to/node_modules/playwright/index.mjs
+MKTERO_PREVIEW_BROWSERS=chromium,chrome,firefox,webkit,safari \
+  node scripts/validate-preview-browser.mjs
+```
+
+Reports and screenshots go to `build/preview-validation/`. Real Safari runs
+through `safaridriver` and needs Safari's "Allow remote automation" setting;
+without it the Safari run is reported as skipped.
