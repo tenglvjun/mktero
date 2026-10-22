@@ -11,6 +11,10 @@ import { isCorrectionInteractionTarget } from './correction-interactions.js';
 import { enhanceTableCopyActions } from './table-copy-actions.js';
 import { installRenderedAnnotations } from './pdf-annotations.js';
 import {
+    createBlockHeightIdentity,
+    holdBlockHeightWhileImagesLoad,
+} from './block-height-memory.js';
+import {
     applyTranslationPresentation,
     normalizeTranslationPresentation,
     sameTranslationPresentation,
@@ -41,6 +45,7 @@ export class RenderedTableWidget extends WidgetType {
         onCorrectionError,
         onCorrectionEditingChange,
         translate,
+        blockHeights = null,
     }) {
         super();
         this.source = source;
@@ -68,9 +73,19 @@ export class RenderedTableWidget extends WidgetType {
         this.onCorrectionError = onCorrectionError;
         this.onCorrectionEditingChange = onCorrectionEditingChange;
         this.translate = translate;
+        this.blockHeights = blockHeights;
+        this.blockHeightIdentity = createBlockHeightIdentity(
+            'table',
+            annotationSourceFrom,
+            annotationSource
+        );
         this.activeCellEdits = 0;
         this.activeCellSession = null;
         this.destroyed = false;
+    }
+
+    get estimatedHeight() {
+        return this.blockHeights?.estimate(this.blockHeightIdentity) ?? -1;
     }
 
     eq(other) {
@@ -149,6 +164,7 @@ export class RenderedTableWidget extends WidgetType {
                 source: this.source,
             });
         }
+        holdBlockHeightWhileImagesLoad(container, view, this.estimatedHeight);
         return container;
     }
 
