@@ -14,6 +14,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildPreview, previewOutput } from './build-preview.mjs';
+import { EMBED_CSP, EMBED_SANDBOX, READY_MESSAGE } from '../preview/embed.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(projectRoot, 'build/preview-validation');
@@ -31,10 +32,36 @@ const build = await buildPreview();
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 
+// /__embed.html frames /__sandboxed/ the way the website does: a sandboxed
+// iframe, and the preview served with the website's CSP. The preview's module
+// requests then carry `Origin: null`, so they need CORS.
+const SANDBOXED = '/__sandboxed';
+const EMBED_PAGE = `<!doctype html><meta charset="utf-8"><title>embed</title><body style="margin:0">
+<iframe id="preview" sandbox="${EMBED_SANDBOX}" allow="clipboard-write" referrerpolicy="no-referrer"
+    width="1280" height="800" src="${SANDBOXED}/index.html?lang=en&frame=desktop&theme=light&diagnostics=1"></iframe>
+<script>
+window.readyMessages = [];
+addEventListener('message', event => {
+    if (event.source !== document.getElementById('preview').contentWindow) return;
+    if (event.data?.type === ${JSON.stringify(READY_MESSAGE)}) window.readyMessages.push(event.origin);
+});
+</script>`;
+
 const served = [];
 const server = createServer(async (request, response) => {
     try {
-        const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+        let pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+        if (pathname === '/__embed.html') {
+            response.writeHead(200, {
+                'Content-Type': MIME['.html'],
+                'Cache-Control': 'no-store',
+                'Content-Security-Policy': "frame-src 'self'",
+            });
+            response.end(EMBED_PAGE);
+            return;
+        }
+        const sandboxed = pathname.startsWith(`${SANDBOXED}/`);
+        if (sandboxed) pathname = pathname.slice(SANDBOXED.length);
         const file = path.resolve(previewOutput, `.${pathname === '/' ? '/index.html' : pathname}`);
         if (!file.startsWith(previewOutput + path.sep)) throw new Error('Outside preview');
         const body = await readFile(file);
@@ -42,6 +69,10 @@ const server = createServer(async (request, response) => {
         response.writeHead(200, {
             'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
             'Cache-Control': 'no-store',
+            ...(sandboxed ? {
+                'Content-Security-Policy': EMBED_CSP,
+                'Access-Control-Allow-Origin': '*',
+            } : {}),
         });
         response.end(body);
     }
@@ -157,6 +188,8 @@ async function runPlaywright(name, playwright) {
         const dark = await open({ colorScheme: 'dark' });
         await screenshot(dark.page, 'reader-dark-1280');
         await dark.context.close();
+
+        report.sandboxedEmbed = await runSandboxedEmbed(browser, external, pageErrors);
     }
     finally {
         await browser.close();
@@ -167,8 +200,52 @@ async function runPlaywright(name, playwright) {
         && report.interactions.every(entry => entry.passed)
         && external.length === 0
         && pageErrors.length === 0
-        && /[\u4e00-\u9fff]/.test(report.zhLocale?.original || '');
+        && /[\u4e00-\u9fff]/.test(report.zhLocale?.original || '')
+        && Boolean(report.sandboxedEmbed?.passed);
     return report;
+}
+
+// The preview inside the website's sandbox: it must start, pass its own
+// checks, tell the parent it is ready, and have no storage.
+async function runSandboxedEmbed(browser, external, pageErrors) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 820 } });
+    await context.route('**/*', route => {
+        const url = route.request().url();
+        if (url.startsWith(baseURL) || /^(?:blob|data):/.test(url)) return route.continue();
+        external.push(url);
+        return route.abort();
+    });
+    const page = await context.newPage();
+    page.on('pageerror', error => pageErrors.push(`sandboxed pageerror: ${error.message}`));
+    page.on('console', message => {
+        if (message.type() === 'error') pageErrors.push(`sandboxed console: ${message.text()}`);
+    });
+    const result = { passed: false };
+    try {
+        await page.goto(`${baseURL}/__embed.html`);
+        await page.waitForFunction(() => window.readyMessages.length > 0, null, { timeout: 30_000 });
+        result.readyOrigin = await page.evaluate(() => window.readyMessages[0]);
+        const frame = page.frames().find(candidate => candidate.url().includes(`${SANDBOXED}/index.html`));
+        if (!frame) throw new Error('sandboxed frame not found');
+        await frame.waitForFunction(() => /^(?:PASS|FAIL) /.test(document.title), null, { timeout: 90_000 });
+        result.title = await frame.evaluate(() => document.title);
+        result.storage = await frame.evaluate(() => {
+            try {
+                return typeof window.localStorage.length;
+            }
+            catch (error) {
+                return error.name;
+            }
+        });
+        result.passed = result.title.startsWith('PASS ') && result.storage === 'SecurityError';
+    }
+    catch (error) {
+        result.error = error.message;
+    }
+    finally {
+        await context.close();
+    }
+    return result;
 }
 
 // Real pointer, wheel and keyboard input, which the in-page self-test cannot
@@ -409,6 +486,7 @@ function summarize(report) {
             ...(report.pageErrors || [])].slice(0, 12),
         externalRequests: report.externalRequests,
         grammarChunks: report.grammarChunks,
+        sandboxedEmbed: report.sandboxedEmbed,
     };
 }
 
@@ -416,6 +494,10 @@ function formatSummary(summary) {
     if (summary.skipped) return `- ${summary.browser}: skipped (${summary.skipped})`;
     if (summary.error) return `- ${summary.browser}: error ${summary.error}`;
     const problems = [...summary.failedChecks, ...summary.failedInteractions, ...summary.errors];
+    const embed = summary.sandboxedEmbed;
+    if (embed && !embed.passed) {
+        problems.push(`sandboxed embed: ${embed.error || `${embed.title}, storage ${embed.storage}`}`);
+    }
     return `- ${summary.browser} ${summary.version || ''}: ${summary.passed ? 'pass' : 'FAIL'}`
         + (problems.length ? `\n    ${problems.join('\n    ')}` : '');
 }

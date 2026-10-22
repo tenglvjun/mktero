@@ -26,6 +26,7 @@ import {
     renderPageThumbnail,
 } from './render.js';
 import { createPreviewShell } from './shell.js';
+import { forceLightColorScheme, lightOnlyStyles, postReady } from './embed.js';
 import {
     createSelfTest,
     installErrorCapture,
@@ -56,6 +57,13 @@ const initialTab = ['library', 'pdf', 'reader'].includes(params.get('tab'))
     : 'reader';
 document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
 if (params.get('frame') === 'desktop') document.documentElement.dataset.frame = 'desktop';
+// An embedding page with a fixed light design passes theme=light so the
+// reader does not turn dark with the visitor's system setting.
+const forceLight = params.get('theme') === 'light';
+if (forceLight) {
+    document.documentElement.dataset.theme = 'light';
+    forceLightColorScheme(window);
+}
 
 let resolveReady;
 let rejectReady;
@@ -400,6 +408,10 @@ async function start() {
         },
         localization,
     });
+    if (forceLight) {
+        const styles = view.host.shadowRoot.querySelector('style[data-mktero-styles]');
+        if (styles) styles.textContent = lightOnlyStyles(styles.textContent);
+    }
     shell.readerPane.appendChild(view.root);
     shell.activate(initialTab);
     view.render(model);
@@ -428,9 +440,7 @@ async function start() {
         }),
     });
     resolveReady(true);
-    if (window.parent !== window) {
-        window.parent.postMessage({ type: 'mktero-preview-ready' }, '*');
-    }
+    postReady(window);
     if (params.get('diagnostics') === '1') {
         const report = await selfTest();
         renderDiagnosticsPanel(document, report);

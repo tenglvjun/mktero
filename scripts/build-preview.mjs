@@ -1,6 +1,7 @@
 // Build the browser preview of the Mktero reader into build/preview. The XPI
 // build is separate and unaffected; this output is a static page for a
 // website embed and for browser compatibility checks.
+import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,21 @@ export const previewOutput = path.join(projectRoot, 'build/preview');
 // Browsers the website supports. The reader itself targets Firefox 115 in the
 // XPI; this bundle has to run in current Chromium and WebKit as well.
 export const PREVIEW_TARGETS = ['chrome111', 'edge111', 'firefox115', 'safari16.4'];
+
+// What an embedding page may rely on. Bump it when one of these changes, so a
+// site that knows only the old contract skips the new preview instead of
+// embedding something it cannot drive:
+// - index.html accepts ?lang=en|zh, ?frame=desktop and ?theme=light;
+// - it works inside the sandbox and CSP in preview/embed.js (opaque origin,
+//   no storage, no network);
+// - it posts {type: 'mktero-preview-ready'} to its parent, addressed to the
+//   site's origin, once the reader has mounted;
+// - it is laid out for a 1280x800 frame.
+export const PREVIEW_EMBED_VERSION = 1;
+// Describes the build. Shipped inside build/preview and the release archive.
+export const PREVIEW_MANIFEST = 'mktero-preview.json';
+// Build diagnostics. Never shipped.
+export const PREVIEW_DIAGNOSTICS = 'bundle-inputs.json';
 
 export async function buildPreview({ minify = true } = {}) {
     const manifest = JSON.parse(await readFile(path.join(projectRoot, 'manifest.json'), 'utf8'));
@@ -48,8 +64,17 @@ export async function buildPreview({ minify = true } = {}) {
         copyFile(path.join(projectRoot, 'preview/index.html'), path.join(previewOutput, 'index.html')),
         copyFile(path.join(projectRoot, 'preview/preview.css'), path.join(previewOutput, 'preview.css')),
         writeFile(
-            path.join(previewOutput, 'bundle-inputs.json'),
+            path.join(previewOutput, PREVIEW_DIAGNOSTICS),
             `${JSON.stringify(summarizeInputs(output), null, 2)}\n`
+        ),
+        writeFile(
+            path.join(previewOutput, PREVIEW_MANIFEST),
+            `${JSON.stringify({
+                name: 'mktero-preview',
+                version: manifest.version,
+                commit: sourceCommit(),
+                embed: PREVIEW_EMBED_VERSION,
+            }, null, 2)}\n`
         ),
     ]);
     return {
@@ -58,6 +83,19 @@ export async function buildPreview({ minify = true } = {}) {
         totalBytes: Object.values(outputs).reduce((total, entry) => total + entry.bytes, 0),
         version: manifest.version,
     };
+}
+
+// The commit the preview was built from, or null outside a git checkout.
+function sourceCommit() {
+    try {
+        const commit = execFileSync('git', ['-C', projectRoot, 'rev-parse', 'HEAD'], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim();
+        return /^[0-9a-f]{40}$/.test(commit) ? commit : null;
+    } catch {
+        return null;
+    }
 }
 
 // Bytes a browser fetches before the reader starts: the entry and its static

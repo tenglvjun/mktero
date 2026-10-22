@@ -62,6 +62,10 @@ jobs:
       - name: Build release assets
         run: npm run build
 
+      # The website installs this archive at deploy time to embed the reader.
+      - name: Package reader preview
+        run: npm run package:preview
+
       - name: Upload release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -70,11 +74,13 @@ jobs:
             build/mktero-${{ steps.version.outputs.version }}.xpi
             build/mktero-${{ steps.version.outputs.version }}.xpi.sha256
             build/updates.json
+            build/mktero-preview-${{ steps.version.outputs.version }}.tar.gz
+            build/mktero-preview-${{ steps.version.outputs.version }}.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
 
   attest:
-    name: Attest XPI provenance
+    name: Attest release asset provenance
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -90,10 +96,12 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Attest XPI provenance
+      - name: Attest XPI and preview provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
-          subject-path: release-assets/mktero-${{ needs.build.outputs.version }}.xpi
+          subject-path: |
+            release-assets/mktero-${{ needs.build.outputs.version }}.xpi
+            release-assets/mktero-preview-${{ needs.build.outputs.version }}.tar.gz
 
   publish:
     name: Create GitHub Release
@@ -130,6 +138,8 @@ jobs:
             "release-assets/mktero-${VERSION}.xpi" \
             "release-assets/mktero-${VERSION}.xpi.sha256" \
             "release-assets/updates.json" \
+            "release-assets/mktero-preview-${VERSION}.tar.gz" \
+            "release-assets/mktero-preview-${VERSION}.tar.gz.sha256" \
             --verify-tag \
             --generate-notes \
             --title "Mktero ${VERSION}"

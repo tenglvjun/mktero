@@ -83,7 +83,7 @@ documentation-only. Report any command that could not be run.
   compatibility checks (`npm run build:preview`). Fixture data only; not part
   of the XPI. See `docs/development.md`.
 - `scripts/`: build, figure validation harnesses, the figure-corpus check, and
-  the browser preview build and validation.
+  the browser preview build, packaging, and validation.
 - `test/`: Node test runner coverage, with jsdom or linkedom where DOM behavior
   is needed.
 
@@ -181,6 +181,12 @@ archives, image paths, API responses, and preference values as untrusted input.
   verify the Firefox 115 bundle.
 - Version change: keep `manifest.json`, `package.json`, `package-lock.json`, XPI
   naming, release URLs, and generated update metadata consistent.
+- Browser preview embedding change (query parameters, the ready message, the
+  sandbox and CSP in `preview/embed.js`, or the 1280x800 layout): bump
+  `PREVIEW_EMBED_VERSION` in `scripts/build-preview.mjs`.
+  Each release publishes `mktero-preview-X.Y.Z.tar.gz` and its `.sha256`, and
+  the website installs them at deploy time; a site that does not know the new
+  embed version shows its still image instead.
 - User-visible behavior, requirements, storage, or privacy change: update the
   English and Simplified Chinese READMEs and the matching `docs/*.md` pages in
   the same change.

@@ -25,7 +25,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
         color-scheme: dark;
         --titlebar: #2a2a2c;
         --titlebar-border: #121214;
@@ -67,9 +67,9 @@ body {
 
 html[data-frame="desktop"] body {
     background:
-        radial-gradient(60% 70% at 15% 10%, #8fb8ff 0%, rgb(143 184 255 / 0%) 70%),
-        radial-gradient(50% 60% at 90% 90%, #b6a4ff 0%, rgb(182 164 255 / 0%) 70%),
-        linear-gradient(135deg, #3b5ba9, #1f2f63 60%, #182447);
+        radial-gradient(55% 65% at 12% 8%, #9cc2ff 0%, rgb(156 194 255 / 0%) 70%),
+        radial-gradient(45% 55% at 92% 92%, #b9d3ff 0%, rgb(185 211 255 / 0%) 70%),
+        linear-gradient(135deg, #3f6fd9, #2b4fa8 55%, #22397a);
 }
 
 html[data-frame="desktop"] #preview-root {

@@ -44,3 +44,6 @@ jobs:
 
       - name: Build XPI
         run: npm run build
+
+      - name: Package reader preview
+        run: npm run package:preview
