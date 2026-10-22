@@ -4,6 +4,11 @@ import {
     LUCIDE_ICONS,
 } from '../icons/lucide-icon.js';
 import { pdfSelectionPagesFromAnnotation } from '../core/pdf-selection-source-resolver.js';
+import {
+    installSelectionPopupGuard,
+    pdfSelectionViewRect,
+    readPdfSelectionRects,
+} from './selection-popup-guard.js';
 
 const MARKDOWN_BUTTON_SELECTOR = '.mktero-markdown-button';
 const GRAPH_BUTTON_SELECTOR = '.mktero-citation-graph-button';
@@ -27,6 +32,43 @@ export function registerReaderToolbar({
     }
 
     let active = true;
+    const popupGuards = new Map();
+
+    function ensureSelectionPopupGuard(reader, doc = getReaderDocument(reader)) {
+        if (!active || reader?.type !== 'pdf' || !doc?.querySelector) return;
+        for (const [existing, dispose] of [...popupGuards]) {
+            if (!existing.defaultView || existing.defaultView.closed) {
+                dispose();
+                popupGuards.delete(existing);
+            }
+        }
+        if (popupGuards.has(doc)) return;
+        try {
+            popupGuards.set(doc, installSelectionPopupGuard({
+                document: doc,
+                selectionRects: () => readPdfSelectionRects(pdfViewWindow(reader)),
+                viewRect: popup => pdfSelectionViewRect(
+                    popup,
+                    pdfViewWindow(reader)
+                ),
+                scrollTarget: () => pdfViewWindow(reader),
+                onDispose: () => popupGuards.delete(doc),
+            }));
+        }
+        catch (error) {
+            popupGuards.delete(doc);
+            // This runs while a PDF reader opens. The open handler turns any
+            // exception into a "PDF conversion failed" alert, so a placement
+            // failure is only logged.
+            defaultErrorHandler(error);
+        }
+    }
+
+    function disposeSelectionPopupGuards() {
+        for (const dispose of [...popupGuards.values()]) dispose();
+        popupGuards.clear();
+    }
+
     const notifyPDFReaderAvailable = reader => {
         if (!active
             || reader?.type !== 'pdf'
@@ -47,6 +89,7 @@ export function registerReaderToolbar({
         suppressAvailableNotification = false,
     }) => {
         if (!active || reader?.type !== 'pdf') return;
+        ensureSelectionPopupGuard(reader, doc);
         if (!suppressAvailableNotification) notifyPDFReaderAvailable(reader);
         if (!doc.querySelector?.(MARKDOWN_BUTTON_SELECTOR)) {
             append(createToolbarButton({
@@ -63,9 +106,9 @@ export function registerReaderToolbar({
     };
 
     const selectionHandler = ({ reader, doc, params, append }) => {
-        if (!active || reader?.type !== 'pdf' || typeof onOpenSelection !== 'function') {
-            return;
-        }
+        if (!active || reader?.type !== 'pdf') return;
+        ensureSelectionPopupGuard(reader, doc);
+        if (typeof onOpenSelection !== 'function') return;
         if (typeof isMarkdownReady === 'function' && !isMarkdownReady(reader)) return;
         const annotation = params?.annotation;
         if (!pdfSelectionPagesFromAnnotation(annotation)) return;
@@ -90,10 +133,16 @@ export function registerReaderToolbar({
         );
     }
     zotero.Reader.registerEventListener('renderToolbar', handler, pluginID);
-    injectOpenReaderToolbars(zotero, handler, notifyPDFReaderAvailable);
+    injectOpenReaderToolbars(
+        zotero,
+        handler,
+        notifyPDFReaderAvailable,
+        ensureSelectionPopupGuard
+    );
     return () => {
         if (!active) return;
         active = false;
+        disposeSelectionPopupGuards();
         removeOpenReaderToolbarButtons(zotero);
         // Zotero 9.0's public unregister method incorrectly keeps only the target
         // listener. Its plugin-ID cleanup path has the intended implementation.
@@ -174,11 +223,17 @@ function reportSelection(button, message, reader, onSelectionUnresolved) {
     onSelectionUnresolved?.(message, reader);
 }
 
-function injectOpenReaderToolbars(zotero, handler, notifyPDFReaderAvailable) {
+function injectOpenReaderToolbars(
+    zotero,
+    handler,
+    notifyPDFReaderAvailable,
+    ensureSelectionPopupGuard
+) {
     for (const reader of getOpenReaders(zotero)) {
         notifyPDFReaderAvailable(reader);
         try {
             const doc = getReaderDocument(reader);
+            ensureSelectionPopupGuard?.(reader, doc);
             removeToolbarButtonsFromDocument(doc);
             const container = doc?.querySelector?.(CUSTOM_SECTIONS_SELECTOR);
             if (!container) continue;
@@ -231,6 +286,12 @@ function getOpenReaders(zotero) {
 function getReaderDocument(reader) {
     return reader?._iframeWindow?.document
         || reader?._iframe?.contentDocument
+        || null;
+}
+
+function pdfViewWindow(reader) {
+    return reader?._internalReader?._primaryView?._iframeWindow
+        || reader?._primaryView?._iframeWindow
         || null;
 }
 

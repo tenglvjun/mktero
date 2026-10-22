@@ -254,3 +254,69 @@ test('keeps its place when the anchor it points at is replaced', () => {
     popup.close();
     dom.window.close();
 });
+
+test('keeps a fixed popup inside the reader when Zotero chrome covers the window', () => {
+    const dom = new JSDOM('<!doctype html><div id="host"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { window } = dom;
+    const { document } = window;
+    window.innerWidth = 1400;
+    window.innerHeight = 900;
+    const host = document.querySelector('#host');
+    const shadow = host.attachShadow({ mode: 'open' });
+    const parent = document.createElement('div');
+    const anchor = document.createElement('span');
+    parent.append(anchor);
+    shadow.append(parent);
+    const rects = new Map([
+        [host, {
+            left: 240,
+            top: 80,
+            right: 900,
+            bottom: 860,
+            width: 660,
+            height: 780,
+        }],
+        [anchor, {
+            left: 820,
+            top: 400,
+            right: 880,
+            bottom: 420,
+            width: 60,
+            height: 20,
+        }],
+    ]);
+    window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+        return rects.get(this) || {
+            left: 0,
+            top: 0,
+            right: 480,
+            bottom: 220,
+            width: 480,
+            height: 220,
+        };
+    };
+    const popup = createAnchoredPopup(parent, {
+        className: 'popup',
+        idPrefix: 'test-popup',
+        viewportPadding: 12,
+    });
+
+    popup.open({
+        anchor,
+        label: 'Preview',
+        renderContent({ document: ownerDocument }) {
+            return ownerDocument.createElementNS(XHTML_NAMESPACE, 'div');
+        },
+    });
+    const element = shadow.querySelector('.popup');
+    const left = Number.parseFloat(element.style.left);
+    const width = 480;
+
+    assert.equal(element.style.maxWidth, '636px');
+    assert.equal(left, 408);
+    assert.ok(left + width <= 900 - 12);
+    popup.close();
+    dom.window.close();
+});

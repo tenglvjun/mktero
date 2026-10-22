@@ -551,3 +551,91 @@ function selectionAnnotation() {
         },
     };
 }
+
+test('moves a PDF selection popup off the selected caption until cleanup', async () => {
+    const { document } = parseHTML(
+        '<html><body><div id="view"></div></body></html>'
+    );
+    const view = {
+        left: 220,
+        top: 90,
+        right: 980,
+        bottom: 820,
+        width: 760,
+        height: 730,
+    };
+    const parent = document.querySelector('#view');
+    parent.getBoundingClientRect = () => view;
+    const popup = document.createElement('div');
+    popup.className = 'selection-popup view-popup page-popup-left-center';
+    popup.style.transform = 'translate(700px, 524px)';
+    popup.getBoundingClientRect = () => {
+        const match = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px\s*\)/.exec(
+            popup.style.transform
+        );
+        const left = Number(match[1]);
+        const top = Number(match[2]);
+        return {
+            left,
+            top,
+            right: left + 198,
+            bottom: top + 76,
+            width: 198,
+            height: 76,
+        };
+    };
+    parent.append(popup);
+    const iframeWindow = {
+        frameElement: {
+            clientWidth: view.width,
+            clientHeight: view.height,
+            getBoundingClientRect: () => view,
+        },
+        getSelection: () => ({
+            isCollapsed: false,
+            rangeCount: 1,
+            getRangeAt: () => ({
+                getClientRects: () => [
+                    { left: 20, top: 410, right: 720, bottom: 428 },
+                    { left: 20, top: 430, right: 720, bottom: 448 },
+                    { left: 20, top: 450, right: 680, bottom: 468 },
+                    { left: 20, top: 470, right: 640, bottom: 488 },
+                ],
+            }),
+        }),
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    const reader = {
+        type: 'pdf',
+        itemID: 42,
+        _iframeWindow: { document },
+        _internalReader: { _primaryView: { _iframeWindow: iframeWindow } },
+    };
+    const openErrors = [];
+    const dispose = registerReaderToolbar({
+        zotero: {
+            Reader: {
+                _readers: [reader],
+                registerEventListener() {},
+                unregisterEventListener() {},
+            },
+        },
+        pluginID: 'mktero@example.com',
+        onOpen: () => {},
+        onError: error => openErrors.push(error),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const moved = popup.getBoundingClientRect();
+    assert.equal(moved.top >= 578 || moved.bottom <= 500, true);
+    assert.deepEqual(openErrors, []);
+    const settled = popup.style.transform;
+    dispose();
+    popup.style.transform = 'translate(700px, 524px)';
+    document.body.dispatchEvent(new document.defaultView.Event('scroll'));
+    await Promise.resolve();
+    assert.equal(popup.style.transform, 'translate(700px, 524px)');
+    assert.notEqual(settled, 'translate(700px, 524px)');
+});
