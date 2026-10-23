@@ -774,3 +774,34 @@ test('joins the caption sentence directly under the figure title', () => {
     assert.ok(!candidate.captionBlockIds.includes(prose));
     assert.ok(!candidate.ownedTextBlockIds.includes(prose));
 });
+
+test('leaves a list item or a new sentence under a finished caption in the body', () => {
+    const title = 'Fig. 7. Overall exploration results of the network.';
+    const blocks = [];
+    const assets = [{ path: 'images/fig.png', mimeType: 'image/png', data: createTestPNG() }];
+    const add = block => {
+        const sourceOrdinal = blocks.length;
+        const id = `mineru:p0:b${sourceOrdinal}`;
+        blocks.push({ id, sourceOrdinal, pageIndex: 0, sourceRanges: [], rangeEvidence: 'unresolved', ...block });
+        return id;
+    };
+    const parent = add({ type: 'image', role: 'unknown', bboxKind: 'group', bbox: [500, 270, 890, 460] });
+    add({ type: 'image', role: 'panel', bboxKind: 'visual-body', bbox: [500, 270, 890, 460],
+        assetPath: 'images/fig.png', parentId: parent });
+    const caption = add({ type: 'caption', role: 'caption', bboxKind: 'caption', text: title,
+        bbox: [503, 461, 939, 496], parentId: parent });
+    const sentence = 'For the sake of space, we only show the configurations of the best models.';
+    const item = '- We optimize the architecture through an application-oriented search.';
+    add({ type: 'text', role: 'unknown', bboxKind: 'text', text: sentence, bbox: [503, 500, 943, 630] });
+    add({ type: 'text', role: 'unknown', bboxKind: 'text', text: item, bbox: [503, 632, 943, 700] });
+    const markdown = ['![](images/fig.png)', '', title, '', sentence, '', item].join('\n');
+    const candidate = resolveFigureCandidates(bindFigureSourceRanges({
+        provider: 'mineru', markdown, assets, assetBasePath: '', blocks,
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0, geometryEvidence: 'fixture',
+            markdownRange: { from: 0, to: markdown.length } }],
+        contentList: [], providerState: {},
+    }))[0];
+    assert.equal(candidate.decision, 'compose', candidate.reason);
+    assert.deepEqual(candidate.captionBlockIds, [caption]);
+});
