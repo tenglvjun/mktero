@@ -136,6 +136,14 @@ export const MINERU_PARSER_PROFILE_ID = JSON.stringify({
     sourceMap: MINERU_SOURCE_MAP_OPTIONS,
 });
 
+// Identifies what MinerU was asked to produce, independent of how Mktero
+// reads the result. It keys the raw-result store, so a document-pipeline
+// change reuses stored results while a request change does not.
+export const MINERU_REQUEST_PROFILE_ID = JSON.stringify({
+    batch: MINERU_BATCH_OPTIONS,
+    file: MINERU_FILE_OPTIONS,
+});
+
 // Local V1 results do not share the hosted batch contract or figure layout.
 export const MINERU_LOCAL_PARSER_PROFILE_ID = JSON.stringify({
     transport: 'local-v1',

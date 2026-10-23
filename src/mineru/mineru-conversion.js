@@ -4,6 +4,7 @@ import {
     DEFAULT_PENDING_TASK_MAX_ENTRIES,
 } from './pending-task-store.js';
 import { prepareMinerUResult } from './mineru-result.js';
+import { extractMinerUResultFromZip } from './zip-markdown.js';
 import { throwIfFigureAborted as throwIfAborted } from '../figures/figure-async.js';
 
 export class MinerUConversion {
@@ -16,6 +17,9 @@ export class MinerUConversion {
         restoreCachedInput = null,
         recoverFigures = async result => result,
         createPreviousCacheKeys = null,
+        resultStore = null,
+        createResultKey = null,
+        extractStoredResult = extractMinerUResultFromZip,
         createDataID = createTaskDataID,
         now = Date.now,
         maxTaskAgeMs = DEFAULT_PENDING_TASK_MAX_AGE_MS,
@@ -43,6 +47,9 @@ export class MinerUConversion {
         this.restoreCachedInput = restoreCachedInput;
         this.recoverFigures = recoverFigures;
         this.createPreviousCacheKeys = createPreviousCacheKeys;
+        this.resultStore = resultStore?.get && resultStore?.put ? resultStore : null;
+        this.createResultKey = typeof createResultKey === 'function' ? createResultKey : null;
+        this.extractStoredResult = extractStoredResult;
         this.createDataID = createDataID;
         this.now = now;
         this.maxTaskAgeMs = maxTaskAgeMs;
@@ -80,6 +87,7 @@ export class MinerUConversion {
             ? event => onProgressiveFigures({ ...event, cacheKey: key })
             : null;
         const reportBounded = (progress, state) => onProgress(Math.min(96, progress), state);
+        const resultKey = cacheEnabled ? await this.#resultKey(fileData, signal) : null;
         const selected = await this.#withKeyOperation(key, async () => {
             const resumed = await this.#selectResumableTask({ key, forceRefresh });
             if (resumed?.origin) return resumed;
@@ -92,6 +100,7 @@ export class MinerUConversion {
                     onProgress: reportBounded,
                     onProgressiveFigures: emitProgressive,
                     warnings,
+                    resultKey,
                 });
                 if (cached) return cached;
             }
@@ -123,13 +132,15 @@ export class MinerUConversion {
         }
         let result;
         try {
-            const raw = await this.client.collect({
+            const collected = await this.client.collect({
                 apiKey,
                 task: selected.task,
                 onProgress: progress => reportProgress(Math.min(96, progress)),
+                ...(resultKey && this.resultStore ? { includeArchive: true } : {}),
                 signal,
             });
             throwIfAborted(signal);
+            const raw = await this.#keepResultArchive(resultKey, collected, signal);
             result = this.progressiveResult
                 ? await this.progressiveResult(raw, { fileData, signal,
                     onProgress: reportProgress, onEvent: emitProgressive })
@@ -192,10 +203,81 @@ export class MinerUConversion {
 
     async readCached(options = {}) {
         if (!options?.key) return null;
+        const resultKey = options.cacheEnabled
+            ? await this.#resultKey(options.fileData, options.signal)
+            : null;
         return this.#withKeyOperation(
             options.key,
-            () => this.#readCached(options)
+            () => this.#readCached({ ...options, resultKey })
         );
+    }
+
+    async #resultKey(fileData, signal) {
+        if (!this.resultStore || !this.createResultKey) return null;
+        try {
+            const resultKey = await this.createResultKey(fileData);
+            throwIfAborted(signal);
+            return typeof resultKey === 'string' && resultKey ? resultKey : null;
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            this.#reportError(error);
+            return null;
+        }
+    }
+
+    // Stores the trimmed MinerU archive and strips it from the raw result so
+    // the bytes never reach the document pipeline or the derived cache.
+    async #keepResultArchive(resultKey, collected, signal) {
+        if (!collected || typeof collected !== 'object' || !('resultArchive' in collected)) return collected;
+        const { resultArchive, ...raw } = collected;
+        if (!resultKey || !this.resultStore || !resultArchive) return raw;
+        try {
+            await this.resultStore.put(resultKey, {
+                archive: resultArchive,
+                provider: 'mineru',
+                extractedPages: raw.extractedPages,
+                totalPages: raw.totalPages,
+            }, { signal });
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            this.#reportError(error);
+        }
+        return raw;
+    }
+
+    async #readStoredResult(resultKey, signal) {
+        if (!resultKey || !this.resultStore) return null;
+        try {
+            const stored = await this.resultStore.get(resultKey, { signal });
+            throwIfAborted(signal);
+            if (!stored) return null;
+            const extracted = this.extractStoredResult(stored.archive);
+            return {
+                ...extracted,
+                extractedPages: stored.extractedPages ?? null,
+                totalPages: stored.totalPages ?? null,
+            };
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            if (error?.name === 'AbortError') throw error;
+            this.#reportError(error);
+            await this.resultStore.delete?.(resultKey).catch(() => {});
+            return null;
+        }
+    }
+
+    // A stored MinerU result is prepared exactly like a downloaded one, so a
+    // document-pipeline change is re-derived without contacting MinerU.
+    async #prepareStoredResult(raw, { fileData, signal, onProgress, onProgressiveFigures }) {
+        const prepared = this.progressiveResult
+            ? await this.progressiveResult(raw, { fileData, signal, onProgress, onEvent: onProgressiveFigures })
+            : await this.prepareResult(raw, { fileData, signal, onProgress });
+        const result = await this.#recoverFigures(prepared, { fileData, signal, onProgress });
+        throwIfAborted(signal);
+        return result;
     }
 
     async #readCached({
@@ -206,6 +288,7 @@ export class MinerUConversion {
         onProgress = () => {},
         onProgressiveFigures = null,
         warnings,
+        resultKey = null,
     } = {}) {
         const reportedWarnings = Array.isArray(warnings) ? warnings : [];
         if (!key) return null;
@@ -213,6 +296,16 @@ export class MinerUConversion {
         let cached = await this.#readCache(key, cacheEnabled, reportedWarnings);
         throwIfAborted(signal);
         let migrated = false;
+        if (!cached && cacheEnabled && resultKey) {
+            const stored = await this.#readStoredResult(resultKey, signal);
+            if (stored) {
+                const result = await this.#prepareStoredResult(stored, {
+                    fileData, signal, onProgress, onProgressiveFigures,
+                });
+                await this.#putCache(key, result, signal, reportedWarnings);
+                return { result, origin: 'cache', warnings: reportedWarnings };
+            }
+        }
         if (!cached && cacheEnabled && this.createPreviousCacheKeys) {
             try {
                 const previousKeys = await this.createPreviousCacheKeys(fileData);
@@ -253,15 +346,20 @@ export class MinerUConversion {
         const result = await this.#recoverFigures(resolved, { fileData, signal, onProgress });
         throwIfAborted(signal);
         if (cacheEnabled && (migrated || result !== cached || wasPending)) {
-            try { await this.cache.put(key, result, { signal }); }
-            catch (error) {
-                throwIfAborted(signal);
-                if (error?.name === 'AbortError') throw error;
-                this.#reportError(error);
-                reportedWarnings.push('The Markdown result could not be saved to the local cache.');
-            }
+            await this.#putCache(key, result, signal, reportedWarnings);
         }
         return { result, origin: 'cache', warnings: reportedWarnings };
+    }
+
+    async #putCache(key, result, signal, warnings) {
+        if (!this.cache) return;
+        try { await this.cache.put(key, result, { signal }); }
+        catch (error) {
+            throwIfAborted(signal);
+            if (error?.name === 'AbortError') throw error;
+            this.#reportError(error);
+            warnings.push('The Markdown result could not be saved to the local cache.');
+        }
     }
 
     async #selectResumableTask({ key, forceRefresh }) {

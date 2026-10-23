@@ -34,6 +34,10 @@ import {
     createZoteroPDFTextIndexCache,
 } from './cache/pdf-text-index-cache.js';
 import {
+    createMinerUResultKey,
+    createZoteroMinerUResultStore,
+} from './cache/mineru-result-store.js';
+import {
     createZoteroMarkdownAnnotationStore,
 } from './cache/markdown-annotation-store.js';
 import {
@@ -104,6 +108,7 @@ import {
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_REQUEST_PROFILE_ID,
 } from './mineru/parser-profile.js';
 import {
     MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
@@ -437,6 +442,11 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.pdfTextIndexCache = pdfTextIndexCache;
+    const mineruResultStore = createZoteroMinerUResultStore({
+        zotero: Zotero,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+    });
     const readerTextLocator = createZoteroPDFTextLocator(Zotero);
     const loadPDFFile = createZoteroPDFFileLoader(
         Zotero,
@@ -646,6 +656,12 @@ globalThis.startup = async function startup({ id, rootURI }) {
                 createMarkdownCacheKey(fileData, { parserProfile })
             ))
         ),
+        resultStore: mineruResultStore,
+        createResultKey: fileData => createMinerUResultKey({
+            fileData,
+            provider: 'mineru',
+            requestProfile: MINERU_REQUEST_PROFILE_ID,
+        }),
         onError: error => Zotero.logError?.(error),
     });
     const localConversion = new MinerULocalConversion({
@@ -748,6 +764,15 @@ globalThis.startup = async function startup({ id, rootURI }) {
             prepareMinerUResult
         ),
         recoverFigures,
+        resultStore: mineruResultStore,
+        // The hosted service fixes its own MinerU request; its results are
+        // kept apart from direct MinerU results.
+        createResultKey: (fileData, { sourceHash } = {}) => createMinerUResultKey({
+            fileData,
+            sourceHash,
+            provider: 'mktero',
+            requestProfile: MINERU_REQUEST_PROFILE_ID,
+        }),
     });
     const extractor = new ConversionProviderRouter({
         getProvider: () => getConversionProvider(Zotero),
@@ -824,6 +849,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         .catch(error => Zotero.logError(error));
     runtime.citationCache?.prune().catch(error => Zotero.logError(error));
     pdfTextIndexCache.prune().catch(error => Zotero.logError(error));
+    mineruResultStore.prune().catch(error => Zotero.logError(error));
     pendingTasks.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
     const preferencePaneID = await registerMinerUPreferencesPane({

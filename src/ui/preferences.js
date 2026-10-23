@@ -1,4 +1,5 @@
 import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
+import { createZoteroMinerUResultStore } from '../cache/mineru-result-store.js';
 import {
     notifyLocalCacheCleared,
     withSuccessfulClearNotification,
@@ -1976,6 +1977,11 @@ globalThis.MkteroPreferences = {
                 )
             )),
             createZoteroPDFTextIndexCache({
+                zotero: Zotero,
+                ioUtils: IOUtils,
+                pathUtils: PathUtils,
+            }),
+            createZoteroMinerUResultStore({
                 zotero: Zotero,
                 ioUtils: IOUtils,
                 pathUtils: PathUtils,

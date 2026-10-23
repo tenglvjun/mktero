@@ -183,9 +183,9 @@ See [Configuration](./docs/configuration.md) for every setting and
   service for your account.
 - If you select MinerU cloud, a local MinerU service, or Mistral, the complete
   PDF is sent there instead, and not to Mktero.
-- Credentials, cached Markdown and figures, corrections, translations, and
-  reading positions are stored unencrypted in the active Zotero profile and are
-  not synced by Mktero.
+- Credentials, cached Markdown and figures, stored MinerU results (without the
+  PDF copy), corrections, translations, and reading positions are stored
+  unencrypted in the active Zotero profile and are not synced by Mktero.
 - Signing in for the default conversion sends the email and password only when
   you sign in. Registration also emails a verification code. The access token
   and refresh token stay in the same profile. While the account pane is open,
