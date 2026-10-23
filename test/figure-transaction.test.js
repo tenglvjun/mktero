@@ -210,3 +210,40 @@ test('consumes a see-next-page placeholder and keeps the next-page legend', () =
     assert.ok(!draft.input.markdown.split('\n')
         .some(value => value.startsWith('Extended Data Fig. 9 | Odor delivery')));
 });
+
+test('escapes an explicit-range caption once and records the composed members', () => {
+    const caption = 'Fig. 2. Results [1] with a ] bracket and a \\ backslash.';
+    const escaped = 'Fig. 2. Results \\[1\\] with a \\] bracket and a \\\\ backslash.';
+    const image = `![${escaped}](images/panel.png)`;
+    const markdown = `${image}\n\nProse after.`;
+    const input = {
+        provider: 'mineru', rangesExplicit: true, markdown,
+        assets: [{ path: 'images/panel.png', mimeType: 'image/png', data: createTestPNG() }],
+        assetBasePath: '', contentList: [], providerState: {},
+        blocks: [
+            { id: 'p0-0', sourceOrdinal: 0, pageIndex: 0, type: 'image', role: 'unknown', bboxKind: 'group',
+                bbox: [0, 0, 1000, 1000], text: '', sourceRanges: [], rangeEvidence: 'unresolved' },
+            { id: 'p0-0:body0', sourceOrdinal: 0, pageIndex: 0, type: 'image', role: 'panel', bboxKind: 'visual-body',
+                bbox: [100, 100, 500, 400], assetPath: 'images/panel.png', parentId: 'p0-0', text: '',
+                sourceRanges: [{ from: 0, to: image.length }], rangeEvidence: 'explicit-range' },
+            { id: 'p0-0:caption', sourceOrdinal: 0, pageIndex: 0, type: 'caption', role: 'caption', bboxKind: 'caption',
+                bbox: [100, 410, 500, 440], parentId: 'p0-0', text: caption,
+                sourceRanges: [{ from: 2, to: 2 + escaped.length }], rangeEvidence: 'explicit-range' },
+        ],
+        pages: [{ pageIndex: 0, width: 1000, height: 1000, unit: 'pt', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: 0, geometryEvidence: 'fixture', markdownRange: null }],
+    };
+    const bound = bindFigureSourceRanges(input);
+    const [candidate] = resolveFigureCandidates(bound);
+    assert.equal(candidate.decision, 'compose');
+    const draft = composeFigureDraft(bound, [{
+        candidate,
+        crop: { data: createTestPNG(400, 320), mimeType: 'image/png', width: 400, height: 320 },
+        assetPath: 'generated/figures/f2.png',
+    }]);
+    assert.ok(draft.input.markdown.includes(`![${escaped}](generated/figures/f2.png)`));
+    const composite = draft.input.blocks.find(block => block.figureId);
+    assert.equal(composite.captionText, caption);
+    assert.deepEqual(composite.memberBlockIds, ['p0-0:body0', 'p0-0:caption']);
+    assert.equal(draft.blueprints[0].renderCaption, escaped);
+});

@@ -134,10 +134,13 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
         });
     // A "see next page" placeholder is consumed but never shown as legend.
     const legendMembers = captionMembers.filter(block => !isNextPageCaptionPlaceholder(block.text));
+    // A provider with explicit ranges keeps the caption's own text: its range
+    // can be an image description that is already escaped for Markdown.
     const captionText = (legendMembers.length ? legendMembers : captionMembers)
-        .flatMap(block => block.sourceRanges.map(range => (
-            input.markdown.slice(range.from, range.to)
-        ))).join(' ').replace(/\s*\r?\n\s*/gu, ' ').trim();
+        .flatMap(block => (input.rangesExplicit === true && typeof block.text === 'string'
+            ? [block.text]
+            : block.sourceRanges.map(range => input.markdown.slice(range.from, range.to))))
+        .join(' ').replace(/\s*\r?\n\s*/gu, ' ').trim();
     if (captionText.length > limits.maxCaptionLength) throw transactionError('resource-limit');
     const renderCaption = escapeImageDescription(captionText);
     // Blank lines keep the generated image a standalone paragraph even when
@@ -198,6 +201,7 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
             pageIndex: candidate.pageIndex, bbox: [...candidate.visualBBox],
             assetPath: destination, figureId: candidate.id, captionText,
             captionBBox: candidate.captionBBox ? [...candidate.captionBBox] : null,
+            memberBlockIds: [...ids],
             rangeEvidence: 'explicit-range',
         },
     };
