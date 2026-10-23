@@ -1130,7 +1130,7 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
     assert.deepEqual(JSON.parse(MINERU_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
         file: { is_ocr: true },
-        document: 'mineru-document-ir-v1',
+        document: 'mineru-document-ir-v2',
         figureStructure: 'figure-region-v17',
     });
     assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v17/);

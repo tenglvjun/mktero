@@ -4,6 +4,7 @@ import { ingestMinerUContentList } from './ingest-content-list.js';
 import { classifyBlocks } from './classify.js';
 import { attachFloatNotes } from './floats.js';
 import { orderReadingFlow } from './reading-order.js';
+import { attachEquationNumbers } from './equations.js';
 import { assignHeadingLevels } from './headings.js';
 import { stitchParagraphs } from './stitch.js';
 import { validateDocumentIR } from './ir.js';
@@ -33,6 +34,7 @@ export function buildMinerUDocumentIR(bundle) {
     classifyBlocks(ir);
     attachFloatNotes(ir);
     orderReadingFlow(ir);
+    attachEquationNumbers(ir);
     assignHeadingLevels(ir);
     stitchParagraphs(ir);
     return validateDocumentIR(ir);

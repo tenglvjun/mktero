@@ -155,10 +155,7 @@ export function renderInlineSpans(spans) {
     let output = '';
     for (const span of spans || []) {
         let piece = '';
-        if (span.type === 'math') {
-            const content = String(span.content || '').replace(/\s*\n\s*/gu, ' ').replace(/\$/gu, '\\$').trim();
-            if (content) piece = `$${content}$`;
-        }
+        if (span.type === 'math') piece = renderInlineMath(span.content);
         else if (span.type === 'text') {
             const content = normalizeOCRText(span.content).replace(/\s+/gu, ' ').trim();
             if (content) piece = escapeMarkdownText(content);
@@ -172,6 +169,34 @@ export function renderInlineSpans(spans) {
         else output += ` ${piece}`;
     }
     return output;
+}
+
+const MATH_ABBREVIATION = /^\\(?:mathrm|text|textrm)\s*\{\s*(i\s*\.\s*e|e\s*\.\s*g|etc)\s*\.\s*\}$/u;
+const MATH_LEADING_PUNCTUATION = /^([,.;:])\s*/u;
+const MATH_TRAILING_PUNCTUATION = /(?<!\\)\s*([,.;:])$/u;
+
+// Inline math as `$…$`. Sentence punctuation that OCR put inside the math at
+// either end moves outside it, and math that is only "i.e.", "e.g." or "etc."
+// becomes text. A trailing `\,` or `\;` is a spacing command and stays.
+function renderInlineMath(value) {
+    let content = String(value || '').replace(/\s*\n\s*/gu, ' ').trim();
+    const abbreviation = content.match(MATH_ABBREVIATION);
+    if (abbreviation) return `${abbreviation[1].replace(/\s+/gu, '')}.`;
+    let before = '';
+    let after = '';
+    const leading = content.match(MATH_LEADING_PUNCTUATION);
+    if (leading) {
+        before = leading[1];
+        content = content.slice(leading[0].length);
+    }
+    const trailing = content.match(MATH_TRAILING_PUNCTUATION);
+    if (trailing) {
+        after = trailing[1];
+        content = content.slice(0, -trailing[0].length);
+    }
+    content = content.replace(/\$/gu, '\\$').trim();
+    if (!content) return before + after;
+    return `${before}${before ? ' ' : ''}$${content}$${after}`;
 }
 
 // MinerU table HTML as one Markdown HTML block: no line breaks (a blank line

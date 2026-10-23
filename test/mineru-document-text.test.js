@@ -91,3 +91,17 @@ test('escaped adversarial OCR text renders as inert text', () => {
     const table = renderMarkdownHTML(sanitizeTableHTML('<table><tr><td onclick="x()"><img src=x onerror=alert(1)></td></tr></table>'));
     assert.doesNotMatch(table, UNSAFE_HTML);
 });
+
+test('moves sentence punctuation out of inline math and turns abbreviation math into text', () => {
+    const line = content => renderInlineSpans([
+        { type: 'text', content: 'see' }, { type: 'math', content }, { type: 'text', content: 'next' },
+    ]);
+    assert.equal(line('x,'), 'see $x$, next');
+    assert.equal(line(', y'), 'see, $y$ next');
+    assert.equal(line('0.5.'), 'see $0.5$. next');
+    assert.equal(line('a \\;'), 'see $a \\;$ next');
+    assert.equal(line('\\ldots.'), 'see $\\ldots$. next');
+    assert.equal(line('\\mathrm { e . g . }'), 'see e.g. next');
+    assert.equal(line('\\mathrm{i.e.}'), 'see i.e. next');
+    assert.equal(line('\\text{etc.}'), 'see etc. next');
+});

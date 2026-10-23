@@ -15,7 +15,7 @@ export function ingestMinerUContentList(contentList, { assets = [], assetBasePat
     const blocks = [];
     const diagnostics = {
         droppedBlocks: 0, unknownTypes: {}, unmatchedDeleted: 0, unresolvedAssets: 0,
-        reorderedBands: [], joins: [], chromeFallbacks: [],
+        reorderedBands: [], joins: [], chromeFallbacks: [], equationNumbers: [],
     };
     for (const entry of contentList) {
         const pageIndex = entry?.pageIndex;
