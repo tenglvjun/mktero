@@ -14,6 +14,11 @@
 - Source navigation depends on provider blocks and coordinates; older cached
   results may remain readable without source links. MinerU cloud, local MinerU,
   and Mistral results have independent parser profiles and caches.
+- MinerU page footnotes (affiliations, funding, and content notes at the foot
+  of a page) are not shown in the reading document yet.
+- MinerU cloud results locate text by OCR block, not by line, so a Markdown
+  paragraph jumps to its whole block in the PDF. A paragraph joined across a
+  page, column, or figure keeps one location for each part.
 - Local MinerU mode talks to a MinerU 4.0 V1 service. It does not restore
   figures from that service's result, and a restarted local service cannot
   resume an earlier job.

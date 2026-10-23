@@ -27,6 +27,14 @@ completed figures again.
 Ambiguous, rotated, or unverifiable groups retain their original images and
 text.
 
+For MinerU, Mktero writes the reading Markdown itself from MinerU's layout, so
+every figure's image, caption, and interior text has an exact Markdown range
+from the start; nothing is matched by text. A composed figure is written back
+into the document at its first member, and the document is written again from
+the same layout, so its source map stays exact. An unfinished restoration is
+not stored in the cache: after a restart it runs again from the stored MinerU
+result, and the provisional document stays readable when that result is gone.
+
 ## Progressive rendering
 
 Local PDF rasterization runs in a background worker, so the reader and the rest
@@ -60,7 +68,9 @@ and stale layout markers are rebuilt, including images that span a whole row.
 
 ## Provider support
 
-- MinerU region restoration requires supported detailed layout metadata.
+- MinerU region restoration requires a `layout.json` from a supported MinerU
+  backend and version (`vlm` or `hybrid`, 3.4.4 or 3.4.5). Other results keep
+  their figures as MinerU returned them.
 - Mistral's pixel dimensions do not establish the PDF CropBox origin or
   rotation, and that is not independently verified, so the production Mistral
   adapter does not perform coordinate-based region restoration and preserves the
