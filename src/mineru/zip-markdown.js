@@ -217,6 +217,10 @@ function normalizeContentBlock(block) {
         pageIndex: block.page_idx,
         bbox: [...block.bbox],
     };
+    if (Number.isSafeInteger(block.text_level) && block.text_level > 0 && block.text_level <= 6) {
+        normalized.textLevel = block.text_level;
+    }
+    if (typeof block.sub_type === 'string' && block.sub_type.length <= 64) normalized.subType = block.sub_type;
     if (block.type === 'image' || block.type === 'chart') {
         if (typeof block.img_path === 'string') normalized.assetPath = block.img_path;
         normalized.captions = normalizeStringList(
