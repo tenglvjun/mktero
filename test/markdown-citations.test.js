@@ -1159,6 +1159,44 @@ test('maps author superscripts to affiliations without stealing body references'
     );
 });
 
+test('keeps citations of prose that opens before the first section heading', () => {
+    const markdown = [
+        '# Modelling cycle length in athletes',
+        '',
+        'Ann Author $^{1,2}$ & Bob Builder $^{2}$',
+        '',
+        '<!-- mktero-section: article-info -->',
+        '',
+        '$^{1}$ School of Mathematics, University of Galway, Ireland. $^{2}$ Orreco, Galway, Ireland.',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'Cycle phases are tracked by basal body temperature $^{1}$ or calendar methods $^{2}$.',
+        '',
+        '## Results and discussion',
+        '',
+        'The model agrees with earlier work $^{2}$.',
+        '',
+        '## References',
+        '',
+        '1. Alpha A. A first paper. 2019.',
+        '2. Beta B. A second paper. 2020.',
+    ].join('\n');
+    const result = analyzeMarkdownCitations(markdown);
+    assert.deepEqual(result.affiliations.map(affiliation => affiliation.id), ['affiliation:1', 'affiliation:2']);
+    assert.deepEqual(
+        result.citations.map(citation => [markdown.slice(citation.from, citation.to), citation.kind, citation.referenceIds]),
+        [
+            ['1', 'affiliation', ['affiliation:1']],
+            ['2', 'affiliation', ['affiliation:2']],
+            ['2', 'affiliation', ['affiliation:2']],
+            ['1', 'reference', ['number:1']],
+            ['2', 'reference', ['number:2']],
+            ['2', 'reference', ['number:2']],
+        ]
+    );
+});
+
 test('maps alphabetic author superscripts to affiliations and ignores symbols', () => {
     const markdown = [
         '# Paper',

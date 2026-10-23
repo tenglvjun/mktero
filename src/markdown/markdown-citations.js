@@ -152,10 +152,13 @@ function analyzeFrontMatter(markdown, bodyEnd) {
         'affiliation'
     ));
 
+    // Text after the affiliation list is body even before the first section
+    // heading: a paper without an "Introduction" heading opens with cited
+    // prose.
     return {
         affiliations: definition.affiliations,
         citations,
-        bodyFrom: detectedBodyFrom ?? definition.affiliationAreaEnd,
+        bodyFrom: Math.min(detectedBodyFrom ?? Infinity, definition.affiliationAreaEnd),
     };
 }
 
