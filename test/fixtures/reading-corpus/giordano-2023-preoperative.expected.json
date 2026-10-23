@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "id": "giordano-2023-preoperative",
+  "archiveSha256": "4e0333d2b715316f726c0f22e2cd67471ebf301321ff643ce368edc284cbbda4",
+  "pipelines": {
+    "legacy": {
+      "pages": 13,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 15,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 7908,
+        "found": 7834,
+        "ratio": 0.9906
+      },
+      "pageNotes": {
+        "total": 0,
+        "found": 0
+      },
+      "headings": {
+        "count": 12,
+        "levels": {
+          "1": 8,
+          "2": 4
+        },
+        "sequence": [
+          "1:20019d5b9d4e",
+          "1:5a4970c8a961",
+          "1:644a9c531916",
+          "2:c3f9d3944d34",
+          "2:3640318fae45",
+          "2:f4cbf01b12cc",
+          "2:739bf9c45de5",
+          "1:bfaf5dede8c9",
+          "1:4e594618d734",
+          "1:d457d71a9f46",
+          "1:6e9bc74c4ab9",
+          "1:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 113,
+        "covered": 101,
+        "ratio": 0.8938,
+        "crossPage": 1
+      },
+      "floats": {
+        "markdown": {
+          "image": 7,
+          "captionedImage": 4,
+          "table": 3,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 6,
+          "chart": 1,
+          "table": 3,
+          "code": 0,
+          "captioned": 7
+        }
+      },
+      "references": {
+        "markdown": 48,
+        "layout": 48
+      }
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "id": "obermeyer-2026-biomarker",
+  "archiveSha256": "620ce336589881486222471f3a77c18816b4e74609917020cf7d7698027846b6",
+  "pipelines": {
+    "legacy": {
+      "pages": 15,
+      "breaks": {
+        "total": 1,
+        "page": 0,
+        "column": 1,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 18,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 14424,
+        "found": 14367,
+        "ratio": 0.996
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 0
+      },
+      "headings": {
+        "count": 30,
+        "levels": {
+          "1": 3,
+          "2": 27
+        },
+        "sequence": [
+          "1:72dbed81107a",
+          "1:84393add8c48",
+          "2:4fc55706b3c9",
+          "2:6f259c50c775",
+          "2:431eecdfbf1a",
+          "2:a3c0078ae1f4",
+          "2:fdc74d106b38",
+          "2:65cb2b5451a2",
+          "2:bcec91fbcff0",
+          "2:feab9e7d9ff9",
+          "2:3f3867313a9d",
+          "2:60ef2ca955a4",
+          "2:8b882374c0ec",
+          "2:cf3c0c08f40c",
+          "2:6c1892e4ec3a",
+          "2:d3065415b0c8",
+          "2:1820b6d5c15f",
+          "2:c86c637c9dda",
+          "2:84393add8c48",
+          "2:676dfdd56ad2",
+          "1:b4032f02651d",
+          "2:d3065415b0c8",
+          "2:49d4843163a7",
+          "2:c0cd39d37db9",
+          "2:3a6eb0790f39",
+          "2:6ac3cdbb9b7b",
+          "2:c78ead20a8f4",
+          "2:5a9634296bae",
+          "2:20842cb13cc2",
+          "2:8b6bfe00f003"
+        ]
+      },
+      "sourceMap": {
+        "total": 157,
+        "covered": 139,
+        "ratio": 0.8854,
+        "crossPage": 0
+      },
+      "floats": {
+        "markdown": {
+          "image": 6,
+          "captionedImage": 4,
+          "table": 8,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 2,
+          "chart": 7,
+          "table": 8,
+          "code": 0,
+          "captioned": 8
+        }
+      },
+      "references": {
+        "markdown": 0,
+        "layout": 59
+      }
+    }
+  }
+}

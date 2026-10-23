@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "id": "arxiv-2608.27454",
+  "archiveSha256": "8fb521939c89bbb8e29d13f7649a75e1f5d76594841ec14644d0291cc4b3019f",
+  "pipelines": {
+    "legacy": {
+      "pages": 28,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 30,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 12706,
+        "found": 12700,
+        "ratio": 0.9995
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 0
+      },
+      "headings": {
+        "count": 34,
+        "levels": {
+          "1": 15,
+          "2": 13,
+          "3": 6
+        },
+        "sequence": [
+          "1:5a4970c8a961",
+          "1:94a5a4bcc319",
+          "1:cfa09cc1ade5",
+          "2:76811359981b",
+          "2:971f4c4597d3",
+          "3:9ecb6eb8fd28",
+          "3:683868265579",
+          "3:a375e8076500",
+          "3:7eb019f0ccbb",
+          "1:bb787093c076",
+          "2:cab6c90b5a0d",
+          "2:a2ac5b832f4b",
+          "3:439bdb59984f",
+          "3:86aa428bacff",
+          "1:25a40097782a",
+          "2:a181b9e009ad",
+          "2:e4325b0bdf99",
+          "2:8c965ba237e3",
+          "1:e04bda71be70",
+          "1:281b79ec8ae2",
+          "1:d457d71a9f46",
+          "1:5ee9b448f723",
+          "1:07a0b0962107",
+          "1:94ea7b0396fb",
+          "2:94327ffa8b71",
+          "1:2fb6e75f9568",
+          "1:5858713e0718",
+          "1:bf640a7a1c68",
+          "2:8a03aa2a4094",
+          "2:93d7f1d8c517",
+          "1:9b902e00e004",
+          "2:17321d96014f",
+          "2:bc430d890c27",
+          "2:6a822d2dd07a"
+        ]
+      },
+      "sourceMap": {
+        "total": 225,
+        "covered": 186,
+        "ratio": 0.8267,
+        "crossPage": 0
+      },
+      "floats": {
+        "markdown": {
+          "image": 2,
+          "captionedImage": 2,
+          "table": 7,
+          "algorithm": 1,
+          "code": 11,
+          "math": 9
+        },
+        "layout": {
+          "image": 2,
+          "chart": 1,
+          "table": 7,
+          "code": 12,
+          "captioned": 10
+        }
+      },
+      "references": {
+        "markdown": 46,
+        "layout": 46
+      }
+    }
+  }
+}

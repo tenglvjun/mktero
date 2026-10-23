@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "id": "williams-2023-cancer",
+  "archiveSha256": "129447f1e521e0370cfcd900fbe548c68a866022b0aed9a224b1498ffdc93803",
+  "pipelines": {
+    "legacy": {
+      "pages": 13,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 55,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 13720,
+        "found": 13717,
+        "ratio": 0.9998
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 0
+      },
+      "headings": {
+        "count": 17,
+        "levels": {
+          "1": 12,
+          "2": 5
+        },
+        "sequence": [
+          "1:dc9bff972513",
+          "1:ea560944f08c",
+          "1:5600ae99b14e",
+          "1:04a22d97ec55",
+          "1:d99e53608d2e",
+          "1:4b0293f4ad8c",
+          "1:aee8c4b43ba3",
+          "1:d133268e1bcf",
+          "1:40be3731cd88",
+          "1:4d74e58b9956",
+          "1:9011f37390e5",
+          "1:1820b6d5c15f",
+          "2:a777dfdeca78",
+          "2:2514e1475add",
+          "2:cb6683935861",
+          "2:2805f92820de",
+          "2:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 177,
+        "covered": 167,
+        "ratio": 0.9435,
+        "crossPage": 0
+      },
+      "floats": {
+        "markdown": {
+          "image": 3,
+          "captionedImage": 0,
+          "table": 0,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 5,
+          "chart": 0,
+          "table": 0,
+          "code": 0,
+          "captioned": 1
+        }
+      },
+      "references": {
+        "markdown": 95,
+        "layout": 95
+      }
+    }
+  }
+}

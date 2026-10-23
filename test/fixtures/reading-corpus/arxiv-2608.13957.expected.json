@@ -1,0 +1,99 @@
+{
+  "schema": 1,
+  "id": "arxiv-2608.13957",
+  "archiveSha256": "0db4f183b84157cde87dac8545a5d66bfb2541793592eab5310be55d46e1f44e",
+  "pipelines": {
+    "legacy": {
+      "pages": 7,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 1,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 6519,
+        "found": 6519,
+        "ratio": 1
+      },
+      "pageNotes": {
+        "total": 2,
+        "found": 0
+      },
+      "headings": {
+        "count": 30,
+        "levels": {
+          "1": 11,
+          "2": 9,
+          "3": 10
+        },
+        "sequence": [
+          "1:aa90baa7ad53",
+          "1:c59ddd3f7ba6",
+          "1:5a4970c8a961",
+          "1:63e4f9fcce15",
+          "2:7dbc094b09b6",
+          "2:6024ed25c1e8",
+          "1:f0a80fbe74f6",
+          "2:40d06859574e",
+          "2:b4433c44adfe",
+          "3:57f71b294464",
+          "3:bad6a0e7119c",
+          "1:31462e3b5086",
+          "2:e6a9ac36f946",
+          "3:f311dea530b7",
+          "3:89dba0c8223b",
+          "3:d88194e71f0e",
+          "2:2f9ccc07b469",
+          "2:1433fba3fd1b",
+          "3:bcd0ac3714cd",
+          "3:5bc63b64f360",
+          "1:9b3afa5175d7",
+          "2:e5075037958e",
+          "3:0785af533b04",
+          "3:a942b1931b9b",
+          "3:f2a54f79b509",
+          "2:f2b98b0f5ed4",
+          "1:a91885b3ed59",
+          "1:0a31928df70c",
+          "1:b86f1e8aa75e",
+          "1:140e692bf22d"
+        ]
+      },
+      "sourceMap": {
+        "total": 115,
+        "covered": 112,
+        "ratio": 0.9739,
+        "crossPage": 0
+      },
+      "floats": {
+        "markdown": {
+          "image": 4,
+          "captionedImage": 4,
+          "table": 2,
+          "algorithm": 0,
+          "code": 0,
+          "math": 2
+        },
+        "layout": {
+          "image": 1,
+          "chart": 3,
+          "table": 2,
+          "code": 0,
+          "captioned": 6
+        }
+      },
+      "references": {
+        "markdown": 22,
+        "layout": 23
+      }
+    }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "id": "liu-2026-psychological",
+  "archiveSha256": "2a77f6cc505f93692a558655e5c00882aecf6c4732f57a59ce472c326109f3c8",
+  "pipelines": {
+    "legacy": {
+      "pages": 19,
+      "breaks": {
+        "total": 4,
+        "page": 0,
+        "column": 1,
+        "float": 0,
+        "math": 0,
+        "adjacent": 3,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 58,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 14141,
+        "found": 14138,
+        "ratio": 0.9998
+      },
+      "pageNotes": {
+        "total": 2,
+        "found": 1
+      },
+      "headings": {
+        "count": 43,
+        "levels": {
+          "1": 19,
+          "2": 20,
+          "3": 4
+        },
+        "sequence": [
+          "1:a7cd62b5948d",
+          "1:c2fca2aa3a97",
+          "1:40f21fe344fe",
+          "1:5a4970c8a961",
+          "1:644a9c531916",
+          "2:abfa3d835241",
+          "2:427c92ea8f17",
+          "2:039e457d63ad",
+          "2:3b932e73eeaf",
+          "2:b69c6092bbaf",
+          "2:bb5b20482e68",
+          "2:8755b65d86d2",
+          "1:bfaf5dede8c9",
+          "2:56bf7e0684ee",
+          "2:29b648cdf75c",
+          "2:daa3e9d40d60",
+          "2:52e76b06aa98",
+          "3:f0825c6cd91c",
+          "3:4f0b90bc6680",
+          "2:7bd7047e83f3",
+          "3:08edf54d5e7f",
+          "3:8ae97004c475",
+          "2:95036352e1d8",
+          "2:3dfe0e4d84ea",
+          "2:ef3e7b108aa9",
+          "1:4e594618d734",
+          "2:c987c084b1f0",
+          "2:fc43727a79ad",
+          "2:08d5e6491e2e",
+          "1:1e56b71e5f8d",
+          "2:85236b6917c6",
+          "2:519e087fe640",
+          "1:ba2002c2c0d0",
+          "1:b2c49160292d",
+          "1:281b79ec8ae2",
+          "1:5a8c5ab5e083",
+          "1:07a0b0962107",
+          "1:d448f50b5197",
+          "1:2514e1475add",
+          "1:9db0dfdb4ec6",
+          "1:38ec60db2c69",
+          "1:0930ed3b6ff4",
+          "1:703821a83a10"
+        ]
+      },
+      "sourceMap": {
+        "total": 215,
+        "covered": 196,
+        "ratio": 0.9116,
+        "crossPage": 1
+      },
+      "floats": {
+        "markdown": {
+          "image": 7,
+          "captionedImage": 0,
+          "table": 8,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 1,
+          "chart": 17,
+          "table": 8,
+          "code": 0,
+          "captioned": 19
+        }
+      },
+      "references": {
+        "markdown": 1,
+        "layout": 60
+      }
+    }
+  }
+}

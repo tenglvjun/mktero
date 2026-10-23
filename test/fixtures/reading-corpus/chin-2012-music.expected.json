@@ -1,0 +1,99 @@
+{
+  "schema": 1,
+  "id": "chin-2012-music",
+  "archiveSha256": "272d063e7f02b1e9f58d5bef5586ec2b08c6ea6c5bed556bdcb304d1c450728d",
+  "pipelines": {
+    "legacy": {
+      "pages": 19,
+      "breaks": {
+        "total": 1,
+        "page": 0,
+        "column": 1,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 40,
+        "leaks": 1
+      },
+      "textCoverage": {
+        "total": 13762,
+        "found": 13751,
+        "ratio": 0.9992
+      },
+      "pageNotes": {
+        "total": 4,
+        "found": 0
+      },
+      "headings": {
+        "count": 31,
+        "levels": {
+          "1": 6,
+          "2": 25
+        },
+        "sequence": [
+          "1:c8e3b92d2b9f",
+          "1:5ed27318582d",
+          "1:588765323b94",
+          "1:e0624f8ec678",
+          "1:26fd93fba5eb",
+          "1:e8fdb2565678",
+          "2:5b7e6bf2dc4a",
+          "2:34ef94a0ea33",
+          "2:afba1a0ce1c8",
+          "2:0487c249731a",
+          "2:f516b7c2696b",
+          "2:460fb4e04e12",
+          "2:1bcfdbcfda15",
+          "2:b1d8894cbcac",
+          "2:42e33cd28edf",
+          "2:2404f79fe1c1",
+          "2:7ce85ab02adb",
+          "2:5b7e6bf2dc4a",
+          "2:34ef94a0ea33",
+          "2:afba1a0ce1c8",
+          "2:0487c249731a",
+          "2:f516b7c2696b",
+          "2:460fb4e04e12",
+          "2:4484a674bd7a",
+          "2:36e50c558e55",
+          "2:d9a858f9287c",
+          "2:42e33cd28edf",
+          "2:2404f79fe1c1",
+          "2:3db57044a461",
+          "2:07a0b0962107",
+          "2:d5ac1ef9a420"
+        ]
+      },
+      "sourceMap": {
+        "total": 217,
+        "covered": 178,
+        "ratio": 0.8203,
+        "crossPage": 0
+      },
+      "floats": {
+        "markdown": {
+          "image": 0,
+          "captionedImage": 0,
+          "table": 10,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 0,
+          "chart": 0,
+          "table": 10,
+          "code": 0,
+          "captioned": 10
+        }
+      },
+      "references": {
+        "markdown": 83,
+        "layout": 89
+      }
+    }
+  }
+}

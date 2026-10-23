@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "id": "doi-10.2196-20710",
+  "archiveSha256": "ea91c2e4eff07eccd7326869d4e070e19e0a05f366b95991461cc981ced1a028",
+  "pipelines": {
+    "legacy": {
+      "pages": 12,
+      "breaks": {
+        "total": 1,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 1
+      },
+      "chrome": {
+        "candidates": 46,
+        "leaks": 2
+      },
+      "textCoverage": {
+        "total": 8283,
+        "found": 8262,
+        "ratio": 0.9975
+      },
+      "pageNotes": {
+        "total": 0,
+        "found": 0
+      },
+      "headings": {
+        "count": 25,
+        "levels": {
+          "1": 3,
+          "2": 22
+        },
+        "sequence": [
+          "1:8b6205edd9ee",
+          "1:c59ddd3f7ba6",
+          "1:d3db5338aae1",
+          "2:89b91df19d9d",
+          "2:ea2e8f199a0c",
+          "2:3f3867313a9d",
+          "2:624cfe449089",
+          "2:b545de1fd4d4",
+          "2:e23758f8746f",
+          "2:3b7d77be93a9",
+          "2:c099142bc318",
+          "2:64dacf3aa7ec",
+          "2:83cda308f769",
+          "2:ac5b7378f4e9",
+          "2:f6349cc8e577",
+          "2:68528558d6e2",
+          "2:3cc610240ec7",
+          "2:e0f757e36a29",
+          "2:d457d71a9f46",
+          "2:3990f37fbb51",
+          "2:8f0fc0098df4",
+          "2:8a439a9a7704",
+          "2:e4e4917e94af",
+          "2:07a0b0962107",
+          "2:2805f92820de"
+        ]
+      },
+      "sourceMap": {
+        "total": 103,
+        "covered": 84,
+        "ratio": 0.8155,
+        "crossPage": 2
+      },
+      "floats": {
+        "markdown": {
+          "image": 4,
+          "captionedImage": 1,
+          "table": 3,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 1,
+          "chart": 7,
+          "table": 3,
+          "code": 0,
+          "captioned": 8
+        }
+      },
+      "references": {
+        "markdown": 23,
+        "layout": 23
+      }
+    }
+  }
+}

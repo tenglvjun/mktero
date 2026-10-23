@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "id": "nguyen-2023-music",
+  "archiveSha256": "afb3c215e072f7bc1adaf66d175969e97a0ea9ff74e08cafb4913452c15db7d1",
+  "pipelines": {
+    "legacy": {
+      "pages": 15,
+      "breaks": {
+        "total": 1,
+        "page": 1,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 29,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 9036,
+        "found": 8980,
+        "ratio": 0.9938
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 0
+      },
+      "headings": {
+        "count": 27,
+        "levels": {
+          "1": 15,
+          "2": 12
+        },
+        "sequence": [
+          "1:a348fd5fefa1",
+          "1:0c58e527f94a",
+          "1:c59ddd3f7ba6",
+          "1:5a4970c8a961",
+          "1:644a9c531916",
+          "2:746835c1e61c",
+          "2:0b2216383133",
+          "2:a3698177b02c",
+          "2:2a1569229441",
+          "2:20b9636731e0",
+          "2:e039008f5693",
+          "2:65d7d89178b4",
+          "2:d13d3b110b90",
+          "2:970d086a97af",
+          "1:9efcb930e4c1",
+          "2:0042e24cee22",
+          "2:d8ec705dc785",
+          "2:da2e5edd7eef",
+          "1:909e1d761ee4",
+          "1:9732439a0f7f",
+          "1:4e594618d734",
+          "1:a4d0293ea443",
+          "1:852408bfbc83",
+          "1:0beadcde4f5f",
+          "1:8f0fc0098df4",
+          "1:d448f50b5197",
+          "1:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 117,
+        "covered": 95,
+        "ratio": 0.812,
+        "crossPage": 2
+      },
+      "floats": {
+        "markdown": {
+          "image": 1,
+          "captionedImage": 0,
+          "table": 4,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 2,
+          "chart": 0,
+          "table": 4,
+          "code": 0,
+          "captioned": 5
+        }
+      },
+      "references": {
+        "markdown": 55,
+        "layout": 55
+      }
+    }
+  }
+}

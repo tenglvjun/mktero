@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "id": "arxiv-2606.13529",
+  "archiveSha256": "9d318211a178a24d7c0974f216b96a627d77739d4adc55ee8a5c9b2a3c9c0f37",
+  "pipelines": {
+    "legacy": {
+      "pages": 48,
+      "breaks": {
+        "total": 1,
+        "page": 1,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 1,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 19372,
+        "found": 19365,
+        "ratio": 0.9996
+      },
+      "pageNotes": {
+        "total": 0,
+        "found": 0
+      },
+      "headings": {
+        "count": 33,
+        "levels": {
+          "1": 14,
+          "2": 16,
+          "3": 3
+        },
+        "sequence": [
+          "1:d08e76eea24e",
+          "1:c59ddd3f7ba6",
+          "1:5a4970c8a961",
+          "2:8f685c2e8a05",
+          "2:ab6f77deaeb3",
+          "2:404acec641aa",
+          "2:2db552bc38d4",
+          "1:66c2bf6341dd",
+          "2:de42bd236d24",
+          "2:98b8edae3fbe",
+          "1:cfa09cc1ade5",
+          "2:80dc0e0ce77e",
+          "2:8583da4ed68e",
+          "2:8f3f3019ed8f",
+          "1:3c2c09b67d10",
+          "2:b4db43b7f0da",
+          "3:390d0c10c57c",
+          "3:0d0eb3a4d669",
+          "3:6ebe7b4ac3ff",
+          "2:ba0e6de5f9e4",
+          "1:9b3afa5175d7",
+          "2:3e542362db6b",
+          "2:531343f972e5",
+          "2:ca89c76d1fde",
+          "2:db5f431e6b38",
+          "2:cb6633b3df29",
+          "1:a91885b3ed59",
+          "1:4fccc8cb28f1",
+          "1:5c2e0c1f6841",
+          "1:2514e1475add",
+          "1:dc20918b9512",
+          "1:1820b6d5c15f",
+          "1:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 237,
+        "covered": 220,
+        "ratio": 0.9283,
+        "crossPage": 7
+      },
+      "floats": {
+        "markdown": {
+          "image": 14,
+          "captionedImage": 14,
+          "table": 9,
+          "algorithm": 0,
+          "code": 0,
+          "math": 1
+        },
+        "layout": {
+          "image": 4,
+          "chart": 10,
+          "table": 11,
+          "code": 0,
+          "captioned": 19
+        }
+      },
+      "references": {
+        "markdown": 51,
+        "layout": 51
+      }
+    }
+  }
+}
