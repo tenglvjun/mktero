@@ -174,3 +174,110 @@ test('marks reference sections only after the repaired order', () => {
     });
     assert.deepEqual(ir.blocks.map(entry => entry.role), ['heading', 'reference', 'chrome', 'heading', 'body']);
 });
+
+test('places a float that MinerU read early after the text above it', () => {
+    const table = block('table', [34, 294, 918, 615], { kind: 'table' });
+    const note = { ...block('note', [40, 618, 600, 630]), role: 'float-note', attachedTo: 'table' };
+    const ir = order([
+        table,
+        block('portfolio', [31, 42, 408, 91], { kind: 'title' }),
+        block('intro', [36, 189, 902, 220]),
+        note,
+        block('statistics', [38, 277, 123, 294], { kind: 'title' }),
+        block('software', [38, 629, 214, 646], { kind: 'title' }),
+    ]);
+    assert.deepEqual(ids(ir), ['portfolio', 'intro', 'statistics', 'table', 'note', 'software']);
+    assert.deepEqual(ir.diagnostics.reorderedBands.at(-1),
+        { pageIndex: 0, rule: 'float', before: ['table', 'statistics'], after: ['statistics', 'table'] });
+});
+
+test('keeps floats in order when two move after the same text', () => {
+    const ir = order([
+        block('first', [100, 300, 900, 400], { kind: 'image' }),
+        block('second', [100, 420, 900, 520], { kind: 'code' }),
+        block('heading', [100, 100, 400, 120], { kind: 'title' }),
+        block('next-page', [100, 100, 900, 200], { pageIndex: 1 }),
+    ], [0, 1]);
+    assert.deepEqual(ids(ir), ['heading', 'first', 'second', 'next-page']);
+});
+
+test('does not move a float past text in another column or below it', () => {
+    const ir = order([
+        block('photo', [515, 304, 614, 419], { kind: 'image' }),
+        block('reference', [78, 332, 492, 366], { kind: 'reference' }),
+        block('caption-like', [639, 72, 922, 95]),
+        block('below', [500, 430, 900, 600]),
+    ]);
+    assert.deepEqual(ids(ir), ['photo', 'reference', 'caption-like', 'below']);
+});
+
+test('keeps a left-column introduction before right-column prose split by display math', () => {
+    const ir = order([
+        block('right-top', [510, 250, 900, 400]),
+        block('left-heading', [100, 240, 280, 280], { kind: 'title' }),
+        block('left-intro', [100, 300, 490, 520]),
+        block('equation', [510, 420, 900, 480], { kind: 'equation' }),
+        block('right-bottom', [510, 500, 900, 700]),
+    ]);
+    assert.deepEqual(ids(ir), ['left-heading', 'left-intro', 'right-top', 'equation', 'right-bottom']);
+});
+
+test('keeps a full-width abstract heading above columns that MinerU read right-first', () => {
+    const ir = order([
+        block('abstract', [80, 70, 920, 120], { kind: 'title' }),
+        block('right', [510, 130, 900, 480]),
+        block('left', [100, 140, 490, 700]),
+    ]);
+    assert.deepEqual(ids(ir), ['abstract', 'left', 'right']);
+});
+
+test('moves an early appendix code float to after the heading directly above it', () => {
+    const ir = order([
+        block('last-ref', [512, 237, 884, 303], { kind: 'reference', pageIndex: 8 }),
+        block('code', [114, 760, 884, 920], { kind: 'code', pageIndex: 9 }),
+        block('appendix', [114, 83, 386, 101], { kind: 'title', pageIndex: 9 }),
+        block('intro', [112, 108, 884, 158], { pageIndex: 9 }),
+        block('a4', [114, 728, 322, 745], { kind: 'title', pageIndex: 9 }),
+        block('note', [112, 85, 885, 149], { pageIndex: 10 }),
+    ], [8, 9, 10]);
+    assert.deepEqual(ids(ir), ['last-ref', 'appendix', 'intro', 'a4', 'code', 'note']);
+    assert.equal(ir.diagnostics.reorderedBands.at(-1).rule, 'float');
+});
+
+test('keeps code under its heading and moves an early bottom code after the heading above it', () => {
+    const ir = order([
+        block('last-ref', [512, 237, 884, 303], { kind: 'reference', pageIndex: 8 }),
+        block('bottom-code', [114, 760, 884, 920], { kind: 'code', pageIndex: 9 }),
+        block('appendix', [114, 83, 386, 101], { kind: 'title', pageIndex: 9 }),
+        block('intro', [112, 108, 884, 158], { pageIndex: 9 }),
+        block('a1', [114, 166, 391, 181], { kind: 'title', pageIndex: 9 }),
+        block('a1-code', [114, 190, 884, 400], { kind: 'code', pageIndex: 9 }),
+        block('a4', [114, 728, 322, 745], { kind: 'title', pageIndex: 9 }),
+        block('note', [112, 85, 885, 149], { pageIndex: 10 }),
+    ], [8, 9, 10]);
+    assert.deepEqual(ids(ir), [
+        'last-ref', 'appendix', 'intro', 'a1', 'a1-code', 'a4', 'bottom-code', 'note',
+    ]);
+});
+
+test('orders one column top to bottom when its paragraphs are interleaved with images', () => {
+    const ir = order([
+        block('right-bottom', [520, 420, 900, 620]),
+        block('image-left', [80, 500, 470, 820], { kind: 'image' }),
+        block('right-top', [520, 80, 900, 200]),
+        block('image-right', [520, 500, 900, 820], { kind: 'image' }),
+        block('right-mid', [520, 220, 900, 400]),
+        block('left', [80, 80, 470, 400]),
+    ]);
+    assert.deepEqual(ids(ir), [
+        'left', 'image-left', 'right-top', 'right-mid', 'image-right', 'right-bottom',
+    ]);
+    assert.deepEqual(
+        ids(ir).filter(id => id.startsWith('right-')),
+        ['right-top', 'right-mid', 'right-bottom'],
+    );
+    assert.deepEqual(
+        ids(ir).filter(id => id.startsWith('image-')),
+        ['image-left', 'image-right'],
+    );
+});

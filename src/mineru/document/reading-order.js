@@ -7,6 +7,7 @@ const MAX_COLUMNS = 3;
 const MAX_COLUMN_SPREAD_SHARE = 0.2;
 const MIN_COLUMN_BLOCK_HEIGHT = 30;
 const ORDER_TOLERANCE = 2;
+const FLOAT_OVERLAP_SHARE = 0.5;
 const FLOW_ROLES = new Set([BLOCK_ROLE.BODY, BLOCK_ROLE.HEADING, BLOCK_ROLE.REFERENCE]);
 export const REFERENCE_HEADING = /^(?:[0-9IVX]+\.?\s+)?(?:references?|bibliography|literature cited|works cited|reference list|参考文献)$/iu;
 
@@ -51,9 +52,52 @@ export function orderReadingFlow(ir) {
                 sliced !== text ? 'separator' : 'column');
         }
     }
-    ir.blocks = blocks;
+    ir.blocks = placeFloatsBelowText(blocks, ir.diagnostics);
     markReferenceSections(ir);
     return ir;
+}
+
+// A float that MinerU read before flow text lying wholly above it, in the
+// same horizontal range of the same page, moves to just after the last such
+// text (a table read before the heading above it). Its attached notes move
+// with it. Text beside the float, in another column, never moves it, and a
+// float is never moved earlier.
+function placeFloatsBelowText(blocks, diagnostics) {
+    let output = blocks;
+    const lastPlaced = new Map();
+    for (const float of blocks.filter(block => isFloatBlock(block) && block.bbox)) {
+        const from = output.indexOf(float);
+        let anchor = -1;
+        for (let index = from + 1; index < output.length; index++) {
+            const block = output[index];
+            if (block.pageIndex !== float.pageIndex) continue;
+            if (isFlowBlock(block) && block.bbox && block.bbox[3] <= float.bbox[1] + ORDER_TOLERANCE
+                && overlapShare(block.bbox, float.bbox) >= FLOAT_OVERLAP_SHARE) {
+                anchor = index;
+            }
+        }
+        if (anchor < 0) continue;
+        const moving = [float, ...output.slice(from + 1, anchor + 1)
+            .filter(block => block.attachedTo === float.id)];
+        const target = output[anchor];
+        const rest = output.filter(block => !moving.includes(block));
+        rest.splice(rest.indexOf(lastPlaced.get(target) || target) + 1, 0, ...moving);
+        lastPlaced.set(target, moving.at(-1));
+        diagnostics.reorderedBands.push({
+            pageIndex: float.pageIndex,
+            rule: 'float',
+            before: [float.id, target.id],
+            after: [target.id, float.id],
+        });
+        output = rest;
+    }
+    return output;
+}
+
+function overlapShare(left, right) {
+    const overlap = Math.min(left[2], right[2]) - Math.max(left[0], right[0]);
+    const narrower = Math.min(left[2] - left[0], right[2] - right[0]);
+    return overlap > 0 && narrower > 0 ? overlap / narrower : 0;
 }
 
 // Column layout of one page from the boxes of its flow text. Each block gets
