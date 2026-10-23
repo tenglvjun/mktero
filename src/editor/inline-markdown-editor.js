@@ -44,6 +44,10 @@ import { createCitationPopup } from './citation-popup.js';
 import { rootSelectionFor } from './root-selection.js';
 import { createAnnotationPopup } from './annotation-popup.js';
 import {
+    COPY_FAILED,
+    createCopyDelivery,
+} from './copy-delivery.js';
+import {
     isCorrectionInteractionTarget,
     isEditableTextCorrectionBlock,
 } from './correction-interactions.js';
@@ -101,6 +105,12 @@ const NAVIGATION_HISTORY_LIMIT = 50;
 // A jump that lands within this distance of the previous entry is the same
 // place to the reader, so it must not add a second back step.
 const NAVIGATION_SAME_POSITION_PX = 24;
+// Ctrl/Cmd+C reaches the copy event in the same task on Windows and macOS.
+// The wait only has to outlast that, not a slow machine's paint.
+const COPY_SHORTCUT_GRACE_MS = 200;
+// The fallback copy below asks CodeMirror for the text it would have copied.
+// That dispatch is not a reader copy, so the verification ignores it.
+let syntheticCopyDispatch = false;
 
 function requestEditorScroll(view, position, requestedDocument, correctAfterRender = true) {
     view.requestMeasure({
@@ -136,6 +146,10 @@ export function createInlineMarkdownEditor({
     deleteAnnotation,
     copySourcedMarkdown,
     copyCode,
+    deliverCopy,
+    isCopyDeliveryActive,
+    onCopyDeliveryFailed,
+    onCopyDeliveryError,
     openSourceLocation,
     openAnnotationInPDF,
     onSourceNavigationError,
@@ -1024,6 +1038,72 @@ export function createInlineMarkdownEditor({
         true
     );
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
+    const copyDelivery = typeof deliverCopy === 'function'
+        && typeof ownerWindow.setTimeout === 'function'
+        ? createCopyDelivery({
+            readText: () => deliverCopy({ action: 'read' }),
+            writeText: text => deliverCopy({ action: 'write', text }),
+            setTimeout: ownerWindow.setTimeout?.bind(ownerWindow),
+            clearTimeout: ownerWindow.clearTimeout?.bind(ownerWindow),
+            // A view without the hook (the browser preview) never stops a
+            // delivery for focus; only an explicit false does.
+            isActive: () => !destroyed
+                && isCopyDeliveryActive?.() !== false,
+        })
+        : null;
+    let copyShortcutWatch = null;
+    const clearCopyShortcutWatch = () => {
+        if (!copyShortcutWatch) return;
+        const { timer } = copyShortcutWatch;
+        copyShortcutWatch = null;
+        try {
+            ownerWindow.clearTimeout?.(timer);
+        }
+        catch {
+            // An unloading window's timers can throw; the watch is already
+            // dropped, so a late timer does nothing.
+        }
+    };
+    const deliverReaderCopy = request => {
+        if (!copyDelivery || !request) return;
+        copyDelivery.deliver(request)
+            .then(result => {
+                if (result === COPY_FAILED && !destroyed) {
+                    onCopyDeliveryFailed?.();
+                }
+            })
+            .catch(error => onCopyDeliveryError?.(error));
+    };
+    // Bubble phase, so CodeMirror and the note editor have already put their
+    // text on the event. Firefox writes the system clipboard once the event
+    // returns; the delivery reads it back afterwards. Nothing here changes
+    // what a copy puts on the clipboard.
+    const verifyReaderCopy = event => {
+        if (destroyed || syntheticCopyDispatch) return;
+        if (copyShortcutWatch) copyShortcutWatch.observed = true;
+        if (!copyDelivery) return;
+        deliverReaderCopy(readerCopyRequest(event, view, parent));
+    };
+    parent.addEventListener('copy', verifyReaderCopy);
+    // Ctrl/Cmd+C normally ends in a copy event above. When it does not, for
+    // example because keyboard focus is in another frame while the reader's
+    // selection is still visible, the reader's own selection is copied the
+    // same way CodeMirror would copy it.
+    const watchCopyShortcut = () => {
+        if (destroyed || !copyDelivery) return;
+        if (activeCorrection || tableCorrectionEditing) return;
+        if (!readerSelectionText(rootSelectionFor(parent), view)) return;
+        clearCopyShortcutWatch();
+        const watch = { observed: false, timer: null };
+        watch.timer = ownerWindow.setTimeout?.(() => {
+            if (copyShortcutWatch !== watch) return;
+            copyShortcutWatch = null;
+            if (watch.observed || destroyed) return;
+            const request = fallbackReaderCopyRequest(view, parent);
+            if (request) deliverReaderCopy({ ...request, writeFirst: true });
+        }, COPY_SHORTCUT_GRACE_MS);
+        copyShortcutWatch = watch;
+    };
     const openPageMarkerSourceLocation = offset => {
         if (typeof openSourceLocation !== 'function') return;
         const markdown = view?.state?.doc?.toString?.() || '';
@@ -1183,6 +1263,15 @@ export function createInlineMarkdownEditor({
     return {
         getMarkdown() {
             return view.state.doc.toString();
+        },
+        // Called by the view when Ctrl/Cmd+C is pressed outside a text field.
+        watchCopyShortcut,
+        // Another copy replaced the clipboard; an older delivery must not
+        // write over it. A pending Ctrl/Cmd+C watch stays: if the chord's
+        // copy landed outside the reader, the reader's selection is still
+        // what the reader asked to copy.
+        cancelCopyDelivery() {
+            copyDelivery?.cancel();
         },
         hasActiveCorrection() {
             return Boolean(activeCorrection);
@@ -1371,6 +1460,9 @@ export function createInlineMarkdownEditor({
                     closeSelectionActionsOnEscape,
                     true
                 );
+                copyDelivery?.cancel();
+                clearCopyShortcutWatch();
+                parent.removeEventListener('copy', verifyReaderCopy);
                 parent.removeEventListener(
                     'mouseup',
                     openSelectedMarkdownActions,
@@ -1932,6 +2024,119 @@ function createTimedTargetHighlight({
         }, 3000);
     };
     return { activate, cancel };
+}
+
+// What a copy that reached the reader put on the clipboard. A handler that
+// supplied the text itself (CodeMirror copies the Markdown source, a note
+// editor copies its quote) is matched exactly. Otherwise Firefox copies the
+// selection's rendered text, which the selection reports too. A copy from a
+// text field inside the reader belongs to that field and is left alone.
+function readerCopyRequest(event, view, parent) {
+    const supplied = event.defaultPrevented ? clipboardEventText(event) : '';
+    if (supplied.trim()) return { text: supplied, exact: true };
+    if (event.defaultPrevented) return null;
+    const origin = event.composedPath?.()[0] || event.target;
+    if (isTextInputElement(origin)) return null;
+    const text = readerSelectionText(rootSelectionFor(parent), view);
+    return text ? { text, exact: false } : null;
+}
+
+function clipboardEventText(event) {
+    try {
+        return String(event.clipboardData?.getData?.('text/plain') || '');
+    }
+    catch {
+        return '';
+    }
+}
+
+// The rendered text of a selection that lies inside the reader, or ''.
+function readerSelectionText(selection, view) {
+    if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
+        return '';
+    }
+    if (!view.dom.contains(selection.anchorNode)
+        || !view.dom.contains(selection.focusNode)) {
+        return '';
+    }
+    return String(selection.toString?.() || '').trim();
+}
+
+// The copy Ctrl/Cmd+C should have made when no copy event arrived. The
+// selection is offered to CodeMirror as a copy, so a plain passage copies its
+// Markdown source exactly as it does normally. A selection CodeMirror leaves
+// to the browser, such as one inside a rendered formula or table, copies its
+// rendered text. The editor's state must already follow the DOM selection;
+// a stale state would copy another passage, so that falls back as well.
+function fallbackReaderCopyRequest(view, parent) {
+    const selection = rootSelectionFor(parent);
+    const rendered = readerSelectionText(selection, view);
+    if (!rendered) return null;
+    const supplied = stateFollowsSelection(view, selection)
+        ? codeMirrorCopyText(selection, view)
+        : '';
+    return supplied.trim()
+        ? { text: supplied, exact: true }
+        : { text: rendered, exact: false };
+}
+
+function stateFollowsSelection(view, selection) {
+    const { main } = view.state.selection;
+    if (main.empty) return false;
+    try {
+        const range = selection.getRangeAt(0);
+        const start = view.posAtDOM(range.startContainer, range.startOffset);
+        const end = view.posAtDOM(range.endContainer, range.endOffset);
+        return Math.min(start, end) === main.from
+            && Math.max(start, end) === main.to;
+    }
+    catch {
+        return false;
+    }
+}
+
+function codeMirrorCopyText(selection, view) {
+    let target;
+    try {
+        target = selection.getRangeAt(0).startContainer;
+    }
+    catch {
+        return '';
+    }
+    const element = target?.nodeType === 1 ? target : target?.parentElement;
+    if (!element || !view.contentDOM.contains(element)) return '';
+    const ownerWindow = element.ownerDocument?.defaultView;
+    if (!ownerWindow?.Event) return '';
+    const data = new Map();
+    const event = new ownerWindow.Event('copy', {
+        bubbles: true,
+        cancelable: true,
+    });
+    Object.defineProperty(event, 'clipboardData', {
+        value: {
+            clearData: () => data.clear(),
+            setData: (type, value) => data.set(type, String(value)),
+            getData: type => data.get(type) || '',
+        },
+    });
+    syntheticCopyDispatch = true;
+    try {
+        element.dispatchEvent(event);
+    }
+    catch {
+        return '';
+    }
+    finally {
+        syntheticCopyDispatch = false;
+    }
+    return event.defaultPrevented ? data.get('text/plain') || '' : '';
+}
+
+const TEXT_INPUT_TAGS = new Set(['TEXTAREA', 'TEXTBOX', 'SELECT', 'INPUT']);
+
+function isTextInputElement(element) {
+    if (!element || element.nodeType !== 1) return false;
+    return TEXT_INPUT_TAGS.has(String(element.tagName || '').toUpperCase());
 }
 
 function isNavigationBackShortcut(event) {

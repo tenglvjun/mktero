@@ -104,6 +104,7 @@ import {
     previousLandmark,
 } from './landmark-navigation.js';
 import {
+    isCopyShortcut,
     isNextAssetShortcut,
     isNextHeadingShortcut,
     isNextNoteShortcut,
@@ -512,6 +513,14 @@ class MarkdownTabView {
                 this.deleteAnnotation(annotationID)
             ),
             copySourcedMarkdown: target => this.copySourcedMarkdown(target),
+            // Only a platform that can lose a copy offers the clipboard read
+            // (bootstrap: Windows). Elsewhere the reader copies as before.
+            deliverCopy: this.canDeliverReaderCopy(model)
+                ? request => this.deliverReaderCopy(request)
+                : null,
+            isCopyDeliveryActive: () => this.isCopyDeliveryActive(),
+            onCopyDeliveryFailed: () => this.reportCopyDeliveryFailure(),
+            onCopyDeliveryError: error => this.zotero?.logError?.(error),
             copyCode: typeof model?.onCopyCode === 'function'
                 ? code => this.copyCode(code)
                 : null,
@@ -1052,6 +1061,67 @@ class MarkdownTabView {
             throw new Error('Code copy is unavailable');
         }
         return this.model.onCopyCode(code);
+    }
+
+    canDeliverReaderCopy(model = this.model) {
+        return typeof model?.onReadClipboard === 'function'
+            && typeof model?.onWriteClipboard === 'function';
+    }
+
+    // The editor reaches the system clipboard through the model so its own
+    // module stays free of Zotero.
+    deliverReaderCopy({ action, text } = {}) {
+        if (!this.canDeliverReaderCopy()) {
+            throw new Error('Clipboard delivery is unavailable');
+        }
+        if (action === 'read') return this.model.onReadClipboard();
+        if (action === 'write') return this.model.onWriteClipboard(text);
+        throw new Error('Clipboard request is unavailable');
+    }
+
+    // A delivery stops once the reader is no longer here: the window lost
+    // focus, or a field or another frame took the keyboard. Writing then
+    // could replace something the reader copied somewhere else.
+    isCopyDeliveryActive() {
+        if (this.destroyed) return false;
+        if (this.document.hasFocus?.() === false) return false;
+        const active = this.document.activeElement;
+        if (!active || active === this.host) return true;
+        return !isExternalTextFocus(active);
+    }
+
+    // Uses the toolbar status, which a render does not clear, so the message
+    // stays for its timeout.
+    reportCopyDeliveryFailure() {
+        if (this.destroyed || !this.elements?.actionStatus) return;
+        this.setDocumentActionStatus('viewer.copyFailed', {
+            dismissAfter: true,
+        });
+    }
+
+    // Window capture phase, like the history chord: the chord counts
+    // wherever focus is in this window, except in a field or another frame,
+    // where Ctrl/Cmd+C belongs to that control.
+    handleCopyShortcut(event) {
+        if (this.destroyed || typeof this.editor?.watchCopyShortcut !== 'function') {
+            return;
+        }
+        if (!isCopyShortcut(event, { isMac: this.zotero?.isMac === true })) return;
+        if (!this.isMarkdownTabForeground()) return;
+        if (this.shortcutBlockedByForeignFocus(event)) return;
+        this.editor.watchCopyShortcut();
+    }
+
+    // A copy or cut that did not come from this reader replaced the
+    // clipboard. A delivery still running here must not write over it.
+    // A copy inside another frame (a note, the PDF) may never reach this
+    // window listener; isCopyDeliveryActive() stops the delivery then,
+    // because the frame holds the keyboard before any write.
+    cancelForeignCopyDelivery(event) {
+        if (this.destroyed) return;
+        const path = event.composedPath?.() || [];
+        if (path.includes(this.host)) return;
+        this.editor?.cancelCopyDelivery?.();
     }
 
     async changeAnnotationColor(annotationID, color) {
@@ -2816,6 +2886,14 @@ class MarkdownTabView {
         this.listen(this.ownerWindow, 'keydown', event => {
             this.handleNavigationShortcut(event, { requireForeground: true });
         }, true);
+        this.listen(this.ownerWindow, 'keydown', event => {
+            this.handleCopyShortcut(event);
+        }, true);
+        for (const type of ['copy', 'cut']) {
+            this.listen(this.ownerWindow, type, event => {
+                this.cancelForeignCopyDelivery(event);
+            }, true);
+        }
         // N/P and "?" are ordinary typing keys. The listener stays inside
         // the Markdown shadow tree: Zotero's note editor is another frame in
         // this same window, and a window-level listener scrolls the reader

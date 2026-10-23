@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    isCopyShortcut,
     isNextAssetShortcut,
     isNextHeadingShortcut,
     isNextNoteShortcut,
@@ -109,4 +110,40 @@ test('composing input disables every landmark key', () => {
         assert.ok(!isNextAssetShortcut(keyEvent(overrides)));
         assert.ok(!isNextNoteShortcut(keyEvent(overrides)));
     }
+});
+
+test('Ctrl+C is the copy chord off macOS, Cmd+C on macOS', () => {
+    assert.ok(isCopyShortcut(keyEvent({ key: 'c', ctrlKey: true })));
+    assert.ok(!isCopyShortcut(keyEvent({ key: 'c', metaKey: true })));
+    assert.ok(isCopyShortcut(
+        keyEvent({ key: 'c', metaKey: true }),
+        { isMac: true }
+    ));
+    assert.ok(!isCopyShortcut(
+        keyEvent({ key: 'c', ctrlKey: true }),
+        { isMac: true }
+    ));
+});
+
+test('the copy chord matches by physical key on other layouts', () => {
+    assert.ok(isCopyShortcut(keyEvent({ key: 'с', code: 'KeyC', ctrlKey: true })));
+    assert.ok(isCopyShortcut(keyEvent({ key: 'C', ctrlKey: true })));
+});
+
+test('Shift, Alt, repeats and composition are not the copy chord', () => {
+    // Ctrl+Shift+C is Zotero's own copy-citation command.
+    assert.ok(!isCopyShortcut(keyEvent({
+        key: 'C',
+        ctrlKey: true,
+        shiftKey: true,
+    })));
+    // Ctrl+Alt is AltGr on Windows.
+    assert.ok(!isCopyShortcut(keyEvent({ key: 'c', ctrlKey: true, altKey: true })));
+    assert.ok(!isCopyShortcut(keyEvent({ key: 'c', ctrlKey: true, repeat: true })));
+    assert.ok(!isCopyShortcut(keyEvent({
+        key: 'c',
+        ctrlKey: true,
+        isComposing: true,
+    })));
+    assert.ok(!isCopyShortcut(keyEvent({ key: 'x', code: 'KeyX', ctrlKey: true })));
 });

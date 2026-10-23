@@ -7883,3 +7883,205 @@ test('saves an open correction when the closing window cannot clear its timers',
     assert.deepEqual(commits, [pending]);
     assert.ok(errors.includes('NS_ERROR_NOT_INITIALIZED'));
 });
+
+function createCopyDeliveryView({
+    visible = true,
+    hooks = true,
+    zotero = {},
+    configureWindow,
+} = {}) {
+    const clipboard = { reads: [], writes: [] };
+    const model = createModel({
+        status: 'ready',
+        markdown: 'Copied passage',
+        ...(hooks
+            ? {
+                onReadClipboard: () => {
+                    clipboard.reads.push('read');
+                    return 'Copied passage';
+                },
+                onWriteClipboard: text => {
+                    clipboard.writes.push(text);
+                },
+            }
+            : {}),
+    });
+    let editorOptions = null;
+    const created = createView(model, zotero, {
+        configureWindow,
+        editorFactory: options => {
+            editorOptions = options;
+            const editor = createTestInlineEditor(options);
+            editor.watchCount = 0;
+            editor.cancelCount = 0;
+            editor.watchCopyShortcut = () => { editor.watchCount++; };
+            editor.cancelCopyDelivery = () => { editor.cancelCount++; };
+            return editor;
+        },
+    });
+    created.document.body.appendChild(created.view.root);
+    created.view.host.getClientRects = () => (visible
+        ? [{ width: 800, height: 600 }]
+        : []);
+    return { ...created, clipboard, editorOptions: () => editorOptions };
+}
+
+function dispatchClipboardEvent(window, type, path) {
+    const event = new window.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'composedPath', { value: () => path });
+    window.document.dispatchEvent(event);
+    return event;
+}
+
+test('Ctrl+C anywhere in the window asks the reader to watch its copy', () => {
+    const { document, view } = createCopyDeliveryView();
+    try {
+        // Focus on the Zotero chrome: the chord never enters the shadow root.
+        const event = dispatchShortcut(document.body, { key: 'c', ctrlKey: true });
+        assert.equal(view.editor.watchCount, 1);
+        // The reader only watches; Firefox's own copy still runs.
+        assert.equal(event.defaultPrevented, false);
+
+        dispatchShortcut(document.body, { key: 'c', metaKey: true });
+        dispatchShortcut(document.body, { key: 'C', ctrlKey: true, shiftKey: true });
+        assert.equal(view.editor.watchCount, 1);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('Cmd+C is the copy chord on macOS', () => {
+    const { document, view } = createCopyDeliveryView({ zotero: { isMac: true } });
+    try {
+        dispatchShortcut(document.body, { key: 'c', ctrlKey: true });
+        assert.equal(view.editor.watchCount, 0);
+        dispatchShortcut(document.body, { key: 'c', metaKey: true });
+        assert.equal(view.editor.watchCount, 1);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('Ctrl+C in a field or another frame stays with that control', () => {
+    const { document, view } = createCopyDeliveryView();
+    try {
+        const search = document.createElement('input');
+        search.type = 'search';
+        document.body.appendChild(search);
+        dispatchShortcut(search, { key: 'c', ctrlKey: true });
+
+        const frame = document.createElement('iframe');
+        document.body.appendChild(frame);
+        focusElement(document, frame);
+        dispatchShortcut(document.body, { key: 'c', ctrlKey: true });
+
+        assert.equal(view.editor.watchCount, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('a reader behind another tab does not watch Ctrl+C', () => {
+    const { document, view } = createCopyDeliveryView({ visible: false });
+    try {
+        dispatchShortcut(document.body, { key: 'c', ctrlKey: true });
+        assert.equal(view.editor.watchCount, 0);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('the reader checks copies only when the platform offers a clipboard read', async () => {
+    const checked = createCopyDeliveryView();
+    const unchecked = createCopyDeliveryView({ hooks: false });
+    try {
+        const deliverCopy = checked.editorOptions().deliverCopy;
+        assert.equal(typeof deliverCopy, 'function');
+        assert.equal(unchecked.editorOptions().deliverCopy, null);
+
+        assert.equal(await deliverCopy({ action: 'read' }), 'Copied passage');
+        await deliverCopy({ action: 'write', text: 'Copied passage' });
+        assert.deepEqual(checked.clipboard.reads, ['read']);
+        assert.deepEqual(checked.clipboard.writes, ['Copied passage']);
+        assert.throws(() => deliverCopy({ action: 'erase' }), /unavailable/);
+    }
+    finally {
+        checked.view.destroy();
+        unchecked.view.destroy();
+    }
+});
+
+test('a copy outside the reader stops its pending delivery', () => {
+    const { document, view } = createCopyDeliveryView();
+    try {
+        const window = document.defaultView;
+        dispatchClipboardEvent(window, 'copy', [view.host, document.body]);
+        assert.equal(view.editor.cancelCount, 0);
+
+        dispatchClipboardEvent(window, 'copy', [document.body]);
+        dispatchClipboardEvent(window, 'cut', [document.body]);
+        assert.equal(view.editor.cancelCount, 2);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('a delivery stops once the reader no longer has the keyboard', () => {
+    const { document, view } = createCopyDeliveryView();
+    try {
+        assert.equal(view.isCopyDeliveryActive(), true);
+
+        const frame = document.createElement('iframe');
+        document.body.appendChild(frame);
+        focusElement(document, frame);
+        assert.equal(view.isCopyDeliveryActive(), false);
+
+        focusElement(document, view.host);
+        document.hasFocus = () => false;
+        assert.equal(view.isCopyDeliveryActive(), false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('a copy that never reached the clipboard is reported in the toolbar', () => {
+    let timers;
+    const { view } = createCopyDeliveryView({
+        configureWindow(window) {
+            timers = installManualTimers(window);
+        },
+    });
+    try {
+        view.reportCopyDeliveryFailure();
+        assert.equal(view.elements.actionStatus.hidden, false);
+        assert.equal(
+            view.elements.actionStatus.textContent,
+            'Copy failed. Press Ctrl+C again.'
+        );
+        // A later render does not clear it before its timeout.
+        view.render(view.model);
+        assert.equal(view.elements.actionStatus.hidden, false);
+        runManualTimer(timers.timers);
+        assert.equal(view.elements.actionStatus.hidden, true);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
+test('destroying the view removes the copy listeners', () => {
+    const { document, view } = createCopyDeliveryView();
+    const editor = view.editor;
+    view.destroy();
+    dispatchShortcut(document.body, { key: 'c', ctrlKey: true });
+    dispatchClipboardEvent(document.defaultView, 'copy', [document.body]);
+    assert.equal(editor.watchCount, 0);
+    assert.equal(editor.cancelCount, 0);
+});

@@ -1168,6 +1168,7 @@ async function openItemAsMarkdown(itemID, {
         onDisposeSourcePeek: () => runtime.sourcePeekRenderer?.dispose(itemID),
         onCopySourcedMarkdown: target => copySourcedMarkdown(itemID, target),
         onCopyCode: code => copyCode(code),
+        ...readerCopyDeliveryHooks(),
         onCreateMarkdownAnnotation: draft => (
             runMarkdownAnnotationAction('create', itemID, draft)
         ),
@@ -1976,6 +1977,7 @@ function createSavedMarkdownActions(noteID, sourceItem) {
             copySourcedMarkdown(itemID, target)
         )),
         onCopyCode: code => copyCode(code),
+        ...readerCopyDeliveryHooks(),
         onTranslateSelection: ({ text, onTextDelta } = {}) => (
             translateSelection(noteID, { text, onTextDelta })
         ),
@@ -3567,6 +3569,30 @@ async function copyCode(code) {
         Zotero.logError?.(error);
         throw error;
     }
+}
+
+// Windows lets one program open the clipboard at a time, and Firefox drops a
+// copy made while another program holds it without reporting an error. The
+// reader checks its copies there. Other platforms do not lose copies this
+// way, so the reader copies as before and the clipboard is never read.
+// Reads fail routinely while another program holds the clipboard; the
+// reader retries them, so they are not logged.
+function readerCopyDeliveryHooks() {
+    if (!mkteroIsWindows()) return {};
+    return {
+        onReadClipboard: () => {
+            if (typeof runtime.clipboard?.readText !== 'function') {
+                throw new Error('Clipboard read is unavailable');
+            }
+            return runtime.clipboard.readText();
+        },
+        onWriteClipboard: text => {
+            if (typeof runtime.clipboard?.writeText !== 'function') {
+                throw new Error('Clipboard write is unavailable');
+            }
+            return runtime.clipboard.writeText(text);
+        },
+    };
 }
 
 async function runMarkdownAnnotationAction(action, ...args) {

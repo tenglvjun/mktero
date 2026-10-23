@@ -41,6 +41,14 @@
 - Selection translation is a separate, on-demand reading aid. It is available
   only from source text in Markdown reading views, is not cached, and may incur
   AI provider usage costs.
+- On Windows, copying from the Markdown reader can collide with another
+  program that has the clipboard open, and Zotero then keeps the previous
+  clipboard content without an error. Mktero reads the clipboard back after
+  each copy from the reader and writes the copy again while it is missing. If
+  it is still missing after about two seconds, the reader toolbar says so and
+  the previous content stays. Ctrl+C pressed while the selection is visible
+  but focus is on another part of the window copies the reader's selection
+  too. Copying in a text field, a note, or the PDF is unchanged.
 - Archives, Markdown, images, source maps, PDF indexes, and KaTeX rendering have
   local resource limits and fail safely when those limits are exceeded. A
   Markdown block that cannot be rendered, such as a list nested hundreds of

@@ -514,6 +514,48 @@ test('keeps code-copy callbacks isolated across windows and closes them', () => 
     assert.deepEqual(secondWindow.closed, [second.tabID]);
 });
 
+// The reader checks its copies only when the tab model carries both clipboard
+// hooks, so the presenter has to pass them through on open and on reopen.
+test('passes the clipboard hooks that let the reader check its copies', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const reads = [];
+    const writes = [];
+
+    const plain = presenter.open(41, { onCopyCode: () => {} });
+    assert.equal(plain.model.onReadClipboard, undefined);
+    assert.equal(plain.model.onWriteClipboard, undefined);
+
+    const checked = presenter.open(42, {
+        onReadClipboard: () => {
+            reads.push('first');
+            return 'Copied passage';
+        },
+        onWriteClipboard: text => writes.push(['first', text]),
+    });
+    assert.equal(checked.model.onReadClipboard(), 'Copied passage');
+    checked.model.onWriteClipboard('Copied passage');
+
+    const reopened = presenter.open(42, {
+        onReadClipboard: () => {
+            reads.push('reopened');
+            return 'Copied passage';
+        },
+        onWriteClipboard: text => writes.push(['reopened', text]),
+    });
+    assert.equal(reopened.model, checked.model);
+    reopened.model.onReadClipboard();
+    reopened.model.onWriteClipboard('Copied passage');
+
+    assert.deepEqual(reads, ['first', 'reopened']);
+    assert.deepEqual(writes, [
+        ['first', 'Copied passage'],
+        ['reopened', 'Copied passage'],
+    ]);
+    presenter.dispose();
+});
+
 test('does not create a Zotero tab when the inline view cannot be initialized', () => {
     const mainWindow = createMainWindow();
     const presenter = new MarkdownTabPresenter({
