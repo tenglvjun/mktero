@@ -35,7 +35,11 @@ export function orderReadingFlow(ir) {
     for (const [pageIndex, entries] of byPage) {
         const layout = assignPageColumns(entries.map(entry => entry.block));
         const page = pages.get(pageIndex);
-        if (page) page.columns = layout.columns;
+        if (page) {
+            page.columns = layout.columns;
+            page.gutters = layout.gutters;
+            page.textWidth = layout.width;
+        }
         if (layout.columns < 2) continue;
         const text = entries.filter(entry => isFlowBlock(entry.block) && entry.block.bbox);
         const separators = pureSeparators(text);
@@ -77,6 +81,20 @@ export function assignPageColumns(blocks) {
             : gutters.filter(gutter => (gutter.from + gutter.to) / 2 < center(block.bbox)).length;
     }
     return { columns: gutters.length + 1, width, gutters };
+}
+
+// Column of any box on a page with the given layout: 'span' across a
+// gutter, otherwise the 0-based column.
+export function columnOfBox(bbox, page) {
+    const gutters = page?.gutters || [];
+    if (!bbox || !gutters.length) return 0;
+    const width = page.textWidth || 1000;
+    const margin = GUTTER_MARGIN_SHARE * width;
+    if (bbox[2] - bbox[0] >= SPAN_SHARE * width
+        || gutters.some(gutter => bbox[0] < gutter.from - margin && bbox[2] > gutter.to + margin)) {
+        return 'span';
+    }
+    return gutters.filter(gutter => (gutter.from + gutter.to) / 2 < center(bbox)).length;
 }
 
 // Gutters between column clusters. Cluster edges use the median of the

@@ -9,6 +9,7 @@ const MIN_REPEATED_SHARE = 0.3;
 const MAX_INTERIOR_WORDS = 6;
 const MAX_REPEATED_STAMP_WORDS = 80;
 const INTERIOR_OVERLAP = 0.9;
+const PANEL_LABEL = /^\(?[a-z]\)?$/iu;
 const CHROME_TYPES = new Set(['header', 'footer', 'page_number', 'aside_text']);
 const BARE_DOI = /^(?:https?:\/\/)?(?:dx\.)?doi\.org\/10\.\S+$/iu;
 const PAGE_NUMBER = /^(?:page\s+)?(?:\d{1,4}|[ivxlcdm]{1,7})(?:\s*(?:of|\/)\s*\d{1,4})?$/iu;
@@ -148,10 +149,24 @@ function floatInterior(block, text, floatBodies) {
         || wordCount(text) > MAX_INTERIOR_WORDS) {
         return null;
     }
+    // A lone panel letter ("a", "(b)") next to a figure is part of it even
+    // when MinerU's image box stops short of it.
+    const figures = floatBodies.get(block.pageIndex) || [];
+    if (PANEL_LABEL.test(text.trim()) && figures.length) {
+        return figures.reduce((best, body) => (
+            distance(block.bbox, body.bbox) < distance(block.bbox, best.bbox) ? body : best
+        )).id;
+    }
     for (const body of floatBodies.get(block.pageIndex) || []) {
         if (overlapShare(block.bbox, body.bbox) >= INTERIOR_OVERLAP) return body.id;
     }
     return null;
+}
+
+function distance(left, right) {
+    const dx = Math.max(0, left[0] - right[2], right[0] - left[2]);
+    const dy = Math.max(0, left[1] - right[3], right[1] - left[3]);
+    return Math.hypot(dx, dy);
 }
 
 function overlapShare(inner, outer) {
