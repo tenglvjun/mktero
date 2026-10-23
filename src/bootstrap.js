@@ -167,8 +167,7 @@ import { MinerULocalClient } from './mineru/local-client.js';
 import { MinerULocalConversion } from './mineru/local-conversion.js';
 import { createMinerUConversionFacade } from './mineru/conversion-facade.js';
 import { LEGACY_FIGURE_PROFILES } from './figures/legacy-figure-profiles.js';
-import { decodeMinerUFigureInput } from './mineru/figure-layout-adapter.js';
-import { prepareMinerUResult } from './mineru/mineru-result.js';
+import { createMinerUFigureInput, prepareMinerUResult } from './mineru/document/prepare.js';
 import { decodeMistralResult, prepareMistralResult } from './mistral/mistral-result.js';
 import { FigureRestorationService } from './figures/figure-restoration-service.js';
 import { FigureLabelRecoveryService } from './figures/figure-label-recovery.js';
@@ -631,25 +630,16 @@ globalThis.startup = async function startup({ id, rootURI }) {
             onEvent: context.onEvent,
         });
     };
-    const restoreCachedFigures = (input, context) => createProgressiveFigureRunner({
-        restoration: figureRestoration,
-        prepare: prepareMinerUResult,
-        finalize: finalizeRestoredDocument,
-        hash: sha256Hex,
-    })(input, {
-        fileData: context.fileData,
-        signal: context.signal,
-        onEvent: context.onEvent,
-    });
     const conversion = new MinerUConversion({
         client: new MinerUClient({
             createAbortController: createZoteroAbortController,
         }),
         pendingTasks,
         cache,
-        prepareResult: prepareWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
-        progressiveResult: progressiveWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
-        restoreCachedInput: restoreCachedFigures,
+        prepareResult: prepareWithFigures(createMinerUFigureInput, prepareMinerUResult),
+        // An unfinished restoration is cached as a marker only; the conversion
+        // restarts it from the raw result store.
+        progressiveResult: progressiveWithFigures(createMinerUFigureInput, prepareMinerUResult),
         recoverFigures,
         createPreviousCacheKeys: fileData => Promise.all(
             MINERU_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
@@ -760,7 +750,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache,
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         prepareResult: prepareWithFigures(
-            decodeMinerUFigureInput,
+            createMinerUFigureInput,
             prepareMinerUResult
         ),
         recoverFigures,
@@ -1566,10 +1556,12 @@ function noteProgressiveDocument(itemID, event) {
         && getMinerUCacheEnabled(Zotero))) {
         return;
     }
+    // The figure input holds the whole document IR; the raw MinerU result
+    // store already keeps what is needed to start the restoration again.
     runtime.cache.put(event.cacheKey, event.document, {
         figureRestoration: {
             status: 'pending',
-            input: event.figureInput,
+            source: 'mineru-result-store',
             completedFigureIds: [],
         },
     }).then(() => rememberMarkdownReadiness(itemID, {
@@ -2156,6 +2148,7 @@ async function attachRevisionSession(itemID, result, signal) {
                 assetBasePath: result.assetBasePath || '',
                 extractedPages: result.extractedPages,
                 totalPages: result.totalPages,
+                ...(result.documentStructure ? { documentStructure: result.documentStructure } : {}),
             }, { signal });
         }
         catch (error) {

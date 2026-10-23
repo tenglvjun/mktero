@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
     createMarkdownAnalysisCache,
     DEFAULT_ANALYSIS_NAMESPACE_LIMIT,
+    computeAlignedMarkdownOutline,
     computeDocumentFigures,
+    headingLevelsForDocumentStructure,
 } from '../src/markdown/markdown-analysis-cache.js';
 
 test('reuses a cached analysis for the same Markdown string', () => {
@@ -225,4 +227,15 @@ test('computeDocumentFigures keeps one variant per translated view kind', () => 
 test('the compute helpers work without a cache', () => {
     const figures = computeDocumentFigures(null, '# Paper\n\n![Figure 1](a.png)', {});
     assert.ok(Array.isArray(figures));
+});
+
+test('keeps producer heading levels for a structured document outline', () => {
+    const markdown = '# Paper\n\n## 1 Introduction\n\nText.\n\n### 1.1 Scope\n\nText.\n\n## 2 Methods\n\nText.';
+    assert.equal(headingLevelsForDocumentStructure('mineru-ir-v1'), 'structural');
+    assert.equal(headingLevelsForDocumentStructure(undefined), 'inferred');
+    const cache = createMarkdownAnalysisCache();
+    const structural = computeAlignedMarkdownOutline(cache, markdown, { headingLevels: 'structural' });
+    assert.deepEqual(structural.map(heading => heading.level), [1, 2, 3, 2]);
+    const inferred = computeAlignedMarkdownOutline(cache, markdown);
+    assert.notEqual(inferred, structural);
 });

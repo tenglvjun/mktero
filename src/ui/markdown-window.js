@@ -69,6 +69,7 @@ import { findGitHubRepositories } from '../markdown/github-repository-links.js';
 import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
 import {
     computeAlignedMarkdownOutline,
+    headingLevelsForDocumentStructure,
     computeDocumentFigures,
     computeMarkdownAssetOutline,
     computeMarkdownFragmentIndex,
@@ -421,6 +422,7 @@ class MarkdownTabView {
         this.outlineMarkdown = '';
         this.outlineSourceRanges = null;
         this.outlineChromeRanges = [];
+        this.outlineHeadingLevels = 'inferred';
         this.outlinePdfOutline = [];
         this.renderedChromeRanges = [];
         this.deferredRenderModel = null;
@@ -913,7 +915,12 @@ class MarkdownTabView {
                             { figureMap: model.figureMap }
                         )
                         : figureViews,
-                    translatedView ? '' : model.title
+                    translatedView ? '' : model.title,
+                    // A translation keeps the source headings but not their
+                    // producer's leveling guarantees.
+                    !translatedView || comparisonView
+                        ? outlineHeadingLevels(model.documentStructure)
+                        : 'inferred'
                 );
                 this.syncNotes(annotationOverlay, markdown.length);
                 if (assetsChanged) this.editor.refreshRendering();
@@ -6273,9 +6280,11 @@ class MarkdownTabView {
         chromeRanges = NO_OUTLINE_RANGES,
         pdfOutline = NO_OUTLINE_RANGES,
         figureViews = null,
-        itemTitle = ''
+        itemTitle = '',
+        headingLevels = 'inferred'
     ) {
         const nextMarkdown = String(markdown || '');
+        const nextHeadingLevels = headingLevels === 'structural' ? 'structural' : 'inferred';
         const nextChromeRanges = Array.isArray(chromeRanges)
             ? chromeRanges
             : NO_OUTLINE_RANGES;
@@ -6292,8 +6301,10 @@ class MarkdownTabView {
             && this.outlineChromeRanges === nextChromeRanges
             && this.outlinePdfOutline === nextPdfOutline
             && this.outlineFigureViews === figureViews
-            && this.outlineItemTitle === nextItemTitle;
+            && this.outlineItemTitle === nextItemTitle
+            && this.outlineHeadingLevels === nextHeadingLevels;
         this.outlineMarkdown = nextMarkdown;
+        this.outlineHeadingLevels = nextHeadingLevels;
         this.outlineSourceRanges = sourceRanges;
         this.outlineChromeRanges = nextChromeRanges;
         this.outlinePdfOutline = nextPdfOutline;
@@ -6366,6 +6377,7 @@ class MarkdownTabView {
                 chromeRanges: this.outlineChromeRanges,
                 pdfOutline: this.outlinePdfOutline,
                 itemTitle: this.outlineItemTitle,
+                headingLevels: this.outlineHeadingLevels,
             }
         ).map(heading => ({
             text: heading.text,
@@ -7371,6 +7383,7 @@ function collectDocumentLayerInputs(
         model.annotationOverlay,
         model.sourceMap,
         model.chromeRanges,
+        model.documentStructure,
         model.title,
         model.pdfOutline,
         model.pendingFigureAssets,
@@ -7467,6 +7480,12 @@ function mapAnnotationOverlayToComparison(overlay, blockRanges) {
         }),
         unmatched: [...(source.unmatched || [])],
     };
+}
+
+// A document whose producer leveled its headings from the paper's numbering
+// keeps those levels in the outline.
+function outlineHeadingLevels(documentStructure) {
+    return headingLevelsForDocumentStructure(documentStructure);
 }
 
 function mapChromeRangesToComparison(chromeRanges, blockRanges) {

@@ -1,4 +1,4 @@
-import { prepareMinerUResult } from '../mineru/mineru-result.js';
+import { prepareMinerUResult } from '../mineru/document/prepare.js';
 import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS } from '../mineru/parser-profile.js';
 import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 
@@ -334,6 +334,9 @@ function createResult(
     if (parsedResult.userEdited) extracted.userEdited = true;
     if (Array.isArray(parsedResult.chromeRanges)) {
         extracted.chromeRanges = parsedResult.chromeRanges;
+    }
+    if (typeof parsedResult.documentStructure === 'string') {
+        extracted.documentStructure = parsedResult.documentStructure;
     }
     return extracted;
 }

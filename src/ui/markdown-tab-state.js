@@ -173,6 +173,7 @@ export function createConversionReadyChanges(result) {
         cacheKey: null,
         sourceHash: null,
         sourceMap: [],
+        documentStructure: null,
         figureMap: null,
         figureRestoration: null,
         pendingFigureAssets: null,

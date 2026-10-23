@@ -450,6 +450,7 @@ function materializeRevision(revision) {
         assetBasePath: revision.base.assetBasePath || '',
         extractedPages: revision.base.extractedPages ?? null,
         totalPages: revision.base.totalPages ?? null,
+        ...(revision.base.documentStructure ? { documentStructure: revision.base.documentStructure } : {}),
         editableBlocks,
         correctedBlockIDs: editableBlocks
             .filter(block => block.corrected)
@@ -929,7 +930,14 @@ function cloneBaseDocument(document) {
         assetBasePath: String(document.assetBasePath || ''),
         extractedPages: document.extractedPages ?? null,
         totalPages: document.totalPages ?? null,
+        // Corrections replace block text, never the document's structure.
+        ...(isDocumentStructure(document.documentStructure)
+            ? { documentStructure: document.documentStructure } : {}),
     };
+}
+
+function isDocumentStructure(value) {
+    return typeof value === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/u.test(value);
 }
 
 function cloneSourceMapEntry(entry) {

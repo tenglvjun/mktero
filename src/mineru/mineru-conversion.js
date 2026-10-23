@@ -3,7 +3,7 @@ import {
     DEFAULT_PENDING_TASK_MAX_AGE_MS,
     DEFAULT_PENDING_TASK_MAX_ENTRIES,
 } from './pending-task-store.js';
-import { prepareMinerUResult } from './mineru-result.js';
+import { prepareMinerUResult } from './document/prepare.js';
 import { extractMinerUResultFromZip } from './zip-markdown.js';
 import { throwIfFigureAborted as throwIfAborted } from '../figures/figure-async.js';
 
@@ -326,6 +326,18 @@ export class MinerUConversion {
         }
         if (!cached) return null;
         const wasPending = cached.figureRestoration?.status === 'pending';
+        // An unfinished figure restoration starts again from the raw MinerU
+        // result; the cached document stays in use when that is gone.
+        if (wasPending && cached.figureRestoration.source === 'mineru-result-store' && resultKey) {
+            const stored = await this.#readStoredResult(resultKey, signal);
+            if (stored) {
+                const result = await this.#prepareStoredResult(stored, {
+                    fileData, signal, onProgress, onProgressiveFigures,
+                });
+                if (cacheEnabled) await this.#putCache(key, result, signal, reportedWarnings);
+                return { result, origin: 'cache', warnings: reportedWarnings };
+            }
+        }
         let resolved = cached;
         if (wasPending && cached.restorationInput && this.restoreCachedInput) {
             try {

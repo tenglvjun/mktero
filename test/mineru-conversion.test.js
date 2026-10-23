@@ -715,6 +715,8 @@ test('stores normalized MinerU Markdown with its PDF source map', async () => {
         + 'an event), and context engagement.';
     assert.equal(cachedResult.markdown, normalized);
     assert.equal(result.result.markdown, normalized);
+    // Each page's part of the stitched paragraph keeps its own location.
+    const split = 'The framework improves the ability to change perspective on '.length - 1;
     assert.deepEqual(cachedResult.sourceMap, [{
         type: 'text',
         markdownFrom: 0,
@@ -723,7 +725,12 @@ test('stores normalized MinerU Markdown with its PDF source map', async () => {
             { pageIndex: 0, bbox: [100, 100, 900, 200] },
             { pageIndex: 1, bbox: [100, 80, 900, 160] },
         ],
+        locationRanges: [
+            { markdownFrom: 0, markdownTo: split, location: { pageIndex: 0, bbox: [100, 100, 900, 200] } },
+            { markdownFrom: split + 1, markdownTo: normalized.length, location: { pageIndex: 1, bbox: [100, 80, 900, 160] } },
+        ],
     }]);
+    assert.equal(cachedResult.documentStructure, 'mineru-ir-v1');
 });
 
 test('keeps an uploaded task after transient and caller-abort failures', async t => {

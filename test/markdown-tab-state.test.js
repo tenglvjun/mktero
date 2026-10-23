@@ -238,6 +238,7 @@ test('clears figures when a successful reparse has no assets', () => {
         cacheKey: null,
         sourceHash: null,
         sourceMap: [],
+        documentStructure: null,
         figureMap: null,
         figureRestoration: null,
         pendingFigureAssets: null,

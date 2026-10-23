@@ -219,21 +219,33 @@ export function computeMarkdownFragmentIndex(cache, markdown) {
     );
 }
 
+// Document structures whose ATX heading levels already follow the paper's
+// section numbering.
+const STRUCTURAL_HEADING_DOCUMENTS = new Set(['mineru-ir-v1']);
+
+export function headingLevelsForDocumentStructure(documentStructure) {
+    return STRUCTURAL_HEADING_DOCUMENTS.has(documentStructure) ? 'structural' : 'inferred';
+}
+
+// `headingLevels: 'structural'` is for a document whose producer already
+// leveled its headings (the MinerU document pipeline).
 export function computeAlignedMarkdownOutline(cache, markdown, {
     chromeRanges = NO_DEPENDENCY_RANGES,
     pdfOutline = NO_DEPENDENCY_RANGES,
     itemTitle = '',
+    headingLevels = 'inferred',
 } = {}) {
     return run(
         cache,
         NAMESPACE_OUTLINE,
         markdown,
-        [chromeRanges, pdfOutline, itemTitle],
+        [chromeRanges, pdfOutline, itemTitle, headingLevels],
         () => extractAlignedMarkdownOutline(
             markdown,
             chromeRanges,
             pdfOutline,
-            itemTitle
+            itemTitle,
+            { headingLevels }
         )
     );
 }

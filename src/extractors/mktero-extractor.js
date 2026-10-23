@@ -1,4 +1,4 @@
-import { prepareMinerUResult } from '../mineru/mineru-result.js';
+import { prepareMinerUResult } from '../mineru/document/prepare.js';
 import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
@@ -531,6 +531,9 @@ function createResult(
     if (parsedResult.userEdited) extracted.userEdited = true;
     if (Array.isArray(parsedResult.chromeRanges)) {
         extracted.chromeRanges = parsedResult.chromeRanges;
+    }
+    if (typeof parsedResult.documentStructure === 'string') {
+        extracted.documentStructure = parsedResult.documentStructure;
     }
     return extracted;
 }

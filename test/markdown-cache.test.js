@@ -753,6 +753,26 @@ test('writes a completed figure restoration status without an input file', async
     assert.equal('figureRestoration' in restored, false);
 });
 
+test('records where an unfinished figure restoration starts again, and the document structure', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-restoration-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = { rootPath, ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename } };
+    await new MarkdownCache(options).put(CACHE_KEY, { markdown: '# Paper', documentStructure: 'mineru-ir-v1' }, {
+        figureRestoration: { status: 'pending', source: 'mineru-result-store', completedFigureIds: [] },
+    });
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    assert.equal((await readdir(entryPath)).some(file => file.startsWith('restoration-')), false);
+    const restored = await new MarkdownCache(options).get(CACHE_KEY);
+    assert.deepEqual(restored.figureRestoration, {
+        status: 'pending', completedFigureIds: [], source: 'mineru-result-store',
+    });
+    assert.equal('restorationInput' in restored, false);
+    assert.equal(restored.documentStructure, 'mineru-ir-v1');
+    await new MarkdownCache(options).put(CACHE_KEY, { markdown: '# Paper', documentStructure: 'Not Valid!' });
+    assert.equal('documentStructure' in await new MarkdownCache(options).get(CACHE_KEY), false);
+});
+
 test('restores cached chromeRanges next to the source map', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));

@@ -86,6 +86,9 @@ export class MarkdownDocumentService {
         if (Array.isArray(extracted.chromeRanges)) {
             result.chromeRanges = extracted.chromeRanges;
         }
+        if (typeof extracted.documentStructure === 'string') {
+            result.documentStructure = extracted.documentStructure;
+        }
         if (extracted.figureMap) result.figureMap = extracted.figureMap;
         if (extracted.assets?.length) {
             result.assets = extracted.assets;

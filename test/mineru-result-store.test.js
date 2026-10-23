@@ -137,6 +137,60 @@ test('re-derives a cloud MinerU result from the store without the network', asyn
     assert.equal(read.origin, 'cache');
 });
 
+test('restarts an unfinished figure restoration from the raw result store', async () => {
+    const store = createMemoryStore();
+    await store.put(KEY, { archive: createMinerUResultArchive(resultZip()), provider: 'mineru', totalPages: 2 });
+    const cache = createMemoryCache();
+    cache.entries.set('e'.repeat(64), {
+        markdown: '# Provisional', assets: [], sourceMap: [],
+        figureRestoration: { status: 'pending', source: 'mineru-result-store', completedFigureIds: [] },
+    });
+    const events = [];
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() { throw new Error('must not upload'); },
+            async collect() { throw new Error('must not download'); },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        cache,
+        progressiveResult: async (raw, { onEvent }) => {
+            onEvent?.({ type: 'complete' });
+            return { ...raw, markdown: `${raw.markdown} restored` };
+        },
+        resultStore: store,
+        createResultKey: async () => KEY,
+    });
+    const converted = await conversion.convert({
+        key: 'e'.repeat(64), apiKey: 'token', fileName: 'paper.pdf', fileData: new Uint8Array([1]),
+        cacheEnabled: true, onProgressiveFigures: event => events.push(event),
+    });
+    assert.equal(converted.origin, 'cache');
+    assert.equal(converted.result.markdown, '# Stored result restored');
+    assert.equal(cache.entries.get('e'.repeat(64)).markdown, '# Stored result restored');
+    assert.deepEqual(events.map(event => event.type), ['complete']);
+});
+
+test('keeps the provisional document when the raw result is gone', async () => {
+    const cache = createMemoryCache();
+    cache.entries.set('e'.repeat(64), {
+        markdown: '# Provisional', assets: [], sourceMap: [],
+        figureRestoration: { status: 'pending', source: 'mineru-result-store', completedFigureIds: [] },
+    });
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() { throw new Error('must not upload'); },
+            async collect() { throw new Error('must not download'); },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        cache,
+        progressiveResult: async () => { throw new Error('must not restore'); },
+        resultStore: createMemoryStore(),
+        createResultKey: async () => KEY,
+    });
+    const read = await conversion.readCached({ key: 'e'.repeat(64), fileData: new Uint8Array([1]), cacheEnabled: true });
+    assert.equal(read.result.markdown, '# Provisional');
+});
+
 test('stores a downloaded cloud archive and strips it before preparation', async () => {
     const store = createMemoryStore();
     const prepared = [];
