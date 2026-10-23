@@ -88,6 +88,17 @@ test('counts discarded decorations that survive as visible blocks', () => {
     assert.deepEqual(countChromeLeaks(blocks, chrome), { candidates: 3, leaks: 2 });
 });
 
+test('does not count a title that only repeats a running header on another page', () => {
+    const markdown = 'A Paper Title About Things\n\nBody.';
+    const blocks = summarizeMarkdownBlocks(markdown);
+    const chrome = [{ type: 'header', text: 'A Paper Title About Things', pageIndex: 3, bbox: [100, 20, 900, 40] }];
+    const titleMap = [{ markdownFrom: 0, markdownTo: 26, locations: [{ pageIndex: 0, bbox: [100, 100, 900, 140] }] }];
+    assert.equal(countChromeLeaks(blocks, chrome, titleMap).leaks, 0);
+    const leakMap = [{ markdownFrom: 0, markdownTo: 26, locations: [{ pageIndex: 3, bbox: [100, 22, 900, 38] }] }];
+    assert.equal(countChromeLeaks(blocks, chrome, leakMap).leaks, 1);
+    assert.equal(countChromeLeaks(blocks, chrome).leaks, 1);
+});
+
 test('measures span coverage and footnote visibility with shingles', () => {
     const visible = 'The quick brown fox jumps over the lazy dog near the river bank.';
     assert.deepEqual(measureTextCoverage(visible, ['quick brown fox jumps']), { total: 4, found: 4, ratio: 1 });
@@ -149,7 +160,7 @@ test('reports nested metric differences', () => {
 test('matches committed reading expectations for every local corpus archive', {
     skip: corpusDir ? false : `set ${READING_CORPUS_ENV} to a directory of MinerU result archives`,
 }, async () => {
-    for (const pipeline of ['legacy']) {
+    for (const pipeline of ['legacy', 'ir']) {
         const report = await checkReadingCorpus({ corpusDir, pipeline, log: () => {} });
         assert.equal(report.failures.length, 0,
             report.failures.map(failure => failure.message).join('\n'));

@@ -80,6 +80,85 @@
         "markdown": 18,
         "layout": 18
       }
+    },
+    "ir": {
+      "pages": 6,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 0,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 6061,
+        "found": 6061,
+        "ratio": 1
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 0
+      },
+      "headings": {
+        "count": 17,
+        "levels": {
+          "1": 1,
+          "2": 6,
+          "3": 10
+        },
+        "sequence": [
+          "1:658845a9cf03",
+          "2:cc7a2cf15d87",
+          "2:d0ebbc2c8386",
+          "3:9b47cf9d9615",
+          "3:b1f5a50fd2b5",
+          "3:d8187a86c7e1",
+          "2:60251ed620ed",
+          "3:73471e35179f",
+          "3:b47ccd17fa5f",
+          "3:1ff6443f5f22",
+          "3:5307765d32af",
+          "2:b6d06fa3b370",
+          "3:4c9e180006f6",
+          "3:0927b41dac76",
+          "3:a519230c7350",
+          "2:a88dbf9346cc",
+          "2:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 106,
+        "covered": 106,
+        "ratio": 1,
+        "crossPage": 3
+      },
+      "floats": {
+        "markdown": {
+          "image": 8,
+          "captionedImage": 7,
+          "table": 3,
+          "algorithm": 0,
+          "code": 0,
+          "math": 6
+        },
+        "layout": {
+          "image": 5,
+          "chart": 3,
+          "table": 3,
+          "code": 0,
+          "captioned": 10
+        }
+      },
+      "references": {
+        "markdown": 18,
+        "layout": 18
+      }
     }
   }
 }

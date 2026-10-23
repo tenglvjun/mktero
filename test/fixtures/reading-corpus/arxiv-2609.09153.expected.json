@@ -117,6 +117,123 @@
         "markdown": 54,
         "layout": 54
       }
+    },
+    "ir": {
+      "pages": 36,
+      "breaks": {
+        "total": 2,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 2,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 36,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 16392,
+        "found": 16392,
+        "ratio": 1
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 0
+      },
+      "headings": {
+        "count": 54,
+        "levels": {
+          "1": 1,
+          "2": 20,
+          "3": 31,
+          "4": 2
+        },
+        "sequence": [
+          "1:6e103d3dee91",
+          "2:5a4970c8a961",
+          "2:63e4f9fcce15",
+          "2:35466a7bc003",
+          "3:a1135e25dff8",
+          "3:93309727b2aa",
+          "3:634037210a4d",
+          "2:90b987df3ced",
+          "2:50752a7191b8",
+          "3:137b391ceeb7",
+          "3:ad5d265affea",
+          "3:688cfa29bfba",
+          "3:db46c95879bf",
+          "3:962e3f5243e2",
+          "2:a91885b3ed59",
+          "2:07a0b0962107",
+          "2:c45e16b00a74",
+          "3:8c95a468da44",
+          "3:0f1d24698da0",
+          "3:8cfadc3601c8",
+          "3:fc7ce7060c7f",
+          "3:a4dd6e0b4f2e",
+          "2:54049b7523fb",
+          "3:c0e44ce981a0",
+          "3:a30f9d41aa92",
+          "3:31be2f90d18d",
+          "3:e58c5369f2ae",
+          "3:6a78a8f74e35",
+          "2:1e37bdefaf9b",
+          "2:b4bfb248068b",
+          "3:61cdcbed47a5",
+          "2:f363590aa4ae",
+          "3:cae070ebeefd",
+          "3:743a7a0509d4",
+          "3:a8b50842b968",
+          "2:5fa57917d02f",
+          "3:580341778c7f",
+          "3:661aaa3e88b7",
+          "2:414363ddc583",
+          "2:e6d809f30557",
+          "2:0b4b412e6b77",
+          "2:a2b1b940ad1f",
+          "2:77012a15dde0",
+          "3:d9e2a4b927b4",
+          "2:4c7f169a903c",
+          "3:7afa2201965d",
+          "3:a9fdbc206839",
+          "3:c26fce5c4ce0",
+          "3:91c3987b8f50",
+          "4:3eba04bd5514",
+          "4:3d307d3ffc52",
+          "2:b753176fecb0",
+          "3:fc0003db7708",
+          "3:b0a1a818e935"
+        ]
+      },
+      "sourceMap": {
+        "total": 300,
+        "covered": 300,
+        "ratio": 1,
+        "crossPage": 8
+      },
+      "floats": {
+        "markdown": {
+          "image": 9,
+          "captionedImage": 6,
+          "table": 11,
+          "algorithm": 1,
+          "code": 10,
+          "math": 8
+        },
+        "layout": {
+          "image": 4,
+          "chart": 5,
+          "table": 11,
+          "code": 11,
+          "captioned": 17
+        }
+      },
+      "references": {
+        "markdown": 54,
+        "layout": 54
+      }
     }
   }
 }

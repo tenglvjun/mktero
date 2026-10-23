@@ -87,11 +87,14 @@ export function collectLayoutSignals(layout) {
     };
     if (!Array.isArray(layout?.pdf_info)) return signals;
     signals.pages = layout.pdf_info.length;
-    for (const page of layout.pdf_info) {
+    for (const [pageIndex, page] of layout.pdf_info.entries()) {
         for (const block of page?.discarded_blocks || []) {
             const text = blockText(block);
             if (!text) continue;
-            if (CHROME_TYPES.has(block.type)) signals.chrome.push({ type: block.type, text });
+            if (CHROME_TYPES.has(block.type)) {
+                const bbox = normalizedBox(block.bbox, page?.page_size);
+                signals.chrome.push({ type: block.type, text, ...(bbox ? { pageIndex, bbox } : {}) });
+            }
             else if (block.type === 'page_footnote') signals.pageNotes.push(text);
         }
         for (const block of page?.para_blocks || []) collectBodyBlock(block, signals);
@@ -116,6 +119,13 @@ function collectBodyBlock(block, signals) {
     }
     if (block.type === 'interline_equation') return;
     collectSpans(block, signals.bodySpans);
+}
+
+function normalizedBox(bbox, pageSize) {
+    if (!Array.isArray(bbox) || bbox.length !== 4 || !Array.isArray(pageSize)) return null;
+    const [width, height] = pageSize;
+    if (!(width > 0 && height > 0)) return null;
+    return [bbox[0] / width * 1000, bbox[1] / height * 1000, bbox[2] / width * 1000, bbox[3] / height * 1000];
 }
 
 function collectSpans(block, output) {
@@ -219,6 +229,13 @@ function breakKind(previous, next, between, sourceMap) {
     return before && after ? 'adjacent' : 'unmapped';
 }
 
+function blockLocations(block, sourceMap) {
+    return overlappingEntries(block, sourceMap).flatMap(entry => (
+        entry.locationRanges?.filter(range => range.markdownFrom < block.to && range.markdownTo > block.from)
+            .map(range => range.location) || entry.locations
+    ));
+}
+
 function overlappingEntries(block, sourceMap) {
     return (Array.isArray(sourceMap) ? sourceMap : []).filter(entry => (
         entry && entry.markdownFrom < block.to && entry.markdownTo > block.from
@@ -242,21 +259,36 @@ function firstLocation(block, sourceMap) {
 }
 
 // A leak is a discarded page decoration whose text survived as a visible
-// block of its own (or as the start or end of one).
-export function countChromeLeaks(blocks, chrome) {
+// block of its own (or as the start or end of one). When the source map
+// places the block, it must also overlap a decoration with that text on the
+// same page and height: a paper title that repeats as the running header,
+// or a first-page DOI, is not a leak.
+export function countChromeLeaks(blocks, chrome, sourceMap = []) {
     const keys = new Map();
+    const places = new Map();
     for (const item of chrome) {
         const key = normalizeMetricText(item.text);
         if (key.length < MIN_CHROME_KEY) continue;
         keys.set(key, (keys.get(key) || 0) + 1);
+        if (item.bbox) {
+            if (!places.has(key)) places.set(key, []);
+            places.get(key).push(item);
+        }
     }
     const seen = new Map();
     for (const block of blocks) {
         const text = normalizeMetricText(block.text);
         if (!text) continue;
+        const locations = blockLocations(block, sourceMap);
         for (const key of keys.keys()) {
             if (text === key || (text.length < key.length * 3
                 && (text.startsWith(key) || text.endsWith(key)))) {
+                if (locations.length && places.has(key) && !locations.some(location => (
+                    places.get(key).some(place => place.pageIndex === location.pageIndex
+                        && place.bbox[1] < location.bbox[3] + 10 && location.bbox[1] < place.bbox[3] + 10)
+                ))) {
+                    continue;
+                }
                 seen.set(key, (seen.get(key) || 0) + 1);
             }
         }
@@ -340,12 +372,14 @@ export function summarizeReadingDocument(prepared, layout) {
         !chromeRanges.some(range => range.from <= block.from && block.to <= range.to)
     ));
     const signals = collectLayoutSignals(layout);
-    const outline = extractAlignedMarkdownOutline(markdown, chromeRanges, [], '');
+    const outline = extractAlignedMarkdownOutline(markdown, chromeRanges, [], '', {
+        headingLevels: prepared?.documentStructure === 'mineru-ir-v1' ? 'structural' : 'inferred',
+    });
     const citations = analyzeMarkdownCitations(markdown);
     return {
         pages: signals.pages,
         breaks: countParagraphBreaks(blocks, prepared?.sourceMap),
-        chrome: countChromeLeaks(blocks, signals.chrome),
+        chrome: countChromeLeaks(blocks, signals.chrome, prepared?.sourceMap),
         textCoverage: measureTextCoverage(index.text, signals.bodySpans),
         pageNotes: countVisibleNotes(index.text, signals.pageNotes),
         headings: headingHistogram(outline),

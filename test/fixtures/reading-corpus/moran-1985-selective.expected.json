@@ -16,7 +16,7 @@
       },
       "chrome": {
         "candidates": 9,
-        "leaks": 1
+        "leaks": 0
       },
       "textCoverage": {
         "total": 4178,
@@ -45,6 +45,71 @@
         "covered": 43,
         "ratio": 0.9556,
         "crossPage": 0
+      },
+      "floats": {
+        "markdown": {
+          "image": 3,
+          "captionedImage": 1,
+          "table": 0,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 2,
+          "chart": 1,
+          "table": 0,
+          "code": 0,
+          "captioned": 1
+        }
+      },
+      "references": {
+        "markdown": 0,
+        "layout": 33
+      }
+    },
+    "ir": {
+      "pages": 4,
+      "breaks": {
+        "total": 1,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 1,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 9,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 4178,
+        "found": 4149,
+        "ratio": 0.9931
+      },
+      "pageNotes": {
+        "total": 0,
+        "found": 0
+      },
+      "headings": {
+        "count": 4,
+        "levels": {
+          "1": 1,
+          "2": 3
+        },
+        "sequence": [
+          "1:2ba33bc65aa6",
+          "2:a47809074af5",
+          "2:b24d5016f4e9",
+          "2:f8ddf4239576"
+        ]
+      },
+      "sourceMap": {
+        "total": 45,
+        "covered": 45,
+        "ratio": 1,
+        "crossPage": 1
       },
       "floats": {
         "markdown": {
