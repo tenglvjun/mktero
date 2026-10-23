@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyBlocks, chromeKey } from '../src/mineru/document/classify.js';
 import { DOCUMENT_IR_SCHEMA } from '../src/mineru/document/ir.js';
+import { markReferenceSections } from '../src/mineru/document/reading-order.js';
 
 let counter = 0;
 
@@ -102,13 +103,13 @@ test('treats short text inside an image as part of the picture', () => {
 });
 
 test('marks reference entries after a references heading until the next heading', () => {
-    const ir = classify([
+    const ir = markReferenceSections(classify([
         text(5, [100, 100, 900, 120], 'REFERENCES', { kind: 'title' }),
         text(5, [100, 130, 900, 160], '[1] A. Author, A title, 2020.'),
         text(5, [100, 170, 900, 200], '[2] B. Author, Another, 2021.', { kind: 'reference', mineruType: 'ref_text' }),
         text(5, [100, 300, 900, 320], 'Appendix A', { kind: 'title' }),
         text(5, [100, 330, 900, 360], 'Appendix body.'),
-    ]);
+    ]));
     assert.deepEqual(roles(ir), ['heading', 'reference', 'reference', 'heading', 'body']);
     assert.equal(ir.blocks[0].referenceHeading, true);
 });

@@ -12,7 +12,6 @@ const INTERIOR_OVERLAP = 0.9;
 const CHROME_TYPES = new Set(['header', 'footer', 'page_number', 'aside_text']);
 const BARE_DOI = /^(?:https?:\/\/)?(?:dx\.)?doi\.org\/10\.\S+$/iu;
 const PAGE_NUMBER = /^(?:page\s+)?(?:\d{1,4}|[ivxlcdm]{1,7})(?:\s*(?:of|\/)\s*\d{1,4})?$/iu;
-export const REFERENCE_HEADING = /^(?:[0-9IVX]+\.?\s+)?(?:references?|bibliography|literature cited|works cited|reference list|参考文献)$/iu;
 
 // Assigns a reading role to every IR block. MinerU's discarded blocks are
 // trusted first; body blocks it missed are recognized as page decoration
@@ -24,7 +23,6 @@ export function classifyBlocks(ir) {
     const chromeKeys = discardedChromeKeys(ir.blocks);
     const edgeRepeats = repeatedEdgeKeys(ir.blocks);
     const floatBodies = collectFloatBodies(ir.blocks);
-    let inReferences = false;
     for (const block of ir.blocks) {
         if (block.kind === BLOCK_KIND.DISCARDED) {
             block.role = block.mineruType === 'page_footnote' ? BLOCK_ROLE.PAGE_NOTE : BLOCK_ROLE.CHROME;
@@ -48,17 +46,11 @@ export function classifyBlocks(ir) {
             block.floatInteriorOf = host;
             continue;
         }
-        if (block.kind === BLOCK_KIND.TITLE) {
-            block.role = BLOCK_ROLE.HEADING;
-            inReferences = REFERENCE_HEADING.test(text.trim());
-            if (inReferences) block.referenceHeading = true;
-            continue;
-        }
-        if (block.kind === BLOCK_KIND.REFERENCE || inReferences && block.kind === BLOCK_KIND.TEXT) {
-            block.role = BLOCK_ROLE.REFERENCE;
-            continue;
-        }
-        block.role = BLOCK_ROLE.BODY;
+        // Reference sections need the repaired reading order, so prose after a
+        // references heading is marked later by markReferenceSections.
+        block.role = block.kind === BLOCK_KIND.TITLE ? BLOCK_ROLE.HEADING
+            : block.kind === BLOCK_KIND.REFERENCE ? BLOCK_ROLE.REFERENCE
+                : BLOCK_ROLE.BODY;
     }
     return ir;
 }
