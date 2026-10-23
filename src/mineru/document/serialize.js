@@ -1,6 +1,6 @@
 import { escapeImageDescription, parseAcademicFigureCaption } from '../../markdown/markdown-figures.js';
 import { planFigureLayouts } from '../../markdown/figure-layout-normalizer.js';
-import { BLOCK_KIND, BLOCK_ROLE } from './ir.js';
+import { BLOCK_KIND, BLOCK_ROLE, fragmentText, unionBBox } from './ir.js';
 import {
     createHyphenationVocabulary,
     escapeLineStart,
@@ -20,16 +20,47 @@ const SKIPPED_ROLES = new Set([BLOCK_ROLE.CHROME, BLOCK_ROLE.PAGE_NOTE]);
 // Writes the document IR as Markdown and records, for every block, the exact
 // output range of each of its fragments. The source map comes from those
 // ranges, so no text matching is needed afterwards.
-export function serializeDocumentIR(ir, { vocabulary = createHyphenationVocabulary(ir), composites = null } = {}) {
-    const units = [];
-    const skipped = new Set(composites?.skippedBlockIds || []);
-    const anchors = composites?.anchors || new Map();
-    for (const block of ir.blocks) {
-        for (const composite of anchors.get(block.id) || []) units.push(compositeUnit(composite));
-        if (skipped.has(block.id)) continue;
-        units.push(...blockUnits(block, vocabulary));
-    }
+//
+// Every unit also lists its pieces: a stable key, the part it plays, and its
+// output range. The figure pipeline addresses blocks by these keys, and a
+// composed figure (`composites`) replaces the pieces it consumed when the IR
+// is written again.
+export function serializeDocumentIR(ir, { vocabulary = createHyphenationVocabulary(ir), composites = [] } = {}) {
+    let units = [];
+    for (const block of ir.blocks) units.push(...blockUnits(block, vocabulary));
+    if (composites?.length) units = placeComposites(units, composites);
     return assemble(applyFigureLayouts(units));
+}
+
+// A composed figure is written where its earliest member was. A unit whose
+// only piece the figure consumed is dropped; a panel whose embedded caption
+// was consumed keeps its image; a paragraph of several fragments keeps all of
+// its text, so a figure can never delete prose that continues elsewhere.
+function placeComposites(units, composites) {
+    const owners = new Map();
+    for (const composite of composites) {
+        for (const id of composite.memberBlockIds || []) {
+            if (!owners.has(id)) owners.set(id, composite);
+        }
+    }
+    const placed = new Set();
+    const output = [];
+    for (const unit of units) {
+        for (const piece of unit.pieces || []) {
+            const composite = owners.get(piece.key);
+            if (composite && !placed.has(composite)) {
+                placed.add(composite);
+                output.push(compositeUnit(composite));
+            }
+        }
+        if (unit.skipKey && owners.has(unit.skipKey)) continue;
+        if (unit.captionKeys?.some(key => owners.has(key)) && unit.rebuild) {
+            output.push(unit.rebuild(''));
+            continue;
+        }
+        output.push(unit);
+    }
+    return output;
 }
 
 function blockUnits(block, vocabulary) {
@@ -81,10 +112,13 @@ function inlineText(block, vocabulary) {
 function textUnits(block, vocabulary) {
     const { text, ranges } = inlineText(block, vocabulary);
     if (!text) return [];
+    const part = block.role === BLOCK_ROLE.REFERENCE ? 'reference'
+        : block.role === BLOCK_ROLE.FLOAT_NOTE ? 'note' : 'text';
     if (block.role === BLOCK_ROLE.BODY && block.fragments.length === 1 && isStandaloneAddress(text)) {
         const address = text.trim();
         const output = `[${address}](https://${address})`;
-        return [{ block, kind: 'text', type: 'text', text: output, fragments: wholeFragments(block, output) }];
+        return [withPieces({ block, kind: 'text', type: 'text', text: output, fragments: wholeFragments(block, output) },
+            [ownPiece(block, `${block.id}#f0`, part, output, address)])];
     }
     const bullet = block.role === BLOCK_ROLE.REFERENCE ? null : BULLET_START.exec(text);
     let prefix = '';
@@ -98,16 +132,31 @@ function textUnits(block, vocabulary) {
     // bullet and by a line-start escape inserted at the very beginning.
     const shift = prefix.length - (bullet ? bullet[0].length : 0) + escaped.length - body.length;
     const output = `${prefix}${escaped}`;
+    const fragments = ranges.map((range, index) => ({
+        from: index === 0 ? 0 : Math.max(0, range.from + shift),
+        to: index === ranges.length - 1 ? output.length : Math.max(0, range.to + shift),
+        fragment: range.fragment,
+    }));
+    const pieces = fragments.map((range, index) => ({
+        key: `${block.id}#f${index}`,
+        part,
+        blockId: block.id,
+        from: range.from,
+        to: range.to,
+        pageIndex: range.fragment.pageIndex,
+        bbox: range.fragment.bbox,
+        text: fragmentText(range.fragment),
+    }));
     return [{
         block,
         kind: prefix ? 'list' : 'text',
         type: 'text',
         text: output,
-        fragments: ranges.map((range, index) => ({
-            from: index === 0 ? 0 : Math.max(0, range.from + shift),
-            to: index === ranges.length - 1 ? output.length : Math.max(0, range.to + shift),
-            fragment: range.fragment,
-        })),
+        fragments,
+        pieces,
+        // A paragraph stitched from several fragments is never removed by a
+        // figure: only the fragment inside the figure is a member.
+        skipKey: pieces.length === 1 ? pieces[0].key : null,
     }];
 }
 
@@ -117,7 +166,8 @@ function headingUnits(block, vocabulary) {
     if (!content) return [];
     const level = Math.min(6, Math.max(1, block.level || 2));
     const output = `${'#'.repeat(level)} ${content}`;
-    return [{ block, kind: 'heading', type: 'text', text: output, fragments: wholeFragments(block, output) }];
+    return [withPieces({ block, kind: 'heading', type: 'text', text: output, fragments: wholeFragments(block, output) },
+        [ownPiece(block, `${block.id}#f0`, 'heading', output, content)])];
 }
 
 function equationUnits(block) {
@@ -127,10 +177,11 @@ function equationUnits(block) {
         .join('\n')
         .trim();
     if (!latex) {
-        return block.assetPath ? [imageUnit(block, null, block.assetPath, '', 'equation')] : [];
+        return block.assetPath ? [imageUnit(block, null, block.assetPath, '', 'equation', 'equation')] : [];
     }
     const output = `$$\n${latex}\n$$`;
-    return [{ block, kind: 'math', type: 'equation', text: output, fragments: wholeFragments(block, output) }];
+    return [withPieces({ block, kind: 'math', type: 'equation', text: output, fragments: wholeFragments(block, output) },
+        [ownPiece(block, block.id, 'equation', output, latex)])];
 }
 
 function figureUnits(block) {
@@ -140,9 +191,9 @@ function figureUnits(block) {
     if (!bodies.length) units.push(...captionUnits(block));
     for (const [index, body] of bodies.entries()) {
         units.push(imageUnit(block, body, body.assetPath, index === bodies.length - 1 ? caption : '',
-            block.kind === BLOCK_KIND.CHART ? 'chart' : 'image'));
+            block.kind === BLOCK_KIND.CHART ? 'chart' : 'image', 'panel'));
     }
-    units.push(...footnoteUnits(block));
+    units.push(...footnoteUnits(block, 'note'));
     return units;
 }
 
@@ -153,8 +204,8 @@ function tableUnits(block) {
     const figureCaption = /^(?:fig|figure)\b/iu.test(parseAcademicFigureCaption(caption)?.label || '');
     const units = [];
     if (figureCaption && body?.assetPath) {
-        units.push(imageUnit(block, body, body.assetPath, caption, 'image'));
-        units.push(...footnoteUnits(block));
+        units.push(imageUnit(block, body, body.assetPath, caption, 'image', 'table'));
+        units.push(...footnoteUnits(block, 'table'));
         return units;
     }
     if (captions.length) {
@@ -162,12 +213,15 @@ function tableUnits(block) {
         // lines; a hard line break keeps them in one caption paragraph.
         const output = captionChildren(block)
             .map(child => escapeLineStart(childInline(child))).filter(Boolean).join('  \n');
-        if (output) units.push(childUnit(block, captionChildren(block), output, { caption: true }));
+        if (output) units.push(childUnit(block, captionChildren(block), output, { caption: true }, `${block.id}:caption`, 'table'));
     }
     const html = sanitizeTableHTML(body?.html);
-    if (html) units.push({ block, kind: 'table', type: 'table', text: html, fragments: wholeFragments(block, html) });
-    else if (body?.assetPath) units.push(imageUnit(block, body, body.assetPath, '', 'image'));
-    units.push(...footnoteUnits(block));
+    if (html) {
+        units.push(withPieces({ block, kind: 'table', type: 'table', text: html, fragments: wholeFragments(block, html) },
+            [ownPiece(block, `${block.id}:body`, 'table', html, '')]));
+    }
+    else if (body?.assetPath) units.push(imageUnit(block, body, body.assetPath, '', 'image', 'table'));
+    units.push(...footnoteUnits(block, 'table'));
     return units;
 }
 
@@ -178,9 +232,10 @@ function codeUnits(block) {
     const fence = '`'.repeat(longest + 1);
     const language = String(block.codeLanguage || '').toLowerCase();
     const output = `${fence}${CODE_LANGUAGE.test(language) ? language : ''}\n${code}\n${fence}`;
-    const units = captionUnits(block);
-    units.push({ block, kind: 'code', type: 'code', text: output, fragments: wholeFragments(block, output) });
-    units.push(...footnoteUnits(block));
+    const units = captionUnits(block, 'code');
+    units.push(withPieces({ block, kind: 'code', type: 'code', text: output, fragments: wholeFragments(block, output) },
+        [ownPiece(block, `${block.id}:body`, 'code', output, '')]));
+    units.push(...footnoteUnits(block, 'code'));
     return units;
 }
 
@@ -194,39 +249,57 @@ function algorithmUnits(block) {
     )).join('\n');
     const output = '<div class="mineru-algorithm" style="white-space: pre-wrap; font-family:monospace;">\n'
         + `${content}\n</div>`;
-    const units = captionUnits(block);
-    units.push({ block, kind: 'algorithm', type: 'code', text: output, fragments: wholeFragments(block, output) });
-    units.push(...footnoteUnits(block));
+    const units = captionUnits(block, 'code');
+    units.push(withPieces({ block, kind: 'algorithm', type: 'code', text: output, fragments: wholeFragments(block, output) },
+        [ownPiece(block, `${block.id}:body`, 'code', output, '')]));
+    units.push(...footnoteUnits(block, 'code'));
     return units;
 }
 
-function captionUnits(block) {
+// A figure caption without an image is a text block for the figure
+// pipeline; a code or algorithm caption belongs to the code.
+function captionUnits(block, part = 'text') {
     const children = captionChildren(block);
     const caption = escapeLineStart(children.map(child => childInline(child)).filter(Boolean).join(' '));
-    return caption ? [childUnit(block, children, caption, { caption: true })] : [];
+    return caption
+        ? [childUnit(block, children, caption, { caption: true }, `${block.id}:caption`, part, captionText(block))]
+        : [];
 }
 
-function footnoteUnits(block) {
+function footnoteUnits(block, part) {
     return block.children
         .filter(child => child.kind === 'footnote' && child.role !== BLOCK_ROLE.CHROME)
         .map(child => ({ child, text: escapeLineStart(childInline(child)) }))
         .filter(({ text }) => text)
-        .map(({ child, text }) => childUnit(block, [child], text, { footnote: true }));
+        .map(({ child, text }) => childUnit(block, [child], text, { footnote: true }, child.id, part, childText(child)));
 }
 
 // A caption or note paragraph is located by its own boxes, not the float's.
-function childUnit(block, children, text, extra) {
+function childUnit(block, children, text, extra, key, part, plain = '') {
     const fragments = children.flatMap(child => (child.fragments || [])
         .filter(fragment => fragment.bbox)
         .map(fragment => ({ from: 0, to: text.length, fragment, whole: true })));
-    return {
+    const bbox = unionBBox(children.map(child => child.bbox).filter(Boolean)) || block.bbox;
+    return withPieces({
         block,
         kind: 'text',
         type: 'text',
         text,
         fragments: fragments.length ? fragments : wholeFragments(block, text),
         ...extra,
-    };
+    }, [{ key, part, blockId: block.id, from: 0, to: text.length, pageIndex: block.pageIndex, bbox,
+        text: part === 'table' || part === 'code' ? '' : plain }]);
+}
+
+function withPieces(unit, pieces) {
+    return { ...unit, pieces, skipKey: pieces.length === 1 ? pieces[0].key : null };
+}
+
+// A piece spanning the whole unit, located on the block's own page.
+function ownPiece(block, key, part, output, text) {
+    const fragment = block.fragments.find(item => item.pageIndex === block.pageIndex && item.bbox);
+    return { key, part, blockId: block.id, from: 0, to: output.length, pageIndex: block.pageIndex,
+        bbox: fragment?.bbox || block.bbox, text };
 }
 
 // Caption lines from top to bottom: MinerU can list a table label after
@@ -265,21 +338,53 @@ function childText(child) {
         .trim();
 }
 
-function imageUnit(block, body, assetPath, caption, type) {
-    const alt = caption ? escapeImageDescription(caption) : '';
+// `part` is `panel` for a figure image; a table or equation written as its
+// crop image keeps its own part, so the figure pipeline never takes it as a
+// panel and the layout planner never puts it in a grid. A panel's caption
+// pieces are one per MinerU caption block, as the region resolver expects.
+function imageUnit(block, body, assetPath, caption, type, part) {
+    const panel = part === 'panel';
+    const captions = panel && caption ? captionPieces(block) : [];
+    const alt = panel ? captions.map(piece => piece.alt).join(' ') : caption ? escapeImageDescription(caption) : '';
     const text = `![${alt}](${assetPath})`;
+    const bbox = body?.bbox || block.bbox;
+    const pieces = [{
+        key: body?.id || `${block.id}:body`, part, blockId: block.id, from: 0, to: text.length,
+        pageIndex: block.pageIndex, bbox, text: '', ...(panel ? { assetPath, parentId: block.id } : {}),
+    }];
+    let offset = 2;
+    for (const piece of captions) {
+        pieces.push({
+            key: piece.key, part: 'caption', blockId: block.id, from: offset, to: offset + piece.alt.length,
+            pageIndex: block.pageIndex, bbox: piece.bbox, text: piece.text, parentId: block.id,
+        });
+        offset += piece.alt.length + 1;
+    }
+    const captionValue = panel ? captions.map(piece => piece.text).join(' ') : caption;
     return {
         block,
         kind: 'image',
         type,
         text,
         image: { from: 0, to: text.length },
-        ...(alt ? { caption: { from: 2, to: 2 + alt.length, text: caption } } : {}),
+        ...(alt ? { caption: { from: 2, to: 2 + alt.length, text: captionValue } } : {}),
         child: body,
         assetPath,
-        location: { pageIndex: block.pageIndex, bbox: body?.bbox || block.bbox },
-        fragments: [{ from: 0, to: text.length, fragment: { pageIndex: block.pageIndex, bbox: body?.bbox || block.bbox } }],
+        panel,
+        location: { pageIndex: block.pageIndex, bbox },
+        fragments: [{ from: 0, to: text.length, fragment: { pageIndex: block.pageIndex, bbox } }],
+        pieces,
+        skipKey: pieces[0].key,
+        captionKeys: captions.map(piece => piece.key),
+        rebuild: nextCaption => imageUnit(block, body, assetPath, nextCaption, type, part),
     };
+}
+
+function captionPieces(block) {
+    return captionChildren(block)
+        .map(child => ({ key: child.id, bbox: child.bbox, text: childText(child) }))
+        .filter(piece => piece.text)
+        .map(piece => ({ ...piece, alt: escapeImageDescription(piece.text) }));
 }
 
 function compositeUnit(composite) {
@@ -294,6 +399,8 @@ function compositeUnit(composite) {
         image: { from: 0, to: text.length },
         ...(alt ? { caption: { from: 2, to: 2 + alt.length, text: composite.captionText } } : {}),
         fragments: [{ from: 0, to: text.length, fragment: { pageIndex: composite.pageIndex, bbox: composite.bbox } }],
+        pieces: [{ key: composite.id, part: 'composite', blockId: null, from: 0, to: text.length,
+            pageIndex: composite.pageIndex, bbox: composite.bbox, text: '' }],
     };
 }
 
@@ -308,7 +415,7 @@ function wholeFragments(block, text) {
 // image unit is one line, so its decisions map back to whole units.
 function applyFigureLayouts(units) {
     const imageBlocks = units
-        .filter(unit => unit.kind === 'image' && unit.block && unit.child?.bbox)
+        .filter(unit => unit.panel && unit.child?.bbox)
         .map(unit => ({ assetPath: unit.assetPath, pageIndex: unit.block.pageIndex, bbox: unit.child.bbox }));
     if (imageBlocks.length < 2) return units;
     const unitAtLine = new Map();
@@ -358,6 +465,7 @@ function assemble(units) {
     let markdown = '';
     const sourceMap = [];
     const blockRanges = new Map();
+    const pieces = [];
     for (const [index, unit] of units.entries()) {
         if (index > 0) markdown += separator(units[index - 1], unit);
         const from = markdown.length;
@@ -367,8 +475,11 @@ function assemble(units) {
         const entry = sourceMapEntry(unit, from, to);
         if (entry) sourceMap.push(entry);
         recordBlockRange(blockRanges, unit, from, to);
+        for (const piece of unit.pieces || []) {
+            if (piece.to > piece.from) pieces.push({ ...piece, from: from + piece.from, to: from + piece.to });
+        }
     }
-    return { markdown, sourceMap, blockRanges };
+    return { markdown, sourceMap, blockRanges, pieces };
 }
 
 function sourceMapEntry(unit, from, to) {

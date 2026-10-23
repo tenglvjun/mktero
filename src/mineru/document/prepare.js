@@ -9,10 +9,15 @@ import { stitchParagraphs } from './stitch.js';
 import { validateDocumentIR } from './ir.js';
 import { createHyphenationVocabulary } from './text.js';
 import { DOCUMENT_STRUCTURE, serializeDocumentIR } from './serialize.js';
+import { createFigureInputFromIR } from './figure-input.js';
 
-// Bundle fields that only feed the IR. The prepared document keeps the
-// Markdown, its exact source map, the assets, and the page counts.
-const INPUT_ONLY_FIELDS = ['contentList', 'layout', 'detailedLayout', 'figureTables'];
+// Bundle and figure-input fields that only feed the IR. The prepared document
+// keeps the Markdown, its exact source map, the assets, and the page counts.
+const INPUT_ONLY_FIELDS = [
+    'contentList', 'layout', 'detailedLayout', 'figureTables',
+    'blocks', 'pages', 'providerState', 'rangesExplicit',
+];
+const COMPOSITE_SUFFIX = ':composite';
 
 // Builds the reading-order document IR from a MinerU result bundle:
 // layout.json first, content_list.json when no layout is available.
@@ -42,7 +47,7 @@ export function isPreparedMinerUDocument(document) {
 // The prepared reading document of a MinerU result. Markdown comes only from
 // the IR; MinerU's own full.md is kept as-is only when the bundle carries no
 // structure at all.
-export function prepareMinerUDocument(bundle, { ir = buildMinerUDocumentIR(bundle), composites = null } = {}) {
+export function prepareMinerUDocument(bundle, { ir = buildMinerUDocumentIR(bundle), composites = [] } = {}) {
     if (isPreparedMinerUDocument(bundle)) return bundle;
     const prepared = { ...(bundle || {}) };
     for (const field of INPUT_ONLY_FIELDS) delete prepared[field];
@@ -64,6 +69,62 @@ export function prepareMinerUDocument(bundle, { ir = buildMinerUDocumentIR(bundl
         chromeRanges: [],
         documentStructure: DOCUMENT_STRUCTURE,
     };
+}
+
+// The figure pipeline's input for a MinerU result bundle. Without a layout
+// or content list it carries only the Markdown, so nothing is composed.
+export function createMinerUFigureInput(bundle) {
+    const ir = buildMinerUDocumentIR(bundle);
+    if (!ir) {
+        return {
+            provider: 'mineru',
+            rangesExplicit: true,
+            markdown: String(bundle?.markdown || '').replace(/\r\n?/gu, '\n'),
+            assets: bundle?.assets || [],
+            assetBasePath: bundle?.assetBasePath || '',
+            pages: [],
+            blocks: [],
+            contentList: [],
+            providerState: {},
+            extractedPages: bundle?.extractedPages,
+            totalPages: bundle?.totalPages,
+            warnings: Array.isArray(bundle?.warnings) ? [...bundle.warnings] : [],
+        };
+    }
+    const serialized = serializeDocumentIR(ir, { vocabulary: createHyphenationVocabulary(ir) });
+    return createFigureInputFromIR(ir, serialized, bundle);
+}
+
+// Prepares any MinerU document the pipeline hands over:
+// - a prepared document (from the cache or a revision) is returned as is;
+// - a figure input is written again from its IR, with each composed figure
+//   in place of the pieces it consumed;
+// - a result bundle is prepared from its layout or content list.
+export function prepareMinerUResult(input) {
+    if (isPreparedMinerUDocument(input) || input?.userEdited) return input;
+    const ir = input?.providerState?.mineruDocument?.ir;
+    if (ir) {
+        const composites = (input.blocks || []).filter(block => (
+            typeof block?.figureId === 'string' && block.id === `${block.figureId}${COMPOSITE_SUFFIX}`
+            && typeof block.assetPath === 'string' && Array.isArray(block.memberBlockIds)
+        )).map(block => ({
+            id: block.id,
+            figureId: block.figureId,
+            assetPath: block.assetPath,
+            captionText: typeof block.captionText === 'string' ? block.captionText : '',
+            memberBlockIds: block.memberBlockIds,
+            pageIndex: block.pageIndex,
+            bbox: block.bbox,
+        }));
+        return prepareMinerUDocument(input, { ir, composites });
+    }
+    if (validateMinerULayout(input?.layout) || Array.isArray(input?.contentList) && input.contentList.length) {
+        return prepareMinerUDocument(input);
+    }
+    // A document prepared by an earlier pipeline has no structure left to
+    // rebuild; its Markdown and source map stay as they were.
+    if (typeof input?.markdown === 'string' && Array.isArray(input.sourceMap)) return input;
+    return prepareMinerUDocument(input);
 }
 
 export { serializeDocumentIR };
