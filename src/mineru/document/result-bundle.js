@@ -1,7 +1,6 @@
 import { FIGURE_LIMITS } from '../../figures/figure-limits.js';
 
 export const MINERU_LAYOUT_SCHEMA = 'mineru-layout-v2';
-export const MINERU_DETAILED_LAYOUT_SCHEMA = 'mineru-middle-v1';
 
 const MAX_TYPE_LENGTH = 64;
 const MAX_META_LENGTH = 64;
@@ -69,47 +68,6 @@ export function validateMinerULayout(layout) {
         previous = page.pageIndex;
     }
     return true;
-}
-
-// The figure adapter still reads the previous projection. It is a strict
-// subset of the v2 layout, so it is derived instead of parsed twice.
-export function deriveDetailedLayout(layout) {
-    if (!validateMinerULayout(layout)) return null;
-    return {
-        schema: MINERU_DETAILED_LAYOUT_SCHEMA,
-        pdfInfo: layout.pages.map(page => ({
-            page_idx: page.pageIndex,
-            page_size: [...page.pageSize],
-            para_blocks: page.blocks.map(detailedBlock),
-        })),
-        backend: layout.backend,
-        version: layout.version,
-    };
-}
-
-function detailedBlock(block) {
-    const output = {};
-    if (block.type) output.type = block.type;
-    if (block.content !== undefined) output.content = block.content;
-    if (block.imagePath !== undefined) output.image_path = block.imagePath;
-    if (block.bbox) output.bbox = [...block.bbox];
-    if (block.blocks) output.blocks = block.blocks.map(detailedBlock);
-    if (block.lines) output.lines = block.lines.map(detailedLine);
-    return output;
-}
-
-function detailedLine(line) {
-    const output = {};
-    if (line.bbox) output.bbox = [...line.bbox];
-    output.spans = line.spans.map(span => {
-        const projected = {};
-        if (span.type) projected.type = span.type;
-        if (span.content !== undefined) projected.content = span.content;
-        if (span.imagePath !== undefined) projected.image_path = span.imagePath;
-        if (span.bbox) projected.bbox = [...span.bbox];
-        return projected;
-    });
-    return output;
 }
 
 function projectBlocks(value, depth, diagnostics, budget) {

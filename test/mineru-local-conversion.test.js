@@ -42,7 +42,7 @@ test('stores a fresh local result and does not keep figure layout', async () => 
                     markdown: '# Fresh local',
                     assets: [],
                     assetBasePath: '',
-                    detailedLayout: { schema: 'docvortex.middle' },
+                    layout: { schema: 'mineru-layout-v2', pages: [] },
                     figureMap: { figures: [] },
                 };
             },
@@ -61,7 +61,7 @@ test('stores a fresh local result and does not keep figure layout', async () => 
     });
 
     assert.equal(converted.origin, 'fresh');
-    assert.equal(converted.result.detailedLayout, undefined);
+    assert.equal(converted.result.layout, undefined);
     assert.equal(converted.result.figureMap, undefined);
     assert.equal(stored[0].result.markdown, '# Fresh local');
     assert.equal(stored[0].result.figureMap, undefined);

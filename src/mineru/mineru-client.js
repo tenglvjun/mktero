@@ -179,8 +179,6 @@ export class MinerUClient {
                 : extracted.contentList || [],
             ...(typeof extracted === 'string' || !extracted.layout
                 ? {} : { layout: extracted.layout }),
-            ...(typeof extracted === 'string' || !extracted.detailedLayout
-                ? {} : { detailedLayout: extracted.detailedLayout }),
             extractedPages: totalPages,
             totalPages,
             ...(resultArchive ? { resultArchive } : {}),

@@ -162,7 +162,8 @@ test('forwards the detailed layout that authorizes figure region geometry', asyn
         task: { batchID: 'batch-1', dataID: 'mktero-task-1' },
     });
 
-    assert.equal(result.detailedLayout?.schema, 'mineru-middle-v1');
+    assert.equal(result.layout?.schema, 'mineru-layout-v2');
+    assert.equal('detailedLayout' in result, false);
     const input = createMinerUFigureInput(result);
     assert.equal(input.pages[0].coordinateFrame, 'display-cropbox');
     assert.ok(input.blocks.some(block => block.role === 'panel'

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { strToU8, zipSync } from 'fflate';
 import { extractMinerUResultFromZip } from '../src/mineru/zip-markdown.js';
 import {
-    deriveDetailedLayout,
     MINERU_LAYOUT_SCHEMA,
     projectMinerULayout,
     validateMinerULayout,
@@ -117,27 +116,13 @@ test('truncates oversized strings and caps the block budget', () => {
     assert.equal(projectMinerULayout(layoutFixture(), { maxPages: 1 }), null);
 });
 
-test('derives the previous detailed layout projection', () => {
-    const detailed = deriveDetailedLayout(projectMinerULayout(layoutFixture()));
-    assert.equal(detailed.schema, 'mineru-middle-v1');
-    assert.equal(detailed.backend, 'hybrid');
-    assert.equal(detailed.version, '3.4.4');
-    assert.deepEqual(detailed.pdfInfo[0].para_blocks[0], {
-        type: 'title',
-        bbox: [50, 50, 560, 80],
-        lines: [{ bbox: [50, 50, 560, 80], spans: [{ type: 'text', content: 'A Paper', bbox: [50, 50, 560, 80] }] }],
-    });
-    assert.equal(detailed.pdfInfo[1].para_blocks[1].blocks[1].lines[0].spans[0].image_path, 't.jpg');
-    assert.equal(deriveDetailedLayout({ schema: 'other' }), null);
-});
-
 test('rejects layouts with unordered or malformed pages', () => {
     const layout = projectMinerULayout(layoutFixture());
     assert.equal(validateMinerULayout({ ...layout, pages: [...layout.pages].reverse() }), false);
     assert.equal(validateMinerULayout({ ...layout, pages: [{ pageIndex: 0, pageSize: [1, 1] }] }), false);
 });
 
-test('extracts the projected layout and the derived detailed layout from a ZIP', () => {
+test('extracts the projected layout from a ZIP', () => {
     const archive = zipSync({
         'result/full.md': strToU8('# A Paper'),
         'result/layout.json': strToU8(JSON.stringify(layoutFixture())),
@@ -145,13 +130,12 @@ test('extracts the projected layout and the derived detailed layout from a ZIP',
     const result = extractMinerUResultFromZip(archive);
     assert.equal(result.layout.schema, MINERU_LAYOUT_SCHEMA);
     assert.equal(result.layout.pages[0].discarded.length, 2);
-    assert.equal(result.detailedLayout.schema, 'mineru-middle-v1');
+    assert.equal('detailedLayout' in result, false);
     const broken = extractMinerUResultFromZip(zipSync({
         'result/full.md': strToU8('# A Paper'),
         'result/layout.json': strToU8('{"pdf_info":'),
     }));
     assert.equal(broken.layout, undefined);
-    assert.equal(broken.detailedLayout, undefined);
     assert.equal(broken.markdown, '# A Paper');
 });
 
@@ -162,7 +146,6 @@ test('ignores a layout.json outside the Markdown result root', () => {
         'result/images/a.jpg': strToU8('img'),
     }));
     assert.equal(result.layout, undefined);
-    assert.equal(result.detailedLayout, undefined);
     assert.equal(result.markdown, '# A Paper');
     assert.equal(result.assets.length, 1);
 });
@@ -176,7 +159,6 @@ test('does not project a root that contains both layout.json and middle.json', (
         'result/images/a.jpg': strToU8('img'),
     }));
     assert.equal(result.layout, undefined);
-    assert.equal(result.detailedLayout, undefined);
     assert.equal(result.markdown, '# A Paper');
     assert.equal(result.assets.length, 1);
 });
@@ -186,9 +168,8 @@ test('keeps Markdown and assets when the layout exceeds the byte cap', () => {
         'result/full.md': strToU8('# A Paper'),
         'result/layout.json': strToU8(JSON.stringify(layoutFixture())),
         'result/images/a.jpg': strToU8('img'),
-    }), { maxDetailedLayoutBytes: 5 });
+    }), { maxLayoutBytes: 5 });
     assert.equal(result.layout, undefined);
-    assert.equal(result.detailedLayout, undefined);
     assert.equal(result.markdown, '# A Paper');
     assert.equal(result.assets.length, 1);
 });

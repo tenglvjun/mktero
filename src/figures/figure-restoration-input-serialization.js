@@ -23,8 +23,6 @@ export function serializeFigureRestorationInput(input, { maxBytes = FIGURE_LIMIT
         pages: input.pages,
         ...(input.contentList !== undefined ? { contentList: input.contentList } : {}),
         ...(input.providerState !== undefined ? { providerState: input.providerState } : {}),
-        ...(input.detailedLayout !== undefined ? { detailedLayout: input.detailedLayout } : {}),
-        ...(input.figureTables !== undefined ? { figureTables: input.figureTables } : {}),
     };
     const json = JSON.stringify(projection);
     const bytes = new TextEncoder().encode(json).length;
@@ -73,8 +71,6 @@ export function parseFigureRestorationInputJSON(json, { document, maxBytes = FIG
         pages: projection.pages,
         ...(projection.contentList !== undefined ? { contentList: projection.contentList } : {}),
         ...(projection.providerState !== undefined ? { providerState: projection.providerState } : {}),
-        ...(projection.detailedLayout !== undefined ? { detailedLayout: projection.detailedLayout } : {}),
-        ...(projection.figureTables !== undefined ? { figureTables: projection.figureTables } : {}),
     };
     try {
         validateFigureInput(input);

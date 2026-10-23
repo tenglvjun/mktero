@@ -146,7 +146,6 @@ function withIdentity(result, parserProfile) {
         provider: 'mineru',
         parserProfile,
     };
-    delete output.detailedLayout;
     delete output.layout;
     delete output.figureMap;
     return output;

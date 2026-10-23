@@ -3,7 +3,7 @@ import { toUint8Array } from './binary.js';
 import { isValidNormalizedSourceBBox } from '../core/markdown-source-map.js';
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { assertFigureJSONBudget, normalizeFigureAssetPath } from '../figures/figure-model.js';
-import { deriveDetailedLayout, projectMinerULayout } from './document/result-bundle.js';
+import { projectMinerULayout } from './document/result-bundle.js';
 
 export const DEFAULT_MAX_MARKDOWN_BYTES = 50 * 1024 * 1024;
 export const DEFAULT_MAX_CONTENT_LIST_BYTES = 20 * 1024 * 1024;
@@ -25,7 +25,7 @@ export function extractMinerUResultFromZip(archive, {
     maxContentBlocks = DEFAULT_MAX_CONTENT_BLOCKS,
     maxAssetBytes = DEFAULT_MAX_ASSET_BYTES,
     maxTotalAssetBytes = DEFAULT_MAX_TOTAL_ASSET_BYTES,
-    maxDetailedLayoutBytes = FIGURE_LIMITS.maxDetailedLayoutBytes,
+    maxLayoutBytes = FIGURE_LIMITS.maxLayoutBytes,
 } = {}) {
     const bytes = toUint8Array(archive, 'The MinerU result archive');
     let markdownPath;
@@ -111,17 +111,15 @@ export function extractMinerUResultFromZip(archive, {
         data,
     }));
     const layout = readMinerULayout(bytes, directoryName(markdownPath), {
-        maxBytes: Math.min(maxDetailedLayoutBytes, FIGURE_LIMITS.maxDetailedLayoutBytes),
+        maxBytes: Math.min(maxLayoutBytes, FIGURE_LIMITS.maxLayoutBytes),
         contentListBytes: contentListPath ? documentFiles[contentListPath].length : 0,
     });
-    const detailedLayout = layout ? deriveDetailedLayout(layout) : null;
     return {
         markdown: strFromU8(markdownBytes),
         assets,
         assetBasePath: directoryName(markdownPath),
         contentList,
         ...(layout ? { layout } : {}),
-        ...(detailedLayout ? { detailedLayout } : {}),
     };
 }
 
