@@ -17,7 +17,10 @@ export const READING_CORPUS_FALLBACK_ENV = 'MKTERO_FIGURE_CORPUS';
 export const READING_CORPUS_EXPECTATION_DIR = fileURLToPath(
     new URL('../test/fixtures/reading-corpus/', import.meta.url)
 );
-export const READING_PIPELINES = ['ir'];
+// `ir-pdf` also reads the PDF that MinerU puts in its archive
+// (`*_origin.pdf`) with PDF.js, as the extension does, so the document gets
+// the PDF's lines and fonts.
+export const READING_PIPELINES = ['ir', 'ir-pdf'];
 
 const PARSER = markdownParser.configure(GFM);
 const CHROME_TYPES = new Set(['header', 'footer', 'page_number', 'aside_text']);
@@ -396,7 +399,30 @@ export async function loadPipeline(name) {
         const { prepareMinerUDocument } = await import('../src/mineru/document/prepare.js');
         return raw => prepareMinerUDocument(raw);
     }
+    if (name === 'ir-pdf') {
+        const { prepareMinerUDocument } = await import('../src/mineru/document/prepare.js');
+        const { createPDFJSTextEngine } = await import('../src/pdf/pdfjs-text-engine.js');
+        return async (raw, archive) => {
+            const pdf = readOriginPDFFromArchive(archive);
+            let pdfText = null;
+            if (pdf) {
+                const engine = createPDFJSTextEngine({
+                    standardFontDataUrl: fileURLToPath(new URL('../node_modules/pdfjs-dist/standard_fonts/', import.meta.url)),
+                });
+                try { pdfText = await engine.extract(pdf); }
+                finally { await engine.dispose(); }
+            }
+            return prepareMinerUDocument(raw, { pdfText });
+        };
+    }
     throw new TypeError(`Unknown reading pipeline ${name}`);
+}
+
+export function readOriginPDFFromArchive(archive) {
+    if (!archive) return null;
+    const files = unzipSync(archive, { filter: file => /(?:^|\/)[^/]*_origin\.pdf$/iu.test(file.name) });
+    const names = Object.keys(files);
+    return names.length === 1 ? files[names[0]] : null;
 }
 
 export async function checkReadingCorpus({
@@ -418,7 +444,7 @@ export async function checkReadingCorpus({
         const raw = extractMinerUResultFromZip(archive);
         const layout = readLayoutFromArchive(archive);
         const started = performance.now();
-        const prepared = await prepare(raw);
+        const prepared = await prepare(raw, archive);
         const timeMs = Math.round(performance.now() - started);
         const summary = summarizeReadingDocument(prepared, layout);
         report.documents.push({ id, timeMs, ...summary });

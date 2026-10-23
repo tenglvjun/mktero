@@ -89,6 +89,94 @@
         "markdown": 92,
         "layout": 94
       }
+    },
+    "ir-pdf": {
+      "pages": 16,
+      "breaks": {
+        "total": 1,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 1,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 37,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 12075,
+        "found": 11953,
+        "ratio": 0.9899
+      },
+      "pageNotes": {
+        "total": 3,
+        "found": 2
+      },
+      "headings": {
+        "count": 26,
+        "levels": {
+          "1": 1,
+          "2": 10,
+          "3": 15
+        },
+        "sequence": [
+          "1:a775b68d4cfb",
+          "2:c59ddd3f7ba6",
+          "2:d3db5338aae1",
+          "2:f9e53ef695f2",
+          "3:9b0666f2b5d1",
+          "3:cadbd06cccd3",
+          "3:64f29c188326",
+          "3:14ba08005ad0",
+          "3:b1d97605b683",
+          "3:14cddf00532d",
+          "2:5b9ea36ea4a8",
+          "3:d9c2253b51bd",
+          "3:4945d90c5c5e",
+          "3:7cb22f8438cf",
+          "3:7b46fcf6894e",
+          "3:953f0080586c",
+          "3:14cddf00532d",
+          "3:5b31fa702ce6",
+          "3:bb07821a31f2",
+          "2:3cc610240ec7",
+          "3:ebaaf83acfa4",
+          "2:3990f37fbb51",
+          "2:c69edd92cf8c",
+          "2:4fccc8cb28f1",
+          "2:de845c7c3c44",
+          "2:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 110,
+        "covered": 110,
+        "ratio": 1,
+        "crossPage": 10
+      },
+      "floats": {
+        "markdown": {
+          "image": 11,
+          "captionedImage": 7,
+          "table": 6,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 3,
+          "chart": 5,
+          "table": 12,
+          "code": 0,
+          "captioned": 10
+        }
+      },
+      "references": {
+        "markdown": 92,
+        "layout": 94
+      }
     }
   }
 }

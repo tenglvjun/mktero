@@ -11,10 +11,11 @@ import {
 import { orderReadingFlow } from './reading-order.js';
 import { attachEquationNumbers } from './equations.js';
 import { placePageNotes, restoreDiscardedReferences } from './notes.js';
-import { assignHeadingLevels } from './headings.js';
+import { assignHeadingLevels, levelHeadingsByStyle } from './headings.js';
 import { groupSections } from './sections.js';
 import { stitchParagraphs } from './stitch.js';
 import { validateDocumentIR } from './ir.js';
+import { attachPDFGeometry } from './pdf-geometry.js';
 import { createHyphenationVocabulary } from './text.js';
 import { DOCUMENT_STRUCTURE, serializeDocumentIR } from './serialize.js';
 import { createFigureInputFromIR } from './figure-input.js';
@@ -29,8 +30,10 @@ const COMPOSITE_SUFFIX = ':composite';
 
 // Builds the reading-order document IR from a MinerU result bundle:
 // layout.json first, content_list.json when no layout is available.
-// Returns null when neither is usable.
-export function buildMinerUDocumentIR(bundle) {
+// Returns null when neither is usable. `pdfText` is the PDF's own text
+// index (see pdf-geometry.js); it gives the text real lines and fonts, and
+// without it every page keeps block geometry.
+export function buildMinerUDocumentIR(bundle, { pdfText = null } = {}) {
     const options = { assets: bundle?.assets || [], assetBasePath: bundle?.assetBasePath || '' };
     let ir = null;
     if (validateMinerULayout(bundle?.layout)) ir = ingestMinerULayout(bundle.layout, options);
@@ -38,6 +41,7 @@ export function buildMinerUDocumentIR(bundle) {
         ir = ingestMinerUContentList(bundle.contentList, options);
     }
     if (!ir) return null;
+    attachPDFGeometry(ir, pdfText);
     classifyBlocks(ir);
     attachFloatNotes(ir);
     reassignFloatCaptions(ir);
@@ -50,6 +54,7 @@ export function buildMinerUDocumentIR(bundle) {
     stitchParagraphs(ir);
     placePageNotes(ir);
     groupSections(ir);
+    levelHeadingsByStyle(ir);
     return validateDocumentIR(ir);
 }
 
@@ -62,7 +67,11 @@ export function isPreparedMinerUDocument(document) {
 // The prepared reading document of a MinerU result. Markdown comes only from
 // the IR; MinerU's own full.md is kept as-is only when the bundle carries no
 // structure at all.
-export function prepareMinerUDocument(bundle, { ir = buildMinerUDocumentIR(bundle), composites = [] } = {}) {
+export function prepareMinerUDocument(bundle, {
+    pdfText = null,
+    ir = buildMinerUDocumentIR(bundle, { pdfText }),
+    composites = [],
+} = {}) {
     if (isPreparedMinerUDocument(bundle)) return bundle;
     const prepared = { ...(bundle || {}) };
     for (const field of INPUT_ONLY_FIELDS) delete prepared[field];
@@ -88,8 +97,8 @@ export function prepareMinerUDocument(bundle, { ir = buildMinerUDocumentIR(bundl
 
 // The figure pipeline's input for a MinerU result bundle. Without a layout
 // or content list it carries only the Markdown, so nothing is composed.
-export function createMinerUFigureInput(bundle) {
-    const ir = buildMinerUDocumentIR(bundle);
+export function createMinerUFigureInput(bundle, { pdfText = null } = {}) {
+    const ir = buildMinerUDocumentIR(bundle, { pdfText });
     if (!ir) {
         return {
             provider: 'mineru',

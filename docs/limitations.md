@@ -23,6 +23,13 @@
 - MinerU cloud results locate text by OCR block, not by line, so a Markdown
   paragraph jumps to its whole block in the PDF. A paragraph joined across a
   page, column, or figure keeps one location for each part.
+- A MinerU paragraph that a page or column break splits at a full stop is
+  rejoined only when the PDF has a text layer showing that the line before the
+  break is full and the line after it is not indented, in a paper that indents
+  its paragraphs. Without a text layer (a scanned PDF), such a paragraph stays
+  split. The outline of a paper without section numbers is leveled by heading
+  type from the same text layer; when the types do not nest, or the PDF has no
+  text layer, those headings stay at one level.
 - Local MinerU mode talks to a MinerU 4.0 V1 service. It does not restore
   figures from that service's result, and a restarted local service cannot
   resume an earlier job.

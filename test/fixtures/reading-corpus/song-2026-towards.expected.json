@@ -95,6 +95,100 @@
         "markdown": 27,
         "layout": 27
       }
+    },
+    "ir-pdf": {
+      "pages": 24,
+      "breaks": {
+        "total": 5,
+        "page": 1,
+        "column": 0,
+        "float": 0,
+        "math": 4,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 20,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 14233,
+        "found": 13965,
+        "ratio": 0.9812
+      },
+      "pageNotes": {
+        "total": 0,
+        "found": 0
+      },
+      "headings": {
+        "count": 32,
+        "levels": {
+          "1": 1,
+          "2": 22,
+          "3": 9
+        },
+        "sequence": [
+          "1:25befb3e6324",
+          "2:c59ddd3f7ba6",
+          "2:d3db5338aae1",
+          "2:c099142bc318",
+          "2:9674823b0de0",
+          "2:8f8b0cc9a5d0",
+          "2:df221294dc64",
+          "2:ea2490172772",
+          "2:48fbde9bb495",
+          "2:80c9ee27dfa6",
+          "2:3cc610240ec7",
+          "2:89fd1b8a9cfb",
+          "2:fff9d794f7bb",
+          "2:508001c70e4b",
+          "3:90bd4511729e",
+          "3:aee50b18a03c",
+          "2:0cb7760dfc8d",
+          "2:231e60585497",
+          "3:729f6f1e44a6",
+          "3:d14b3e911d25",
+          "3:dfede1110b1b",
+          "3:e8e877424024",
+          "3:2507c13e65fe",
+          "3:ccce4e8fd444",
+          "3:ab2402716076",
+          "2:8c1603a34a67",
+          "2:4245c4715f32",
+          "2:b7bd2b3a1a4b",
+          "2:f978982a95db",
+          "2:1820b6d5c15f",
+          "2:c86c637c9dda",
+          "2:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 141,
+        "covered": 141,
+        "ratio": 1,
+        "crossPage": 8
+      },
+      "floats": {
+        "markdown": {
+          "image": 14,
+          "captionedImage": 7,
+          "table": 0,
+          "algorithm": 0,
+          "code": 0,
+          "math": 11
+        },
+        "layout": {
+          "image": 4,
+          "chart": 10,
+          "table": 0,
+          "code": 0,
+          "captioned": 7
+        }
+      },
+      "references": {
+        "markdown": 27,
+        "layout": 27
+      }
     }
   }
 }

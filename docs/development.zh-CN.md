@@ -36,8 +36,11 @@ node scripts/figure-corpus-check.mjs --update             # 复核后刷新
 ```bash
 node scripts/reading-corpus-check.mjs --pipeline ir            # 比较并打印表格
 node scripts/reading-corpus-check.mjs --pipeline ir --update   # 复核后刷新
+node scripts/reading-corpus-check.mjs --pipeline ir-pdf        # 同时用 PDF.js 读取压缩包中的 PDF
 node scripts/reading-corpus-check.mjs --ids a,b --json         # 输出部分论文的完整报告
 ```
+
+`ir` 只读取 MinerU 结果。`ir-pdf` 还会像扩展一样，用 PDF.js 读取 MinerU 放在压缩包里的 `*_origin.pdf`，让段落合并和标题层级使用 PDF 的行与字体。两种管线都有提交的期望值，复核后分别用 `--update` 刷新。
 
 | 指标 | 含义 |
 | --- | --- |

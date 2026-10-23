@@ -106,6 +106,110 @@
         "markdown": 1,
         "layout": 60
       }
+    },
+    "ir-pdf": {
+      "pages": 19,
+      "breaks": {
+        "total": 3,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 3,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 58,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 14141,
+        "found": 14141,
+        "ratio": 1
+      },
+      "pageNotes": {
+        "total": 2,
+        "found": 2
+      },
+      "headings": {
+        "count": 41,
+        "levels": {
+          "1": 1,
+          "2": 16,
+          "3": 20,
+          "4": 4
+        },
+        "sequence": [
+          "1:40f21fe344fe",
+          "2:5a4970c8a961",
+          "2:644a9c531916",
+          "3:abfa3d835241",
+          "3:427c92ea8f17",
+          "3:039e457d63ad",
+          "3:3b932e73eeaf",
+          "3:b69c6092bbaf",
+          "3:bb5b20482e68",
+          "3:8755b65d86d2",
+          "2:bfaf5dede8c9",
+          "3:56bf7e0684ee",
+          "3:29b648cdf75c",
+          "3:daa3e9d40d60",
+          "3:52e76b06aa98",
+          "4:f0825c6cd91c",
+          "4:4f0b90bc6680",
+          "3:7bd7047e83f3",
+          "4:08edf54d5e7f",
+          "4:8ae97004c475",
+          "3:95036352e1d8",
+          "3:3dfe0e4d84ea",
+          "3:ef3e7b108aa9",
+          "2:4e594618d734",
+          "3:c987c084b1f0",
+          "3:fc43727a79ad",
+          "3:08d5e6491e2e",
+          "2:1e56b71e5f8d",
+          "3:85236b6917c6",
+          "3:519e087fe640",
+          "2:ba2002c2c0d0",
+          "2:b2c49160292d",
+          "2:281b79ec8ae2",
+          "2:5a8c5ab5e083",
+          "2:07a0b0962107",
+          "2:d448f50b5197",
+          "2:2514e1475add",
+          "2:9db0dfdb4ec6",
+          "2:38ec60db2c69",
+          "2:0930ed3b6ff4",
+          "2:703821a83a10"
+        ]
+      },
+      "sourceMap": {
+        "total": 213,
+        "covered": 213,
+        "ratio": 1,
+        "crossPage": 8
+      },
+      "floats": {
+        "markdown": {
+          "image": 18,
+          "captionedImage": 11,
+          "table": 8,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 1,
+          "chart": 17,
+          "table": 8,
+          "code": 0,
+          "captioned": 19
+        }
+      },
+      "references": {
+        "markdown": 1,
+        "layout": 60
+      }
     }
   }
 }

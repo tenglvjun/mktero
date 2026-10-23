@@ -13,6 +13,7 @@ import {
     normalizeMetricText,
     READING_CORPUS_ENV,
     READING_CORPUS_FALLBACK_ENV,
+    READING_PIPELINES,
     summarizeMarkdownBlocks,
     textShingles,
 } from '../scripts/reading-corpus-check.mjs';
@@ -157,10 +158,12 @@ test('reports nested metric differences', () => {
     ]);
 });
 
-test('matches committed reading expectations for every local corpus archive', {
-    skip: corpusDir ? false : `set ${READING_CORPUS_ENV} to a directory of MinerU result archives`,
-}, async () => {
-    const report = await checkReadingCorpus({ corpusDir, log: () => {} });
-    assert.equal(report.failures.length, 0,
-        report.failures.map(failure => failure.message).join('\n'));
-});
+for (const pipeline of READING_PIPELINES) {
+    test(`matches committed ${pipeline} reading expectations for every local corpus archive`, {
+        skip: corpusDir ? false : `set ${READING_CORPUS_ENV} to a directory of MinerU result archives`,
+    }, async () => {
+        const report = await checkReadingCorpus({ corpusDir, pipeline, log: () => {} });
+        assert.equal(report.failures.length, 0,
+            report.failures.map(failure => failure.message).join('\n'));
+    });
+}

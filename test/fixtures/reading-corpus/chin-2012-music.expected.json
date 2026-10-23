@@ -94,6 +94,98 @@
         "markdown": 87,
         "layout": 89
       }
+    },
+    "ir-pdf": {
+      "pages": 19,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 40,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 13762,
+        "found": 13762,
+        "ratio": 1
+      },
+      "pageNotes": {
+        "total": 4,
+        "found": 3
+      },
+      "headings": {
+        "count": 31,
+        "levels": {
+          "1": 1,
+          "2": 30
+        },
+        "sequence": [
+          "1:c8e3b92d2b9f",
+          "2:5ed27318582d",
+          "2:588765323b94",
+          "2:e0624f8ec678",
+          "2:26fd93fba5eb",
+          "2:e8fdb2565678",
+          "2:5b7e6bf2dc4a",
+          "2:34ef94a0ea33",
+          "2:afba1a0ce1c8",
+          "2:0487c249731a",
+          "2:f516b7c2696b",
+          "2:460fb4e04e12",
+          "2:1bcfdbcfda15",
+          "2:b1d8894cbcac",
+          "2:42e33cd28edf",
+          "2:2404f79fe1c1",
+          "2:7ce85ab02adb",
+          "2:5b7e6bf2dc4a",
+          "2:34ef94a0ea33",
+          "2:afba1a0ce1c8",
+          "2:0487c249731a",
+          "2:f516b7c2696b",
+          "2:460fb4e04e12",
+          "2:4484a674bd7a",
+          "2:36e50c558e55",
+          "2:d9a858f9287c",
+          "2:42e33cd28edf",
+          "2:2404f79fe1c1",
+          "2:3db57044a461",
+          "2:d5ac1ef9a420",
+          "2:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 224,
+        "covered": 224,
+        "ratio": 1,
+        "crossPage": 11
+      },
+      "floats": {
+        "markdown": {
+          "image": 0,
+          "captionedImage": 0,
+          "table": 10,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 0,
+          "chart": 0,
+          "table": 10,
+          "code": 0,
+          "captioned": 10
+        }
+      },
+      "references": {
+        "markdown": 87,
+        "layout": 89
+      }
     }
   }
 }

@@ -55,8 +55,14 @@ and 12-character heading hashes only, never paper text. The directory comes from
 ```bash
 node scripts/reading-corpus-check.mjs --pipeline ir            # compare and print a table
 node scripts/reading-corpus-check.mjs --pipeline ir --update   # refresh after review
+node scripts/reading-corpus-check.mjs --pipeline ir-pdf        # also read the archive's PDF with PDF.js
 node scripts/reading-corpus-check.mjs --ids a,b --json         # full report for some papers
 ```
+
+`ir` reads the MinerU result alone. `ir-pdf` also reads the `*_origin.pdf` that
+MinerU puts in its archive with PDF.js, as the extension does, so paragraph
+joins and heading levels use the PDF's lines and fonts. Both have committed
+expectations; refresh each with `--update` after review.
 
 | Metric | Meaning |
 | --- | --- |

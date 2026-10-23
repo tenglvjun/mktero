@@ -605,19 +605,40 @@ globalThis.startup = async function startup({ id, rootURI }) {
     const recoverFigures = async (result, context) => figureReadingOrder.recover(
         await figureLabelRecovery.recover(result, context), context
     );
+    // The PDF's own text index gives the MinerU document its real lines and
+    // fonts. It is the annotation locator's index, so it is built once per
+    // PDF; when it cannot be built the document keeps block geometry.
+    const readPDFText = async context => {
+        if (!context?.fileData || !runtime.pdfAnnotationLocator?.indexFileData) return null;
+        try {
+            return await runtime.pdfAnnotationLocator.indexFileData(context.fileData, { signal: context.signal });
+        }
+        catch (error) {
+            if (error?.name === 'AbortError' || context.signal?.aborted) throw error;
+            Zotero.debug?.(`Mktero: PDF text geometry unavailable (${error?.name || 'Error'})`);
+            return null;
+        }
+    };
+    // Only the MinerU decoder reads the conversion context.
+    const withPDFText = decode => {
+        const decodeWithContext = async (raw, context) => decode(raw, { pdfText: await readPDFText(context) });
+        decodeWithContext.readsContext = true;
+        return decodeWithContext;
+    };
+    const decodeInput = (decode, raw, context) => (decode.readsContext ? decode(raw, context) : decode(raw));
     const prepareWithFigures = (decode, prepare) => async (raw, context) => {
         // A saved correction is already a prepared document. Re-running figure
         // restoration would discard the edit and requires a conversion context
         // that revision reopening does not have.
         if (raw?.userEdited) return raw;
-        const input = decode(raw);
+        const input = await decodeInput(decode, raw, context);
         const draft = await figureRestoration.restore(input, context);
         return finalizeRestoredDocument(input, draft, {
             prepare, hash: sha256Hex, signal: context?.signal,
         });
     };
     const progressiveWithFigures = (decode, prepare) => async (raw, context) => {
-        const input = decode(raw);
+        const input = await decodeInput(decode, raw, context);
         const run = createProgressiveFigureRunner({
             restoration: figureRestoration,
             prepare,
@@ -636,10 +657,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }),
         pendingTasks,
         cache,
-        prepareResult: prepareWithFigures(createMinerUFigureInput, prepareMinerUResult),
+        prepareResult: prepareWithFigures(withPDFText(createMinerUFigureInput), prepareMinerUResult),
         // An unfinished restoration is cached as a marker only; the conversion
         // restarts it from the raw result store.
-        progressiveResult: progressiveWithFigures(createMinerUFigureInput, prepareMinerUResult),
+        progressiveResult: progressiveWithFigures(withPDFText(createMinerUFigureInput), prepareMinerUResult),
         recoverFigures,
         createPreviousCacheKeys: fileData => Promise.all(
             MINERU_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
@@ -757,7 +778,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache,
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         prepareResult: prepareWithFigures(
-            createMinerUFigureInput,
+            withPDFText(createMinerUFigureInput),
             prepareMinerUResult
         ),
         recoverFigures,

@@ -2,6 +2,7 @@ import { parseAcademicFigureCaption } from '../../markdown/markdown-figures.js';
 import { BLOCK_KIND, BLOCK_ROLE, fragmentText, isFloatBlock } from './ir.js';
 import { columnOfBox, isFlowBlock } from './reading-order.js';
 import { isCJKCharacter } from './text.js';
+import { indentsParagraphs } from './pdf-geometry.js';
 
 const TERMINAL = /(?:[.!?。！？…:：]["'”’»)\]）】]*|(?:https?:\/\/|www\.|doi:\s*|10\.\d{4,9}\/)\S+|\S+@\S+\.\w+)$/iu;
 const LIST_START = /^(?:[•●○◦▪▫‣∙·■□➢➤►✓✔\-–—*]\s|(?:\(?[0-9]{1,3}[.)]|\(?[a-z][.)]|\(?[ivx]{1,4}[.)])\s)/u;
@@ -18,6 +19,12 @@ const MIN_PROSE_SHARE = 0.3;
 const MAX_HEADING_UPPERCASE = 0.8;
 const MAX_SIDEBAR_SKIP = 6;
 const VERTICAL_TOLERANCE = 6;
+// With the PDF's lines: a last line that runs at least this far across its
+// block is full; one that stops short of this ends the paragraph.
+const FULL_LINE = 0.93;
+const SHORT_LINE = 0.6;
+// A first line indented less than this many line heights is not indented.
+const NO_INDENT = 0.3;
 
 // Joins paragraphs that a column, page, or float split. A join needs both a
 // layout boundary (the first piece ends its column or page and the second
@@ -29,6 +36,7 @@ export function stitchParagraphs(ir) {
     const pieces = indexPieces(ir.blocks, pages);
     const blocks = ir.blocks;
     pieces.numberedReferences = hasNumberedReferences(blocks);
+    pieces.indentsParagraphs = indentsParagraphs(blocks);
     const consumed = new Set();
     for (let index = 0; index < blocks.length; index++) {
         const block = blocks[index];
@@ -43,6 +51,7 @@ export function stitchParagraphs(ir) {
                 from: candidate.id,
                 boundary: found.boundary,
                 pageIndex: block.fragments.at(-1).pageIndex,
+                ...(found.geometry ? { geometry: true } : {}),
             });
             block.fragments.push(...candidate.fragments);
             block.mergedFrom.push(candidate.id, ...candidate.mergedFrom);
@@ -62,7 +71,7 @@ function findContinuation(block, blocks, from, pieces) {
     const next = nextFlowIndex(blocks, from);
     if (next < 0) return null;
     const candidate = blocks[next];
-    if (isStitchable(candidate) && textContinues(block, candidate)) {
+    if (isStitchable(candidate) && textContinues(block, candidate) && !endsShort(block)) {
         const boundary = joinBoundary(block, candidate, blocks, from, next, pieces)
             || referenceContinuation(block, candidate, blocks, from, next, pieces);
         // Across a float the sentence must visibly run on: the next part is
@@ -72,7 +81,44 @@ function findContinuation(block, blocks, from, pieces) {
             return { index: next, boundary };
         }
     }
+    const geometric = geometryContinuation(block, candidate, blocks, from, next, pieces);
+    if (geometric) return geometric;
     return findPastSidebar(block, blocks, next, pieces);
+}
+
+// The PDF's lines show a paragraph ending where the text cannot: its last
+// line stops well short of the block's width. A hyphen or a comma still
+// runs on.
+function endsShort(block) {
+    const geometry = block.fragments.at(-1)?.pdf;
+    return Boolean(geometry) && geometry.lines >= 2 && geometry.lastFill < SHORT_LINE
+        && !/[-,]$/u.test(lastText(block));
+}
+
+// A paragraph broken by a page or a column at the end of a sentence reads
+// as two. In a document that indents its paragraphs, the PDF shows the
+// difference: the first part's last line is full and the second part's
+// first line is not indented. Body text only, after the first page, where
+// the article's metadata sits.
+function geometryContinuation(block, candidate, blocks, from, next, pieces) {
+    if (!pieces.indentsParagraphs || !isStitchable(candidate)) return null;
+    if (block.role !== BLOCK_ROLE.BODY || candidate.role !== BLOCK_ROLE.BODY
+        || block.kind !== BLOCK_KIND.TEXT || candidate.kind !== BLOCK_KIND.TEXT) {
+        return null;
+    }
+    const last = block.fragments.at(-1);
+    const first = candidate.fragments[0];
+    if (!last?.pdf || !first?.pdf || last.pageIndex === 0 || first.pageIndex === 0) return null;
+    if (last.pdf.lines < 2 || last.pdf.lastFill < FULL_LINE || first.pdf.firstIndent >= NO_INDENT) return null;
+    const head = lastText(block);
+    const tail = firstText(candidate);
+    if (!head || !tail || /[:：]$/u.test(head) || LIST_START.test(tail) || CAPTION_START.test(tail)
+        || LABEL_START.test(tail) || REFERENCE_MARKER.test(tail)) {
+        return null;
+    }
+    if (!looksLikeProse(head, { minimum: true }) || !looksLikeProse(tail, { minimum: true })) return null;
+    const boundary = joinBoundary(block, candidate, blocks, from, next, pieces);
+    return boundary === 'page' || boundary === 'column' ? { index: next, boundary, geometry: true } : null;
 }
 
 // A page can open with a sidebar (PLOS and Nature put article metadata in a

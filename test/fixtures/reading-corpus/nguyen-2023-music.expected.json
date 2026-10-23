@@ -88,6 +88,92 @@
         "markdown": 55,
         "layout": 55
       }
+    },
+    "ir-pdf": {
+      "pages": 15,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 29,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 9036,
+        "found": 8981,
+        "ratio": 0.9939
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 1
+      },
+      "headings": {
+        "count": 25,
+        "levels": {
+          "2": 13,
+          "3": 12
+        },
+        "sequence": [
+          "2:c59ddd3f7ba6",
+          "2:5a4970c8a961",
+          "2:644a9c531916",
+          "3:746835c1e61c",
+          "3:0b2216383133",
+          "3:a3698177b02c",
+          "3:2a1569229441",
+          "3:20b9636731e0",
+          "3:e039008f5693",
+          "3:65d7d89178b4",
+          "3:d13d3b110b90",
+          "3:970d086a97af",
+          "2:9efcb930e4c1",
+          "3:0042e24cee22",
+          "3:d8ec705dc785",
+          "3:da2e5edd7eef",
+          "2:909e1d761ee4",
+          "2:9732439a0f7f",
+          "2:4e594618d734",
+          "2:a4d0293ea443",
+          "2:852408bfbc83",
+          "2:0beadcde4f5f",
+          "2:8f0fc0098df4",
+          "2:d448f50b5197",
+          "2:07a0b0962107"
+        ]
+      },
+      "sourceMap": {
+        "total": 120,
+        "covered": 120,
+        "ratio": 1,
+        "crossPage": 4
+      },
+      "floats": {
+        "markdown": {
+          "image": 2,
+          "captionedImage": 1,
+          "table": 4,
+          "algorithm": 0,
+          "code": 0,
+          "math": 0
+        },
+        "layout": {
+          "image": 2,
+          "chart": 0,
+          "table": 4,
+          "code": 0,
+          "captioned": 5
+        }
+      },
+      "references": {
+        "markdown": 55,
+        "layout": 55
+      }
     }
   }
 }

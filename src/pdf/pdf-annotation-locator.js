@@ -114,6 +114,33 @@ export class PDFAnnotationLocator {
         return index;
     }
 
+    // The text index of a PDF by its bytes alone, for a reader that has no
+    // item (the MinerU document pipeline). It shares the cache and the
+    // in-flight work of prepare(), so a conversion and the annotation index
+    // of the same PDF parse it once.
+    async indexFileData(fileData, { signal } = {}) {
+        this.#requireActive();
+        throwIfAborted(signal);
+        const sourceHash = await this.createSourceHash(fileData);
+        this.#requireActive();
+        throwIfAborted(signal);
+        validateSourceHash(sourceHash);
+        const cacheKey = await createPDFTextIndexCacheKey(
+            sourceHash,
+            this.engine.profile || 'pdf-text-index-v1'
+        );
+        this.#requireActive();
+        throwIfAborted(signal);
+        let task = this.inFlight.get(cacheKey);
+        if (!task || task.controller.signal.aborted) {
+            task = this.#createIndexTask(cacheKey, fileData);
+            this.inFlight.set(cacheKey, task);
+        }
+        const index = await this.#consumeIndexTask(task, signal);
+        if (!this.active) throw disposedError();
+        return index;
+    }
+
     async locate(itemID, text, options = {}) {
         this.#requireActive();
         throwIfAborted(options.signal);
