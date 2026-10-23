@@ -768,6 +768,7 @@ function translationMessages(source, targetLanguage, previousFailure = '') {
             'The user message is a JSON array of objects with id and sourceMarkdown fields.',
             'Return only a JSON array with exactly one object for every input object. Each object must contain the unchanged id and a translatedMarkdown string.',
             'Do not omit, duplicate, merge, split, or reorder entries.',
+            'An entry with a continuesFrom field continues the sentence of the entry with that id after a displayed equation; translate the two so they read as one sentence, but keep each in its own entry.',
             'Preserve Markdown and HTML structure, citations, URLs, DOI and arXiv identifiers, inline Markdown, LaTeX, numbers, units, author names, institutions, email addresses, ORCID values, and figure or table numbers accurately.',
             'Preserve the exact order and count of structural markers, including heading prefixes, list markers, blockquotes, and table shape.',
             'Copy every MKTEROPROTECTED<number>PLACEHOLDER token exactly once, unchanged, and in its original order.',
