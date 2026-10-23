@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 import { makeFigureInput, createTestPNG } from './helpers/figure-fixtures.js';
 import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
 import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import { sha256Hex } from '../src/core/sha256.js';
 
 const hash = data => sha256Hex(data, { crypto: webcrypto });
@@ -38,7 +38,7 @@ test('restores all panels and interior labels before prose preparation', async (
     const { input, bodyText, axisLabel } = makeFigureInput();
     const { restoration, counts } = service();
     const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
-    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
     assert.equal(document.figureMap.figures.length, 1);
     assert.equal(document.figureMap.figures[0].panels.length, 4);
     assert.ok(document.markdown.includes(bodyText));
@@ -112,7 +112,7 @@ test('allocates a readable noncolliding image beneath every supported archive ro
         input.assets.push(occupied);
         const before = structuredClone(input);
         const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
-        const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+        const document = await finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
         assert.equal(document.figureMap.figures.length, 1);
         const destination = document.figureMap.figures[0].render.assetPath;
         const assetPath = basePath ? `${basePath}/${destination}` : destination;

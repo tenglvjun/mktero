@@ -160,9 +160,7 @@ test('reports nested metric differences', () => {
 test('matches committed reading expectations for every local corpus archive', {
     skip: corpusDir ? false : `set ${READING_CORPUS_ENV} to a directory of MinerU result archives`,
 }, async () => {
-    for (const pipeline of ['legacy', 'ir']) {
-        const report = await checkReadingCorpus({ corpusDir, pipeline, log: () => {} });
-        assert.equal(report.failures.length, 0,
-            report.failures.map(failure => failure.message).join('\n'));
-    }
+    const report = await checkReadingCorpus({ corpusDir, log: () => {} });
+    assert.equal(report.failures.length, 0,
+        report.failures.map(failure => failure.message).join('\n'));
 });

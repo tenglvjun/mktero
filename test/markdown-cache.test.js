@@ -26,7 +26,7 @@ import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js
 import { makeFigureInput } from './helpers/figure-fixtures.js';
 import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
 import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
 import { parseHTML } from 'linkedom';
 
@@ -59,7 +59,7 @@ for (const failure of ['render-failed', 'missing-geometry', 'resource-limit']) {
         const draft = await service.restore(input, { fileData: Uint8Array.of(1) });
         assert.equal(draft.input.markdown, input.markdown);
         assert.deepEqual(draft.input.assets, input.assets);
-        const result = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+        const result = await finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
         await new MarkdownCache(options).put(CACHE_KEY, result);
         const loaded = await new MarkdownCache(options).get(CACHE_KEY);
         assert.equal(loaded.markdown, result.markdown);
@@ -701,7 +701,7 @@ test('persists a pending figure restoration input and rehydrates it from cached 
         now: () => 1_700_000_000_000,
     };
     const { input } = makeFigureInput();
-    const document = prepareMinerUResult(input);
+    const document = prepareFigureFixture(input);
     await new MarkdownCache(options).put(CACHE_KEY, document, {
         figureRestoration: { status: 'pending', input, completedFigureIds: ['fig-p0-b0'] },
     });
@@ -726,7 +726,7 @@ test('keeps the readable document when the stored restoration input is corrupted
         pathUtils: { join: path.join, filename: path.basename },
     };
     const { input } = makeFigureInput();
-    const document = prepareMinerUResult(input);
+    const document = prepareFigureFixture(input);
     await new MarkdownCache(options).put(CACHE_KEY, document, {
         figureRestoration: { status: 'pending', input },
     });

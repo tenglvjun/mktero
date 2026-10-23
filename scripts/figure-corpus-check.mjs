@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { extractMinerUResultFromZip } from '../src/mineru/zip-markdown.js';
-import { decodeMinerUFigureInput } from '../src/mineru/figure-layout-adapter.js';
+import { createMinerUFigureInput } from '../src/mineru/document/prepare.js';
 import { bindFigureSourceRanges } from '../src/figures/figure-source-binding.js';
 import { resolveFigureCandidates } from '../src/figures/figure-region-resolver.js';
 
@@ -148,7 +148,7 @@ async function findArchive(corpusDir, id) {
 
 function summarizeArchive(archive) {
     const raw = extractMinerUResultFromZip(archive);
-    const input = decodeMinerUFigureInput(raw);
+    const input = createMinerUFigureInput(raw);
     const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
     const figures = candidates
         .filter(candidate => candidate.decision === 'compose')

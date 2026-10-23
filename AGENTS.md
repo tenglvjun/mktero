@@ -66,7 +66,11 @@ documentation-only. Report any command that could not be run.
 - `src/i18n/`: English and Simplified Chinese user-facing copy.
 - `src/icons/`: bundled lucide icon helpers.
 - `src/mineru/`: MinerU API client, parsing profile, ZIP extraction, binary
-  helpers, and Markdown normalization.
+  helpers, and the raw result archive.
+- `src/mineru/document/`: the MinerU reading document. It ingests `layout.json`
+  (or the content list) into a block IR, classifies page chrome, repairs reading
+  order, stitches paragraphs across pages, columns and floats, and serializes
+  Markdown with its exact source map and figure-pipeline input.
 - `src/mistral/`: Mistral OCR client, parsing profile, and result normalization.
 - `src/pdf/`: PDF.js text engine, page crops, annotation location, and outlines.
 - `src/platform/`: Zotero/runtime adapters for aborting requests and Zotero APIs.

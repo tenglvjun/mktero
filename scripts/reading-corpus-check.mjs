@@ -17,7 +17,7 @@ export const READING_CORPUS_FALLBACK_ENV = 'MKTERO_FIGURE_CORPUS';
 export const READING_CORPUS_EXPECTATION_DIR = fileURLToPath(
     new URL('../test/fixtures/reading-corpus/', import.meta.url)
 );
-export const READING_PIPELINES = ['legacy', 'ir'];
+export const READING_PIPELINES = ['ir'];
 
 const PARSER = markdownParser.configure(GFM);
 const CHROME_TYPES = new Set(['header', 'footer', 'page_number', 'aside_text']);
@@ -392,10 +392,6 @@ export function summarizeReadingDocument(prepared, layout) {
 // Corpus runner.
 
 export async function loadPipeline(name) {
-    if (name === 'legacy') {
-        const { prepareMinerUResult } = await import('../src/mineru/mineru-result.js');
-        return raw => prepareMinerUResult(raw);
-    }
     if (name === 'ir') {
         const { prepareMinerUDocument } = await import('../src/mineru/document/prepare.js');
         return raw => prepareMinerUDocument(raw);
@@ -405,7 +401,7 @@ export async function loadPipeline(name) {
 
 export async function checkReadingCorpus({
     corpusDir,
-    pipeline = 'legacy',
+    pipeline = 'ir',
     update = false,
     ids = null,
     log = console.log,
@@ -598,7 +594,7 @@ async function main() {
     const ids = option('--ids')?.split(',').filter(Boolean) || null;
     const report = await checkReadingCorpus({
         corpusDir,
-        pipeline: option('--pipeline') || 'legacy',
+        pipeline: option('--pipeline') || 'ir',
         update: args.includes('--update'),
         ids,
         log: args.includes('--json') ? () => {} : console.log,

@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 import { makeFigureInput, createTestPNG } from './helpers/figure-fixtures.js';
 import { sha256Hex } from '../src/core/sha256.js';
 import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import { createProgressiveFigureRunner } from '../src/figures/figure-progressive-runner.js';
 import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
 
@@ -31,7 +31,7 @@ test('publishes one provisional document, patches each figure, and prepares twic
     const events = [];
     const runner = createProgressiveFigureRunner({
         restoration: progressiveService(),
-        prepare: value => { prepares += 1; return prepareMinerUResult(value); },
+        prepare: value => { prepares += 1; return prepareFigureFixture(value); },
         hash,
         finalize: async (source, draft, { prepare }) => ({
             ...(await prepare(draft.input)), figureMap: { version: 1, stub: true },
@@ -94,7 +94,7 @@ test('emits one provisional document from the original input when onPlan is neve
     });
     const runner = createProgressiveFigureRunner({
         restoration,
-        prepare: value => { prepares += 1; return prepareMinerUResult(value); },
+        prepare: value => { prepares += 1; return prepareFigureFixture(value); },
         hash,
     });
     await runner(input, { fileData: Uint8Array.of(1), onEvent: event => events.push(event) });
@@ -107,10 +107,10 @@ test('progressive final document matches the synchronous restoration path', asyn
     const { input } = makeFigureInput();
     const syncDraft = await progressiveService().restore(input, { fileData: Uint8Array.of(1) });
     const syncDocument = await finalizeRestoredDocument(input, syncDraft, {
-        prepare: prepareMinerUResult, hash,
+        prepare: prepareFigureFixture, hash,
     });
     const runner = createProgressiveFigureRunner({
-        restoration: progressiveService(), prepare: prepareMinerUResult, hash,
+        restoration: progressiveService(), prepare: prepareFigureFixture, hash,
     });
     const progressiveDocument = await runner(input, { fileData: Uint8Array.of(1) });
     assert.equal(progressiveDocument.markdown, syncDocument.markdown);

@@ -1,10 +1,10 @@
 import { strToU8, zipSync } from 'fflate';
 import { extractMinerUResultFromZip } from '../../src/mineru/zip-markdown.js';
-import { decodeMinerUFigureInput } from '../../src/mineru/figure-layout-adapter.js';
+import { createMinerUFigureInput } from '../../src/mineru/document/prepare.js';
 import { decodeMistralResult } from '../../src/mistral/mistral-result.js';
 import { createTestPNG } from './figure-fixtures.js';
 
-export async function createFigureProviderFixture(caseID, provider, { fileData, manifest, sourceOrder = 'interleaved' }) {
+export async function createFigureProviderFixture(caseID, provider, { fileData, manifest }) {
     if (!['mineru', 'mistral'].includes(provider) || !manifest.cases[caseID]) throw new Error('Unknown fixture');
     const scene = manifest.cases[caseID];
     const assets = {};
@@ -17,7 +17,9 @@ export async function createFigureProviderFixture(caseID, provider, { fileData, 
         const images = [];
         const box = value => value && [value[0] * page.width / 1000, value[1] * page.height / 1000,
             value[2] * page.width / 1000, value[3] * page.height / 1000];
-        const textBlock = (content, bbox, type = 'text') => ({ type, bbox: box(bbox), content });
+        // MinerU writes each text block as lines of spans; Mistral reads `content`.
+        const textBlock = (content, bbox, type = 'text') => ({ type, bbox: box(bbox), content,
+            lines: [{ bbox: box(bbox), spans: [{ type: 'text', content, bbox: box(bbox) }] }] });
         for (const heading of page.headings.slice(0, 1)) {
             chunks.push('# ' + heading.text);
             const block = textBlock(heading.text, heading.bbox, 'title');
@@ -26,6 +28,9 @@ export async function createFigureProviderFixture(caseID, provider, { fileData, 
         }
         for (const [groupIndex, group] of page.groups.entries()) {
             const children = [];
+            // MinerU lists text drawn inside a figure as its own blocks after
+            // the figure, not as children of it.
+            const interior = [];
             const caption = textBlock(group.caption, group.captionBBox, 'caption');
             const addCaption = () => {
                 chunks.push(group.caption); blocks.push(caption);
@@ -46,25 +51,26 @@ export async function createFigureProviderFixture(caseID, provider, { fileData, 
                     [bbox[0] + 20, bbox[1] + 15, bbox[0] + 45, bbox[1] + 35]);
                 chunks.push(panelLabel.content);
                 blocks.push(panelLabel);
-                children.push(panelLabel);
+                interior.push(panelLabel);
                 const labelBox = [bbox[0] + 20, bbox[1] + 15, bbox[2] - 20, bbox[1] + 35];
                 chunks.push('Axis value');
                 const label = textBlock('Axis value', labelBox);
                 blocks.push(label);
-                children.push(label);
+                interior.push(label);
                 if (caseID === 'grid-2x2' && index === 0) chunks.push(page.bodyText);
             }
             if (group.legend) {
                 const legend = textBlock(group.legend.text, group.legend.bbox);
                 chunks.push(group.legend.text);
                 blocks.push(legend);
-                children.push(legend);
+                interior.push(legend);
             }
             if (caseID !== 'caption-above') addCaption();
             paraBlocks.push({ type: 'image', bbox: box([Math.min(...group.panels.map(b => b[0]), group.captionBBox[0]),
                 Math.min(...group.panels.map(b => b[1]), group.captionBBox[1]),
                 Math.max(...group.panels.map(b => b[2]), group.captionBBox[2]),
                 Math.max(...group.panels.map(b => b[3]), group.captionBBox[3])]), blocks: children });
+            paraBlocks.push(...interior);
         }
         for (const column of page.columns || []) {
             chunks.push(column.text);
@@ -82,7 +88,7 @@ export async function createFigureProviderFixture(caseID, provider, { fileData, 
         const body = textBlock(page.bodyText, page.bodyBBox);
         blocks.push(body);
         paraBlocks.push(body);
-        if (provider === 'mineru' && sourceOrder === 'interleaved' && images.length > 1) {
+        if (provider === 'mineru' && images.length > 1) {
             const firstPath = images[0].id;
             const lastPath = images.at(-1).id;
             const firstImage = chunks.splice(chunks.indexOf(`![](${firstPath})`), 1)[0];
@@ -117,7 +123,7 @@ export async function createFigureProviderFixture(caseID, provider, { fileData, 
             'full.md': strToU8(pages.map(page => page.markdown).join('\n\n')),
             'paper_middle.json': strToU8(JSON.stringify({ _backend: 'vlm', _version_name: '3.4.5', pdf_info: pdfInfo })),
         });
-        input = decodeMinerUFigureInput(extractMinerUResultFromZip(archive));
+        input = createMinerUFigureInput(extractMinerUResultFromZip(archive));
     }
     else {
         input = decodeMistralResult({ model: 'mistral-ocr-4-1', pages, usage_info: { pages_processed: pages.length } });
@@ -129,16 +135,12 @@ export async function createFigureProviderFixture(caseID, provider, { fileData, 
             delete page.geometryReason;
         }
     }
-    // Interleaved OCR is bounded by two same-page image anchors. The ordinary
-    // trailing-caption variant deliberately lacks that evidence in MinerU.
-    const expected = provider === 'mineru' && sourceOrder === 'linear' ? {
-        ...scene.expected,
-        figures: caseID === 'independent' ? 1 : 0,
-        panelCounts: caseID === 'independent' ? [1] : [],
-        consumedTexts: [],
-        preserve: caseID !== 'independent',
-        preserveReason: caseID === 'uncertain' ? 'missing-geometry' : 'ambiguous-source-range',
-    } : scene.expected;
+    // The two `continued` pages print the same heading and body lines at the
+    // page edges, differing only in a page number. MinerU's document pipeline
+    // reads lines repeated at one edge as running headers and footers.
+    const expected = provider === 'mineru' && caseID === 'continued'
+        ? { ...scene.expected, retainedTexts: [] }
+        : scene.expected;
     return { input, fileData, expected, pageGeometries: manifest.pageGeometries, scene,
         coordinateEvidence: provider === 'mistral' ? 'synthetic-display-cropbox' : 'mineru-vlm-3.4.5' };
 }

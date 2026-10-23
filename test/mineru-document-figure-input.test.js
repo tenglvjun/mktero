@@ -76,6 +76,34 @@ function service() {
     });
 }
 
+function layoutBundle(pages, names, identity = {}) {
+    return {
+        markdown: 'full.md',
+        assets: names.map(name => ({ path: `images/${name}`, mimeType: 'image/jpeg', data: new Uint8Array([1]) })),
+        assetBasePath: '',
+        layout: projectMinerULayout({
+            _backend: 'hybrid',
+            _version_name: '3.4.4',
+            ...identity,
+            pdf_info: pages,
+        }),
+        contentList: [],
+    };
+}
+
+function layoutPage(pageIndex, blocks) {
+    return { page_idx: pageIndex, page_size: PAGE, discarded_blocks: [], para_blocks: blocks };
+}
+
+function imageBlock(bbox, name, children = []) {
+    return {
+        type: 'image', bbox, blocks: [
+            { type: 'image_body', bbox, lines: [line(bbox, { type: 'image', image_path: name })] },
+            ...children,
+        ],
+    };
+}
+
 test('names figure blocks by serialized pieces with exact Markdown ranges', () => {
     const input = createMinerUFigureInput(bundle());
     validateFigureInput(input);
@@ -137,8 +165,9 @@ test('an in-progress document equals the first serialization', async () => {
 test('prepares each kind of MinerU input exactly once', () => {
     const prepared = prepareMinerUResult(bundle());
     assert.equal(prepareMinerUResult(prepared), prepared);
-    const edited = { markdown: 'edited', userEdited: true, sourceMap: [] };
+    const edited = { markdown: 'edited', userEdited: true, sourceMap: [], chromeRanges: [{ from: 0, to: 6 }] };
     assert.equal(prepareMinerUResult(edited), edited);
+    assert.deepEqual(edited.chromeRanges, [{ from: 0, to: 6 }]);
     const earlier = { markdown: 'earlier pipeline', sourceMap: [], chromeRanges: [] };
     assert.equal(prepareMinerUResult(earlier), earlier);
     assert.equal(prepareMinerUResult({ markdown: '# Raw', assets: [] }).markdown, '# Raw');
@@ -150,4 +179,179 @@ test('falls back to the Markdown alone when a bundle has no structure', () => {
     assert.equal(input.markdown, 'Plain\ntext');
     assert.deepEqual(input.blocks, []);
     assert.equal(buildMinerUDocumentIR({ markdown: 'x' }), null);
+});
+
+test('splits one image block into span panels and composes them', () => {
+    const input = createMinerUFigureInput(layoutBundle([layoutPage(0, [{
+        type: 'image', bbox: [100, 80, 900, 760], blocks: [
+            { type: 'image_body', bbox: [100, 100, 450, 700], lines: [line([100, 100, 450, 700], { type: 'image', image_path: 'a.jpg' })] },
+            { type: 'image_body', bbox: [500, 100, 900, 700], lines: [line([500, 100, 900, 700], { type: 'image', image_path: 'b.jpg' })] },
+            { type: 'image_caption', bbox: [100, 710, 900, 750], lines: [line([100, 710, 900, 750], 'Figure 1. Two panels.')] },
+        ],
+    }])], ['a.jpg', 'b.jpg']));
+    const panels = input.blocks.filter(block => block.role === 'panel');
+    assert.deepEqual(panels.map(block => block.bbox), [[100, 100, 450, 700], [500, 100, 900, 700]]);
+    const caption = input.blocks.find(block => block.role === 'caption');
+    assert.equal(caption.parentId, panels[0].parentId);
+    assert.equal(caption.text, 'Figure 1. Two panels.');
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose', candidates[0].reason);
+    assert.equal(candidates[0].panelBlockIds.length, 2);
+    assert.equal(candidates[0].captionBlockIds.length, 1);
+});
+
+test('keeps blocks when the layout backend or version is unsupported', () => {
+    for (const identity of [
+        { _backend: 'pipeline', _version_name: '3.4.5' },
+        { _backend: 'vlm', _version_name: '999.0.0' },
+    ]) {
+        const input = createMinerUFigureInput(layoutBundle(
+            [layoutPage(0, [imageBlock([100, 100, 400, 400], 'a.jpg')])],
+            ['a.jpg'],
+            identity,
+        ));
+        assert.equal(input.pages[0].coordinateFrame, 'unknown', JSON.stringify(identity));
+        assert.ok(input.blocks.some(block => block.role === 'panel'), JSON.stringify(identity));
+    }
+});
+
+test('uses display-cropbox for vlm 3.4.5 and hybrid 3.4.4 layouts', () => {
+    for (const identity of [
+        { _backend: 'vlm', _version_name: '3.4.5' },
+        { _backend: 'hybrid', _version_name: '3.4.4' },
+    ]) {
+        const input = createMinerUFigureInput(layoutBundle(
+            [layoutPage(0, [imageBlock([100, 100, 400, 400], 'a.jpg')])],
+            ['a.jpg'],
+            identity,
+        ));
+        assert.equal(input.pages[0].coordinateFrame, 'display-cropbox', JSON.stringify(identity));
+    }
+});
+
+test('composes a sibling caption and keeps short interior text with the figure', () => {
+    const input = createMinerUFigureInput(layoutBundle([layoutPage(0, [
+        text([60, 160, 540, 190], 'Figure 1. Study flowchart.'),
+        imageBlock([60, 220, 540, 700], 'a.jpg'),
+        text([200, 300, 400, 330], 'Group A results'),
+    ])], ['a.jpg']));
+    const caption = input.blocks.find(block => block.role === 'caption');
+    assert.equal(caption.text, 'Figure 1. Study flowchart.');
+    assert.equal(input.markdown.includes('Group A results'), false);
+    const interior = input.blocks.find(block => block.id.endsWith('#interior'));
+    assert.equal(interior.text, 'Group A results');
+    const panel = input.blocks.find(block => block.role === 'panel');
+    assert.ok(interior.bbox[0] >= panel.bbox[0] && interior.bbox[1] >= panel.bbox[1]
+        && interior.bbox[2] <= panel.bbox[2] && interior.bbox[3] <= panel.bbox[3]);
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose', candidates[0].reason);
+    assert.deepEqual(candidates[0].captionBlockIds, [caption.id]);
+});
+
+test('composes three adjacent charts without taking the following paragraph as a caption', () => {
+    const chart = (bbox, name) => ({
+        type: 'chart', bbox, blocks: [
+            { type: 'chart_body', bbox, lines: [line(bbox, { type: 'chart', image_path: name })] },
+        ],
+    });
+    const input = createMinerUFigureInput(layoutBundle([layoutPage(0, [
+        chart([60, 100, 220, 280], 'a.jpg'),
+        chart([250, 100, 420, 280], 'b.jpg'),
+        chart([450, 100, 620, 280], 'c.jpg'),
+        text([60, 300, 620, 340], 'Figure 1. Three panels of the result.'),
+        text([60, 360, 620, 420], 'The following sentence explains the result in ordinary prose.'),
+    ])], ['a.jpg', 'b.jpg', 'c.jpg']));
+    const paragraph = input.blocks.find(block => block.text.startsWith('The following sentence'));
+    assert.notEqual(paragraph.role, 'caption');
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose', candidates[0].reason);
+    assert.equal(candidates[0].panelBlockIds.length, 3);
+    assert.equal(candidates[0].captionBlockIds.length, 1);
+    assert.equal(candidates[0].captionBlockIds.includes(paragraph.id), false);
+});
+
+test('composes a 2x2 chart grid and owns its panel labels', () => {
+    const chart = (bbox, name, labelBox, label) => ({
+        type: 'chart', bbox, blocks: [
+            { type: 'chart_caption', bbox: labelBox, lines: [line(labelBox, label)] },
+            { type: 'chart_body', bbox, lines: [line(bbox, { type: 'chart', image_path: name })] },
+        ],
+    });
+    const input = createMinerUFigureInput(layoutBundle([layoutPage(0, [
+        chart([60, 80, 280, 240], 'a.jpg', [70, 50, 100, 70], 'A'),
+        chart([320, 80, 540, 240], 'b.jpg', [330, 50, 360, 70], 'B'),
+        chart([60, 300, 280, 460], 'c.jpg', [70, 270, 100, 290], 'C'),
+        chart([320, 300, 540, 460], 'd.jpg', [330, 270, 360, 290], 'D'),
+        text([60, 480, 540, 530], 'Fig. 1. Four panels of one result.'),
+    ])], ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg']));
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose', candidates[0].reason);
+    assert.equal(candidates[0].panelBlockIds.length, 4);
+    assert.equal(candidates[0].captionBlockIds.length, 1);
+    const owned = candidates[0].ownedTextBlockIds.map(id => input.blocks.find(block => block.id === id).text);
+    assert.deepEqual(owned, ['A', 'B', 'C', 'D']);
+});
+
+test('composes side-by-side panels and owns their footnotes under an unpunctuated caption', () => {
+    const input = createMinerUFigureInput(layoutBundle([layoutPage(0, [
+        { type: 'image', bbox: [60, 200, 290, 480], blocks: [
+            { type: 'image_body', bbox: [60, 200, 290, 460], lines: [line([60, 200, 290, 460], { type: 'image', image_path: 'a.jpg' })] },
+            { type: 'image_footnote', bbox: [65, 462, 285, 478], lines: [line([65, 462, 285, 478], '(a) Left panel.')] },
+        ] },
+        { type: 'chart', bbox: [310, 200, 540, 480], blocks: [
+            { type: 'chart_body', bbox: [310, 200, 540, 460], lines: [line([310, 200, 540, 460], { type: 'chart', image_path: 'b.jpg' })] },
+            { type: 'chart_footnote', bbox: [315, 462, 535, 478], lines: [line([315, 462, 535, 478], '(b) Right panel.')] },
+        ] },
+        text([50, 500, 550, 560], 'Figure 1 The impact of reusable skills on sleep.'),
+    ])], ['a.jpg', 'b.jpg']));
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].decision, 'compose', candidates[0].reason);
+    assert.equal(candidates[0].panelBlockIds.length, 2);
+    const owned = candidates[0].ownedTextBlockIds.map(id => input.blocks.find(block => block.id === id).text);
+    assert.deepEqual(owned, ['(a) Left panel.', '(b) Right panel.']);
+    const caption = input.blocks.find(block => block.id === candidates[0].captionBlockIds[0]);
+    assert.equal(caption.text, 'Figure 1 The impact of reusable skills on sleep.');
+});
+
+test('keeps a valid page frame when a later image block is empty', () => {
+    const input = createMinerUFigureInput(layoutBundle([
+        layoutPage(0, [imageBlock([100, 100, 800, 700], 'a.jpg')]),
+        layoutPage(1, [{ type: 'image', bbox: [100, 100, 800, 700], blocks: [] }]),
+    ], ['a.jpg']));
+    assert.equal(input.pages[0].coordinateFrame, 'display-cropbox');
+    assert.ok(input.blocks.some(block => block.pageIndex === 0 && block.bboxKind === 'visual-body'));
+    assert.equal(input.blocks.some(block => block.pageIndex === 1 && block.role === 'panel'), false);
+});
+
+test('turns only a figure-captioned content-list table into an image', () => {
+    const prepared = prepareMinerUDocument({
+        markdown: 'ignored',
+        assets: [
+            { path: 'images/fig4.png', mimeType: 'image/png', data: new Uint8Array([1]) },
+            { path: 'images/table2.png', mimeType: 'image/png', data: new Uint8Array([1]) },
+        ],
+        contentList: [
+            {
+                type: 'table', text: '<table><tr><td>Study</td></tr></table>',
+                captions: ['Fig. 4. Forest plot.'], assetPath: 'images/fig4.png',
+                pageIndex: 0, bbox: [100, 100, 900, 400],
+            },
+            {
+                type: 'table', text: '<table><tr><td>A</td></tr></table>',
+                captions: ['Table 2. Values.'], assetPath: 'images/table2.png',
+                pageIndex: 0, bbox: [100, 420, 900, 700],
+            },
+        ],
+    });
+    assert.equal(prepared.markdown, [
+        '![Fig. 4. Forest plot.](images/fig4.png)',
+        'Table 2. Values.',
+        '<table><tr><td>A</td></tr></table>',
+    ].join('\n\n'));
+    assert.equal(prepared.markdown.includes('table2.png'), false);
 });

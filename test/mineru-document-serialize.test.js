@@ -28,6 +28,25 @@ function page(pageIndex, blocks, discarded = []) {
     return { page_idx: pageIndex, page_size: PAGE, para_blocks: blocks, discarded_blocks: discarded };
 }
 
+function imageBlock(bbox, name, children = []) {
+    return {
+        type: 'image',
+        bbox,
+        blocks: [
+            { type: 'image_body', bbox, lines: [line(bbox, { type: 'image', image_path: name })] },
+            ...children,
+        ],
+    };
+}
+
+function captionChild(bbox, content) {
+    return { type: 'image_caption', bbox, lines: [line(bbox, content)] };
+}
+
+function jpeg(name) {
+    return { path: `images/${name}`, mimeType: 'image/jpeg', data: new Uint8Array([1]) };
+}
+
 function bundle(pages, assets = [{ path: IMAGE, mimeType: 'image/jpeg', data: new Uint8Array([1]) }]) {
     return {
         markdown: 'MinerU full.md',
@@ -233,4 +252,147 @@ test('falls back to the content list, then to MinerU Markdown', () => {
     assert.equal(fromMarkdown.markdown, '# Raw');
     assert.equal(fromMarkdown.documentStructure, undefined);
     assert.deepEqual(fromMarkdown.chromeRanges, []);
+});
+
+test('writes body above side-by-side images before their layout marker', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        imageBlock([100, 300, 480, 600], 'a.jpg'),
+        imageBlock([520, 300, 900, 600], 'b.jpg'),
+        text([100, 80, 900, 160], 'The body paragraph sits above both panels of the figure.'),
+        text([100, 620, 900, 660], 'Figure 1. Two panels side by side.'),
+    ])], ['a.jpg', 'b.jpg'].map(jpeg)));
+    assert.equal(prepared.markdown, [
+        'The body paragraph sits above both panels of the figure.',
+        '',
+        '<!-- mktero-figure-layout: columns=2 rows=2 -->',
+        '![](images/a.jpg)',
+        '',
+        '![](images/b.jpg)',
+        '',
+        'Figure 1. Two panels side by side.',
+    ].join('\n'));
+});
+
+test('does not group adjacent images that each have their own figure caption', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        imageBlock([100, 100, 480, 400], 'a.jpg', [captionChild([100, 400, 480, 440], 'Fig. 1. Left panel alone.')]),
+        imageBlock([520, 100, 900, 400], 'b.jpg', [captionChild([520, 400, 900, 440], 'Fig. 2. Right panel alone.')]),
+    ])], ['a.jpg', 'b.jpg'].map(jpeg)));
+    assert.equal(prepared.markdown.includes('mktero-figure-layout'), false);
+    assert.equal(prepared.markdown, [
+        '![Fig. 1. Left panel alone.](images/a.jpg)',
+        '![Fig. 2. Right panel alone.](images/b.jpg)',
+    ].join('\n\n'));
+});
+
+test('marks seven captioned panels as a 3,3,1 grid', () => {
+    const boxes = [
+        [50, 100, 300, 300], [350, 100, 600, 300], [650, 100, 900, 300],
+        [50, 350, 300, 550], [350, 350, 600, 550], [650, 350, 900, 550],
+        [50, 600, 300, 800],
+    ];
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        ...boxes.map((bbox, index) => imageBlock(bbox, `p${index}.jpg`)),
+        text([50, 820, 900, 860], 'Figure 4. Seven panels in a grid.'),
+    ])], boxes.map((_, index) => jpeg(`p${index}.jpg`))));
+    assert.match(prepared.markdown, /^<!-- mktero-figure-layout: columns=3 rows=3,3,1 -->\n!\[\]\(images\/p0\.jpg\)/u);
+    assert.ok(prepared.markdown.endsWith('Figure 4. Seven panels in a grid.'));
+    assert.equal(prepared.markdown.match(/!\[\]\(images\/p\d\.jpg\)/gu).length, 7);
+});
+
+test('marks stacked panels separately from a neighbouring captioned figure', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        imageBlock([200, 100, 700, 280], 'a.jpg'),
+        imageBlock([200, 300, 700, 480], 'b.jpg'),
+        text([200, 500, 700, 540], 'Fig. 5. Stacked panels of one result.'),
+        imageBlock([100, 600, 480, 900], 'c.jpg', [
+            captionChild([100, 860, 480, 900], 'Fig. 6. A neighbouring result.'),
+        ]),
+    ])], ['a.jpg', 'b.jpg', 'c.jpg'].map(jpeg)));
+    assert.equal(prepared.markdown, [
+        '<!-- mktero-figure-layout: columns=1 rows=1,1 -->',
+        '![](images/a.jpg)',
+        '',
+        '![](images/b.jpg)',
+        '',
+        'Fig. 5. Stacked panels of one result.',
+        '',
+        '![Fig. 6. A neighbouring result.](images/c.jpg)',
+    ].join('\n'));
+    assert.equal(prepared.markdown.match(/mktero-figure-layout/gu).length, 1);
+});
+
+test('uses a caption child that MinerU listed before the image body', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [{
+        type: 'image', bbox: [100, 80, 900, 500], blocks: [
+            captionChild([100, 80, 900, 110], 'Fig. 1 The impact of the method on sleep.'),
+            { type: 'image_body', bbox: [100, 120, 900, 500], lines: [line([100, 120, 900, 500], { type: 'image', image_path: 'a.jpg' })] },
+        ],
+    }])]));
+    assert.equal(prepared.markdown, '![Fig. 1 The impact of the method on sleep.](images/a.jpg)');
+});
+
+test('keeps pipe and unpunctuated caption children as the image alt', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        imageBlock([100, 100, 900, 400], 'a.jpg', [captionChild([100, 410, 900, 440], 'Figure 2 | Overview of the framework.')]),
+        imageBlock([100, 500, 900, 800], 'b.jpg', [captionChild([100, 810, 900, 840], 'Fig. 1 The impact of the method on sleep.')]),
+    ])], ['a.jpg', 'b.jpg'].map(jpeg)));
+    assert.equal(prepared.markdown, [
+        '![Figure 2 | Overview of the framework.](images/a.jpg)',
+        '![Fig. 1 The impact of the method on sleep.](images/b.jpg)',
+    ].join('\n\n'));
+});
+
+test('does not write a shared caption above several panels into the first alt', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        text([100, 80, 900, 120], 'Figure 1. Shared caption above the panels.'),
+        imageBlock([100, 140, 480, 400], 'a.jpg'),
+        imageBlock([520, 140, 900, 400], 'b.jpg'),
+    ])], ['a.jpg', 'b.jpg'].map(jpeg)));
+    assert.equal(prepared.markdown, [
+        '<!-- mktero-figure-layout: columns=2 rows=2 -->',
+        'Figure 1. Shared caption above the panels.',
+        '',
+        '![](images/a.jpg)',
+        '',
+        '![](images/b.jpg)',
+    ].join('\n'));
+    assert.equal(prepared.markdown.includes('![Figure 1'), false);
+});
+
+test('keeps a prose figure mention as body and an uncaptioned image alt empty', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        text([100, 40, 900, 80], 'Figure 1 shows the result of the proposed method.'),
+        imageBlock([100, 100, 400, 300], 'a.jpg'),
+    ])]));
+    assert.equal(prepared.markdown, 'Figure 1 shows the result of the proposed method.\n\n![](images/a.jpg)');
+});
+
+test('does not turn a reference bullet into a Markdown list item', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        text([100, 40, 300, 60], 'References', 'title'),
+        { type: 'ref_text', bbox: [100, 80, 900, 120], lines: [line([100, 80, 900, 120], '• Jones P. Second study in the list.')] },
+    ])]));
+    assert.match(prepared.markdown, /• Jones P\. Second study in the list\./u);
+    assert.equal(prepared.markdown.includes('- '), false);
+});
+
+test('keeps a table-captioned crop and a figure-captioned table without an image as HTML', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        { type: 'table', bbox: [100, 100, 900, 400], blocks: [
+            { type: 'table_caption', bbox: [100, 100, 900, 120], lines: [line([100, 100, 900, 120], 'Table 1. Values.')] },
+            { type: 'table_body', bbox: [100, 120, 900, 400], lines: [line([100, 120, 900, 400], { type: 'table', html: '<table><tr><td>1</td></tr></table>', image_path: 'a.jpg' })] },
+        ] },
+        { type: 'table', bbox: [100, 500, 900, 800], blocks: [
+            { type: 'table_caption', bbox: [100, 500, 900, 520], lines: [line([100, 500, 900, 520], 'Figure 5. Forest plot.')] },
+            { type: 'table_body', bbox: [100, 520, 900, 800], lines: [line([100, 520, 900, 800], { type: 'table', html: '<table><tr><td>x</td></tr></table>' })] },
+        ] },
+    ])]));
+    assert.equal(prepared.markdown, [
+        'Table 1. Values.',
+        '<table><tr><td>1</td></tr></table>',
+        'Figure 5. Forest plot.',
+        '<table><tr><td>x</td></tr></table>',
+    ].join('\n\n'));
+    assert.equal(prepared.markdown.includes('!['), false);
 });

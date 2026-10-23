@@ -6,7 +6,7 @@ import { bindFigureSourceRanges } from '../src/figures/figure-source-binding.js'
 import { resolveFigureCandidates } from '../src/figures/figure-region-resolver.js';
 import { composeFigureDraft } from '../src/figures/figure-transaction.js';
 import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import { sha256Hex } from '../src/core/sha256.js';
 import { validateFigureMap } from '../src/figures/figure-model.js';
 
@@ -24,7 +24,7 @@ function fixture() {
 
 test('binds the final image and caption to the Markdown hash and separate PDF locations', async () => {
     const { input, draft } = fixture();
-    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
     assert.equal(document.figureMap.figures.length, 1);
     const figure = document.figureMap.figures[0];
     assert.ok(document.markdown.slice(figure.render.range.from, figure.render.range.to)
@@ -37,7 +37,7 @@ test('binds the final image and caption to the Markdown hash and separate PDF lo
     assert.doesNotThrow(() => validateFigureMap(document.figureMap, {
         ...document, persisted: true, markdownHash: document.figureMap.markdownHash,
     }));
-    assert.deepEqual(prepareMinerUResult(document), document);
+    assert.deepEqual(prepareFigureFixture(document), document);
     assert.equal(document.providerState, undefined);
     assert.equal(document.blocks, undefined);
 });
@@ -58,7 +58,7 @@ test('does not publish a restored document after cancellation during final hashi
     const { input, draft } = fixture();
     const controller = new AbortController();
     await assert.rejects(finalizeRestoredDocument(input, draft, {
-        prepare: prepareMinerUResult, signal: controller.signal,
+        prepare: prepareFigureFixture, signal: controller.signal,
         hash: async data => { controller.abort(); return hash(data); },
     }), { name: 'AbortError' });
 });
@@ -82,7 +82,7 @@ test('keeps generated image destinations relative even when the archive root is 
     const candidate = resolveFigureCandidates(input).find(value => value.decision === 'compose');
     const draft = composeFigureDraft(input, [{ candidate, assetPath: 'generated/figures/restored.png',
         crop: { data: createTestPNG(), mimeType: 'image/png', width: 8, height: 8 } }]);
-    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
     const figure = document.figureMap.figures[0];
     assert.ok(figure);
     assert.equal(document.assets.at(-1).path, 'generated/figures/restored.png');

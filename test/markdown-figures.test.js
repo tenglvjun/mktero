@@ -5,13 +5,13 @@ import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outl
 import {
     findAcademicFigureGroups,
     findAcademicFigures,
+    normalizeMarkdownFigureCaptions,
     normalizeMisassignedAcademicCaptions,
     parseAcademicFigureCaption,
     parseAcademicTableCaption,
     parseLooseAcademicFigureCaption,
     splitTrailingAcademicFigureCaption,
 } from '../src/markdown/markdown-figures.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
 
 function shiftedABFigureMarkdown() {
     return [
@@ -135,8 +135,14 @@ test('moves a shared (a)/(b) caption off the following figure images', () => {
     );
 });
 
-test('reassigns shifted (a)/(b) figure captions during MinerU preparation', () => {
-    const result = prepareMinerUResult({ markdown: shiftedABFigureMarkdown() });
+// Markdown written by an OCR provider, as the Mistral preparer and the
+// renderer normalize it.
+function normalizeProviderMarkdown(markdown) {
+    return { markdown: normalizeMisassignedAcademicCaptions(normalizeMarkdownFigureCaptions(markdown)) };
+}
+
+test('reassigns shifted (a)/(b) figure captions in provider Markdown', () => {
+    const result = normalizeProviderMarkdown(shiftedABFigureMarkdown());
 
     assert.deepEqual(
         findAcademicFigures(result.markdown).map(figure => figure.caption.label),
@@ -252,10 +258,8 @@ test('renders blank-separated (a)/(b) panels under the shifted figure captions',
     assert.doesNotMatch(barHTML, /Fig\. 7\./);
 });
 
-test('prepares blank-separated (a)/(b) caption shifts from raw MinerU Markdown', () => {
-    const result = prepareMinerUResult({
-        markdown: blankSeparatedABFigureRawMarkdown(),
-    });
+test('normalizes blank-separated (a)/(b) caption shifts in raw provider Markdown', () => {
+    const result = normalizeProviderMarkdown(blankSeparatedABFigureRawMarkdown());
 
     assert.deepEqual(
         findAcademicFigures(result.markdown).map(figure => figure.caption.label),

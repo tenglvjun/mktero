@@ -154,3 +154,41 @@ test('extracts the projected layout and the derived detailed layout from a ZIP',
     assert.equal(broken.detailedLayout, undefined);
     assert.equal(broken.markdown, '# A Paper');
 });
+
+test('ignores a layout.json outside the Markdown result root', () => {
+    const result = extractMinerUResultFromZip(zipSync({
+        'result/full.md': strToU8('# A Paper'),
+        'other/layout.json': strToU8(JSON.stringify(layoutFixture())),
+        'result/images/a.jpg': strToU8('img'),
+    }));
+    assert.equal(result.layout, undefined);
+    assert.equal(result.detailedLayout, undefined);
+    assert.equal(result.markdown, '# A Paper');
+    assert.equal(result.assets.length, 1);
+});
+
+test('does not project a root that contains both layout.json and middle.json', () => {
+    const raw = JSON.stringify(layoutFixture());
+    const result = extractMinerUResultFromZip(zipSync({
+        'result/full.md': strToU8('# A Paper'),
+        'result/layout.json': strToU8(raw),
+        'result/paper_middle.json': strToU8(raw),
+        'result/images/a.jpg': strToU8('img'),
+    }));
+    assert.equal(result.layout, undefined);
+    assert.equal(result.detailedLayout, undefined);
+    assert.equal(result.markdown, '# A Paper');
+    assert.equal(result.assets.length, 1);
+});
+
+test('keeps Markdown and assets when the layout exceeds the byte cap', () => {
+    const result = extractMinerUResultFromZip(zipSync({
+        'result/full.md': strToU8('# A Paper'),
+        'result/layout.json': strToU8(JSON.stringify(layoutFixture())),
+        'result/images/a.jpg': strToU8('img'),
+    }), { maxDetailedLayoutBytes: 5 });
+    assert.equal(result.layout, undefined);
+    assert.equal(result.detailedLayout, undefined);
+    assert.equal(result.markdown, '# A Paper');
+    assert.equal(result.assets.length, 1);
+});

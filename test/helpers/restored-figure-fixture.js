@@ -4,7 +4,7 @@ import { bindFigureSourceRanges } from '../../src/figures/figure-source-binding.
 import { resolveFigureCandidates } from '../../src/figures/figure-region-resolver.js';
 import { composeFigureDraft } from '../../src/figures/figure-transaction.js';
 import { finalizeRestoredDocument } from '../../src/figures/figure-finalization.js';
-import { prepareMinerUResult } from '../../src/mineru/mineru-result.js';
+import { prepareFigureFixture } from './figure-preparer.js';
 import { sha256Hex } from '../../src/core/sha256.js';
 
 export async function makeRestoredFigureDocument(options = {}) {
@@ -19,5 +19,5 @@ export async function makeRestoredFigureDocument(options = {}) {
         crop: { data, mimeType: 'image/png', width: 800, height: 750 },
         assetPath: `generated/figures/${candidate.id}-${digest}.png`,
     }]);
-    return finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+    return finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
 }
