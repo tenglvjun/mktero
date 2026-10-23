@@ -3,6 +3,7 @@ import { toUint8Array } from './binary.js';
 import { isValidNormalizedSourceBBox } from '../core/markdown-source-map.js';
 import { FIGURE_LIMITS } from '../figures/figure-limits.js';
 import { assertFigureJSONBudget, normalizeFigureAssetPath } from '../figures/figure-model.js';
+import { deriveDetailedLayout, projectMinerULayout } from './document/result-bundle.js';
 
 export const DEFAULT_MAX_MARKDOWN_BYTES = 50 * 1024 * 1024;
 export const DEFAULT_MAX_CONTENT_LIST_BYTES = 20 * 1024 * 1024;
@@ -109,20 +110,22 @@ export function extractMinerUResultFromZip(archive, {
         mimeType: imageMimeType(path),
         data,
     }));
-    const detailedLayout = readDetailedLayout(bytes, directoryName(markdownPath), {
+    const layout = readMinerULayout(bytes, directoryName(markdownPath), {
         maxBytes: Math.min(maxDetailedLayoutBytes, FIGURE_LIMITS.maxDetailedLayoutBytes),
         contentListBytes: contentListPath ? documentFiles[contentListPath].length : 0,
     });
+    const detailedLayout = layout ? deriveDetailedLayout(layout) : null;
     return {
         markdown: strFromU8(markdownBytes),
         assets,
         assetBasePath: directoryName(markdownPath),
         contentList,
+        ...(layout ? { layout } : {}),
         ...(detailedLayout ? { detailedLayout } : {}),
     };
 }
 
-function readDetailedLayout(bytes, root, { maxBytes, contentListBytes }) {
+function readMinerULayout(bytes, root, { maxBytes, contentListBytes }) {
     try {
         const names = [];
         unzipSync(bytes, { filter(file) {
@@ -144,32 +147,12 @@ function readDetailedLayout(bytes, root, { maxBytes, contentListBytes }) {
             || data.length + contentListBytes > FIGURE_LIMITS.maxCombinedLayoutBytes) return null;
         const parsed = JSON.parse(strFromU8(data));
         assertFigureJSONBudget(parsed, { maxBytes });
-        if (!Array.isArray(parsed?.pdf_info) || parsed.pdf_info.length > FIGURE_LIMITS.maxPDFPages) return null;
-        const pdfInfo = parsed.pdf_info.map(page => ({
-            page_idx: page.page_idx, page_size: page.page_size,
-            para_blocks: (Array.isArray(page.para_blocks) ? page.para_blocks : []).map(projectLayoutBlock),
-        }));
-        return { schema: 'mineru-middle-v1', pdfInfo,
-            backend: typeof parsed._backend === 'string' ? parsed._backend.slice(0, 64) : null,
-            version: typeof parsed._version_name === 'string' ? parsed._version_name.slice(0, 64) : null };
+        return projectMinerULayout(parsed);
     }
     catch {
-        // Detailed layout is optional; its failure cannot discard readable OCR.
+        // The layout is optional; its failure cannot discard readable OCR.
         return null;
     }
-}
-
-function projectLayoutBlock(block) {
-    if (!block || typeof block !== 'object' || Array.isArray(block)) return {};
-    const output = {};
-    for (const key of ['type', 'content', 'image_path']) {
-        if (typeof block[key] === 'string') output[key] = block[key];
-    }
-    if (Array.isArray(block.bbox)) output.bbox = block.bbox.slice(0, 4);
-    for (const key of ['blocks', 'lines', 'spans']) {
-        if (Array.isArray(block[key])) output[key] = block[key].map(projectLayoutBlock);
-    }
-    return output;
 }
 
 export function extractMarkdownFromZip(archive, options) {

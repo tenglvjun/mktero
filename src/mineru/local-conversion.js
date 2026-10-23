@@ -147,6 +147,7 @@ function withIdentity(result, parserProfile) {
         parserProfile,
     };
     delete output.detailedLayout;
+    delete output.layout;
     delete output.figureMap;
     return output;
 }
