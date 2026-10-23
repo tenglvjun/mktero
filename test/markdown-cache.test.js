@@ -29,6 +29,8 @@ import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js'
 import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
 import { parseHTML } from 'linkedom';
+import { MarkdownTranslationService, TRANSLATION_PROMPT_VERSION } from '../src/ai/markdown-translation-service.js';
+import { collectMarkdownTranslationBlocks } from '../src/markdown/markdown-translation-blocks.js';
 
 const CACHE_KEY = 'a'.repeat(64);
 const SECOND_CACHE_KEY = 'b'.repeat(64);
@@ -584,6 +586,93 @@ test('replacing or clearing Markdown removes its stored translation', async t =>
     await cache.putTranslation(CACHE_KEY, translationKey, translation);
     await cache.clear();
     assert.equal(await cache.getTranslation(CACHE_KEY, translationKey), null);
+});
+
+test('copies translations to a new profile entry of the same PDF', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const cache = new MarkdownCache({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    });
+    const translation = language => ({
+        translatedMarkdown: `# ${language}`,
+        comparisonMarkdown: '',
+        blocks: [{ id: 'translation-0', markdown: `# ${language}` }],
+        sourceBlocks: [{ id: 'translation-0', markdown: '# Paper' }],
+        settingsIdentity: 'settings',
+        model: 'example-model',
+        targetLanguage: language,
+        promptVersion: 'translation-v1',
+        partial: false,
+        failedBlocks: [],
+    });
+    await cache.put(CACHE_KEY, { markdown: '# Paper' });
+    await cache.putTranslation(CACHE_KEY, 'c'.repeat(64), translation('zh-CN'));
+    await cache.putTranslation(CACHE_KEY, 'd'.repeat(64), translation('ja-JP'));
+    await cache.put(SECOND_CACHE_KEY, { markdown: '# Paper\n\nReparsed.' });
+
+    assert.equal(await cache.copyTranslations(CACHE_KEY, SECOND_CACHE_KEY), 2);
+    assert.deepEqual(await cache.getTranslationByLanguage(SECOND_CACHE_KEY, 'zh-CN'), translation('zh-CN'));
+    assert.deepEqual(await cache.getTranslationByLanguage(SECOND_CACHE_KEY, 'ja-JP'), translation('ja-JP'));
+    // The earlier entry keeps its own translations.
+    assert.deepEqual(await cache.getTranslationByLanguage(CACHE_KEY, 'zh-CN'), translation('zh-CN'));
+    // An entry that already has translations, a missing entry, and the same
+    // entry are left alone.
+    assert.equal(await cache.copyTranslations(CACHE_KEY, SECOND_CACHE_KEY), 0);
+    assert.equal(await cache.copyTranslations('e'.repeat(64), SECOND_CACHE_KEY), 0);
+    assert.equal(await cache.copyTranslations(CACHE_KEY, 'f'.repeat(64)), 0);
+    assert.equal(await cache.copyTranslations(CACHE_KEY, CACHE_KEY), 0);
+});
+
+test('a copied translation reuses only the blocks whose source text is unchanged', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const cache = new MarkdownCache({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename },
+    });
+    const settings = {
+        enabled: true, provider: 'custom', protocol: 'openai-chat-completions',
+        apiBase: 'https://api.example.com/v1', apiKey: 'token', model: 'example-chat',
+        targetLanguage: 'zh-CN', requestTimeoutMs: 30_000, maxOutputTokens: 2_048,
+    };
+    const settingsIdentity = JSON.stringify({
+        provider: settings.provider, protocol: settings.protocol, apiBase: settings.apiBase,
+        model: settings.model, reasoning: 'none', targetLanguage: 'zh-CN', promptVersion: TRANSLATION_PROMPT_VERSION,
+    });
+    const oldSource = 'First paragraph of the paper.\n\nA second paragraph split in two.';
+    const newSource = 'First paragraph of the paper.\n\nA second paragraph joined across the page.';
+    const oldBlocks = collectMarkdownTranslationBlocks(oldSource).filter(block => block.translatable);
+    await cache.put(CACHE_KEY, { markdown: oldSource });
+    await cache.putTranslation(CACHE_KEY, 'c'.repeat(64), {
+        translatedMarkdown: '论文的第一段。\n\n第二段。',
+        comparisonMarkdown: '',
+        blocks: [{ id: oldBlocks[0].id, markdown: '论文的第一段。' }, { id: oldBlocks[1].id, markdown: '第二段。' }],
+        sourceBlocks: oldBlocks.map(block => ({ id: block.id, markdown: block.markdown })),
+        settingsIdentity,
+        model: settings.model,
+        targetLanguage: 'zh-CN',
+        promptVersion: TRANSLATION_PROMPT_VERSION,
+        partial: false,
+        failedBlocks: [],
+    });
+    await cache.put(SECOND_CACHE_KEY, { markdown: newSource });
+    assert.equal(await cache.copyTranslations(CACHE_KEY, SECOND_CACHE_KEY), 1);
+
+    const service = new MarkdownTranslationService({
+        aiGateway: { generateText: async () => { throw new Error('No request expected'); } },
+        cache,
+        getSettings: () => settings,
+        createCacheKey: async () => 'd'.repeat(64),
+    });
+    const cached = await service.getCachedDocumentTranslation({ documentKey: SECOND_CACHE_KEY, markdown: newSource });
+    assert.equal(cached.partial, true);
+    assert.equal(cached.translatedMarkdown, '论文的第一段。\n\nA second paragraph joined across the page.');
+    const newBlocks = collectMarkdownTranslationBlocks(newSource).filter(block => block.translatable);
+    assert.deepEqual(cached.pendingBlockIDs, [newBlocks[1].id]);
 });
 
 test('removes only the corrupted language from a multilingual cache', async t => {

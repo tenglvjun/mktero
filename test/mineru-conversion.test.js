@@ -1126,6 +1126,87 @@ test('public readCached does not interleave cache.put with an in-flight convert 
     assert.deepEqual(calls, { submit: 1, parse: 0, collect: 1 });
 });
 
+test('a new profile entry takes the translations of the newest earlier entry', async () => {
+    const calls = [];
+    const conversion = new MinerUConversion({
+        client: createSuccessfulClient({ markdown: '# Converted', contentList: [] }),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            get: async () => null,
+            put: async key => { calls.push(['put', key]); },
+            copyTranslations: async (from, to) => {
+                calls.push(['copy', from, to]);
+                return from === 'v17-key' ? 2 : 0;
+            },
+        },
+        createTranslationSourceKeys: async fileData => {
+            calls.push(['keys', fileData.length]);
+            return ['current-key', 'empty-key', 'v17-key', 'v16-key'];
+        },
+        createDataID: () => 'mktero-task-translations',
+    });
+    const result = await conversion.convert({
+        key: 'current-key',
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1, 2]),
+        cacheEnabled: true,
+    });
+    assert.equal(result.result.markdown, '# Converted');
+    assert.deepEqual(calls, [
+        ['put', 'current-key'],
+        ['keys', 2],
+        ['copy', 'empty-key', 'current-key'],
+        ['copy', 'v17-key', 'current-key'],
+    ]);
+});
+
+test('a translation copy failure does not fail the conversion', async () => {
+    const errors = [];
+    const conversion = new MinerUConversion({
+        client: createSuccessfulClient({ markdown: '# Converted', contentList: [] }),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            get: async () => null,
+            put: async () => {},
+            copyTranslations: async () => { throw new Error('disk full'); },
+        },
+        createTranslationSourceKeys: async () => ['old-key'],
+        createDataID: () => 'mktero-task-copy-failure',
+        onError: error => errors.push(error.message),
+    });
+    const result = await conversion.convert({
+        key: 'current-key',
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+    assert.equal(result.result.markdown, '# Converted');
+    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(errors, ['disk full']);
+});
+
+test('re-reading a stored result under a new profile carries translations over', async () => {
+    const copies = [];
+    const conversion = new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            get: async () => null,
+            put: async () => {},
+            copyTranslations: async (from, to) => { copies.push([from, to]); return 1; },
+        },
+        resultStore: { get: async () => ({ archive: new Uint8Array([1]) }), put: async () => {} },
+        createResultKey: async () => 'result-key',
+        extractStoredResult: () => ({ markdown: '# Stored', contentList: [] }),
+        createTranslationSourceKeys: async () => ['old-key'],
+    });
+    const result = await conversion.readCached({ key: 'current-key', fileData: new Uint8Array([1]), cacheEnabled: true });
+    assert.equal(result.result.markdown, '# Stored');
+    assert.deepEqual(copies, [['old-key', 'current-key']]);
+});
+
 test('the MinerU profile names its document pipeline and reuses no earlier Markdown', () => {
     assert.deepEqual(JSON.parse(MINERU_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },

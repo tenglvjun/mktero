@@ -17,6 +17,7 @@ export class MinerUConversion {
         restoreCachedInput = null,
         recoverFigures = async result => result,
         createPreviousCacheKeys = null,
+        createTranslationSourceKeys = null,
         resultStore = null,
         createResultKey = null,
         extractStoredResult = extractMinerUResultFromZip,
@@ -47,6 +48,8 @@ export class MinerUConversion {
         this.restoreCachedInput = restoreCachedInput;
         this.recoverFigures = recoverFigures;
         this.createPreviousCacheKeys = createPreviousCacheKeys;
+        this.createTranslationSourceKeys = typeof createTranslationSourceKeys === 'function'
+            ? createTranslationSourceKeys : null;
         this.resultStore = resultStore?.get && resultStore?.put ? resultStore : null;
         this.createResultKey = typeof createResultKey === 'function' ? createResultKey : null;
         this.extractStoredResult = extractStoredResult;
@@ -162,6 +165,7 @@ export class MinerUConversion {
             cacheEnabled,
             warnings,
             signal,
+            fileData,
         });
         throwIfAborted(signal);
         reportProgress(CONVERSION_PROGRESS.COMPLETE);
@@ -302,7 +306,7 @@ export class MinerUConversion {
                 const result = await this.#prepareStoredResult(stored, {
                     fileData, signal, onProgress, onProgressiveFigures,
                 });
-                await this.#putCache(key, result, signal, reportedWarnings);
+                await this.#putCache(key, result, signal, reportedWarnings, fileData);
                 return { result, origin: 'cache', warnings: reportedWarnings };
             }
         }
@@ -334,7 +338,7 @@ export class MinerUConversion {
                 const result = await this.#prepareStoredResult(stored, {
                     fileData, signal, onProgress, onProgressiveFigures,
                 });
-                if (cacheEnabled) await this.#putCache(key, result, signal, reportedWarnings);
+                if (cacheEnabled) await this.#putCache(key, result, signal, reportedWarnings, migrated ? fileData : null);
                 return { result, origin: 'cache', warnings: reportedWarnings };
             }
         }
@@ -358,12 +362,14 @@ export class MinerUConversion {
         const result = await this.#recoverFigures(resolved, { fileData, signal, onProgress });
         throwIfAborted(signal);
         if (cacheEnabled && (migrated || result !== cached || wasPending)) {
-            await this.#putCache(key, result, signal, reportedWarnings);
+            await this.#putCache(key, result, signal, reportedWarnings, migrated ? fileData : null);
         }
         return { result, origin: 'cache', warnings: reportedWarnings };
     }
 
-    async #putCache(key, result, signal, warnings) {
+    // `fileData` is passed when the entry is new for this profile, so the
+    // translations of the same PDF under an earlier profile carry over.
+    async #putCache(key, result, signal, warnings, fileData = null) {
         if (!this.cache) return;
         try { await this.cache.put(key, result, { signal }); }
         catch (error) {
@@ -371,6 +377,29 @@ export class MinerUConversion {
             if (error?.name === 'AbortError') throw error;
             this.#reportError(error);
             warnings.push('The Markdown result could not be saved to the local cache.');
+            return;
+        }
+        if (fileData) await this.#copyEarlierTranslations(key, fileData, signal);
+    }
+
+    // The newest earlier profile entry that has translations gives them to
+    // the new entry. Reading a copied translation reuses only the blocks
+    // whose source text is unchanged, so this never shows a stale block.
+    // Failure is only reported: the conversion result is already saved.
+    async #copyEarlierTranslations(key, fileData, signal) {
+        if (!this.createTranslationSourceKeys || !this.cache?.copyTranslations || !fileData) return;
+        try {
+            const previousKeys = await this.createTranslationSourceKeys(fileData);
+            for (const previousKey of new Set(previousKeys)) {
+                throwIfAborted(signal);
+                if (!previousKey || previousKey === key) continue;
+                if (await this.cache.copyTranslations(previousKey, key)) return;
+            }
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            if (error?.name === 'AbortError') throw error;
+            this.#reportError(error);
         }
     }
 
@@ -443,7 +472,7 @@ export class MinerUConversion {
         return task;
     }
 
-    async #commitResult({ key, selected, result, cacheEnabled, warnings, signal }) {
+    async #commitResult({ key, selected, result, cacheEnabled, warnings, signal, fileData }) {
         await this.#withKeyOperation(key, async () => {
             throwIfAborted(signal);
             if (this.#currentTask(key)?.batchID !== selected.task.batchID) {
@@ -452,6 +481,7 @@ export class MinerUConversion {
             if (this.cache && cacheEnabled) {
                 try {
                     await this.cache.put(key, result, { signal });
+                    await this.#copyEarlierTranslations(key, fileData, signal);
                 }
                 catch (error) {
                     throwIfAborted(signal);

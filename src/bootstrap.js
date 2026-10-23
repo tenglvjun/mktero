@@ -646,6 +646,13 @@ globalThis.startup = async function startup({ id, rootURI }) {
                 createMarkdownCacheKey(fileData, { parserProfile })
             ))
         ),
+        // A new profile entry takes the translations of the newest earlier
+        // entry of the same PDF.
+        createTranslationSourceKeys: fileData => Promise.all(
+            [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru].map(parserProfile => (
+                createMarkdownCacheKey(fileData, { parserProfile })
+            ))
+        ),
         resultStore: mineruResultStore,
         createResultKey: fileData => createMinerUResultKey({
             fileData,

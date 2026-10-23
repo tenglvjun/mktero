@@ -152,7 +152,9 @@ links, code, images, and structural placeholders, and runs at most five
 requests concurrently. Choose `Original`, `Translation`, or `Bilingual` in
 the reader. Translations are cached independently by source content, provider,
 protocol, model, language, reasoning effort, and prompt version, so partial
-work can resume.
+work can resume. When a Mktero update reads a MinerU result again, the new
+document keeps the translation of every block whose text did not change; only
+the changed blocks are marked for translation.
 When local Markdown corrections delete a block, translations for unchanged
 blocks remain available and the deleted block disappears from `Bilingual`
 reading. Earlier source versions are retained, so restoring a deleted block can

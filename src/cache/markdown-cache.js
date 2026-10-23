@@ -363,6 +363,39 @@ export class MarkdownCache {
         ));
     }
 
+    // Copies the translations of one entry to another entry of the same PDF
+    // that has none yet: a parser profile change writes a new entry, and its
+    // reader reuses each translated block whose source text is unchanged.
+    // Returns the number of translations copied.
+    copyTranslations(fromCacheKey, toCacheKey) {
+        validateCacheKey(fromCacheKey);
+        validateCacheKey(toCacheKey);
+        if (fromCacheKey === toCacheKey) return Promise.resolve(0);
+        return this.#withOperation(() => this.#copyTranslations(fromCacheKey, toCacheKey));
+    }
+
+    async #copyTranslations(fromCacheKey, toCacheKey) {
+        const toPath = this.#entryPath(toCacheKey);
+        const target = await this.#readMetadata(toPath, this.path.join(toPath, METADATA_FILE), toCacheKey);
+        if (!target || target.translations?.length) return 0;
+        const fromPath = this.#entryPath(fromCacheKey);
+        const source = await this.#readMetadata(fromPath, this.path.join(fromPath, METADATA_FILE), fromCacheKey);
+        const descriptors = (source?.translations || []).slice(-MAX_TRANSLATION_VARIANTS);
+        let copied = 0;
+        for (const descriptor of descriptors) {
+            let record;
+            try {
+                record = await this.#readTranslationRecord(fromPath, descriptor);
+            }
+            catch {
+                continue;
+            }
+            await this.#putTranslation(toCacheKey, descriptor.translationKey, translationValue(record));
+            copied++;
+        }
+        return copied;
+    }
+
     deleteTranslation(cacheKey) {
         validateCacheKey(cacheKey);
         return this.#withOperation(() => this.#deleteTranslation(cacheKey));
