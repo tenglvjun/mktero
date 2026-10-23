@@ -64,3 +64,16 @@ function isLetterKey(event, letter) {
 // Physical-key matching reports Shift+N as KeyN too, so each matcher owns
 // its shiftKey and altKey decision instead: headings take the bare plane,
 // figures take Shift, notes take Alt.
+
+// Ctrl+C, or Cmd+C on macOS. Matched by position as well as by character so a
+// non-Latin layout still counts; Ctrl+Shift+C is Zotero's own copy command.
+export function isCopyShortcut(event, { isMac = false } = {}) {
+    if (event.isComposing || event.repeat) return false;
+    if (event.altKey || event.shiftKey) return false;
+    const accel = isMac
+        ? event.metaKey && !event.ctrlKey
+        : event.ctrlKey && !event.metaKey;
+    if (!accel) return false;
+    const key = String(event.key || '').toLowerCase();
+    return key === 'c' || String(event.code || '') === 'KeyC';
+}

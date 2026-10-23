@@ -129,6 +129,8 @@ export class MarkdownTabPresenter {
         onDisposeSourcePeek,
         onCopySourcedMarkdown,
         onCopyCode,
+        onReadClipboard,
+        onWriteClipboard,
         onCreateMarkdownAnnotation,
         onUpdateMarkdownAnnotation,
         onDeleteMarkdownAnnotation,
@@ -253,6 +255,10 @@ export class MarkdownTabPresenter {
             if (onCopyCode) {
                 existing.model.onCopyCode = onCopyCode;
             }
+            if (onReadClipboard && onWriteClipboard) {
+                existing.model.onReadClipboard = onReadClipboard;
+                existing.model.onWriteClipboard = onWriteClipboard;
+            }
             if (onCreateMarkdownAnnotation) {
                 existing.model.onCreateMarkdownAnnotation
                     = onCreateMarkdownAnnotation;
@@ -327,6 +333,8 @@ export class MarkdownTabPresenter {
                 onDisposeSourcePeek,
                 onCopySourcedMarkdown,
                 onCopyCode,
+                onReadClipboard,
+                onWriteClipboard,
                 onCreateMarkdownAnnotation,
                 onUpdateMarkdownAnnotation,
                 onDeleteMarkdownAnnotation,
