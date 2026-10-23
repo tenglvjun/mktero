@@ -2,7 +2,12 @@ import { validateMinerULayout } from './result-bundle.js';
 import { ingestMinerULayout } from './ingest-layout.js';
 import { ingestMinerUContentList } from './ingest-content-list.js';
 import { classifyBlocks } from './classify.js';
-import { attachFloatNotes } from './floats.js';
+import {
+    attachFloatNotes,
+    groupAdjacentTables,
+    mergeContinuedTables,
+    reassignFloatCaptions,
+} from './floats.js';
 import { orderReadingFlow } from './reading-order.js';
 import { attachEquationNumbers } from './equations.js';
 import { assignHeadingLevels } from './headings.js';
@@ -33,7 +38,10 @@ export function buildMinerUDocumentIR(bundle) {
     if (!ir) return null;
     classifyBlocks(ir);
     attachFloatNotes(ir);
+    reassignFloatCaptions(ir);
     orderReadingFlow(ir);
+    groupAdjacentTables(ir);
+    mergeContinuedTables(ir);
     attachEquationNumbers(ir);
     assignHeadingLevels(ir);
     stitchParagraphs(ir);
