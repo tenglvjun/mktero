@@ -17,6 +17,7 @@ const MARKDOWN_PARSER = parser.configure(GFM);
 const MIN_CONTIGUOUS_TEXT_LENGTH = 32;
 
 export function bindFigureSourceRanges(input, { limits: overrides, budget: sharedBudget } = {}) {
+    if (input?.rangesExplicit === true) return checkExplicitSourceRanges(input);
     const limits = { ...FIGURE_LIMITS, ...overrides };
     const blocks = input.blocks.map(block => ({
         ...block, sourceRanges: [], rangeEvidence: 'unresolved',
@@ -120,6 +121,57 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
         }
     }
     return output;
+}
+
+// A provider that serialized the Markdown itself knows every block's range;
+// matching text again could only lose precision. The ranges are checked,
+// not searched: each lies inside the Markdown, a panel range is exactly one
+// standalone image of the panel's asset, and the only overlap allowed is a
+// caption inside its panel's image description.
+export function checkExplicitSourceRanges(input) {
+    const length = String(input.markdown || '').length;
+    const images = new Map(collectFigureImageNodes(input.markdown)
+        .filter(image => image.standalone)
+        .map(image => [`${image.from}:${image.to}`, image]));
+    const ranges = [];
+    const blocks = input.blocks.map(block => {
+        const sourceRanges = (block.sourceRanges || []).map(range => ({ from: range.from, to: range.to }));
+        for (const range of sourceRanges) {
+            if (!Number.isSafeInteger(range.from) || !Number.isSafeInteger(range.to)
+                || range.from < 0 || range.to <= range.from || range.to > length) {
+                throw invalidExplicitRange('A figure source range lies outside the Markdown');
+            }
+            ranges.push({ ...range, block });
+        }
+        if (block.role === 'panel' && block.bboxKind !== 'group') {
+            const image = sourceRanges.length ? images.get(`${sourceRanges[0].from}:${sourceRanges[0].to}`) : null;
+            if (!image || safePath(image.assetPath, input.assetBasePath)
+                !== safePath(block.assetPath, input.assetBasePath)) {
+                throw invalidExplicitRange('A figure panel range is not its standalone image');
+            }
+        }
+        return { ...block, sourceRanges, rangeEvidence: sourceRanges.length ? 'explicit-range' : 'unresolved' };
+    });
+    ranges.sort((left, right) => left.from - right.from || right.to - left.to);
+    let outer = null;
+    for (const range of ranges) {
+        if (outer && range.from < outer.to) {
+            const nested = outer.block.role === 'panel' && range.block.role === 'caption'
+                && range.block.parentId && range.block.parentId === outer.block.parentId
+                && range.to <= outer.to;
+            if (!nested) throw invalidExplicitRange('Figure source ranges overlap');
+            continue;
+        }
+        outer = range;
+    }
+    return { ...input, blocks };
+}
+
+function invalidExplicitRange(message) {
+    const error = new TypeError(message);
+    error.code = 'INVALID_EXPLICIT_RANGE';
+    error.preserveReason = 'ambiguous-source-range';
+    return error;
 }
 
 // Captions and figure text can sit on a different page than their figure;

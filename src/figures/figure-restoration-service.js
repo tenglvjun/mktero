@@ -42,7 +42,17 @@ export class FigureRestorationService {
         let bound = input;
         let session;
         try {
-            bound = bindFigureSourceRanges(input, { limits, budget });
+            try {
+                bound = bindFigureSourceRanges(input, { limits, budget });
+            }
+            catch (error) {
+                // Explicit ranges that fail their check compose nothing; the
+                // document keeps its original figures.
+                if (error.code !== 'INVALID_EXPLICIT_RANGE') throw error;
+                return { input, blueprints: [], preserved: [{
+                    id: 'fig-p0-b0', pageIndex: input.pages[0]?.pageIndex ?? 0, reason: error.preserveReason,
+                }] };
+            }
             const panelPages = new Set(bound.blocks.filter(block => block.role === 'panel')
                 .map(block => block.pageIndex));
             const geometries = new Map();

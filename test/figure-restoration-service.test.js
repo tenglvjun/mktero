@@ -201,3 +201,19 @@ test('ignores a throwing figure listener without failing restore', async () => {
     });
     assert.ok(draft.blueprints.length >= 1);
 });
+
+test('keeps the document unchanged when explicit source ranges fail their check', async () => {
+    const { input } = makeFigureInput();
+    // Each panel range stops one character short of its image.
+    const explicit = { ...input, rangesExplicit: true, blocks: input.blocks.map(block => {
+        if (block.role !== 'panel') return { ...block, sourceRanges: [] };
+        const from = input.markdown.indexOf(`![](${block.assetPath})`);
+        return { ...block, sourceRanges: [{ from, to: from + block.assetPath.length + 4 }] };
+    }) };
+    const { restoration, counts } = service();
+    const draft = await restoration.restore(explicit, { fileData: Uint8Array.of(1) });
+    assert.equal(draft.input, explicit);
+    assert.deepEqual(draft.blueprints, []);
+    assert.equal(draft.preserved[0].reason, 'ambiguous-source-range');
+    assert.equal(counts().opened, 0);
+});

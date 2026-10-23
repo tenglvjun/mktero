@@ -514,3 +514,72 @@ test('binds a unique caption paragraph without panel anchors', () => {
     assert.equal(bound.markdown.slice(range.from, range.to), caption);
     assert.equal(bound.blocks[0].rangeEvidence, 'unique-text');
 });
+
+function explicitInput() {
+    const { input } = makeFigureInput();
+    let cursor = 0;
+    for (const block of input.blocks) {
+        const text = block.assetPath ? `![](${block.assetPath})` : block.text;
+        if (!text) continue;
+        const from = input.markdown.indexOf(text, cursor);
+        block.sourceRanges = [{ from, to: from + text.length }];
+        block.rangeEvidence = 'explicit-range';
+        cursor = from + text.length;
+    }
+    return { ...input, rangesExplicit: true };
+}
+
+test('accepts explicit source ranges without matching text again', () => {
+    const input = explicitInput();
+    const before = structuredClone(input);
+    const bound = bindFigureSourceRanges(input);
+    assert.deepEqual(bound.blocks.map(block => block.sourceRanges), input.blocks.map(block => block.sourceRanges));
+    assert.ok(bound.blocks.every(block => block.rangeEvidence === (block.sourceRanges.length ? 'explicit-range' : 'unresolved')));
+    assert.deepEqual(input, before);
+    assert.equal(resolveFigureCandidates(bound)[0].decision, 'compose');
+});
+
+test('accepts a caption nested inside its panel image description', () => {
+    const input = explicitInput();
+    const panel = input.blocks.find(block => block.role === 'panel');
+    const caption = input.blocks.find(block => block.role === 'caption');
+    const alt = 'Figure 1. Nested caption';
+    const image = `![${alt}](${panel.assetPath})`;
+    input.markdown = input.markdown.replace(`![](${panel.assetPath})`, image);
+    const from = input.markdown.indexOf(image);
+    panel.sourceRanges = [{ from, to: from + image.length }];
+    caption.sourceRanges = [{ from: from + 2, to: from + 2 + alt.length }];
+    for (const block of input.blocks) {
+        if (block !== panel && block !== caption && block.sourceRanges.length) {
+            const text = block.assetPath ? `![](${block.assetPath})` : block.text;
+            const at = input.markdown.indexOf(text, block === input.blocks.at(-1) ? from + image.length : 0);
+            block.sourceRanges = at >= 0 ? [{ from: at, to: at + text.length }] : [];
+        }
+    }
+    input.blocks = input.blocks.filter(block => block.role !== 'caption' || block === caption);
+    assert.doesNotThrow(() => bindFigureSourceRanges(input));
+});
+
+test('rejects explicit ranges that break their contract', () => {
+    const cases = {
+        'outside the Markdown': input => { input.blocks[1].sourceRanges = [{ from: 0, to: input.markdown.length + 1 }]; },
+        'empty range': input => { input.blocks[1].sourceRanges = [{ from: 4, to: 4 }]; },
+        'panel range is not its image': input => {
+            const panel = input.blocks.find(block => block.role === 'panel');
+            panel.sourceRanges = [{ from: panel.sourceRanges[0].from, to: panel.sourceRanges[0].to - 1 }];
+        },
+        'panel range is another asset': input => {
+            const panels = input.blocks.filter(block => block.role === 'panel');
+            [panels[0].sourceRanges, panels[1].sourceRanges] = [panels[1].sourceRanges, panels[0].sourceRanges];
+        },
+        'overlapping text': input => {
+            const texts = input.blocks.filter(block => block.text && block.sourceRanges.length);
+            texts[1].sourceRanges = [{ ...texts[0].sourceRanges[0] }];
+        },
+    };
+    for (const [name, mutate] of Object.entries(cases)) {
+        const input = explicitInput();
+        mutate(input);
+        assert.throws(() => bindFigureSourceRanges(input), error => error.code === 'INVALID_EXPLICIT_RANGE', name);
+    }
+});
