@@ -204,3 +204,113 @@ test('decides line-final hyphens from the document vocabulary', () => {
     assert.equal(joinTextParts('ends with', 'next part', vocabulary).text, 'ends with next part');
     assert.equal(joinTextParts('range 80–', '82 items', vocabulary).text, 'range 80–82 items');
 });
+
+test('does not join across an independent paragraph in the same column', () => {
+    const ir = stitch([
+        text(0, [100, 700, 480, 900], `${LONG} transfer across`),
+        text(0, [100, 400, 480, 620], 'An independent paragraph stays in this column and ends here.'),
+        text(1, [100, 60, 480, 200], 'heterogeneous tasks without forgetting.'),
+    ]);
+    assert.equal(ir.blocks.length, 3);
+    assert.equal(ir.diagnostics.joins.length, 0);
+});
+
+test('does not join across a publisher banner heading on the next page', () => {
+    const ir = stitch([
+        text(0, [100, 800, 480, 940], `${LONG} although their`),
+        text(1, [62, 32, 240, 87], 'Digital wearables spotlight', { kind: 'title' }),
+        text(1, [61, 114, 480, 250], 'use in trials has increased over the decade.'),
+    ]);
+    assert.equal(ir.blocks[1].role, 'heading');
+    assert.equal(ir.blocks.length, 3);
+    assert.equal(ir.diagnostics.joins.length, 0);
+});
+
+test('joins a figure parenthetical split before a Methods locator', () => {
+    const ir = stitch([
+        text(0, [100, 700, 900, 940], `${LONG} answers within range (Fig. 4a,`),
+        text(1, [100, 60, 900, 200], 'Methods; extended explanation in the supplement).'),
+    ]);
+    assert.equal(ir.blocks.length, 1);
+    assert.match(texts(ir)[0], /\(Fig\. 4a, \| Methods;/);
+    assert.equal(ir.diagnostics.joins[0].boundary, 'page');
+});
+
+test('joins a citation year split from its author name', () => {
+    const ir = stitch([
+        text(0, [100, 700, 900, 940], 'Dental anxiety can stem from earlier experiences (Oosterink et al.,'),
+        text(1, [100, 60, 900, 200], '2017; van Houtem et al., 2015). Its extreme form is dental phobia.'),
+    ]);
+    assert.equal(ir.blocks.length, 1);
+    assert.match(texts(ir)[0], /et al\., \| 2017;/);
+});
+
+test('joins a semicolon series split at a page break', () => {
+    const ir = stitch([
+        text(0, [100, 700, 900, 940], `${LONG} triage the work made concrete);`),
+        text(1, [100, 60, 900, 200], 'isolated worktrees let parallel agents run without colliding.'),
+    ]);
+    assert.equal(ir.blocks.length, 1);
+    assert.match(texts(ir)[0], /concrete\); \| isolated worktrees/);
+});
+
+test('joins one sentence split by two page boundaries', () => {
+    const ir = stitch([
+        text(0, [100, 700, 900, 940], 'A sufficiently descriptive paragraph continues with'),
+        text(1, [100, 60, 900, 200], 'another fragment that still has no ending'),
+        text(2, [100, 60, 900, 200], 'and finally ends here with a period.'),
+    ], 3);
+    assert.equal(ir.blocks.length, 1);
+    assert.equal(ir.blocks[0].fragments.length, 3);
+    assert.deepEqual(ir.diagnostics.joins.map(join => join.boundary), ['page', 'page']);
+});
+
+test('does not join a paragraph that already ends in a URL', () => {
+    const ir = stitch([
+        text(0, [100, 700, 900, 940], 'A sufficiently detailed paragraph closes with a link https://example.org/data'),
+        text(1, [100, 60, 900, 200], 'eHealth interventions are discussed in a separate paragraph.'),
+    ]);
+    assert.equal(ir.blocks.length, 2);
+    assert.equal(ir.diagnostics.joins.length, 0);
+});
+
+test('does not join a semicolon ending with a new capitalized sentence', () => {
+    const ir = stitch([
+        text(0, [100, 700, 900, 940], 'The first complete paragraph deliberately closes with a semicolon;'),
+        text(1, [100, 60, 900, 200], 'Another paragraph intentionally begins with a capital letter.'),
+    ]);
+    assert.equal(ir.blocks.length, 2);
+    assert.equal(ir.diagnostics.joins.length, 0);
+});
+
+test('does not join a figure or table caption with the following body', () => {
+    for (const caption of [
+        'Figure 1. A descriptive caption without a closing period',
+        'Table 2. A descriptive caption without a closing period',
+    ]) {
+        const ir = stitch([
+            text(0, [100, 700, 900, 940], caption),
+            text(1, [100, 60, 900, 200], 'and the article continues with an explanatory paragraph here.'),
+        ]);
+        assert.equal(ir.blocks.length, 2, caption);
+        assert.equal(ir.diagnostics.joins.length, 0, caption);
+    }
+});
+
+test('joins an abstract across a first-page copyright cluster that ends with its DOI', () => {
+    const cluster = [
+        'Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted without fee.',
+        "UIST '23, October 29-November 1, 2023, San Francisco, CA, USA",
+        '© 2023 Copyright held by the owner/author(s).',
+        'ACM ISBN 979-8-4007-0132-0/23/10.',
+        'https://doi.org/10.1145/3586183.3606763',
+    ];
+    const ir = stitch([
+        text(0, [82, 400, 484, 700], `${LONG} invitations over the next two`),
+        ...cluster.map((content, index) => text(0, [82, 720 + index * 28, 480, 744 + index * 28], content)),
+        text(1, [82, 60, 484, 200], 'days, make new acquaintances and show up together.'),
+    ]);
+    assert.deepEqual(ir.blocks.slice(1).map(block => block.role), Array(5).fill('chrome'));
+    assert.equal(ir.diagnostics.joins.length, 1);
+    assert.match(texts(ir)[0], /next two \| days, make new acquaintances/u);
+});

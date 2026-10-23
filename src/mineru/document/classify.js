@@ -64,7 +64,28 @@ export function classifyBlocks(ir) {
                 : BLOCK_ROLE.BODY;
     }
     keepFloatProseVisible(ir.blocks, proseFloats);
+    hideCopyrightDOIs(ir.blocks, diagnostics);
     return ir;
+}
+
+// A bare DOI is article metadata and stays visible, except as the last line
+// of a first-page copyright notice (ACM prints Permission, venue, (c), ISBN
+// and the DOI as one cluster).
+function hideCopyrightDOIs(blocks, diagnostics) {
+    const copyright = new Set(diagnostics.chromeFallbacks
+        .filter(entry => /publisher-copyright/u.test(entry.rule))
+        .map(entry => entry.id));
+    let previous = null;
+    for (const block of blocks) {
+        if (block.kind === BLOCK_KIND.DISCARDED) continue;
+        if (block.pageIndex === 0 && block.role === BLOCK_ROLE.BODY && block.kind === BLOCK_KIND.TEXT
+            && previous?.pageIndex === 0 && copyright.has(previous.id)
+            && BARE_DOI.test(blockPlainText(block).trim())) {
+            block.role = BLOCK_ROLE.CHROME;
+            diagnostics.chromeFallbacks.push({ id: block.id, pageIndex: 0, rule: 'first-page-copyright-doi' });
+        }
+        previous = block;
+    }
 }
 
 // A flowchart or boxed figure holds sentences, not only labels. When any

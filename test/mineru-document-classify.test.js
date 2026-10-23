@@ -158,3 +158,22 @@ test('keeps every text box of a flowchart once one of them is a sentence', () =>
     ]);
     assert.deepEqual(roles(ir), ['float', 'body', 'body', 'float-note']);
 });
+
+test('hides a first-page permission, venue, copyright, and ISBN cluster', () => {
+    const ir = classify([
+        text(0, [82, 720, 480, 760], 'Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted without fee.'),
+        text(0, [82, 770, 480, 800], "UIST '23, October 29-November 1, 2023, San Francisco, CA, USA"),
+        text(0, [82, 810, 480, 840], '© 2023 Copyright held by the owner/author(s).'),
+        text(0, [82, 850, 480, 880], 'ACM ISBN 979-8-4007-0132-0/23/10.'),
+        text(0, [82, 890, 480, 920], 'https://doi.org/10.1145/3586183.3606763'),
+        text(0, [520, 100, 900, 120], 'https://doi.org/10.1145/3586183.3606764'),
+    ]);
+    assert.deepEqual(roles(ir), ['chrome', 'chrome', 'chrome', 'chrome', 'chrome', 'body']);
+    assert.deepEqual(ir.diagnostics.chromeFallbacks.map(entry => entry.rule), [
+        'first-page-publisher-copyright',
+        'first-page-publisher-copyright',
+        'first-page-publisher-copyright',
+        'first-page-publisher-copyright',
+        'first-page-copyright-doi',
+    ]);
+});
