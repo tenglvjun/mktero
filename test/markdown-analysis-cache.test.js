@@ -5,6 +5,7 @@ import {
     DEFAULT_ANALYSIS_NAMESPACE_LIMIT,
     computeAlignedMarkdownOutline,
     computeDocumentFigures,
+    computeMarkdownFootnotes,
     headingLevelsForDocumentStructure,
 } from '../src/markdown/markdown-analysis-cache.js';
 
@@ -222,6 +223,31 @@ test('computeDocumentFigures keeps one variant per translated view kind', () => 
     );
     assert.equal(cache.stats().hits, 1);
     assert.equal(cache.size(), 2);
+});
+
+test('computeMarkdownFootnotes reuses one analysis per Markdown string', () => {
+    const cache = createMarkdownAnalysisCache();
+    const markdown = [
+        'A claim $^{1}$.',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{1}$ The source.',
+    ].join('\n');
+    const first = computeMarkdownFootnotes(cache, markdown);
+    const second = computeMarkdownFootnotes(cache, markdown);
+    assert.equal(second, first);
+    assert.equal(first.notes.length, 1);
+    assert.equal(first.notes[0].key, '1');
+    assert.equal(cache.stats().hits, 1);
+    assert.equal(cache.stats().misses, 1);
+
+    const direct = computeMarkdownFootnotes(null, markdown);
+    assert.notEqual(direct, first);
+    assert.equal(direct.notes[0].key, '1');
+
+    const other = computeMarkdownFootnotes(cache, `${markdown}\n`);
+    assert.notEqual(other, first);
+    assert.equal(cache.stats().misses, 2);
 });
 
 test('the compute helpers work without a cache', () => {

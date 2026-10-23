@@ -1,5 +1,5 @@
-// Whole-document Markdown analyses (citations, figures, table and figure
-// references, outline, fragment index) cost hundreds of milliseconds on a long
+// Whole-document Markdown analyses (citations, footnotes, figures, table and
+// figure references, outline, fragment index) cost hundreds of milliseconds on a long
 // paper, and the reader repeats them on every model update: switching between
 // the original, translated, and comparison views replaces the CodeMirror
 // document, which invalidates every cache keyed on `state.doc`.
@@ -19,6 +19,7 @@
 
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import { analyzeMarkdownCitations } from './markdown-citations.js';
+import { analyzeMarkdownFootnotes } from './markdown-footnotes.js';
 import { analyzeMarkdownFigureReferences } from './markdown-figure-references.js';
 import { analyzeMarkdownTableReferences } from './markdown-table-references.js';
 import { extractMarkdownAssetOutline } from './markdown-asset-outline.js';
@@ -42,6 +43,7 @@ const NO_DEPENDENCY_RANGES = Object.freeze([]);
 // agrees on its cache key and its identity dependencies.
 const NAMESPACE_FIGURES = 'figures';
 const NAMESPACE_CITATIONS = 'citations';
+const NAMESPACE_FOOTNOTES = 'footnotes';
 const NAMESPACE_TABLE_REFERENCES = 'tableReferences';
 const NAMESPACE_FIGURE_REFERENCES = 'figureReferences';
 const NAMESPACE_FRAGMENTS = 'fragments';
@@ -184,6 +186,16 @@ export function computeMarkdownCitations(cache, markdown) {
         markdown,
         [],
         () => analyzeMarkdownCitations(markdown)
+    );
+}
+
+export function computeMarkdownFootnotes(cache, markdown) {
+    return run(
+        cache,
+        NAMESPACE_FOOTNOTES,
+        markdown,
+        [],
+        () => analyzeMarkdownFootnotes(markdown)
     );
 }
 

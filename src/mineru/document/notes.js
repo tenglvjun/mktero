@@ -1,4 +1,5 @@
 import { isPublisherCopyrightParagraph } from '../../markdown/publisher-copyright.js';
+import { footnoteMarkKeys } from '../../markdown/footnote-marks.js';
 import { BLOCK_KIND, BLOCK_ROLE, blockPlainText, isFloatBlock } from './ir.js';
 
 export const NOTE_KIND = Object.freeze({
@@ -27,11 +28,6 @@ const CONTACT = /\be-?mail\b|[\w.+-]+@[\w-]+(?:\.[\w-]+)+/iu;
 const COPYRIGHT_OR_DOI = /©|\(c\)\s*(?:19|20)\d{2}|\bcopyright\b|\blicen[cs]ed under\b|\bcreative commons\b|^(?:https?:\/\/)?(?:dx\.)?doi\.org\/|\bISSN\b/iu;
 // "^{1}", "^{\dagger}", "*", "†", "¹": the mark a footnote opens with.
 const NOTE_MARK = /^\s*(?:\{\s*\}\s*)?(?:\^\s*\{\s*([^{}]{1,24})\s*\}|\^\s*([0-9a-z*]))|^\s*([*†‡§¶#]+|[¹²³⁴⁵⁶⁷⁸⁹⁰]+)(?=\s|\S)/u;
-const MARK_NAMES = new Map([
-    ['\\ddagger', '‡'], ['\\dagger', '†'], ['\\ast', '*'], ['\\star', '*'], ['\\S', '§'], ['\\P', '¶'],
-    ['\\#', '#'], ['\\sharp', '#'], ['\\circ', '°'], ['\\triangle', '△'],
-]);
-const SUPERSCRIPT_DIGITS = new Map([...'⁰¹²³⁴⁵⁶⁷⁸⁹'].map((digit, value) => [digit, String(value)]));
 // An author-year reference entry MinerU discarded as a page footnote.
 const AUTHOR_YEAR_ENTRY = /^\p{Lu}[\p{L}'’-]+,\s*(?:\p{Lu}\.\s*){1,3}(?:,|and|&)[\s\S]*\((?:19|20)\d{2}[a-z]?\)/u;
 
@@ -69,18 +65,7 @@ export function noteMarker(block) {
 }
 
 // Normalized marks of a superscript: "1,3" → ["1", "3"], "\dagger" → ["†"].
-export function markerKeys(value) {
-    const raw = String(value || '').trim();
-    if (!raw) return [];
-    if ([...raw].every(character => SUPERSCRIPT_DIGITS.has(character))) {
-        return [[...raw].map(character => SUPERSCRIPT_DIGITS.get(character)).join('')];
-    }
-    return raw.split(/\s*,\s*/u).map(part => {
-        let key = part.replace(/\s+/gu, '');
-        for (const [name, symbol] of MARK_NAMES) key = key.replaceAll(name, symbol);
-        return key;
-    }).filter(key => /^(?:\d{1,3}|[a-z]|[*†‡§¶#°△]+)$/u.test(key));
-}
+export const markerKeys = footnoteMarkKeys;
 
 // Marks a body span cites: superscript math and attached symbols.
 function citedMarks(block) {

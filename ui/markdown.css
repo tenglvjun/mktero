@@ -3011,6 +3011,26 @@ blockquote.mktero-note,
     outline-offset: 2px;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-ref,
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-back {
+    border-radius: 4px;
+    color: var(--accent-strong);
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-ref:hover,
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-back:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-ref:focus-visible,
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-back:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: 2px;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-selection-retained {
     border-radius: 3px;
     background: Highlight;

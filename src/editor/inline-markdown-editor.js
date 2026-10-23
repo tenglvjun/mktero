@@ -362,6 +362,28 @@ export function createInlineMarkdownEditor({
         navigationForwardStack,
         navigationBackStack
     );
+    const flashEditorRange = (from, to) => {
+        activateDOMGlobals(ownerWindow);
+        if (!view) return;
+        if (selectionFlashTimer !== null) {
+            ownerWindow.clearTimeout?.(selectionFlashTimer);
+            selectionFlashTimer = null;
+        }
+        const length = view.state.doc.length;
+        const start = Math.max(0, Math.trunc(Number(from) || 0));
+        const end = Math.min(length, Math.trunc(Number(to) || 0));
+        if (end <= start) return;
+        const effects = [setSelectionFlash.of({ from: start, to: end })];
+        const expand = markdownSectionExpandEffect(view.state, start);
+        if (expand) effects.push(expand);
+        view.dispatch({ effects });
+        if (typeof ownerWindow.setTimeout !== 'function') return;
+        selectionFlashTimer = ownerWindow.setTimeout(() => {
+            selectionFlashTimer = null;
+            if (destroyed) return;
+            view.dispatch({ effects: setSelectionFlash.of(null) });
+        }, 1200);
+    };
     const activateCitation = (editorView, target) => {
         recordNavigationPoint();
         referenceFeatures.citation.highlight.activate(editorView, target);
@@ -373,6 +395,18 @@ export function createInlineMarkdownEditor({
     const activateFigureReference = (editorView, target) => {
         recordNavigationPoint();
         referenceFeatures.figure.highlight.activate(editorView, target);
+    };
+    const activateFootnoteJump = (editorView, target) => {
+        const from = Number(target?.from);
+        const to = Number(target?.to);
+        if (!Number.isSafeInteger(from)
+            || !Number.isSafeInteger(to)
+            || to <= from) {
+            return;
+        }
+        recordNavigationPoint();
+        flashEditorRange(from, to);
+        requestEditorScroll(editorView, from, editorView.state.doc);
     };
     let scrollProgressFrame = null;
     let lastScrollProgress;
@@ -506,6 +540,7 @@ export function createInlineMarkdownEditor({
                     activateCitation,
                     activateTableReference,
                     activateFigureReference,
+                    activateFootnoteJump,
                     commitCorrection: correction => (
                         onCommitCorrection?.(correction)
                     ),
@@ -1386,25 +1421,7 @@ export function createInlineMarkdownEditor({
         goNavigationBack,
         goNavigationForward,
         flashRange(from, to) {
-            activateDOMGlobals(ownerWindow);
-            if (selectionFlashTimer !== null) {
-                ownerWindow.clearTimeout?.(selectionFlashTimer);
-                selectionFlashTimer = null;
-            }
-            const length = view.state.doc.length;
-            const start = Math.max(0, Math.trunc(Number(from) || 0));
-            const end = Math.min(length, Math.trunc(Number(to) || 0));
-            if (end <= start) return;
-            const effects = [setSelectionFlash.of({ from: start, to: end })];
-            const expand = markdownSectionExpandEffect(view.state, start);
-            if (expand) effects.push(expand);
-            view.dispatch({ effects });
-            if (typeof ownerWindow.setTimeout !== 'function') return;
-            selectionFlashTimer = ownerWindow.setTimeout(() => {
-                selectionFlashTimer = null;
-                if (destroyed) return;
-                view.dispatch({ effects: setSelectionFlash.of(null) });
-            }, 1200);
+            flashEditorRange(from, to);
         },
         highlightTranslationBlock(blockID) {
             activateDOMGlobals(ownerWindow);

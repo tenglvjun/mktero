@@ -10952,3 +10952,317 @@ test('expands a collapsed section when search navigation scrolls to a hit', asyn
     editor.destroy();
     dom.window.close();
 });
+
+function createFootnoteEditor(markdown, options = {}) {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        ...options,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    forceParsing(view, view.state.doc.length, 1000);
+    return { dom, document, editor, view, window: dom.window };
+}
+
+function footnoteDocument(body, note = '$^{1}$ The source of the claim.') {
+    return [
+        body,
+        '',
+        '<!-- mktero-note: footnote -->',
+        `> ${note}`,
+    ].join('\n');
+}
+
+function dispatchMouse(element, window, type) {
+    element.dispatchEvent(new window.MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+    }));
+}
+
+function dispatchKey(element, window, key) {
+    element.dispatchEvent(new window.KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key,
+    }));
+}
+
+function spyEditorScroll(view) {
+    const positions = [];
+    view.lineBlockAt = position => {
+        positions.push(position);
+        return { top: 720 };
+    };
+    view.requestMeasure = request => {
+        if (request?.read) request.write?.(request.read(view), view);
+    };
+    return positions;
+}
+
+test('renders a footnote citation as a link and not as math or a reference', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const { dom, document, editor } = createFootnoteEditor(markdown);
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+    const back = document.querySelector('.cm-mktero-footnote-back');
+
+    assert.equal(reference?.textContent, '1');
+    assert.equal(reference?.getAttribute('role'), 'link');
+    assert.equal(reference?.getAttribute('tabindex'), '0');
+    assert.equal(reference?.getAttribute('aria-label'), 'Go to note 1');
+    assert.equal(reference?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(reference?.classList.contains('cm-mktero-citation-superscript'), true);
+    assert.equal(back?.textContent, '1');
+    assert.equal(back?.getAttribute('role'), 'link');
+    assert.equal(back?.getAttribute('tabindex'), '0');
+    assert.equal(back?.getAttribute('aria-label'), 'Back to the text of note 1');
+    assert.equal(back?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(back?.classList.contains('cm-mktero-citation-superscript'), true);
+    assert.equal(back?.closest('.cm-mktero-math'), null);
+    assert.equal(document.querySelector('.cm-mktero-math'), null);
+    assert.doesNotMatch(
+        document.querySelector('.cm-content')?.textContent || '',
+        /\$|\^|\{|\}/
+    );
+    assert.equal(document.body.textContent.includes('mktero-note'), false);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('jumps to a footnote from a click or the keyboard and can go back', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const quoteOffset = markdown.indexOf('> $^{1}$');
+    const backAvailable = [];
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown, {
+        onNavigationBackChange: available => backAvailable.push(available),
+    });
+    const positions = spyEditorScroll(view);
+    view.scrollDOM.scrollTop = 96;
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+
+    dispatchMouse(reference, window, 'click');
+
+    assert.ok(positions.includes(quoteOffset));
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.ok(document.querySelector('.cm-line.cm-mktero-note .cm-mktero-selection-flash'));
+    assert.deepEqual(backAvailable, [true]);
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(view.scrollDOM.scrollTop, 96);
+
+    reference.focus();
+    dispatchKey(reference, window, 'Enter');
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.equal(backAvailable.at(-1), true);
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(view.scrollDOM.scrollTop, 96);
+
+    reference.focus();
+    dispatchKey(reference, window, ' ');
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a footnote back link returns to the citing mark', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const citingOffset = markdown.indexOf('$^{1}$');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown);
+    const positions = spyEditorScroll(view);
+    view.scrollDOM.scrollTop = 400;
+    const back = document.querySelector('.cm-mktero-footnote-back');
+
+    dispatchMouse(back, window, 'click');
+
+    assert.ok(positions.includes(citingOffset));
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.ok(document.querySelector('.cm-mktero-footnote-ref')
+        ?.closest('.cm-line')
+        ?.querySelector('.cm-mktero-selection-flash'));
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(view.scrollDOM.scrollTop, 400);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a footnote mark written as a TeX command links both ways as its symbol', () => {
+    const markdown = footnoteDocument(
+        'The Sharpe Ratio $^{†}$ measures return.',
+        '$^{\\dagger}$ Calculated over the full period.'
+    );
+    const citingOffset = markdown.indexOf('$^{†}$');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown);
+    const positions = spyEditorScroll(view);
+    const back = document.querySelector('.cm-mktero-footnote-back');
+    assert.equal(back?.textContent, '†');
+    assert.equal(back.getAttribute('role'), 'link');
+    assert.equal(back.closest('.cm-mktero-note')?.textContent, '† Calculated over the full period.');
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref')?.textContent, '†');
+    dispatchMouse(back, window, 'click');
+    assert.ok(positions.includes(citingOffset));
+    assert.equal(editor.getMarkdown(), markdown);
+    editor.destroy();
+    dom.window.close();
+});
+
+test('expands a collapsed section when a footnote jump lands inside it', () => {
+    const markdown = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Author $^{1}$ is listed here.',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{1}$ Corresponding author.',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const quoteOffset = markdown.indexOf('> $^{1}$');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+    const positions = spyEditorScroll(view);
+    view.scrollDOM.scrollTop = 48;
+
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Corresponding author'), false);
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref'), null);
+
+    button.click();
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+    assert.equal(reference?.textContent, '1');
+    const standIn = reference.cloneNode(true);
+    button.click();
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Corresponding author'), false);
+
+    // Collapsing removes the in-content control. Replay the same activation
+    // from a copy that still carries the note index.
+    view.contentDOM.append(standIn);
+    dispatchMouse(standIn, window, 'click');
+
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.equal(document.body.textContent.includes('Corresponding author'), true);
+    assert.ok(positions.includes(quoteOffset));
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('an unpaired footnote note is not a link', () => {
+    const markdown = footnoteDocument(
+        'No citing mark in this paragraph.',
+        '$^{1}$ An unpaired note.'
+    );
+    const { dom, document, editor } = createFootnoteEditor(markdown);
+
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref'), null);
+    assert.equal(document.querySelector('.cm-mktero-footnote-back'), null);
+    assert.equal(document.body.textContent.includes('mktero-note'), false);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a footnote mark is not also decorated as a reference citation', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'A claim $^{1}$ and a reference [2].',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{1}$ The source.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+    const { dom, document, editor, window } = createFootnoteEditor(markdown);
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+    const back = document.querySelector('.cm-mktero-footnote-back');
+    const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+
+    assert.equal(reference?.textContent, '1');
+    assert.equal(reference?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(back?.textContent, '1');
+    assert.equal(back?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(back?.closest('.cm-mktero-math'), null);
+    assert.deepEqual(citations.map(citation => citation.textContent), ['2']);
+
+    citations[0].dispatchEvent(new window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.match(
+        document.querySelector('.mktero-citation-popup')?.textContent || '',
+        /Beta B\. Second paper\. 2021\./
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('editing a paragraph hides its footnote link and does not break the note', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const paragraphEnd = markdown.indexOf('\n');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown, {
+        onCommitCorrection: async () => {},
+    });
+    editor.setCorrectionState({
+        enabled: false,
+        blocks: [{
+            id: 'paragraph-1',
+            type: 'paragraph',
+            from: 0,
+            to: paragraphEnd,
+            markdown: markdown.slice(0, paragraphEnd),
+        }],
+        correctedBlockIDs: [],
+    });
+    const content = document.querySelector('.cm-content');
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+
+    dispatchMouse(reference, window, 'dblclick');
+    assert.equal(content.getAttribute('contenteditable'), 'false');
+    assert.equal(reference.isConnected, true);
+
+    view.posAtCoords = () => 8;
+    dispatchMouse(content, window, 'dblclick');
+    assert.equal(content.getAttribute('contenteditable'), 'true');
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref'), null);
+    assert.match(content.textContent, /\$\^\{1\}/);
+    assert.equal(
+        document.querySelector('.cm-mktero-footnote-back')?.textContent,
+        '1'
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    dispatchKey(content, window, 'Escape');
+    assert.equal(content.getAttribute('contenteditable'), 'false');
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref')?.textContent, '1');
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});

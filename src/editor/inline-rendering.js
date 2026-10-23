@@ -25,6 +25,7 @@ import {
     computeDocumentFigures,
     computeFigureReferences,
     computeMarkdownCitations,
+    computeMarkdownFootnotes,
     computeTableReferences,
 } from '../markdown/markdown-analysis-cache.js';
 import {
@@ -89,6 +90,7 @@ import {
     BILINGUAL_LIST_BOUNDARY,
 } from '../markdown/markdown-translation-blocks.js';
 import { findMarkdownDirectives, SECTION_LABEL_KEYS } from '../markdown/markdown-directives.js';
+import { footnoteMarkKeys } from '../markdown/footnote-marks.js';
 
 // Expanded sections stay open across a translation that copies the same
 // directives: the key is the kind plus the ordinal of that kind. An edit
@@ -513,6 +515,36 @@ class TextMarkerWidget extends WidgetType {
     }
 }
 
+// A footnote mark written as a TeX command (`$^{\dagger}$`) is shown as its
+// symbol. A mark decoration cannot wrap the math widget that would cover the
+// same range, so the widget carries the link itself.
+class FootnoteMarkWidget extends WidgetType {
+    constructor(text, className, attributes) {
+        super();
+        this.text = text;
+        this.className = className;
+        this.attributes = attributes;
+    }
+
+    eq(other) {
+        return this.text === other.text
+            && this.className === other.className
+            && JSON.stringify(this.attributes) === JSON.stringify(other.attributes);
+    }
+
+    toDOM(view) {
+        const marker = view.dom.ownerDocument.createElement('span');
+        marker.className = this.className;
+        for (const [name, value] of Object.entries(this.attributes)) marker.setAttribute(name, value);
+        marker.textContent = this.text;
+        return marker;
+    }
+
+    ignoreEvent() {
+        return false;
+    }
+}
+
 class TaskCheckboxWidget extends WidgetType {
     constructor(checked, label) {
         super();
@@ -927,6 +959,7 @@ export function createInlineRenderingExtension({
     activateCitation,
     activateTableReference,
     activateFigureReference,
+    activateFootnoteJump,
     commitCorrection,
     restoreCorrection,
     onCorrectionError,
@@ -956,6 +989,7 @@ export function createInlineRenderingExtension({
         activateCitation,
         activateTableReference,
         activateFigureReference,
+        activateFootnoteJump,
         commitCorrection,
         restoreCorrection,
         onCorrectionError,
@@ -988,6 +1022,12 @@ export function createInlineRenderingExtension({
         citationAnalysisDocument: null,
         citationAnalysis: null,
         citationTargets: new Map(),
+        footnoteAnalysisDocument: null,
+        footnoteLinks: [],
+        footnoteQuoteTargets: new Map(),
+        footnoteCitationTargets: new Map(),
+        footnoteOwnedRanges: [],
+        footnoteSuperscriptWrappers: [],
         tableReferences: createReferenceAnalysisCache(
             source => computeTableReferences(context.analysisCache, source)
         ),
@@ -1508,6 +1548,12 @@ function buildDecorations(state, context) {
             return undefined;
         },
     });
+    decorateFootnotes(
+        state,
+        decorations,
+        context,
+        [...renderedGroups, ...renderedMathRanges]
+    );
     decorateCitations(state, decorations, context);
     decorateTableReferences(state, decorations, context);
     decorateFigureReferences(state, decorations, context);
@@ -1806,13 +1852,22 @@ function annotationStartOffset(ranges) {
 
 function decorateCitations(state, decorations, context) {
     const result = citationAnalysis(state, context);
+    // A paired footnote owns its superscript wrapper. Decorating that same
+    // range as a reference would hide the wrapper twice.
+    indexFootnotes(state, context);
+    const footnoteRanges = context.footnoteOwnedRanges;
     const hiddenSuperscriptMarkup = new Set();
     const superscriptContent = new Map();
     for (const affiliation of result.affiliations) {
         const markup = affiliation.markerMarkup;
         if (!markup
             || rangesOverlapEditing(affiliation, context)
-            || citationRangeIsExcluded(state, markup.contentFrom)) {
+            || citationRangeIsExcluded(state, markup.contentFrom)
+            || overlapsFootnoteRange(
+                markup.wrapperFrom,
+                markup.wrapperTo,
+                footnoteRanges
+            )) {
             continue;
         }
         hideSuperscriptMarkup(decorations, markup, hiddenSuperscriptMarkup);
@@ -1827,8 +1882,16 @@ function decorateCitations(state, decorations, context) {
     }
     for (const citation of result.citations) {
         const markup = citation.superscriptMarkup;
+        const wrapperFrom = markup?.wrapperFrom ?? citation.from;
+        const wrapperTo = markup?.wrapperTo ?? citation.to;
         if (rangesOverlapEditing(citation, context)
-            || citationRangeIsExcluded(state, citation.from)) {
+            || citationRangeIsExcluded(state, citation.from)
+            || overlapsFootnoteRange(wrapperFrom, wrapperTo, footnoteRanges)
+            || overlapsFootnoteRange(
+                citation.from,
+                citation.to,
+                footnoteRanges
+            )) {
             continue;
         }
         if (markup) {
@@ -1923,6 +1986,214 @@ function citationAnalysis(state, context) {
             .map(target => [target.id, target])
     );
     return result;
+}
+
+const FOOTNOTE_MATH_WRAPPER = /^(?:\$|\\\()(?:\{\s*\})?\^\s*\{\s*([^{}\r\n]{1,24}?)\s*\}(?:\$|\\\))$/u;
+
+function indexFootnotes(state, context) {
+    if (context.footnoteAnalysisDocument === state.doc) return;
+    const result = computeMarkdownFootnotes(
+        context.analysisCache,
+        state.doc.toString()
+    );
+    const links = [];
+    const quoteTargets = new Map();
+    const citationTargets = new Map();
+    const ownedRanges = [];
+    const superscriptWrappers = [];
+    result.notes.forEach((note, index) => {
+        if (!note.citation) return;
+        const citing = footnoteCitationMarkup(state, note.citation);
+        const mark = footnoteMarkMarkup(state, note.mark);
+        if (!citing || !mark) return;
+        const id = String(index);
+        const label = note.label || note.key;
+        links.push({ id, label, citing, mark });
+        quoteTargets.set(id, {
+            id,
+            from: note.quote.from,
+            to: note.quote.to,
+            label,
+        });
+        citationTargets.set(id, {
+            id,
+            from: note.citation.wrapperFrom,
+            to: note.citation.wrapperTo,
+            label,
+        });
+        ownedRanges.push(
+            { from: citing.wrapperFrom, to: citing.wrapperTo },
+            { from: mark.wrapperFrom, to: mark.wrapperTo }
+        );
+        if (citing.raiseContent) superscriptWrappers.push(citing);
+        if (mark.raiseContent) superscriptWrappers.push(mark);
+    });
+    context.footnoteAnalysisDocument = state.doc;
+    context.footnoteLinks = links;
+    context.footnoteQuoteTargets = quoteTargets;
+    context.footnoteCitationTargets = citationTargets;
+    context.footnoteOwnedRanges = ownedRanges;
+    context.footnoteSuperscriptWrappers = superscriptWrappers;
+}
+
+function decorateFootnotes(state, decorations, context, replacedRanges) {
+    indexFootnotes(state, context);
+    const hiddenMarkup = new Set();
+    for (const link of context.footnoteLinks) {
+        const label = { mark: link.label };
+        decorateFootnoteEndpoint(
+            state,
+            decorations,
+            context,
+            link.citing,
+            {
+                className: 'cm-mktero-footnote-ref',
+                ariaLabel: context.translate(
+                    'markdown.footnote.jumpToNote',
+                    label
+                ),
+                index: link.id,
+            },
+            hiddenMarkup,
+            replacedRanges
+        );
+        decorateFootnoteEndpoint(
+            state,
+            decorations,
+            context,
+            link.mark,
+            {
+                className: 'cm-mktero-footnote-back',
+                ariaLabel: context.translate(
+                    'markdown.footnote.backToText',
+                    label
+                ),
+                index: link.id,
+            },
+            hiddenMarkup,
+            replacedRanges
+        );
+    }
+}
+
+function decorateFootnoteEndpoint(
+    state,
+    decorations,
+    context,
+    markup,
+    spec,
+    hiddenMarkup,
+    replacedRanges
+) {
+    // Only the delimiters around the mark are replaced; the mark itself may
+    // hold a rendered symbol such as `\dagger`.
+    if (!markup
+        || rangesOverlapEditing({
+            from: markup.wrapperFrom,
+            to: markup.wrapperTo,
+        }, context)
+        || citationRangeIsExcluded(state, markup.contentFrom)
+        || markup.wrapperFrom < markup.contentFrom
+            && rangeOverlapsAny(markup.wrapperFrom, markup.contentFrom, replacedRanges)
+        || markup.contentTo < markup.wrapperTo
+            && rangeOverlapsAny(markup.contentTo, markup.wrapperTo, replacedRanges)
+        || !markup.raiseContent
+            && rangeOverlapsAny(markup.wrapperFrom, markup.wrapperTo, replacedRanges)) {
+        return;
+    }
+    const className = [
+        spec.className,
+        markup.raiseContent ? 'cm-mktero-citation-superscript' : '',
+    ].filter(Boolean).join(' ');
+    const attributes = {
+        role: 'link',
+        tabindex: '0',
+        'aria-label': spec.ariaLabel,
+        'data-footnote-index': spec.index,
+    };
+    const content = state.sliceDoc(markup.contentFrom, markup.contentTo);
+    if (markup.raiseContent && content.includes('\\')) {
+        const [symbol] = footnoteMarkKeys(content);
+        if (!symbol || rangeOverlapsAny(markup.wrapperFrom, markup.wrapperTo, replacedRanges)) return;
+        decorations.push(Decoration.replace({
+            widget: new FootnoteMarkWidget(symbol, className, attributes),
+        }).range(markup.wrapperFrom, markup.wrapperTo));
+        return;
+    }
+    if (markup.raiseContent) {
+        hideSuperscriptMarkup(decorations, markup, hiddenMarkup);
+    }
+    decorations.push(Decoration.mark({ class: className, attributes }).range(markup.contentFrom, markup.contentTo));
+}
+
+function footnoteCitationMarkup(state, citation) {
+    if (!citation
+        || !validFootnoteRange(state, citation.wrapperFrom, citation.wrapperTo)
+        || !validFootnoteRange(state, citation.from, citation.to)
+        || citation.from < citation.wrapperFrom
+        || citation.to > citation.wrapperTo) {
+        return null;
+    }
+    return {
+        wrapperFrom: citation.wrapperFrom,
+        wrapperTo: citation.wrapperTo,
+        contentFrom: citation.from,
+        contentTo: citation.to,
+        raiseContent: citation.wrapperFrom < citation.from
+            || citation.to < citation.wrapperTo,
+    };
+}
+
+function footnoteMarkMarkup(state, mark) {
+    if (!validFootnoteRange(state, mark?.from, mark?.to)) return null;
+    const raw = state.sliceDoc(mark.from, mark.to);
+    const math = FOOTNOTE_MATH_WRAPPER.exec(raw);
+    if (!math) {
+        return {
+            wrapperFrom: mark.from,
+            wrapperTo: mark.to,
+            contentFrom: mark.from,
+            contentTo: mark.to,
+            raiseContent: false,
+        };
+    }
+    const contentFrom = mark.from + math[0].indexOf(math[1]);
+    const contentTo = contentFrom + math[1].length;
+    if (contentFrom < mark.from || contentTo > mark.to) return null;
+    return {
+        wrapperFrom: mark.from,
+        wrapperTo: mark.to,
+        contentFrom,
+        contentTo,
+        raiseContent: true,
+    };
+}
+
+function validFootnoteRange(state, from, to) {
+    return Number.isSafeInteger(from)
+        && Number.isSafeInteger(to)
+        && from >= 0
+        && to > from
+        && to <= state.doc.length;
+}
+
+function hasFootnoteSuperscriptMarkup(state, context, from, to) {
+    indexFootnotes(state, context);
+    return context.footnoteSuperscriptWrappers.some(markup => (
+        markup.wrapperFrom === from && markup.wrapperTo === to
+    ));
+}
+
+// The footnote layer draws a mark written as a TeX command itself.
+function insideFootnoteMark(state, context, from, to) {
+    indexFootnotes(state, context);
+    return context.footnoteSuperscriptWrappers.some(markup => (
+        markup.contentFrom <= from && to <= markup.contentTo
+    ));
+}
+
+function overlapsFootnoteRange(from, to, ranges) {
+    return (ranges || []).some(range => from < range.to && range.from < to);
 }
 
 function createReferenceAnalysisCache(analyze, {
@@ -2068,6 +2339,8 @@ function referenceInteraction(event, view, context) {
             activate: openNote,
         };
     }
+    const footnote = footnoteReferenceInteraction(event, view, context);
+    if (footnote) return footnote;
     const citation = citationElement(event, view);
     if (citation) {
         return {
@@ -2662,6 +2935,46 @@ function selectionActionsLocked(context) {
         || context.annotationPopup?.isNoteOpen?.());
 }
 
+function footnoteReferenceTypes(context) {
+    return [
+        {
+            selector: '.cm-mktero-footnote-ref',
+            targetAttribute: 'data-footnote-index',
+            targets: context.footnoteQuoteTargets,
+            activate: context.activateFootnoteJump,
+        },
+        {
+            selector: '.cm-mktero-footnote-back',
+            targetAttribute: 'data-footnote-index',
+            targets: context.footnoteCitationTargets,
+            activate: context.activateFootnoteJump,
+        },
+    ];
+}
+
+function footnoteReferenceInteraction(event, view, context) {
+    for (const type of footnoteReferenceTypes(context)) {
+        const element = event.target?.closest?.(type.selector);
+        if (!element || !view.dom.contains(element)) continue;
+        const target = type.targets?.get(
+            element.getAttribute(type.targetAttribute) || ''
+        );
+        if (!target) return null;
+        return {
+            element,
+            popup: null,
+            open() {},
+            activate() {
+                context.citationPopup?.close();
+                context.tablePreviewPopup?.close();
+                context.figurePreviewPopup?.close();
+                type.activate?.(view, target);
+            },
+        };
+    }
+    return null;
+}
+
 function previewReferenceTypes(context) {
     return [
         {
@@ -3011,6 +3324,11 @@ function decorateMath(
             context,
             matchFrom,
             matchTo
+        ) || hasFootnoteSuperscriptMarkup(
+            state,
+            context,
+            matchFrom,
+            matchTo
         )) {
             continue;
         }
@@ -3062,7 +3380,8 @@ function decorateAuthorNoteLatexCommands(
         const matchFrom = nodeFrom + match.start;
         const matchTo = nodeFrom + match.end;
         if (rangeOverlapsAny(matchFrom, matchTo, excludedRanges)
-            || rangeOverlapsAny(matchFrom, matchTo, renderedMathRanges)) {
+            || rangeOverlapsAny(matchFrom, matchTo, renderedMathRanges)
+            || insideFootnoteMark(state, context, matchFrom, matchTo)) {
             continue;
         }
         decorations.push(renderedMathRange(

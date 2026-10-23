@@ -25,7 +25,10 @@ muted note right after the first paragraph of that page that carries its mark
 (a superscript number, `*`, or `†`). A note whose mark is not found follows the
 last paragraph of its page, without crossing a heading. Table and figure notes
 use the same style directly below their table or figure. Notes are ordinary
-quoted text: you can search, annotate, translate, and copy them.
+quoted text: you can search, annotate, translate, and copy them. A footnote
+mark in the text is a link to its note, and the mark at the start of the note
+links back; both are recorded as jumps, so `Alt+Left` (`Cmd+[` on macOS)
+returns to where you were.
 
 Article metadata that is not part of the reading text goes into a collapsed
 section: affiliations, contact and contribution notes, funding, dates, and a

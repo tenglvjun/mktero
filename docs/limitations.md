@@ -14,11 +14,12 @@
 - Source navigation depends on provider blocks and coordinates; older cached
   results may remain readable without source links. MinerU cloud, local MinerU,
   and Mistral results have independent parser profiles and caches.
-- MinerU page footnotes appear as notes after the paragraph that cites them,
-  but a footnote mark in the text is not a link to its note yet. Collapsed
-  article information, author biography, and reporting summary sections are
-  recognized from the page layout and wording, so unusual front matter can stay
-  in the reading text.
+- A footnote mark links to its note only when the note follows it in the same
+  section and repeats the mark. A note placed without its mark (for example a
+  printed `††` the OCR text does not carry) has no link. Collapsed article
+  information, author biography, and reporting summary sections are recognized
+  from the page layout and wording, so unusual front matter can stay in the
+  reading text.
 - MinerU cloud results locate text by OCR block, not by line, so a Markdown
   paragraph jumps to its whole block in the PDF. A paragraph joined across a
   page, column, or figure keeps one location for each part.

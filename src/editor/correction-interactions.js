@@ -8,6 +8,8 @@ const CORRECTION_INTERACTION_SELECTOR = [
     '[role="button"]',
     '.cm-mktero-link',
     '.cm-mktero-citation',
+    '.cm-mktero-footnote-ref',
+    '.cm-mktero-footnote-back',
     '.cm-mktero-table-reference',
     '.cm-mktero-figure-reference',
     '.cm-mktero-pdf-annotation',
