@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "id": "miller-1956-magical",
+  "archiveSha256": "cdc97746da4d2f2aabbccf606dcc6433d14b01dffbdcb9f21b5da6482cc13b42",
+  "pages": 17,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "FIG. 1.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        501,
+        584,
+        887,
+        774
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "FIG. 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        514,
+        100,
+        900,
+        287
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "FIG. 3.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        114,
+        90,
+        491,
+        284
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "FIG. 4.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        505,
+        646,
+        886,
+        832
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "FIG. 5.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        114,
+        662,
+        495,
+        845
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "FIG. 6.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        502,
+        91,
+        886,
+        285
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": "FIG. 8.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        512,
+        88,
+        898,
+        300
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": "FIG. 7.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        104,
+        595,
+        491,
+        838
+      ]
+    },
+    {
+      "pageIndex": 14,
+      "label": "FIG. 9.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        93,
+        99,
+        477,
+        326
+      ]
+    }
+  ],
+  "preserved": []
+}

@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "id": "malik-1996-heart",
+  "archiveSha256": "bc6ffb570b3e40308120f64ad4108463c54ddb4612eb6e34bfb0b5e5fca69cdf",
+  "pages": 28,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Figure 1",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        123,
+        79,
+        680,
+        643
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Figure 2",
+      "panels": 1,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        72,
+        81,
+        526,
+        243
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Figure 3",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        79,
+        80,
+        467,
+        273
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Figure 4",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        485,
+        83,
+        867,
+        294
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Figure 5",
+      "panels": 6,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        74,
+        80,
+        781,
+        792
+      ]
+    },
+    {
+      "pageIndex": 8,
+      "label": "Figure 6",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        128,
+        630,
+        639,
+        847
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": "Figure 7",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        88,
+        82,
+        449,
+        286
+      ]
+    },
+    {
+      "pageIndex": 15,
+      "label": "Figure 8",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        75,
+        82,
+        521,
+        526
+      ]
+    },
+    {
+      "pageIndex": 16,
+      "label": "Figure 9",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        133,
+        78,
+        514,
+        379
+      ]
+    }
+  ],
+  "preserved": []
+}

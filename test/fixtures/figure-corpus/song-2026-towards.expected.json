@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "id": "song-2026-towards",
+  "archiveSha256": "ed4e8e529284985fb1d1828e768d857690136b34c7d603cd82f616abee3cacc0",
+  "pages": 24,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 3,
+      "label": "Fig. 1.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        118,
+        271,
+        849,
+        694
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "Fig. 2.",
+      "panels": 4,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        126,
+        87,
+        844,
+        468
+      ]
+    },
+    {
+      "pageIndex": 8,
+      "label": "Fig. 3.",
+      "panels": 3,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        114,
+        339,
+        849,
+        658
+      ]
+    },
+    {
+      "pageIndex": 10,
+      "label": "Fig. 4.",
+      "panels": 3,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        118,
+        215,
+        844,
+        527
+      ]
+    },
+    {
+      "pageIndex": 12,
+      "label": "Fig. 5.",
+      "panels": 3,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        173,
+        82,
+        829,
+        387
+      ]
+    }
+  ],
+  "preserved": []
+}

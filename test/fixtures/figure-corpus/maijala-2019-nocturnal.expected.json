@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "id": "maijala-2019-nocturnal",
+  "archiveSha256": "edd5c61ed2a6f11e6799fea5b616335c4540e278fc7468b1f5dc035e85fde638",
+  "pages": 10,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 0,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        830,
+        140,
+        905,
+        197
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Fig. 1",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        99,
+        612,
+        893,
+        854
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Fig. 2",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        208,
+        114,
+        789,
+        345
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Fig. 3",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        255,
+        593,
+        741,
+        891
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "Fig. 4",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        97,
+        107,
+        481,
+        345
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Fig. 5",
+      "panels": 2,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        208,
+        117,
+        789,
+        478
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Fig. 6",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        97,
+        630,
+        484,
+        868
+      ]
+    }
+  ],
+  "preserved": []
+}

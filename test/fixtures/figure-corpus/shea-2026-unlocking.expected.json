@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "id": "shea-2026-unlocking",
+  "archiveSha256": "1d6b6d4dcd157bc969e5cf8f908d817905abaac77ad3e686f0e6abf793716dc7",
+  "pages": 117,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 99,
+      "label": "Figure 1.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        194,
+        72,
+        901,
+        416
+      ]
+    },
+    {
+      "pageIndex": 100,
+      "label": "Figure 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        348,
+        70,
+        757,
+        626
+      ]
+    },
+    {
+      "pageIndex": 101,
+      "label": "Figure 3.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        192,
+        79,
+        901,
+        470
+      ]
+    },
+    {
+      "pageIndex": 102,
+      "label": "Figure 4.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        192,
+        98,
+        902,
+        392
+      ]
+    },
+    {
+      "pageIndex": 103,
+      "label": "Figure 5.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        191,
+        74,
+        902,
+        328
+      ]
+    },
+    {
+      "pageIndex": 104,
+      "label": "Figure 6.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        199,
+        70,
+        902,
+        350
+      ]
+    },
+    {
+      "pageIndex": 105,
+      "label": "Figure 7.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        192,
+        70,
+        904,
+        378
+      ]
+    },
+    {
+      "pageIndex": 106,
+      "label": "Figure 8.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        223,
+        72,
+        870,
+        621
+      ]
+    },
+    {
+      "pageIndex": 108,
+      "label": "Figure 9.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        191,
+        70,
+        904,
+        401
+      ]
+    },
+    {
+      "pageIndex": 109,
+      "label": "Figure 10.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        191,
+        129,
+        906,
+        294
+      ]
+    },
+    {
+      "pageIndex": 110,
+      "label": "Figure 11.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        196,
+        74,
+        901,
+        457
+      ]
+    },
+    {
+      "pageIndex": 111,
+      "label": "Figure 12.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        255,
+        76,
+        840,
+        660
+      ]
+    },
+    {
+      "pageIndex": 113,
+      "label": "Figure 13.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 6,
+      "bbox": [
+        192,
+        72,
+        902,
+        426
+      ]
+    },
+    {
+      "pageIndex": 114,
+      "label": "Figure 14.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        196,
+        96,
+        901,
+        372
+      ]
+    }
+  ],
+  "preserved": []
+}

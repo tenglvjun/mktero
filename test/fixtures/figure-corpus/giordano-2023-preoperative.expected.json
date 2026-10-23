@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "id": "giordano-2023-preoperative",
+  "archiveSha256": "4e0333d2b715316f726c0f22e2cd67471ebf301321ff643ce368edc284cbbda4",
+  "pages": 13,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 0,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        53,
+        496,
+        150,
+        524
+      ]
+    },
+    {
+      "pageIndex": 0,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        55,
+        777,
+        157,
+        806
+      ]
+    },
+    {
+      "pageIndex": 2,
+      "label": "Figure 1.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        279,
+        111,
+        763,
+        443
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Figure 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        67,
+        112,
+        931,
+        317
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Figure 5.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        279,
+        113,
+        851,
+        391
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 6,
+      "reason": "ambiguous-caption"
+    }
+  ]
+}

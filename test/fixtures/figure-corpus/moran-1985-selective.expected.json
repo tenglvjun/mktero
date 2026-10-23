@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "moran-1985-selective",
+  "archiveSha256": "b0643be29ee9021a3c6db4f9febac0a8d8bbec9313d6d9a3900ef141c5a7cf7d",
+  "pages": 4,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 0,
+      "label": null,
+      "panels": 2,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        354,
+        579,
+        644,
+        838
+      ]
+    },
+    {
+      "pageIndex": 1,
+      "label": "Fig. 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        354,
+        32,
+        943,
+        348
+      ]
+    }
+  ],
+  "preserved": []
+}

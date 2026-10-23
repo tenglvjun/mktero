@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "id": "arxiv-2609.09150",
+  "archiveSha256": "3a08883879213d663d3d52a20fc686e9102c6843ba6ddee815712eea9ad2a1c5",
+  "pages": 9,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 1,
+      "label": "Figure 1:",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        103,
+        74,
+        915,
+        330
+      ]
+    },
+    {
+      "pageIndex": 2,
+      "label": "Figure 2:",
+      "panels": 3,
+      "captions": 1,
+      "owned": 4,
+      "bbox": [
+        94,
+        80,
+        904,
+        319
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Figure 3:",
+      "panels": 3,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        93,
+        79,
+        902,
+        318
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Figure 4:",
+      "panels": 3,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        93,
+        80,
+        904,
+        321
+      ]
+    }
+  ],
+  "preserved": []
+}

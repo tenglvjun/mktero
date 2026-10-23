@@ -38,6 +38,12 @@ another paper, add its archive to the corpus directory and commit the generated
 `<id>.expected.json`. Missing archives are skipped; an archive whose bytes
 changed fails until it is re-verified and updated.
 
+The figure input now comes from the MinerU document IR. The ten expectations
+recorded before it (`beyond-alignment`, `brainbench`, `clinical-llm`,
+`envharness`, `externalization`, `menstrual-wearable`, `mosaic`, `neuradock`,
+`olfactory`, `parsimonious`) were written by the earlier figure adapter. Re-run
+`--update` for them on a machine that has those archives and review the diff.
+
 ## Reading corpus regression
 
 `scripts/reading-corpus-check.mjs` measures how the MinerU pipeline reads each

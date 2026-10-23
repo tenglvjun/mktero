@@ -27,6 +27,8 @@ node scripts/figure-corpus-check.mjs --update             # 复核后刷新
 
 修改图组规则后，运行检查并复核差异。验证新论文时，把它的压缩包加入语料目录，并提交生成的 `<id>.expected.json`。缺失的压缩包会被跳过；压缩包字节发生变化时会失败，直到重新验证并更新。
 
+图组输入现在来自 MinerU 文档 IR。在此之前记录的 10 份期望（`beyond-alignment`、`brainbench`、`clinical-llm`、`envharness`、`externalization`、`menstrual-wearable`、`mosaic`、`neuradock`、`olfactory`、`parsimonious`）由之前的图组适配器生成。请在有这些压缩包的机器上对它们重新运行 `--update`，并复核差异。
+
 ## 阅读质量回归语料
 
 `scripts/reading-corpus-check.mjs` 统计 MinerU 管线对本机每个压缩包（`<id>.zip`）的阅读结果，并与 `test/fixtures/reading-corpus/<id>.expected.json` 比较。期望文件只保存计数和 12 位标题哈希，不保存论文正文。目录取自 `MKTERO_READING_CORPUS`，未设置时使用 `MKTERO_FIGURE_CORPUS`。

@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "id": "singh-2026-tiny",
+  "archiveSha256": "63c9bf49a30fc3366cf043b12dd6047fd22f13f4ca177bad9279d225d4a9449f",
+  "pages": 6,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 0,
+      "label": "Fig. 1.",
+      "panels": 2,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        516,
+        249,
+        921,
+        348
+      ]
+    },
+    {
+      "pageIndex": 1,
+      "label": "Fig. 3.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        506,
+        80,
+        940,
+        223
+      ]
+    },
+    {
+      "pageIndex": 1,
+      "label": "Fig. 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        60,
+        84,
+        476,
+        220
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Fig. 6.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        101,
+        80,
+        889,
+        249
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Fig. 7.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        531,
+        276,
+        891,
+        461
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 2,
+      "reason": "ambiguous-caption"
+    }
+  ]
+}
