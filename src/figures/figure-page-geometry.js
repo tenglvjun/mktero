@@ -25,7 +25,8 @@ export function alignFigureInputToPDF(input, pageGeometryByIndex, { limits = FIG
             ? page.geometryReason
             : alignment.reason || failures.get(page.pageIndex);
         if (geometryReason) {
-            return { ...page, coordinateFrame: 'unknown', geometryReason };
+            const { geometryVerification: _pending, ...rest } = page;
+            return { ...rest, coordinateFrame: 'unknown', geometryReason };
         }
         const geometry = alignment.geometry;
         return {
@@ -36,6 +37,7 @@ export function alignFigureInputToPDF(input, pageGeometryByIndex, { limits = FIG
             dpi: null,
             rotation: geometry.rotation,
             coordinateFrame: 'display-cropbox',
+            ...(page.geometryVerification === 'pending' ? { geometryVerification: 'verified' } : {}),
             sourceGeometry: {
                 width: page.width, height: page.height, unit: page.unit, dpi: page.dpi ?? null,
                 rotation: page.rotation ?? null, coordinateFrame: page.coordinateFrame,
@@ -56,6 +58,54 @@ export function alignFigureInputToPDF(input, pageGeometryByIndex, { limits = FIG
         contentList: contentList.map(block => invalidPages.has(block.pageIndex)
             ? { ...block, bbox: null } : block),
     };
+}
+
+// Confirms a layout page whose size is still awaiting a PDF check. Agreement
+// keeps the display frame; a size disagreement preserves that page only.
+export function verifyPendingFigurePages(input, pageGeometryByIndex, { limits = FIGURE_LIMITS } = {}) {
+    return {
+        ...input,
+        pages: input.pages.map(page => verifyPendingPage(
+            page, geometryFor(pageGeometryByIndex, page.pageIndex), limits,
+        )),
+    };
+}
+
+function verifyPendingPage(page, geometry, limits) {
+    if (page.geometryVerification !== 'pending') return page;
+    if (layoutPageSizeAgrees(page, geometry, limits.geometryTolerance)) {
+        return { ...page, coordinateFrame: 'display-cropbox', geometryVerification: 'verified' };
+    }
+    const { geometryVerification: _pending, ...rest } = page;
+    return {
+        ...rest,
+        coordinateFrame: 'unknown',
+        geometryReason: comparablePageGeometry(page, geometry) ? 'coordinate-mismatch' : 'missing-geometry',
+    };
+}
+
+// PDF.js width and height are the displayed page. A 90° or 270° rotation has
+// already swapped them relative to the unrotated CropBox, so the layout
+// page_size is compared to that pair, within the relative tolerance on each side.
+export function layoutPageSizeAgrees(page, geometry, tolerance = FIGURE_LIMITS.geometryTolerance) {
+    if (!comparablePageGeometry(page, geometry)) return false;
+    return dimensionsMatch(page, geometry.width, geometry.height, geometry.userUnit, tolerance);
+}
+
+function comparablePageGeometry(page, geometry) {
+    return Boolean(geometry)
+        && ROTATIONS.has(geometry.rotation)
+        && positive(geometry.userUnit)
+        && positive(geometry.width)
+        && positive(geometry.height)
+        && positive(page?.width)
+        && positive(page?.height);
+}
+
+function geometryFor(pageGeometryByIndex, pageIndex) {
+    return pageGeometryByIndex instanceof Map
+        ? pageGeometryByIndex.get(pageIndex)
+        : pageGeometryByIndex?.[pageIndex];
 }
 
 function createAlignment(page, geometry, limits) {

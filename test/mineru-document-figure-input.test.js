@@ -91,8 +91,38 @@ function layoutBundle(pages, names, identity = {}) {
     };
 }
 
-function layoutPage(pageIndex, blocks) {
-    return { page_idx: pageIndex, page_size: PAGE, discarded_blocks: [], para_blocks: blocks };
+function layoutPage(pageIndex, blocks, pageSize = PAGE) {
+    return { page_idx: pageIndex, page_size: pageSize, discarded_blocks: [], para_blocks: blocks };
+}
+
+function captionedFigure(name, caption) {
+    return [
+        text([60, 160, 540, 190], caption),
+        imageBlock([60, 220, 540, 700], name),
+    ];
+}
+
+function pdfGeometry(pageIndex, width, height, rotation = 0) {
+    const swapped = rotation === 90 || rotation === 270;
+    return {
+        pageIndex, width, height, rotation, userUnit: 1,
+        coordinateFrame: 'display-cropbox',
+        viewBox: [0, 0, swapped ? height : width, swapped ? width : height],
+        mediaBox: null,
+        viewportTransform: swapped ? [0, 1, 1, 0, 0, 0] : [1, 0, 0, -1, 0, height],
+    };
+}
+
+function restoreWith(input, geometries) {
+    const byIndex = new Map(geometries.map(geometry => [geometry.pageIndex, geometry]));
+    return new FigureRestorationService({
+        hash,
+        openPDF: async () => ({
+            getPageGeometry: async pageIndex => byIndex.get(pageIndex),
+            renderRegion: async () => ({ data: createTestPNG(80, 60), mimeType: 'image/png', width: 80, height: 60 }),
+            close: async () => {},
+        }),
+    }).restore(input, { fileData: Uint8Array.of(1) });
 }
 
 function imageBlock(bbox, name, children = []) {
@@ -201,23 +231,10 @@ test('splits one image block into span panels and composes them', () => {
     assert.equal(candidates[0].captionBlockIds.length, 1);
 });
 
-test('keeps blocks when the layout backend or version is unsupported', () => {
+test('keeps blocks and defers geometry verification for every layout page size', () => {
     for (const identity of [
         { _backend: 'pipeline', _version_name: '3.4.5' },
         { _backend: 'vlm', _version_name: '999.0.0' },
-    ]) {
-        const input = createMinerUFigureInput(layoutBundle(
-            [layoutPage(0, [imageBlock([100, 100, 400, 400], 'a.jpg')])],
-            ['a.jpg'],
-            identity,
-        ));
-        assert.equal(input.pages[0].coordinateFrame, 'unknown', JSON.stringify(identity));
-        assert.ok(input.blocks.some(block => block.role === 'panel'), JSON.stringify(identity));
-    }
-});
-
-test('uses display-cropbox for vlm 3.4.5 and hybrid 3.4.4 layouts', () => {
-    for (const identity of [
         { _backend: 'vlm', _version_name: '3.4.5' },
         { _backend: 'hybrid', _version_name: '3.4.4' },
     ]) {
@@ -227,7 +244,72 @@ test('uses display-cropbox for vlm 3.4.5 and hybrid 3.4.4 layouts', () => {
             identity,
         ));
         assert.equal(input.pages[0].coordinateFrame, 'display-cropbox', JSON.stringify(identity));
+        assert.equal(input.pages[0].geometryVerification, 'pending', JSON.stringify(identity));
+        assert.equal(input.pages[0].geometryReason, undefined, JSON.stringify(identity));
+        assert.equal(input.pages[0].width, 1000, JSON.stringify(identity));
+        assert.ok(input.blocks.some(block => block.role === 'panel'), JSON.stringify(identity));
     }
+});
+
+test('composes a layout outside the old whitelist when the page size matches the PDF', async () => {
+    const input = createMinerUFigureInput(layoutBundle([
+        layoutPage(0, captionedFigure('a.jpg', 'Figure 1. Study flowchart.')),
+    ], ['a.jpg'], { _backend: 'pipeline', _version_name: '1.0.0' }));
+    const offline = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(offline[0].decision, 'compose', offline[0].reason);
+    const draft = await restoreWith(input, [pdfGeometry(0, 1000, 1000)]);
+    assert.equal(draft.blueprints.length, 1);
+    assert.equal(draft.preserved.length, 0);
+    assert.equal(draft.input.pages[0].coordinateFrame, 'display-cropbox');
+    assert.equal(draft.input.pages[0].geometryVerification, 'verified');
+});
+
+test('preserves a mismatched page and still restores the others', async () => {
+    const input = createMinerUFigureInput(layoutBundle([
+        layoutPage(0, captionedFigure('a.jpg', 'Figure 1. Study flowchart.')),
+        layoutPage(1, captionedFigure('b.jpg', 'Figure 2. Study flowchart.')),
+    ], ['a.jpg', 'b.jpg'], { _backend: 'pipeline', _version_name: '1.0.0' }));
+    const before = structuredClone(input.pages);
+    const draft = await restoreWith(input, [
+        pdfGeometry(0, 400, 500),
+        pdfGeometry(1, 1000, 1000),
+    ]);
+    assert.deepEqual(input.pages, before);
+    assert.deepEqual(draft.blueprints.map(item => item.pageIndex), [1]);
+    const rejected = draft.preserved.filter(item => item.pageIndex === 0);
+    assert.equal(rejected.length, 1);
+    assert.equal(rejected[0].reason, 'coordinate-mismatch');
+    assert.equal(draft.preserved.some(item => item.pageIndex === 1), false);
+    assert.equal(draft.input.pages[0].coordinateFrame, 'unknown');
+    assert.equal(draft.input.pages[0].geometryReason, 'coordinate-mismatch');
+    assert.equal(draft.input.pages[1].geometryVerification, 'verified');
+});
+
+test('composes a 90 degree page whose displayed PDF size is swapped', async () => {
+    const input = createMinerUFigureInput(layoutBundle([
+        layoutPage(0, captionedFigure('a.jpg', 'Figure 1. Study flowchart.'), [800, 600]),
+    ], ['a.jpg'], { _backend: 'vlm', _version_name: '9.9.9' }));
+    const geometry = pdfGeometry(0, 800, 600, 90);
+    assert.deepEqual(geometry.viewBox, [0, 0, 600, 800]);
+    const draft = await restoreWith(input, [geometry]);
+    assert.equal(draft.blueprints.length, 1);
+    assert.equal(draft.preserved.length, 0);
+    assert.equal(draft.input.pages[0].rotation, 90);
+    assert.equal(draft.input.pages[0].geometryVerification, 'verified');
+});
+
+test('keeps a content-list page unverified', () => {
+    const input = createMinerUFigureInput({
+        markdown: 'ignored',
+        assets: [{ path: 'images/a.jpg', mimeType: 'image/jpeg', data: new Uint8Array([1]) }],
+        contentList: [{
+            type: 'image', assetPath: 'images/a.jpg', pageIndex: 0, bbox: [100, 100, 400, 400],
+            captions: ['Figure 1. A result.'],
+        }],
+    });
+    assert.equal(input.pages[0].coordinateFrame, 'unknown');
+    assert.equal(input.pages[0].geometryEvidence, 'content-list-only');
+    assert.equal(input.pages[0].geometryVerification, undefined);
 });
 
 test('composes a sibling caption and keeps short interior text with the figure', () => {

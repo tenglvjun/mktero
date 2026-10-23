@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeFigureInput } from './helpers/figure-fixtures.js';
-import { alignFigureInputToPDF } from '../src/figures/figure-model.js';
+import { alignFigureInputToPDF, verifyPendingFigurePages } from '../src/figures/figure-model.js';
 
 function geometry(rotation = 0, userUnit = 1) {
     const transforms = {
@@ -89,6 +89,29 @@ test('refuses unknown frames, mismatched dimensions and unsupported MediaBox dat
         const result = alignFigureInputToPDF(input, new Map([[0, geometry()]]));
         assert.ok(['missing-geometry', 'coordinate-mismatch'].includes(result.pages[0].geometryReason));
     }
+});
+
+test('verifies a pending page against the displayed PDF size, including rotation', () => {
+    const pending = (width, height) => ({
+        pages: [{
+            pageIndex: 0, width, height, unit: 'pdf-user-unit', dpi: null,
+            coordinateFrame: 'display-cropbox', rotation: null,
+            geometryVerification: 'pending',
+        }],
+    });
+    const rotated = verifyPendingFigurePages(pending(800, 600), new Map([[0, geometry(90)]]));
+    assert.equal(rotated.pages[0].geometryVerification, 'verified');
+    assert.equal(rotated.pages[0].coordinateFrame, 'display-cropbox');
+    const unrotated = verifyPendingFigurePages(pending(600, 800), new Map([[0, geometry(90)]]));
+    assert.equal(unrotated.pages[0].coordinateFrame, 'unknown');
+    assert.equal(unrotated.pages[0].geometryReason, 'coordinate-mismatch');
+    assert.equal(unrotated.pages[0].geometryVerification, undefined);
+    const edge = verifyPendingFigurePages(pending(606, 800), new Map([[0, geometry()]]));
+    assert.equal(edge.pages[0].geometryVerification, 'verified');
+    const over = verifyPendingFigurePages(pending(607, 800), new Map([[0, geometry()]]));
+    assert.equal(over.pages[0].geometryReason, 'coordinate-mismatch');
+    const mistral = { pages: [{ pageIndex: 0, coordinateFrame: 'unknown', geometryReason: 'missing-geometry' }] };
+    assert.equal(verifyPendingFigurePages(mistral, new Map()).pages[0], mistral.pages[0]);
 });
 
 test('keeps the provider geometry reason instead of masking it as missing geometry', () => {

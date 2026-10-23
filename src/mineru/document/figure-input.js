@@ -123,22 +123,30 @@ function pieceRole(piece) {
 }
 
 function figurePages(ir) {
-    const supported = ir.source?.origin === 'layout'
-        && MINERU_FIGURE_LAYOUT_OPTIONS.backends.includes(ir.source.backend)
-        && MINERU_FIGURE_LAYOUT_OPTIONS.versions.includes(ir.source.version);
     return ir.pages.map(page => {
         if (ir.source?.origin !== 'layout') {
             return { pageIndex: page.pageIndex, coordinateFrame: 'unknown', rotation: null,
                 geometryEvidence: 'content-list-only', markdownRange: null };
         }
+        if (!positivePageSize(page)) {
+            return { pageIndex: page.pageIndex, coordinateFrame: 'unknown', rotation: null,
+                geometryEvidence: 'mineru-layout-v2', markdownRange: null };
+        }
+        // The layout frame is assumed so candidate resolution runs without the
+        // PDF; restoration checks this page size against the PDF before any crop.
         return {
             pageIndex: page.pageIndex, width: page.width, height: page.height,
             unit: MINERU_FIGURE_LAYOUT_OPTIONS.unit, dpi: null,
-            coordinateFrame: supported ? 'display-cropbox' : 'unknown', rotation: null,
-            ...(supported ? {} : { geometryReason: 'unsupported-layout-schema' }),
+            coordinateFrame: 'display-cropbox', rotation: null,
+            geometryVerification: 'pending',
             geometryEvidence: 'mineru-layout-v2', markdownRange: null,
         };
     });
+}
+
+function positivePageSize(page) {
+    return Number.isFinite(page?.width) && page.width > 0
+        && Number.isFinite(page?.height) && page.height > 0;
 }
 
 // MinerU's own float box, as the region resolver measures figure groups by

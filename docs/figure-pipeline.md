@@ -68,9 +68,10 @@ and stale layout markers are rebuilt, including images that span a whole row.
 
 ## Provider support
 
-- MinerU region restoration requires a `layout.json` from a supported MinerU
-  backend and version (`vlm` or `hybrid`, 3.4.4 or 3.4.5). Other results keep
-  their figures as MinerU returned them.
+- MinerU region restoration uses a `layout.json` page size that matches the
+  PDF page. A 90° or 270° rotation swaps width and height, and each dimension
+  must agree within 1%. A page that does not match keeps its figures as MinerU
+  returned them.
 - Mistral's pixel dimensions do not establish the PDF CropBox origin or
   rotation, and that is not independently verified, so the production Mistral
   adapter does not perform coordinate-based region restoration and preserves the

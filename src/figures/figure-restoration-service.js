@@ -1,7 +1,7 @@
 import { FIGURE_LIMITS } from './figure-limits.js';
 import {
     alignFigureInputToPDF, normalizeFigureAssetDestination, normalizeFigureAssetPath,
-    validateFigureCrop, validateFigureInput,
+    validateFigureCrop, validateFigureInput, verifyPendingFigurePages,
 } from './figure-model.js';
 import { bindFigureSourceRanges } from './figure-source-binding.js';
 import { resolveFigureCandidates } from './figure-region-resolver.js';
@@ -57,7 +57,7 @@ export class FigureRestorationService {
                 .map(block => block.pageIndex));
             const geometries = new Map();
             const possiblePages = bound.pages.filter(page => panelPages.has(page.pageIndex)
-                && page.coordinateFrame !== 'unknown');
+                && pageNeedsPDFGeometry(page));
             if (possiblePages.length) {
                 try {
                     const opening = Promise.resolve(this.openPDF(fileData, { signal: scope.signal }));
@@ -79,6 +79,7 @@ export class FigureRestorationService {
                             if (error.name === 'AbortError') throw error;
                         }
                     }
+                    bound = verifyPendingFigurePages(bound, geometries, { limits });
                     bound = alignFigureInputToPDF(bound, geometries, { limits });
                 }
                 catch (error) {
@@ -260,6 +261,12 @@ export class FigureRestorationService {
             return { error: true, reason: error.code === 'FIGURE_RENDER_TIMEOUT' ? 'render-timeout' : 'render-failed' };
         }
     }
+}
+
+function pageNeedsPDFGeometry(page) {
+    // Pending pages stay in the display frame so resolution is unchanged, but
+    // the pending flag alone must still open the PDF before any crop.
+    return page.coordinateFrame !== 'unknown' || page.geometryVerification === 'pending';
 }
 
 function buildFigurePlaceholders(input, candidates) {

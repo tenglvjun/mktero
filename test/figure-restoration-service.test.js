@@ -46,6 +46,30 @@ test('restores all panels and interior labels before prose preparation', async (
     assert.deepEqual(counts(), { opened: 1, closed: 1, rendered: 1 });
 });
 
+test('opens the PDF to verify a pending page before cropping', async () => {
+    const { input } = makeFigureInput();
+    input.pages[0].coordinateFrame = 'unknown';
+    input.pages[0].geometryVerification = 'pending';
+    const { restoration, counts } = service();
+    const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
+    assert.equal(counts().opened, 1);
+    assert.equal(draft.blueprints.length, 1);
+    assert.equal(draft.input.pages[0].coordinateFrame, 'display-cropbox');
+    assert.equal(draft.input.pages[0].geometryVerification, 'verified');
+});
+
+test('preserves a pending page whose size disagrees without cropping it', async () => {
+    const { input } = makeFigureInput();
+    input.pages[0].geometryVerification = 'pending';
+    input.pages[0].width = 100;
+    const { restoration, counts } = service();
+    const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
+    assert.equal(counts().opened, 1);
+    assert.equal(counts().rendered, 0);
+    assert.equal(draft.blueprints.length, 0);
+    assert.equal(draft.preserved[0].reason, 'coordinate-mismatch');
+});
+
 test('retains original content when figure rendering fails or coordinates are missing', async () => {
     for (const missingGeometry of [false, true]) {
         const { input } = makeFigureInput();

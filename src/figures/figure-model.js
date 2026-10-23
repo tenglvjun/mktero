@@ -5,7 +5,7 @@ import {
 } from './figure-limits.js';
 import { GFM, parser } from '@lezer/markdown';
 
-export { alignFigureInputToPDF } from './figure-page-geometry.js';
+export { alignFigureInputToPDF, verifyPendingFigurePages } from './figure-page-geometry.js';
 
 const MARKDOWN_PARSER = parser.configure(GFM);
 const HASH = /^[a-f0-9]{64}$/;
