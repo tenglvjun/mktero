@@ -118,3 +118,43 @@ test('normalizes chrome keys across numbers and punctuation', () => {
     assert.equal(chromeKey('J Med Internet Res 2021 | vol. 23 | p. 4'), chromeKey('J Med Internet Res 2021 | vol. 23 | p. 11'));
     assert.notEqual(chromeKey('Article'), chromeKey('Articles'));
 });
+
+test('hides a running footer that sits above the edge band at its usual height', () => {
+    const footer = 'Physiol Rev. Author manuscript; available in PMC 2026 February 08.';
+    const ir = classify([
+        text(1, [268, 899, 640, 914], footer, { kind: 'discarded', mineruType: 'footer' }),
+        text(2, [268, 899, 640, 915], footer),
+        text(3, [268, 500, 640, 515], footer),
+    ]);
+    assert.deepEqual(roles(ir), ['chrome', 'chrome', 'body']);
+    assert.equal(ir.diagnostics.chromeFallbacks[0].rule, 'matches-discarded-position');
+});
+
+test('drops a running footer that MinerU attached to a float as its footnote', () => {
+    const table = {
+        id: `b${counter++}`, kind: 'table', mineruType: 'table', role: 'float', pageIndex: 2, bbox: [100, 100, 900, 900],
+        fragments: [{ pageIndex: 2, bbox: [100, 100, 900, 900], lines: [] }],
+        children: [
+            { id: 't:body0', kind: 'body', pageIndex: 2, bbox: [100, 100, 900, 880], html: '<table></table>' },
+            { id: 't:footnote0', kind: 'footnote', pageIndex: 2, bbox: [100, 880, 900, 900],
+                fragments: [{ pageIndex: 2, bbox: [100, 880, 900, 900], lines: [{ spans: [{ type: 'text', content: 'Eur Heart J, Vol. 17, March 1996' }] }] }] },
+            { id: 't:footnote1', kind: 'footnote', pageIndex: 2, bbox: [100, 860, 900, 880],
+                fragments: [{ pageIndex: 2, bbox: [100, 860, 900, 880], lines: [{ spans: [{ type: 'text', content: 'Values are means.' }] }] }] },
+        ],
+        mergedFrom: [], absorbed: [],
+    };
+    const ir = classify([text(1, [120, 918, 330, 932], 'Eur Heart J. Vol. 17, March 1996', { kind: 'discarded', mineruType: 'footer' }), table]);
+    assert.equal(table.children[1].role, 'chrome');
+    assert.equal(table.children[2].role, undefined);
+    assert.equal(ir.diagnostics.chromeFallbacks[0].rule, 'float-footnote-matches-discarded');
+});
+
+test('keeps every text box of a flowchart once one of them is a sentence', () => {
+    const ir = classify([
+        figure(3, [130, 280, 860, 640]),
+        text(3, [460, 480, 630, 495], '73 cycles excluded due to:'),
+        text(3, [470, 495, 840, 520], '14 cycles without LH result and missing temperature measurements'),
+        text(3, [150, 300, 170, 315], 'b'),
+    ]);
+    assert.deepEqual(roles(ir), ['float', 'body', 'body', 'float-note']);
+});

@@ -13,6 +13,7 @@ const PANEL_LABEL = /^\(?[a-z]\)?$/iu;
 const CHROME_TYPES = new Set(['header', 'footer', 'page_number', 'aside_text']);
 const BARE_DOI = /^(?:https?:\/\/)?(?:dx\.)?doi\.org\/10\.\S+$/iu;
 const PAGE_NUMBER = /^(?:page\s+)?(?:\d{1,4}|[ivxlcdm]{1,7})(?:\s*(?:of|\/)\s*\d{1,4})?$/iu;
+const POSITION_TOLERANCE = 20;
 
 // Assigns a reading role to every IR block. MinerU's discarded blocks are
 // trusted first; body blocks it missed are recognized as page decoration
@@ -22,8 +23,10 @@ export function classifyBlocks(ir) {
     const diagnostics = ir.diagnostics;
     const pageCount = Math.max(1, ir.pages.length);
     const chromeKeys = discardedChromeKeys(ir.blocks);
+    const chromePositions = discardedChromePositions(ir.blocks);
     const edgeRepeats = repeatedEdgeKeys(ir.blocks);
     const floatBodies = collectFloatBodies(ir.blocks);
+    const proseFloats = new Set();
     for (const block of ir.blocks) {
         if (block.kind === BLOCK_KIND.DISCARDED) {
             block.role = block.mineruType === 'page_footnote' ? BLOCK_ROLE.PAGE_NOTE : BLOCK_ROLE.CHROME;
@@ -33,15 +36,22 @@ export function classifyBlocks(ir) {
             block.role = BLOCK_ROLE.BODY;
             continue;
         }
-        if (block.role === BLOCK_ROLE.FLOAT) continue;
+        if (block.role === BLOCK_ROLE.FLOAT) {
+            dropChromeFootnotes(block, chromeKeys, diagnostics);
+            continue;
+        }
         const text = blockPlainText(block);
-        const rule = chromeRule(block, text, { chromeKeys, edgeRepeats, pageCount });
+        const rule = chromeRule(block, text, { chromeKeys, chromePositions, edgeRepeats, pageCount });
         if (rule) {
             block.role = BLOCK_ROLE.CHROME;
             diagnostics.chromeFallbacks.push({ id: block.id, pageIndex: block.pageIndex, rule });
             continue;
         }
         const host = floatInterior(block, text, floatBodies);
+        if (!host) {
+            const container = containingFloat(block, floatBodies);
+            if (container) proseFloats.add(container);
+        }
         if (host) {
             block.role = BLOCK_ROLE.FLOAT_NOTE;
             block.floatInteriorOf = host;
@@ -53,7 +63,28 @@ export function classifyBlocks(ir) {
             : block.kind === BLOCK_KIND.REFERENCE ? BLOCK_ROLE.REFERENCE
                 : BLOCK_ROLE.BODY;
     }
+    keepFloatProseVisible(ir.blocks, proseFloats);
     return ir;
+}
+
+// A flowchart or boxed figure holds sentences, not only labels. When any
+// text inside a figure is longer than a label, none of that figure's text
+// is hidden, so its content is never shown only in part.
+function keepFloatProseVisible(blocks, proseFloats) {
+    for (const block of blocks) {
+        if (block.role !== BLOCK_ROLE.FLOAT_NOTE || !proseFloats.has(block.floatInteriorOf)) continue;
+        if (PANEL_LABEL.test(blockPlainText(block).trim())) continue;
+        block.role = BLOCK_ROLE.BODY;
+        delete block.floatInteriorOf;
+    }
+}
+
+function containingFloat(block, floatBodies) {
+    if (!block.bbox || block.fragments.length !== 1) return null;
+    for (const body of floatBodies.get(block.pageIndex) || []) {
+        if (overlapShare(block.bbox, body.bbox) >= INTERIOR_OVERLAP) return body.id;
+    }
+    return null;
 }
 
 export function chromeKey(text) {
@@ -83,6 +114,43 @@ function discardedChromeKeys(blocks) {
     return keys;
 }
 
+// Where each discarded decoration sits, by text: a body block with the same
+// text at the same height of another page is the same decoration.
+function discardedChromePositions(blocks) {
+    const positions = new Map();
+    for (const block of blocks) {
+        if (block.kind !== BLOCK_KIND.DISCARDED || !CHROME_TYPES.has(block.mineruType) || !block.bbox) continue;
+        const key = chromeKey(blockPlainText(block));
+        if (key.replace(/#/gu, '').length < 4) continue;
+        if (!positions.has(key)) positions.set(key, []);
+        positions.get(key).push(block.bbox);
+    }
+    return positions;
+}
+
+function matchesDiscardedPosition(block, key, positions) {
+    return Boolean(block.bbox) && (positions.get(key) || []).some(bbox => (
+        Math.abs(bbox[1] - block.bbox[1]) <= POSITION_TOLERANCE
+        && Math.abs(bbox[3] - block.bbox[3]) <= POSITION_TOLERANCE
+    ));
+}
+
+// MinerU can attach a running footer to a full-page float as its footnote.
+function dropChromeFootnotes(block, chromeKeys, diagnostics) {
+    for (const child of block.children) {
+        if (child.kind !== 'footnote') continue;
+        const text = (child.fragments || []).map(fragment => fragmentTextOf(fragment)).join(' ').trim();
+        const key = chromeKey(text);
+        if (key.replace(/#/gu, '').length < 4 || wordCount(text) > MAX_CHROME_WORDS || !chromeKeys.has(key)) continue;
+        child.role = BLOCK_ROLE.CHROME;
+        diagnostics.chromeFallbacks.push({ id: child.id, pageIndex: block.pageIndex, rule: 'float-footnote-matches-discarded' });
+    }
+}
+
+function fragmentTextOf(fragment) {
+    return (fragment.lines || []).flatMap(line => line.spans).map(span => span.content).join(' ');
+}
+
 function repeatedEdgeKeys(blocks) {
     const pages = new Map();
     for (const block of blocks) {
@@ -97,12 +165,19 @@ function repeatedEdgeKeys(blocks) {
     return pages;
 }
 
-function chromeRule(block, text, { chromeKeys, edgeRepeats, pageCount }) {
+function chromeRule(block, text, { chromeKeys, chromePositions, edgeRepeats, pageCount }) {
     const edge = edgeOf(block);
     const trimmed = text.trim();
     if (!trimmed) return null;
-    // ACM and IEEE stamp the copyright notice beside the first-page abstract.
     if (!edge) {
+        // A running footer printed a little above the usual band is still the
+        // decoration MinerU discarded at that height on other pages.
+        const key = chromeKey(trimmed);
+        if (key.replace(/#/gu, '').length >= 4 && wordCount(trimmed) <= MAX_CHROME_WORDS
+            && matchesDiscardedPosition(block, key, chromePositions)) {
+            return 'matches-discarded-position';
+        }
+        // ACM and IEEE stamp the copyright notice beside the first-page abstract.
         return block.pageIndex === 0 && block.kind !== BLOCK_KIND.TITLE
             && isPublisherCopyrightParagraph(trimmed) && !BARE_DOI.test(trimmed)
             ? 'first-page-publisher-copyright'
