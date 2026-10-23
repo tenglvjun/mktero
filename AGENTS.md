@@ -144,6 +144,12 @@ archives, image paths, API responses, and preference values as untrusted input.
   behavior changes, update the matching profile ID through the parser option
   constants. Figure behavior is versioned by `FIGURE_PIPELINE_PROFILE`, which is
   part of both profiles, so a figure-pipeline change must bump it as well.
+  The MinerU profile is the request options plus `MINERU_DOCUMENT_PIPELINE`
+  and `FIGURE_PIPELINE_PROFILE`: bump `MINERU_DOCUMENT_PIPELINE` with any
+  change to `src/mineru/document/` output. The raw result store is keyed by
+  `MINERU_REQUEST_PROFILE_ID`, so such a bump re-reads stored results offline.
+  Keep each shipped profile as a literal in `MINERU_PREVIOUS_PARSER_PROFILE_IDS`
+  so corrected revisions stay reachable.
 - Cache failures are non-fatal to successful conversion. Preserve atomic
   replacement, serialized operations, expiry, and limit enforcement.
 

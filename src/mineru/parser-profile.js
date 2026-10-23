@@ -86,14 +86,12 @@ const PAGE_BANNER_TEXT_FLOW_SOURCE_MAP_OPTIONS = Object.freeze({
     figureStructure: 'figure-region-v15',
 });
 
-const PUBLISHER_COPYRIGHT_SOURCE_MAP_OPTIONS = Object.freeze({
-    ...PAGE_BANNER_TEXT_FLOW_SOURCE_MAP_OPTIONS,
-    textFlow: 'cross-page-continuation-v3',
-    chrome: 'publisher-copyright-cluster-v1',
-    figureStructure: FIGURE_PIPELINE_PROFILE,
-});
+// The Markdown heuristics before the document IR. The last of them shipped as
+// the v17 identity below and is kept for corrected revisions only.
 
-export const MINERU_SOURCE_MAP_OPTIONS = PUBLISHER_COPYRIGHT_SOURCE_MAP_OPTIONS;
+// Shipped v17 cache identity: the last profile that rewrote MinerU's full.md.
+// Keep this literal so a profile bump cannot rewrite it.
+export const MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"sourceMap":{"textMatching":"exact-then-academic-v4","figurePanels":"same-page-horizontal-or-labeled-vertical-ab-v2","figureLayouts":"same-page-image-group-layout-v1","textFlow":"cross-page-continuation-v3","prose":"unclosed-parenthetical-comma-v1","columns":"same-page-two-column-reading-order-v6","blockFlow":"misplaced-code-page-order-v2","chrome":"publisher-copyright-cluster-v1","figureStructure":"figure-region-v17","figureLayout":{"backends":["vlm","hybrid"],"versions":["3.4.4","3.4.5"],"unit":"pdf-user-unit"},"figureLabelRecovery":"verified-pdf-image-v1","figureReadingOrder":"verified-pdf-title-order-v1","embeddedCaptions":"trailing-figure-caption-v1","standaloneLinks":"bare-address-lines-v1","figureTables":"figure-captioned-tables-v1","figureCaptions":"panel-pair-captions-v2"}}';
 
 // Shipped v14 cache identity. Keep this literal so a profile bump cannot rewrite it.
 export const MINERU_FIGURE_REGION_V14_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"sourceMap":{"textMatching":"exact-then-academic-v4","figurePanels":"same-page-horizontal-or-labeled-vertical-ab-v2","figureLayouts":"same-page-image-group-layout-v1","textFlow":"cross-page-continuation-v2","prose":"unclosed-parenthetical-comma-v1","columns":"same-page-two-column-reading-order-v6","blockFlow":"misplaced-code-page-order-v2","chrome":"page-edge-repeated-v1","figureStructure":"figure-region-v14","figureLayout":{"backends":["vlm","hybrid"],"versions":["3.4.4","3.4.5"],"unit":"pdf-user-unit"},"figureLabelRecovery":"verified-pdf-image-v1","figureReadingOrder":"verified-pdf-title-order-v1","embeddedCaptions":"trailing-figure-caption-v1","standaloneLinks":"bare-address-lines-v1","figureTables":"figure-captioned-tables-v1","figureCaptions":"panel-pair-captions-v2"}}';
@@ -104,13 +102,14 @@ export const MINERU_FIGURE_REGION_V16_PARSER_PROFILE_ID = '{"batch":{"model_vers
 // Shipped v15 cache identity. Keep this literal so a profile bump cannot rewrite it.
 export const MINERU_FIGURE_REGION_V15_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"sourceMap":{"textMatching":"exact-then-academic-v4","figurePanels":"same-page-horizontal-or-labeled-vertical-ab-v2","figureLayouts":"same-page-image-group-layout-v1","textFlow":"cross-page-continuation-v3","prose":"unclosed-parenthetical-comma-v1","columns":"same-page-two-column-reading-order-v6","blockFlow":"misplaced-code-page-order-v2","chrome":"publisher-copyright-cluster-v1","figureStructure":"figure-region-v15","figureLayout":{"backends":["vlm","hybrid"],"versions":["3.4.4","3.4.5"],"unit":"pdf-user-unit"},"figureLabelRecovery":"verified-pdf-image-v1","figureReadingOrder":"verified-pdf-title-order-v1","embeddedCaptions":"trailing-figure-caption-v1","standaloneLinks":"bare-address-lines-v1","figureTables":"figure-captioned-tables-v1","figureCaptions":"panel-pair-captions-v2"}}';
 
-// Figure rendering changes can reuse completed OCR. Older text-flow profiles
-// still need provider layout data, so they stay in the correction lookup list.
-export const MINERU_COMPATIBLE_CACHE_PROFILE_IDS = Object.freeze([
-    MINERU_FIGURE_REGION_V14_PARSER_PROFILE_ID,
-]);
+// Markdown cached by an earlier profile came from the full.md heuristics, so
+// no earlier profile is reused for reading. A document cached by an earlier
+// profile is converted again, from the raw result store when it has one.
+export const MINERU_COMPATIBLE_CACHE_PROFILE_IDS = Object.freeze([]);
 
+// Earlier profiles, searched only for corrected revisions.
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V16_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V15_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V14_PARSER_PROFILE_ID,
@@ -130,10 +129,15 @@ export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
     })),
 ]);
 
+// How Mktero reads a MinerU result into its reading document. Bump it with
+// any change to the document IR or its Markdown.
+export const MINERU_DOCUMENT_PIPELINE = 'mineru-document-ir-v1';
+
 export const MINERU_PARSER_PROFILE_ID = JSON.stringify({
     batch: MINERU_BATCH_OPTIONS,
     file: MINERU_FILE_OPTIONS,
-    sourceMap: MINERU_SOURCE_MAP_OPTIONS,
+    document: MINERU_DOCUMENT_PIPELINE,
+    figureStructure: FIGURE_PIPELINE_PROFILE,
 });
 
 // Identifies what MinerU was asked to produce, independent of how Mktero

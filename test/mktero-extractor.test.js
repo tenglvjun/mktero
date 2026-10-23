@@ -4,7 +4,7 @@ import {
     MkteroDocumentExtractor,
     MkteroSignInRequiredError,
 } from '../src/extractors/mktero-extractor.js';
-import { MINERU_PARSER_PROFILE_ID } from '../src/mineru/parser-profile.js';
+import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS } from '../src/mineru/parser-profile.js';
 
 function createPDFItem(overrides = {}) {
     return {
@@ -339,4 +339,24 @@ test('readCached returns an existing cache entry without a session', async () =>
     assert.equal(result.markdown, '# Cached while signed out');
     assert.equal(result.cacheHit, true);
     assert.equal(result.provider, 'mktero');
+});
+
+test('finds a correction made under an earlier MinerU profile', async () => {
+    const profiles = [];
+    const earlier = MINERU_PREVIOUS_PARSER_PROFILE_IDS[0];
+    const extractor = createExtractor({
+        conversion: { async convert() { assert.fail('No conversion for a correction'); } },
+        createCacheKey: async (_data, { parserProfile }) => {
+            profiles.push(parserProfile);
+            return parserProfile === earlier ? 'b'.repeat(64) : 'a'.repeat(64) + profiles.length;
+        },
+        readRevision: async ({ cacheKey }) => cacheKey === 'b'.repeat(64) ? { markdown: '# Corrected earlier' } : null,
+        preparePDFIndex() {},
+    });
+
+    const result = await extractor.readCached(42, {});
+
+    assert.equal(result.markdown, '# Corrected earlier');
+    assert.equal(result.cacheKey, 'b'.repeat(64));
+    assert.deepEqual(profiles, [MINERU_PARSER_PROFILE_ID, earlier]);
 });

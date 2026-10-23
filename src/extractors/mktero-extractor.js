@@ -3,7 +3,9 @@ import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_PARSER_PROFILE_ID,
+    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
 } from '../mineru/parser-profile.js';
+import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 import { MkteroSignInRequiredError } from '../account/account-session.js';
 
 export { MkteroSignInRequiredError };
@@ -348,8 +350,11 @@ export class MkteroDocumentExtractor {
         if (revision || !this.createCacheKey) {
             return revision ? { snapshot: revision, cacheKey } : null;
         }
+        // A correction made under any earlier profile is still the user's
+        // text, so every earlier profile is searched, not only those whose
+        // cached Markdown can be reused.
         const visited = new Set([cacheKey]);
-        for (const parserProfile of MINERU_COMPATIBLE_CACHE_PROFILE_IDS) {
+        for (const parserProfile of [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru]) {
             const legacyKey = await this.createCacheKey(fileData, {
                 parserProfile,
             });
