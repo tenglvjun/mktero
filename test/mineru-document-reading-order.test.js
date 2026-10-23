@@ -281,3 +281,30 @@ test('orders one column top to bottom when its paragraphs are interleaved with i
         ['image-left', 'image-right'],
     );
 });
+
+test('treats a stack of short reference entries as a column', () => {
+    const entry = (id, bbox) => block(id, bbox, { kind: 'reference' });
+    const ir = order([
+        entry('l1', [61, 82, 486, 111]),
+        entry('l2', [61, 111, 486, 140]),
+        entry('l3', [61, 141, 486, 163]),
+        entry('r1', [533, 82, 938, 101]),
+        entry('r2', [511, 101, 938, 131]),
+        entry('r3', [511, 131, 938, 160]),
+    ]);
+    assert.equal(ir.pages[0].columns, 2);
+    assert.deepEqual(ir.blocks.map(entry => entry.column), [0, 0, 0, 1, 1, 1]);
+});
+
+test('reads the reference entries of a single-column page from top to bottom', () => {
+    const entry = (id, bbox) => block(id, bbox, { kind: 'reference' });
+    const ir = order([
+        entry('161', [242, 503, 850, 547]),
+        entry('continued', [270, 74, 822, 105]),
+        entry('152', [242, 105, 855, 149]),
+        entry('153', [242, 149, 855, 206]),
+        entry('162', [242, 548, 843, 591]),
+    ]);
+    assert.deepEqual(ids(ir), ['continued', '152', '153', '161', '162']);
+    assert.equal(ir.diagnostics.reorderedBands[0].rule, 'reference');
+});

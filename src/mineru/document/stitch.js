@@ -6,6 +6,8 @@ import { isCJKCharacter } from './text.js';
 const TERMINAL = /(?:[.!?。！？…:：]["'”’»)\]）】]*|(?:https?:\/\/|www\.|doi:\s*|10\.\d{4,9}\/)\S+|\S+@\S+\.\w+)$/iu;
 const LIST_START = /^(?:[•●○◦▪▫‣∙·■□➢➤►✓✔\-–—*]\s|(?:\(?[0-9]{1,3}[.)]|\(?[a-z][.)]|\(?[ivx]{1,4}[.)])\s)/u;
 const REFERENCE_MARKER = /^(?:\[\d{1,4}\]|\d{1,4}\.\s|\d{1,4}\)\s|\d{1,4}\s+\p{Lu})/u;
+// Lower-case surname particles open an author name: "de Witte, M.", "van der Berg, A.".
+const SURNAME_PARTICLE = /^(?:(?:de|del|della|der|den|di|da|du|dos|das|la|le|van|von|ten|ter|zu|al|el|bin|ibn)\s+)+(?=\p{Lu})/u;
 const AUTHOR_START = /^(?:\p{Lu}[\p{L}'’-]+(?:\s+\p{Lu}[\p{L}'’-]+)*,\s*(?:\p{Lu}\.|\p{Lu}[\p{L}'’-]+[,.])|(?:\p{Lu}\.\s*){1,3}(?:-\s*)?\p{Lu}[\p{L}'’-]+,)/u;
 const CAPTION_START = /^(?:fig(?:ure)?s?\.?|tables?|algorithms?|scheme|chart|plate|supplementary (?:fig(?:ure)?|table))\s*[A-Z]?\d/iu;
 const LABEL_START = /^(?:[\p{Lu}][\p{L}'’]*(?:\s+[\p{L}'’]+){0,4}\s*[:：]|publisher[’']?s note\b|open access\b|reprints and permissions\b)/u;
@@ -26,6 +28,7 @@ export function stitchParagraphs(ir) {
     const pages = new Map(ir.pages.map(page => [page.pageIndex, page]));
     const pieces = indexPieces(ir.blocks, pages);
     const blocks = ir.blocks;
+    pieces.numberedReferences = hasNumberedReferences(blocks);
     const consumed = new Set();
     for (let index = 0; index < blocks.length; index++) {
         const block = blocks[index];
@@ -60,7 +63,8 @@ function findContinuation(block, blocks, from, pieces) {
     if (next < 0) return null;
     const candidate = blocks[next];
     if (isStitchable(candidate) && textContinues(block, candidate)) {
-        const boundary = joinBoundary(block, candidate, blocks, from, next, pieces);
+        const boundary = joinBoundary(block, candidate, blocks, from, next, pieces)
+            || referenceContinuation(block, candidate, blocks, from, next, pieces);
         // Across a float the sentence must visibly run on: the next part is
         // in lower case or the first stops on a function word.
         if (boundary && (boundary !== 'float' || /^\p{Ll}/u.test(firstText(candidate))
@@ -111,6 +115,30 @@ function findPastSidebar(block, blocks, from, pieces) {
         skipped.push(piece);
     }
     return null;
+}
+
+// Inside a reference list MinerU splits one entry into two blocks even within
+// a column. The second part continues the entry when it carries no entry
+// marker and either starts in lower case or, in a numbered list, is an entry
+// MinerU itself read as a reference and follows an unfinished entry. In an
+// author-year list a capitalized block is a new entry, and text after the
+// list (a publisher's note) is not an entry.
+function referenceContinuation(left, right, blocks, leftEnd, rightIndex, pieces) {
+    if (left.role !== BLOCK_ROLE.REFERENCE || right.role !== BLOCK_ROLE.REFERENCE) return null;
+    if (blocks.slice(leftEnd, rightIndex).some(block => !isTransparent(block))) return null;
+    const last = pieces.get(left.fragments.at(-1));
+    const first = pieces.get(right.fragments[0]);
+    if (!last || !first || last.fragment.pageIndex !== first.fragment.pageIndex) return null;
+    const tail = firstText(right);
+    if (/^\p{Ll}/u.test(tail) && !SURNAME_PARTICLE.test(tail)) return 'reference';
+    return pieces.numberedReferences && right.kind === BLOCK_KIND.REFERENCE && !TERMINAL.test(lastText(left))
+        ? 'reference' : null;
+}
+
+function hasNumberedReferences(blocks) {
+    const references = blocks.filter(block => block.role === BLOCK_ROLE.REFERENCE);
+    const marked = references.filter(block => REFERENCE_MARKER.test(firstText(block))).length;
+    return references.length > 0 && marked >= references.length / 2;
 }
 
 function isStitchable(block) {
@@ -243,10 +271,11 @@ export function textContinues(left, right) {
     if (LIST_START.test(tail) || CAPTION_START.test(tail)) return false;
     if (left.role === BLOCK_ROLE.REFERENCE || right.role === BLOCK_ROLE.REFERENCE) {
         if (left.role !== right.role || REFERENCE_MARKER.test(tail)) return false;
-        if (/-$/u.test(head) || /^\p{Ll}/u.test(tail)) return true;
+        const particle = SURNAME_PARTICLE.test(tail);
+        if (/-$/u.test(head) || /^\p{Ll}/u.test(tail) && !particle) return true;
         if (TERMINAL.test(head)) return false;
         // An author-year list has no markers; a new entry opens with a name.
-        return !AUTHOR_START.test(tail) || /(?:,|\band|&)$/u.test(head);
+        return !AUTHOR_START.test(tail.replace(SURNAME_PARTICLE, '')) || /(?:,|\band|&)$/u.test(head);
     }
     // A word broken by a line-final hyphen continues whatever the text is.
     if (/\p{L}-$/u.test(head) && /^\p{Ll}/u.test(tail)) return true;

@@ -314,3 +314,40 @@ test('joins an abstract across a first-page copyright cluster that ends with its
     assert.equal(ir.diagnostics.joins.length, 1);
     assert.match(texts(ir)[0], /next two \| days, make new acquaintances/u);
 });
+
+test('joins a reference entry that MinerU split inside one column', () => {
+    const ir = stitch([
+        text(0, [100, 100, 900, 140], '[4] A. Author, B. Author, and C. Author, "A long title of a paper about', { kind: 'reference' }),
+        text(0, [100, 140, 900, 160], 'Signals," in Proceedings of the Conference, 2020, pp. 1-9.', { kind: 'reference' }),
+        text(0, [100, 160, 900, 200], '[5] D. Author, "Another paper," Journal, 2021.', { kind: 'reference' }),
+    ], 1);
+    assert.deepEqual(texts(ir), [
+        '[4] A. Author, B. Author, and C. Author, "A long title of a paper about | Signals," in Proceedings of the Conference, 2020, pp. 1-9.',
+        '[5] D. Author, "Another paper," Journal, 2021.',
+    ]);
+    assert.equal(ir.diagnostics.joins[0].boundary, 'reference');
+});
+
+test('keeps author-year entries that open with a surname particle apart', () => {
+    const ir = stitch([
+        text(0, [100, 100, 900, 140], 'Author, A. (2024). A title. Journal 12, 765–776. doi: 10.1177/135910531', { kind: 'reference' }),
+        text(0, [100, 140, 900, 180], 'de Witte, M., Aalbers, S., and Vink, A. (2022). Another title. Journal 4, 1–29.', { kind: 'reference' }),
+        text(0, [100, 180, 900, 220], 'van der Berg, A. (2021). A third title. Journal 5, 1–9. Proceedings of', { kind: 'reference' }),
+        text(0, [100, 220, 900, 240], 'the national meeting, 2021.', { kind: 'reference' }),
+    ], 1);
+    assert.equal(ir.blocks.length, 3);
+    assert.match(texts(ir)[2], /Proceedings of \| the national meeting/u);
+});
+
+test('does not join a publisher note after the last reference', () => {
+    const references = { schema: DOCUMENT_IR_SCHEMA, pages: [{ pageIndex: 0 }], diagnostics: { reorderedBands: [], chromeFallbacks: [], joins: [] } };
+    references.blocks = [
+        text(0, [55, 100, 943, 140], 'References', { kind: 'title' }),
+        text(0, [55, 150, 943, 190], '47. Author, M.H. A title. J. Music Ther. 1993, 30, 210–223. [CrossRef]', { kind: 'reference' }),
+        text(0, [55, 195, 943, 235], '48. Author, C. A title. J. Clin. Med. 2023, 12, 2669. [CrossRef] [PubMed]', { kind: 'reference' }),
+        text(0, [54, 253, 943, 296], "Disclaimer/Publisher's Note: The statements, opinions and data are solely those of the authors."),
+    ];
+    const ir = stitchParagraphs(assignHeadingLevels(orderReadingFlow(attachFloatNotes(classifyBlocks(references)))));
+    assert.equal(ir.blocks.length, 4);
+    assert.equal(ir.diagnostics.joins.length, 0);
+});

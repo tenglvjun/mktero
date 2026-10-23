@@ -6,6 +6,7 @@ const GUTTER_MARGIN_SHARE = 0.02;
 const MAX_COLUMNS = 3;
 const MAX_COLUMN_SPREAD_SHARE = 0.2;
 const MIN_COLUMN_BLOCK_HEIGHT = 30;
+const MIN_REFERENCE_COLUMN_ENTRIES = 3;
 const ORDER_TOLERANCE = 2;
 const FLOAT_OVERLAP_SHARE = 0.5;
 const FLOW_ROLES = new Set([BLOCK_ROLE.BODY, BLOCK_ROLE.HEADING, BLOCK_ROLE.REFERENCE]);
@@ -41,7 +42,10 @@ export function orderReadingFlow(ir) {
             page.gutters = layout.gutters;
             page.textWidth = layout.width;
         }
-        if (layout.columns < 2) continue;
+        if (layout.columns < 2) {
+            blocks = orderReferenceEntries(blocks, entries, ir.diagnostics, pageIndex);
+            continue;
+        }
         const text = entries.filter(entry => isFlowBlock(entry.block) && entry.block.bbox);
         const separators = pureSeparators(text);
         const sliced = sliceBySeparators(text, separators) || text;
@@ -55,6 +59,19 @@ export function orderReadingFlow(ir) {
     ir.blocks = placeFloatsBelowText(blocks, ir.diagnostics);
     markReferenceSections(ir);
     return ir;
+}
+
+// On a single-column page, reference entries are read top to bottom. MinerU
+// sometimes reads an entry before the continuation of the previous page's
+// last entry at the top of the page; that entry moves after the blocks above
+// it. Other text on such a page keeps MinerU's order.
+function orderReferenceEntries(blocks, entries, diagnostics, pageIndex) {
+    const references = entries.filter(entry => entry.block.role === BLOCK_ROLE.REFERENCE && entry.block.bbox);
+    if (references.length < 2) return blocks;
+    const repaired = repairSlice(references);
+    return repaired.some((entry, index) => entry !== references[index])
+        ? applyOrder(blocks, references, repaired, diagnostics, pageIndex, 'reference')
+        : blocks;
 }
 
 // A float that MinerU read before flow text lying wholly above it, in the
@@ -157,10 +174,18 @@ function findGutters(blocks, width) {
             clusters.push({ blocks: [entry.block], lastCenter: entry.center });
         }
     }
+    // A column needs a paragraph, so a short label beside the text does not
+    // make one. Reference entries are short but several of them stacked are a
+    // column of their own.
     const columns = clusters
-        .map(cluster => cluster.blocks.filter(block => (
-            block.kind !== BLOCK_KIND.TITLE && block.bbox[3] - block.bbox[1] >= MIN_COLUMN_BLOCK_HEIGHT
-        )))
+        .map(cluster => {
+            const paragraphs = cluster.blocks.filter(block => (
+                block.kind !== BLOCK_KIND.TITLE && block.bbox[3] - block.bbox[1] >= MIN_COLUMN_BLOCK_HEIGHT
+            ));
+            if (paragraphs.length) return paragraphs;
+            const entries = cluster.blocks.filter(block => block.role === BLOCK_ROLE.REFERENCE);
+            return entries.length >= MIN_REFERENCE_COLUMN_ENTRIES ? entries : [];
+        })
         .filter(paragraphs => paragraphs.length);
     if (columns.length < 2 || columns.length > MAX_COLUMNS) return [];
     // A column whose paragraphs spread across most of a column width holds
