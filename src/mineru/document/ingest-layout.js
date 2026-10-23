@@ -44,6 +44,7 @@ export function ingestMinerULayout(layout, { assets = [], assetBasePath = '' } =
             joins: [],
             chromeFallbacks: [],
             equationNumbers: [],
+            notePlacements: [],
         },
     };
     const blocks = [];

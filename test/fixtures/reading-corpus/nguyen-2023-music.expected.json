@@ -6,12 +6,12 @@
     "ir": {
       "pages": 15,
       "breaks": {
-        "total": 1,
+        "total": 0,
         "page": 0,
         "column": 0,
         "float": 0,
         "math": 0,
-        "adjacent": 1,
+        "adjacent": 0,
         "unmapped": 0
       },
       "chrome": {
@@ -25,16 +25,15 @@
       },
       "pageNotes": {
         "total": 1,
-        "found": 0
+        "found": 1
       },
       "headings": {
-        "count": 26,
+        "count": 25,
         "levels": {
-          "2": 14,
+          "2": 13,
           "3": 12
         },
         "sequence": [
-          "2:0c58e527f94a",
           "2:c59ddd3f7ba6",
           "2:5a4970c8a961",
           "2:644a9c531916",
@@ -63,8 +62,8 @@
         ]
       },
       "sourceMap": {
-        "total": 119,
-        "covered": 119,
+        "total": 120,
+        "covered": 120,
         "ratio": 1,
         "crossPage": 4
       },

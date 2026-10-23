@@ -1,5 +1,5 @@
 import { syntaxTree } from '@codemirror/language';
-import { Prec, StateEffect, StateField } from '@codemirror/state';
+import { EditorState, Prec, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
     createEmptyAnnotationOverlay,
@@ -88,6 +88,178 @@ import {
 import {
     BILINGUAL_LIST_BOUNDARY,
 } from '../markdown/markdown-translation-blocks.js';
+import { findMarkdownDirectives, SECTION_LABEL_KEYS } from '../markdown/markdown-directives.js';
+
+// Expanded sections stay open across a translation that copies the same
+// directives: the key is the kind plus the ordinal of that kind. An edit
+// that moves a section remaps the key through the overlapping range.
+const toggleMarkdownSection = StateEffect.define();
+const expandMarkdownSections = StateEffect.define();
+
+export function markdownSectionExpandEffect(state, position) {
+    const current = state.field(markdownSectionField, false);
+    if (!current) return null;
+    const pos = normalizeSectionPosition(position, state.doc.length);
+    if (pos == null) return null;
+    const section = current.sections.find(candidate => (
+        positionInsideSection(state.doc, candidate, pos)
+    ));
+    if (!section || current.expanded.has(section.key)) return null;
+    return expandMarkdownSections.of([section.key]);
+}
+
+export function expandMarkdownSectionAt(view, position) {
+    const effect = markdownSectionExpandEffect(view?.state, position);
+    if (!effect) return false;
+    view.dispatch({ effects: effect });
+    return true;
+}
+
+const markdownSectionField = StateField.define({
+    create(state) {
+        return {
+            ...indexMarkdownDirectives(state.doc.toString()),
+            expanded: new Set(),
+        };
+    },
+    update(value, transaction) {
+        let next = transaction.docChanged
+            ? updateDirectiveState(value, transaction)
+            : value;
+        let expanded = next.expanded;
+        let expandedChanged = false;
+        for (const effect of transaction.effects) {
+            if (effect.is(toggleMarkdownSection)) {
+                const key = String(effect.value || '');
+                if (!next.sections.some(section => section.key === key)) continue;
+                expanded = new Set(expanded);
+                if (expanded.has(key)) expanded.delete(key);
+                else expanded.add(key);
+                expandedChanged = true;
+            }
+            else if (effect.is(expandMarkdownSections)) {
+                const keys = Array.isArray(effect.value) ? effect.value : [];
+                let updated = null;
+                for (const key of keys) {
+                    if (!next.sections.some(section => section.key === key)
+                        || expanded.has(key)) {
+                        continue;
+                    }
+                    updated = updated || new Set(expanded);
+                    updated.add(key);
+                }
+                if (updated) {
+                    expanded = updated;
+                    expandedChanged = true;
+                }
+            }
+        }
+        if (next === value && !expandedChanged) return value;
+        return expanded === next.expanded ? next : { ...next, expanded };
+    },
+});
+
+// Only a transaction that sets the selection reveals a section: a jump to
+// an annotation, a search hit, or a source position. Any other transaction
+// leaves a section the reader collapsed closed, even with the cursor inside.
+function markdownSectionTransactionExtender(transaction) {
+    if (!transaction.selection) return null;
+    const current = transaction.startState.field(markdownSectionField, false);
+    if (!current?.sections.length) return null;
+    const head = transaction.newSelection.main.head;
+    const sections = transaction.docChanged
+        ? mapDirectiveSections(current.sections, transaction.changes)
+        : current.sections;
+    const section = sections.find(candidate => (
+        positionInsideSection(transaction.newDoc, candidate, head)
+    ));
+    if (!section || current.expanded.has(section.key)) return null;
+    if (transaction.effects.some(effect => (
+        effect.is(toggleMarkdownSection) && effect.value === section.key
+    ))) {
+        return null;
+    }
+    if (transaction.effects.some(effect => (
+        effect.is(expandMarkdownSections)
+        && Array.isArray(effect.value)
+        && effect.value.includes(section.key)
+    ))) {
+        return null;
+    }
+    return { effects: expandMarkdownSections.of([section.key]) };
+}
+
+class MarkdownSectionToggleWidget extends WidgetType {
+    constructor({ key, expanded, label, actionLabel }) {
+        super();
+        this.key = key;
+        this.expanded = expanded;
+        this.label = label;
+        this.actionLabel = actionLabel;
+    }
+
+    eq(other) {
+        return other.key === this.key
+            && other.expanded === this.expanded
+            && other.label === this.label
+            && other.actionLabel === this.actionLabel;
+    }
+
+    // The button stays the same element when the section opens or closes,
+    // so keyboard focus stays on it.
+    updateDOM(button) {
+        if (!button?.classList?.contains('mktero-section-toggle')) return false;
+        this.#apply(button);
+        return true;
+    }
+
+    // The visible label names the section; `aria-expanded` gives its state
+    // and the title the action.
+    #apply(button) {
+        button.dataset.sectionKey = this.key;
+        button.setAttribute('aria-expanded', this.expanded ? 'true' : 'false');
+        button.title = this.actionLabel;
+        button.textContent = this.label;
+    }
+
+    toDOM(view) {
+        const ownerDocument = view.dom.ownerDocument;
+        const button = ownerDocument.createElementNS?.(XHTML_NAMESPACE, 'button')
+            || ownerDocument.createElement('button');
+        button.type = 'button';
+        button.className = 'mktero-section-toggle';
+        this.#apply(button);
+        const dispatchToggle = () => {
+            view.dispatch({ effects: toggleMarkdownSection.of(button.dataset.sectionKey) });
+        };
+        button.addEventListener('mousedown', event => {
+            event.stopPropagation();
+        });
+        // Enter and Space toggle here, so the editor never sees them;
+        // preventing their default also stops the click they would fire.
+        button.addEventListener('keydown', event => {
+            if (!isSectionToggleKey(event)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            dispatchToggle();
+        });
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            dispatchToggle();
+        });
+        return button;
+    }
+
+    ignoreEvent(event) {
+        return event.type !== 'mousedown'
+            && event.type !== 'mouseup'
+            && event.type !== 'click'
+            && event.type !== 'keydown'
+            && event.type !== 'keyup'
+            && event.type !== 'keypress';
+    }
+}
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const MAX_MATCH_CANDIDATES = 10_000;
@@ -988,11 +1160,16 @@ export function createInlineRenderingExtension({
             // Typing inside the open correction block only shifts later
             // decorations. Rebuilding the whole paper here re-runs citation
             // and figure analysis on every keystroke.
+            const sectionExpansionChanged = transaction.effects.some(effect => (
+                effect.is(toggleMarkdownSection)
+                || effect.is(expandMarkdownSections)
+            ));
             if (correctionEditCanReuseDecorations(
                 transaction,
                 context,
                 {
                     shouldRefresh,
+                    sectionExpansionChanged,
                     referenceHighlightChanged,
                     tableHighlightChanged,
                     figureHighlightChanged,
@@ -1037,6 +1214,7 @@ export function createInlineRenderingExtension({
                 || translationPairHighlightChanged
                 || editingRangeChanged
                 || correctionStateChanged
+                || sectionExpansionChanged
                 || shouldRefresh) {
                 return buildDecorations(transaction.state, context);
             }
@@ -1045,6 +1223,8 @@ export function createInlineRenderingExtension({
         provide: field => EditorView.decorations.from(field),
     });
     return [
+        markdownSectionField,
+        EditorState.transactionExtender.of(markdownSectionTransactionExtender),
         renderingField,
         blockHeightRecorder(context.blockHeights),
         Prec.highest(EditorView.domEventHandlers({
@@ -1245,6 +1425,12 @@ function buildDecorations(state, context) {
         context.documentTitle
     );
     const decorations = [];
+    const directiveLayer = collectDirectiveDecorations(
+        state,
+        directiveStateFor(state),
+        context.translate
+    );
+    const directiveSkipRanges = directiveLayer.skipRanges;
     const excludedMathRanges = collectExcludedMathRanges(state);
     const renderedMathRanges = [];
     const analyzedTableReferences = referenceAnalysis(
@@ -1272,29 +1458,34 @@ function buildDecorations(state, context) {
         ...algorithmGroups,
         ...renderedFigureGroups,
         ...tableGroups,
-    ];
-    for (const group of algorithmGroups) {
-        decorations.push(renderedRange(group, state, 'algorithm', context));
-    }
-    for (const group of renderedFigureGroups) {
+    ].filter(group => !rangeOverlapsAny(group.from, group.to, directiveSkipRanges));
+    for (const group of renderedGroups) {
+        if (algorithmGroups.includes(group)) {
+            decorations.push(renderedRange(group, state, 'algorithm', context));
+            continue;
+        }
+        if (tableGroups.includes(group)) {
+            decorations.push(renderedRange(
+                {
+                    ...group,
+                    tableTarget: tableTargetsByFrom.get(group.from),
+                },
+                state,
+                group.table.kind === 'gfm' ? 'table' : 'html-block',
+                context
+            ));
+            continue;
+        }
         decorations.push(renderedRange(group, state, 'image', context));
-    }
-    for (const group of tableGroups) {
-        decorations.push(renderedRange(
-            {
-                ...group,
-                tableTarget: tableTargetsByFrom.get(group.from),
-            },
-            state,
-            group.table.kind === 'gfm' ? 'table' : 'html-block',
-            context
-        ));
     }
 
     syntaxTree(state).iterate({
         enter(node) {
             if (node.name !== 'Document'
                 && rangeInsideEditing(node, context)) {
+                return false;
+            }
+            if (rangeInsideAny(node.from, node.to, directiveSkipRanges)) {
                 return false;
             }
             if (renderedGroups.some(group => rangeContains(group, node))) {
@@ -1331,7 +1522,15 @@ function buildDecorations(state, context) {
     decorateTranslationPairs(state, decorations, context);
     decorateTranslationFailures(state, decorations, context);
     decorateCorrections(state, decorations, context);
-    return Decoration.set(decorations, true);
+    const visible = decorations.filter(decoration => (
+        !decorationOverlapsRanges(decoration, directiveSkipRanges)
+    ));
+    for (const note of directiveLayer.notes) {
+        if (decorationOverlapsRanges(note.quote, directiveSkipRanges)) continue;
+        decorateNoteQuoteLines(state, visible, note.quote);
+    }
+    visible.push(...directiveLayer.decorations);
+    return Decoration.set(visible, true);
 }
 
 function decorateTranslationPairs(state, decorations, context) {
@@ -3392,4 +3591,300 @@ function rangeInsideAny(from, to, ranges) {
 
 function shouldRenderHTMLBlock(source) {
     return /^\s*(?:<!--\s*zotero-page:|<table\b)/i.test(source);
+}
+
+function directiveStateFor(state) {
+    return state.field(markdownSectionField, false) || {
+        ...indexMarkdownDirectives(state.doc.toString()),
+        expanded: new Set(),
+    };
+}
+
+function indexMarkdownDirectives(markdown) {
+    const found = findMarkdownDirectives(markdown);
+    const counts = new Map();
+    return {
+        notes: found.notes,
+        directives: found.directives,
+        sections: found.sections.map(section => {
+            const ordinal = counts.get(section.kind) || 0;
+            counts.set(section.kind, ordinal + 1);
+            return {
+                ...section,
+                ordinal,
+                key: `${section.kind}:${ordinal}`,
+            };
+        }),
+    };
+}
+
+function updateDirectiveState(value, transaction) {
+    if (shouldReparseDirectives(value, transaction)) {
+        const next = indexMarkdownDirectives(transaction.newDoc.toString());
+        return {
+            ...next,
+            expanded: reconcileExpandedSections(
+                value.sections,
+                next.sections,
+                value.expanded,
+                transaction.changes,
+                transaction.startState.doc.length
+            ),
+        };
+    }
+    return {
+        ...value,
+        sections: mapDirectiveSections(value.sections, transaction.changes),
+        notes: mapDirectiveNotes(value.notes, transaction.changes),
+        directives: mapDirectiveRanges(value.directives, transaction.changes),
+    };
+}
+
+function shouldReparseDirectives(value, transaction) {
+    if (isFullDocumentReplacement(
+        transaction.changes,
+        transaction.startState.doc.length
+    )) {
+        return true;
+    }
+    let reparse = false;
+    transaction.changes.iterChanges((from, to, _fromB, _toB, insert) => {
+        if (String(insert).includes('<!--')) reparse = true;
+        if (directiveRangesTouch(value, from, to)) reparse = true;
+    });
+    return reparse;
+}
+
+function directiveRangesTouch(value, from, to) {
+    return [...value.sections, ...value.notes, ...value.directives].some(range => (
+        range.from < to && from < range.to
+    ));
+}
+
+function isFullDocumentReplacement(changes, length) {
+    if (length === 0) return true;
+    let full = false;
+    changes.iterChanges((from, to) => {
+        if (from === 0 && to === length) full = true;
+    });
+    return full;
+}
+
+function reconcileExpandedSections(
+    previous,
+    next,
+    expanded,
+    changes,
+    previousLength
+) {
+    const nextKeys = new Set(next.map(section => section.key));
+    if (isFullDocumentReplacement(changes, previousLength)) {
+        return new Set([...expanded].filter(key => nextKeys.has(key)));
+    }
+    const mapped = previous
+        .filter(section => expanded.has(section.key))
+        .map(section => mapDirectiveSection(section, changes))
+        .filter(Boolean);
+    const used = new Set();
+    const result = new Set();
+    for (const section of next) {
+        const index = mapped.findIndex((old, candidate) => (
+            !used.has(candidate)
+            && old.kind === section.kind
+            && old.from < section.to
+            && section.from < old.to
+        ));
+        if (index < 0) continue;
+        used.add(index);
+        result.add(section.key);
+    }
+    return result;
+}
+
+function mapDirectiveSections(sections, changes) {
+    return sections.flatMap(section => {
+        const mapped = mapDirectiveSection(section, changes);
+        return mapped ? [mapped] : [];
+    });
+}
+
+function mapDirectiveSection(section, changes) {
+    const open = mapRangeThroughChanges(section.open, changes);
+    const close = mapRangeThroughChanges(section.close, changes);
+    if (!open || !close || close.from < open.to) return null;
+    return {
+        ...section,
+        open,
+        close,
+        from: open.from,
+        to: close.to,
+        content: { from: open.to, to: close.from },
+    };
+}
+
+function mapDirectiveNotes(notes, changes) {
+    return notes.flatMap(note => {
+        const range = mapRangeThroughChanges(note, changes);
+        const quote = mapRangeThroughChanges(note.quote, changes);
+        if (!range || !quote) return [];
+        return [{ ...note, ...range, quote }];
+    });
+}
+
+function mapDirectiveRanges(ranges, changes) {
+    return ranges.flatMap(range => {
+        const mapped = mapRangeThroughChanges(range, changes);
+        return mapped ? [{ ...range, ...mapped }] : [];
+    });
+}
+
+function normalizeSectionPosition(position, length) {
+    const numeric = Number(position);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.max(0, Math.min(Math.trunc(numeric), length));
+}
+
+function positionInsideSection(doc, section, position) {
+    if (!Number.isSafeInteger(position) || !section) return false;
+    return position >= sectionInteriorStart(doc, section)
+        && position < section.to;
+}
+
+function sectionInteriorStart(doc, section) {
+    const line = doc.lineAt(Math.min(section.open.from, doc.length));
+    const commentEnd = Math.min(section.open.to, line.to);
+    if (doc.sliceString(line.from, section.open.from).trim()
+        || doc.sliceString(commentEnd, line.to).trim()) {
+        return section.open.to;
+    }
+    return Math.min(doc.length, line.to < doc.length ? line.to + 1 : line.to);
+}
+
+function sectionLabel(kind, translate) {
+    const key = SECTION_LABEL_KEYS[kind];
+    return key ? translate(key) : kind;
+}
+
+function isSectionToggleKey(event) {
+    return event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar';
+}
+
+function collectDirectiveDecorations(state, directiveState, translate) {
+    const decorations = [];
+    const skipRanges = [];
+    const owned = new Set();
+    const doc = state.doc;
+    for (const section of directiveState.sections) {
+        owned.add(rangeKey(section.open));
+        owned.add(rangeKey(section.close));
+        const expanded = directiveState.expanded.has(section.key);
+        const openLine = directiveLineRange(doc, section.open.from, section.open.to);
+        const closeLine = directiveLineRange(doc, section.close.from, section.close.to);
+        const widget = Decoration.replace({
+            widget: new MarkdownSectionToggleWidget({
+                key: section.key,
+                expanded,
+                label: sectionLabel(section.kind, translate || translateEnglish),
+                actionLabel: (translate || translateEnglish)(expanded
+                    ? 'markdown.section.collapse'
+                    : 'markdown.section.expand'),
+            }),
+            block: true,
+        }).range(openLine.from, openLine.contentTo);
+        decorations.push(widget);
+        skipRanges.push({ from: openLine.from, to: openLine.contentTo });
+        if (expanded) {
+            pushCollapsedDirectiveLine(doc, decorations, skipRanges, closeLine);
+            continue;
+        }
+        if (openLine.to < closeLine.to) {
+            const hiddenRange = { from: openLine.to, to: closeLine.to };
+            decorations.push(Decoration.replace({ block: true }).range(
+                hiddenRange.from,
+                hiddenRange.to
+            ));
+            skipRanges.push(hiddenRange);
+        }
+    }
+    for (const note of directiveState.notes) {
+        owned.add(rangeKey(note));
+        pushHiddenDirective(doc, decorations, skipRanges, note);
+    }
+    for (const directive of directiveState.directives) {
+        if (owned.has(rangeKey(directive))) continue;
+        pushHiddenDirective(doc, decorations, skipRanges, directive);
+    }
+    return {
+        decorations,
+        skipRanges,
+        notes: directiveState.notes,
+    };
+}
+
+function pushHiddenDirective(doc, decorations, skipRanges, range) {
+    const lineRange = directiveLineRange(doc, range.from, range.to);
+    if (lineRange.to <= lineRange.from) return;
+    if (skipRanges.some(skip => (
+        lineRange.from >= skip.from && lineRange.contentTo <= skip.to
+    ))) {
+        return;
+    }
+    pushCollapsedDirectiveLine(doc, decorations, skipRanges, lineRange);
+}
+
+function pushCollapsedDirectiveLine(doc, decorations, skipRanges, lineRange) {
+    if (!lineRange || lineRange.contentTo <= lineRange.from) return;
+    decorations.push(Decoration.line({
+        class: 'cm-mktero-directive-line',
+    }).range(lineRange.from));
+    decorations.push(Decoration.replace({}).range(lineRange.from, lineRange.contentTo));
+    skipRanges.push({ from: lineRange.from, to: lineRange.contentTo });
+}
+
+// contentTo stops before the line break so the next line can still take a
+// line decoration. `to` includes that break when the directive owns the line,
+// which is where a collapsed section's hidden range starts.
+function directiveLineRange(doc, from, to) {
+    if (!Number.isSafeInteger(from)
+        || !Number.isSafeInteger(to)
+        || to <= from
+        || doc.length === 0) {
+        return { from: 0, to: 0, contentTo: 0 };
+    }
+    const start = Math.max(0, Math.min(from, doc.length));
+    const end = Math.max(start, Math.min(to, doc.length));
+    const line = doc.lineAt(start);
+    const endLine = doc.lineAt(Math.max(start, end - 1));
+    const ownsLine = line.number === endLine.number
+        && !doc.sliceString(line.from, start).trim()
+        && !doc.sliceString(end, line.to).trim();
+    return {
+        from: ownsLine ? line.from : start,
+        contentTo: ownsLine ? line.to : end,
+        to: ownsLine && endLine.to < doc.length ? endLine.to + 1 : (ownsLine ? endLine.to : end),
+    };
+}
+
+function decorateNoteQuoteLines(state, decorations, quote) {
+    if (!quote || quote.to <= quote.from) return;
+    const fromLine = state.doc.lineAt(quote.from).number;
+    const toLine = state.doc.lineAt(Math.max(quote.from, quote.to - 1)).number;
+    for (let lineNumber = fromLine; lineNumber <= toLine; lineNumber++) {
+        decorations.push(Decoration.line({
+            class: 'cm-mktero-note',
+        }).range(state.doc.line(lineNumber).from));
+    }
+}
+
+function decorationOverlapsRanges(decoration, ranges) {
+    return ranges.some(range => {
+        if (decoration.from === decoration.to) {
+            return range.from <= decoration.from && decoration.from < range.to;
+        }
+        return decoration.from < range.to && range.from < decoration.to;
+    });
+}
+
+function rangeKey(range) {
+    return `${range.from}:${range.to}`;
 }

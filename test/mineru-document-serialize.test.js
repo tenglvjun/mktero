@@ -97,13 +97,16 @@ test('writes the document IR as Markdown in reading order', () => {
     const prepared = prepareMinerUDocument(sampleBundle());
     assert.equal(prepared.markdown, [
         '# A Study of Things',
+        '<!-- mktero-section: article-info -->',
+        '1 A page footnote.',
+        '<!-- /mktero-section -->',
         '## 1. Introduction',
         `${BODY} uses 5 \\* 3 and costs \\$5 per architecture that ${REST}`,
         '![Fig. 1. A caption with \\[1\\] and $x^2$](images/a.jpg)',
         '- First point of the list\n- Second point of the list',
         'Table 1 Results',
         '<table><tr><td> $a < b$ </td></tr></table>',
-        'Values are means.',
+        '<!-- mktero-note: table -->\n> Values are means.',
         '$$\nE = mc^2\n$$',
         '[www.example.org/data](https://www.example.org/data)',
         '## References',
@@ -136,12 +139,16 @@ test('records an exact, valid source map with per-page ranges', () => {
     assert.equal(sourceMap.find(entry => entry.type === 'table').locations[0].pageIndex, 1);
     assert.equal(sourceMap.find(entry => entry.type === 'equation').locations[0].pageIndex, 1);
     // Every visible character belongs to exactly one entry; only the blank
-    // lines between blocks are unmapped.
+    // lines between blocks and the hidden directive comments are unmapped.
     const owners = new Array(markdown.length).fill(0);
     for (const entry of sourceMap) {
         for (let index = entry.markdownFrom; index < entry.markdownTo; index++) owners[index]++;
     }
-    assert.ok(owners.every((count, index) => count === 1 || count === 0 && /\s/u.test(markdown[index])));
+    const hidden = new Array(markdown.length).fill(false);
+    for (const match of markdown.matchAll(/^<!-- \/?mktero-[^\n]* -->$/gmu)) {
+        for (let index = match.index; index < match.index + match[0].length; index++) hidden[index] = true;
+    }
+    assert.ok(owners.every((count, index) => count === 1 || count === 0 && (/\s/u.test(markdown[index]) || hidden[index])));
 });
 
 test('records block ranges for every serialized block', () => {
@@ -155,13 +162,15 @@ test('records block ranges for every serialized block', () => {
     assert.equal(markdown.slice(unit.caption.from, unit.caption.to), 'Fig. 1. A caption with \\[1\\] and $x^2$');
     assert.equal(unit.caption.text, 'Fig. 1. A caption with [1] and $x^2$');
     const table = blockRanges.get(flow.find(item => item.kind === 'table').id);
-    assert.deepEqual(table.units.map(item => item.kind), ['text', 'table', 'text']);
+    assert.deepEqual(table.units.map(item => item.kind), ['text', 'table', 'note']);
     assert.equal(table.units[2].footnote, true);
+    assert.equal(markdown.slice(table.units[2].fragments[0].from, table.units[2].fragments[0].to), 'Values are means.');
 });
 
-test('keeps decorations and page notes out of the Markdown', () => {
+test('keeps decorations out of the Markdown and first-page metadata in its section', () => {
     const { markdown } = prepareMinerUDocument(sampleBundle());
-    assert.doesNotMatch(markdown, /Running Header|page footnote/u);
+    assert.doesNotMatch(markdown, /Running Header/u);
+    assert.match(markdown, /<!-- mktero-section: article-info -->\n\n1 A page footnote\.\n\n<!-- \/mktero-section -->/u);
 });
 
 test('renders captions, tables, lists, and links from the serialized Markdown', () => {
@@ -395,4 +404,22 @@ test('keeps a table-captioned crop and a figure-captioned table without an image
         '<table><tr><td>x</td></tr></table>',
     ].join('\n\n'));
     assert.equal(prepared.markdown.includes('!['), false);
+});
+
+test('writes a page footnote as a note after the paragraph that cites it', () => {
+    const prepared = prepareMinerUDocument(bundle([
+        page(0, [
+            text([100, 100, 900, 130], 'Intro', 'title'),
+            text([100, 150, 900, 300], ['The loop pattern spread quickly among practitioners', { type: 'inline_equation', content: '^{1}' }, '.']),
+            text([100, 320, 900, 500], 'A second paragraph follows the first one on the same page.'),
+        ], [{ ...text([100, 900, 900, 930], [{ type: 'inline_equation', content: '^{1}' }, 'Quoted in a practitioner newsletter.']), type: 'page_footnote' }]),
+    ], []));
+    assert.equal(prepared.markdown, [
+        '## Intro',
+        'The loop pattern spread quickly among practitioners $^{1}$.',
+        '<!-- mktero-note: footnote -->\n> $^{1}$ Quoted in a practitioner newsletter.',
+        'A second paragraph follows the first one on the same page.',
+    ].join('\n\n'));
+    const note = prepared.sourceMap.find(entry => prepared.markdown.slice(entry.markdownFrom, entry.markdownTo).startsWith('> $^{1}$ Quoted'));
+    assert.deepEqual(note.locations, [{ pageIndex: 0, bbox: [100, 900, 900, 930] }]);
 });

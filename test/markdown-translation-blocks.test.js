@@ -1169,3 +1169,45 @@ test('marks a chrome-only paragraph as not translatable', () => {
         true
     );
 });
+
+test('copies structural directives unchanged and translates the note quote', () => {
+    const markdown = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Affiliation text.',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> Quoted note.',
+        '',
+        'Body paragraph.',
+    ].join('\n');
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const directives = blocks.filter(block => block.markdown.includes('mktero-'));
+    const quote = blocks.find(block => block.markdown.includes('Quoted note'));
+
+    assert.ok(directives.length >= 3);
+    assert.ok(directives.every(block => block.translatable === false));
+    assert.equal(quote?.type, 'blockquote');
+    assert.equal(quote?.translatable, true);
+
+    const translations = blocks.filter(block => block.translatable).map(block => ({
+        id: block.id,
+        markdown: block.requestMarkdown
+            .replace('Affiliation text', '单位信息')
+            .replace('Quoted note', '引用注释')
+            .replace('Body paragraph', '正文'),
+    }));
+    const translated = assembleTranslatedMarkdown(markdown, blocks, translations);
+    const comparison = createComparisonMarkdown(markdown, blocks, translations);
+
+    for (const view of [translated, comparison]) {
+        assert.match(view, /<!-- mktero-section: article-info -->/);
+        assert.match(view, /<!-- \/mktero-section -->/);
+        assert.match(view, /<!-- mktero-note: footnote -->/);
+    }
+    assert.match(translated, /引用注释/);
+    assert.match(comparison, /Quoted note/);
+    assert.match(comparison, /引用注释/);
+});

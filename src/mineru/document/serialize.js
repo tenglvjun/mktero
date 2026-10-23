@@ -1,5 +1,7 @@
 import { escapeImageDescription, parseAcademicFigureCaption } from '../../markdown/markdown-figures.js';
 import { planFigureLayouts } from '../../markdown/figure-layout-normalizer.js';
+import { noteDirective, SECTION_CLOSE_DIRECTIVE, sectionOpenDirective } from '../../markdown/markdown-directives.js';
+import { NOTE_KIND } from './notes.js';
 import { BLOCK_KIND, BLOCK_ROLE, fragmentText, unionBBox } from './ir.js';
 import {
     createHyphenationVocabulary,
@@ -15,7 +17,11 @@ export const DOCUMENT_STRUCTURE = 'mineru-ir-v1';
 
 const BULLET_START = /^(?:[•●○◦▪▫‣∙·■□➢➤►✓✔]\s*|-\s+)(?=\S)/u;
 const CODE_LANGUAGE = /^[a-z0-9+#-]{1,20}$/u;
-const SKIPPED_ROLES = new Set([BLOCK_ROLE.CHROME, BLOCK_ROLE.PAGE_NOTE]);
+const SKIPPED_ROLES = new Set([BLOCK_ROLE.CHROME]);
+const NOTE_KIND_OF_FLOAT = new Map([
+    [BLOCK_KIND.TABLE, 'table'], [BLOCK_KIND.IMAGE, 'figure'], [BLOCK_KIND.CHART, 'figure'],
+    [BLOCK_KIND.CODE, 'code'], [BLOCK_KIND.ALGORITHM, 'code'],
+]);
 
 // Writes the document IR as Markdown and records, for every block, the exact
 // output range of each of its fragments. The source map comes from those
@@ -26,10 +32,36 @@ const SKIPPED_ROLES = new Set([BLOCK_ROLE.CHROME, BLOCK_ROLE.PAGE_NOTE]);
 // composed figure (`composites`) replaces the pieces it consumed when the IR
 // is written again.
 export function serializeDocumentIR(ir, { vocabulary = createHyphenationVocabulary(ir), composites = [] } = {}) {
+    const floats = new Map(ir.blocks.filter(block => block.role === BLOCK_ROLE.FLOAT).map(block => [block.id, block]));
     let units = [];
-    for (const block of ir.blocks) units.push(...blockUnits(block, vocabulary));
+    for (const block of ir.blocks) {
+        if (block.sectionStart) units.push(directiveUnit(sectionOpenDirective(block.sectionStart)));
+        units.push(...blockUnits(block, vocabulary, floats));
+        if (block.sectionEnd) units.push(directiveUnit(SECTION_CLOSE_DIRECTIVE));
+    }
     if (composites?.length) units = placeComposites(units, composites);
-    return assemble(applyFigureLayouts(units));
+    return assemble(dropEmptySections(applyFigureLayouts(units)));
+}
+
+// A section directive line; it has no source location.
+function directiveUnit(text) {
+    return { block: null, kind: 'directive', text, fragments: [] };
+}
+
+// A section whose blocks all wrote nothing (or a composed figure took them)
+// is not written.
+function dropEmptySections(units) {
+    const output = [];
+    for (const unit of units) {
+        const previous = output.at(-1);
+        if (unit.kind === 'directive' && unit.text === SECTION_CLOSE_DIRECTIVE
+            && previous?.kind === 'directive' && previous.text !== SECTION_CLOSE_DIRECTIVE) {
+            output.pop();
+            continue;
+        }
+        output.push(unit);
+    }
+    return output;
 }
 
 // A composed figure is written where its earliest member was. A unit whose
@@ -63,9 +95,20 @@ function placeComposites(units, composites) {
     return output;
 }
 
-function blockUnits(block, vocabulary) {
+function blockUnits(block, vocabulary, floats) {
     if (SKIPPED_ROLES.has(block.role)) return [];
     if (block.role === BLOCK_ROLE.FLOAT_NOTE && !block.attachedTo) return [];
+    // A content footnote of the page is a note; article metadata is a
+    // paragraph of its collapsible section; page decoration MinerU discarded
+    // stays out.
+    if (block.role === BLOCK_ROLE.PAGE_NOTE) {
+        if (block.noteKind === NOTE_KIND.CONTENT) return textUnits(block, vocabulary).map(unit => asNote(unit, 'footnote'));
+        return block.noteKind === NOTE_KIND.FRONT_MATTER && block.sectionKind ? textUnits(block, vocabulary) : [];
+    }
+    if (block.role === BLOCK_ROLE.FLOAT_NOTE) {
+        const kind = NOTE_KIND_OF_FLOAT.get(floats.get(block.attachedTo)?.kind) || 'table';
+        return textUnits(block, vocabulary).map(unit => asNote(unit, kind));
+    }
     if (block.kind === BLOCK_KIND.DISCARDED) return [];
     if (block.role === BLOCK_ROLE.HEADING) return headingUnits(block, vocabulary);
     switch (block.kind) {
@@ -266,12 +309,38 @@ function captionUnits(block, part = 'text') {
         : [];
 }
 
+// A float's footnotes are notes; a photo's biography text (in a section of
+// author biographies) is plain paragraphs.
 function footnoteUnits(block, part) {
+    const kind = NOTE_KIND_OF_FLOAT.get(block.kind) || 'table';
     return block.children
         .filter(child => child.kind === 'footnote' && child.role !== BLOCK_ROLE.CHROME)
         .map(child => ({ child, text: escapeLineStart(childInline(child)) }))
         .filter(({ text }) => text)
-        .map(({ child, text }) => childUnit(block, [child], text, { footnote: true }, child.id, part, childText(child)));
+        .map(({ child, text }) => {
+            const unit = childUnit(block, [child], text, { footnote: true }, child.id, part, childText(child));
+            return block.footnotesAsText ? unit : asNote(unit, kind);
+        });
+}
+
+// A note is its directive line followed by the text as a one-paragraph
+// blockquote. The unit stays one piece of output, so a figure that consumes
+// the note removes the directive with it; every range of the text moves by
+// the prefix. Its source map entry starts at the blockquote, which the reader
+// indexes as a block of its own after the directive comment.
+function asNote(unit, kind) {
+    const directive = noteDirective(kind);
+    const prefix = `${directive}\n> `;
+    const shift = range => ({ ...range, from: range.from + prefix.length, to: range.to + prefix.length });
+    return {
+        ...unit,
+        kind: 'note',
+        text: `${prefix}${unit.text}`,
+        fragments: unit.fragments.map(shift),
+        pieces: (unit.pieces || []).map(shift),
+        noteKind: kind,
+        sourceFrom: directive.length + 1,
+    };
 }
 
 // A caption or note paragraph is located by its own boxes, not the float's.
@@ -471,8 +540,8 @@ function assemble(units) {
         const from = markdown.length;
         markdown += unit.text;
         const to = markdown.length;
-        if (unit.kind === 'marker') continue;
-        const entry = sourceMapEntry(unit, from, to);
+        if (unit.kind === 'marker' || unit.kind === 'directive') continue;
+        const entry = sourceMapEntry(unit, from + (unit.sourceFrom || 0), to, from);
         if (entry) sourceMap.push(entry);
         recordBlockRange(blockRanges, unit, from, to);
         for (const piece of unit.pieces || []) {
@@ -482,7 +551,9 @@ function assemble(units) {
     return { markdown, sourceMap, blockRanges, pieces };
 }
 
-function sourceMapEntry(unit, from, to) {
+// `from` is where the entry starts; fragment offsets are relative to the
+// unit's own start.
+function sourceMapEntry(unit, from, to, unitFrom = from) {
     const fragments = unit.fragments.filter(fragment => fragment.fragment?.bbox && fragment.to > fragment.from);
     if (!fragments.length) return null;
     if (unit.kind === 'image') {
@@ -497,8 +568,8 @@ function sourceMapEntry(unit, from, to) {
     const entry = { type: unit.type, markdownFrom: from, markdownTo: to, locations };
     if (fragments.length > 1 && !fragments.some(fragment => fragment.whole)) {
         entry.locationRanges = fragments.map(fragment => ({
-            markdownFrom: from + fragment.from,
-            markdownTo: from + fragment.to,
+            markdownFrom: unitFrom + fragment.from,
+            markdownTo: unitFrom + fragment.to,
             location: { pageIndex: fragment.fragment.pageIndex, bbox: [...fragment.fragment.bbox] },
         }));
     }

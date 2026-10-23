@@ -10,7 +10,9 @@ import {
 } from './floats.js';
 import { orderReadingFlow } from './reading-order.js';
 import { attachEquationNumbers } from './equations.js';
+import { placePageNotes, restoreDiscardedReferences } from './notes.js';
 import { assignHeadingLevels } from './headings.js';
+import { groupSections } from './sections.js';
 import { stitchParagraphs } from './stitch.js';
 import { validateDocumentIR } from './ir.js';
 import { createHyphenationVocabulary } from './text.js';
@@ -40,11 +42,14 @@ export function buildMinerUDocumentIR(bundle) {
     attachFloatNotes(ir);
     reassignFloatCaptions(ir);
     orderReadingFlow(ir);
+    restoreDiscardedReferences(ir);
     groupAdjacentTables(ir);
     mergeContinuedTables(ir);
     attachEquationNumbers(ir);
     assignHeadingLevels(ir);
     stitchParagraphs(ir);
+    placePageNotes(ir);
+    groupSections(ir);
     return validateDocumentIR(ir);
 }
 

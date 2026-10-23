@@ -15,6 +15,7 @@ import {
     parseLooseAcademicFigureCaption,
     splitTrailingAcademicFigureCaption,
 } from './markdown-figures.js';
+import { parseMarkdownDirective, SECTION_LABEL_KEYS } from './markdown-directives.js';
 import { isNumericCitationContent } from './text-normalization.js';
 
 const MAX_MATH_EXPRESSIONS = 1000;
@@ -245,8 +246,50 @@ function renderParsedMarkdown(markdown, parser) {
         links: tokens.links,
     });
     const groupedTokens = groupAcademicTableTokens(transformedTokens);
+    annotateMarkdownDirectiveTokens(groupedTokens);
     groupedTokens.links = tokens.links;
     return parser.parser(groupedTokens);
+}
+
+// Top-level HTML comments are the only directives. The class and the section
+// label are produced here, never by injecting raw HTML into the Markdown.
+function annotateMarkdownDirectiveTokens(tokens) {
+    if (!Array.isArray(tokens)) return;
+    let pendingNote = false;
+    let open = null;
+    for (const token of tokens) {
+        if (!token || token.type === 'space') continue;
+        const directive = token.type === 'html' && token.block === true
+            ? parseMarkdownDirective(token.text)
+            : null;
+        if (directive?.type === 'note') {
+            token.mkteroDirective = directive;
+            pendingNote = true;
+            continue;
+        }
+        if (pendingNote && token.type === 'blockquote') {
+            token.mkteroNote = true;
+        }
+        pendingNote = false;
+        if (!directive) continue;
+        token.mkteroDirective = directive;
+        if (directive.type === 'section-open') {
+            open = open ? null : token;
+            continue;
+        }
+        if (directive.type === 'section-close' && open) {
+            open.mkteroPairedSection = true;
+            token.mkteroPairedSection = true;
+            open = null;
+        }
+    }
+}
+
+function renderMarkdownSectionLabel(kind, translate) {
+    const key = SECTION_LABEL_KEYS[kind];
+    if (!key) return '';
+    return '<p class="mktero-section-label"><strong>'
+        + `${escapeHTML(translate(key))}</strong></p>\n`;
 }
 
 function createSafeRenderer(
@@ -260,16 +303,29 @@ function createSafeRenderer(
     } = {}
 ) {
     return {
-        html({ text }) {
+        html(token) {
+            const text = token.text;
             const page = text.trim().match(/^<!--\s*zotero-page:\s*(.*?)\s*-->$/);
             if (page) {
                 return `<span class="page-marker" data-page="${escapeAttribute(page[1])}">`
                     + `${escapeHTML(translate('markdown.page', { page: page[1] }))}</span>`;
             }
             if (parseFigureLayoutMarker(text)) return '';
+            if (token.block === true && parseMarkdownDirective(text)) {
+                const directive = token.mkteroDirective || parseMarkdownDirective(text);
+                if (token.mkteroPairedSection && directive?.type === 'section-open') {
+                    return renderMarkdownSectionLabel(directive.kind, translate);
+                }
+                return '';
+            }
             const table = sanitizeRawHTMLTable(text, mathBudget, target);
             if (table) return table;
             return escapeKnownInlineTags(escapeHTML(text));
+        },
+
+        blockquote(token) {
+            const className = token.mkteroNote ? ' class="mktero-note"' : '';
+            return `<blockquote${className}>\n${this.parser.parse(token.tokens)}</blockquote>\n`;
         },
 
         link({ href, tokens }) {

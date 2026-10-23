@@ -18,6 +18,33 @@ Academic figure captions are recognized in common publisher formats, including
 `Figure N | ...` captions that follow an empty OCR image, so prose figure
 references remain previewable in cached documents.
 
+## Footnotes and article information
+
+In a MinerU result, a footnote at the foot of a PDF page appears as a small,
+muted note right after the first paragraph of that page that carries its mark
+(a superscript number, `*`, or `†`). A note whose mark is not found follows the
+last paragraph of its page, without crossing a heading. Table and figure notes
+use the same style directly below their table or figure. Notes are ordinary
+quoted text: you can search, annotate, translate, and copy them.
+
+Article metadata that is not part of the reading text goes into a collapsed
+section: affiliations, contact and contribution notes, funding, dates, and a
+journal's first-page sidebar appear under `Article information` below the
+title and author line, so the first screen shows the title, the authors, and
+the abstract. Author biographies after the references appear under `Author
+biographies`, and a Nature reporting summary under `Reporting summary`. A
+section is collapsed whenever the document opens. Its header is a button you
+can click or activate with `Enter` or `Space`. Search results, annotations,
+and other jumps into a collapsed section open it first. Headings inside a
+section are not listed in the outline. Snapshots and Zotero notes show the
+section label in bold followed by its content. Markdown and Obsidian exports
+keep the content as ordinary text; the section markers are HTML comments and
+do not show in Obsidian.
+
+Mktero recognizes these parts from the layout and the wording of the page.
+A note can land after a different paragraph when its mark is printed in an
+unusual way, and metadata that does not look like metadata stays in the text.
+
 ## Copy a formula, a code block, or a table
 
 A display formula and a table show their copy actions in the top corner when

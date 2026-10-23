@@ -25,7 +25,7 @@
       },
       "pageNotes": {
         "total": 1,
-        "found": 0
+        "found": 1
       },
       "headings": {
         "count": 21,
@@ -57,8 +57,8 @@
         ]
       },
       "sourceMap": {
-        "total": 96,
-        "covered": 96,
+        "total": 97,
+        "covered": 97,
         "ratio": 1,
         "crossPage": 4
       },

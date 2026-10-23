@@ -25,17 +25,16 @@
       },
       "pageNotes": {
         "total": 3,
-        "found": 0
+        "found": 2
       },
       "headings": {
-        "count": 27,
+        "count": 26,
         "levels": {
           "1": 1,
-          "2": 26
+          "2": 25
         },
         "sequence": [
           "1:a775b68d4cfb",
-          "2:1d3e062982bd",
           "2:c59ddd3f7ba6",
           "2:d3db5338aae1",
           "2:f9e53ef695f2",
@@ -64,8 +63,8 @@
         ]
       },
       "sourceMap": {
-        "total": 108,
-        "covered": 108,
+        "total": 110,
+        "covered": 110,
         "ratio": 1,
         "crossPage": 10
       },

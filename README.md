@@ -55,6 +55,10 @@ conversions for the same PDF and parser profile.
   footers, and page numbers, and keep reliable page/region mappings so text,
   formulas, tables, and figures can jump back to their PDF source. A PDF text
   selection can open its Markdown paragraph when that mapping is unique.
+- In MinerU results, show page footnotes as notes after the paragraph that
+  cites them, and fold article metadata, author biographies, and reporting
+  summaries into collapsed sections, so the first screen shows the title,
+  authors, and abstract.
 - Browse the outline or a figure/table index, preview citations, affiliations,
   figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
 - Copy a display formula's LaTeX, a code block's text, or a table as Markdown

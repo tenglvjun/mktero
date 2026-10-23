@@ -1,4 +1,5 @@
 import { isPublisherCopyrightParagraph } from '../../markdown/publisher-copyright.js';
+import { classifyPageNote } from './notes.js';
 import { BLOCK_KIND, BLOCK_ROLE, blockPlainText } from './ir.js';
 
 const TOP_BAND = 90;
@@ -30,6 +31,7 @@ export function classifyBlocks(ir) {
     for (const block of ir.blocks) {
         if (block.kind === BLOCK_KIND.DISCARDED) {
             block.role = block.mineruType === 'page_footnote' ? BLOCK_ROLE.PAGE_NOTE : BLOCK_ROLE.CHROME;
+            if (block.role === BLOCK_ROLE.PAGE_NOTE) classifyPageNote(block);
             continue;
         }
         if (block.kind === BLOCK_KIND.EQUATION) {

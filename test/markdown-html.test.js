@@ -1466,3 +1466,70 @@ test('keeps one math budget for a document rendered block by block', () => {
     assert.match(thrown, /markdown-source-fallback/);
     assert.equal(thrown.match(/class="katex"/g)?.length, 1_000);
 });
+
+test('renders note quotes and paired section labels without directive text', () => {
+    const html = renderMarkdownHTML([
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Affiliation one.',
+        '',
+        '## Inner heading',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'Body text.',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> Quoted in a practitioner newsletter.',
+        '',
+        '> Ordinary quote.',
+    ].join('\n'), {
+        translate: (key, variables) => translateMessage('zh-CN', key, variables),
+    });
+
+    assert.match(html, /<p class="mktero-section-label"><strong>文章信息<\/strong><\/p>/);
+    assert.match(html, /<h2>Inner heading<\/h2>/);
+    assert.match(html, /<p>Affiliation one\.<\/p>/);
+    assert.match(html, /<p>Body text\.<\/p>/);
+    assert.match(html, /<blockquote class="mktero-note">\n<p>Quoted in a practitioner newsletter\.<\/p>/);
+    assert.match(html, /<blockquote>\n<p>Ordinary quote\.<\/p>/);
+    assert.doesNotMatch(html, /<!--\s*mktero-/);
+});
+
+test('drops an unpaired section directive and leaves its content as ordinary blocks', () => {
+    const html = renderMarkdownHTML([
+        '<!-- mktero-section: article-info -->',
+        '',
+        '<!-- mktero-section: reporting-summary -->',
+        '',
+        'Nested.',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        '<!-- mktero-section: author-biographies -->',
+        '',
+        'Never closed.',
+    ].join('\n'));
+
+    assert.doesNotMatch(html, /<!--\s*mktero-/);
+    assert.doesNotMatch(html, /mktero-section-label/);
+    assert.match(html, /<p>Nested\.<\/p>/);
+    assert.match(html, /<p>Never closed\.<\/p>/);
+});
+
+test('does not treat escaped, fenced, or inline directive text as a directive', () => {
+    const html = renderMarkdownHTML([
+        'Text \\<!-- mktero-note: footnote --> more',
+        '',
+        '```',
+        '<!-- mktero-section: article-info -->',
+        '```',
+        '',
+        'See <!-- mktero-note: footnote --> inline.',
+    ].join('\n'));
+
+    assert.match(html, /mktero-note: footnote/);
+    assert.match(html, /mktero-section: article-info/);
+    assert.doesNotMatch(html, /mktero-note"|mktero-section-label/);
+    assert.doesNotMatch(html, /<blockquote class="mktero-note">/);
+});

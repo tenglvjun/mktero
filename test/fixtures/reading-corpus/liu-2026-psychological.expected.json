@@ -20,24 +20,22 @@
       },
       "textCoverage": {
         "total": 14141,
-        "found": 14138,
-        "ratio": 0.9998
+        "found": 14141,
+        "ratio": 1
       },
       "pageNotes": {
         "total": 2,
-        "found": 1
+        "found": 2
       },
       "headings": {
-        "count": 43,
+        "count": 41,
         "levels": {
           "1": 1,
-          "2": 18,
+          "2": 16,
           "3": 20,
           "4": 4
         },
         "sequence": [
-          "2:a7cd62b5948d",
-          "2:c2fca2aa3a97",
           "1:40f21fe344fe",
           "2:5a4970c8a961",
           "2:644a9c531916",
@@ -82,8 +80,8 @@
         ]
       },
       "sourceMap": {
-        "total": 210,
-        "covered": 210,
+        "total": 214,
+        "covered": 214,
         "ratio": 1,
         "crossPage": 8
       },

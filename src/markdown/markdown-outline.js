@@ -8,6 +8,7 @@ import {
     numberedHeadingDepth,
     outlineNumberingScheme,
 } from './heading-numbering.js';
+import { markdownSectionRanges } from './markdown-directives.js';
 
 const OUTLINE_PARSER = markdownParser.configure(GFM);
 const HEADING_NODE = /^(?:ATXHeading|SetextHeading)([1-6])$/;
@@ -27,12 +28,16 @@ export function extractMarkdownOutline(
 ) {
     const source = String(markdown || '');
     const hidden = normalizeChromeRanges(chromeRanges, source.length);
+    const tree = OUTLINE_PARSER.parse(source);
+    const directiveRanges = markdownSectionRanges(source, tree);
     const headings = [];
-    OUTLINE_PARSER.parse(source).iterate({
+    tree.iterate({
         enter(node) {
             const match = HEADING_NODE.exec(node.name);
             if (!match) return;
             if (hidden.some(range => (
+                range.from <= node.from && node.from < range.to
+            )) || directiveRanges.some(range => (
                 range.from <= node.from && node.from < range.to
             ))) {
                 return;

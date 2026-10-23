@@ -25,13 +25,13 @@
       },
       "pageNotes": {
         "total": 1,
-        "found": 0
+        "found": 1
       },
       "headings": {
-        "count": 28,
+        "count": 18,
         "levels": {
           "1": 1,
-          "2": 27
+          "2": 17
         },
         "sequence": [
           "1:72dbed81107a",
@@ -51,22 +51,12 @@
           "2:d3065415b0c8",
           "2:1820b6d5c15f",
           "2:c86c637c9dda",
-          "2:676dfdd56ad2",
-          "2:b4032f02651d",
-          "2:d3065415b0c8",
-          "2:49d4843163a7",
-          "2:c0cd39d37db9",
-          "2:3a6eb0790f39",
-          "2:6ac3cdbb9b7b",
-          "2:c78ead20a8f4",
-          "2:5a9634296bae",
-          "2:20842cb13cc2",
-          "2:8b6bfe00f003"
+          "2:676dfdd56ad2"
         ]
       },
       "sourceMap": {
-        "total": 152,
-        "covered": 152,
+        "total": 153,
+        "covered": 153,
         "ratio": 1,
         "crossPage": 8
       },

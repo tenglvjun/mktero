@@ -489,3 +489,30 @@ test('collapses a bibliographic title split across consecutive headings', () => 
     );
     assert.equal(outline[0].offset, 0);
 });
+
+test('omits headings inside a paired section from every outline', () => {
+    const markdown = [
+        '# Title',
+        '',
+        '<!-- mktero-section: article-info -->',
+        '',
+        '## Hidden heading',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        '## Visible',
+        '',
+        '<!-- mktero-section: author-biographies -->',
+        '',
+        '## Unpaired heading',
+    ].join('\n');
+
+    assert.deepEqual(
+        extractMarkdownOutline(markdown).map(heading => heading.text),
+        ['Title', 'Visible', 'Unpaired heading']
+    );
+    assert.deepEqual(
+        extractAlignedMarkdownOutline(markdown).map(heading => heading.text),
+        ['Title', 'Visible', 'Unpaired heading']
+    );
+});

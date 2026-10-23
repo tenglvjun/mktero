@@ -10733,3 +10733,222 @@ test('reports an unsaved table cell correction for a closing tab to save', async
     editor.destroy();
     dom.window.close();
 });
+
+function createDirectiveEditor(markdown) {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    forceParsing(view, view.state.doc.length, 1000);
+    return { dom, document, editor, view, window: dom.window };
+}
+
+test('hides a note directive and marks every quote line', () => {
+    const markdown = [
+        'Intro',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> Quoted finding',
+        '> continued line',
+        '',
+        '> Ordinary quote',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(markdown);
+    const noteLines = [...document.querySelectorAll('.cm-mktero-note')];
+
+    assert.equal(document.body.textContent.includes('mktero-note'), false);
+    assert.deepEqual(noteLines.map(line => line.textContent), [
+        'Quoted finding',
+        'continued line',
+    ]);
+    assert.ok(noteLines.every(line => line.classList.contains('cm-mktero-blockquote')));
+    assert.equal(
+        document.querySelector('.cm-mktero-blockquote:not(.cm-mktero-note)')?.textContent,
+        'Ordinary quote'
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('collapses a section by default and toggles it from the button', () => {
+    const markdown = [
+        '# Title',
+        '',
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Hidden affiliation.',
+        '',
+        '## Inner heading',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'Visible body.',
+    ].join('\n');
+    const { dom, document, editor, view, window } = createDirectiveEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+
+    assert.ok(button);
+    assert.equal(button.type, 'button');
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    // The visible label names the button; the title gives the action.
+    assert.equal(button.hasAttribute('aria-label'), false);
+    assert.equal(button.title, 'Expand');
+    assert.equal(button.textContent, 'Article information');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), false);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+    assert.equal(document.body.textContent.includes('Visible body'), true);
+
+    button.click();
+    const expanded = document.querySelector('.mktero-section-toggle');
+    // The same button stays, so keyboard focus stays on it.
+    assert.equal(expanded, button);
+    assert.equal(expanded.getAttribute('aria-expanded'), 'true');
+    assert.equal(expanded.title, 'Collapse');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), true);
+    assert.equal(document.body.textContent.includes('Inner heading'), true);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+
+    expanded.dispatchEvent(new window.KeyboardEvent('keydown', {
+        key: ' ',
+        bubbles: true,
+        cancelable: true,
+    }));
+    const collapsed = document.querySelector('.mktero-section-toggle');
+    assert.equal(collapsed.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), false);
+
+    collapsed.dispatchEvent(new window.KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+    }));
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+
+    const inside = view.state.doc.toString().indexOf('Hidden affiliation');
+    view.dispatch({ selection: { anchor: inside } });
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    document.querySelector('.mktero-section-toggle').click();
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'false'
+    );
+    view.dispatch({ selection: { anchor: inside } });
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), true);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps keyboard focus on the section button and a collapsed section closed', () => {
+    const markdown = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Hidden affiliation.',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'Visible body.',
+    ].join('\n');
+    const { dom, document, editor, view, window } = createDirectiveEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+    button.focus();
+    button.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.equal(document.activeElement, button);
+    button.dispatchEvent(new window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.activeElement, button);
+
+    // Collapsing with the cursor inside keeps the section closed through
+    // transactions that do not move the selection.
+    const inside = view.state.doc.toString().indexOf('Hidden affiliation');
+    view.dispatch({ selection: { anchor: inside } });
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    button.click();
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    editor.refreshRendering?.();
+    view.dispatch({});
+    view.dispatch({ effects: [] });
+    assert.equal(document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps a section expanded when a translation copies its directive', () => {
+    const source = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Affiliation.',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const translated = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        '单位信息。',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(source);
+
+    document.querySelector('.mktero-section-toggle').click();
+    editor.setMarkdown(translated);
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    assert.equal(document.body.textContent.includes('单位信息'), true);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('expands a collapsed section when search navigation scrolls to a hit', async () => {
+    const { searchMarkdownDocument } = await import(
+        '../src/markdown/markdown-document-search.js'
+    );
+    const markdown = [
+        '<!-- mktero-section: reporting-summary -->',
+        '',
+        'UniqueSectionPhrase appears here.',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(markdown);
+    const result = searchMarkdownDocument(markdown, 'UniqueSectionPhrase');
+
+    assert.equal(document.body.textContent.includes('UniqueSectionPhrase'), false);
+    editor.setDocumentSearchHighlights({
+        matches: result.matches,
+        activeIndex: 0,
+    });
+    editor.scrollToOffset(result.matches[0].from);
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    assert.equal(document.body.textContent.includes('UniqueSectionPhrase'), true);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+
+    editor.destroy();
+    dom.window.close();
+});
