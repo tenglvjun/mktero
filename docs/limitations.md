@@ -36,9 +36,14 @@
   author's own typo or spelling stays as printed, and a heading MinerU wrote
   twice is written once. A scanned PDF's text layer is an older OCR and is
   not used; MinerU's reading stays, including any word it misread.
-- Local MinerU mode talks to a MinerU 4.0 V1 service. It does not restore
-  figures from that service's result, and a restarted local service cannot
-  resume an earlier job.
+- Local MinerU mode talks to a MinerU 4.0 V1 service. Its result is read from
+  the archive's `middle_json.json` with the same reading rules as MinerU cloud
+  (page notes, joined paragraphs and tables, hidden page decoration, source
+  links); an archive without a readable `middle_json.json` keeps the service's
+  own Markdown. The result is kept with other stored MinerU results, so a
+  Mktero update reads it again without the service. It does not restore
+  cropped figures from the PDF, and a restarted local service cannot resume an
+  earlier job.
 - A PDF text selection opens its Markdown paragraph only when one source
   region covers it, or when the selection text occurs in exactly one cached
   paragraph and no source region overlaps it. Ambiguous, repeated, uncached,

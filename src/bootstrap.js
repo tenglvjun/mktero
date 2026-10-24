@@ -106,6 +106,8 @@ import {
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_LOCAL_PARSER_PROFILE_ID,
+    MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_LOCAL_REQUEST_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
@@ -164,7 +166,7 @@ import { ZoteroAnnotationExtractor } from './extractors/zotero-annotation-extrac
 import { MinerUClient } from './mineru/mineru-client.js';
 import { MinerUConversion } from './mineru/mineru-conversion.js';
 import { MinerULocalClient } from './mineru/local-client.js';
-import { MinerULocalConversion } from './mineru/local-conversion.js';
+import { MinerULocalConversion, prepareLocalMinerUResult } from './mineru/local-conversion.js';
 import { createMinerUConversionFacade } from './mineru/conversion-facade.js';
 import { LEGACY_FIGURE_PROFILES } from './figures/legacy-figure-profiles.js';
 import { createMinerUFigureInput, prepareMinerUResult } from './mineru/document/prepare.js';
@@ -687,6 +689,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
             createAbortController: createZoteroAbortController,
         }),
         cache,
+        // The PDF's text layer is only read for a result with structure.
+        prepareResult: async (raw, context) => prepareLocalMinerUResult(raw, {
+            pdfText: raw?.layout ? await readPDFText(context) : null,
+        }),
+        resultStore: mineruResultStore,
+        createResultKey: fileData => createMinerUResultKey({
+            fileData,
+            provider: 'mineru-local',
+            requestProfile: MINERU_LOCAL_REQUEST_PROFILE_ID,
+        }),
+        createTranslationSourceKeys: fileData => Promise.all(
+            MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => createMarkdownCacheKey(fileData, { parserProfile }))
+        ),
         onError: error => Zotero.logError?.(error),
     });
     const mineruConversion = createMinerUConversionFacade({
@@ -705,7 +720,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         getParserProfile: () => currentMinerUParserProfile(),
         getPreviousParserProfiles: () => (
             getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
-                ? []
+                ? [...MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS]
                 : [
                     ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
                     LEGACY_FIGURE_PROFILES.mineru,

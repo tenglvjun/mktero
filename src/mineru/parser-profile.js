@@ -149,9 +149,26 @@ export const MINERU_REQUEST_PROFILE_ID = JSON.stringify({
 });
 
 // Local V1 results do not share the hosted batch contract or figure layout.
+// What the self-hosted service is asked for; it keys the raw-result store.
+export const MINERU_LOCAL_REQUEST_PROFILE_ID = JSON.stringify({
+    transport: 'local-v1',
+    tier: 'standard',
+    ocrMode: 'auto',
+    output: 'zip',
+});
+
+// A self-hosted MinerU 4.0 result is read from its middle_json.json through
+// the same document pipeline as cloud results. A pipeline change reads the
+// stored result again; it does not need the service.
 export const MINERU_LOCAL_PARSER_PROFILE_ID = JSON.stringify({
     transport: 'local-v1',
     tier: 'standard',
     ocrMode: 'auto',
-    output: 'zip-markdown-v1',
+    output: 'zip-middle-v2',
+    document: MINERU_DOCUMENT_PIPELINE,
 });
+
+// Shipped local profiles, kept as literals so their corrections still open.
+export const MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    JSON.stringify({ transport: 'local-v1', tier: 'standard', ocrMode: 'auto', output: 'zip-markdown-v1' }),
+]);

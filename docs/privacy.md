@@ -13,7 +13,7 @@
 | Mktero extension version, sent with requests to the Mktero service and recorded when you sign in or refresh your token, so the operator can see which builds are still in use | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
 | Research invitation email, the token link, the answers you submit, and the research-email opt-out | The Mktero service you select; the link token is not saved by the website | Not by Mktero |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
-| Stored MinerU results (the result's Markdown, content list, layout JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted | No |
+| Stored MinerU results from Mktero, MinerU cloud, or a local MinerU service (the result's Markdown, content list, layout or middle JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted | No |
 | Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and expiry time | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |

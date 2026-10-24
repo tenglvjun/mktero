@@ -171,13 +171,19 @@ export function mergeContinuedTables(ir) {
     const removed = new Set();
     const pages = [...new Set(ir.blocks.map(block => block.pageIndex))].sort((left, right) => left - right);
     for (const pageIndex of pages) {
-        const first = ir.blocks.find(block => (
-            block.pageIndex === pageIndex && !removed.has(block) && isOrderedItem(block)
-        ));
+        // MinerU 4.0 says which table continues, wherever it starts on the
+        // page; otherwise an uncaptioned table at the top of the page does.
+        const first = ir.blocks.find(block => block.pageIndex === pageIndex && !removed.has(block)
+            && block.kind === BLOCK_KIND.TABLE && block.role === BLOCK_ROLE.FLOAT && block.continuesPrev)
+            || ir.blocks.find(block => (
+                block.pageIndex === pageIndex && !removed.has(block) && isOrderedItem(block)
+            ));
         if (!first || first.kind !== BLOCK_KIND.TABLE || first.role !== BLOCK_ROLE.FLOAT) continue;
-        if (hasCaptionText(first)) continue;
-        const top = bodyBox(first)?.[1] ?? first.bbox?.[1];
-        if (!Number.isFinite(top) || top > CONTINUED_TOP) continue;
+        if (!first.continuesPrev) {
+            if (hasCaptionText(first)) continue;
+            const top = bodyBox(first)?.[1] ?? first.bbox?.[1];
+            if (!Number.isFinite(top) || top > CONTINUED_TOP) continue;
+        }
         const host = [...ir.blocks].reverse().find(block => (
             block.pageIndex === pageIndex - 1 && !removed.has(block)
             && block.role === BLOCK_ROLE.FLOAT && isFloatBlock(block)

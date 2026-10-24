@@ -1,7 +1,7 @@
 import { unzipSync, zipSync } from 'fflate';
 import { toUint8Array } from './binary.js';
 
-const KEPT_FILE = /(?:^|\/)(?:full\.md|(?:.+_)?content_list\.json|(?:.+_)?(?:middle|layout)\.json)$/i;
+const KEPT_FILE = /(?:^|\/)(?:full\.md|markdown\.md|middle_json\.json|(?:.+_)?content_list\.json|(?:.+_)?(?:middle|layout)\.json)$/i;
 const KEPT_IMAGE = /\.(?:gif|jpe?g|png|webp)$/i;
 const DEFAULT_MAX_RESULT_ARCHIVE_BYTES = 256 * 1024 * 1024;
 
@@ -28,8 +28,9 @@ export function createMinerUResultArchive(archive, {
     for (const [name, data] of Object.entries(files)) {
         entries[name] = [data, { level: KEPT_IMAGE.test(name) ? 0 : 6 }];
     }
-    if (!Object.keys(entries).some(name => /(?:^|\/)full\.md$/i.test(name))) {
-        throw new Error('The MinerU result archive does not contain full.md');
+    // A cloud result has full.md; a self-hosted MinerU 4.0 result markdown.md.
+    if (!Object.keys(entries).some(name => /(?:^|\/)(?:full|markdown)\.md$/i.test(name))) {
+        throw new Error('The MinerU result archive does not contain its Markdown');
     }
     return zipSync(entries);
 }

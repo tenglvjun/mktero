@@ -49,7 +49,15 @@ test('trims a MinerU archive to the files the extension reads', () => {
     const extracted = extractMinerUResultFromZip(trimmed);
     assert.equal(extracted.markdown, '# Stored result');
     assert.equal(extracted.assets.length, 1);
-    assert.throws(() => createMinerUResultArchive(zipSync({ 'x/a.png': new Uint8Array([1]) })), /full\.md/);
+    assert.throws(() => createMinerUResultArchive(zipSync({ 'x/a.png': new Uint8Array([1]) })), /its Markdown/);
+    // A self-hosted MinerU 4.0 result keeps markdown.md and middle_json.json.
+    const local = unzipSync(createMinerUResultArchive(zipSync({
+        'markdown.md': new Uint8Array([1]),
+        'middle_json.json': new Uint8Array([2]),
+        'structured_content.json': new Uint8Array([3]),
+        'images/a.png': new Uint8Array([4]),
+    })));
+    assert.deepEqual(Object.keys(local).sort(), ['images/a.png', 'markdown.md', 'middle_json.json']);
     assert.equal(tryCreateMinerUResultArchive(new Uint8Array([1, 2, 3])), null);
     assert.throws(() => createMinerUResultArchive(resultZip(), { maxBytes: 8 }), /too large/);
 });

@@ -307,6 +307,8 @@ function buildFloat(block, raw, context) {
     block.role = BLOCK_ROLE.FLOAT;
     if (typeof raw.guessLang === 'string') block.codeLanguage = raw.guessLang;
     if (typeof raw.subType === 'string') block.subType = raw.subType;
+    // MinerU 4.0 marks a table it found continued from the previous page.
+    if (raw.continuesPrev === true && block.kind === BLOCK_KIND.TABLE) block.continuesPrev = true;
     const counts = { body: 0, caption: 0, footnote: 0 };
     const children = Array.isArray(raw.blocks) ? raw.blocks : [raw];
     for (const child of children) {

@@ -1,5 +1,8 @@
 import { strFromU8, unzipSync } from 'fflate';
 import { toUint8Array } from './binary.js';
+import { assertFigureJSONBudget } from '../figures/figure-model.js';
+import { FIGURE_LIMITS } from '../figures/figure-limits.js';
+import { projectMinerUMiddleJSON } from './document/ingest-middle-v2.js';
 import {
     DEFAULT_MAX_ASSET_BYTES,
     DEFAULT_MAX_MARKDOWN_BYTES,
@@ -7,6 +10,8 @@ import {
 } from './zip-markdown.js';
 
 const MARKDOWN_NAME = 'markdown.md';
+const MIDDLE_NAME = 'middle_json.json';
+const MAX_MIDDLE_DEPTH = 32;
 const IMAGE_MIME_TYPES = new Map([
     ['.gif', 'image/gif'],
     ['.jpeg', 'image/jpeg'],
@@ -81,6 +86,8 @@ export function extractMinerULocalResultFromZip(archive, {
         throw extractionError(error);
     }
 
+    const assetBasePath = directoryName(markdownPath);
+    const layout = readMiddleJSON(bytes, assetBasePath);
     return {
         markdown: strFromU8(markdownBytes),
         assets: Object.entries(assetFiles).map(([path, data]) => ({
@@ -88,9 +95,39 @@ export function extractMinerULocalResultFromZip(archive, {
             mimeType: imageMimeType(path),
             data,
         })),
-        assetBasePath: directoryName(markdownPath),
+        assetBasePath,
         contentList: [],
+        ...(layout ? { layout } : {}),
     };
+}
+
+// MinerU 4.0 writes the document structure next to markdown.md as
+// middle_json.json (DocVortex Middle JSON 2.0). It is projected to the
+// layout the document pipeline reads. The structure is optional: without
+// it, or when it cannot be read, the result keeps MinerU's own Markdown.
+function readMiddleJSON(bytes, root) {
+    try {
+        let name = null;
+        let size = 0;
+        unzipSync(bytes, { filter(file) {
+            if (directoryName(file.name) === root && file.name.split('/').at(-1) === MIDDLE_NAME) {
+                if (name) throw resultError('The MinerU result contains multiple middle_json.json files');
+                name = file.name;
+                size = file.originalSize;
+            }
+            return false;
+        } });
+        if (!name || size > FIGURE_LIMITS.maxLayoutBytes) return null;
+        const data = unzipSync(bytes, { filter: file => file.name === name })[name];
+        if (!data || data.length > FIGURE_LIMITS.maxLayoutBytes) return null;
+        const parsed = JSON.parse(strFromU8(data));
+        // Inline spans and nested lists sit deeper than 3.x lines.
+        assertFigureJSONBudget(parsed, { maxBytes: FIGURE_LIMITS.maxLayoutBytes, maxDepth: MAX_MIDDLE_DEPTH });
+        return projectMinerUMiddleJSON(parsed);
+    }
+    catch {
+        return null;
+    }
 }
 
 function assertSafeZipPath(path) {
