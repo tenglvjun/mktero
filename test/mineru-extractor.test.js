@@ -328,6 +328,7 @@ test('normalizes MinerU Markdown and exposes its PDF source map', async () => {
             + 'an event), and context engagement.'
     );
     assert.equal(source.includes('\n\n'), true);
+    const split = 'The framework improves the ability to change perspective on'.length;
     assert.deepEqual(result.sourceMap, [{
         type: 'text',
         markdownFrom: 0,
@@ -336,7 +337,13 @@ test('normalizes MinerU Markdown and exposes its PDF source map', async () => {
             { pageIndex: 0, bbox: [100, 120, 900, 220] },
             { pageIndex: 1, bbox: [100, 80, 900, 160] },
         ],
+        locationRanges: [
+            { markdownFrom: 0, markdownTo: split, location: { pageIndex: 0, bbox: [100, 120, 900, 220] } },
+            { markdownFrom: split + 1, markdownTo: result.markdown.length,
+                location: { pageIndex: 1, bbox: [100, 80, 900, 160] } },
+        ],
     }]);
+    assert.equal(result.documentStructure, 'mineru-ir-v1');
 });
 
 test('does not normalize Markdown explicitly edited by the user', async () => {

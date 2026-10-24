@@ -1,0 +1,210 @@
+{
+  "schema": 1,
+  "id": "oneill-2026-representational",
+  "archiveSha256": "e651b16c99353587233e6a409bb5be0589e97864494104faf5213ad7c019cd07",
+  "pages": 38,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Fig. 1|",
+      "panels": 23,
+      "captions": 2,
+      "owned": 8,
+      "bbox": [
+        62,
+        64,
+        945,
+        739
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Fig. 2 |",
+      "panels": 9,
+      "captions": 2,
+      "owned": 6,
+      "bbox": [
+        64,
+        64,
+        945,
+        635
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Fig. 3 |",
+      "panels": 4,
+      "captions": 1,
+      "owned": 3,
+      "bbox": [
+        60,
+        59,
+        494,
+        364
+      ]
+    },
+    {
+      "pageIndex": 8,
+      "label": null,
+      "panels": 6,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        134,
+        64,
+        876,
+        894
+      ]
+    },
+    {
+      "pageIndex": 9,
+      "label": "Fig. 6 |",
+      "panels": 8,
+      "captions": 2,
+      "owned": 4,
+      "bbox": [
+        171,
+        64,
+        836,
+        469
+      ]
+    },
+    {
+      "pageIndex": 19,
+      "label": "Extended Data Fig. 1 |",
+      "panels": 7,
+      "captions": 2,
+      "owned": 7,
+      "bbox": [
+        116,
+        59,
+        889,
+        373
+      ]
+    },
+    {
+      "pageIndex": 20,
+      "label": "Extended Data Fig. 2 |",
+      "panels": 3,
+      "captions": 2,
+      "owned": 2,
+      "bbox": [
+        259,
+        56,
+        752,
+        256
+      ]
+    },
+    {
+      "pageIndex": 21,
+      "label": "Extended Data Fig. 3 |",
+      "panels": 8,
+      "captions": 2,
+      "owned": 8,
+      "bbox": [
+        146,
+        59,
+        863,
+        368
+      ]
+    },
+    {
+      "pageIndex": 22,
+      "label": "Extended Data Fig. 4 |",
+      "panels": 13,
+      "captions": 2,
+      "owned": 6,
+      "bbox": [
+        104,
+        56,
+        905,
+        780
+      ]
+    },
+    {
+      "pageIndex": 23,
+      "label": "Extended Data Fig. 5 |",
+      "panels": 7,
+      "captions": 2,
+      "owned": 4,
+      "bbox": [
+        146,
+        55,
+        864,
+        712
+      ]
+    },
+    {
+      "pageIndex": 24,
+      "label": "Extended Data Fig. 6 |",
+      "panels": 16,
+      "captions": 1,
+      "owned": 6,
+      "bbox": [
+        193,
+        59,
+        815,
+        891
+      ]
+    },
+    {
+      "pageIndex": 26,
+      "label": "Extended Data Fig. 7 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        65,
+        55,
+        947,
+        877
+      ]
+    },
+    {
+      "pageIndex": 28,
+      "label": "Extended Data Fig. 8 |",
+      "panels": 11,
+      "captions": 2,
+      "owned": 3,
+      "bbox": [
+        97,
+        55,
+        910,
+        434
+      ]
+    },
+    {
+      "pageIndex": 29,
+      "label": "Extended Data Fig. 9 |",
+      "panels": 9,
+      "captions": 1,
+      "owned": 4,
+      "bbox": [
+        250,
+        57,
+        757,
+        498
+      ]
+    },
+    {
+      "pageIndex": 30,
+      "label": "Extended Data Fig. 10 |",
+      "panels": 8,
+      "captions": 2,
+      "owned": 4,
+      "bbox": [
+        198,
+        59,
+        810,
+        292
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 6,
+      "reason": "ambiguous-caption"
+    }
+  ]
+}

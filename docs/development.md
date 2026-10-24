@@ -38,6 +38,43 @@ another paper, add its archive to the corpus directory and commit the generated
 `<id>.expected.json`. Missing archives are skipped; an archive whose bytes
 changed fails until it is re-verified and updated.
 
+The figure input now comes from the MinerU document IR. The ten expectations
+recorded before it (`beyond-alignment`, `brainbench`, `clinical-llm`,
+`envharness`, `externalization`, `menstrual-wearable`, `mosaic`, `neuradock`,
+`olfactory`, `parsimonious`) were written by the earlier figure adapter. Re-run
+`--update` for them on a machine that has those archives and review the diff.
+
+## Reading corpus regression
+
+`scripts/reading-corpus-check.mjs` measures how the MinerU pipeline reads each
+local archive (`<id>.zip`) and compares the numbers with
+`test/fixtures/reading-corpus/<id>.expected.json`. The expectations hold counts
+and 12-character heading hashes only, never paper text. The directory comes from
+`MKTERO_READING_CORPUS`, falling back to `MKTERO_FIGURE_CORPUS`.
+
+```bash
+node scripts/reading-corpus-check.mjs --pipeline ir            # compare and print a table
+node scripts/reading-corpus-check.mjs --pipeline ir --update   # refresh after review
+node scripts/reading-corpus-check.mjs --pipeline ir-pdf        # also read the archive's PDF with PDF.js
+node scripts/reading-corpus-check.mjs --ids a,b --json         # full report for some papers
+```
+
+`ir` reads the MinerU result alone. `ir-pdf` also reads the `*_origin.pdf` that
+MinerU puts in its archive with PDF.js, as the extension does, so paragraph
+joins and heading levels use the PDF's lines and fonts. Both have committed
+expectations; refresh each with `--update` after review.
+
+| Metric | Meaning |
+| --- | --- |
+| `breaks` | Two text paragraphs that read as one sentence (the first ends open, the second starts in lower case) with only floats or display math between them, split by the PDF boundary the source map reports: `page`, `column`, `float`, `math`, `adjacent`, or `unmapped` |
+| `chrome` | Discarded headers, footers, page numbers, and side text (8+ normalized characters) that survive as a visible block |
+| `textCoverage` | Share of layout text-span shingles (8 characters) found in the visible text |
+| `pageNotes` | Page footnotes with at least 80% of their shingles visible |
+| `headings` | Outline size, level histogram, and the hashed `level:title` sequence |
+| `sourceMap` | Share of visible top-level blocks covered by a source-map entry, and entries that span several pages |
+| `floats` | Images, tables, algorithms, code, and display math in the output versus the layout |
+| `references` | Parsed reference entries versus layout `ref_text` blocks |
+
 ## Browser preview
 
 `preview/` mounts the real Markdown reader (`createMarkdownTabView`) in a plain

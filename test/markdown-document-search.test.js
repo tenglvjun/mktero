@@ -89,3 +89,21 @@ test('stops after the match budget and reports truncation', () => {
     });
     assert.equal(MAX_DOCUMENT_SEARCH_MATCHES, 10_000);
 });
+
+test('finds text inside a collapsible section', () => {
+    const markdown = [
+        '<!-- mktero-section: reporting-summary -->',
+        '',
+        'UniqueSectionPhrase appears here.',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const result = searchMarkdownDocument(markdown, 'UniqueSectionPhrase');
+
+    assert.equal(result.truncated, false);
+    assert.equal(result.matches.length, 1);
+    assert.equal(
+        markdown.slice(result.matches[0].from, result.matches[0].to),
+        'UniqueSectionPhrase'
+    );
+});

@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "id": "doi-10.1038-s41746-025-02320-8",
+  "archiveSha256": "9484cee2b1b725e1fb05a8fcb62b3c96d5ce5c7ef38cf0f8001e24c4914a7e03",
+  "pages": 13,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Fig. 1 |",
+      "panels": 1,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        99,
+        65,
+        908,
+        711
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Fig. 2 |",
+      "panels": 6,
+      "captions": 2,
+      "owned": 4,
+      "bbox": [
+        143,
+        64,
+        842,
+        822
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Fig. 3 |",
+      "panels": 12,
+      "captions": 2,
+      "owned": 5,
+      "bbox": [
+        137,
+        59,
+        841,
+        827
+      ]
+    }
+  ],
+  "preserved": []
+}

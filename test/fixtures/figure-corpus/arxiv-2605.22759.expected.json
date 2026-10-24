@@ -1,0 +1,253 @@
+{
+  "schema": 1,
+  "id": "arxiv-2605.22759",
+  "archiveSha256": "0005cad32e0bbdd45a75fe9532e7daab39f6a9f0269278df41146bb9d6bfe5c6",
+  "pages": 75,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Figure 1 |",
+      "panels": 8,
+      "captions": 1,
+      "owned": 7,
+      "bbox": [
+        106,
+        113,
+        891,
+        688
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Figure 3 |",
+      "panels": 4,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        143,
+        103,
+        844,
+        763
+      ]
+    },
+    {
+      "pageIndex": 8,
+      "label": "Figure 4 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        111,
+        98,
+        893,
+        738
+      ]
+    },
+    {
+      "pageIndex": 12,
+      "label": "Figure 5 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        109,
+        96,
+        894,
+        776
+      ]
+    },
+    {
+      "pageIndex": 24,
+      "label": "Figure ED.1 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        101,
+        97,
+        894,
+        397
+      ]
+    },
+    {
+      "pageIndex": 25,
+      "label": "Figure ED.2 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        102,
+        99,
+        893,
+        409
+      ]
+    },
+    {
+      "pageIndex": 29,
+      "label": "Figure ED.3 |",
+      "panels": 7,
+      "captions": 1,
+      "owned": 5,
+      "bbox": [
+        102,
+        189,
+        896,
+        720
+      ]
+    },
+    {
+      "pageIndex": 31,
+      "label": "Figure ED.4 |",
+      "panels": 24,
+      "captions": 1,
+      "owned": 17,
+      "bbox": [
+        104,
+        151,
+        898,
+        800
+      ]
+    },
+    {
+      "pageIndex": 48,
+      "label": "Figure ED.5 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        117,
+        122,
+        878,
+        838
+      ]
+    },
+    {
+      "pageIndex": 50,
+      "label": "Figure ED.6 |",
+      "panels": 11,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        148,
+        98,
+        857,
+        833
+      ]
+    },
+    {
+      "pageIndex": 51,
+      "label": "Figure ED.7 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        141,
+        100,
+        856,
+        717
+      ]
+    },
+    {
+      "pageIndex": 52,
+      "label": "Figure ED.8 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        141,
+        125,
+        861,
+        740
+      ]
+    },
+    {
+      "pageIndex": 53,
+      "label": "Figure ED.9 |",
+      "panels": 2,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        106,
+        122,
+        854,
+        699
+      ]
+    },
+    {
+      "pageIndex": 54,
+      "label": "Figure ED.10 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        151,
+        97,
+        842,
+        838
+      ]
+    },
+    {
+      "pageIndex": 55,
+      "label": "Figure ED.11 |",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        106,
+        99,
+        881,
+        266
+      ]
+    },
+    {
+      "pageIndex": 57,
+      "label": "Figure ED.12 |",
+      "panels": 10,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        124,
+        125,
+        877,
+        679
+      ]
+    },
+    {
+      "pageIndex": 65,
+      "label": "Figure ED.14 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        109,
+        192,
+        894,
+        674
+      ]
+    },
+    {
+      "pageIndex": 74,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        141,
+        684,
+        389,
+        731
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 4,
+      "reason": "foreign-content-overlap"
+    },
+    {
+      "pageIndex": 64,
+      "reason": "foreign-content-overlap"
+    }
+  ]
+}

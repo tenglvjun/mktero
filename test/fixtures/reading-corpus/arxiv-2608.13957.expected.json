@@ -1,0 +1,193 @@
+{
+  "schema": 1,
+  "id": "arxiv-2608.13957",
+  "archiveSha256": "0db4f183b84157cde87dac8545a5d66bfb2541793592eab5310be55d46e1f44e",
+  "pipelines": {
+    "ir": {
+      "pages": 7,
+      "breaks": {
+        "total": 1,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 1,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 1,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 6519,
+        "found": 6519,
+        "ratio": 1
+      },
+      "pageNotes": {
+        "total": 2,
+        "found": 1
+      },
+      "headings": {
+        "count": 30,
+        "levels": {
+          "1": 1,
+          "2": 10,
+          "3": 9,
+          "4": 10
+        },
+        "sequence": [
+          "1:aa90baa7ad53",
+          "2:c59ddd3f7ba6",
+          "2:5a4970c8a961",
+          "2:63e4f9fcce15",
+          "3:7dbc094b09b6",
+          "3:6024ed25c1e8",
+          "2:f0a80fbe74f6",
+          "3:40d06859574e",
+          "3:b4433c44adfe",
+          "4:57f71b294464",
+          "4:bad6a0e7119c",
+          "2:31462e3b5086",
+          "3:e6a9ac36f946",
+          "4:f311dea530b7",
+          "4:89dba0c8223b",
+          "4:d88194e71f0e",
+          "3:2f9ccc07b469",
+          "3:1433fba3fd1b",
+          "4:bcd0ac3714cd",
+          "4:5bc63b64f360",
+          "2:9b3afa5175d7",
+          "3:e5075037958e",
+          "4:0785af533b04",
+          "4:a942b1931b9b",
+          "4:f2a54f79b509",
+          "3:f2b98b0f5ed4",
+          "2:a91885b3ed59",
+          "2:0a31928df70c",
+          "2:b86f1e8aa75e",
+          "2:140e692bf22d"
+        ]
+      },
+      "sourceMap": {
+        "total": 116,
+        "covered": 116,
+        "ratio": 1,
+        "crossPage": 3
+      },
+      "floats": {
+        "markdown": {
+          "image": 4,
+          "captionedImage": 4,
+          "table": 2,
+          "algorithm": 0,
+          "code": 0,
+          "math": 2
+        },
+        "layout": {
+          "image": 1,
+          "chart": 3,
+          "table": 2,
+          "code": 0,
+          "captioned": 6
+        }
+      },
+      "references": {
+        "markdown": 22,
+        "layout": 23
+      }
+    },
+    "ir-pdf": {
+      "pages": 7,
+      "breaks": {
+        "total": 1,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 1,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 1,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 6519,
+        "found": 6519,
+        "ratio": 1
+      },
+      "pageNotes": {
+        "total": 2,
+        "found": 1
+      },
+      "headings": {
+        "count": 30,
+        "levels": {
+          "1": 1,
+          "2": 10,
+          "3": 9,
+          "4": 10
+        },
+        "sequence": [
+          "1:aa90baa7ad53",
+          "2:c59ddd3f7ba6",
+          "2:5a4970c8a961",
+          "2:63e4f9fcce15",
+          "3:7dbc094b09b6",
+          "3:6024ed25c1e8",
+          "2:f0a80fbe74f6",
+          "3:40d06859574e",
+          "3:b4433c44adfe",
+          "4:57f71b294464",
+          "4:bad6a0e7119c",
+          "2:31462e3b5086",
+          "3:e6a9ac36f946",
+          "4:f311dea530b7",
+          "4:89dba0c8223b",
+          "4:d88194e71f0e",
+          "3:2f9ccc07b469",
+          "3:1433fba3fd1b",
+          "4:bcd0ac3714cd",
+          "4:5bc63b64f360",
+          "2:9b3afa5175d7",
+          "3:e5075037958e",
+          "4:0785af533b04",
+          "4:a942b1931b9b",
+          "4:f2a54f79b509",
+          "3:f2b98b0f5ed4",
+          "2:a91885b3ed59",
+          "2:0a31928df70c",
+          "2:b86f1e8aa75e",
+          "2:140e692bf22d"
+        ]
+      },
+      "sourceMap": {
+        "total": 116,
+        "covered": 116,
+        "ratio": 1,
+        "crossPage": 3
+      },
+      "floats": {
+        "markdown": {
+          "image": 4,
+          "captionedImage": 4,
+          "table": 2,
+          "algorithm": 0,
+          "code": 0,
+          "math": 2
+        },
+        "layout": {
+          "image": 1,
+          "chart": 3,
+          "table": 2,
+          "code": 0,
+          "captioned": 6
+        }
+      },
+      "references": {
+        "markdown": 22,
+        "layout": 23
+      }
+    }
+  }
+}

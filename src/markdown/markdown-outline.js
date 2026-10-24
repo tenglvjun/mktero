@@ -3,6 +3,12 @@ import {
     findPaperTitleHeading,
     normalizeChromeRanges,
 } from './chrome-ranges.js';
+import {
+    clampOutlineLevel,
+    numberedHeadingDepth,
+    outlineNumberingScheme,
+} from './heading-numbering.js';
+import { markdownSectionRanges } from './markdown-directives.js';
 
 const OUTLINE_PARSER = markdownParser.configure(GFM);
 const HEADING_NODE = /^(?:ATXHeading|SetextHeading)([1-6])$/;
@@ -12,19 +18,26 @@ const MIN_PDF_OUTLINE_MATCHES = 3;
 const SECTION_NUMBER_PREFIX_PATTERN =
     /^(?:\d{1,2}(?:\.\d+)*\.?\s+|[ivxlcdm]{1,6}\.\s+|[a-z]\.\s+)/i;
 
+// `headingLevels: 'structural'` trusts the ATX levels of a document whose
+// producer already assigned them from the section numbering.
 export function extractMarkdownOutline(
     markdown,
     chromeRanges = [],
-    itemTitle = ''
+    itemTitle = '',
+    { headingLevels = 'inferred' } = {}
 ) {
     const source = String(markdown || '');
     const hidden = normalizeChromeRanges(chromeRanges, source.length);
+    const tree = OUTLINE_PARSER.parse(source);
+    const directiveRanges = markdownSectionRanges(source, tree);
     const headings = [];
-    OUTLINE_PARSER.parse(source).iterate({
+    tree.iterate({
         enter(node) {
             const match = HEADING_NODE.exec(node.name);
             if (!match) return;
             if (hidden.some(range => (
+                range.from <= node.from && node.from < range.to
+            )) || directiveRanges.some(range => (
                 range.from <= node.from && node.from < range.to
             ))) {
                 return;
@@ -43,11 +56,9 @@ export function extractMarkdownOutline(
     });
     // Level the original headings first. Collapsing the split title earlier
     // makes its body include the following section and flattens the outline.
+    const sections = omitNonSectionHeadings(source, headings);
     return collapseSplitPaperTitle(
-        assignOutlineLevels(
-            omitNonSectionHeadings(source, headings),
-            source
-        ),
+        headingLevels === 'structural' ? sections : assignOutlineLevels(sections, source),
         findPaperTitleHeading(source, itemTitle)
     );
 }
@@ -56,12 +67,14 @@ export function extractAlignedMarkdownOutline(
     markdown,
     chromeRanges = [],
     pdfOutline = [],
-    itemTitle = ''
+    itemTitle = '',
+    options = {}
 ) {
     const headings = extractMarkdownOutline(
         markdown,
         chromeRanges,
-        itemTitle
+        itemTitle,
+        options
     );
     const bookmarks = flattenPdfOutline(pdfOutline);
     if (!bookmarks.length) return headings;
@@ -229,10 +242,6 @@ function headingExclusiveEnd(markdown, offset) {
     return end;
 }
 
-const NUMBERED_HEADING_PATTERN = /^(\d+(?:\.\d+)*)(?:\.|\s|$)/;
-const LETTER_HEADING_PATTERN = /^([A-Z](?:\.\d+)*)\.(?:\s|$)/;
-const LETTER_SUBHEADING_PATTERN = /^([A-Z]\.\d+(?:\.\d+)*)(?:\s|$)/;
-const ROMAN_HEADING_PATTERN = /^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.(?:\s|$)/i;
 
 function assignOutlineLevels(headings, markdown) {
     if (headings.length < 2) return headings;
@@ -276,32 +285,6 @@ function sectionBodyIsLong(markdown, previousOffset, currentOffset) {
         .filter(Boolean);
     if (paragraphs.length >= 2) return true;
     return body.replace(/\s+/g, '').length > 400;
-}
-
-function outlineNumberingScheme(texts) {
-    return texts.some(text => ROMAN_HEADING_PATTERN.test(String(text).trim()))
-        ? 'ieee'
-        : 'standard';
-}
-
-function numberedHeadingDepth(text, scheme = 'standard') {
-    const trimmed = String(text).trim();
-    if (ROMAN_HEADING_PATTERN.test(trimmed)) return 1;
-    if (scheme === 'ieee') {
-        const letter = LETTER_SUBHEADING_PATTERN.exec(trimmed)
-            || LETTER_HEADING_PATTERN.exec(trimmed);
-        if (!letter) return 0;
-        return clampOutlineLevel(1 + letter[1].split('.').length);
-    }
-    const match = LETTER_HEADING_PATTERN.exec(trimmed)
-        || LETTER_SUBHEADING_PATTERN.exec(trimmed)
-        || NUMBERED_HEADING_PATTERN.exec(trimmed);
-    if (!match) return 0;
-    return clampOutlineLevel(match[1].split('.').length);
-}
-
-function clampOutlineLevel(depth) {
-    return Math.min(6, Math.max(1, depth));
 }
 
 export function createMarkdownFragmentIndex(markdown) {

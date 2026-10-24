@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
     createMarkdownAnalysisCache,
     DEFAULT_ANALYSIS_NAMESPACE_LIMIT,
+    computeAlignedMarkdownOutline,
     computeDocumentFigures,
+    computeMarkdownFootnotes,
+    headingLevelsForDocumentStructure,
 } from '../src/markdown/markdown-analysis-cache.js';
 
 test('reuses a cached analysis for the same Markdown string', () => {
@@ -222,7 +225,43 @@ test('computeDocumentFigures keeps one variant per translated view kind', () => 
     assert.equal(cache.size(), 2);
 });
 
+test('computeMarkdownFootnotes reuses one analysis per Markdown string', () => {
+    const cache = createMarkdownAnalysisCache();
+    const markdown = [
+        'A claim $^{1}$.',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{1}$ The source.',
+    ].join('\n');
+    const first = computeMarkdownFootnotes(cache, markdown);
+    const second = computeMarkdownFootnotes(cache, markdown);
+    assert.equal(second, first);
+    assert.equal(first.notes.length, 1);
+    assert.equal(first.notes[0].key, '1');
+    assert.equal(cache.stats().hits, 1);
+    assert.equal(cache.stats().misses, 1);
+
+    const direct = computeMarkdownFootnotes(null, markdown);
+    assert.notEqual(direct, first);
+    assert.equal(direct.notes[0].key, '1');
+
+    const other = computeMarkdownFootnotes(cache, `${markdown}\n`);
+    assert.notEqual(other, first);
+    assert.equal(cache.stats().misses, 2);
+});
+
 test('the compute helpers work without a cache', () => {
     const figures = computeDocumentFigures(null, '# Paper\n\n![Figure 1](a.png)', {});
     assert.ok(Array.isArray(figures));
+});
+
+test('keeps producer heading levels for a structured document outline', () => {
+    const markdown = '# Paper\n\n## 1 Introduction\n\nText.\n\n### 1.1 Scope\n\nText.\n\n## 2 Methods\n\nText.';
+    assert.equal(headingLevelsForDocumentStructure('mineru-ir-v1'), 'structural');
+    assert.equal(headingLevelsForDocumentStructure(undefined), 'inferred');
+    const cache = createMarkdownAnalysisCache();
+    const structural = computeAlignedMarkdownOutline(cache, markdown, { headingLevels: 'structural' });
+    assert.deepEqual(structural.map(heading => heading.level), [1, 2, 3, 2]);
+    const inferred = computeAlignedMarkdownOutline(cache, markdown);
+    assert.notEqual(inferred, structural);
 });

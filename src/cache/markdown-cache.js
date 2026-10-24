@@ -213,6 +213,7 @@ export class MarkdownCache {
                         ...(restoration.input ? { restorationInput: restoration.input } : {}) }
                     : {}),
                 ...(metadata.userEdited ? { userEdited: true } : {}),
+                ...(metadata.documentStructure ? { documentStructure: metadata.documentStructure } : {}),
             };
         }
         catch {
@@ -360,6 +361,39 @@ export class MarkdownCache {
             translationKey,
             translation
         ));
+    }
+
+    // Copies the translations of one entry to another entry of the same PDF
+    // that has none yet: a parser profile change writes a new entry, and its
+    // reader reuses each translated block whose source text is unchanged.
+    // Returns the number of translations copied.
+    copyTranslations(fromCacheKey, toCacheKey) {
+        validateCacheKey(fromCacheKey);
+        validateCacheKey(toCacheKey);
+        if (fromCacheKey === toCacheKey) return Promise.resolve(0);
+        return this.#withOperation(() => this.#copyTranslations(fromCacheKey, toCacheKey));
+    }
+
+    async #copyTranslations(fromCacheKey, toCacheKey) {
+        const toPath = this.#entryPath(toCacheKey);
+        const target = await this.#readMetadata(toPath, this.path.join(toPath, METADATA_FILE), toCacheKey);
+        if (!target || target.translations?.length) return 0;
+        const fromPath = this.#entryPath(fromCacheKey);
+        const source = await this.#readMetadata(fromPath, this.path.join(fromPath, METADATA_FILE), fromCacheKey);
+        const descriptors = (source?.translations || []).slice(-MAX_TRANSLATION_VARIANTS);
+        let copied = 0;
+        for (const descriptor of descriptors) {
+            let record;
+            try {
+                record = await this.#readTranslationRecord(fromPath, descriptor);
+            }
+            catch {
+                continue;
+            }
+            await this.#putTranslation(toCacheKey, descriptor.translationKey, translationValue(record));
+            copied++;
+        }
+        return copied;
     }
 
     deleteTranslation(cacheKey) {
@@ -604,6 +638,9 @@ export class MarkdownCache {
                 metadata.chromeRangesBytes = chromeRangesBytes;
             }
             if (result.userEdited) metadata.userEdited = true;
+            if (isDocumentStructure(result.documentStructure)) {
+                metadata.documentStructure = result.documentStructure;
+            }
             if (serializedFigureMap) {
                 metadata.figureMapFile = figureMapFile;
                 metadata.figureMapBytes = serializedFigureMap.bytes;
@@ -615,6 +652,7 @@ export class MarkdownCache {
                         ? [...figureRestoration.completedFigureIds]
                         : [],
                 };
+                if (isRestorationSource(figureRestoration.source)) restoration.source = figureRestoration.source;
                 if (storedRestorationInput) {
                     restoration.inputFile = restorationFile;
                     restoration.inputBytes = restorationInputBytes;
@@ -856,6 +894,7 @@ export class MarkdownCache {
             status: 'pending',
             completedFigureIds: Array.isArray(state.completedFigureIds)
                 ? [...state.completedFigureIds] : [],
+            ...(isRestorationSource(state.source) ? { source: state.source } : {}),
         };
         if (!isSafeRestorationFile(state.inputFile)
             || !Number.isSafeInteger(state.inputBytes)
@@ -1159,6 +1198,8 @@ function validateMetadata(
         || typeof metadata.assetBasePath !== 'string'
         || (metadata.userEdited !== undefined
             && typeof metadata.userEdited !== 'boolean')
+        || (metadata.documentStructure !== undefined
+            && !isDocumentStructure(metadata.documentStructure))
         || (metadata.figureRestoration !== undefined
             && !isValidFigureRestorationMetadata(
                 metadata.figureRestoration,
@@ -1187,6 +1228,18 @@ function isSafeRestorationFile(file) {
     return /^restoration-[a-z0-9-]+\.json$/.test(String(file || ''));
 }
 
+// The derived document's structure, so the reader can trust its heading
+// levels. Short, lower-case identifiers only.
+function isDocumentStructure(value) {
+    return typeof value === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/u.test(value);
+}
+
+// Where a pending restoration starts again: the raw MinerU result store
+// keeps the bundle, so the cache only records that it is there.
+function isRestorationSource(value) {
+    return value === 'mineru-result-store';
+}
+
 function isValidFigureRestorationMetadata(state, maxBytes) {
     if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
     if (state.status === 'complete') {
@@ -1195,6 +1248,7 @@ function isValidFigureRestorationMetadata(state, maxBytes) {
             && state.completedFigureIds === undefined;
     }
     if (state.status !== 'pending') return false;
+    if (state.source !== undefined && !isRestorationSource(state.source)) return false;
     const ids = state.completedFigureIds;
     const idsValid = ids === undefined || (Array.isArray(ids) && ids.every(id => (
         typeof id === 'string' && id.length > 0 && id.length <= 200

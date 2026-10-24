@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "id": "arxiv-2606.01767",
+  "archiveSha256": "317a167435bf441ccd2a115710f6fa5e4f55a0cc7a468711d28e7ac4c0df7331",
+  "pages": 18,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 0,
+      "label": "Fig. 1.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        506,
+        218,
+        922,
+        377
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Fig. 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        80,
+        70,
+        919,
+        405
+      ]
+    },
+    {
+      "pageIndex": 9,
+      "label": "Fig. 3.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        73,
+        591,
+        924,
+        809
+      ]
+    },
+    {
+      "pageIndex": 10,
+      "label": "Fig. 4.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        75,
+        65,
+        922,
+        621
+      ]
+    },
+    {
+      "pageIndex": 12,
+      "label": "Fig. 5.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        80,
+        67,
+        919,
+        414
+      ]
+    },
+    {
+      "pageIndex": 13,
+      "label": "Fig. 6.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        75,
+        67,
+        922,
+        314
+      ]
+    },
+    {
+      "pageIndex": 14,
+      "label": "Fig. 7.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        75,
+        65,
+        920,
+        553
+      ]
+    },
+    {
+      "pageIndex": 17,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        513,
+        71,
+        623,
+        190
+      ]
+    },
+    {
+      "pageIndex": 17,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        516,
+        302,
+        616,
+        421
+      ]
+    },
+    {
+      "pageIndex": 17,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        508,
+        525,
+        626,
+        646
+      ]
+    },
+    {
+      "pageIndex": 17,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        509,
+        757,
+        625,
+        873
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 17,
+      "reason": "ambiguous-membership"
+    }
+  ]
+}

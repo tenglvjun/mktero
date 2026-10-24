@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "arxiv-2010.01727",
+  "archiveSha256": "156ff846fb7066626dd9ac5e5f2e5df748125b5080590b585e8779b048005a52",
+  "pages": 4,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 1,
+      "label": "FIG. 1:",
+      "panels": 13,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        86,
+        65,
+        910,
+        806
+      ]
+    }
+  ],
+  "preserved": []
+}

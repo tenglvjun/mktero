@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 import { makeFigureInput, createTestPNG } from './helpers/figure-fixtures.js';
 import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
 import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import { sha256Hex } from '../src/core/sha256.js';
 
 const hash = data => sha256Hex(data, { crypto: webcrypto });
@@ -38,12 +38,36 @@ test('restores all panels and interior labels before prose preparation', async (
     const { input, bodyText, axisLabel } = makeFigureInput();
     const { restoration, counts } = service();
     const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
-    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+    const document = await finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
     assert.equal(document.figureMap.figures.length, 1);
     assert.equal(document.figureMap.figures[0].panels.length, 4);
     assert.ok(document.markdown.includes(bodyText));
     assert.ok(!document.markdown.includes(axisLabel));
     assert.deepEqual(counts(), { opened: 1, closed: 1, rendered: 1 });
+});
+
+test('opens the PDF to verify a pending page before cropping', async () => {
+    const { input } = makeFigureInput();
+    input.pages[0].coordinateFrame = 'unknown';
+    input.pages[0].geometryVerification = 'pending';
+    const { restoration, counts } = service();
+    const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
+    assert.equal(counts().opened, 1);
+    assert.equal(draft.blueprints.length, 1);
+    assert.equal(draft.input.pages[0].coordinateFrame, 'display-cropbox');
+    assert.equal(draft.input.pages[0].geometryVerification, 'verified');
+});
+
+test('preserves a pending page whose size disagrees without cropping it', async () => {
+    const { input } = makeFigureInput();
+    input.pages[0].geometryVerification = 'pending';
+    input.pages[0].width = 100;
+    const { restoration, counts } = service();
+    const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
+    assert.equal(counts().opened, 1);
+    assert.equal(counts().rendered, 0);
+    assert.equal(draft.blueprints.length, 0);
+    assert.equal(draft.preserved[0].reason, 'coordinate-mismatch');
 });
 
 test('retains original content when figure rendering fails or coordinates are missing', async () => {
@@ -112,7 +136,7 @@ test('allocates a readable noncolliding image beneath every supported archive ro
         input.assets.push(occupied);
         const before = structuredClone(input);
         const draft = await restoration.restore(input, { fileData: Uint8Array.of(1) });
-        const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+        const document = await finalizeRestoredDocument(input, draft, { prepare: prepareFigureFixture, hash });
         assert.equal(document.figureMap.figures.length, 1);
         const destination = document.figureMap.figures[0].render.assetPath;
         const assetPath = basePath ? `${basePath}/${destination}` : destination;
@@ -200,4 +224,20 @@ test('ignores a throwing figure listener without failing restore', async () => {
         onFigure() { throw new Error('figure listener failed'); },
     });
     assert.ok(draft.blueprints.length >= 1);
+});
+
+test('keeps the document unchanged when explicit source ranges fail their check', async () => {
+    const { input } = makeFigureInput();
+    // Each panel range stops one character short of its image.
+    const explicit = { ...input, rangesExplicit: true, blocks: input.blocks.map(block => {
+        if (block.role !== 'panel') return { ...block, sourceRanges: [] };
+        const from = input.markdown.indexOf(`![](${block.assetPath})`);
+        return { ...block, sourceRanges: [{ from, to: from + block.assetPath.length + 4 }] };
+    }) };
+    const { restoration, counts } = service();
+    const draft = await restoration.restore(explicit, { fileData: Uint8Array.of(1) });
+    assert.equal(draft.input, explicit);
+    assert.deepEqual(draft.blueprints, []);
+    assert.equal(draft.preserved[0].reason, 'ambiguous-source-range');
+    assert.equal(counts().opened, 0);
 });

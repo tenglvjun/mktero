@@ -1,4 +1,7 @@
 import { MINERU_LOCAL_PARSER_PROFILE_ID } from './parser-profile.js';
+import { prepareMinerUDocument } from './document/prepare.js';
+import { validateMinerULayout } from './document/result-bundle.js';
+import { extractMinerULocalResultFromZip } from './local-result.js';
 
 const CACHE_READ_WARNING = 'The local Markdown cache could not be read.';
 const CACHE_WRITE_WARNING = 'The Markdown result could not be saved to the local cache.';
@@ -7,7 +10,9 @@ const CACHE_WRITE_WARNING = 'The Markdown result could not be saved to the local
  * Converts through a self-hosted MinerU 4.0 V1 service.
  *
  * The local service keeps job state only in memory, so this path never writes
- * a pending task and never resumes a job after the service restarts.
+ * a pending task and never resumes a job after the service restarts. Its
+ * trimmed result archive is kept in the raw-result store, so a new document
+ * pipeline reads it again without the service.
  */
 export class MinerULocalConversion {
     constructor({
@@ -15,6 +20,10 @@ export class MinerULocalConversion {
         cache = null,
         prepareResult = prepareLocalMinerUResult,
         parserProfile = MINERU_LOCAL_PARSER_PROFILE_ID,
+        resultStore = null,
+        createResultKey = null,
+        extractStoredResult = extractMinerULocalResultFromZip,
+        createTranslationSourceKeys = null,
         onError = () => {},
     }) {
         if (!client?.parse) {
@@ -30,6 +39,11 @@ export class MinerULocalConversion {
         this.cache = cache;
         this.prepareResult = prepareResult;
         this.parserProfile = parserProfile;
+        this.resultStore = resultStore?.get && resultStore?.put ? resultStore : null;
+        this.createResultKey = typeof createResultKey === 'function' ? createResultKey : null;
+        this.extractStoredResult = extractStoredResult;
+        this.createTranslationSourceKeys = typeof createTranslationSourceKeys === 'function'
+            ? createTranslationSourceKeys : null;
         this.onError = onError;
     }
 
@@ -62,14 +76,23 @@ export class MinerULocalConversion {
         }
 
         throwIfAborted(signal);
-        const raw = await this.client.parse({
-            apiKey,
-            apiBase,
-            fileName,
-            fileData,
-            onProgress: progress => onProgress(Math.min(96, progress)),
-            signal,
-        });
+        const resultKey = cacheEnabled ? await this.#resultKey(fileData, signal) : null;
+        // A result the service produced before is read again from the store.
+        const stored = forceRefresh ? null : await this.#readStoredResult(resultKey, signal);
+        let raw = stored;
+        if (!raw) {
+            const parsed = await this.client.parse({
+                apiKey,
+                apiBase,
+                fileName,
+                fileData,
+                ...(resultKey ? { includeArchive: true } : {}),
+                onProgress: progress => onProgress(Math.min(96, progress)),
+                signal,
+            });
+            throwIfAborted(signal);
+            raw = await this.#keepResultArchive(resultKey, parsed, signal);
+        }
         throwIfAborted(signal);
         const prepared = withIdentity(
             await this.prepareResult(raw, { fileData, signal, onProgress }),
@@ -78,6 +101,7 @@ export class MinerULocalConversion {
         if (this.cache && cacheEnabled && key) {
             try {
                 await this.cache.put(key, prepared, { signal });
+                await this.#copyEarlierTranslations(key, fileData, signal);
             }
             catch (error) {
                 throwIfAborted(signal);
@@ -87,7 +111,67 @@ export class MinerULocalConversion {
         }
         throwIfAborted(signal);
         onProgress(100);
-        return { result: prepared, origin: 'fresh', warnings };
+        return { result: prepared, origin: stored ? 'cache' : 'fresh', warnings };
+    }
+
+    async #resultKey(fileData, signal) {
+        if (!this.resultStore || !this.createResultKey || !fileData) return null;
+        try {
+            const resultKey = await this.createResultKey(fileData);
+            throwIfAborted(signal);
+            return typeof resultKey === 'string' && resultKey ? resultKey : null;
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            this.#reportError(error);
+            return null;
+        }
+    }
+
+    async #readStoredResult(resultKey, signal) {
+        if (!resultKey) return null;
+        try {
+            const stored = await this.resultStore.get(resultKey, { signal });
+            throwIfAborted(signal);
+            return stored?.archive ? this.extractStoredResult(stored.archive) : null;
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            if (error?.name === 'AbortError') throw error;
+            this.#reportError(error);
+            await this.resultStore.delete?.(resultKey)?.catch?.(() => {});
+            return null;
+        }
+    }
+
+    // The archive goes to the store and never into the prepared document.
+    async #keepResultArchive(resultKey, parsed, signal) {
+        if (!parsed || typeof parsed !== 'object' || !('resultArchive' in parsed)) return parsed;
+        const { resultArchive, ...raw } = parsed;
+        if (!resultKey || !resultArchive) return raw;
+        try {
+            await this.resultStore.put(resultKey, { archive: resultArchive, provider: 'mineru-local' }, { signal });
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            this.#reportError(error);
+        }
+        return raw;
+    }
+
+    async #copyEarlierTranslations(key, fileData, signal) {
+        if (!this.createTranslationSourceKeys || !this.cache?.copyTranslations || !fileData) return;
+        try {
+            for (const previousKey of new Set(await this.createTranslationSourceKeys(fileData))) {
+                throwIfAborted(signal);
+                if (previousKey && previousKey !== key && await this.cache.copyTranslations(previousKey, key)) return;
+            }
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            if (error?.name === 'AbortError') throw error;
+            this.#reportError(error);
+        }
     }
 
     async readCached({
@@ -128,7 +212,21 @@ export class MinerULocalConversion {
     }
 }
 
-export function prepareLocalMinerUResult(result) {
+// A result with MinerU 4.0's document structure goes through the same
+// document pipeline as cloud results (with the PDF's text layer when the
+// caller has it); one without keeps MinerU's own Markdown.
+export function prepareLocalMinerUResult(result, { pdfText = null } = {}) {
+    if (validateMinerULayout(result?.layout) && result.layout.pages.some(page => page.blocks.length)) {
+        try {
+            const prepared = prepareMinerUDocument({ ...result, contentList: [] }, { pdfText });
+            // A structure that reads as nothing never hides MinerU's Markdown.
+            if (prepared.markdown.trim()) return prepared;
+        }
+        catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            // An unreadable structure falls back to the service's Markdown.
+        }
+    }
     return {
         markdown: result?.markdown,
         assets: result?.assets || [],
@@ -146,7 +244,7 @@ function withIdentity(result, parserProfile) {
         provider: 'mineru',
         parserProfile,
     };
-    delete output.detailedLayout;
+    delete output.layout;
     delete output.figureMap;
     return output;
 }

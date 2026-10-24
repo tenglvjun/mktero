@@ -5,7 +5,7 @@ export const FIGURE_LIMITS = Object.freeze({
     maxPDFPages: 10_000,
     maxMarkdownBytes: 50 * 1024 * 1024,
     maxContentListBytes: 20 * 1024 * 1024,
-    maxDetailedLayoutBytes: 20 * 1024 * 1024,
+    maxLayoutBytes: 20 * 1024 * 1024,
     maxCombinedLayoutBytes: 40 * 1024 * 1024,
     maxLayoutBlocks: 100_000,
     maxJSONNodes: 500_000,

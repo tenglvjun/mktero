@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "id": "liu-2026-psychological",
+  "archiveSha256": "2a77f6cc505f93692a558655e5c00882aecf6c4732f57a59ce472c326109f3c8",
+  "pages": 19,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 4,
+      "label": null,
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        178,
+        86,
+        814,
+        624
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "FIGURE 4",
+      "panels": 2,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        164,
+        418,
+        832,
+        651
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": null,
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        180,
+        88,
+        824,
+        752
+      ]
+    },
+    {
+      "pageIndex": 14,
+      "label": null,
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        156,
+        92,
+        847,
+        530
+      ]
+    },
+    {
+      "pageIndex": 15,
+      "label": null,
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        164,
+        92,
+        832,
+        347
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 5,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 8,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 13,
+      "reason": "caption-overlap"
+    }
+  ]
+}

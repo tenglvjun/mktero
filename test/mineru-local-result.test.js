@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { strToU8, zipSync } from 'fflate';
 import { extractMinerULocalResultFromZip } from '../src/mineru/local-result.js';
 
-test('reads markdown.md and images without treating middle JSON as figure layout', () => {
+test('reads markdown.md and images, and ignores a middle JSON of another protocol', () => {
     const archive = zipSync({
         'markdown.md': strToU8('# Local paper\n\n![Chart](images/a.png)\n'),
         'middle_json.json': strToU8('{"schema":"docvortex.middle","pdf_info":[]}'),

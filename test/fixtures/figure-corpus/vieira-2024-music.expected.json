@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "id": "vieira-2024-music",
+  "archiveSha256": "4c745ff8473bc9f5f813e898ea519f76e13ef0afc914e759287d96ee9691c3db",
+  "pages": 16,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 0,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        837,
+        220,
+        891,
+        262
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Figure 3.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        159,
+        80,
+        836,
+        229
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Figure 4.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        164,
+        273,
+        836,
+        552
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 3,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 10,
+      "reason": "foreign-content-overlap"
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "id": "arxiv-2412.20138",
+  "archiveSha256": "a6398daad82ed86c79bea0f53db671fad4a05668e16e769142cda319b5110e25",
+  "pages": 38,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Fig. 1:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        103,
+        449,
+        897,
+        638
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Fig. 2:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        142,
+        358,
+        857,
+        686
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Fig. 3:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        143,
+        422,
+        857,
+        592
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "Fig. 4:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        142,
+        158,
+        857,
+        337
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Fig. 5:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        143,
+        109,
+        857,
+        277
+      ]
+    },
+    {
+      "pageIndex": 10,
+      "label": "Fig. 6:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        142,
+        113,
+        865,
+        398
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": "Fig. 7:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        210,
+        113,
+        793,
+        414
+      ]
+    },
+    {
+      "pageIndex": 19,
+      "label": "Fig. S1:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        202,
+        519,
+        803,
+        801
+      ]
+    },
+    {
+      "pageIndex": 20,
+      "label": "Fig. S2:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        192,
+        158,
+        811,
+        477
+      ]
+    },
+    {
+      "pageIndex": 20,
+      "label": "Fig. S3:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        199,
+        585,
+        809,
+        828
+      ]
+    },
+    {
+      "pageIndex": 21,
+      "label": "Fig. S4:",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        192,
+        132,
+        809,
+        450
+      ]
+    }
+  ],
+  "preserved": []
+}

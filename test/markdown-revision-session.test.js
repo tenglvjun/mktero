@@ -1082,3 +1082,18 @@ test('reports a failed save of a closing session during shutdown', async () => {
     await closing;
     await registry.destroyAll();
 });
+
+test('keeps the base document structure in every snapshot', async () => {
+    const session = await openMarkdownRevisionSession({
+        baseDocument: { ...createBaseDocument(), documentStructure: 'mineru-ir-v1' },
+        store: createMemoryStore(),
+    });
+    const initial = session.snapshot();
+    assert.equal(initial.documentStructure, 'mineru-ir-v1');
+    const paragraph = initial.editableBlocks.find(block => block.originalMarkdown.includes('5O participants'));
+    const corrected = await session.commit({
+        blockID: paragraph.id,
+        replacementMarkdown: 'The study included fifty participants.',
+    });
+    assert.equal(corrected.documentStructure, 'mineru-ir-v1');
+});

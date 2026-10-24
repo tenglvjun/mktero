@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "nguyen-2023-music",
+  "archiveSha256": "afb3c215e072f7bc1adaf66d175969e97a0ea9ff74e08cafb4913452c15db7d1",
+  "pages": 15,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 0,
+      "label": null,
+      "panels": 1,
+      "captions": 0,
+      "owned": 0,
+      "bbox": [
+        54,
+        338,
+        149,
+        410
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "Fig 1.",
+      "panels": 1,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        325,
+        98,
+        915,
+        536
+      ]
+    }
+  ],
+  "preserved": []
+}

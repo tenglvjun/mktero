@@ -66,7 +66,11 @@ documentation-only. Report any command that could not be run.
 - `src/i18n/`: English and Simplified Chinese user-facing copy.
 - `src/icons/`: bundled lucide icon helpers.
 - `src/mineru/`: MinerU API client, parsing profile, ZIP extraction, binary
-  helpers, and Markdown normalization.
+  helpers, and the raw result archive.
+- `src/mineru/document/`: the MinerU reading document. It ingests `layout.json`
+  (or the content list) into a block IR, classifies page chrome, repairs reading
+  order, stitches paragraphs across pages, columns and floats, and serializes
+  Markdown with its exact source map and figure-pipeline input.
 - `src/mistral/`: Mistral OCR client, parsing profile, and result normalization.
 - `src/pdf/`: PDF.js text engine, page crops, annotation location, and outlines.
 - `src/platform/`: Zotero/runtime adapters for aborting requests and Zotero APIs.
@@ -140,6 +144,12 @@ archives, image paths, API responses, and preference values as untrusted input.
   behavior changes, update the matching profile ID through the parser option
   constants. Figure behavior is versioned by `FIGURE_PIPELINE_PROFILE`, which is
   part of both profiles, so a figure-pipeline change must bump it as well.
+  The MinerU profile is the request options plus `MINERU_DOCUMENT_PIPELINE`
+  and `FIGURE_PIPELINE_PROFILE`: bump `MINERU_DOCUMENT_PIPELINE` with any
+  change to `src/mineru/document/` output. The raw result store is keyed by
+  `MINERU_REQUEST_PROFILE_ID`, so such a bump re-reads stored results offline.
+  Keep each shipped profile as a literal in `MINERU_PREVIOUS_PARSER_PROFILE_IDS`
+  so corrected revisions stay reachable.
 - Cache failures are non-fatal to successful conversion. Preserve atomic
   replacement, serialized operations, expiry, and limit enforcement.
 

@@ -5,13 +5,14 @@ import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outl
 import {
     findAcademicFigureGroups,
     findAcademicFigures,
+    findAcademicTableGroups,
+    normalizeMarkdownFigureCaptions,
     normalizeMisassignedAcademicCaptions,
     parseAcademicFigureCaption,
     parseAcademicTableCaption,
     parseLooseAcademicFigureCaption,
     splitTrailingAcademicFigureCaption,
 } from '../src/markdown/markdown-figures.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
 
 function shiftedABFigureMarkdown() {
     return [
@@ -135,8 +136,14 @@ test('moves a shared (a)/(b) caption off the following figure images', () => {
     );
 });
 
-test('reassigns shifted (a)/(b) figure captions during MinerU preparation', () => {
-    const result = prepareMinerUResult({ markdown: shiftedABFigureMarkdown() });
+// Markdown written by an OCR provider, as the Mistral preparer and the
+// renderer normalize it.
+function normalizeProviderMarkdown(markdown) {
+    return { markdown: normalizeMisassignedAcademicCaptions(normalizeMarkdownFigureCaptions(markdown)) };
+}
+
+test('reassigns shifted (a)/(b) figure captions in provider Markdown', () => {
+    const result = normalizeProviderMarkdown(shiftedABFigureMarkdown());
 
     assert.deepEqual(
         findAcademicFigures(result.markdown).map(figure => figure.caption.label),
@@ -252,10 +259,8 @@ test('renders blank-separated (a)/(b) panels under the shifted figure captions',
     assert.doesNotMatch(barHTML, /Fig\. 7\./);
 });
 
-test('prepares blank-separated (a)/(b) caption shifts from raw MinerU Markdown', () => {
-    const result = prepareMinerUResult({
-        markdown: blankSeparatedABFigureRawMarkdown(),
-    });
+test('normalizes blank-separated (a)/(b) caption shifts in raw provider Markdown', () => {
+    const result = normalizeProviderMarkdown(blankSeparatedABFigureRawMarkdown());
 
     assert.deepEqual(
         findAcademicFigures(result.markdown).map(figure => figure.caption.label),
@@ -609,4 +614,91 @@ test('parses publisher series figure captions', () => {
         parseAcademicFigureCaption('B Camera 1 measurements, NxN mirrors ON'),
         null
     );
+});
+
+test('joins an uncaptioned HTML table that immediately follows a captioned table', () => {
+    const markdown = [
+        'Table 1 Results of the comparison.',
+        '',
+        '<table><tr><td>A</td></tr></table>',
+        '',
+        '<table><tr><td>B</td></tr></table>',
+        '',
+        '<table><tr><td>C</td></tr></table>',
+    ].join('\n');
+    const groups = findAcademicTableGroups(markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].caption.label, 'Table 1');
+    assert.match(markdown.slice(groups[0].table.to, groups[0].to), /<td>C<\/td>/);
+    assert.equal(
+        extractMarkdownAssetOutline(markdown).filter(item => item.type === 'table').length,
+        1
+    );
+    const html = renderMarkdownHTML(markdown);
+    assert.equal((html.match(/<caption>/g) || []).length, 1);
+    assert.equal((html.match(/<table\b/g) || []).length, 3);
+    assert.doesNotMatch(html, /<p>Table 1/);
+});
+
+test('joins a bare table label with the uncaptioned HTML tables under it', () => {
+    const markdown = [
+        'TABLE III',
+        '',
+        'Overview of the three orders.',
+        '',
+        '<table><tr><td>Order 1</td></tr></table>',
+        '',
+        '<table><tr><td>Order 2</td></tr></table>',
+    ].join('\n');
+    const groups = findAcademicTableGroups(markdown);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].caption.label, 'TABLE III');
+    assert.match(markdown.slice(groups[0].from, groups[0].to), /Order 2/);
+    const html = renderMarkdownHTML(markdown);
+    assert.equal((html.match(/<caption>/g) || []).length, 1);
+    assert.match(html, /mktero-table-label">TABLE III</);
+});
+
+test('does not group adjacent uncaptioned tables or a table after prose', () => {
+    const adjacent = [
+        '<table><tr><td>A</td></tr></table>',
+        '',
+        '<table><tr><td>B</td></tr></table>',
+    ].join('\n');
+    assert.equal(findAcademicTableGroups(adjacent).length, 0);
+
+    const prose = [
+        'Table 1 Results of the comparison.',
+        '',
+        '<table><tr><td>A</td></tr></table>',
+        '',
+        'A note about the rows.',
+        '',
+        '<table><tr><td>B</td></tr></table>',
+    ].join('\n');
+    const [group] = findAcademicTableGroups(prose);
+    assert.equal(group.to, group.table.to);
+    assert.doesNotMatch(prose.slice(group.from, group.to), /<td>B<\/td>/);
+
+    const gfm = [
+        'Table 1 Results of the comparison.',
+        '',
+        '<table><tr><td>A</td></tr></table>',
+        '',
+        '| A | B |',
+        '| --- | --- |',
+        '| 1 | 2 |',
+    ].join('\n');
+    const [htmlGroup] = findAcademicTableGroups(gfm);
+    assert.equal(htmlGroup.to, htmlGroup.table.to);
+
+    const trailing = [
+        '<table><tr><td>A</td></tr></table>',
+        '',
+        'Table 1 Results of the first table.',
+        '',
+        '<table><tr><td>B</td></tr></table>',
+    ].join('\n');
+    const [trailingGroup] = findAcademicTableGroups(trailing);
+    assert.doesNotMatch(trailing.slice(trailingGroup.from, trailingGroup.to), /<td>B<\/td>/);
 });

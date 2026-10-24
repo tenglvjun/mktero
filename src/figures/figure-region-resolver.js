@@ -552,6 +552,10 @@ function orderCaptionParts(parts) {
 // leaves a much larger gap.
 const STACKED_CAPTION_MAX_GAP = 8;
 const MAX_STACKED_CAPTION_PARTS = 4;
+// A list item or a numbered subsection under a caption starts article text,
+// and so does a new capitalized sentence after a caption that already ended.
+const NEW_PARAGRAPH_START = /^(?:[-–•●▪◦‣*]\s|\(?\d{1,3}[.)]\s|[IVXLC]{1,6}\.\s)/u;
+const SENTENCE_END = /[.!?。！？]["'”’)\]]*$/u;
 
 function stackedCaptionContinuations(blocks, caption, limits) {
     if (!validBox(caption.bbox)) return [];
@@ -563,8 +567,9 @@ function stackedCaptionContinuations(blocks, caption, limits) {
     while (parts.length < MAX_STACKED_CAPTION_PARTS) {
         let next = null;
         let nextGap = Infinity;
+        const previous = parts.at(-1) || caption;
         for (const block of blocks) {
-            if (!stackedCaptionBlock(block, caption, bottom, left, right, taken, limits)) {
+            if (!stackedCaptionBlock(block, caption, bottom, left, right, taken, limits, previous)) {
                 continue;
             }
             const gap = block.bbox[1] - bottom;
@@ -584,7 +589,7 @@ function stackedCaptionContinuations(blocks, caption, limits) {
     return parts;
 }
 
-function stackedCaptionBlock(block, caption, bottom, left, right, taken, limits) {
+function stackedCaptionBlock(block, caption, bottom, left, right, taken, limits, previous = caption) {
     if (taken.has(block.id) || block.pageIndex !== caption.pageIndex) return false;
     if (!validBox(block.bbox) || block.bboxKind === 'group' || isPanel(block)) return false;
     if (!block.sourceRanges?.length || block.rangeEvidence === 'unresolved') return false;
@@ -592,7 +597,8 @@ function stackedCaptionBlock(block, caption, bottom, left, right, taken, limits)
         return false;
     }
     const text = String(block.text || '').trim();
-    if (!text || isFigureCaptionText(text)) return false;
+    if (!text || isFigureCaptionText(text) || NEW_PARAGRAPH_START.test(text)) return false;
+    if (SENTENCE_END.test(String(previous.text || '').trim()) && /^\p{Lu}/u.test(text)) return false;
     const gap = block.bbox[1] - bottom;
     if (gap < -1 || gap > STACKED_CAPTION_MAX_GAP) return false;
     return overlap(block.bbox[0], block.bbox[2], left, right)

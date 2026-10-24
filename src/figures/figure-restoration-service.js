@@ -1,7 +1,7 @@
 import { FIGURE_LIMITS } from './figure-limits.js';
 import {
     alignFigureInputToPDF, normalizeFigureAssetDestination, normalizeFigureAssetPath,
-    validateFigureCrop, validateFigureInput,
+    validateFigureCrop, validateFigureInput, verifyPendingFigurePages,
 } from './figure-model.js';
 import { bindFigureSourceRanges } from './figure-source-binding.js';
 import { resolveFigureCandidates } from './figure-region-resolver.js';
@@ -42,12 +42,22 @@ export class FigureRestorationService {
         let bound = input;
         let session;
         try {
-            bound = bindFigureSourceRanges(input, { limits, budget });
+            try {
+                bound = bindFigureSourceRanges(input, { limits, budget });
+            }
+            catch (error) {
+                // Explicit ranges that fail their check compose nothing; the
+                // document keeps its original figures.
+                if (error.code !== 'INVALID_EXPLICIT_RANGE') throw error;
+                return { input, blueprints: [], preserved: [{
+                    id: 'fig-p0-b0', pageIndex: input.pages[0]?.pageIndex ?? 0, reason: error.preserveReason,
+                }] };
+            }
             const panelPages = new Set(bound.blocks.filter(block => block.role === 'panel')
                 .map(block => block.pageIndex));
             const geometries = new Map();
             const possiblePages = bound.pages.filter(page => panelPages.has(page.pageIndex)
-                && page.coordinateFrame !== 'unknown');
+                && pageNeedsPDFGeometry(page));
             if (possiblePages.length) {
                 try {
                     const opening = Promise.resolve(this.openPDF(fileData, { signal: scope.signal }));
@@ -69,6 +79,7 @@ export class FigureRestorationService {
                             if (error.name === 'AbortError') throw error;
                         }
                     }
+                    bound = verifyPendingFigurePages(bound, geometries, { limits });
                     bound = alignFigureInputToPDF(bound, geometries, { limits });
                 }
                 catch (error) {
@@ -250,6 +261,12 @@ export class FigureRestorationService {
             return { error: true, reason: error.code === 'FIGURE_RENDER_TIMEOUT' ? 'render-timeout' : 'render-failed' };
         }
     }
+}
+
+function pageNeedsPDFGeometry(page) {
+    // Pending pages stay in the display frame so resolution is unchanged, but
+    // the pending flag alone must still open the PDF before any crop.
+    return page.coordinateFrame !== 'unknown' || page.geometryVerification === 'pending';
 }
 
 function buildFigurePlaceholders(input, candidates) {

@@ -6,7 +6,7 @@ import { createFigureProviderFixture } from './helpers/figure-provider-fixtures.
 import { createTestPNG } from './helpers/figure-fixtures.js';
 import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
 import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareMinerUResult } from '../src/mineru/document/prepare.js';
 import { prepareMistralResult } from '../src/mistral/mistral-result.js';
 import { createMarkdownExportPlan } from '../src/markdown/markdown-export.js';
 import { collectFigureImageNodes } from '../src/figures/figure-model.js';

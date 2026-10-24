@@ -5,7 +5,7 @@ import {
     DEFAULT_MAX_ARCHIVE_BYTES,
     MinerUClient,
 } from '../src/mineru/mineru-client.js';
-import { decodeMinerUFigureInput } from '../src/mineru/figure-layout-adapter.js';
+import { createMinerUFigureInput } from '../src/mineru/document/prepare.js';
 import { createTestPNG } from './helpers/figure-fixtures.js';
 
 function jsonResponse(body, status = 200, headers = undefined) {
@@ -162,8 +162,9 @@ test('forwards the detailed layout that authorizes figure region geometry', asyn
         task: { batchID: 'batch-1', dataID: 'mktero-task-1' },
     });
 
-    assert.equal(result.detailedLayout?.schema, 'mineru-middle-v1');
-    const input = decodeMinerUFigureInput(result);
+    assert.equal(result.layout?.schema, 'mineru-layout-v2');
+    assert.equal('detailedLayout' in result, false);
+    const input = createMinerUFigureInput(result);
     assert.equal(input.pages[0].coordinateFrame, 'display-cropbox');
     assert.ok(input.blocks.some(block => block.role === 'panel'
         && block.bboxKind === 'visual-body' && block.parentId));

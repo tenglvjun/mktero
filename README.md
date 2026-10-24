@@ -55,6 +55,14 @@ conversions for the same PDF and parser profile.
   footers, and page numbers, and keep reliable page/region mappings so text,
   formulas, tables, and figures can jump back to their PDF source. A PDF text
   selection can open its Markdown paragraph when that mapping is unique.
+- In MinerU results, show page footnotes as notes after the paragraph that
+  cites them, and fold article metadata, author biographies, and reporting
+  summaries into collapsed sections, so the first screen shows the title,
+  authors, and abstract. The PDF's own text layer, read locally, also rejoins a
+  paragraph a page or column break splits at a full stop, levels the
+  headings of a paper without section numbers by their type, and, in a
+  typeset PDF, restores single words the OCR model "corrected" (a name, an
+  author's spelling) to the printed text.
 - Browse the outline or a figure/table index, preview citations, affiliations,
   figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
 - Copy a display formula's LaTeX, a code block's text, or a table as Markdown
@@ -183,9 +191,9 @@ See [Configuration](./docs/configuration.md) for every setting and
   service for your account.
 - If you select MinerU cloud, a local MinerU service, or Mistral, the complete
   PDF is sent there instead, and not to Mktero.
-- Credentials, cached Markdown and figures, corrections, translations, and
-  reading positions are stored unencrypted in the active Zotero profile and are
-  not synced by Mktero.
+- Credentials, cached Markdown and figures, stored MinerU results (without the
+  PDF copy), corrections, translations, and reading positions are stored
+  unencrypted in the active Zotero profile and are not synced by Mktero.
 - Signing in for the default conversion sends the email and password only when
   you sign in. Registration also emails a verification code. The access token
   and refresh token stay in the same profile. While the account pane is open,

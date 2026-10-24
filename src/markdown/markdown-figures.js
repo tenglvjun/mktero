@@ -852,16 +852,49 @@ export function findAcademicTableGroups(markdown) {
         }
         const table = academicTableAt(lines, tableIndex, blockedLines);
         if (!table) continue;
-        groups.push({
+        const extended = extendTableGroup({
             from: lines[index].from,
             to: table.to,
             caption,
             table,
-        });
-        index = table.lastLineIndex;
+        }, lines, blockedLines);
+        groups.push(extended.group);
+        index = extended.lastLineIndex;
     }
 
     return groups;
+}
+
+const MAX_FOLLOWING_HTML_TABLES = 8;
+
+// An uncaptioned HTML table that follows a captioned table, with only a
+// blank line between them, is the next panel of that table. The outline
+// then has one entry and the caption is rendered once. A GFM table, a
+// table with its own caption, or a table after prose stays separate.
+function extendTableGroup(group, lines, blockedLines) {
+    let lastLineIndex = group.table.lastLineIndex;
+    let to = group.to;
+    let joined = 0;
+    while (joined < MAX_FOLLOWING_HTML_TABLES) {
+        const index = nearbyLineIndex(lines, lastLineIndex + 1);
+        if (index <= lastLineIndex) break;
+        const table = rawHTMLTableAt(lines, index, blockedLines);
+        if (!table || table.lastLineIndex <= lastLineIndex) break;
+        const captionIndex = nearbyLineIndex(lines, table.lastLineIndex + 1);
+        if (captionIndex < lines.length
+            && !blockedLines.has(captionIndex)
+            && isAcademicTableCaptionLine(lines[captionIndex].text)) {
+            break;
+        }
+        to = table.to;
+        lastLineIndex = table.lastLineIndex;
+        joined++;
+    }
+    return { group: { ...group, to }, lastLineIndex };
+}
+
+function isAcademicTableCaptionLine(text) {
+    return Boolean(parseAcademicTableCaption(text) || parseAcademicTableHeading(text));
 }
 
 export function normalizeMisassignedAcademicCaptions(markdown) {

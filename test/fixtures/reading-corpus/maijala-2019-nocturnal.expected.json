@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "id": "maijala-2019-nocturnal",
+  "archiveSha256": "edd5c61ed2a6f11e6799fea5b616335c4540e278fc7468b1f5dc035e85fde638",
+  "pipelines": {
+    "ir": {
+      "pages": 10,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 22,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 8316,
+        "found": 8286,
+        "ratio": 0.9964
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 1
+      },
+      "headings": {
+        "count": 26,
+        "levels": {
+          "1": 1,
+          "2": 25
+        },
+        "sequence": [
+          "1:902469776148",
+          "2:c59ddd3f7ba6",
+          "2:89b91df19d9d",
+          "2:3f3867313a9d",
+          "2:34ef94a0ea33",
+          "2:cc5891891f12",
+          "2:07a2efc2db2f",
+          "2:3cc7e584cfae",
+          "2:3b7d77be93a9",
+          "2:c099142bc318",
+          "2:07a2efc2db2f",
+          "2:3cc7e584cfae",
+          "2:3cc610240ec7",
+          "2:852408bfbc83",
+          "2:2805f92820de",
+          "2:4fccc8cb28f1",
+          "2:7b78b86bfbf3",
+          "2:8a439a9a7704",
+          "2:2514e1475add",
+          "2:ac4b090e3e8b",
+          "2:e7dea87f6ab1",
+          "2:a777dfdeca78",
+          "2:64de05447a49",
+          "2:07a0b0962107",
+          "2:0930ed3b6ff4",
+          "2:e74822754afc"
+        ]
+      },
+      "sourceMap": {
+        "total": 114,
+        "covered": 114,
+        "ratio": 1,
+        "crossPage": 7
+      },
+      "floats": {
+        "markdown": {
+          "image": 9,
+          "captionedImage": 7,
+          "table": 2,
+          "algorithm": 0,
+          "code": 0,
+          "math": 2
+        },
+        "layout": {
+          "image": 1,
+          "chart": 8,
+          "table": 2,
+          "code": 0,
+          "captioned": 9
+        }
+      },
+      "references": {
+        "markdown": 31,
+        "layout": 31
+      }
+    },
+    "ir-pdf": {
+      "pages": 10,
+      "breaks": {
+        "total": 0,
+        "page": 0,
+        "column": 0,
+        "float": 0,
+        "math": 0,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 22,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 8316,
+        "found": 8286,
+        "ratio": 0.9964
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 1
+      },
+      "headings": {
+        "count": 26,
+        "levels": {
+          "1": 1,
+          "2": 25
+        },
+        "sequence": [
+          "1:902469776148",
+          "2:c59ddd3f7ba6",
+          "2:89b91df19d9d",
+          "2:3f3867313a9d",
+          "2:34ef94a0ea33",
+          "2:cc5891891f12",
+          "2:07a2efc2db2f",
+          "2:3cc7e584cfae",
+          "2:3b7d77be93a9",
+          "2:c099142bc318",
+          "2:07a2efc2db2f",
+          "2:3cc7e584cfae",
+          "2:3cc610240ec7",
+          "2:852408bfbc83",
+          "2:2805f92820de",
+          "2:4fccc8cb28f1",
+          "2:7b78b86bfbf3",
+          "2:8a439a9a7704",
+          "2:2514e1475add",
+          "2:ac4b090e3e8b",
+          "2:e7dea87f6ab1",
+          "2:a777dfdeca78",
+          "2:64de05447a49",
+          "2:07a0b0962107",
+          "2:0930ed3b6ff4",
+          "2:e74822754afc"
+        ]
+      },
+      "sourceMap": {
+        "total": 114,
+        "covered": 114,
+        "ratio": 1,
+        "crossPage": 7
+      },
+      "floats": {
+        "markdown": {
+          "image": 9,
+          "captionedImage": 7,
+          "table": 2,
+          "algorithm": 0,
+          "code": 0,
+          "math": 2
+        },
+        "layout": {
+          "image": 1,
+          "chart": 8,
+          "table": 2,
+          "code": 0,
+          "captioned": 9
+        }
+      },
+      "references": {
+        "markdown": 31,
+        "layout": 31
+      }
+    }
+  }
+}

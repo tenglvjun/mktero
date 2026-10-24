@@ -144,11 +144,13 @@ test('passes through Markdown produced by MinerU', async () => {
                 sourceHash: 'b'.repeat(64),
                 sourceMap,
                 chromeRanges,
+                documentStructure: 'mineru-ir-v1',
             }),
         },
     });
 
     const result = await service.convert(42);
+    assert.equal(result.documentStructure, 'mineru-ir-v1');
 
     assert.equal(result.markdown, '# Already Markdown\n\n| A | B |');
     assert.equal(result.sourceKind, 'markdown');

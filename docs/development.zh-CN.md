@@ -27,6 +27,32 @@ node scripts/figure-corpus-check.mjs --update             # 复核后刷新
 
 修改图组规则后，运行检查并复核差异。验证新论文时，把它的压缩包加入语料目录，并提交生成的 `<id>.expected.json`。缺失的压缩包会被跳过；压缩包字节发生变化时会失败，直到重新验证并更新。
 
+图组输入现在来自 MinerU 文档 IR。在此之前记录的 10 份期望（`beyond-alignment`、`brainbench`、`clinical-llm`、`envharness`、`externalization`、`menstrual-wearable`、`mosaic`、`neuradock`、`olfactory`、`parsimonious`）由之前的图组适配器生成。请在有这些压缩包的机器上对它们重新运行 `--update`，并复核差异。
+
+## 阅读质量回归语料
+
+`scripts/reading-corpus-check.mjs` 统计 MinerU 管线对本机每个压缩包（`<id>.zip`）的阅读结果，并与 `test/fixtures/reading-corpus/<id>.expected.json` 比较。期望文件只保存计数和 12 位标题哈希，不保存论文正文。目录取自 `MKTERO_READING_CORPUS`，未设置时使用 `MKTERO_FIGURE_CORPUS`。
+
+```bash
+node scripts/reading-corpus-check.mjs --pipeline ir            # 比较并打印表格
+node scripts/reading-corpus-check.mjs --pipeline ir --update   # 复核后刷新
+node scripts/reading-corpus-check.mjs --pipeline ir-pdf        # 同时用 PDF.js 读取压缩包中的 PDF
+node scripts/reading-corpus-check.mjs --ids a,b --json         # 输出部分论文的完整报告
+```
+
+`ir` 只读取 MinerU 结果。`ir-pdf` 还会像扩展一样，用 PDF.js 读取 MinerU 放在压缩包里的 `*_origin.pdf`，让段落合并和标题层级使用 PDF 的行与字体。两种管线都有提交的期望值，复核后分别用 `--update` 刷新。
+
+| 指标 | 含义 |
+| --- | --- |
+| `breaks` | 两个正文段读起来是同一句话（前段末尾未结束、后段小写开头），中间只隔着浮动体或行间公式；按 sourceMap 给出的 PDF 边界分为 `page`、`column`、`float`、`math`、`adjacent`、`unmapped` |
+| `chrome` | 被 MinerU 丢弃的页眉、页脚、页码、侧边文字（规范化后不少于 8 个字符）仍作为可见块出现的次数 |
+| `textCoverage` | 版面文本 span 的 8 字符分片出现在可见文本中的比例 |
+| `pageNotes` | 至少 80% 分片可见的页脚注数量 |
+| `headings` | 大纲条数、层级分布，以及 `层级:标题` 的哈希序列 |
+| `sourceMap` | 被 sourceMap 覆盖的可见顶层块比例，以及跨多页的条目数 |
+| `floats` | 输出中的图片、表格、算法、代码和行间公式数量，与版面中的数量对比 |
+| `references` | 解析出的参考文献条目数，与版面 `ref_text` 块数对比 |
+
 ## 浏览器预览
 
 `preview/` 在普通网页中挂载真实的 Markdown 阅读器（`createMarkdownTabView`），外层是 Zotero 风格的窗口和一篇示例论文，用于网站展示和浏览器兼容检查。论文、译文、批注和模拟的 PDF 页面都是夹具数据；页面不发出任何网络请求，CSP 也禁止对外连接。XPI 不包含这部分内容。

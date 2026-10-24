@@ -69,6 +69,7 @@ import { findGitHubRepositories } from '../markdown/github-repository-links.js';
 import { safeMarkdownLinkURL } from '../markdown/markdown-html.js';
 import {
     computeAlignedMarkdownOutline,
+    headingLevelsForDocumentStructure,
     computeDocumentFigures,
     computeMarkdownAssetOutline,
     computeMarkdownFragmentIndex,
@@ -85,7 +86,11 @@ import {
     selectSourcePeek,
     sourcePeekKey,
 } from '../core/source-peek.js';
-import { appendRenderedMarkdown } from '../editor/rendered-markdown-dom.js';
+import {
+    appendInlineMathText,
+    appendRenderedMarkdown,
+    renderedPlainText,
+} from '../editor/rendered-markdown-dom.js';
 import {
     createTranslationReadingPositionAnchor,
     mapComparisonRangeToSource,
@@ -421,6 +426,7 @@ class MarkdownTabView {
         this.outlineMarkdown = '';
         this.outlineSourceRanges = null;
         this.outlineChromeRanges = [];
+        this.outlineHeadingLevels = 'inferred';
         this.outlinePdfOutline = [];
         this.renderedChromeRanges = [];
         this.deferredRenderModel = null;
@@ -913,7 +919,12 @@ class MarkdownTabView {
                             { figureMap: model.figureMap }
                         )
                         : figureViews,
-                    translatedView ? '' : model.title
+                    translatedView ? '' : model.title,
+                    // A translation keeps the source headings but not their
+                    // producer's leveling guarantees.
+                    !translatedView || comparisonView
+                        ? outlineHeadingLevels(model.documentStructure)
+                        : 'inferred'
                 );
                 this.syncNotes(annotationOverlay, markdown.length);
                 if (assetsChanged) this.editor.refreshRendering();
@@ -6273,9 +6284,11 @@ class MarkdownTabView {
         chromeRanges = NO_OUTLINE_RANGES,
         pdfOutline = NO_OUTLINE_RANGES,
         figureViews = null,
-        itemTitle = ''
+        itemTitle = '',
+        headingLevels = 'inferred'
     ) {
         const nextMarkdown = String(markdown || '');
+        const nextHeadingLevels = headingLevels === 'structural' ? 'structural' : 'inferred';
         const nextChromeRanges = Array.isArray(chromeRanges)
             ? chromeRanges
             : NO_OUTLINE_RANGES;
@@ -6292,8 +6305,10 @@ class MarkdownTabView {
             && this.outlineChromeRanges === nextChromeRanges
             && this.outlinePdfOutline === nextPdfOutline
             && this.outlineFigureViews === figureViews
-            && this.outlineItemTitle === nextItemTitle;
+            && this.outlineItemTitle === nextItemTitle
+            && this.outlineHeadingLevels === nextHeadingLevels;
         this.outlineMarkdown = nextMarkdown;
+        this.outlineHeadingLevels = nextHeadingLevels;
         this.outlineSourceRanges = sourceRanges;
         this.outlineChromeRanges = nextChromeRanges;
         this.outlinePdfOutline = nextPdfOutline;
@@ -6366,6 +6381,7 @@ class MarkdownTabView {
                 chromeRanges: this.outlineChromeRanges,
                 pdfOutline: this.outlinePdfOutline,
                 itemTitle: this.outlineItemTitle,
+                headingLevels: this.outlineHeadingLevels,
             }
         ).map(heading => ({
             text: heading.text,
@@ -6404,7 +6420,8 @@ class MarkdownTabView {
             this.outlineItemAttributes(item)
         );
         if (!item.type) {
-            button.textContent = item.text;
+            appendInlineMathText(button, item.text);
+            button.setAttribute('title', renderedPlainText(button));
             return button;
         }
         const tableThumb = this.createOutlineTableThumb(item);
@@ -6418,11 +6435,10 @@ class MarkdownTabView {
                 draggable: 'false',
             }));
         }
-        button.appendChild(this.createElement(
-            'span',
-            { class: 'markdown-outline-caption' },
-            item.text
-        ));
+        const caption = this.createElement('span', { class: 'markdown-outline-caption' });
+        appendInlineMathText(caption, item.text);
+        button.appendChild(caption);
+        button.setAttribute('title', renderedPlainText(caption));
         return button;
     }
 
@@ -6889,11 +6905,14 @@ class MarkdownTabView {
             this.noteButtonAttributes(annotation, offset)
         );
         button.appendChild(this.createNoteMetadata(annotation, offset !== null));
-        button.appendChild(this.createElement(
-            'span',
-            { class: 'markdown-note-quote' },
-            String(annotation.text || '')
-        ));
+        const quote = this.createElement('span', { class: 'markdown-note-quote' });
+        appendInlineMathText(quote, String(annotation.text || ''));
+        button.appendChild(quote);
+        if (!annotation.comment && button.hasAttribute('aria-label') && quote.querySelector('math')) {
+            button.setAttribute('aria-label', this.t('viewer.noteJump', {
+                text: accessibleAnnotationText(renderedPlainText(quote)),
+            }));
+        }
         if (annotation.comment) {
             button.appendChild(this.createElement(
                 'span',
@@ -7371,6 +7390,7 @@ function collectDocumentLayerInputs(
         model.annotationOverlay,
         model.sourceMap,
         model.chromeRanges,
+        model.documentStructure,
         model.title,
         model.pdfOutline,
         model.pendingFigureAssets,
@@ -7467,6 +7487,12 @@ function mapAnnotationOverlayToComparison(overlay, blockRanges) {
         }),
         unmatched: [...(source.unmatched || [])],
     };
+}
+
+// A document whose producer leveled its headings from the paper's numbering
+// keeps those levels in the outline.
+function outlineHeadingLevels(documentStructure) {
+    return headingLevelsForDocumentStructure(documentStructure);
 }
 
 function mapChromeRangesToComparison(chromeRanges, blockRanges) {

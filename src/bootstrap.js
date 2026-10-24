@@ -34,6 +34,10 @@ import {
     createZoteroPDFTextIndexCache,
 } from './cache/pdf-text-index-cache.js';
 import {
+    createMinerUResultKey,
+    createZoteroMinerUResultStore,
+} from './cache/mineru-result-store.js';
+import {
     createZoteroMarkdownAnnotationStore,
 } from './cache/markdown-annotation-store.js';
 import {
@@ -102,8 +106,11 @@ import {
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_LOCAL_PARSER_PROFILE_ID,
+    MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_LOCAL_REQUEST_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_REQUEST_PROFILE_ID,
 } from './mineru/parser-profile.js';
 import {
     MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
@@ -159,11 +166,10 @@ import { ZoteroAnnotationExtractor } from './extractors/zotero-annotation-extrac
 import { MinerUClient } from './mineru/mineru-client.js';
 import { MinerUConversion } from './mineru/mineru-conversion.js';
 import { MinerULocalClient } from './mineru/local-client.js';
-import { MinerULocalConversion } from './mineru/local-conversion.js';
+import { MinerULocalConversion, prepareLocalMinerUResult } from './mineru/local-conversion.js';
 import { createMinerUConversionFacade } from './mineru/conversion-facade.js';
 import { LEGACY_FIGURE_PROFILES } from './figures/legacy-figure-profiles.js';
-import { decodeMinerUFigureInput } from './mineru/figure-layout-adapter.js';
-import { prepareMinerUResult } from './mineru/mineru-result.js';
+import { createMinerUFigureInput, prepareMinerUResult } from './mineru/document/prepare.js';
 import { decodeMistralResult, prepareMistralResult } from './mistral/mistral-result.js';
 import { FigureRestorationService } from './figures/figure-restoration-service.js';
 import { FigureLabelRecoveryService } from './figures/figure-label-recovery.js';
@@ -437,6 +443,11 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.pdfTextIndexCache = pdfTextIndexCache;
+    const mineruResultStore = createZoteroMinerUResultStore({
+        zotero: Zotero,
+        ioUtils: IOUtils,
+        pathUtils: PathUtils,
+    });
     const readerTextLocator = createZoteroPDFTextLocator(Zotero);
     const loadPDFFile = createZoteroPDFFileLoader(
         Zotero,
@@ -596,19 +607,40 @@ globalThis.startup = async function startup({ id, rootURI }) {
     const recoverFigures = async (result, context) => figureReadingOrder.recover(
         await figureLabelRecovery.recover(result, context), context
     );
+    // The PDF's own text index gives the MinerU document its real lines and
+    // fonts. It is the annotation locator's index, so it is built once per
+    // PDF; when it cannot be built the document keeps block geometry.
+    const readPDFText = async context => {
+        if (!context?.fileData || !runtime.pdfAnnotationLocator?.indexFileData) return null;
+        try {
+            return await runtime.pdfAnnotationLocator.indexFileData(context.fileData, { signal: context.signal });
+        }
+        catch (error) {
+            if (error?.name === 'AbortError' || context.signal?.aborted) throw error;
+            Zotero.debug?.(`Mktero: PDF text geometry unavailable (${error?.name || 'Error'})`);
+            return null;
+        }
+    };
+    // Only the MinerU decoder reads the conversion context.
+    const withPDFText = decode => {
+        const decodeWithContext = async (raw, context) => decode(raw, { pdfText: await readPDFText(context) });
+        decodeWithContext.readsContext = true;
+        return decodeWithContext;
+    };
+    const decodeInput = (decode, raw, context) => (decode.readsContext ? decode(raw, context) : decode(raw));
     const prepareWithFigures = (decode, prepare) => async (raw, context) => {
         // A saved correction is already a prepared document. Re-running figure
         // restoration would discard the edit and requires a conversion context
         // that revision reopening does not have.
         if (raw?.userEdited) return raw;
-        const input = decode(raw);
+        const input = await decodeInput(decode, raw, context);
         const draft = await figureRestoration.restore(input, context);
         return finalizeRestoredDocument(input, draft, {
             prepare, hash: sha256Hex, signal: context?.signal,
         });
     };
     const progressiveWithFigures = (decode, prepare) => async (raw, context) => {
-        const input = decode(raw);
+        const input = await decodeInput(decode, raw, context);
         const run = createProgressiveFigureRunner({
             restoration: figureRestoration,
             prepare,
@@ -621,31 +653,35 @@ globalThis.startup = async function startup({ id, rootURI }) {
             onEvent: context.onEvent,
         });
     };
-    const restoreCachedFigures = (input, context) => createProgressiveFigureRunner({
-        restoration: figureRestoration,
-        prepare: prepareMinerUResult,
-        finalize: finalizeRestoredDocument,
-        hash: sha256Hex,
-    })(input, {
-        fileData: context.fileData,
-        signal: context.signal,
-        onEvent: context.onEvent,
-    });
     const conversion = new MinerUConversion({
         client: new MinerUClient({
             createAbortController: createZoteroAbortController,
         }),
         pendingTasks,
         cache,
-        prepareResult: prepareWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
-        progressiveResult: progressiveWithFigures(decodeMinerUFigureInput, prepareMinerUResult),
-        restoreCachedInput: restoreCachedFigures,
+        prepareResult: prepareWithFigures(withPDFText(createMinerUFigureInput), prepareMinerUResult),
+        // An unfinished restoration is cached as a marker only; the conversion
+        // restarts it from the raw result store.
+        progressiveResult: progressiveWithFigures(withPDFText(createMinerUFigureInput), prepareMinerUResult),
         recoverFigures,
         createPreviousCacheKeys: fileData => Promise.all(
             MINERU_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
                 createMarkdownCacheKey(fileData, { parserProfile })
             ))
         ),
+        // A new profile entry takes the translations of the newest earlier
+        // entry of the same PDF.
+        createTranslationSourceKeys: fileData => Promise.all(
+            [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru].map(parserProfile => (
+                createMarkdownCacheKey(fileData, { parserProfile })
+            ))
+        ),
+        resultStore: mineruResultStore,
+        createResultKey: fileData => createMinerUResultKey({
+            fileData,
+            provider: 'mineru',
+            requestProfile: MINERU_REQUEST_PROFILE_ID,
+        }),
         onError: error => Zotero.logError?.(error),
     });
     const localConversion = new MinerULocalConversion({
@@ -653,6 +689,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
             createAbortController: createZoteroAbortController,
         }),
         cache,
+        // The PDF's text layer is only read for a result with structure.
+        prepareResult: async (raw, context) => prepareLocalMinerUResult(raw, {
+            pdfText: raw?.layout ? await readPDFText(context) : null,
+        }),
+        resultStore: mineruResultStore,
+        createResultKey: fileData => createMinerUResultKey({
+            fileData,
+            provider: 'mineru-local',
+            requestProfile: MINERU_LOCAL_REQUEST_PROFILE_ID,
+        }),
+        createTranslationSourceKeys: fileData => Promise.all(
+            MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => createMarkdownCacheKey(fileData, { parserProfile }))
+        ),
         onError: error => Zotero.logError?.(error),
     });
     const mineruConversion = createMinerUConversionFacade({
@@ -671,7 +720,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         getParserProfile: () => currentMinerUParserProfile(),
         getPreviousParserProfiles: () => (
             getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
-                ? []
+                ? [...MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS]
                 : [
                     ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
                     LEGACY_FIGURE_PROFILES.mineru,
@@ -744,10 +793,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache,
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         prepareResult: prepareWithFigures(
-            decodeMinerUFigureInput,
+            withPDFText(createMinerUFigureInput),
             prepareMinerUResult
         ),
         recoverFigures,
+        resultStore: mineruResultStore,
+        // The hosted service fixes its own MinerU request; its results are
+        // kept apart from direct MinerU results.
+        createResultKey: (fileData, { sourceHash } = {}) => createMinerUResultKey({
+            fileData,
+            sourceHash,
+            provider: 'mktero',
+            requestProfile: MINERU_REQUEST_PROFILE_ID,
+        }),
     });
     const extractor = new ConversionProviderRouter({
         getProvider: () => getConversionProvider(Zotero),
@@ -824,6 +882,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         .catch(error => Zotero.logError(error));
     runtime.citationCache?.prune().catch(error => Zotero.logError(error));
     pdfTextIndexCache.prune().catch(error => Zotero.logError(error));
+    mineruResultStore.prune().catch(error => Zotero.logError(error));
     pendingTasks.prune().catch(error => Zotero.logError(error));
     presenter.ensureSessionStateFilter();
     const preferencePaneID = await registerMinerUPreferencesPane({
@@ -1540,10 +1599,12 @@ function noteProgressiveDocument(itemID, event) {
         && getMinerUCacheEnabled(Zotero))) {
         return;
     }
+    // The figure input holds the whole document IR; the raw MinerU result
+    // store already keeps what is needed to start the restoration again.
     runtime.cache.put(event.cacheKey, event.document, {
         figureRestoration: {
             status: 'pending',
-            input: event.figureInput,
+            source: 'mineru-result-store',
             completedFigureIds: [],
         },
     }).then(() => rememberMarkdownReadiness(itemID, {
@@ -2130,6 +2191,7 @@ async function attachRevisionSession(itemID, result, signal) {
                 assetBasePath: result.assetBasePath || '',
                 extractedPages: result.extractedPages,
                 totalPages: result.totalPages,
+                ...(result.documentStructure ? { documentStructure: result.documentStructure } : {}),
             }, { signal });
         }
         catch (error) {

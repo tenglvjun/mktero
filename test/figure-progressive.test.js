@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import { makeFigureInput, createTestPNG } from './helpers/figure-fixtures.js';
 import { sha256Hex } from '../src/core/sha256.js';
 import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import {
     buildProgressiveFigureDocument,
     pendingFigureAssetPaths,
@@ -29,7 +29,7 @@ async function planFor(input) {
 
 test('builds an immediately readable document that keeps pending OCR panels', async () => {
     const { input } = makeFigureInput();
-    const document = await buildProgressiveFigureDocument(input, [], { prepare: prepareMinerUResult });
+    const document = await buildProgressiveFigureDocument(input, [], { prepare: prepareFigureFixture });
     assert.ok(document.markdown.includes('images/panel-0.png'));
     assert.equal(document.figureMap, undefined);
 });
@@ -41,7 +41,7 @@ test('replaces a completed figure and drops its original OCR panels', async () =
     assert.ok(candidate);
     const entry = { candidate, crop: { data: createTestPNG(800, 750), mimeType: 'image/png', width: 800, height: 750 },
         assetPath: 'generated/figures/fig-p0-b0-abcd.png' };
-    const document = await buildProgressiveFigureDocument(plan.input, [entry], { prepare: prepareMinerUResult });
+    const document = await buildProgressiveFigureDocument(plan.input, [entry], { prepare: prepareFigureFixture });
     assert.ok(document.markdown.includes('generated/figures/fig-p0-b0-abcd.png'));
     assert.ok(!document.markdown.includes('images/panel-0.png'));
 });

@@ -14,9 +14,36 @@
 - Source navigation depends on provider blocks and coordinates; older cached
   results may remain readable without source links. MinerU cloud, local MinerU,
   and Mistral results have independent parser profiles and caches.
-- Local MinerU mode talks to a MinerU 4.0 V1 service. It does not restore
-  figures from that service's result, and a restarted local service cannot
-  resume an earlier job.
+- A footnote mark links to its note only when the note follows it in the same
+  section and repeats the mark. A note placed without its mark (for example a
+  printed `††` the OCR text does not carry) has no link. Collapsed article
+  information, author biography, and reporting summary sections are recognized
+  from the page layout and wording, so unusual front matter can stay in the
+  reading text.
+- MinerU cloud results locate text by OCR block, not by line, so a Markdown
+  paragraph jumps to its whole block in the PDF. A paragraph joined across a
+  page, column, or figure keeps one location for each part.
+- A MinerU paragraph that a page or column break splits at a full stop is
+  rejoined only when the PDF has a text layer showing that the line before the
+  break is full and the line after it is not indented, in a paper that indents
+  its paragraphs. Without a text layer (a scanned PDF), such a paragraph stays
+  split. The outline of a paper without section numbers is leveled by heading
+  type from the same text layer; when the types do not nest, or the PDF has no
+  text layer, those headings stay at one level.
+- MinerU's OCR model sometimes writes what it expects instead of what is
+  printed. In a typeset PDF whose text layer agrees with MinerU almost
+  everywhere, a single differing word is restored to the printed text, so an
+  author's own typo or spelling stays as printed, and a heading MinerU wrote
+  twice is written once. A scanned PDF's text layer is an older OCR and is
+  not used; MinerU's reading stays, including any word it misread.
+- Local MinerU mode talks to a MinerU 4.0 V1 service. Its result is read from
+  the archive's `middle_json.json` with the same reading rules as MinerU cloud
+  (page notes, joined paragraphs and tables, hidden page decoration, source
+  links); an archive without a readable `middle_json.json` keeps the service's
+  own Markdown. The result is kept with other stored MinerU results, so a
+  Mktero update reads it again without the service. It does not restore
+  cropped figures from the PDF, and a restarted local service cannot resume an
+  earlier job.
 - A PDF text selection opens its Markdown paragraph only when one source
   region covers it, or when the selection text occurs in exactly one cached
   paragraph and no source region overlaps it. Ambiguous, repeated, uncached,

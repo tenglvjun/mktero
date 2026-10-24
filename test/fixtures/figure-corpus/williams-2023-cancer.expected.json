@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "williams-2023-cancer",
+  "archiveSha256": "129447f1e521e0370cfcd900fbe548c68a866022b0aed9a224b1498ffdc93803",
+  "pages": 13,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Figure 1.",
+      "panels": 4,
+      "captions": 2,
+      "owned": 2,
+      "bbox": [
+        70,
+        87,
+        841,
+        365
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Figure 2.",
+      "panels": 1,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        151,
+        87,
+        926,
+        502
+      ]
+    }
+  ],
+  "preserved": []
+}

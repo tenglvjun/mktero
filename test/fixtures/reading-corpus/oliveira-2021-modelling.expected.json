@@ -1,0 +1,149 @@
+{
+  "schema": 1,
+  "id": "oliveira-2021-modelling",
+  "archiveSha256": "c95ae11e06aff429d7eabb274c662d25483c39da126418491f03efb66fb9c8d0",
+  "pipelines": {
+    "ir": {
+      "pages": 14,
+      "breaks": {
+        "total": 4,
+        "page": 1,
+        "column": 0,
+        "float": 0,
+        "math": 3,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 57,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 9755,
+        "found": 9710,
+        "ratio": 0.9954
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 1
+      },
+      "headings": {
+        "count": 10,
+        "levels": {
+          "1": 1,
+          "2": 9
+        },
+        "sequence": [
+          "1:d20f6cde5e26",
+          "2:f516b7c2696b",
+          "2:d457d71a9f46",
+          "2:852408bfbc83",
+          "2:3f3867313a9d",
+          "2:07a0b0962107",
+          "2:4fccc8cb28f1",
+          "2:d448f50b5197",
+          "2:a777dfdeca78",
+          "2:676dfdd56ad2"
+        ]
+      },
+      "sourceMap": {
+        "total": 116,
+        "covered": 116,
+        "ratio": 1,
+        "crossPage": 7
+      },
+      "floats": {
+        "markdown": {
+          "image": 18,
+          "captionedImage": 15,
+          "table": 6,
+          "algorithm": 0,
+          "code": 0,
+          "math": 8
+        },
+        "layout": {
+          "image": 2,
+          "chart": 15,
+          "table": 7,
+          "code": 0,
+          "captioned": 19
+        }
+      },
+      "references": {
+        "markdown": 45,
+        "layout": 45
+      }
+    },
+    "ir-pdf": {
+      "pages": 14,
+      "breaks": {
+        "total": 4,
+        "page": 1,
+        "column": 0,
+        "float": 0,
+        "math": 3,
+        "adjacent": 0,
+        "unmapped": 0
+      },
+      "chrome": {
+        "candidates": 57,
+        "leaks": 0
+      },
+      "textCoverage": {
+        "total": 9755,
+        "found": 9708,
+        "ratio": 0.9952
+      },
+      "pageNotes": {
+        "total": 1,
+        "found": 1
+      },
+      "headings": {
+        "count": 10,
+        "levels": {
+          "1": 1,
+          "2": 9
+        },
+        "sequence": [
+          "1:d20f6cde5e26",
+          "2:f516b7c2696b",
+          "2:d457d71a9f46",
+          "2:852408bfbc83",
+          "2:3f3867313a9d",
+          "2:07a0b0962107",
+          "2:4fccc8cb28f1",
+          "2:d448f50b5197",
+          "2:a777dfdeca78",
+          "2:676dfdd56ad2"
+        ]
+      },
+      "sourceMap": {
+        "total": 116,
+        "covered": 116,
+        "ratio": 1,
+        "crossPage": 7
+      },
+      "floats": {
+        "markdown": {
+          "image": 18,
+          "captionedImage": 15,
+          "table": 6,
+          "algorithm": 0,
+          "code": 0,
+          "math": 8
+        },
+        "layout": {
+          "image": 2,
+          "chart": 15,
+          "table": 7,
+          "code": 0,
+          "captioned": 19
+        }
+      },
+      "references": {
+        "markdown": 45,
+        "layout": 45
+      }
+    }
+  }
+}

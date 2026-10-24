@@ -10733,3 +10733,696 @@ test('reports an unsaved table cell correction for a closing tab to save', async
     editor.destroy();
     dom.window.close();
 });
+
+function createDirectiveEditor(markdown) {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    forceParsing(view, view.state.doc.length, 1000);
+    return { dom, document, editor, view, window: dom.window };
+}
+
+test('hides a note directive and marks every quote line', () => {
+    const markdown = [
+        'Intro',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> Quoted finding',
+        '> continued line',
+        '',
+        '> Ordinary quote',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(markdown);
+    const noteLines = [...document.querySelectorAll('.cm-mktero-note')];
+
+    assert.equal(document.body.textContent.includes('mktero-note'), false);
+    assert.deepEqual(noteLines.map(line => line.textContent), [
+        'Quoted finding',
+        'continued line',
+    ]);
+    assert.ok(noteLines.every(line => line.classList.contains('cm-mktero-blockquote')));
+    assert.equal(
+        document.querySelector('.cm-mktero-blockquote:not(.cm-mktero-note)')?.textContent,
+        'Ordinary quote'
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('collapses a section by default and toggles it from the button', () => {
+    const markdown = [
+        '# Title',
+        '',
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Hidden affiliation.',
+        '',
+        '## Inner heading',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'Visible body.',
+    ].join('\n');
+    const { dom, document, editor, view, window } = createDirectiveEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+
+    assert.ok(button);
+    assert.equal(button.type, 'button');
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    // The visible label names the button; the title gives the action.
+    assert.equal(button.hasAttribute('aria-label'), false);
+    assert.equal(button.title, 'Expand');
+    assert.equal(button.textContent, 'Article information');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), false);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+    assert.equal(document.body.textContent.includes('Visible body'), true);
+
+    button.click();
+    const expanded = document.querySelector('.mktero-section-toggle');
+    // The same button stays, so keyboard focus stays on it.
+    assert.equal(expanded, button);
+    assert.equal(expanded.getAttribute('aria-expanded'), 'true');
+    assert.equal(expanded.title, 'Collapse');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), true);
+    assert.equal(document.body.textContent.includes('Inner heading'), true);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+
+    expanded.dispatchEvent(new window.KeyboardEvent('keydown', {
+        key: ' ',
+        bubbles: true,
+        cancelable: true,
+    }));
+    const collapsed = document.querySelector('.mktero-section-toggle');
+    assert.equal(collapsed.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), false);
+
+    collapsed.dispatchEvent(new window.KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+    }));
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+
+    const inside = view.state.doc.toString().indexOf('Hidden affiliation');
+    view.dispatch({ selection: { anchor: inside } });
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    document.querySelector('.mktero-section-toggle').click();
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'false'
+    );
+    view.dispatch({ selection: { anchor: inside } });
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), true);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('collapses chart data under its label below the chart', () => {
+    const markdown = [
+        'Before.',
+        '',
+        '<!-- mktero-section: chart-data -->',
+        '',
+        '<table><tr><td>year</td><td>value</td></tr></table>',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'After.',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+
+    assert.ok(button);
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.match(button.textContent, /Chart data/u);
+    assert.equal(document.body.textContent.includes('year'), false);
+    assert.ok(document.body.textContent.includes('After.'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps keyboard focus on the section button and a collapsed section closed', () => {
+    const markdown = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Hidden affiliation.',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'Visible body.',
+    ].join('\n');
+    const { dom, document, editor, view, window } = createDirectiveEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+    button.focus();
+    button.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.equal(document.activeElement, button);
+    button.dispatchEvent(new window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.activeElement, button);
+
+    // Collapsing with the cursor inside keeps the section closed through
+    // transactions that do not move the selection.
+    const inside = view.state.doc.toString().indexOf('Hidden affiliation');
+    view.dispatch({ selection: { anchor: inside } });
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    button.click();
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    editor.refreshRendering?.();
+    view.dispatch({});
+    view.dispatch({ effects: [] });
+    assert.equal(document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Hidden affiliation'), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps a section expanded when a translation copies its directive', () => {
+    const source = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Affiliation.',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const translated = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        '单位信息。',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(source);
+
+    document.querySelector('.mktero-section-toggle').click();
+    editor.setMarkdown(translated);
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    assert.equal(document.body.textContent.includes('单位信息'), true);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('expands a collapsed section when search navigation scrolls to a hit', async () => {
+    const { searchMarkdownDocument } = await import(
+        '../src/markdown/markdown-document-search.js'
+    );
+    const markdown = [
+        '<!-- mktero-section: reporting-summary -->',
+        '',
+        'UniqueSectionPhrase appears here.',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(markdown);
+    const result = searchMarkdownDocument(markdown, 'UniqueSectionPhrase');
+
+    assert.equal(document.body.textContent.includes('UniqueSectionPhrase'), false);
+    editor.setDocumentSearchHighlights({
+        matches: result.matches,
+        activeIndex: 0,
+    });
+    editor.scrollToOffset(result.matches[0].from);
+    assert.equal(
+        document.querySelector('.mktero-section-toggle').getAttribute('aria-expanded'),
+        'true'
+    );
+    assert.equal(document.body.textContent.includes('UniqueSectionPhrase'), true);
+    assert.equal(document.body.textContent.includes('mktero-section'), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+function createFootnoteEditor(markdown, options = {}) {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        ...options,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    forceParsing(view, view.state.doc.length, 1000);
+    return { dom, document, editor, view, window: dom.window };
+}
+
+function footnoteDocument(body, note = '$^{1}$ The source of the claim.') {
+    return [
+        body,
+        '',
+        '<!-- mktero-note: footnote -->',
+        `> ${note}`,
+    ].join('\n');
+}
+
+function dispatchMouse(element, window, type) {
+    element.dispatchEvent(new window.MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+    }));
+}
+
+function dispatchKey(element, window, key) {
+    element.dispatchEvent(new window.KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key,
+    }));
+}
+
+function spyEditorScroll(view) {
+    const positions = [];
+    view.lineBlockAt = position => {
+        positions.push(position);
+        return { top: 720 };
+    };
+    view.requestMeasure = request => {
+        if (request?.read) request.write?.(request.read(view), view);
+    };
+    return positions;
+}
+
+test('renders a footnote citation as a link and not as math or a reference', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const { dom, document, editor } = createFootnoteEditor(markdown);
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+    const back = document.querySelector('.cm-mktero-footnote-back');
+
+    assert.equal(reference?.textContent, '1');
+    assert.equal(reference?.getAttribute('role'), 'link');
+    assert.equal(reference?.getAttribute('tabindex'), '0');
+    assert.equal(reference?.getAttribute('aria-label'), 'Go to note 1');
+    assert.equal(reference?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(reference?.classList.contains('cm-mktero-citation-superscript'), true);
+    assert.equal(back?.textContent, '1');
+    assert.equal(back?.getAttribute('role'), 'link');
+    assert.equal(back?.getAttribute('tabindex'), '0');
+    assert.equal(back?.getAttribute('aria-label'), 'Back to the text of note 1');
+    assert.equal(back?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(back?.classList.contains('cm-mktero-citation-superscript'), true);
+    assert.equal(back?.closest('.cm-mktero-math'), null);
+    assert.equal(document.querySelector('.cm-mktero-math'), null);
+    assert.doesNotMatch(
+        document.querySelector('.cm-content')?.textContent || '',
+        /\$|\^|\{|\}/
+    );
+    assert.equal(document.body.textContent.includes('mktero-note'), false);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('jumps to a footnote from a click or the keyboard and can go back', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const quoteOffset = markdown.indexOf('> $^{1}$');
+    const backAvailable = [];
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown, {
+        onNavigationBackChange: available => backAvailable.push(available),
+    });
+    const positions = spyEditorScroll(view);
+    view.scrollDOM.scrollTop = 96;
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+
+    dispatchMouse(reference, window, 'click');
+
+    assert.ok(positions.includes(quoteOffset));
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.ok(document.querySelector('.cm-line.cm-mktero-note .cm-mktero-selection-flash'));
+    assert.deepEqual(backAvailable, [true]);
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(view.scrollDOM.scrollTop, 96);
+
+    reference.focus();
+    dispatchKey(reference, window, 'Enter');
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.equal(backAvailable.at(-1), true);
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(view.scrollDOM.scrollTop, 96);
+
+    reference.focus();
+    dispatchKey(reference, window, ' ');
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a footnote back link returns to the citing mark', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const citingOffset = markdown.indexOf('$^{1}$');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown);
+    const positions = spyEditorScroll(view);
+    view.scrollDOM.scrollTop = 400;
+    const back = document.querySelector('.cm-mktero-footnote-back');
+
+    dispatchMouse(back, window, 'click');
+
+    assert.ok(positions.includes(citingOffset));
+    assert.equal(view.scrollDOM.scrollTop, 720);
+    assert.ok(document.querySelector('.cm-mktero-footnote-ref')
+        ?.closest('.cm-line')
+        ?.querySelector('.cm-mktero-selection-flash'));
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(view.scrollDOM.scrollTop, 400);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a footnote mark written as a TeX command links both ways as its symbol', () => {
+    const markdown = footnoteDocument(
+        'The Sharpe Ratio $^{†}$ measures return.',
+        '$^{\\dagger}$ Calculated over the full period.'
+    );
+    const citingOffset = markdown.indexOf('$^{†}$');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown);
+    const positions = spyEditorScroll(view);
+    const back = document.querySelector('.cm-mktero-footnote-back');
+    assert.equal(back?.textContent, '†');
+    assert.equal(back.getAttribute('role'), 'link');
+    assert.equal(back.closest('.cm-mktero-note')?.textContent, '† Calculated over the full period.');
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref')?.textContent, '†');
+    dispatchMouse(back, window, 'click');
+    assert.ok(positions.includes(citingOffset));
+    assert.equal(editor.getMarkdown(), markdown);
+    editor.destroy();
+    dom.window.close();
+});
+
+test('expands a collapsed section when a footnote jump lands inside it', () => {
+    const markdown = [
+        '<!-- mktero-section: article-info -->',
+        '',
+        'Author $^{1}$ is listed here.',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{1}$ Corresponding author.',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n');
+    const quoteOffset = markdown.indexOf('> $^{1}$');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+    const positions = spyEditorScroll(view);
+    view.scrollDOM.scrollTop = 48;
+
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Corresponding author'), false);
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref'), null);
+
+    button.click();
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+    assert.equal(reference?.textContent, '1');
+    const standIn = reference.cloneNode(true);
+    button.click();
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.body.textContent.includes('Corresponding author'), false);
+
+    // Collapsing removes the in-content control. Replay the same activation
+    // from a copy that still carries the note index.
+    view.contentDOM.append(standIn);
+    dispatchMouse(standIn, window, 'click');
+
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.equal(document.body.textContent.includes('Corresponding author'), true);
+    assert.ok(positions.includes(quoteOffset));
+    assert.equal(editor.goNavigationBack(), true);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('an unpaired footnote note is not a link', () => {
+    const markdown = footnoteDocument(
+        'No citing mark in this paragraph.',
+        '$^{1}$ An unpaired note.'
+    );
+    const { dom, document, editor } = createFootnoteEditor(markdown);
+
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref'), null);
+    assert.equal(document.querySelector('.cm-mktero-footnote-back'), null);
+    assert.equal(document.body.textContent.includes('mktero-note'), false);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a footnote mark is not also decorated as a reference citation', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'A claim $^{1}$ and a reference [2].',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{1}$ The source.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+    ].join('\n');
+    const { dom, document, editor, window } = createFootnoteEditor(markdown);
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+    const back = document.querySelector('.cm-mktero-footnote-back');
+    const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+
+    assert.equal(reference?.textContent, '1');
+    assert.equal(reference?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(back?.textContent, '1');
+    assert.equal(back?.classList.contains('cm-mktero-citation'), false);
+    assert.equal(back?.closest('.cm-mktero-math'), null);
+    assert.deepEqual(citations.map(citation => citation.textContent), ['2']);
+
+    citations[0].dispatchEvent(new window.MouseEvent('mouseover', {
+        bubbles: true,
+    }));
+    assert.match(
+        document.querySelector('.mktero-citation-popup')?.textContent || '',
+        /Beta B\. Second paper\. 2021\./
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('editing a paragraph hides its footnote link and does not break the note', () => {
+    const markdown = footnoteDocument(
+        'A claim that needs a source $^{1}$ and more text.'
+    );
+    const paragraphEnd = markdown.indexOf('\n');
+    const { dom, document, editor, view, window } = createFootnoteEditor(markdown, {
+        onCommitCorrection: async () => {},
+    });
+    editor.setCorrectionState({
+        enabled: false,
+        blocks: [{
+            id: 'paragraph-1',
+            type: 'paragraph',
+            from: 0,
+            to: paragraphEnd,
+            markdown: markdown.slice(0, paragraphEnd),
+        }],
+        correctedBlockIDs: [],
+    });
+    const content = document.querySelector('.cm-content');
+    const reference = document.querySelector('.cm-mktero-footnote-ref');
+
+    dispatchMouse(reference, window, 'dblclick');
+    assert.equal(content.getAttribute('contenteditable'), 'false');
+    assert.equal(reference.isConnected, true);
+
+    view.posAtCoords = () => 8;
+    dispatchMouse(content, window, 'dblclick');
+    assert.equal(content.getAttribute('contenteditable'), 'true');
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref'), null);
+    assert.match(content.textContent, /\$\^\{1\}/);
+    assert.equal(
+        document.querySelector('.cm-mktero-footnote-back')?.textContent,
+        '1'
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    dispatchKey(content, window, 'Escape');
+    assert.equal(content.getAttribute('contenteditable'), 'false');
+    assert.equal(document.querySelector('.cm-mktero-footnote-ref')?.textContent, '1');
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+function createCaptionSelectionEditor(markdown) {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', { pretendToBeVisual: true });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => 'blob:mktero-caption-selection',
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    // A point in the rendered caption: the occurrence of `needle` (visible
+    // text only), at its start or end.
+    const point = (caption, needle, { end = false, occurrence = 0 } = {}) => {
+        const walker = document.createTreeWalker(caption, dom.window.NodeFilter.SHOW_TEXT);
+        let seen = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (node.parentElement.closest('annotation')) continue;
+            let index = node.textContent.indexOf(needle);
+            while (index >= 0) {
+                if (seen++ === occurrence) return [node, end ? index + needle.length : index];
+                index = node.textContent.indexOf(needle, index + 1);
+            }
+        }
+        throw new Error(`No ${needle} in the caption`);
+    };
+    const select = (caption, from, to) => {
+        const range = document.createRange();
+        if (!from) range.selectNodeContents(caption);
+        else {
+            range.setStart(...point(caption, from.text, from));
+            range.setEnd(...point(caption, to.text, { ...to, end: true }));
+        }
+        document.getSelection().removeAllRanges();
+        document.getSelection().addRange(range);
+        return selectedMarkdownAnnotation(view, []);
+    };
+    const close = () => {
+        editor.destroy();
+        dom.window.close();
+    };
+    return { document, editor, view, select, close };
+}
+
+const B_EPSILON_CAPTION = 'Figure 1: A $B^{\\varepsilon}$ -tree. Each node is roughly of size B, and $\\varepsilon$ controls '
+    + 'how much of an internal node\'s space is used for pivots ( $B^{\\varepsilon}$ ). As in a B-tree, items are '
+    + 'stored in leaves, and the height of the tree is logarithmic (here $B^{\\varepsilon}$ ).';
+
+test('maps a selection across formulas in a figure caption to its source', () => {
+    const markdown = `Before.\n\n![${B_EPSILON_CAPTION}](images/figure.png)\n\nAfter.`;
+    const { document, view, select, close } = createCaptionSelectionEditor(markdown);
+    const caption = document.querySelector('.mktero-figure figcaption');
+    const sourceOf = selection => selection.ranges.map(range => view.state.sliceDoc(range.from, range.to)).join('');
+
+    const whole = select(caption);
+    assert.equal(sourceOf(whole), B_EPSILON_CAPTION);
+
+    // From the start of the description, across the first formula.
+    const fromStart = select(caption, { text: 'A' }, { text: 'internal' });
+    assert.equal(sourceOf(fromStart), 'A $B^{\\varepsilon}$ -tree. Each node is roughly of size B, and '
+        + '$\\varepsilon$ controls how much of an internal');
+    // From the label.
+    const fromLabel = select(caption, { text: 'Figure' }, { text: 'Each' });
+    assert.equal(sourceOf(fromLabel), 'Figure 1: A $B^{\\varepsilon}$ -tree. Each');
+    // A short word the caption repeats maps to the occurrence selected.
+    const second = select(caption, { text: 'B-tree', occurrence: 0 }, { text: 'B-tree', occurrence: 0 });
+    assert.equal(sourceOf(second), 'B-tree');
+    assert.equal(second.ranges[0].from, markdown.indexOf('B-tree'));
+    const node = select(caption, { text: 'node', occurrence: 1 }, { text: 'node', occurrence: 1 });
+    assert.equal(node.ranges[0].from, markdown.indexOf('node', markdown.indexOf('node') + 1));
+    close();
+});
+
+test('maps a caption with escaped TeX and a caption line by position', () => {
+    // EvoBrain: the image description escapes the backslash of \ldots.
+    const evobrain = '![Fig. 2. The backbone is progressively adapted from $M_{0}$ to $M_{1},\\\\ldots,M_{N}$ , '
+        + 'while task heads are attached.](images/evobrain.jpg)';
+    let editor = createCaptionSelectionEditor(evobrain);
+    let caption = editor.document.querySelector('.mktero-figure figcaption');
+    const evo = editor.select(caption, { text: 'adapted' }, { text: 'while' });
+    assert.equal(editor.view.state.sliceDoc(evo.ranges[0].from, evo.ranges.at(-1).to),
+        'adapted from $M_{0}$ to $M_{1},\\\\ldots,M_{N}$ , while');
+    editor.close();
+
+    // A caption line below its image (BrainBench-style Figure 4 with math).
+    const captionLine = 'Figure 4. Accuracy of every model when $k = 3$ and when $k = 5$ on each task.';
+    const markdown = `![](images/figure-4.png)\n${captionLine}`;
+    editor = createCaptionSelectionEditor(markdown);
+    caption = editor.document.querySelector('figcaption');
+    assert.ok(caption, 'the caption line is rendered as the figure caption');
+    const line = editor.select(caption, { text: 'Accuracy' }, { text: 'task.' });
+    assert.equal(editor.view.state.sliceDoc(line.ranges[0].from, line.ranges.at(-1).to),
+        'Accuracy of every model when $k = 3$ and when $k = 5$ on each task.');
+    editor.close();
+});
+
+test('maps a caption to the source it was rendered from when a block has several', () => {
+    // The image description is a table caption; the figure caption shown is
+    // the line below the image.
+    const tableCaption = 'Table 2. Histogram of BMI with $n = 40$.';
+    const figureCaption = 'Figure 1. Histogram of BMI with $n = 40$ classification.';
+    const markdown = [
+        '<table><tr><td>Category</td><td>BMI</td></tr></table>',
+        '',
+        `![${tableCaption}](images/histogram.jpg)`,
+        figureCaption,
+    ].join('\n');
+    let editor = createCaptionSelectionEditor(markdown);
+    let caption = editor.document.querySelector('.mktero-figure figcaption');
+    assert.equal(caption.textContent.startsWith('Figure 1.'), true);
+    const selected = editor.select(caption, { text: 'Histogram' }, { text: 'classification.' });
+    assert.equal(selected.ranges[0].from, markdown.indexOf('Histogram', markdown.indexOf('Figure 1.')));
+    assert.equal(editor.view.state.sliceDoc(selected.ranges[0].from, selected.ranges.at(-1).to),
+        'Histogram of BMI with $n = 40$ classification.');
+    editor.close();
+
+    // Panels without descriptions share the caption line that follows them.
+    const shared = '![](images/a.png)\n![](images/b.png)\n\nFigure 5. Two panels sharing one caption with $w$.';
+    editor = createCaptionSelectionEditor(shared);
+    caption = editor.document.querySelector('figcaption');
+    const sharedSelection = editor.select(caption, { text: 'Two' }, { text: 'caption' });
+    assert.equal(editor.view.state.sliceDoc(sharedSelection.ranges[0].from, sharedSelection.ranges.at(-1).to),
+        'Two panels sharing one caption');
+    editor.close();
+});
+
+test('opens the selection actions for a caption selection that crosses a formula', () => {
+    const markdown = `![${B_EPSILON_CAPTION}](images/figure.png)`;
+    const { document, select, close } = createCaptionSelectionEditor(markdown);
+    const caption = document.querySelector('.mktero-figure figcaption');
+    assert.ok(select(caption, { text: 'A' }, { text: 'internal' }));
+    caption.dispatchEvent(new document.defaultView.MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    assert.ok(document.querySelector('.mktero-markdown-selection-actions'));
+    close();
+});

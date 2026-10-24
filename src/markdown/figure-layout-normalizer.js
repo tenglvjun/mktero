@@ -11,15 +11,26 @@ const IMAGE_LINE_PATTERN = /^( {0,3})!\[([^\]\r\n]*)\]\(\s*(<[^>\r\n]+>|[^)\s]+)
  * image per Markdown paragraph. Providers supply normalized image blocks;
  * this module deliberately knows nothing about their response formats.
  */
-export function normalizeFigureLayouts(markdown, imageBlocks = [], {
-    allowFallback = false,
-    skipExistingPanelLayout = false,
-} = {}) {
+export function normalizeFigureLayouts(markdown, imageBlocks = [], options = {}) {
     if (typeof markdown !== 'string'
         || !markdown
         || !Array.isArray(imageBlocks)) {
         return markdown;
     }
+    const { lines, markers, lineOverrides } = planFigureLayouts(markdown, imageBlocks, options);
+    if (!markers.size) return markdown;
+    return lines.map((line, index) => (
+        `${markers.get(index) || ''}${lineOverrides.get(index) || line.raw}`
+    )).join('');
+}
+
+// The layout decisions without applying them: `markers` maps a line index to
+// the marker inserted before it, and `lineOverrides` maps a line index to the
+// raw line that replaces it (the reading order of a grid).
+export function planFigureLayouts(markdown, imageBlocks = [], {
+    allowFallback = false,
+    skipExistingPanelLayout = false,
+} = {}) {
 
     const blocksByAssetPath = new Map();
     for (const block of imageBlocks) {
@@ -111,10 +122,7 @@ export function normalizeFigureLayouts(markdown, imageBlocks = [], {
         index = trailingCaption ? captionIndex : imageLines.at(-1).index;
     }
 
-    if (!markers.size) return markdown;
-    return lines.map((line, index) => (
-        `${markers.get(index) || ''}${lineOverrides.get(index) || line.raw}`
-    )).join('');
+    return { lines, markers, lineOverrides };
 }
 
 function isUsableImageBlock(block) {

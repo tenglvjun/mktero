@@ -2502,6 +2502,26 @@ main {
     color: var(--muted);
 }
 
+blockquote.mktero-note,
+.markdown-snapshot-host blockquote.mktero-note {
+    color: var(--muted);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
+}
+
+.mktero-section-label,
+.markdown-snapshot-host .mktero-section-label {
+    margin: 1.4em 0 0.4em;
+    color: var(--muted);
+    font-family: var(--ui-font);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
+}
+
+.mktero-section-label strong {
+    font-weight: 650;
+}
+
 .markdown-snapshot-host code {
     padding: 2px 5px;
     border: 1px solid var(--border-subtle);
@@ -2987,6 +3007,26 @@ main {
 
 .markdown-editor-host > .cm-editor .cm-mktero-table-reference:focus-visible,
 .markdown-editor-host > .cm-editor .cm-mktero-figure-reference:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: 2px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-ref,
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-back {
+    border-radius: 4px;
+    color: var(--accent-strong);
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-ref:hover,
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-back:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-ref:focus-visible,
+.markdown-editor-host > .cm-editor .cm-mktero-footnote-back:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
     outline-offset: 2px;
 }
@@ -4187,6 +4227,64 @@ main {
     color: var(--muted);
 }
 
+.markdown-editor-host > .cm-editor .cm-line.cm-mktero-note {
+    color: var(--muted);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-directive-line {
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+    line-height: 0;
+    padding: 0;
+}
+
+.mktero-section-toggle {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    margin: 0.7em 0;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--surface) 72%, transparent);
+    color: var(--muted);
+    cursor: pointer;
+    font-family: var(--ui-font);
+    font-size: var(--reader-caption-font-size);
+    line-height: var(--reader-caption-line-height);
+    text-align: start;
+}
+
+.mktero-section-toggle::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 0.42em;
+    height: 0.42em;
+    margin-right: 0.6em;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: translateY(-0.05em) rotate(-45deg);
+    transition: transform 120ms ease;
+}
+
+.mktero-section-toggle[aria-expanded="true"]::before {
+    transform: translateY(0.08em) rotate(45deg);
+}
+
+.mktero-section-toggle:hover {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    color: var(--text);
+}
+
+.mktero-section-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-list-bullet,
 .markdown-editor-host > .cm-editor .cm-mktero-list-number {
     display: inline-block;
@@ -4828,6 +4926,24 @@ main {
 .math-fallback {
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+
+/* Inline math in the outline and the note list: text sized, on the line,
+   with its TeX source kept out of view. */
+.markdown-outline-link .math-inline math,
+.markdown-note-quote .math-inline math {
+    font-size: 1em;
+}
+
+.markdown-outline-link .math-inline annotation,
+.markdown-note-quote .math-inline annotation {
+    display: none;
+}
+
+.markdown-outline-link .math-fallback,
+.markdown-note-quote .math-fallback {
+    font: inherit;
+    white-space: normal;
 }
 
 .markdown-source-fallback {

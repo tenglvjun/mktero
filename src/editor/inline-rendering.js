@@ -1,5 +1,5 @@
 import { syntaxTree } from '@codemirror/language';
-import { Prec, StateEffect, StateField } from '@codemirror/state';
+import { EditorState, Prec, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import {
     createEmptyAnnotationOverlay,
@@ -25,6 +25,7 @@ import {
     computeDocumentFigures,
     computeFigureReferences,
     computeMarkdownCitations,
+    computeMarkdownFootnotes,
     computeTableReferences,
 } from '../markdown/markdown-analysis-cache.js';
 import {
@@ -88,6 +89,179 @@ import {
 import {
     BILINGUAL_LIST_BOUNDARY,
 } from '../markdown/markdown-translation-blocks.js';
+import { findMarkdownDirectives, SECTION_LABEL_KEYS } from '../markdown/markdown-directives.js';
+import { footnoteMarkKeys } from '../markdown/footnote-marks.js';
+
+// Expanded sections stay open across a translation that copies the same
+// directives: the key is the kind plus the ordinal of that kind. An edit
+// that moves a section remaps the key through the overlapping range.
+const toggleMarkdownSection = StateEffect.define();
+const expandMarkdownSections = StateEffect.define();
+
+export function markdownSectionExpandEffect(state, position) {
+    const current = state.field(markdownSectionField, false);
+    if (!current) return null;
+    const pos = normalizeSectionPosition(position, state.doc.length);
+    if (pos == null) return null;
+    const section = current.sections.find(candidate => (
+        positionInsideSection(state.doc, candidate, pos)
+    ));
+    if (!section || current.expanded.has(section.key)) return null;
+    return expandMarkdownSections.of([section.key]);
+}
+
+export function expandMarkdownSectionAt(view, position) {
+    const effect = markdownSectionExpandEffect(view?.state, position);
+    if (!effect) return false;
+    view.dispatch({ effects: effect });
+    return true;
+}
+
+const markdownSectionField = StateField.define({
+    create(state) {
+        return {
+            ...indexMarkdownDirectives(state.doc.toString()),
+            expanded: new Set(),
+        };
+    },
+    update(value, transaction) {
+        let next = transaction.docChanged
+            ? updateDirectiveState(value, transaction)
+            : value;
+        let expanded = next.expanded;
+        let expandedChanged = false;
+        for (const effect of transaction.effects) {
+            if (effect.is(toggleMarkdownSection)) {
+                const key = String(effect.value || '');
+                if (!next.sections.some(section => section.key === key)) continue;
+                expanded = new Set(expanded);
+                if (expanded.has(key)) expanded.delete(key);
+                else expanded.add(key);
+                expandedChanged = true;
+            }
+            else if (effect.is(expandMarkdownSections)) {
+                const keys = Array.isArray(effect.value) ? effect.value : [];
+                let updated = null;
+                for (const key of keys) {
+                    if (!next.sections.some(section => section.key === key)
+                        || expanded.has(key)) {
+                        continue;
+                    }
+                    updated = updated || new Set(expanded);
+                    updated.add(key);
+                }
+                if (updated) {
+                    expanded = updated;
+                    expandedChanged = true;
+                }
+            }
+        }
+        if (next === value && !expandedChanged) return value;
+        return expanded === next.expanded ? next : { ...next, expanded };
+    },
+});
+
+// Only a transaction that sets the selection reveals a section: a jump to
+// an annotation, a search hit, or a source position. Any other transaction
+// leaves a section the reader collapsed closed, even with the cursor inside.
+function markdownSectionTransactionExtender(transaction) {
+    if (!transaction.selection) return null;
+    const current = transaction.startState.field(markdownSectionField, false);
+    if (!current?.sections.length) return null;
+    const head = transaction.newSelection.main.head;
+    const sections = transaction.docChanged
+        ? mapDirectiveSections(current.sections, transaction.changes)
+        : current.sections;
+    const section = sections.find(candidate => (
+        positionInsideSection(transaction.newDoc, candidate, head)
+    ));
+    if (!section || current.expanded.has(section.key)) return null;
+    if (transaction.effects.some(effect => (
+        effect.is(toggleMarkdownSection) && effect.value === section.key
+    ))) {
+        return null;
+    }
+    if (transaction.effects.some(effect => (
+        effect.is(expandMarkdownSections)
+        && Array.isArray(effect.value)
+        && effect.value.includes(section.key)
+    ))) {
+        return null;
+    }
+    return { effects: expandMarkdownSections.of([section.key]) };
+}
+
+class MarkdownSectionToggleWidget extends WidgetType {
+    constructor({ key, expanded, label, actionLabel }) {
+        super();
+        this.key = key;
+        this.expanded = expanded;
+        this.label = label;
+        this.actionLabel = actionLabel;
+    }
+
+    eq(other) {
+        return other.key === this.key
+            && other.expanded === this.expanded
+            && other.label === this.label
+            && other.actionLabel === this.actionLabel;
+    }
+
+    // The button stays the same element when the section opens or closes,
+    // so keyboard focus stays on it.
+    updateDOM(button) {
+        if (!button?.classList?.contains('mktero-section-toggle')) return false;
+        this.#apply(button);
+        return true;
+    }
+
+    // The visible label names the section; `aria-expanded` gives its state
+    // and the title the action.
+    #apply(button) {
+        button.dataset.sectionKey = this.key;
+        button.setAttribute('aria-expanded', this.expanded ? 'true' : 'false');
+        button.title = this.actionLabel;
+        button.textContent = this.label;
+    }
+
+    toDOM(view) {
+        const ownerDocument = view.dom.ownerDocument;
+        const button = ownerDocument.createElementNS?.(XHTML_NAMESPACE, 'button')
+            || ownerDocument.createElement('button');
+        button.type = 'button';
+        button.className = 'mktero-section-toggle';
+        this.#apply(button);
+        const dispatchToggle = () => {
+            view.dispatch({ effects: toggleMarkdownSection.of(button.dataset.sectionKey) });
+        };
+        button.addEventListener('mousedown', event => {
+            event.stopPropagation();
+        });
+        // Enter and Space toggle here, so the editor never sees them;
+        // preventing their default also stops the click they would fire.
+        button.addEventListener('keydown', event => {
+            if (!isSectionToggleKey(event)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            dispatchToggle();
+        });
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            dispatchToggle();
+        });
+        return button;
+    }
+
+    ignoreEvent(event) {
+        return event.type !== 'mousedown'
+            && event.type !== 'mouseup'
+            && event.type !== 'click'
+            && event.type !== 'keydown'
+            && event.type !== 'keyup'
+            && event.type !== 'keypress';
+    }
+}
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const MAX_MATCH_CANDIDATES = 10_000;
@@ -338,6 +512,36 @@ class TextMarkerWidget extends WidgetType {
         marker.className = this.className;
         marker.textContent = this.text;
         return marker;
+    }
+}
+
+// A footnote mark written as a TeX command (`$^{\dagger}$`) is shown as its
+// symbol. A mark decoration cannot wrap the math widget that would cover the
+// same range, so the widget carries the link itself.
+class FootnoteMarkWidget extends WidgetType {
+    constructor(text, className, attributes) {
+        super();
+        this.text = text;
+        this.className = className;
+        this.attributes = attributes;
+    }
+
+    eq(other) {
+        return this.text === other.text
+            && this.className === other.className
+            && JSON.stringify(this.attributes) === JSON.stringify(other.attributes);
+    }
+
+    toDOM(view) {
+        const marker = view.dom.ownerDocument.createElement('span');
+        marker.className = this.className;
+        for (const [name, value] of Object.entries(this.attributes)) marker.setAttribute(name, value);
+        marker.textContent = this.text;
+        return marker;
+    }
+
+    ignoreEvent() {
+        return false;
     }
 }
 
@@ -755,6 +959,7 @@ export function createInlineRenderingExtension({
     activateCitation,
     activateTableReference,
     activateFigureReference,
+    activateFootnoteJump,
     commitCorrection,
     restoreCorrection,
     onCorrectionError,
@@ -784,6 +989,7 @@ export function createInlineRenderingExtension({
         activateCitation,
         activateTableReference,
         activateFigureReference,
+        activateFootnoteJump,
         commitCorrection,
         restoreCorrection,
         onCorrectionError,
@@ -816,6 +1022,12 @@ export function createInlineRenderingExtension({
         citationAnalysisDocument: null,
         citationAnalysis: null,
         citationTargets: new Map(),
+        footnoteAnalysisDocument: null,
+        footnoteLinks: [],
+        footnoteQuoteTargets: new Map(),
+        footnoteCitationTargets: new Map(),
+        footnoteOwnedRanges: [],
+        footnoteSuperscriptWrappers: [],
         tableReferences: createReferenceAnalysisCache(
             source => computeTableReferences(context.analysisCache, source)
         ),
@@ -988,11 +1200,16 @@ export function createInlineRenderingExtension({
             // Typing inside the open correction block only shifts later
             // decorations. Rebuilding the whole paper here re-runs citation
             // and figure analysis on every keystroke.
+            const sectionExpansionChanged = transaction.effects.some(effect => (
+                effect.is(toggleMarkdownSection)
+                || effect.is(expandMarkdownSections)
+            ));
             if (correctionEditCanReuseDecorations(
                 transaction,
                 context,
                 {
                     shouldRefresh,
+                    sectionExpansionChanged,
                     referenceHighlightChanged,
                     tableHighlightChanged,
                     figureHighlightChanged,
@@ -1037,6 +1254,7 @@ export function createInlineRenderingExtension({
                 || translationPairHighlightChanged
                 || editingRangeChanged
                 || correctionStateChanged
+                || sectionExpansionChanged
                 || shouldRefresh) {
                 return buildDecorations(transaction.state, context);
             }
@@ -1045,6 +1263,8 @@ export function createInlineRenderingExtension({
         provide: field => EditorView.decorations.from(field),
     });
     return [
+        markdownSectionField,
+        EditorState.transactionExtender.of(markdownSectionTransactionExtender),
         renderingField,
         blockHeightRecorder(context.blockHeights),
         Prec.highest(EditorView.domEventHandlers({
@@ -1245,6 +1465,12 @@ function buildDecorations(state, context) {
         context.documentTitle
     );
     const decorations = [];
+    const directiveLayer = collectDirectiveDecorations(
+        state,
+        directiveStateFor(state),
+        context.translate
+    );
+    const directiveSkipRanges = directiveLayer.skipRanges;
     const excludedMathRanges = collectExcludedMathRanges(state);
     const renderedMathRanges = [];
     const analyzedTableReferences = referenceAnalysis(
@@ -1272,29 +1498,34 @@ function buildDecorations(state, context) {
         ...algorithmGroups,
         ...renderedFigureGroups,
         ...tableGroups,
-    ];
-    for (const group of algorithmGroups) {
-        decorations.push(renderedRange(group, state, 'algorithm', context));
-    }
-    for (const group of renderedFigureGroups) {
+    ].filter(group => !rangeOverlapsAny(group.from, group.to, directiveSkipRanges));
+    for (const group of renderedGroups) {
+        if (algorithmGroups.includes(group)) {
+            decorations.push(renderedRange(group, state, 'algorithm', context));
+            continue;
+        }
+        if (tableGroups.includes(group)) {
+            decorations.push(renderedRange(
+                {
+                    ...group,
+                    tableTarget: tableTargetsByFrom.get(group.from),
+                },
+                state,
+                group.table.kind === 'gfm' ? 'table' : 'html-block',
+                context
+            ));
+            continue;
+        }
         decorations.push(renderedRange(group, state, 'image', context));
-    }
-    for (const group of tableGroups) {
-        decorations.push(renderedRange(
-            {
-                ...group,
-                tableTarget: tableTargetsByFrom.get(group.from),
-            },
-            state,
-            group.table.kind === 'gfm' ? 'table' : 'html-block',
-            context
-        ));
     }
 
     syntaxTree(state).iterate({
         enter(node) {
             if (node.name !== 'Document'
                 && rangeInsideEditing(node, context)) {
+                return false;
+            }
+            if (rangeInsideAny(node.from, node.to, directiveSkipRanges)) {
                 return false;
             }
             if (renderedGroups.some(group => rangeContains(group, node))) {
@@ -1317,6 +1548,12 @@ function buildDecorations(state, context) {
             return undefined;
         },
     });
+    decorateFootnotes(
+        state,
+        decorations,
+        context,
+        [...renderedGroups, ...renderedMathRanges]
+    );
     decorateCitations(state, decorations, context);
     decorateTableReferences(state, decorations, context);
     decorateFigureReferences(state, decorations, context);
@@ -1331,7 +1568,15 @@ function buildDecorations(state, context) {
     decorateTranslationPairs(state, decorations, context);
     decorateTranslationFailures(state, decorations, context);
     decorateCorrections(state, decorations, context);
-    return Decoration.set(decorations, true);
+    const visible = decorations.filter(decoration => (
+        !decorationOverlapsRanges(decoration, directiveSkipRanges)
+    ));
+    for (const note of directiveLayer.notes) {
+        if (decorationOverlapsRanges(note.quote, directiveSkipRanges)) continue;
+        decorateNoteQuoteLines(state, visible, note.quote);
+    }
+    visible.push(...directiveLayer.decorations);
+    return Decoration.set(visible, true);
 }
 
 function decorateTranslationPairs(state, decorations, context) {
@@ -1607,13 +1852,22 @@ function annotationStartOffset(ranges) {
 
 function decorateCitations(state, decorations, context) {
     const result = citationAnalysis(state, context);
+    // A paired footnote owns its superscript wrapper. Decorating that same
+    // range as a reference would hide the wrapper twice.
+    indexFootnotes(state, context);
+    const footnoteRanges = context.footnoteOwnedRanges;
     const hiddenSuperscriptMarkup = new Set();
     const superscriptContent = new Map();
     for (const affiliation of result.affiliations) {
         const markup = affiliation.markerMarkup;
         if (!markup
             || rangesOverlapEditing(affiliation, context)
-            || citationRangeIsExcluded(state, markup.contentFrom)) {
+            || citationRangeIsExcluded(state, markup.contentFrom)
+            || overlapsFootnoteRange(
+                markup.wrapperFrom,
+                markup.wrapperTo,
+                footnoteRanges
+            )) {
             continue;
         }
         hideSuperscriptMarkup(decorations, markup, hiddenSuperscriptMarkup);
@@ -1628,8 +1882,16 @@ function decorateCitations(state, decorations, context) {
     }
     for (const citation of result.citations) {
         const markup = citation.superscriptMarkup;
+        const wrapperFrom = markup?.wrapperFrom ?? citation.from;
+        const wrapperTo = markup?.wrapperTo ?? citation.to;
         if (rangesOverlapEditing(citation, context)
-            || citationRangeIsExcluded(state, citation.from)) {
+            || citationRangeIsExcluded(state, citation.from)
+            || overlapsFootnoteRange(wrapperFrom, wrapperTo, footnoteRanges)
+            || overlapsFootnoteRange(
+                citation.from,
+                citation.to,
+                footnoteRanges
+            )) {
             continue;
         }
         if (markup) {
@@ -1724,6 +1986,214 @@ function citationAnalysis(state, context) {
             .map(target => [target.id, target])
     );
     return result;
+}
+
+const FOOTNOTE_MATH_WRAPPER = /^(?:\$|\\\()(?:\{\s*\})?\^\s*\{\s*([^{}\r\n]{1,24}?)\s*\}(?:\$|\\\))$/u;
+
+function indexFootnotes(state, context) {
+    if (context.footnoteAnalysisDocument === state.doc) return;
+    const result = computeMarkdownFootnotes(
+        context.analysisCache,
+        state.doc.toString()
+    );
+    const links = [];
+    const quoteTargets = new Map();
+    const citationTargets = new Map();
+    const ownedRanges = [];
+    const superscriptWrappers = [];
+    result.notes.forEach((note, index) => {
+        if (!note.citation) return;
+        const citing = footnoteCitationMarkup(state, note.citation);
+        const mark = footnoteMarkMarkup(state, note.mark);
+        if (!citing || !mark) return;
+        const id = String(index);
+        const label = note.label || note.key;
+        links.push({ id, label, citing, mark });
+        quoteTargets.set(id, {
+            id,
+            from: note.quote.from,
+            to: note.quote.to,
+            label,
+        });
+        citationTargets.set(id, {
+            id,
+            from: note.citation.wrapperFrom,
+            to: note.citation.wrapperTo,
+            label,
+        });
+        ownedRanges.push(
+            { from: citing.wrapperFrom, to: citing.wrapperTo },
+            { from: mark.wrapperFrom, to: mark.wrapperTo }
+        );
+        if (citing.raiseContent) superscriptWrappers.push(citing);
+        if (mark.raiseContent) superscriptWrappers.push(mark);
+    });
+    context.footnoteAnalysisDocument = state.doc;
+    context.footnoteLinks = links;
+    context.footnoteQuoteTargets = quoteTargets;
+    context.footnoteCitationTargets = citationTargets;
+    context.footnoteOwnedRanges = ownedRanges;
+    context.footnoteSuperscriptWrappers = superscriptWrappers;
+}
+
+function decorateFootnotes(state, decorations, context, replacedRanges) {
+    indexFootnotes(state, context);
+    const hiddenMarkup = new Set();
+    for (const link of context.footnoteLinks) {
+        const label = { mark: link.label };
+        decorateFootnoteEndpoint(
+            state,
+            decorations,
+            context,
+            link.citing,
+            {
+                className: 'cm-mktero-footnote-ref',
+                ariaLabel: context.translate(
+                    'markdown.footnote.jumpToNote',
+                    label
+                ),
+                index: link.id,
+            },
+            hiddenMarkup,
+            replacedRanges
+        );
+        decorateFootnoteEndpoint(
+            state,
+            decorations,
+            context,
+            link.mark,
+            {
+                className: 'cm-mktero-footnote-back',
+                ariaLabel: context.translate(
+                    'markdown.footnote.backToText',
+                    label
+                ),
+                index: link.id,
+            },
+            hiddenMarkup,
+            replacedRanges
+        );
+    }
+}
+
+function decorateFootnoteEndpoint(
+    state,
+    decorations,
+    context,
+    markup,
+    spec,
+    hiddenMarkup,
+    replacedRanges
+) {
+    // Only the delimiters around the mark are replaced; the mark itself may
+    // hold a rendered symbol such as `\dagger`.
+    if (!markup
+        || rangesOverlapEditing({
+            from: markup.wrapperFrom,
+            to: markup.wrapperTo,
+        }, context)
+        || citationRangeIsExcluded(state, markup.contentFrom)
+        || markup.wrapperFrom < markup.contentFrom
+            && rangeOverlapsAny(markup.wrapperFrom, markup.contentFrom, replacedRanges)
+        || markup.contentTo < markup.wrapperTo
+            && rangeOverlapsAny(markup.contentTo, markup.wrapperTo, replacedRanges)
+        || !markup.raiseContent
+            && rangeOverlapsAny(markup.wrapperFrom, markup.wrapperTo, replacedRanges)) {
+        return;
+    }
+    const className = [
+        spec.className,
+        markup.raiseContent ? 'cm-mktero-citation-superscript' : '',
+    ].filter(Boolean).join(' ');
+    const attributes = {
+        role: 'link',
+        tabindex: '0',
+        'aria-label': spec.ariaLabel,
+        'data-footnote-index': spec.index,
+    };
+    const content = state.sliceDoc(markup.contentFrom, markup.contentTo);
+    if (markup.raiseContent && content.includes('\\')) {
+        const [symbol] = footnoteMarkKeys(content);
+        if (!symbol || rangeOverlapsAny(markup.wrapperFrom, markup.wrapperTo, replacedRanges)) return;
+        decorations.push(Decoration.replace({
+            widget: new FootnoteMarkWidget(symbol, className, attributes),
+        }).range(markup.wrapperFrom, markup.wrapperTo));
+        return;
+    }
+    if (markup.raiseContent) {
+        hideSuperscriptMarkup(decorations, markup, hiddenMarkup);
+    }
+    decorations.push(Decoration.mark({ class: className, attributes }).range(markup.contentFrom, markup.contentTo));
+}
+
+function footnoteCitationMarkup(state, citation) {
+    if (!citation
+        || !validFootnoteRange(state, citation.wrapperFrom, citation.wrapperTo)
+        || !validFootnoteRange(state, citation.from, citation.to)
+        || citation.from < citation.wrapperFrom
+        || citation.to > citation.wrapperTo) {
+        return null;
+    }
+    return {
+        wrapperFrom: citation.wrapperFrom,
+        wrapperTo: citation.wrapperTo,
+        contentFrom: citation.from,
+        contentTo: citation.to,
+        raiseContent: citation.wrapperFrom < citation.from
+            || citation.to < citation.wrapperTo,
+    };
+}
+
+function footnoteMarkMarkup(state, mark) {
+    if (!validFootnoteRange(state, mark?.from, mark?.to)) return null;
+    const raw = state.sliceDoc(mark.from, mark.to);
+    const math = FOOTNOTE_MATH_WRAPPER.exec(raw);
+    if (!math) {
+        return {
+            wrapperFrom: mark.from,
+            wrapperTo: mark.to,
+            contentFrom: mark.from,
+            contentTo: mark.to,
+            raiseContent: false,
+        };
+    }
+    const contentFrom = mark.from + math[0].indexOf(math[1]);
+    const contentTo = contentFrom + math[1].length;
+    if (contentFrom < mark.from || contentTo > mark.to) return null;
+    return {
+        wrapperFrom: mark.from,
+        wrapperTo: mark.to,
+        contentFrom,
+        contentTo,
+        raiseContent: true,
+    };
+}
+
+function validFootnoteRange(state, from, to) {
+    return Number.isSafeInteger(from)
+        && Number.isSafeInteger(to)
+        && from >= 0
+        && to > from
+        && to <= state.doc.length;
+}
+
+function hasFootnoteSuperscriptMarkup(state, context, from, to) {
+    indexFootnotes(state, context);
+    return context.footnoteSuperscriptWrappers.some(markup => (
+        markup.wrapperFrom === from && markup.wrapperTo === to
+    ));
+}
+
+// The footnote layer draws a mark written as a TeX command itself.
+function insideFootnoteMark(state, context, from, to) {
+    indexFootnotes(state, context);
+    return context.footnoteSuperscriptWrappers.some(markup => (
+        markup.contentFrom <= from && to <= markup.contentTo
+    ));
+}
+
+function overlapsFootnoteRange(from, to, ranges) {
+    return (ranges || []).some(range => from < range.to && range.from < to);
 }
 
 function createReferenceAnalysisCache(analyze, {
@@ -1869,6 +2339,8 @@ function referenceInteraction(event, view, context) {
             activate: openNote,
         };
     }
+    const footnote = footnoteReferenceInteraction(event, view, context);
+    if (footnote) return footnote;
     const citation = citationElement(event, view);
     if (citation) {
         return {
@@ -2098,6 +2570,16 @@ function selectedRenderedMarkdownAnnotation(
     // A figure caption is rendered from the image description; selecting it
     // annotates the caption range instead of trying to match the rendered
     // text (which includes math) against the Markdown source.
+    const mapped = selectedCaptionByPosition(start, range, source);
+    if (mapped) {
+        const ranges = subtractChromeRanges({
+            from: sourceFrom + mapped.from,
+            to: sourceFrom + mapped.to,
+        }, chromeRanges);
+        return ranges.length && mapped.text.length <= MAX_PDF_ANNOTATION_TEXT_LENGTH
+            ? { text: mapped.text, ranges }
+            : null;
+    }
     const captionRange = renderedFigureCaptionRange(range, source);
     if (captionRange) {
         const selectedCaption = selectedRenderedCaptionRange(
@@ -2261,6 +2743,147 @@ function compactRenderedText(value) {
 
 function normalizeVisibleText(value) {
     return String(value || '').replace(/\s+/gu, ' ').trim();
+}
+
+// A selection inside a rendered figure caption, mapped to its Markdown by
+// position: each caption is matched to the source it was rendered from (an
+// image description or a caption line), then every selected character maps
+// to its own source character and a selected formula to its whole `$…$`.
+// No text search is involved, so formulas, repeated words, and several
+// captions in one block all map exactly. Returns null when the caption
+// cannot be aligned with its source.
+function selectedCaptionByPosition(container, range, source) {
+    const caption = captionElementOf(range.startContainer);
+    if (!caption || caption !== captionElementOf(range.endContainer) || !container.contains(caption)) return null;
+    const captions = [...container.querySelectorAll('figcaption')];
+    const candidates = figureCaptionSourceCandidates(source);
+    const used = new Set();
+    let alignment = null;
+    for (const element of captions) {
+        const atoms = renderedCaptionAtoms(element);
+        let found = null;
+        for (const [index, candidate] of candidates.entries()) {
+            if (used.has(index)) continue;
+            const aligned = alignCaptionAtoms(atoms, source, candidate);
+            if (aligned) {
+                found = { index, atoms: aligned };
+                break;
+            }
+        }
+        if (found) used.add(found.index);
+        if (element === caption) {
+            alignment = found?.atoms || null;
+            break;
+        }
+    }
+    if (!alignment) return null;
+    let from = Infinity;
+    let to = -Infinity;
+    for (const atom of alignment) {
+        if (!atomSelected(range, atom)) continue;
+        from = Math.min(from, atom.from);
+        to = Math.max(to, atom.to);
+    }
+    if (!Number.isFinite(from) || to <= from) return null;
+    const expanded = expandRangeToMathBoundaries(source, from, to);
+    const text = normalizeVisibleText(createVisibleMarkdownTextIndex(
+        source.slice(expanded.from, expanded.to)
+    ).text);
+    return text ? { from: expanded.from, to: expanded.to, text } : null;
+}
+
+function captionElementOf(node) {
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    return element?.closest?.('figcaption') || null;
+}
+
+// Where a block's captions can come from: every image description and every
+// other non-blank line, in source order.
+function figureCaptionSourceCandidates(source) {
+    const candidates = collectFigureImageNodes(source)
+        .filter(image => image.captionRange.to > image.captionRange.from)
+        .map(image => image.captionRange);
+    let offset = 0;
+    for (const line of source.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('![') && !trimmed.startsWith('<')) {
+            const from = offset + line.indexOf(trimmed);
+            candidates.push({ from, to: from + trimmed.length });
+        }
+        offset += line.length + 1;
+    }
+    return candidates.sort((left, right) => left.from - right.from);
+}
+
+// The caption as the reader sees it: each visible non-space character with
+// its text node and offset, and each rendered formula as one atom.
+function renderedCaptionAtoms(caption) {
+    const atoms = [];
+    const document = caption.ownerDocument;
+    const walker = document.createTreeWalker(caption, document.defaultView.NodeFilter.SHOW_ELEMENT
+        | document.defaultView.NodeFilter.SHOW_TEXT);
+    let skipping = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (skipping && skipping.contains(node)) continue;
+        skipping = null;
+        if (node.nodeType === 1) {
+            if (node.classList?.contains('math-inline')) {
+                atoms.push({ math: true, element: node });
+                skipping = node;
+            }
+            continue;
+        }
+        if (hiddenMathTextNode(node)) continue;
+        const text = node.textContent || '';
+        for (let index = 0; index < text.length; index++) {
+            if (!/\s/u.test(text[index])) atoms.push({ math: false, node, offset: index, character: text[index] });
+        }
+    }
+    return atoms;
+}
+
+// Pairs every rendered atom with its source: a character with the same
+// source character (a source backslash may be an escape the reader does not
+// show), a formula with the next `$…$` of the source. Fails, returning null,
+// when any visible character or formula does not line up.
+function alignCaptionAtoms(atoms, source, captionRange) {
+    const caption = source.slice(captionRange.from, captionRange.to);
+    const formulas = findInlineMathMatches(caption);
+    if (formulas.length !== atoms.filter(atom => atom.math).length) return null;
+    const aligned = [];
+    let cursor = 0;
+    let formula = 0;
+    const skippable = character => /\s/u.test(character) || character === '\\';
+    for (const atom of atoms) {
+        if (atom.math) {
+            const match = formulas[formula++];
+            for (; cursor < match.start; cursor++) if (!skippable(caption[cursor])) return null;
+            aligned.push({ ...atom, from: captionRange.from + match.start, to: captionRange.from + match.end });
+            cursor = match.end;
+            continue;
+        }
+        const next = formulas[formula]?.start ?? caption.length;
+        while (cursor < next && caption[cursor] !== atom.character) {
+            if (!skippable(caption[cursor])) return null;
+            cursor++;
+        }
+        if (cursor >= next) return null;
+        aligned.push({ ...atom, from: captionRange.from + cursor, to: captionRange.from + cursor + 1 });
+        cursor++;
+    }
+    for (; cursor < caption.length; cursor++) if (!skippable(caption[cursor])) return null;
+    return aligned;
+}
+
+function atomSelected(range, atom) {
+    try {
+        if (atom.math) return range.intersectsNode(atom.element);
+        return range.comparePoint(atom.node, atom.offset) >= 0
+            && range.comparePoint(atom.node, atom.offset + 1) <= 0;
+    }
+    catch {
+        return false;
+    }
 }
 
 function renderedFigureCaptionRange(range, source) {
@@ -2461,6 +3084,46 @@ function closeReferencePopupsExcept(context, retainedPopup) {
 function selectionActionsLocked(context) {
     return Boolean(context.annotationPopup?.isSelectionOpen?.()
         || context.annotationPopup?.isNoteOpen?.());
+}
+
+function footnoteReferenceTypes(context) {
+    return [
+        {
+            selector: '.cm-mktero-footnote-ref',
+            targetAttribute: 'data-footnote-index',
+            targets: context.footnoteQuoteTargets,
+            activate: context.activateFootnoteJump,
+        },
+        {
+            selector: '.cm-mktero-footnote-back',
+            targetAttribute: 'data-footnote-index',
+            targets: context.footnoteCitationTargets,
+            activate: context.activateFootnoteJump,
+        },
+    ];
+}
+
+function footnoteReferenceInteraction(event, view, context) {
+    for (const type of footnoteReferenceTypes(context)) {
+        const element = event.target?.closest?.(type.selector);
+        if (!element || !view.dom.contains(element)) continue;
+        const target = type.targets?.get(
+            element.getAttribute(type.targetAttribute) || ''
+        );
+        if (!target) return null;
+        return {
+            element,
+            popup: null,
+            open() {},
+            activate() {
+                context.citationPopup?.close();
+                context.tablePreviewPopup?.close();
+                context.figurePreviewPopup?.close();
+                type.activate?.(view, target);
+            },
+        };
+    }
+    return null;
 }
 
 function previewReferenceTypes(context) {
@@ -2812,6 +3475,11 @@ function decorateMath(
             context,
             matchFrom,
             matchTo
+        ) || hasFootnoteSuperscriptMarkup(
+            state,
+            context,
+            matchFrom,
+            matchTo
         )) {
             continue;
         }
@@ -2863,7 +3531,8 @@ function decorateAuthorNoteLatexCommands(
         const matchFrom = nodeFrom + match.start;
         const matchTo = nodeFrom + match.end;
         if (rangeOverlapsAny(matchFrom, matchTo, excludedRanges)
-            || rangeOverlapsAny(matchFrom, matchTo, renderedMathRanges)) {
+            || rangeOverlapsAny(matchFrom, matchTo, renderedMathRanges)
+            || insideFootnoteMark(state, context, matchFrom, matchTo)) {
             continue;
         }
         decorations.push(renderedMathRange(
@@ -3392,4 +4061,300 @@ function rangeInsideAny(from, to, ranges) {
 
 function shouldRenderHTMLBlock(source) {
     return /^\s*(?:<!--\s*zotero-page:|<table\b)/i.test(source);
+}
+
+function directiveStateFor(state) {
+    return state.field(markdownSectionField, false) || {
+        ...indexMarkdownDirectives(state.doc.toString()),
+        expanded: new Set(),
+    };
+}
+
+function indexMarkdownDirectives(markdown) {
+    const found = findMarkdownDirectives(markdown);
+    const counts = new Map();
+    return {
+        notes: found.notes,
+        directives: found.directives,
+        sections: found.sections.map(section => {
+            const ordinal = counts.get(section.kind) || 0;
+            counts.set(section.kind, ordinal + 1);
+            return {
+                ...section,
+                ordinal,
+                key: `${section.kind}:${ordinal}`,
+            };
+        }),
+    };
+}
+
+function updateDirectiveState(value, transaction) {
+    if (shouldReparseDirectives(value, transaction)) {
+        const next = indexMarkdownDirectives(transaction.newDoc.toString());
+        return {
+            ...next,
+            expanded: reconcileExpandedSections(
+                value.sections,
+                next.sections,
+                value.expanded,
+                transaction.changes,
+                transaction.startState.doc.length
+            ),
+        };
+    }
+    return {
+        ...value,
+        sections: mapDirectiveSections(value.sections, transaction.changes),
+        notes: mapDirectiveNotes(value.notes, transaction.changes),
+        directives: mapDirectiveRanges(value.directives, transaction.changes),
+    };
+}
+
+function shouldReparseDirectives(value, transaction) {
+    if (isFullDocumentReplacement(
+        transaction.changes,
+        transaction.startState.doc.length
+    )) {
+        return true;
+    }
+    let reparse = false;
+    transaction.changes.iterChanges((from, to, _fromB, _toB, insert) => {
+        if (String(insert).includes('<!--')) reparse = true;
+        if (directiveRangesTouch(value, from, to)) reparse = true;
+    });
+    return reparse;
+}
+
+function directiveRangesTouch(value, from, to) {
+    return [...value.sections, ...value.notes, ...value.directives].some(range => (
+        range.from < to && from < range.to
+    ));
+}
+
+function isFullDocumentReplacement(changes, length) {
+    if (length === 0) return true;
+    let full = false;
+    changes.iterChanges((from, to) => {
+        if (from === 0 && to === length) full = true;
+    });
+    return full;
+}
+
+function reconcileExpandedSections(
+    previous,
+    next,
+    expanded,
+    changes,
+    previousLength
+) {
+    const nextKeys = new Set(next.map(section => section.key));
+    if (isFullDocumentReplacement(changes, previousLength)) {
+        return new Set([...expanded].filter(key => nextKeys.has(key)));
+    }
+    const mapped = previous
+        .filter(section => expanded.has(section.key))
+        .map(section => mapDirectiveSection(section, changes))
+        .filter(Boolean);
+    const used = new Set();
+    const result = new Set();
+    for (const section of next) {
+        const index = mapped.findIndex((old, candidate) => (
+            !used.has(candidate)
+            && old.kind === section.kind
+            && old.from < section.to
+            && section.from < old.to
+        ));
+        if (index < 0) continue;
+        used.add(index);
+        result.add(section.key);
+    }
+    return result;
+}
+
+function mapDirectiveSections(sections, changes) {
+    return sections.flatMap(section => {
+        const mapped = mapDirectiveSection(section, changes);
+        return mapped ? [mapped] : [];
+    });
+}
+
+function mapDirectiveSection(section, changes) {
+    const open = mapRangeThroughChanges(section.open, changes);
+    const close = mapRangeThroughChanges(section.close, changes);
+    if (!open || !close || close.from < open.to) return null;
+    return {
+        ...section,
+        open,
+        close,
+        from: open.from,
+        to: close.to,
+        content: { from: open.to, to: close.from },
+    };
+}
+
+function mapDirectiveNotes(notes, changes) {
+    return notes.flatMap(note => {
+        const range = mapRangeThroughChanges(note, changes);
+        const quote = mapRangeThroughChanges(note.quote, changes);
+        if (!range || !quote) return [];
+        return [{ ...note, ...range, quote }];
+    });
+}
+
+function mapDirectiveRanges(ranges, changes) {
+    return ranges.flatMap(range => {
+        const mapped = mapRangeThroughChanges(range, changes);
+        return mapped ? [{ ...range, ...mapped }] : [];
+    });
+}
+
+function normalizeSectionPosition(position, length) {
+    const numeric = Number(position);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.max(0, Math.min(Math.trunc(numeric), length));
+}
+
+function positionInsideSection(doc, section, position) {
+    if (!Number.isSafeInteger(position) || !section) return false;
+    return position >= sectionInteriorStart(doc, section)
+        && position < section.to;
+}
+
+function sectionInteriorStart(doc, section) {
+    const line = doc.lineAt(Math.min(section.open.from, doc.length));
+    const commentEnd = Math.min(section.open.to, line.to);
+    if (doc.sliceString(line.from, section.open.from).trim()
+        || doc.sliceString(commentEnd, line.to).trim()) {
+        return section.open.to;
+    }
+    return Math.min(doc.length, line.to < doc.length ? line.to + 1 : line.to);
+}
+
+function sectionLabel(kind, translate) {
+    const key = SECTION_LABEL_KEYS[kind];
+    return key ? translate(key) : kind;
+}
+
+function isSectionToggleKey(event) {
+    return event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar';
+}
+
+function collectDirectiveDecorations(state, directiveState, translate) {
+    const decorations = [];
+    const skipRanges = [];
+    const owned = new Set();
+    const doc = state.doc;
+    for (const section of directiveState.sections) {
+        owned.add(rangeKey(section.open));
+        owned.add(rangeKey(section.close));
+        const expanded = directiveState.expanded.has(section.key);
+        const openLine = directiveLineRange(doc, section.open.from, section.open.to);
+        const closeLine = directiveLineRange(doc, section.close.from, section.close.to);
+        const widget = Decoration.replace({
+            widget: new MarkdownSectionToggleWidget({
+                key: section.key,
+                expanded,
+                label: sectionLabel(section.kind, translate || translateEnglish),
+                actionLabel: (translate || translateEnglish)(expanded
+                    ? 'markdown.section.collapse'
+                    : 'markdown.section.expand'),
+            }),
+            block: true,
+        }).range(openLine.from, openLine.contentTo);
+        decorations.push(widget);
+        skipRanges.push({ from: openLine.from, to: openLine.contentTo });
+        if (expanded) {
+            pushCollapsedDirectiveLine(doc, decorations, skipRanges, closeLine);
+            continue;
+        }
+        if (openLine.to < closeLine.to) {
+            const hiddenRange = { from: openLine.to, to: closeLine.to };
+            decorations.push(Decoration.replace({ block: true }).range(
+                hiddenRange.from,
+                hiddenRange.to
+            ));
+            skipRanges.push(hiddenRange);
+        }
+    }
+    for (const note of directiveState.notes) {
+        owned.add(rangeKey(note));
+        pushHiddenDirective(doc, decorations, skipRanges, note);
+    }
+    for (const directive of directiveState.directives) {
+        if (owned.has(rangeKey(directive))) continue;
+        pushHiddenDirective(doc, decorations, skipRanges, directive);
+    }
+    return {
+        decorations,
+        skipRanges,
+        notes: directiveState.notes,
+    };
+}
+
+function pushHiddenDirective(doc, decorations, skipRanges, range) {
+    const lineRange = directiveLineRange(doc, range.from, range.to);
+    if (lineRange.to <= lineRange.from) return;
+    if (skipRanges.some(skip => (
+        lineRange.from >= skip.from && lineRange.contentTo <= skip.to
+    ))) {
+        return;
+    }
+    pushCollapsedDirectiveLine(doc, decorations, skipRanges, lineRange);
+}
+
+function pushCollapsedDirectiveLine(doc, decorations, skipRanges, lineRange) {
+    if (!lineRange || lineRange.contentTo <= lineRange.from) return;
+    decorations.push(Decoration.line({
+        class: 'cm-mktero-directive-line',
+    }).range(lineRange.from));
+    decorations.push(Decoration.replace({}).range(lineRange.from, lineRange.contentTo));
+    skipRanges.push({ from: lineRange.from, to: lineRange.contentTo });
+}
+
+// contentTo stops before the line break so the next line can still take a
+// line decoration. `to` includes that break when the directive owns the line,
+// which is where a collapsed section's hidden range starts.
+function directiveLineRange(doc, from, to) {
+    if (!Number.isSafeInteger(from)
+        || !Number.isSafeInteger(to)
+        || to <= from
+        || doc.length === 0) {
+        return { from: 0, to: 0, contentTo: 0 };
+    }
+    const start = Math.max(0, Math.min(from, doc.length));
+    const end = Math.max(start, Math.min(to, doc.length));
+    const line = doc.lineAt(start);
+    const endLine = doc.lineAt(Math.max(start, end - 1));
+    const ownsLine = line.number === endLine.number
+        && !doc.sliceString(line.from, start).trim()
+        && !doc.sliceString(end, line.to).trim();
+    return {
+        from: ownsLine ? line.from : start,
+        contentTo: ownsLine ? line.to : end,
+        to: ownsLine && endLine.to < doc.length ? endLine.to + 1 : (ownsLine ? endLine.to : end),
+    };
+}
+
+function decorateNoteQuoteLines(state, decorations, quote) {
+    if (!quote || quote.to <= quote.from) return;
+    const fromLine = state.doc.lineAt(quote.from).number;
+    const toLine = state.doc.lineAt(Math.max(quote.from, quote.to - 1)).number;
+    for (let lineNumber = fromLine; lineNumber <= toLine; lineNumber++) {
+        decorations.push(Decoration.line({
+            class: 'cm-mktero-note',
+        }).range(state.doc.line(lineNumber).from));
+    }
+}
+
+function decorationOverlapsRanges(decoration, ranges) {
+    return ranges.some(range => {
+        if (decoration.from === decoration.to) {
+            return range.from <= decoration.from && decoration.from < range.to;
+        }
+        return decoration.from < range.to && range.from < decoration.to;
+    });
+}
+
+function rangeKey(range) {
+    return `${range.from}:${range.to}`;
 }

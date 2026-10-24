@@ -7,7 +7,7 @@ import { createWorkerFigureRegionRenderer } from '../src/figures/figure-render-w
 import { createProgressiveFigureRunner } from '../src/figures/figure-progressive-runner.js';
 import { FigureRestorationService } from '../src/figures/figure-restoration-service.js';
 import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js';
-import { prepareMinerUResult } from '../src/mineru/mineru-result.js';
+import { prepareMinerUResult } from '../src/mineru/document/prepare.js';
 import { sha256Hex } from '../src/core/sha256.js';
 import { createFigureProviderFixture } from '../test/helpers/figure-provider-fixtures.js';
 import { replacePendingFigureImages } from '../src/editor/figure-placeholder.js';

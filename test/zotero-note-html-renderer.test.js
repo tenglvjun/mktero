@@ -136,3 +136,24 @@ test('saves a block Markdown cannot render as escaped text', () => {
     assert.match(html, /<p>After\.<\/p>/);
     assert.equal(html.toLowerCase().includes('<script'), false);
 });
+
+test('keeps a section label and a note blockquote in Zotero note HTML', () => {
+    const html = renderZoteroNoteHTML([
+        '<!-- mktero-section: author-biographies -->',
+        '',
+        'Born in 1900.',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> A quoted note.',
+    ].join('\n'));
+
+    assert.match(
+        html,
+        /<p class="mktero-section-label"><strong>Author biographies<\/strong><\/p>/
+    );
+    assert.match(html, /<blockquote class="mktero-note">/);
+    assert.match(html, /A quoted note/);
+    assert.doesNotMatch(html, /mktero-section:|mktero-note:/);
+});

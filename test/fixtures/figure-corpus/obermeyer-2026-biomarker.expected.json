@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "id": "obermeyer-2026-biomarker",
+  "archiveSha256": "620ce336589881486222471f3a77c18816b4e74609917020cf7d7698027846b6",
+  "pages": 15,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Fig. 1 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        62,
+        56,
+        684,
+        370
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Fig. 2 |",
+      "panels": 2,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        60,
+        55,
+        945,
+        279
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Fig. 3 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        59,
+        55,
+        499,
+        310
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "Fig. 4 |",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        143,
+        79,
+        861,
+        772
+      ]
+    },
+    {
+      "pageIndex": 7,
+      "label": "Fig. 5 |",
+      "panels": 3,
+      "captions": 2,
+      "owned": 0,
+      "bbox": [
+        131,
+        56,
+        876,
+        545
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 8,
+      "reason": "foreign-content-overlap"
+    }
+  ]
+}

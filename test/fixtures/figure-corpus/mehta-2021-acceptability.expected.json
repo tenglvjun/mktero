@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "id": "mehta-2021-acceptability",
+  "archiveSha256": "5f8cb9d6ee89957e771a4f8aecae0088560529ccd80cddb8785d866a5d0f856c",
+  "pages": 16,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 8,
+      "label": "Figure 2.",
+      "panels": 2,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        106,
+        107,
+        889,
+        795
+      ]
+    },
+    {
+      "pageIndex": 9,
+      "label": "Figure 3.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        163,
+        395,
+        819,
+        685
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 4,
+      "reason": "ambiguous-caption"
+    }
+  ]
+}

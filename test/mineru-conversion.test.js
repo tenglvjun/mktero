@@ -22,7 +22,9 @@ import {
 import { MinerUPendingTaskStore } from '../src/mineru/pending-task-store.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
+    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
 } from '../src/mineru/parser-profile.js';
 import {
     MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
@@ -715,6 +717,8 @@ test('stores normalized MinerU Markdown with its PDF source map', async () => {
         + 'an event), and context engagement.';
     assert.equal(cachedResult.markdown, normalized);
     assert.equal(result.result.markdown, normalized);
+    // Each page's part of the stitched paragraph keeps its own location.
+    const split = 'The framework improves the ability to change perspective on '.length - 1;
     assert.deepEqual(cachedResult.sourceMap, [{
         type: 'text',
         markdownFrom: 0,
@@ -723,7 +727,12 @@ test('stores normalized MinerU Markdown with its PDF source map', async () => {
             { pageIndex: 0, bbox: [100, 100, 900, 200] },
             { pageIndex: 1, bbox: [100, 80, 900, 160] },
         ],
+        locationRanges: [
+            { markdownFrom: 0, markdownTo: split, location: { pageIndex: 0, bbox: [100, 100, 900, 200] } },
+            { markdownFrom: split + 1, markdownTo: normalized.length, location: { pageIndex: 1, bbox: [100, 80, 900, 160] } },
+        ],
     }]);
+    assert.equal(cachedResult.documentStructure, 'mineru-ir-v1');
 });
 
 test('keeps an uploaded task after transient and caller-abort failures', async t => {
@@ -1117,10 +1126,99 @@ test('public readCached does not interleave cache.put with an in-flight convert 
     assert.deepEqual(calls, { submit: 1, parse: 0, collect: 1 });
 });
 
-test('current profiles are v17 and v14 ids stay compatible', () => {
-    assert.match(MINERU_PARSER_PROFILE_ID, /figure-region-v17/);
+test('a new profile entry takes the translations of the newest earlier entry', async () => {
+    const calls = [];
+    const conversion = new MinerUConversion({
+        client: createSuccessfulClient({ markdown: '# Converted', contentList: [] }),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            get: async () => null,
+            put: async key => { calls.push(['put', key]); },
+            copyTranslations: async (from, to) => {
+                calls.push(['copy', from, to]);
+                return from === 'v17-key' ? 2 : 0;
+            },
+        },
+        createTranslationSourceKeys: async fileData => {
+            calls.push(['keys', fileData.length]);
+            return ['current-key', 'empty-key', 'v17-key', 'v16-key'];
+        },
+        createDataID: () => 'mktero-task-translations',
+    });
+    const result = await conversion.convert({
+        key: 'current-key',
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1, 2]),
+        cacheEnabled: true,
+    });
+    assert.equal(result.result.markdown, '# Converted');
+    assert.deepEqual(calls, [
+        ['put', 'current-key'],
+        ['keys', 2],
+        ['copy', 'empty-key', 'current-key'],
+        ['copy', 'v17-key', 'current-key'],
+    ]);
+});
+
+test('a translation copy failure does not fail the conversion', async () => {
+    const errors = [];
+    const conversion = new MinerUConversion({
+        client: createSuccessfulClient({ markdown: '# Converted', contentList: [] }),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            get: async () => null,
+            put: async () => {},
+            copyTranslations: async () => { throw new Error('disk full'); },
+        },
+        createTranslationSourceKeys: async () => ['old-key'],
+        createDataID: () => 'mktero-task-copy-failure',
+        onError: error => errors.push(error.message),
+    });
+    const result = await conversion.convert({
+        key: 'current-key',
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+    assert.equal(result.result.markdown, '# Converted');
+    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(errors, ['disk full']);
+});
+
+test('re-reading a stored result under a new profile carries translations over', async () => {
+    const copies = [];
+    const conversion = new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            get: async () => null,
+            put: async () => {},
+            copyTranslations: async (from, to) => { copies.push([from, to]); return 1; },
+        },
+        resultStore: { get: async () => ({ archive: new Uint8Array([1]) }), put: async () => {} },
+        createResultKey: async () => 'result-key',
+        extractStoredResult: () => ({ markdown: '# Stored', contentList: [] }),
+        createTranslationSourceKeys: async () => ['old-key'],
+    });
+    const result = await conversion.readCached({ key: 'current-key', fileData: new Uint8Array([1]), cacheEnabled: true });
+    assert.equal(result.result.markdown, '# Stored');
+    assert.deepEqual(copies, [['old-key', 'current-key']]);
+});
+
+test('the MinerU profile names its document pipeline and reuses no earlier Markdown', () => {
+    assert.deepEqual(JSON.parse(MINERU_PARSER_PROFILE_ID), {
+        batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
+        file: { is_ocr: true },
+        document: 'mineru-document-ir-v8',
+        figureStructure: 'figure-region-v17',
+    });
     assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v17/);
-    assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS[0].includes('figure-region-v14'), true);
+    assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, []);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID);
+    assert.equal(JSON.parse(MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID).sourceMap.figureStructure, 'figure-region-v17');
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
     assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0].includes('figure-region-v16'), true);
     assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[2].includes('figure-region-v14'), true);
     assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);

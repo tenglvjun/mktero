@@ -41,6 +41,12 @@ export const TRANSLATION_PROTECTED_CONTENT_CHANGED =
     'TRANSLATION_PROTECTED_CONTENT_CHANGED';
 export const MAX_TRANSLATION_BATCH_BLOCKS = 8;
 export const MAX_TRANSLATION_BATCH_SOURCE_TOKENS = 2_000;
+// A sentence continued across display math ("…is given by" $$…$$ "where …")
+// stays in one batch even past the soft limits, up to this much more.
+const CONTINUATION_BATCH_SLACK = 1.5;
+const OPEN_SENTENCE_END = /(?:[\p{L}\p{N},;:：)\]$]|\\\))$/u;
+const CLOSED_SENTENCE_END = /[.!?。！？]["'”’)\]]*$/u;
+const TRAILING_IMAGE = /!\[[^\]]*\]\([^)]*\)$/u;
 
 export function collectMarkdownTranslationBlocks(markdown, { chromeRanges } = {}) {
     const source = String(markdown || '');
@@ -113,7 +119,35 @@ export function collectMarkdownTranslationBlocks(markdown, { chromeRanges } = {}
         });
         ordinal++;
     }
+    linkEquationContinuations(blocks);
     return blocks;
+}
+
+// A paragraph that continues the sentence of the paragraph before a display
+// equation names it in `continuesFrom`; the equation between them names it
+// in `continuationOf`. The blocks stay separate, so the document structure
+// and the comparison view are unchanged; the batcher keeps the group in one
+// request and the request tells the model the two parts are one sentence.
+function linkEquationContinuations(blocks) {
+    for (let index = 0; index < blocks.length; index++) {
+        const block = blocks[index];
+        if (!block.translatable || block.type !== 'paragraph') continue;
+        let next = index + 1;
+        while (next < blocks.length && isDisplayMathBlock(blocks[next])) next++;
+        if (next === index + 1 || next >= blocks.length) continue;
+        const following = blocks[next];
+        if (!following.translatable || following.type !== 'paragraph') continue;
+        const head = block.markdown.trimEnd();
+        if (CLOSED_SENTENCE_END.test(head) || !OPEN_SENTENCE_END.test(head) || TRAILING_IMAGE.test(head)) continue;
+        if (!/^\p{Ll}/u.test(following.markdown.trimStart())) continue;
+        following.continuesFrom = block.id;
+        for (let between = index + 1; between < next; between++) blocks[between].continuationOf = block.id;
+        index = next - 1;
+    }
+}
+
+function isDisplayMathBlock(block) {
+    return block?.type === 'paragraph' && !block.translatable && isStandaloneDisplayMath(block.markdown);
 }
 
 export function collectMarkdownTranslationSections(markdown, blocks) {
@@ -184,7 +218,13 @@ export function createMarkdownTranslationBatches(section, {
             && translatableCount >= maxBlocks;
         const exceedsTokenLimit = batchBlocks.length
             && sourceTokens + blockTokens > maxSourceTokens;
-        if (batchBlocks.length && (exceedsBlockLimit || exceedsTokenLimit)) {
+        // The rest of a continued sentence joins its start while the batch
+        // stays within the slack.
+        const anchor = block.continuesFrom || block.continuationOf;
+        const keepsSentence = anchor && batchBlocks.some(item => item.id === anchor)
+            && translatableCount < maxBlocks * CONTINUATION_BATCH_SLACK
+            && sourceTokens + blockTokens <= maxSourceTokens * CONTINUATION_BATCH_SLACK;
+        if (batchBlocks.length && (exceedsBlockLimit || exceedsTokenLimit) && !keepsSentence) {
             appendBatch();
         }
         batchBlocks.push(block);
@@ -199,9 +239,11 @@ export function createMarkdownTranslationBatchPayload(blocks) {
     if (!Array.isArray(blocks)) {
         throw new TypeError('Markdown translation blocks are required');
     }
+    const sent = new Set(blocks.filter(block => block.translatable).map(block => block.id));
     return JSON.stringify(blocks.flatMap(block => block.translatable ? [{
         id: block.id,
         sourceMarkdown: block.requestMarkdown,
+        ...(block.continuesFrom && sent.has(block.continuesFrom) ? { continuesFrom: block.continuesFrom } : {}),
     }] : []));
 }
 

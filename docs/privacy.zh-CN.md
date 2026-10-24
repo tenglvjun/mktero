@@ -13,6 +13,7 @@
 | Mktero 插件版本号，随发往 Mktero 服务的请求一起发送，并在登录或刷新令牌时记录，用于让运营方了解仍有哪些版本在使用 | 你选择的 Mktero 服务；仅用于运营统计，不会返回给插件，也不会在你的账号资料中显示 | Mktero 不同步 |
 | 运营调研的邀请邮件、带令牌的链接、你提交的回复内容，以及调研邮件退订开关 | 你选择的 Mktero 服务；链接中的令牌不会保存在网站上 | Mktero 不同步 |
 | 缓存的 Markdown、图片、图表元数据（含 OCR 片段）、来源映射、PDF 索引、校对、译文和阅读位置 | 当前 Zotero 配置文件，未加密 | 否 |
+| 保存的 MinerU 结果，来自 Mktero、MinerU 云端或本地 MinerU 服务（结果中的 Markdown、内容列表、版面或中间 JSON 和图片；不含 PDF 副本），用于 Mktero 更新后无需重新转换即可重新读取论文 | 当前 Zotero 配置文件，未加密 | 否 |
 | Markdown 可用索引：文库 ID、条目 key、附件 key、缓存键、解析配置和过期时间 | 当前 Zotero 配置文件，未加密 | 否 |
 | 当前论文的 DOI/arXiv 标识符及 Provider 所需的候选 DOI | Semantic Scholar、OpenCitations 或 OpenAlex | Mktero 不同步 |
 | 用户为只有标题的文献点击“导入文献”后发送的受限引用文本 | OpenAlex | Mktero 不同步 |

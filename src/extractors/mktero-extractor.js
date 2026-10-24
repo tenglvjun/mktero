@@ -1,8 +1,11 @@
-import { prepareMinerUResult } from '../mineru/mineru-result.js';
+import { prepareMinerUResult } from '../mineru/document/prepare.js';
+import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_PARSER_PROFILE_ID,
+    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
 } from '../mineru/parser-profile.js';
+import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 import { MkteroSignInRequiredError } from '../account/account-session.js';
 
 export { MkteroSignInRequiredError };
@@ -29,6 +32,9 @@ export class MkteroDocumentExtractor {
         isCacheEnabled = () => false,
         prepareResult = prepareMinerUResult,
         recoverFigures = async result => result,
+        resultStore = null,
+        createResultKey = null,
+        extractStoredResult = extractMinerUResultFromZip,
         onCacheError = error => zotero.logError?.(error),
         onPDFIndexError = error => zotero.logError?.(error),
     }) {
@@ -56,6 +62,9 @@ export class MkteroDocumentExtractor {
         this.isCacheEnabled = isCacheEnabled;
         this.prepareResult = prepareResult;
         this.recoverFigures = recoverFigures;
+        this.resultStore = resultStore?.get && resultStore?.put ? resultStore : null;
+        this.createResultKey = typeof createResultKey === 'function' ? createResultKey : null;
+        this.extractStoredResult = extractStoredResult;
         this.onCacheError = onCacheError;
         this.onPDFIndexError = onPDFIndexError;
     }
@@ -75,37 +84,36 @@ export class MkteroDocumentExtractor {
         });
         if (cached) return cached;
 
-        let converted;
-        try {
-            converted = await this.conversion.convert({
-                apiBase: this.getApiBase(),
-                getAccessToken: this.getAccessToken,
-                fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
-                fileData: opened.fileData,
-                onProgress,
-                signal,
-            });
-        }
-        catch (error) {
-            if (error?.code === 'MKTERO_SIGN_IN_REQUIRED') {
-                throw new MkteroSignInRequiredError();
+        const resultKey = prepared.cacheEnabled
+            ? await this.#resultKey(opened.fileData, prepared.sourceHash, signal)
+            : null;
+        let converted = forceRefresh ? null : await this.#readStoredResult(resultKey, signal);
+        if (!converted) {
+            try {
+                converted = await this.conversion.convert({
+                    apiBase: this.getApiBase(),
+                    getAccessToken: this.getAccessToken,
+                    fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
+                    fileData: opened.fileData,
+                    onProgress,
+                    ...(resultKey ? { includeArchive: true } : {}),
+                    signal,
+                });
             }
-            throw error;
+            catch (error) {
+                if (error?.code === 'MKTERO_SIGN_IN_REQUIRED') {
+                    throw new MkteroSignInRequiredError();
+                }
+                throw error;
+            }
+            converted = await this.#keepResultArchive(resultKey, converted, signal);
         }
 
         prepared.warnings.push(...(converted.warnings || []));
-        const preparedResult = await this.prepareResult(converted.result, {
-            fileData: opened.fileData,
+        const result = await this.#prepareConverted(converted.result, opened.fileData, {
             signal,
             onProgress,
         });
-        throwIfAborted(signal);
-        const result = await this.recoverFigures(preparedResult, {
-            fileData: opened.fileData,
-            signal,
-            onProgress,
-        });
-        throwIfAborted(signal);
         if (prepared.cacheKey && prepared.cacheEnabled) {
             await this.#saveCachedResult(
                 prepared.cacheKey,
@@ -132,11 +140,108 @@ export class MkteroDocumentExtractor {
             signal,
             forceRefresh: false,
         });
-        return this.#cachedExtractResult(opened, prepared, {
+        const cached = await this.#cachedExtractResult(opened, prepared, {
             signal,
             onProgress,
             forceRefresh: false,
         });
+        if (cached || !prepared.cacheEnabled || !prepared.cacheKey) return cached;
+        // A pipeline change leaves no derived entry, but a stored MinerU result
+        // can still be read without a network request.
+        const resultKey = await this.#resultKey(opened.fileData, prepared.sourceHash, signal);
+        const stored = await this.#readStoredResult(resultKey, signal);
+        if (!stored) return null;
+        const result = await this.#prepareConverted(stored.result, opened.fileData, {
+            signal,
+            onProgress,
+        });
+        await this.#saveCachedResult(prepared.cacheKey, result, signal, prepared.warnings);
+        onProgress?.(100);
+        return createResult(
+            opened.title,
+            result,
+            true,
+            prepared.warnings,
+            prepared.cacheKey,
+            false,
+            prepared.sourceHash
+        );
+    }
+
+    async #prepareConverted(raw, fileData, { signal, onProgress }) {
+        const preparedResult = await this.prepareResult(raw, {
+            fileData,
+            signal,
+            onProgress,
+        });
+        throwIfAborted(signal);
+        const result = await this.recoverFigures(preparedResult, {
+            fileData,
+            signal,
+            onProgress,
+        });
+        throwIfAborted(signal);
+        return result;
+    }
+
+    async #resultKey(fileData, sourceHash, signal) {
+        if (!this.resultStore || !this.createResultKey) return null;
+        try {
+            const resultKey = await this.createResultKey(fileData, { sourceHash });
+            throwIfAborted(signal);
+            return typeof resultKey === 'string' && resultKey ? resultKey : null;
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            this.#reportCacheError(error);
+            return null;
+        }
+    }
+
+    async #readStoredResult(resultKey, signal) {
+        if (!resultKey || !this.resultStore) return null;
+        try {
+            const stored = await this.resultStore.get(resultKey, { signal });
+            throwIfAborted(signal);
+            if (!stored) return null;
+            return {
+                result: {
+                    ...this.extractStoredResult(stored.archive),
+                    ...(stored.extractedPages != null ? { extractedPages: stored.extractedPages } : {}),
+                    ...(stored.totalPages != null ? { totalPages: stored.totalPages } : {}),
+                },
+                origin: 'cache',
+                warnings: [],
+            };
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            if (error?.name === 'AbortError') throw error;
+            this.#reportCacheError(error);
+            await this.resultStore.delete?.(resultKey).catch(() => {});
+            return null;
+        }
+    }
+
+    // Stores the trimmed MinerU archive and strips it from the conversion so
+    // the bytes never reach the document pipeline or the derived cache.
+    async #keepResultArchive(resultKey, converted, signal) {
+        if (!converted || typeof converted !== 'object' || !('resultArchive' in converted)) return converted;
+        const { resultArchive, ...rest } = converted;
+        if (!resultKey || !this.resultStore || !resultArchive) return rest;
+        try {
+            await this.resultStore.put(resultKey, {
+                archive: resultArchive,
+                provider: 'mktero',
+                extractedPages: rest.result?.extractedPages,
+                totalPages: rest.result?.totalPages,
+            }, { signal });
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            this.#reportCacheError(error);
+        }
+        return rest;
     }
 
     async #openPDF(itemID, signal) {
@@ -245,8 +350,11 @@ export class MkteroDocumentExtractor {
         if (revision || !this.createCacheKey) {
             return revision ? { snapshot: revision, cacheKey } : null;
         }
+        // A correction made under any earlier profile is still the user's
+        // text, so every earlier profile is searched, not only those whose
+        // cached Markdown can be reused.
         const visited = new Set([cacheKey]);
-        for (const parserProfile of MINERU_COMPATIBLE_CACHE_PROFILE_IDS) {
+        for (const parserProfile of [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru]) {
             const legacyKey = await this.createCacheKey(fileData, {
                 parserProfile,
             });
@@ -428,6 +536,9 @@ function createResult(
     if (parsedResult.userEdited) extracted.userEdited = true;
     if (Array.isArray(parsedResult.chromeRanges)) {
         extracted.chromeRanges = parsedResult.chromeRanges;
+    }
+    if (typeof parsedResult.documentStructure === 'string') {
+        extracted.documentStructure = parsedResult.documentStructure;
     }
     return extracted;
 }

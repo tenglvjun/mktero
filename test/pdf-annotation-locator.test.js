@@ -581,6 +581,42 @@ test('cancels lazy PDF.js work on locator disposal without a caller signal', asy
     assert.equal(destroyCalls, 1);
 });
 
+test('indexes PDF bytes once for a conversion and the annotation index', async () => {
+    let extractCalls = 0;
+    const stored = new Map();
+    const locator = new PDFAnnotationLocator({
+        engine: {
+            profile: 'test-profile',
+            async extract() {
+                extractCalls++;
+                return { profile: 'test-profile', pages: [{ pageIndex: 0, rawText: 'Body', items: [] }] };
+            },
+            dispose() {},
+        },
+        cache: {
+            async get(key) { return stored.get(key) || null; },
+            async put(key, value) { stored.set(key, value); },
+        },
+        createSourceHash: () => 'b'.repeat(64),
+    });
+    const fileData = new Uint8Array([1]);
+    // Concurrent readers share one task; a later reader gets the stored index.
+    const [index, prepared] = await Promise.all([
+        locator.indexFileData(fileData),
+        locator.prepare(42, { fileData }),
+    ]);
+    assert.equal(index.pages[0].rawText, 'Body');
+    assert.equal(prepared, index);
+    assert.equal((await locator.indexFileData(fileData)).pages[0].rawText, 'Body');
+    assert.equal(extractCalls, 1);
+
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(locator.indexFileData(fileData, { signal: controller.signal }), error => error?.name === 'AbortError');
+    locator.dispose();
+    await assert.rejects(locator.indexFileData(fileData), error => error?.code === 'MKTERO_PDF_INDEX_UNAVAILABLE');
+});
+
 test('does not start PDF.js after disposal during source hashing', async () => {
     let resolveHash;
     let extractCalls = 0;

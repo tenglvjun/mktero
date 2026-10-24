@@ -93,7 +93,7 @@ export async function finalizeRestoredDocument(input, draft, { prepare, hash, si
 }
 
 function publicDocument(prepared) {
-    const { blocks, pages, providerState, detailedLayout, contentList, figureTables,
+    const { blocks, pages, providerState, detailedLayout, layout, contentList, figureTables,
         ...document } = prepared;
     return document;
 }

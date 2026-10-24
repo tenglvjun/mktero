@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "id": "oliveira-2021-modelling",
+  "archiveSha256": "c95ae11e06aff429d7eabb274c662d25483c39da126418491f03efb66fb9c8d0",
+  "pages": 14,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Figure 1.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        257,
+        282,
+        552,
+        488
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Figure 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        117,
+        378,
+        938,
+        763
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Figure 3.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 1,
+      "bbox": [
+        126,
+        57,
+        930,
+        309
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Figure 4.",
+      "panels": 2,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        122,
+        64,
+        926,
+        386
+      ]
+    },
+    {
+      "pageIndex": 5,
+      "label": "Figure 5.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        121,
+        499,
+        925,
+        869
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "Figure 6.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        121,
+        61,
+        925,
+        428
+      ]
+    },
+    {
+      "pageIndex": 9,
+      "label": "Figure 8.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        255,
+        59,
+        694,
+        323
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": "Figure 10.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        739,
+        329,
+        935,
+        473
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 8,
+      "reason": "ambiguous-caption"
+    },
+    {
+      "pageIndex": 11,
+      "reason": "caption-overlap"
+    },
+    {
+      "pageIndex": 13,
+      "reason": "foreign-content-overlap"
+    }
+  ]
+}

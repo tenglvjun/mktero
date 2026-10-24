@@ -1,6 +1,7 @@
 import { concatenateUint8Arrays, toUint8Array } from './binary.js';
 import { MINERU_BATCH_OPTIONS, MINERU_FILE_OPTIONS } from './parser-profile.js';
 import { extractMinerUResultFromZip } from './zip-markdown.js';
+import { tryCreateMinerUResultArchive } from './result-archive.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import { CONVERSION_PROGRESS } from '../core/conversion-progress.js';
 
@@ -124,6 +125,7 @@ export class MinerUClient {
         apiKey,
         task,
         onProgress = () => {},
+        includeArchive = false,
         signal,
     }) {
         const token = String(apiKey || '').trim();
@@ -167,6 +169,7 @@ export class MinerUClient {
         throwIfAborted(signal);
         onProgress(CONVERSION_PROGRESS.COMPLETE);
         const totalPages = completed.extract_progress?.total_pages ?? null;
+        const resultArchive = includeArchive ? tryCreateMinerUResultArchive(archive) : null;
         return {
             markdown,
             assets: typeof extracted === 'string' ? [] : extracted.assets || [],
@@ -174,10 +177,11 @@ export class MinerUClient {
             contentList: typeof extracted === 'string'
                 ? []
                 : extracted.contentList || [],
-            ...(typeof extracted === 'string' || !extracted.detailedLayout
-                ? {} : { detailedLayout: extracted.detailedLayout }),
+            ...(typeof extracted === 'string' || !extracted.layout
+                ? {} : { layout: extracted.layout }),
             extractedPages: totalPages,
             totalPages,
+            ...(resultArchive ? { resultArchive } : {}),
         };
     }
 

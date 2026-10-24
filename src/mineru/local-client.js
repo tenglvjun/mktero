@@ -11,6 +11,7 @@ import {
 } from './local-endpoint.js';
 import { extractMinerULocalResultFromZip } from './local-result.js';
 import { DEFAULT_MAX_ARCHIVE_BYTES } from './mineru-client.js';
+import { tryCreateMinerUResultArchive } from './result-archive.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 3_000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 600;
@@ -69,6 +70,7 @@ export class MinerULocalClient {
         apiKey,
         fileName,
         fileData,
+        includeArchive = false,
         onProgress = () => {},
         signal,
     }) {
@@ -140,7 +142,10 @@ export class MinerULocalClient {
         }
         throwIfAborted(signal);
         onProgress(CONVERSION_PROGRESS.COMPLETE);
-        return extracted;
+        // The trimmed archive lets a later document pipeline read this
+        // result again without the service.
+        const resultArchive = includeArchive ? tryCreateMinerUResultArchive(archive) : null;
+        return resultArchive ? { ...extracted, resultArchive } : extracted;
     }
 
     async #assertTier(base, token, signal) {

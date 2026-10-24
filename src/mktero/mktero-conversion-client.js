@@ -1,5 +1,6 @@
 import { toUint8Array } from '../mineru/binary.js';
 import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
+import { tryCreateMinerUResultArchive } from '../mineru/result-archive.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import { CONVERSION_PROGRESS } from '../core/conversion-progress.js';
 import { sha256Hex } from '../core/sha256.js';
@@ -114,6 +115,7 @@ export class MkteroConversionClient {
         fileData,
         metadata = null,
         onProgress = () => {},
+        includeArchive = false,
         signal,
     }) {
         if (typeof getAccessToken !== 'function') {
@@ -183,10 +185,12 @@ export class MkteroConversionClient {
             throwIfAborted(signal);
 
             const result = this.extractResultFromZip(archive);
+            const resultArchive = includeArchive ? tryCreateMinerUResultArchive(archive) : null;
             return {
                 result,
                 origin: 'network',
                 warnings: [],
+                ...(resultArchive ? { resultArchive } : {}),
             };
         }
         catch (error) {
