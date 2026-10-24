@@ -299,10 +299,15 @@ test('chart data MinerU read follows the chart in a collapsed section', async ()
         ] },
     ])) }).markdown;
     assert.match(verbatim, /<!-- mktero-section: chart-data -->\n\n````text\nyear, value\n2020, 3\n```\n````\n\n<!-- \/mktero-section -->/u);
-    // Data that is not a table is code, never markup.
+    // Data that is not a table is code, never markup. Parse the document:
+    // a tag regexp misses case and attributes.
     assert.match(verbatim, /```text\n<script>x<\/script>\n```/u);
     const { renderMarkdownHTML } = await import('../src/markdown/markdown-html.js');
-    assert.doesNotMatch(renderMarkdownHTML(verbatim), /<script>/u);
+    const { parseHTML } = await import('linkedom');
+    const { document } = parseHTML(`<html><body>${renderMarkdownHTML(verbatim)}</body></html>`);
+    assert.equal(document.querySelector('script'), null);
+    const renderedCode = [...document.querySelectorAll('code')].map(node => node.textContent).join('\n');
+    assert.equal(renderedCode.includes('<script>x</script>'), true);
 });
 
 test('a raised mark becomes math only with literal TeX characters', () => {
