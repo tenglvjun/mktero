@@ -11291,3 +11291,138 @@ test('editing a paragraph hides its footnote link and does not break the note', 
     editor.destroy();
     dom.window.close();
 });
+
+function createCaptionSelectionEditor(markdown) {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', { pretendToBeVisual: true });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => 'blob:mktero-caption-selection',
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    // A point in the rendered caption: the occurrence of `needle` (visible
+    // text only), at its start or end.
+    const point = (caption, needle, { end = false, occurrence = 0 } = {}) => {
+        const walker = document.createTreeWalker(caption, dom.window.NodeFilter.SHOW_TEXT);
+        let seen = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (node.parentElement.closest('annotation')) continue;
+            let index = node.textContent.indexOf(needle);
+            while (index >= 0) {
+                if (seen++ === occurrence) return [node, end ? index + needle.length : index];
+                index = node.textContent.indexOf(needle, index + 1);
+            }
+        }
+        throw new Error(`No ${needle} in the caption`);
+    };
+    const select = (caption, from, to) => {
+        const range = document.createRange();
+        if (!from) range.selectNodeContents(caption);
+        else {
+            range.setStart(...point(caption, from.text, from));
+            range.setEnd(...point(caption, to.text, { ...to, end: true }));
+        }
+        document.getSelection().removeAllRanges();
+        document.getSelection().addRange(range);
+        return selectedMarkdownAnnotation(view, []);
+    };
+    const close = () => {
+        editor.destroy();
+        dom.window.close();
+    };
+    return { document, editor, view, select, close };
+}
+
+const B_EPSILON_CAPTION = 'Figure 1: A $B^{\\varepsilon}$ -tree. Each node is roughly of size B, and $\\varepsilon$ controls '
+    + 'how much of an internal node\'s space is used for pivots ( $B^{\\varepsilon}$ ). As in a B-tree, items are '
+    + 'stored in leaves, and the height of the tree is logarithmic (here $B^{\\varepsilon}$ ).';
+
+test('maps a selection across formulas in a figure caption to its source', () => {
+    const markdown = `Before.\n\n![${B_EPSILON_CAPTION}](images/figure.png)\n\nAfter.`;
+    const { document, view, select, close } = createCaptionSelectionEditor(markdown);
+    const caption = document.querySelector('.mktero-figure figcaption');
+    const sourceOf = selection => selection.ranges.map(range => view.state.sliceDoc(range.from, range.to)).join('');
+
+    const whole = select(caption);
+    assert.equal(sourceOf(whole), B_EPSILON_CAPTION);
+
+    // From the start of the description, across the first formula.
+    const fromStart = select(caption, { text: 'A' }, { text: 'internal' });
+    assert.equal(sourceOf(fromStart), 'A $B^{\\varepsilon}$ -tree. Each node is roughly of size B, and '
+        + '$\\varepsilon$ controls how much of an internal');
+    // From the label.
+    const fromLabel = select(caption, { text: 'Figure' }, { text: 'Each' });
+    assert.equal(sourceOf(fromLabel), 'Figure 1: A $B^{\\varepsilon}$ -tree. Each');
+    // A short word the caption repeats maps to the occurrence selected.
+    const second = select(caption, { text: 'B-tree', occurrence: 0 }, { text: 'B-tree', occurrence: 0 });
+    assert.equal(sourceOf(second), 'B-tree');
+    assert.equal(second.ranges[0].from, markdown.indexOf('B-tree'));
+    const node = select(caption, { text: 'node', occurrence: 1 }, { text: 'node', occurrence: 1 });
+    assert.equal(node.ranges[0].from, markdown.indexOf('node', markdown.indexOf('node') + 1));
+    close();
+});
+
+test('maps a caption with escaped TeX and a caption line by position', () => {
+    // EvoBrain: the image description escapes the backslash of \ldots.
+    const evobrain = '![Fig. 2. The backbone is progressively adapted from $M_{0}$ to $M_{1},\\\\ldots,M_{N}$ , '
+        + 'while task heads are attached.](images/evobrain.jpg)';
+    let editor = createCaptionSelectionEditor(evobrain);
+    let caption = editor.document.querySelector('.mktero-figure figcaption');
+    const evo = editor.select(caption, { text: 'adapted' }, { text: 'while' });
+    assert.equal(editor.view.state.sliceDoc(evo.ranges[0].from, evo.ranges.at(-1).to),
+        'adapted from $M_{0}$ to $M_{1},\\\\ldots,M_{N}$ , while');
+    editor.close();
+
+    // A caption line below its image (BrainBench-style Figure 4 with math).
+    const captionLine = 'Figure 4. Accuracy of every model when $k = 3$ and when $k = 5$ on each task.';
+    const markdown = `![](images/figure-4.png)\n${captionLine}`;
+    editor = createCaptionSelectionEditor(markdown);
+    caption = editor.document.querySelector('figcaption');
+    assert.ok(caption, 'the caption line is rendered as the figure caption');
+    const line = editor.select(caption, { text: 'Accuracy' }, { text: 'task.' });
+    assert.equal(editor.view.state.sliceDoc(line.ranges[0].from, line.ranges.at(-1).to),
+        'Accuracy of every model when $k = 3$ and when $k = 5$ on each task.');
+    editor.close();
+});
+
+test('maps a caption to the source it was rendered from when a block has several', () => {
+    // The image description is a table caption; the figure caption shown is
+    // the line below the image.
+    const tableCaption = 'Table 2. Histogram of BMI with $n = 40$.';
+    const figureCaption = 'Figure 1. Histogram of BMI with $n = 40$ classification.';
+    const markdown = [
+        '<table><tr><td>Category</td><td>BMI</td></tr></table>',
+        '',
+        `![${tableCaption}](images/histogram.jpg)`,
+        figureCaption,
+    ].join('\n');
+    let editor = createCaptionSelectionEditor(markdown);
+    let caption = editor.document.querySelector('.mktero-figure figcaption');
+    assert.equal(caption.textContent.startsWith('Figure 1.'), true);
+    const selected = editor.select(caption, { text: 'Histogram' }, { text: 'classification.' });
+    assert.equal(selected.ranges[0].from, markdown.indexOf('Histogram', markdown.indexOf('Figure 1.')));
+    assert.equal(editor.view.state.sliceDoc(selected.ranges[0].from, selected.ranges.at(-1).to),
+        'Histogram of BMI with $n = 40$ classification.');
+    editor.close();
+
+    // Panels without descriptions share the caption line that follows them.
+    const shared = '![](images/a.png)\n![](images/b.png)\n\nFigure 5. Two panels sharing one caption with $w$.';
+    editor = createCaptionSelectionEditor(shared);
+    caption = editor.document.querySelector('figcaption');
+    const sharedSelection = editor.select(caption, { text: 'Two' }, { text: 'caption' });
+    assert.equal(editor.view.state.sliceDoc(sharedSelection.ranges[0].from, sharedSelection.ranges.at(-1).to),
+        'Two panels sharing one caption');
+    editor.close();
+});
+
+test('opens the selection actions for a caption selection that crosses a formula', () => {
+    const markdown = `![${B_EPSILON_CAPTION}](images/figure.png)`;
+    const { document, select, close } = createCaptionSelectionEditor(markdown);
+    const caption = document.querySelector('.mktero-figure figcaption');
+    assert.ok(select(caption, { text: 'A' }, { text: 'internal' }));
+    caption.dispatchEvent(new document.defaultView.MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    assert.ok(document.querySelector('.mktero-markdown-selection-actions'));
+    close();
+});

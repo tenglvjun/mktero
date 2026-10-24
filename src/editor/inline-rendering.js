@@ -2570,6 +2570,16 @@ function selectedRenderedMarkdownAnnotation(
     // A figure caption is rendered from the image description; selecting it
     // annotates the caption range instead of trying to match the rendered
     // text (which includes math) against the Markdown source.
+    const mapped = selectedCaptionByPosition(start, range, source);
+    if (mapped) {
+        const ranges = subtractChromeRanges({
+            from: sourceFrom + mapped.from,
+            to: sourceFrom + mapped.to,
+        }, chromeRanges);
+        return ranges.length && mapped.text.length <= MAX_PDF_ANNOTATION_TEXT_LENGTH
+            ? { text: mapped.text, ranges }
+            : null;
+    }
     const captionRange = renderedFigureCaptionRange(range, source);
     if (captionRange) {
         const selectedCaption = selectedRenderedCaptionRange(
@@ -2733,6 +2743,147 @@ function compactRenderedText(value) {
 
 function normalizeVisibleText(value) {
     return String(value || '').replace(/\s+/gu, ' ').trim();
+}
+
+// A selection inside a rendered figure caption, mapped to its Markdown by
+// position: each caption is matched to the source it was rendered from (an
+// image description or a caption line), then every selected character maps
+// to its own source character and a selected formula to its whole `$…$`.
+// No text search is involved, so formulas, repeated words, and several
+// captions in one block all map exactly. Returns null when the caption
+// cannot be aligned with its source.
+function selectedCaptionByPosition(container, range, source) {
+    const caption = captionElementOf(range.startContainer);
+    if (!caption || caption !== captionElementOf(range.endContainer) || !container.contains(caption)) return null;
+    const captions = [...container.querySelectorAll('figcaption')];
+    const candidates = figureCaptionSourceCandidates(source);
+    const used = new Set();
+    let alignment = null;
+    for (const element of captions) {
+        const atoms = renderedCaptionAtoms(element);
+        let found = null;
+        for (const [index, candidate] of candidates.entries()) {
+            if (used.has(index)) continue;
+            const aligned = alignCaptionAtoms(atoms, source, candidate);
+            if (aligned) {
+                found = { index, atoms: aligned };
+                break;
+            }
+        }
+        if (found) used.add(found.index);
+        if (element === caption) {
+            alignment = found?.atoms || null;
+            break;
+        }
+    }
+    if (!alignment) return null;
+    let from = Infinity;
+    let to = -Infinity;
+    for (const atom of alignment) {
+        if (!atomSelected(range, atom)) continue;
+        from = Math.min(from, atom.from);
+        to = Math.max(to, atom.to);
+    }
+    if (!Number.isFinite(from) || to <= from) return null;
+    const expanded = expandRangeToMathBoundaries(source, from, to);
+    const text = normalizeVisibleText(createVisibleMarkdownTextIndex(
+        source.slice(expanded.from, expanded.to)
+    ).text);
+    return text ? { from: expanded.from, to: expanded.to, text } : null;
+}
+
+function captionElementOf(node) {
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    return element?.closest?.('figcaption') || null;
+}
+
+// Where a block's captions can come from: every image description and every
+// other non-blank line, in source order.
+function figureCaptionSourceCandidates(source) {
+    const candidates = collectFigureImageNodes(source)
+        .filter(image => image.captionRange.to > image.captionRange.from)
+        .map(image => image.captionRange);
+    let offset = 0;
+    for (const line of source.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('![') && !trimmed.startsWith('<')) {
+            const from = offset + line.indexOf(trimmed);
+            candidates.push({ from, to: from + trimmed.length });
+        }
+        offset += line.length + 1;
+    }
+    return candidates.sort((left, right) => left.from - right.from);
+}
+
+// The caption as the reader sees it: each visible non-space character with
+// its text node and offset, and each rendered formula as one atom.
+function renderedCaptionAtoms(caption) {
+    const atoms = [];
+    const document = caption.ownerDocument;
+    const walker = document.createTreeWalker(caption, document.defaultView.NodeFilter.SHOW_ELEMENT
+        | document.defaultView.NodeFilter.SHOW_TEXT);
+    let skipping = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (skipping && skipping.contains(node)) continue;
+        skipping = null;
+        if (node.nodeType === 1) {
+            if (node.classList?.contains('math-inline')) {
+                atoms.push({ math: true, element: node });
+                skipping = node;
+            }
+            continue;
+        }
+        if (hiddenMathTextNode(node)) continue;
+        const text = node.textContent || '';
+        for (let index = 0; index < text.length; index++) {
+            if (!/\s/u.test(text[index])) atoms.push({ math: false, node, offset: index, character: text[index] });
+        }
+    }
+    return atoms;
+}
+
+// Pairs every rendered atom with its source: a character with the same
+// source character (a source backslash may be an escape the reader does not
+// show), a formula with the next `$…$` of the source. Fails, returning null,
+// when any visible character or formula does not line up.
+function alignCaptionAtoms(atoms, source, captionRange) {
+    const caption = source.slice(captionRange.from, captionRange.to);
+    const formulas = findInlineMathMatches(caption);
+    if (formulas.length !== atoms.filter(atom => atom.math).length) return null;
+    const aligned = [];
+    let cursor = 0;
+    let formula = 0;
+    const skippable = character => /\s/u.test(character) || character === '\\';
+    for (const atom of atoms) {
+        if (atom.math) {
+            const match = formulas[formula++];
+            for (; cursor < match.start; cursor++) if (!skippable(caption[cursor])) return null;
+            aligned.push({ ...atom, from: captionRange.from + match.start, to: captionRange.from + match.end });
+            cursor = match.end;
+            continue;
+        }
+        const next = formulas[formula]?.start ?? caption.length;
+        while (cursor < next && caption[cursor] !== atom.character) {
+            if (!skippable(caption[cursor])) return null;
+            cursor++;
+        }
+        if (cursor >= next) return null;
+        aligned.push({ ...atom, from: captionRange.from + cursor, to: captionRange.from + cursor + 1 });
+        cursor++;
+    }
+    for (; cursor < caption.length; cursor++) if (!skippable(caption[cursor])) return null;
+    return aligned;
+}
+
+function atomSelected(range, atom) {
+    try {
+        if (atom.math) return range.intersectsNode(atom.element);
+        return range.comparePoint(atom.node, atom.offset) >= 0
+            && range.comparePoint(atom.node, atom.offset + 1) <= 0;
+    }
+    catch {
+        return false;
+    }
 }
 
 function renderedFigureCaptionRange(range, source) {
