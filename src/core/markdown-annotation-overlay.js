@@ -8,6 +8,7 @@ import {
 } from '../markdown/pdf-annotation-text.js';
 import {
     createVisibleMarkdownTextIndex,
+    expandMarkdownRangeToMathBoundaries,
 } from '../markdown/markdown-visible-text.js';
 import {
     leadingCodePoints,
@@ -16,6 +17,12 @@ import {
     trailingCodePoints,
 } from './pdf-annotation.js';
 import { resolvePDFPageIndexHint } from './markdown-source-map.js';
+import {
+    createMathCompactTextIndex,
+    findMathCompactOccurrences,
+    hasMathMarkup,
+    mathCompactText,
+} from '../markdown/math-compact-text.js';
 
 const MAX_MATCHABLE_MARKDOWN_LENGTH = 8 * 1024 * 1024;
 const MAX_MATCH_CANDIDATES = 10_000;
@@ -72,6 +79,7 @@ export class MarkdownAnnotationOverlay {
         const index = createVisibleMarkdownTextIndex(markdown);
         let normalizedIndex = null;
         let dehyphenatedIndex = null;
+        let mathCompactIndex = null;
         const matched = [];
         const unmatched = [];
         let previousSourceTo = 0;
@@ -85,9 +93,12 @@ export class MarkdownAnnotationOverlay {
             const candidates = candidateResult.offsets;
             const exactRanges = candidateResult.truncated
                 ? []
-                : candidates.map(candidate => expandPdfAnnotationSourceRange(
+                : candidates.map(candidate => expandMarkdownRangeToMathBoundaries(
                     markdown,
-                    index.sourceRange(candidate, annotation.text.length)
+                    expandPdfAnnotationSourceRange(
+                        markdown,
+                        index.sourceRange(candidate, annotation.text.length)
+                    )
                 ));
             const exactPageRanges = selectPageCandidates(
                 exactRanges,
@@ -143,9 +154,12 @@ export class MarkdownAnnotationOverlay {
             const normalizedRanges = normalizedCandidateResult.truncated
                 ? []
                 : normalizedCandidates.map(candidate => (
-                    normalizedIndex.sourceRange(
-                        candidate,
-                        normalizedText.length
+                    expandMarkdownRangeToMathBoundaries(
+                        markdown,
+                        normalizedIndex.sourceRange(
+                            candidate,
+                            normalizedText.length
+                        )
                     )
                 ));
             const normalizedPageRanges = selectPageCandidates(
@@ -203,9 +217,12 @@ export class MarkdownAnnotationOverlay {
             const dehyphenatedRanges = dehyphenatedCandidateResult.truncated
                 ? []
                 : dehyphenatedCandidates.map(candidate => (
-                    dehyphenatedIndex.sourceRange(
-                        candidate,
-                        dehyphenatedText.length
+                    expandMarkdownRangeToMathBoundaries(
+                        markdown,
+                        dehyphenatedIndex.sourceRange(
+                            candidate,
+                            dehyphenatedText.length
+                        )
                     )
                 ));
             const dehyphenatedPageRanges = selectPageCandidates(
@@ -230,7 +247,45 @@ export class MarkdownAnnotationOverlay {
                 );
                 continue;
             }
-            const ambiguous = candidateResult.truncated
+            // A formula's TeX and its PDF glyphs only agree once both are
+            // reduced to the symbols they print. This runs last, and only for
+            // text that carries math, so prose keeps its stricter matches.
+            let mathCompactCandidates = [];
+            if (!candidates.length
+                && !normalizedCandidates.length
+                && !dehyphenatedCandidates.length
+                && hasMathMarkup(annotation.text)) {
+                mathCompactIndex ||= createMathCompactTextIndex(index.text);
+                mathCompactCandidates = mathCompactAnnotationRanges(
+                    markdown,
+                    index,
+                    mathCompactIndex,
+                    annotation.text
+                );
+                const mathCompactRange = selectCandidateRange(
+                    selectPageCandidates(
+                        mathCompactCandidates,
+                        annotation.pageIndex,
+                        sourceMap,
+                        markdown.length
+                    ),
+                    previousSourceTo
+                );
+                if (mathCompactRange) {
+                    matched.push(resolvedAnnotation(
+                        annotation,
+                        'normalized',
+                        mathCompactRange
+                    ));
+                    previousSourceTo = Math.max(
+                        previousSourceTo,
+                        mathCompactRange.to
+                    );
+                    continue;
+                }
+            }
+            const ambiguous = mathCompactCandidates.length > 1
+                || candidateResult.truncated
                 || candidates.length
                 || normalizedCandidateResult.truncated
                 || normalizedCandidates.length
@@ -371,4 +426,21 @@ function selectPageCandidates(ranges, pageIndex, sourceMap, documentLength) {
 
 export function createEmptyAnnotationOverlay() {
     return { matched: [], unmatched: [] };
+}
+
+// Maps each math-compact occurrence of `text` through the visible index back
+// to Markdown, grown to whole formulas so no delimiter is left behind.
+function mathCompactAnnotationRanges(markdown, visibleIndex, compactIndex, text) {
+    const key = mathCompactText(text);
+    const offsets = findMathCompactOccurrences(compactIndex, key);
+    if (!offsets) return [];
+    return offsets.flatMap(offset => {
+        const visibleRange = compactIndex.sourceRange(offset, key.length);
+        if (!visibleRange) return [];
+        const sourceRange = visibleIndex.sourceRange(
+            visibleRange.from,
+            visibleRange.to - visibleRange.from
+        );
+        return [expandMarkdownRangeToMathBoundaries(markdown, sourceRange)];
+    });
 }

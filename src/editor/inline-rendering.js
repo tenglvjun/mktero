@@ -75,6 +75,7 @@ import {
 } from '../markdown/chrome-ranges.js';
 import {
     createVisibleMarkdownTextIndex,
+    expandMarkdownRangeToMathBoundaries,
     visibleMarkdownTextForRanges,
 } from '../markdown/markdown-visible-text.js';
 import {
@@ -2452,8 +2453,18 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
     const renderedIntersections = intersectingRenderedContent(view, range);
     if (renderedIntersections === null) return null;
     try {
-        const first = view.posAtDOM(range.startContainer, range.startOffset);
-        const second = view.posAtDOM(range.endContainer, range.endOffset);
+        const first = selectionMarkdownPosition(
+            view,
+            range.startContainer,
+            range.startOffset,
+            'start'
+        );
+        const second = selectionMarkdownPosition(
+            view,
+            range.endContainer,
+            range.endOffset,
+            'end'
+        );
         const selectionFrom = Math.min(first, second);
         const selectionTo = Math.max(first, second);
         const leadingWhitespace = selectedText.length
@@ -2488,9 +2499,34 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
     }
 }
 
+// A selection boundary inside a math widget maps to the whole formula's
+// source range rather than to the widget's start position in CodeMirror.
+function selectionMarkdownPosition(view, node, offset, side) {
+    const container = renderedSelectionContainer(node, view);
+    if (container && isRenderedMathContainer(container)) {
+        const markdownFrom = Number(container.dataset.markdownFrom);
+        const markdownTo = Number(container.dataset.markdownTo);
+        if (Number.isSafeInteger(markdownFrom)
+            && Number.isSafeInteger(markdownTo)
+            && markdownTo > markdownFrom) {
+            if (node !== container) {
+                return side === 'start' ? markdownFrom : markdownTo;
+            }
+            if (side === 'start' && offset === 0) return markdownFrom;
+            if (side === 'end' && offset >= container.childNodes.length) {
+                return markdownTo;
+            }
+        }
+    }
+    return view.posAtDOM(node, offset);
+}
+
 function annotationSelectionWithoutChrome(view, from, to, chromeRanges) {
     const markdown = view.state.doc.toString();
-    const expanded = expandRangeToMathBoundaries(markdown, from, to);
+    const expanded = expandMarkdownRangeToMathBoundaries(
+        markdown,
+        { from, to }
+    );
     const ranges = subtractChromeRanges(expanded, chromeRanges);
     if (!ranges.length) return null;
     const text = visibleMarkdownTextForRanges(
@@ -2704,17 +2740,7 @@ function selectedRenderedCaptionRange(
 // source, which leaves a stray delimiter in the extracted text and breaks the
 // PDF lookup. Growing the range to the math boundary keeps the text plain.
 function expandRangeToMathBoundaries(source, from, to) {
-    let start = from;
-    let end = to;
-    const matches = [
-        ...findDisplayMathMatches(source),
-        ...findInlineMathMatches(source),
-    ];
-    for (const match of matches) {
-        if (start > match.start && start < match.end) start = match.start;
-        if (end > match.start && end < match.end) end = match.end;
-    }
-    return { from: start, to: end };
+    return expandMarkdownRangeToMathBoundaries(source, { from, to });
 }
 
 function createCompactVisibleTextIndex(text) {

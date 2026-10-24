@@ -2522,3 +2522,45 @@ function createNodeIOUtils() {
         },
     };
 }
+
+test('locates a TeX selection against the glyphs of the PDF text layer', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'where K is the operational knowledge made available to the agent as '
+                + 'explicit operating context, so that Eq. (3)',
+            { y: 700, width: 900, hasEOL: true }
+        ),
+        createTextItem('becomes at ∼ πθ (a | τ, ht, H, K).', {
+            y: 686,
+            width: 400,
+            hasEOL: true,
+        }),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'so that Eq. (3) becomes a_{t} \\sim \\pi_{\\theta}(a \\mid \\tau, h_{t}, H, \\mathcal{K})',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 2);
+    locator.dispose();
+});
+
+test('keeps an unmatched TeX selection as not found', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('An unrelated paragraph about agents and benchmarks.', {
+            width: 600,
+            hasEOL: true,
+        }),
+    ]]);
+
+    await assert.rejects(
+        locator.locate(42, 'becomes a_{t} \\sim \\pi_{\\theta}(a \\mid \\tau)', {
+            pdfPageIndexHint: 0,
+        }),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND'
+    );
+    locator.dispose();
+});

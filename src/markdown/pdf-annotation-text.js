@@ -124,7 +124,7 @@ const PDF_ANNOTATION_SYMBOL_REPLACEMENTS = [
     { pattern: /<=/gu, text: '≤' },
     { pattern: /!=/gu, text: '≠' },
 ];
-const LATEX_MATH_SYMBOLS = new Map([
+export const LATEX_MATH_SYMBOLS = new Map([
     ['alpha', 'α'],
     ['beta', 'β'],
     ['gamma', 'γ'],

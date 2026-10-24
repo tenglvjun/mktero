@@ -1,4 +1,5 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
+import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
 import { navigationShortcutLabels } from './reader-shortcuts.js';
 import {
     enhanceRenderedCodeBlocks,
@@ -76,7 +77,7 @@ import {
     computeVisibleChromeRanges,
     createMarkdownAnalysisCache,
 } from '../markdown/markdown-analysis-cache.js';
-import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
+import { createVisibleMarkdownTextIndex, expandMarkdownRangeToMathBoundaries } from '../markdown/markdown-visible-text.js';
 import {
     createMarkdownFragmentID,
     createMarkdownReadingPositionAnchor,
@@ -6987,7 +6988,11 @@ class MarkdownTabView {
             || range.to > markdownLength) {
             return String(annotation?.text || '');
         }
-        return markdown.slice(range.from, range.to);
+        const completeRange = expandMarkdownRangeToMathBoundaries(
+            markdown,
+            range
+        );
+        return markdown.slice(completeRange.from, completeRange.to);
     }
 
     noteButtonAttributes(annotation, offset) {
