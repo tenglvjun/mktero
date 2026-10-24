@@ -9,6 +9,7 @@ import {
 } from './pdf-annotation.js';
 import {
     createVisibleMarkdownTextIndex,
+    expandMarkdownRangeToMathBoundaries,
     visibleMarkdownTextForRanges,
 } from '../markdown/markdown-visible-text.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
@@ -595,12 +596,15 @@ function resolveAnnotations(markdown, annotations) {
     let visibleIndex = null;
     let normalizedIndex = null;
     for (const annotation of annotations) {
+        const expandedRanges = annotation.ranges.map(range => (
+            expandMarkdownRangeToMathBoundaries(markdown, range)
+        ));
         if (markdownAnnotationRangeMatchesSource(
             markdown,
-            annotation.ranges,
+            expandedRanges,
             annotation.text
         )) {
-            matched.push(resolvedAnnotation(annotation, annotation.ranges));
+            matched.push(resolvedAnnotation(annotation, expandedRanges));
             continue;
         }
         visibleIndex ||= createVisibleMarkdownTextIndex(markdown);
@@ -620,7 +624,10 @@ function resolveAnnotations(markdown, annotations) {
             if (selected !== null) {
                 matched.push(resolvedAnnotation(
                     annotation,
-                    visibleIndex.sourceRange(selected, annotation.text.length)
+                    expandMarkdownRangeToMathBoundaries(
+                        markdown,
+                        visibleIndex.sourceRange(selected, annotation.text.length)
+                    )
                 ));
                 continue;
             }
@@ -628,9 +635,12 @@ function resolveAnnotations(markdown, annotations) {
         if (!candidates.truncated && candidates.offsets.length === 1) {
             matched.push(resolvedAnnotation(
                 annotation,
-                visibleIndex.sourceRange(
-                    candidates.offsets[0],
-                    annotation.text.length
+                expandMarkdownRangeToMathBoundaries(
+                    markdown,
+                    visibleIndex.sourceRange(
+                        candidates.offsets[0],
+                        annotation.text.length
+                    )
                 )
             ));
             continue;
@@ -652,9 +662,12 @@ function resolveAnnotations(markdown, annotations) {
                 && normalizedCandidates.offsets.length === 1) {
                 matched.push(resolvedAnnotation(
                     annotation,
-                    normalizedIndex.sourceRange(
-                        normalizedCandidates.offsets[0],
-                        normalizedText.length
+                    expandMarkdownRangeToMathBoundaries(
+                        markdown,
+                        normalizedIndex.sourceRange(
+                            normalizedCandidates.offsets[0],
+                            normalizedText.length
+                        )
                     )
                 ));
                 continue;

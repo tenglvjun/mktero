@@ -694,17 +694,40 @@ function renderCaptionMath(source, mathBudget, target = 'mktero') {
 // the reader's limits and fallback, everything else is escaped text.
 export function renderInlineMathTextHTML(text) {
     const source = String(text || '');
-    const matches = findInlineMathMatches(source);
+    const matches = selectNonOverlappingRanges(
+        findDisplayMathMatches(source),
+        findInlineMathMatches(source)
+    );
     if (!matches.length) return escapeHTML(source);
     const mathBudget = createMathRenderBudget();
     let html = '';
     let offset = 0;
     for (const match of matches) {
         html += escapeHTML(source.slice(offset, match.start));
-        html += renderMath(match.text, false, mathBudget);
+        // Quotes and outline labels are single-line surfaces. Render display
+        // formulas inline so their delimiters disappear without expanding the
+        // side panel to display-math width or height. \tag is display-only,
+        // so lift it out before KaTeX sees the formula.
+        html += renderNoteSurfaceMath(match, mathBudget);
         offset = match.end;
     }
     return html + escapeHTML(source.slice(offset));
+}
+
+const DISPLAY_EQUATION_TAG = /\\tag\*?\{([^{}]{0,32})\}/gu;
+
+function renderNoteSurfaceMath(match, mathBudget) {
+    const display = match.raw?.startsWith('$$') || match.raw?.startsWith('\\[');
+    if (!display) return renderMath(match.text, false, mathBudget);
+    const tags = [];
+    const formula = match.text.replace(DISPLAY_EQUATION_TAG, (_, tag) => {
+        const label = String(tag || '').trim();
+        if (label) tags.push(label);
+        return '';
+    }).replace(/[ \t]*,[ \t]*$/u, '').trim();
+    let html = renderMath(formula || match.text, false, mathBudget);
+    if (tags.length) html += escapeHTML(` (${tags.join(', ')})`);
+    return html;
 }
 
 export function renderTableCaptionContent(caption, mathBudget, target = 'mktero') {

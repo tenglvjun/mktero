@@ -8140,3 +8140,35 @@ test('destroying the view removes the copy listeners', () => {
     assert.equal(editor.watchCount, 0);
     assert.equal(editor.cancelCount, 0);
 });
+
+test('annotationQuoteText prefers the source range over the saved text', () => {
+    const markdown = 'The model $\\hat{G} = \\mu + \\sum_{i}\\beta_{i}g_{i}$ is defined.';
+    const annotation = {
+        text: '\\hat{G} = \\mu + \\sum_{i}\\beta_{i}g_{i}',
+        ranges: [{ from: 10, to: 50 }],
+    };
+    const { view } = createView();
+    const quoteText = view.annotationQuoteText(annotation, markdown.length, markdown);
+    assert.equal(quoteText, '$\\hat{G} = \\mu + \\sum_{i}\\beta_{i}g_{i}$');
+});
+
+test('annotationQuoteText falls back to saved text when ranges are invalid', () => {
+    const markdown = 'Some text';
+    const annotation = {
+        text: 'fallback',
+        ranges: [{ from: 20, to: 30 }],
+    };
+    const { view } = createView();
+    const quoteText = view.annotationQuoteText(annotation, markdown.length, markdown);
+    assert.equal(quoteText, 'fallback');
+});
+
+test('annotationQuoteText falls back to saved text when markdown is empty', () => {
+    const annotation = {
+        text: 'saved text',
+        ranges: [{ from: 0, to: 10 }],
+    };
+    const { view } = createView();
+    const quoteText = view.annotationQuoteText(annotation, 0, '');
+    assert.equal(quoteText, 'saved text');
+});
