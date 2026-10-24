@@ -131,7 +131,7 @@ export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
 
 // How Mktero reads a MinerU result into its reading document. Bump it with
 // any change to the document IR or its Markdown.
-export const MINERU_DOCUMENT_PIPELINE = 'mineru-document-ir-v4';
+export const MINERU_DOCUMENT_PIPELINE = 'mineru-document-ir-v5';
 
 export const MINERU_PARSER_PROFILE_ID = JSON.stringify({
     batch: MINERU_BATCH_OPTIONS,

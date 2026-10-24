@@ -115,8 +115,8 @@
       },
       "textCoverage": {
         "total": 16870,
-        "found": 16870,
-        "ratio": 1
+        "found": 16868,
+        "ratio": 0.9999
       },
       "pageNotes": {
         "total": 3,

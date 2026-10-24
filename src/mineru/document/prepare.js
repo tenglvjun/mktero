@@ -16,6 +16,7 @@ import { groupSections } from './sections.js';
 import { stitchParagraphs } from './stitch.js';
 import { validateDocumentIR } from './ir.js';
 import { attachPDFGeometry } from './pdf-geometry.js';
+import { checkTextAgainstPDF } from './pdf-text-check.js';
 import { createHyphenationVocabulary } from './text.js';
 import { DOCUMENT_STRUCTURE, serializeDocumentIR } from './serialize.js';
 import { createFigureInputFromIR } from './figure-input.js';
@@ -42,6 +43,7 @@ export function buildMinerUDocumentIR(bundle, { pdfText = null } = {}) {
     }
     if (!ir) return null;
     attachPDFGeometry(ir, pdfText);
+    checkTextAgainstPDF(ir, pdfText);
     classifyBlocks(ir);
     attachFloatNotes(ir);
     reassignFloatCaptions(ir);

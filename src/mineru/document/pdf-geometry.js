@@ -17,20 +17,17 @@ export const PDF_GEOMETRY_LIMITS = Object.freeze({
 // in the IR's 0–1000 page units.
 const CONTAINMENT_MARGIN = 4;
 const MAX_FONT_NAME_LENGTH = 128;
+const MAX_ITEM_TEXT_LENGTH = 2_000;
 
 // Attaches `fragment.pdf = { lines, lastFill, firstIndent, fontSize, font }`
 // to the text fragments of every page whose PDF page matches. Pages with
 // such fragments get `geometry: 'line'`; the IR records what was used in
 // `diagnostics.pdfGeometry`. Without a usable index nothing changes.
 export function attachPDFGeometry(ir, pdfText) {
-    const pages = Array.isArray(pdfText?.pages) ? pdfText.pages.slice(0, PDF_GEOMETRY_LIMITS.maxPages) : [];
     const diagnostics = { pages: 0, mismatched: 0, fragments: 0, measured: 0 };
     ir.diagnostics.pdfGeometry = diagnostics;
-    if (!pages.length) return ir;
-    const pdfPages = new Map();
-    for (const page of pages) {
-        if (Number.isSafeInteger(page?.pageIndex) && !pdfPages.has(page.pageIndex)) pdfPages.set(page.pageIndex, page);
-    }
+    const pdfPages = pdfPagesByIndex(pdfText);
+    if (!pdfPages.size) return ir;
     const fragmentsByPage = new Map();
     for (const block of ir.blocks) {
         if (!isMeasurable(block)) continue;
@@ -45,7 +42,7 @@ export function attachPDFGeometry(ir, pdfText) {
         const fragments = fragmentsByPage.get(page.pageIndex);
         const pdfPage = pdfPages.get(page.pageIndex);
         if (!fragments?.length || !pdfPage) continue;
-        const items = pageItems(pdfPage, page);
+        const items = pdfPageItems(pdfPage, page);
         if (!items) {
             diagnostics.mismatched++;
             continue;
@@ -69,9 +66,96 @@ function isMeasurable(block) {
         || block.kind === BLOCK_KIND.REFERENCE || block.role === BLOCK_ROLE.PAGE_NOTE;
 }
 
-// The page's text items as boxes in the IR's 0–1000 units, or null when the
-// PDF page does not have the MinerU page's shape.
-function pageItems(pdfPage, irPage) {
+function pdfPagesByIndex(pdfText) {
+    const pages = Array.isArray(pdfText?.pages) ? pdfText.pages.slice(0, PDF_GEOMETRY_LIMITS.maxPages) : [];
+    const pdfPages = new Map();
+    for (const page of pages) {
+        if (Number.isSafeInteger(page?.pageIndex) && !pdfPages.has(page.pageIndex)) pdfPages.set(page.pageIndex, page);
+    }
+    return pdfPages;
+}
+
+// The text items of every PDF page that has its MinerU page's shape, by page
+// index, as `{ bbox, size, font, text }` in the IR's 0–1000 units.
+export function pdfTextItemsByPage(ir, pdfText) {
+    const pdfPages = pdfPagesByIndex(pdfText);
+    const byPage = new Map();
+    if (!pdfPages.size) return byPage;
+    for (const page of ir.pages) {
+        const pdfPage = pdfPages.get(page.pageIndex);
+        const items = pdfPage ? pdfPageItems(pdfPage, page) : null;
+        if (items) byPage.set(page.pageIndex, items);
+    }
+    return byPage;
+}
+
+// The items whose center lies inside a box, with the containment margin.
+// Page items are sorted by their vertical center, so a box reads only its
+// band of the page.
+export function itemsInBox(bbox, items) {
+    const top = bbox[1] - CONTAINMENT_MARGIN;
+    let low = 0;
+    let high = items.length;
+    while (low < high) {
+        const middle = (low + high) >> 1;
+        if (items[middle].centerY < top) low = middle + 1;
+        else high = middle;
+    }
+    const inside = [];
+    for (let index = low; index < items.length && items[index].centerY <= bbox[3] + CONTAINMENT_MARGIN; index++) {
+        const item = items[index];
+        if (contains(bbox, (item.bbox[0] + item.bbox[2]) / 2, item.centerY)) inside.push(item);
+    }
+    return inside;
+}
+
+// Items grouped into lines, top to bottom, each line left to right: items
+// share a line when their bottoms are within half the smaller item's height.
+export function pdfLines(items) {
+    const sorted = [...items].sort((left, right) => left.bbox[3] - right.bbox[3] || left.bbox[0] - right.bbox[0]);
+    const lines = [];
+    for (const item of sorted) {
+        const height = item.bbox[3] - item.bbox[1];
+        // Lines are made in order of their bottoms; only the last few can
+        // be within reach of this item.
+        const reach = Math.max(2, 0.5 * height);
+        let from = lines.length;
+        while (from > 0 && lines[from - 1].bottom >= item.bbox[3] - reach) from--;
+        let line = null;
+        for (let index = from; index < lines.length && !line; index++) {
+            const candidate = lines[index];
+            if (Math.abs(candidate.bottom - item.bbox[3]) < Math.max(2, 0.5 * Math.min(height, candidate.height))) line = candidate;
+        }
+        if (line) {
+            line.left = Math.min(line.left, item.bbox[0]);
+            line.right = Math.max(line.right, item.bbox[2]);
+            line.height = Math.max(line.height, height);
+            line.items.push(item);
+        }
+        else {
+            lines.push({ bottom: item.bbox[3], height, left: item.bbox[0], right: item.bbox[2], items: [item] });
+        }
+    }
+    lines.sort((left, right) => left.bottom - right.bottom);
+    for (const line of lines) line.items.sort((left, right) => left.bbox[0] - right.bbox[0]);
+    return lines;
+}
+
+// The page's text items as boxes in the IR's 0–1000 units, sorted by their
+// vertical center, or null when the PDF page does not have the MinerU
+// page's shape. Computed once per PDF page and MinerU page size.
+const pageItemsCache = new WeakMap();
+function pdfPageItems(pdfPage, irPage) {
+    if (!pdfPage || typeof pdfPage !== 'object') return null;
+    const key = `${irPage.width}x${irPage.height}`;
+    const cached = pageItemsCache.get(pdfPage);
+    if (cached?.key === key) return cached.items;
+    const items = computePageItems(pdfPage, irPage);
+    pageItemsCache.set(pdfPage, { key, items });
+    return items;
+}
+
+function computePageItems(pdfPage, irPage) {
     const viewport = pdfPage.viewport;
     const transform = viewport?.transform;
     if (!Array.isArray(transform) || transform.length !== 6 || !transform.every(Number.isFinite)
@@ -88,7 +172,7 @@ function pageItems(pdfPage, irPage) {
         const box = itemBox(item, transform, viewport.width, viewport.height);
         if (box) items.push(box);
     }
-    return items;
+    return items.sort((left, right) => left.centerY - right.centerY);
 }
 
 function itemBox(item, viewport, width, height) {
@@ -122,30 +206,18 @@ function itemBox(item, viewport, width, height) {
         size: Math.round(size * 10) / 10,
         font: typeof item.fontName === 'string' ? item.fontName.slice(0, MAX_FONT_NAME_LENGTH) : '',
         length: text.trim().length,
+        text: text.trim().slice(0, MAX_ITEM_TEXT_LENGTH),
+        spaceBefore: /^\s/u.test(text),
+        spaceAfter: /\s$/u.test(text),
+        centerY: (bbox[1] + bbox[3]) / 2,
     };
 }
 
-// Lines of the items inside a fragment, top to bottom: items share a line
-// when their bottoms are within half the smaller item's height.
 function measureFragment(bbox, items) {
-    const inside = items.filter(item => contains(bbox, (item.bbox[0] + item.bbox[2]) / 2, (item.bbox[1] + item.bbox[3]) / 2))
+    const inside = itemsInBox(bbox, items)
         .sort((left, right) => left.bbox[3] - right.bbox[3] || left.bbox[0] - right.bbox[0]);
     if (!inside.length) return null;
-    const lines = [];
-    for (const item of inside) {
-        const height = item.bbox[3] - item.bbox[1];
-        const line = lines.find(candidate => Math.abs(candidate.bottom - item.bbox[3])
-            < Math.max(2, 0.5 * Math.min(height, candidate.height)));
-        if (line) {
-            line.left = Math.min(line.left, item.bbox[0]);
-            line.right = Math.max(line.right, item.bbox[2]);
-            line.height = Math.max(line.height, height);
-        }
-        else {
-            lines.push({ bottom: item.bbox[3], height, left: item.bbox[0], right: item.bbox[2] });
-        }
-    }
-    lines.sort((left, right) => left.bottom - right.bottom);
+    const lines = pdfLines(inside);
     const left = Math.min(...lines.map(line => line.left));
     const right = Math.max(...lines.map(line => line.right));
     const width = right - left;

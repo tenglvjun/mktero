@@ -189,3 +189,22 @@ test('source map entries of a section stay exact and skip the directives', () =>
     const affiliation = sourceMap.find(entry => markdown.slice(entry.markdownFrom, entry.markdownTo).includes('Department of Physics'));
     assert.deepEqual(affiliation.locations, [{ pageIndex: 0, bbox: [200, 155, 800, 170] }]);
 });
+
+test('a sidebar label takes the line printed below it as its value, but not prose', () => {
+    const { markdown } = prepare([page(0, [
+        title([100, 60, 900, 120], 'A Study of Things', 1),
+        text([200, 130, 800, 150], 'Ann Author'),
+        title([40, 200, 90, 215], 'COPYRIGHT'),
+        text([40, 218, 90, 400], ABSTRACT),
+        title([40, 420, 90, 435], 'CITATION'),
+        text([40, 438, 90, 480], 'Author A (2026) A study of things. J. Things 4:12. doi: 10.1000/things.4'),
+        title([100, 520, 900, 540], '1. Introduction'),
+    ])]);
+    const head = markdown.split('\n\n');
+    const open = head.indexOf('<!-- mktero-section: article-info -->');
+    const close = head.indexOf('<!-- /mktero-section -->');
+    const section = head.slice(open + 1, close);
+    assert.ok(section.includes('Author A (2026) A study of things. J. Things 4:12. doi: 10.1000/things.4'));
+    assert.ok(!section.includes(ABSTRACT));
+    assert.ok(head.slice(close).includes(ABSTRACT));
+});

@@ -88,6 +88,7 @@ function articleInfo(blocks, claimed) {
         if (block.role === BLOCK_ROLE.PAGE_NOTE && block.noteKind === NOTE_KIND.FRONT_MATTER) members.add(block);
         else if (isFirstPageMetadata(block)) members.add(block);
     }
+    addSidebarValues(blocks, members, claimed);
     fillBetweenMembers(blocks, members, claimed);
     addBadges(blocks, members, claimed);
     // A note whose mark only the title or the author line cites is about the
@@ -179,6 +180,23 @@ function addBadges(blocks, members, claimed) {
 
 function intersects(left, right) {
     return Boolean(left && right) && left[0] < right[2] && right[0] < left[2] && left[1] < right[3] && right[1] < left[3];
+}
+
+// The paragraph printed right below a sidebar label that takes a value
+// ("CITATION", "EDITED BY") is that value, whether or not the text repeats
+// the label. Prose below a label is the article's text.
+const VALUE_LABEL = /^(?:citation|copyright|edited by|reviewed by|\*?correspondence|specialty section|received|accepted|published)$/iu;
+function addSidebarValues(blocks, members, claimed) {
+    for (const label of [...members]) {
+        if (label.role !== BLOCK_ROLE.HEADING || !label.bbox || !VALUE_LABEL.test(blockPlainText(label).trim())) continue;
+        const value = blocks
+            .filter(block => !members.has(block) && !claimed.has(block) && onlyOnPage(block, 0)
+                && block.role === BLOCK_ROLE.BODY && block.kind === BLOCK_KIND.TEXT && block.bbox
+                && directlyBelow(label.bbox, block.bbox))
+            .sort((left, right) => left.bbox[1] - right.bbox[1])[0];
+        const text = value ? blockPlainText(value) : '';
+        if (value && wordCount(text) <= MAX_FIELD_WORDS && !isProse(text)) members.add(value);
+    }
 }
 
 // A short first-page line between two metadata lines (the second line of an

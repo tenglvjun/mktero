@@ -59,8 +59,10 @@ conversions for the same PDF and parser profile.
   cites them, and fold article metadata, author biographies, and reporting
   summaries into collapsed sections, so the first screen shows the title,
   authors, and abstract. The PDF's own text layer, read locally, also rejoins a
-  paragraph a page or column break splits at a full stop, and levels the
-  headings of a paper without section numbers by their type.
+  paragraph a page or column break splits at a full stop, levels the
+  headings of a paper without section numbers by their type, and, in a
+  typeset PDF, restores single words the OCR model "corrected" (a name, an
+  author's spelling) to the printed text.
 - Browse the outline or a figure/table index, preview citations, affiliations,
   figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
 - Copy a display formula's LaTeX, a code block's text, or a table as Markdown

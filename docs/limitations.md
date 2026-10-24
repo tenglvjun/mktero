@@ -30,6 +30,12 @@
   split. The outline of a paper without section numbers is leveled by heading
   type from the same text layer; when the types do not nest, or the PDF has no
   text layer, those headings stay at one level.
+- MinerU's OCR model sometimes writes what it expects instead of what is
+  printed. In a typeset PDF whose text layer agrees with MinerU almost
+  everywhere, a single differing word is restored to the printed text, so an
+  author's own typo or spelling stays as printed, and a heading MinerU wrote
+  twice is written once. A scanned PDF's text layer is an older OCR and is
+  not used; MinerU's reading stays, including any word it misread.
 - Local MinerU mode talks to a MinerU 4.0 V1 service. It does not restore
   figures from that service's result, and a restarted local service cannot
   resume an earlier job.
