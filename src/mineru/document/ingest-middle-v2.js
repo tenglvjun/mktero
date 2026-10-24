@@ -371,9 +371,16 @@ function textSpan(value, styles) {
     const trimmed = value.trim();
     if (script && trimmed && trimmed.length <= MAX_SCRIPT_LENGTH && SCRIPT_MARK.test(trimmed)
         && !(script === '^' && ORDINAL_SUFFIX.test(trimmed))) {
-        return { type: 'inline_equation', content: `${script}{${trimmed.replace(/([#%&_{}$])/gu, '\\$1')}}` };
+        return { type: 'inline_equation', content: `${script}{${escapeTeX(trimmed)}}` };
     }
     return { type: 'text', content: value };
+}
+
+// TeX special characters as literal text, a backslash included.
+function escapeTeX(text) {
+    return text.replace(/[\\#%&_{}$^~]/gu, character => (
+        character === '\\' ? '\\backslash{}' : character === '^' || character === '~' ? `\\${character}{}` : `\\${character}`
+    ));
 }
 
 function blockType(raw, context) {

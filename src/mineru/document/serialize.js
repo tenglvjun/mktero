@@ -316,7 +316,7 @@ function algorithmUnits(block) {
     const code = block.children.find(child => child.kind === 'body')?.code;
     if (!code) return [];
     const content = code.split('\n').map(line => (
-        /^\s*<\/?div\b/iu.test(line) ? line.replace('<', '\\<') : line
+        line.replace(/^(\s*)<(?=\/?div\b)/iu, '$1\\<')
     )).join('\n');
     const output = '<div class="mineru-algorithm" style="white-space: pre-wrap; font-family:monospace;">\n'
         + `${content}\n</div>`;

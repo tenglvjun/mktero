@@ -194,9 +194,15 @@ function renderInlineMath(value) {
         after = trailing[1];
         content = content.slice(0, -trailing[0].length);
     }
-    content = content.replace(/\$/gu, '\\$').trim();
+    content = escapeMathDollars(content).trim();
     if (!content) return before + after;
     return `${before}${before ? ' ' : ''}$${content}$${after}`;
+}
+
+// A `$` inside math would end it; one already escaped (`\$`) stays as it is,
+// and every other TeX escape (`\\`, `\{`) is kept whole.
+export function escapeMathDollars(latex) {
+    return String(latex).replace(/\\[\s\S]|\$/gu, match => (match === '$' ? '\\$' : match));
 }
 
 // MinerU table HTML as one Markdown HTML block: no line breaks (a blank line
@@ -206,7 +212,7 @@ export function sanitizeTableHTML(html) {
     if (typeof html !== 'string') return '';
     let output = html.replace(/\r?\n/gu, ' ').trim();
     output = output.replace(/<eq>([\s\S]*?)<\/eq>/giu, (match, content) => {
-        const latex = decodeEntities(content).replace(/\$/gu, '\\$').trim();
+        const latex = escapeMathDollars(decodeEntities(content)).trim();
         return latex ? ` $${latex}$ ` : '';
     });
     if (!/^<table\b/iu.test(output) || !/<\/table>$/iu.test(output)) return '';

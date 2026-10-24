@@ -23,7 +23,9 @@ const METADATA_LINE = new RegExp([
 ].join(''), 'iu');
 const AFFILIATION = /\b(?:universit(?:y|ies|é|ät|à|ad|at)|institut(?:e|o|ion)?|department|faculty|school of|college|laborator(?:y|ies)|hospital|cent(?:er|re) for|research (?:unit|organization|group)|academy)\b/iu;
 const CONTACT = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/u;
-const CONTACT_ONLY = /^(?:e-?mail\s*[:：]?\s*)?(?:[\w.+-]+@[\w-]+(?:\.[\w-]+)+[\s,;]*)+$/iu;
+// Addresses separated by spaces or punctuation; the separator keeps two
+// addresses from being read as one in exponentially many ways.
+const CONTACT_ONLY = /^(?:e-?mail\s*[:：]?\s*)?[\w.+-]+@[\w-]+(?:\.[\w-]+)+(?:[\s,;]+[\w.+-]+@[\w-]+(?:\.[\w-]+)+)*[\s,;]*$/iu;
 const FRONT_MATTER_WORDS = /\bcorrespond|\bco-?(?:first|last)\b|\bcore contributor\b|\bequal(?:ly)? contribut|\bwork (?:was )?done\b/iu;
 // "^{1}", "{}^{a,*}", "*", "¹" at the start of the first line; or a plain
 // "1 " / "e " before an affiliation.

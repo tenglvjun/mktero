@@ -30,7 +30,9 @@ const MIN_CHROME_KEY = 8;
 const OPEN_END = /[\p{L}\p{N},;\-–]$/u;
 const LOWER_START = /^\p{Ll}/u;
 const IMAGE_TOKEN = /!\[[^\n]*?\]\([^\s)]+\)/g;
-const IMAGE_ONLY = /^(?:!\[[^\n]*?\]\([^\s)]+\)\s*)+$/;
+// The description cannot contain an unescaped `]`, so one image never reads
+// as several.
+const IMAGE_ONLY = /^(?:!\[(?:\\.|[^\]\\\n])*\]\([^\s)]+\)\s*)+$/;
 const BLOCK_KIND_BY_NODE = new Map([
     ['ATXHeading1', 'heading'], ['ATXHeading2', 'heading'], ['ATXHeading3', 'heading'],
     ['ATXHeading4', 'heading'], ['ATXHeading5', 'heading'], ['ATXHeading6', 'heading'],

@@ -304,3 +304,13 @@ test('chart data MinerU read follows the chart in a collapsed section', async ()
     const { renderMarkdownHTML } = await import('../src/markdown/markdown-html.js');
     assert.doesNotMatch(renderMarkdownHTML(verbatim), /<script>/u);
 });
+
+test('a raised mark becomes math only with literal TeX characters', () => {
+    const spans = content => projectMinerUMiddleJSON(page([
+        { type: 'text', bbox: box(100, 100, 900, 150), content },
+    ])).pages[0].blocks[0].lines[0].spans;
+    assert.deepEqual(spans([text('Value'), text('a#', ['superscript']), text(' here.')]).map(span => span.content),
+        ['Value', '^{a\\#}', ' here.']);
+    // A backslash is never written into math: the raised text stays text.
+    assert.deepEqual(spans([text('Value'), text('a\\b', ['superscript'])]).map(span => span.type), ['text']);
+});

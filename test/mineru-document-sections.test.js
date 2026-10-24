@@ -208,3 +208,13 @@ test('a sidebar label takes the line printed below it as its value, but not pros
     assert.ok(!section.includes(ABSTRACT));
     assert.ok(head.slice(close).includes(ABSTRACT));
 });
+
+test('reads a long run of address-like text in linear time', () => {
+    const started = performance.now();
+    const { markdown } = prepare([page(0, [
+        title([100, 60, 900, 120], 'A Study of Things', 1),
+        text([200, 130, 800, 150], `+@-.${'--+@-.'.repeat(2000)}!`),
+    ])]);
+    assert.ok(performance.now() - started < 2000);
+    assert.match(markdown, /^# A Study of Things/u);
+});

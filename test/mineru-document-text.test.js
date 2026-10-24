@@ -105,3 +105,12 @@ test('moves sentence punctuation out of inline math and turns abbreviation math 
     assert.equal(line('\\mathrm{i.e.}'), 'see i.e. next');
     assert.equal(line('\\text{etc.}'), 'see etc. next');
 });
+
+test('escapes a dollar in math once and keeps TeX escapes whole', async () => {
+    const { escapeMathDollars } = await import('../src/mineru/document/text.js');
+    assert.equal(escapeMathDollars('a$b'), 'a\\$b');
+    assert.equal(escapeMathDollars('\\$5'), '\\$5');
+    assert.equal(escapeMathDollars('x\\\\$y'), 'x\\\\\\$y');
+    assert.equal(sanitizeTableHTML('<table><tr><td><eq>\\$x$</eq></td></tr></table>'),
+        '<table><tr><td> $\\$x\\$$ </td></tr></table>');
+});
