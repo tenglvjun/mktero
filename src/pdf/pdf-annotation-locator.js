@@ -8,6 +8,12 @@ import {
 } from '../markdown/pdf-annotation-text.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
+    createMathCompactTextIndex,
+    findMathCompactOccurrences,
+    hasMathMarkup,
+    mathCompactText,
+} from '../markdown/math-compact-text.js';
+import {
     isPageNumberLine,
     isPublisherWatermarkLine,
 } from '../markdown/publisher-copyright.js';
@@ -451,6 +457,12 @@ function locateInIndex(index, text, {
         // searches the whole document instead of the hinted page.
         located = findPageBreakMatch(index.pages, target, value => value);
     }
+    if (!located && hasMathMarkup(selectedText)) {
+        located = findMathCompactMatch(pages, selectedText, quote)
+            || (pages === index.pages
+                ? null
+                : findMathCompactMatch(index.pages, selectedText, quote));
+    }
     if (!located) {
         const regionLocated = locatePDFRegion(index, pdfRegion, selectedText);
         if (regionLocated) return regionLocated;
@@ -490,6 +502,54 @@ function locateInIndex(index, text, {
             rects,
         },
     };
+}
+
+// A selection whose formula is still TeX ("a_{t} \sim \pi_{\theta}") never
+// equals the glyphs the PDF text layer keeps ("at ∼ πθ"). Both reduce to the
+// same math-compact key, which only has to identify one passage.
+const mathCompactPageIndexes = new WeakMap();
+
+function findMathCompactMatch(pages, selectedText, textQuote) {
+    const key = mathCompactText(selectedText);
+    const matches = [];
+    for (const page of pages) {
+        let compact = mathCompactPageIndexes.get(page);
+        if (!compact) {
+            compact = createMathCompactTextIndex(page.rawText);
+            mathCompactPageIndexes.set(page, compact);
+        }
+        const offsets = findMathCompactOccurrences(compact, key);
+        if (!offsets) return null;
+        for (const offset of offsets) {
+            const sourceRange = compact.sourceRange(offset, key.length);
+            if (sourceRange) matches.push({ page, sourceRange });
+            if (matches.length > MAX_MATCHES) throw ambiguousError();
+        }
+    }
+    if (matches.length === 1) {
+        return { match: { page: matches[0].page }, sourceRange: matches[0].sourceRange };
+    }
+    if (matches.length > 1 && textQuote) {
+        const prefix = mathCompactText(textQuote.prefix || '');
+        const suffix = mathCompactText(textQuote.suffix || '');
+        const scored = matches.filter(candidate => {
+            const compact = mathCompactPageIndexes.get(candidate.page);
+            const before = mathCompactText(
+                candidate.page.rawText.slice(0, candidate.sourceRange.from)
+            );
+            const after = mathCompactText(
+                candidate.page.rawText.slice(candidate.sourceRange.to)
+            );
+            return Boolean(compact)
+                && (!prefix || before.endsWith(prefix.slice(-24)))
+                && (!suffix || after.startsWith(suffix.slice(0, 24)));
+        });
+        if (scored.length === 1) {
+            return { match: { page: scored[0].page }, sourceRange: scored[0].sourceRange };
+        }
+    }
+    if (matches.length > 1) throw ambiguousError();
+    return null;
 }
 
 // Display equations rarely survive the PDF text layer intact, so when every

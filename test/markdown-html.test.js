@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { translateMessage } from '../src/i18n/localization.js';
 import {
     findInlineMathMatches,
+    renderInlineMathTextHTML,
     renderMarkdownHTML,
 } from '../src/markdown/markdown-html.js';
 import { parseFigureLayoutMarker } from '../src/markdown/markdown-figures.js';
@@ -1532,4 +1533,16 @@ test('does not treat escaped, fenced, or inline directive text as a directive', 
     assert.match(html, /mktero-section: article-info/);
     assert.doesNotMatch(html, /mktero-note"|mktero-section-label/);
     assert.doesNotMatch(html, /<blockquote class="mktero-note">/);
+});
+
+test('renders a tagged display formula inline for note quotes', () => {
+    const html = renderInlineMathTextHTML([
+        '$$',
+        '\\mathcal {A} _ {\\mathrm{res}} = (M _ {\\theta}, H, \\mathcal {K}),\\tag{4}',
+        '$$',
+    ].join('\n'));
+
+    assert.match(html, /<math/);
+    assert.match(html, /\(4\)/);
+    assert.doesNotMatch(html, /katex-error|\\tag/);
 });

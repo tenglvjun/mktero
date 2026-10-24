@@ -1,4 +1,5 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
+import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
 import { navigationShortcutLabels } from './reader-shortcuts.js';
 import {
     enhanceRenderedCodeBlocks,
@@ -76,7 +77,7 @@ import {
     computeVisibleChromeRanges,
     createMarkdownAnalysisCache,
 } from '../markdown/markdown-analysis-cache.js';
-import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
+import { createVisibleMarkdownTextIndex, expandMarkdownRangeToMathBoundaries } from '../markdown/markdown-visible-text.js';
 import {
     createMarkdownFragmentID,
     createMarkdownReadingPositionAnchor,
@@ -6552,6 +6553,7 @@ class MarkdownTabView {
         this.renderNoteListChrome(view);
         const list = this.elements.notesList;
         list.replaceChildren();
+        const markdown = this.model?.markdown || '';
         if (!view.totalCount) {
             list.appendChild(this.createNotesEmpty('none'));
         }
@@ -6563,7 +6565,8 @@ class MarkdownTabView {
                 list.appendChild(this.createNoteItem(
                     annotation,
                     matched,
-                    markdownLength
+                    markdownLength,
+                    markdown
                 ));
             }
         }
@@ -6896,7 +6899,7 @@ class MarkdownTabView {
         }
     }
 
-    createNoteItem(annotation, matched, markdownLength) {
+    createNoteItem(annotation, matched, markdownLength, markdown = '') {
         const offset = matched
             ? firstAnnotationOffset(annotation, markdownLength)
             : null;
@@ -6906,7 +6909,8 @@ class MarkdownTabView {
         );
         button.appendChild(this.createNoteMetadata(annotation, offset !== null));
         const quote = this.createElement('span', { class: 'markdown-note-quote' });
-        appendInlineMathText(quote, String(annotation.text || ''));
+        const quoteText = this.annotationQuoteText(annotation, markdownLength, markdown);
+        appendInlineMathText(quote, quoteText);
         button.appendChild(quote);
         if (!annotation.comment && button.hasAttribute('aria-label') && quote.querySelector('math')) {
             button.setAttribute('aria-label', this.t('viewer.noteJump', {
@@ -6969,6 +6973,26 @@ class MarkdownTabView {
         ));
         item.appendChild(deleteNote);
         return item;
+    }
+
+    annotationQuoteText(annotation, markdownLength, markdown = '') {
+        if (typeof markdown !== 'string' || !Number.isInteger(markdownLength)) {
+            return String(annotation?.text || '');
+        }
+        const range = annotation?.ranges?.[0];
+        if (!range
+            || !Number.isInteger(range.from)
+            || !Number.isInteger(range.to)
+            || range.from < 0
+            || range.to <= range.from
+            || range.to > markdownLength) {
+            return String(annotation?.text || '');
+        }
+        const completeRange = expandMarkdownRangeToMathBoundaries(
+            markdown,
+            range
+        );
+        return markdown.slice(completeRange.from, completeRange.to);
     }
 
     noteButtonAttributes(annotation, offset) {

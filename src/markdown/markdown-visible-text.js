@@ -33,7 +33,10 @@ const MATH_EXCLUDED_NODE_NAMES = new Set([
 ]);
 
 export function createVisibleMarkdownTextIndex(markdown, extraHiddenRanges = []) {
-    const hiddenRanges = collectHiddenRanges(markdown, extraHiddenRanges);
+    const { hiddenRanges, mathRanges } = collectHiddenRanges(
+        markdown,
+        extraHiddenRanges
+    );
     const segments = [];
     const chunks = [];
     let sourceFrom = 0;
@@ -65,6 +68,9 @@ export function createVisibleMarkdownTextIndex(markdown, extraHiddenRanges = [])
     const text = chunks.join('');
     return {
         text,
+        expandSourceRangeToMathBoundaries(range) {
+            return expandRangeToMathSourceRanges(range, mathRanges);
+        },
         visibleOffsetAt(offset) {
             if (!Number.isSafeInteger(offset) || offset >= markdown.length) {
                 return text.length;
@@ -121,6 +127,12 @@ export function createVisibleMarkdownTextIndex(markdown, extraHiddenRanges = [])
     };
 }
 
+export function expandMarkdownRangeToMathBoundaries(markdown, range) {
+    const source = String(markdown || '');
+    return createVisibleMarkdownTextIndex(source)
+        .expandSourceRangeToMathBoundaries(range);
+}
+
 export function visibleMarkdownTextForRanges(markdown, ranges) {
     const source = String(markdown || '');
     if (!Array.isArray(ranges)) return '';
@@ -158,6 +170,7 @@ function collectHiddenRanges(markdown, extraHiddenRanges = []) {
     const ranges = [];
     const escapeRanges = [];
     const inlineMathRanges = [];
+    const mathSourceRanges = [];
     const mathExcludedRanges = [];
     const tree = MARKDOWN_PARSER.parse(markdown);
     const linkReferenceLabels = collectLinkReferenceLabels(tree, markdown);
@@ -192,7 +205,9 @@ function collectHiddenRanges(markdown, extraHiddenRanges = []) {
     });
     for (const match of findInlineMathMatches(markdown)) {
         if (overlapsAnyRange(match, mathExcludedRanges)) continue;
-        inlineMathRanges.push({ from: match.start, to: match.end });
+        const mathRange = { from: match.start, to: match.end };
+        inlineMathRanges.push(mathRange);
+        mathSourceRanges.push(mathRange);
         if (match.text.startsWith('^')) continue;
         const contentOffset = match.raw.indexOf(match.text);
         if (contentOffset < 0) continue;
@@ -204,6 +219,10 @@ function collectHiddenRanges(markdown, extraHiddenRanges = []) {
         if (contentTo < match.end) {
             ranges.push({ from: contentTo, to: match.end });
         }
+    }
+    for (const match of findDisplayMathMatches(markdown)) {
+        if (overlapsAnyRange(match, mathExcludedRanges)) continue;
+        mathSourceRanges.push({ from: match.start, to: match.end });
     }
     appendMarkdownEscapeRanges(ranges, escapeRanges, inlineMathRanges);
     if (Array.isArray(extraHiddenRanges)) {
@@ -229,9 +248,48 @@ function collectHiddenRanges(markdown, extraHiddenRanges = []) {
             previous.to = Math.max(previous.to, range.to);
         }
     }
+    return {
+        hiddenRanges: merged,
+        mathRanges: mergeMathSourceRanges(mathSourceRanges),
+    };
+}
+
+function mergeMathSourceRanges(ranges) {
+    const sorted = [...ranges].sort((left, right) => (
+        left.from - right.from || right.to - left.to
+    ));
+    const merged = [];
+    for (const range of sorted) {
+        const previous = merged.at(-1);
+        if (!previous || range.from >= previous.to) {
+            merged.push({ ...range });
+        }
+        else {
+            previous.to = Math.max(previous.to, range.to);
+        }
+    }
     return merged;
 }
 
+function expandRangeToMathSourceRanges(range, mathRanges) {
+    if (!Number.isSafeInteger(range?.from)
+        || !Number.isSafeInteger(range?.to)
+        || range.from < 0
+        || range.to <= range.from) {
+        return range;
+    }
+    let from = range.from;
+    let to = range.to;
+    for (const mathRange of mathRanges) {
+        if (from > mathRange.from && from < mathRange.to) {
+            from = mathRange.from;
+        }
+        if (to > mathRange.from && to < mathRange.to) {
+            to = mathRange.to;
+        }
+    }
+    return { from, to };
+}
 function overlapsAnyRange(target, ranges) {
     return ranges.some(range => target.start < range.to && target.end > range.from);
 }
