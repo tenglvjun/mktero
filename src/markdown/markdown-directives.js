@@ -9,12 +9,13 @@ import { GFM, parser as markdownParser } from '@lezer/markdown';
 //   …                                   a collapsible section
 //   <!-- /mktero-section -->
 export const NOTE_KINDS = Object.freeze(['footnote', 'table', 'figure', 'code']);
-export const SECTION_KINDS = Object.freeze(['article-info', 'author-biographies', 'reporting-summary']);
+export const SECTION_KINDS = Object.freeze(['article-info', 'author-biographies', 'reporting-summary', 'chart-data']);
 // The localization key of each section's label.
 export const SECTION_LABEL_KEYS = Object.freeze({
     'article-info': 'markdown.section.articleInfo',
     'author-biographies': 'markdown.section.authorBiographies',
     'reporting-summary': 'markdown.section.reportingSummary',
+    'chart-data': 'markdown.section.chartData',
 });
 
 const PARSER = markdownParser.configure(GFM);

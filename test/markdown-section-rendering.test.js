@@ -100,3 +100,15 @@ test('keeps section label and disclosure keys in both languages', () => {
         ['文章信息', '作者简介', '报告摘要', '展开', '收起']
     );
 });
+
+test('labels a chart data section in snapshots and notes', () => {
+    const html = renderMarkdownHTML([
+        '<!-- mktero-section: chart-data -->',
+        '',
+        '<table><tr><td>year</td></tr></table>',
+        '',
+        '<!-- /mktero-section -->',
+    ].join('\n'));
+    assert.match(html, /<p class="mktero-section-label"><strong>Chart data<\/strong><\/p>/);
+    assert.equal(translateMessage('zh-CN', 'markdown.section.chartData'), '图表数据');
+});

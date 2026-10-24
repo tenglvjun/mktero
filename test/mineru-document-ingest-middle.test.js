@@ -286,3 +286,21 @@ test('code, algorithms, and image-only equations keep their content', () => {
     assert.match(markdown, /for \$i\$ in range\nreturn/u);
     assert.match(markdown, /Listing 1\. Two prints\./u);
 });
+
+test('chart data MinerU read follows the chart in a collapsed section', async () => {
+    const { markdown } = prepared();
+    assert.match(markdown, /!\[Figure 2\. Values over the years\.\]\(images\/page_1_chart_3\.png\)\n\n<!-- mktero-section: chart-data -->\n\n<table><tr><td>year<\/td><td>value<\/td><\/tr><\/table>\n\n<!-- \/mktero-section -->/u);
+    const verbatim = prepareMinerUDocument({ markdown: '', assets: ASSETS, assetBasePath: '', contentList: [], layout: projectMinerUMiddleJSON(page([
+        { type: 'chart', bbox: box(100, 100, 900, 500), content: [
+            { type: 'chart_body', bbox: box(100, 100, 900, 480), content: 'year, value\n2020, 3\n```', image_path: 'images/page_1_chart_3.png' },
+        ] },
+        { type: 'chart', bbox: box(100, 600, 900, 900), content: [
+            { type: 'chart_body', bbox: box(100, 600, 900, 880), content: '<script>x</script>', image_path: 'images/page_1_image_2.png' },
+        ] },
+    ])) }).markdown;
+    assert.match(verbatim, /<!-- mktero-section: chart-data -->\n\n````text\nyear, value\n2020, 3\n```\n````\n\n<!-- \/mktero-section -->/u);
+    // Data that is not a table is code, never markup.
+    assert.match(verbatim, /```text\n<script>x<\/script>\n```/u);
+    const { renderMarkdownHTML } = await import('../src/markdown/markdown-html.js');
+    assert.doesNotMatch(renderMarkdownHTML(verbatim), /<script>/u);
+});

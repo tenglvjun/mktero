@@ -237,7 +237,35 @@ function figureUnits(block) {
             block.kind === BLOCK_KIND.CHART ? 'chart' : 'image', 'panel'));
     }
     units.push(...footnoteUnits(block, 'note'));
+    if (block.kind === BLOCK_KIND.CHART) units.push(...chartDataUnits(block));
     return units;
+}
+
+// The data MinerU read from a chart (self-hosted, high effort) follows the
+// chart in a collapsed section: a table as a sanitized table, anything else
+// verbatim in a code block. A chart already inside a section shows its data
+// without a section of its own, since sections do not nest.
+function chartDataUnits(block) {
+    const units = [];
+    for (const child of block.children.filter(item => item.kind === 'body' && typeof item.data === 'string')) {
+        const raw = child.data.trim();
+        if (!raw) continue;
+        const table = /<table[\s>]/iu.test(raw) ? sanitizeTableHTML(raw) : '';
+        let output = table;
+        if (!output) {
+            const longest = Math.max(2, ...[...raw.matchAll(/`+/gu)].map(match => match[0].length));
+            const fence = '`'.repeat(longest + 1);
+            output = `${fence}text\n${raw}\n${fence}`;
+        }
+        const bbox = child.bbox || block.bbox;
+        units.push(withPieces({
+            block, kind: table ? 'table' : 'code', type: table ? 'table' : 'code', text: output,
+            fragments: bbox ? [{ from: 0, to: output.length, fragment: { pageIndex: block.pageIndex, bbox } }] : [],
+        }, [{ key: `${child.id}:data`, part: 'table', blockId: block.id, from: 0, to: output.length,
+            pageIndex: block.pageIndex, bbox, text: '' }]));
+    }
+    if (!units.length || block.sectionKind) return units;
+    return [directiveUnit(sectionOpenDirective('chart-data')), ...units, directiveUnit(SECTION_CLOSE_DIRECTIVE)];
 }
 
 function tableUnits(block) {

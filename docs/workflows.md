@@ -35,7 +35,9 @@ section: affiliations, contact and contribution notes, funding, dates, and a
 journal's first-page sidebar appear under `Article information` below the
 title and author line, so the first screen shows the title, the authors, and
 the abstract. Author biographies after the references appear under `Author
-biographies`, and a Nature reporting summary under `Reporting summary`. A
+biographies`, and a Nature reporting summary under `Reporting summary`. When
+a self-hosted MinerU service reads the data of a chart (its high-effort tier),
+the data follows the chart under `Chart data`, as a table when it is one. A
 section is collapsed whenever the document opens. Its header is a button you
 can click or activate with `Enter` or `Space`. Search results, annotations,
 and other jumps into a collapsed section open it first. Headings inside a

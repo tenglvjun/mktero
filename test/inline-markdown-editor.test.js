@@ -10855,6 +10855,31 @@ test('collapses a section by default and toggles it from the button', () => {
     dom.window.close();
 });
 
+test('collapses chart data under its label below the chart', () => {
+    const markdown = [
+        'Before.',
+        '',
+        '<!-- mktero-section: chart-data -->',
+        '',
+        '<table><tr><td>year</td><td>value</td></tr></table>',
+        '',
+        '<!-- /mktero-section -->',
+        '',
+        'After.',
+    ].join('\n');
+    const { dom, document, editor } = createDirectiveEditor(markdown);
+    const button = document.querySelector('.mktero-section-toggle');
+
+    assert.ok(button);
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.match(button.textContent, /Chart data/u);
+    assert.equal(document.body.textContent.includes('year'), false);
+    assert.ok(document.body.textContent.includes('After.'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('keeps keyboard focus on the section button and a collapsed section closed', () => {
     const markdown = [
         '<!-- mktero-section: article-info -->',
