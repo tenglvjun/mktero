@@ -34,27 +34,14 @@
     {
       "pageIndex": 7,
       "label": "Figure 3.",
-      "panels": 2,
+      "panels": 3,
       "captions": 1,
       "owned": 0,
       "bbox": [
-        94,
-        115,
-        630,
-        238
-      ]
-    },
-    {
-      "pageIndex": 7,
-      "label": "Figure 4",
-      "panels": 1,
-      "captions": 1,
-      "owned": 0,
-      "bbox": [
-        630,
-        119,
-        894,
-        237
+        92,
+        113,
+        896,
+        240
       ]
     },
     {

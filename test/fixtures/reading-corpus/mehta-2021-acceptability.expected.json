@@ -83,12 +83,12 @@
         "total": 137,
         "covered": 137,
         "ratio": 1,
-        "crossPage": 4
+        "crossPage": 5
       },
       "floats": {
         "markdown": {
           "image": 4,
-          "captionedImage": 4,
+          "captionedImage": 3,
           "table": 2,
           "algorithm": 0,
           "code": 0,
@@ -190,12 +190,12 @@
         "total": 137,
         "covered": 137,
         "ratio": 1,
-        "crossPage": 4
+        "crossPage": 5
       },
       "floats": {
         "markdown": {
           "image": 4,
-          "captionedImage": 4,
+          "captionedImage": 3,
           "table": 2,
           "algorithm": 0,
           "code": 0,

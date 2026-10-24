@@ -122,6 +122,188 @@ export function reassignFloatCaptions(ir) {
     return ir;
 }
 
+// MinerU's caption lines are not always caption. A float that has a
+// labeled caption ("Figure 3:", "Table 6 |") can also carry, as caption,
+// text that is not part of it:
+// - the running header at the top of the page ("SHEN et al.: ECHOES OF THE
+//   BRAIN …"), which is the page's decoration;
+// - a paragraph of the body that sits beside or above the float (a 114-word
+//   paragraph ending "… Treasury bulletins.", "In this section, we
+//   analyze …"), which is reading text;
+// - text printed in the picture next to its edge (a chart title, a legend,
+//   a panel heading), which the picture already shows.
+// A float without a labeled caption can likewise hold a body paragraph that
+// only refers to a figure ("Figure 4 shows …", "Results are displayed in
+// Figure 2."), with the rest of that paragraph beside it. Decoration leaves
+// the caption, as it leaves every page. Picture text sits outside the
+// cropped picture, so it stays as a note of the figure. A paragraph becomes
+// a body block right after the float. No reading text is lost. Any piece that reads as a caption of its own ("Extended Data
+// Fig. 1 | …"), a panel letter, or a caption that a float continues from
+// the one beside it stays.
+const MIN_STRAY_PARAGRAPH_WORDS = 20;
+const MAX_PICTURE_TEXT_WORDS = 18;
+const PICTURE_TEXT_GAP = 30;
+const BODY_REFERENCE = /\b(?:is|are|was|were)\s+(?:shown|displayed|presented|illustrated|depicted|summari[sz]ed|reported|given|plotted)\s+in\s+(?:fig(?:ure)?s?\.?|tables?)\s*\d/iu;
+const REFERENCE_SENTENCE = /^(?:\(?[a-z]\)\s*)?(?:fig(?:ure)?s?\.?|tables?)\s*\d+[a-z]?\s+(?:shows?|presents?|displays?|illustrates?|depicts?|summari[sz]es?|compares?|reports?|gives?|lists?)\b/iu;
+
+export function releaseStrayCaptions(ir, { chromeKeys = null } = {}) {
+    const released = ensureList(ir, 'releasedCaptions');
+    const decoration = chromeKeys || runningChromeKeys(ir.blocks);
+    const insertions = new Map();
+    for (const block of ir.blocks) {
+        if (block.role !== BLOCK_ROLE.FLOAT || !CAPTION_CLASS.has(block.kind)) continue;
+        const ordered = captionChildren(block);
+        if (!ordered.length) continue;
+        const labeled = ordered.filter(child => isOwnCaption(captionChildText(child)));
+        const body = bodyBox(block);
+        const reasons = new Map();
+        for (const child of ordered) {
+            if (labeled.includes(child)) continue;
+            const text = captionChildText(child);
+            if (!text) continue;
+            const reason = strayReason(child, text, { labeled, body, decoration });
+            if (reason) reasons.set(child, reason);
+        }
+        // Beside a paragraph that refers to the figure, the float's other
+        // unlabeled prose is the rest of that paragraph.
+        if (!labeled.length && [...reasons.values()].includes('body-paragraph')) {
+            for (const child of ordered) {
+                const text = captionChildText(child);
+                if (!reasons.has(child) && text.split(/\s+/u).length >= MIN_STRAY_PARAGRAPH_WORDS && proseLike(text)
+                    && !PANEL_START.test(text)) {
+                    reasons.set(child, 'body-paragraph');
+                }
+            }
+        }
+        for (const child of ordered) {
+            const reason = reasons.get(child);
+            if (!reason) continue;
+            block.children = block.children.filter(item => item !== child);
+            released.push({ id: child.id, from: block.id, reason, pageIndex: block.pageIndex });
+            if (reason === 'picture-text') {
+                block.children.push({ ...child, kind: 'footnote', pictureText: true });
+                continue;
+            }
+            if (reason !== 'body-paragraph') continue;
+            if (!insertions.has(block)) insertions.set(block, []);
+            insertions.get(block).push(captionAsBody(block, child));
+        }
+    }
+    if (!insertions.size) return ir;
+    const output = [];
+    for (const block of ir.blocks) {
+        output.push(block);
+        const paragraphs = insertions.get(block);
+        if (paragraphs) output.push(...paragraphs.sort((left, right) => (left.bbox?.[1] ?? 0) - (right.bbox?.[1] ?? 0)));
+    }
+    ir.blocks = output;
+    return ir;
+}
+
+function strayReason(child, text, { labeled, body, decoration }) {
+    const words = text.split(/\s+/u).length;
+    if (decoration.has(chromeKey(text)) && words <= MAX_CHROME_CAPTION_WORDS) return 'running-header';
+    if (PANEL_LINE.test(text)) return null;
+    const box = child.bbox;
+    if (labeled.length) {
+        if (words >= MIN_STRAY_PARAGRAPH_WORDS && proseLike(text) && !continuesLabeledCaption(child, labeled)) {
+            return 'body-paragraph';
+        }
+        // A short line printed just above the picture, apart from the label
+        // below it, is the picture's own title or legend.
+        if (box && body && words <= MAX_PICTURE_TEXT_WORDS && box[3] <= body[1] + 8
+            && body[1] - box[3] <= PICTURE_TEXT_GAP
+            && labeled.every(label => label.bbox && label.bbox[1] >= body[3] - 8)) {
+            return 'picture-text';
+        }
+        // A heading-like line between the picture and a label below it,
+        // shorter than the label's line, that does not read as a sentence.
+        if (box && body && words <= MAX_PICTURE_TEXT_WORDS && !/[.:;]$/u.test(text)
+            && box[1] >= body[1] - 8 && box[3] <= body[3] + PICTURE_TEXT_GAP
+            && labeled.every(label => label.bbox && label.bbox[1] >= box[3]) && !PANEL_START.test(text)) {
+            return 'picture-text';
+        }
+        return null;
+    }
+    // No label at all: a body paragraph that refers to a figure.
+    if (words >= MIN_STRAY_PARAGRAPH_WORDS && proseLike(text) && !PANEL_START.test(text)
+        && (REFERENCE_SENTENCE.test(text) || BODY_REFERENCE.test(text))) {
+        return 'body-paragraph';
+    }
+    return null;
+}
+
+const MAX_CHROME_CAPTION_WORDS = 30;
+// A panel letter alone ("c", "(b)"), and a line that opens with one
+// ("(b) Residual vs. Age", "d,e, Neural responses …").
+const PANEL_LINE = /^\(?[a-z]{1,2}\)?[.,]?$/iu;
+const PANEL_START = /^(?:\(?[a-z]\)|[a-z](?:\s*[,–-]\s*[a-z])*,)\s/iu;
+
+// A piece that is a caption by itself: any academic label, of any class.
+function isOwnCaption(text) {
+    return Boolean(captionLabel(text, null) || parseAcademicFigureCaption(text) || parseAcademicTableCaption(text));
+}
+
+function proseLike(text) {
+    const words = text.split(/\s+/u).filter(word => /\p{L}/u.test(word));
+    if (!words.length) return false;
+    const lower = words.filter(word => /^\P{L}*\p{Ll}/u.test(word)).length;
+    return lower / words.length >= 0.5 && /[.!?)\]]$/u.test(text.trim()) || lower / words.length >= 0.6;
+}
+
+function startsMidSentence(text) {
+    return /^(?:\p{Ll}|[),;:])/u.test(text.trim());
+}
+
+// An unlabeled piece right below a labeled caption, in its column, reads on
+// from it (a long caption MinerU split in two).
+function continuesLabeledCaption(child, labeled) {
+    const box = child.bbox;
+    if (!box) return true;
+    return labeled.some(label => {
+        const other = label.bbox;
+        if (!other || box[1] < other[1]) return false;
+        return box[1] - other[3] <= 12 && boxesOverlapX(box, other);
+    }) || startsMidSentence(captionChildText(child)) && labeled.some(label => label.bbox
+        && label.bbox[1] <= box[1] + 2 && Math.abs(label.bbox[1] - box[1]) <= 4);
+}
+
+// Decoration MinerU discarded, and body text it classified as decoration
+// (a running header it left in the flow on other pages).
+function runningChromeKeys(blocks) {
+    const keys = new Set();
+    for (const block of blocks) {
+        if (block.role !== BLOCK_ROLE.CHROME) continue;
+        const key = chromeKey(blockPlainText(block));
+        if (key.replace(/#/gu, '').length >= 8) keys.add(key);
+    }
+    return keys;
+}
+
+function chromeKey(text) {
+    return String(text || '').normalize('NFKC').toLowerCase()
+        .replace(/\d+/gu, '#')
+        .replace(/[^\p{L}#]+/gu, '');
+}
+
+// A released caption piece as a body paragraph of its own, in its place
+// after the float.
+function captionAsBody(block, child) {
+    return {
+        id: `${child.id}:text`,
+        kind: BLOCK_KIND.TEXT,
+        mineruType: 'text',
+        role: BLOCK_ROLE.BODY,
+        pageIndex: block.pageIndex,
+        bbox: child.bbox ? [...child.bbox] : block.bbox,
+        fragments: (child.fragments || []).map(fragment => ({ ...fragment, sourceId: child.id })),
+        children: [],
+        mergedFrom: [],
+        absorbed: [],
+        releasedFrom: block.id,
+    };
+}
+
 // A table directly below a captioned table, with a similar width and no
 // caption of its own, is the next panel of that table. It is written
 // immediately after the captioned table so the Markdown group can keep one

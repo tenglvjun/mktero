@@ -10,10 +10,10 @@
       "label": "Fig. 1.",
       "panels": 1,
       "captions": 1,
-      "owned": 1,
+      "owned": 0,
       "bbox": [
-        73,
-        27,
+        76,
+        62,
         917,
         285
       ]

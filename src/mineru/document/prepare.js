@@ -7,6 +7,7 @@ import {
     groupAdjacentTables,
     mergeContinuedTables,
     reassignFloatCaptions,
+    releaseStrayCaptions,
 } from './floats.js';
 import { orderReadingFlow } from './reading-order.js';
 import { attachEquationNumbers } from './equations.js';
@@ -47,6 +48,7 @@ export function buildMinerUDocumentIR(bundle, { pdfText = null } = {}) {
     classifyBlocks(ir);
     attachFloatNotes(ir);
     reassignFloatCaptions(ir);
+    releaseStrayCaptions(ir);
     orderReadingFlow(ir);
     restoreDiscardedReferences(ir);
     groupAdjacentTables(ir);

@@ -6,6 +6,7 @@ import {
     groupAdjacentTables,
     mergeContinuedTables,
     reassignFloatCaptions,
+    releaseStrayCaptions,
 } from '../src/mineru/document/floats.js';
 import { DOCUMENT_IR_SCHEMA } from '../src/mineru/document/ir.js';
 import { serializeDocumentIR } from '../src/mineru/document/serialize.js';
@@ -370,4 +371,69 @@ test('wires caption reassignment through the document IR', () => {
     const ir = buildMinerUDocumentIR({ layout, assets: [] });
     assert.deepEqual(ir.diagnostics.captionMoves.map(move => move.ids), [['p0-0:caption2']]);
     assert.equal(ir.blocks[1].children.some(child => child.id === 'p0-0:caption2'), true);
+});
+
+const PROSE = 'over a large repository of historical bulletins. Tasks require synthesizing evidence across long '
+    + 'contexts and multi-page tables, and the agent is given the reference pages as its initial context.';
+
+test('releases a running header, a body paragraph, and picture text from a labeled caption', () => {
+    const header = text('h', [75, 29, 807, 43], 'SHEN et al.: ECHOES OF THE BRAIN', { role: 'chrome' });
+    const figure = image('f', [100, 120, 900, 400], [
+        caption('f:header', [75, 29, 807, 43], 'SHEN et al.: ECHOES OF THE BRAIN'),
+        caption('f:title', [300, 100, 700, 114], 'A maturity mismatch in current loop practice'),
+        caption('f:label', [100, 410, 900, 440], 'Figure 7: A maturity mismatch in current loop practice.'),
+    ]);
+    const tableFloat = table('t', [200, 540, 800, 640], { captions: [
+        caption('t:prose', [100, 380, 900, 530], PROSE),
+        caption('t:label', [100, 650, 900, 668], 'Table 6 | Benchmark statistics and data splits.'),
+    ] });
+    const after = text('after', [100, 700, 900, 760], 'The next paragraph.');
+    const ir = run([header, figure, tableFloat, after], releaseStrayCaptions);
+
+    assert.deepEqual(captionTexts(figure), ['Figure 7: A maturity mismatch in current loop practice.']);
+    // The picture's own title stays with the figure, as a note.
+    assert.deepEqual(figure.children.filter(child => child.pictureText).map(child => child.id), ['f:title']);
+    assert.deepEqual(captionTexts(tableFloat), ['Table 6 | Benchmark statistics and data splits.']);
+    // The paragraph is reading text again, right after its table.
+    assert.deepEqual(ir.blocks.map(block => block.id), ['h', 'f', 't', 't:prose:text', 'after']);
+    assert.equal(ir.blocks[3].role, 'body');
+    assert.equal(ir.blocks[3].fragments[0].lines[0].spans[0].content, PROSE);
+    assert.deepEqual(ir.diagnostics.releasedCaptions.map(entry => entry.reason).sort(),
+        ['body-paragraph', 'picture-text', 'running-header']);
+});
+
+test('releases a paragraph that only refers to an unlabeled figure, with the rest of it', () => {
+    const figure = image('f', [108, 449, 887, 793], [
+        caption('f:a', [64, 831, 492, 923], 'Results are displayed in Figure 2. Participants experienced a significant '
+            + 'reduction in depression symptoms from the first to the second assessment of the study.'),
+        caption('f:b', [503, 805, 931, 926], 'SEs) at day 0, day 14, and day 28 were 14.41, 11.61, and 11.90, respectively, '
+            + 'and these differences equate to a moderate effect between the first and last assessments.'),
+    ]);
+    const shows = image('g', [630, 119, 894, 237], [
+        caption('g:a', [64, 252, 492, 383], 'Figure 4 shows the agreement based on the curve patterns. A significant '
+            + 'overlap of the two curves was found when the first curve was biphasic and the second was not.'),
+    ]);
+    const ir = run([figure, shows], releaseStrayCaptions);
+    assert.deepEqual(captionTexts(figure), []);
+    assert.deepEqual(captionTexts(shows), []);
+    assert.deepEqual(ir.blocks.map(block => block.id), ['f', 'f:b:text', 'f:a:text', 'g', 'g:a:text']);
+});
+
+test('keeps captions that only look stray', () => {
+    const panels = image('p', [100, 100, 900, 400], [
+        caption('p:panel', [100, 405, 300, 420], '(b) Residual vs. Age'),
+        caption('p:letter', [100, 90, 120, 100], 'c'),
+        caption('p:label', [100, 430, 900, 470], 'Figure 4. (a) Residual autocorrelation and (b) residuals.'),
+    ]);
+    const own = image('q', [100, 500, 900, 700], [
+        caption('q:one', [100, 710, 900, 760], 'Extended Data Fig. 1 | Quantification of behavior in the assay. a, Number of '
+            + 'trials per mouse across all of the conditions that were tested in the virtual burrow.'),
+    ]);
+    const legend = image('r', [100, 800, 900, 900], [
+        caption('r:legend', [100, 905, 900, 925], 'Panel legends describe each of the measured conditions in the trial.'),
+    ]);
+    run([panels, own, legend], releaseStrayCaptions);
+    assert.deepEqual(captionTexts(panels), ['(b) Residual vs. Age', 'c', 'Figure 4. (a) Residual autocorrelation and (b) residuals.']);
+    assert.equal(captionTexts(own).length, 1);
+    assert.equal(captionTexts(legend).length, 1);
 });

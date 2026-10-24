@@ -61,15 +61,15 @@
         ]
       },
       "sourceMap": {
-        "total": 105,
-        "covered": 105,
+        "total": 106,
+        "covered": 106,
         "ratio": 1,
         "crossPage": 6
       },
       "floats": {
         "markdown": {
           "image": 8,
-          "captionedImage": 5,
+          "captionedImage": 4,
           "table": 3,
           "algorithm": 0,
           "code": 0,
@@ -147,15 +147,15 @@
         ]
       },
       "sourceMap": {
-        "total": 105,
-        "covered": 105,
+        "total": 106,
+        "covered": 106,
         "ratio": 1,
         "crossPage": 6
       },
       "floats": {
         "markdown": {
           "image": 8,
-          "captionedImage": 5,
+          "captionedImage": 4,
           "table": 3,
           "algorithm": 0,
           "code": 0,
