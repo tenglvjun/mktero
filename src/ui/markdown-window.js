@@ -86,7 +86,11 @@ import {
     selectSourcePeek,
     sourcePeekKey,
 } from '../core/source-peek.js';
-import { appendRenderedMarkdown } from '../editor/rendered-markdown-dom.js';
+import {
+    appendInlineMathText,
+    appendRenderedMarkdown,
+    renderedPlainText,
+} from '../editor/rendered-markdown-dom.js';
 import {
     createTranslationReadingPositionAnchor,
     mapComparisonRangeToSource,
@@ -6416,7 +6420,8 @@ class MarkdownTabView {
             this.outlineItemAttributes(item)
         );
         if (!item.type) {
-            button.textContent = item.text;
+            appendInlineMathText(button, item.text);
+            button.setAttribute('title', renderedPlainText(button));
             return button;
         }
         const tableThumb = this.createOutlineTableThumb(item);
@@ -6430,11 +6435,10 @@ class MarkdownTabView {
                 draggable: 'false',
             }));
         }
-        button.appendChild(this.createElement(
-            'span',
-            { class: 'markdown-outline-caption' },
-            item.text
-        ));
+        const caption = this.createElement('span', { class: 'markdown-outline-caption' });
+        appendInlineMathText(caption, item.text);
+        button.appendChild(caption);
+        button.setAttribute('title', renderedPlainText(caption));
         return button;
     }
 
@@ -6901,11 +6905,14 @@ class MarkdownTabView {
             this.noteButtonAttributes(annotation, offset)
         );
         button.appendChild(this.createNoteMetadata(annotation, offset !== null));
-        button.appendChild(this.createElement(
-            'span',
-            { class: 'markdown-note-quote' },
-            String(annotation.text || '')
-        ));
+        const quote = this.createElement('span', { class: 'markdown-note-quote' });
+        appendInlineMathText(quote, String(annotation.text || ''));
+        button.appendChild(quote);
+        if (!annotation.comment && button.hasAttribute('aria-label') && quote.querySelector('math')) {
+            button.setAttribute('aria-label', this.t('viewer.noteJump', {
+                text: accessibleAnnotationText(renderedPlainText(quote)),
+            }));
+        }
         if (annotation.comment) {
             button.appendChild(this.createElement(
                 'span',

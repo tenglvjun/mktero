@@ -5727,6 +5727,61 @@ test('shows a live Markdown outline and scrolls to the selected heading', () => 
     view.destroy();
 });
 
+test('renders inline math in outline headings and note quotes', () => {
+    const markdown = '# An Introduction to B $^{\\varepsilon}$-trees\n\nPD-1 $^{+}$ cells.';
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+        annotationOverlay: {
+            matched: [{
+                id: 'note-math',
+                source: 'pdf',
+                type: 'highlight',
+                text: 'PD-1 $^{+}$ cells',
+                comment: '',
+                color: '#ffd400',
+                ranges: [{ from: markdown.indexOf('PD-1'), to: markdown.length - 1 }],
+            }],
+            unmatched: [],
+        },
+    }));
+    try {
+        const heading = shadow.querySelector('.markdown-outline-link');
+        assert.ok(heading.querySelector('.math-inline math'));
+        assert.equal(heading.textContent.includes('$'), false);
+        assert.equal(heading.getAttribute('title'), 'An Introduction to B ε-trees');
+
+        const quote = shadow.querySelector('.markdown-note-quote');
+        assert.ok(quote.querySelector('.math-inline math'));
+        assert.equal(quote.textContent.includes('$^{+}$'), false);
+        const button = quote.closest('button');
+        assert.match(button.getAttribute('aria-label') || '', /PD-1 \+ cells/u);
+        assert.equal(button.getAttribute('aria-label').includes('$'), false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('keeps outline headings and quotes without math as plain text', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Costs of $5 and $6\n\nBody.',
+        sourceKind: 'markdown',
+    }));
+    try {
+        const heading = shadow.querySelector('.markdown-outline-link');
+        assert.equal(heading.querySelector('math'), null);
+        assert.equal(heading.textContent, 'Costs of $5 and $6');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('aligns the Markdown outline to unique PDF bookmarks', () => {
     const markdown = [
         '# Discussion',

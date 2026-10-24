@@ -1,4 +1,4 @@
-import { renderMarkdownHTML } from '../markdown/markdown-html.js';
+import { renderInlineMathTextHTML, renderMarkdownHTML } from '../markdown/markdown-html.js';
 import { translateEnglish } from '../i18n/localization.js';
 
 export function appendRenderedMarkdown(
@@ -30,6 +30,31 @@ export function appendRenderedMarkdown(
         nodes = [...contentNodes[0].childNodes];
     }
     container.append(...nodes.map(node => document.importNode(node, true)));
+}
+
+// Appends a line of plain text whose inline math renders, as the outline
+// and the note list show headings and quotes.
+export function appendInlineMathText(container, text) {
+    const document = container.ownerDocument;
+    const source = String(text || '');
+    if (!/[$\\]/u.test(source)) {
+        container.append(document.createTextNode(source));
+        return;
+    }
+    const DOMParserType = document.defaultView.DOMParser;
+    const parsed = new DOMParserType().parseFromString(
+        `<!doctype html><html><body>${renderInlineMathTextHTML(source)}</body></html>`,
+        'text/html'
+    );
+    container.append(...[...parsed.body.childNodes].map(node => document.importNode(node, true)));
+}
+
+// What a reader sees in an element: rendered math as its symbols, without
+// the TeX source MathML keeps in its annotation.
+export function renderedPlainText(element) {
+    const copy = element.cloneNode(true);
+    for (const annotation of copy.querySelectorAll('annotation, annotation-xml')) annotation.remove();
+    return String(copy.textContent || '').replace(/\s+/gu, ' ').trim();
 }
 
 export function openRenderedLink(event, openLink) {

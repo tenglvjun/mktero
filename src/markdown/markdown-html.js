@@ -689,6 +689,24 @@ function renderCaptionMath(source, mathBudget, target = 'mktero') {
     return renderMath(source, false, mathBudget, target);
 }
 
+// A line of plain text with inline math (`$…$`, `\(…\)`), for surfaces that
+// show a heading or a quote outside the reader: math is KaTeX MathML with
+// the reader's limits and fallback, everything else is escaped text.
+export function renderInlineMathTextHTML(text) {
+    const source = String(text || '');
+    const matches = findInlineMathMatches(source);
+    if (!matches.length) return escapeHTML(source);
+    const mathBudget = createMathRenderBudget();
+    let html = '';
+    let offset = 0;
+    for (const match of matches) {
+        html += escapeHTML(source.slice(offset, match.start));
+        html += renderMath(match.text, false, mathBudget);
+        offset = match.end;
+    }
+    return html + escapeHTML(source.slice(offset));
+}
+
 export function renderTableCaptionContent(caption, mathBudget, target = 'mktero') {
     if (!caption?.label) return '';
     const budget = mathBudget || createMathRenderBudget();

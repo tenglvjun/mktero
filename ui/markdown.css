@@ -4928,6 +4928,24 @@ blockquote.mktero-note,
     white-space: pre-wrap;
 }
 
+/* Inline math in the outline and the note list: text sized, on the line,
+   with its TeX source kept out of view. */
+.markdown-outline-link .math-inline math,
+.markdown-note-quote .math-inline math {
+    font-size: 1em;
+}
+
+.markdown-outline-link .math-inline annotation,
+.markdown-note-quote .math-inline annotation {
+    display: none;
+}
+
+.markdown-outline-link .math-fallback,
+.markdown-note-quote .math-fallback {
+    font: inherit;
+    white-space: normal;
+}
+
 .markdown-source-fallback {
     overflow-wrap: anywhere;
 }
