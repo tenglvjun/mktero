@@ -8172,3 +8172,70 @@ test('annotationQuoteText falls back to saved text when markdown is empty', () =
     const quoteText = view.annotationQuoteText(annotation, 0, '');
     assert.equal(quoteText, 'saved text');
 });
+
+function crossPageWindow(callbacks) {
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'First part. Second part.',
+        annotationOverlay: {
+            matched: [
+                { id: 'PAGE0001', type: 'highlight', text: 'First part.', comment: '', color: '#ffd400', pageLabel: '4', ranges: [{ from: 0, to: 11 }] },
+                { id: 'PAGE0002', type: 'highlight', text: 'Second part.', comment: '', color: '#ffd400', pageLabel: '5', ranges: [{ from: 12, to: 24 }] },
+            ],
+            unmatched: [],
+        },
+        ...callbacks,
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return { setDocument() {}, refreshRendering() {}, destroy() {} };
+        },
+    });
+    return { view, model, editorOptions: () => editorOptions };
+}
+
+test('recolors every page part a cross-page color change reached', async () => {
+    const { view, model, editorOptions } = crossPageWindow({
+        async onChangeAnnotationColor() {
+            return ['PAGE0001', 'PAGE0002'];
+        },
+    });
+
+    await editorOptions().changeAnnotationColor('PAGE0001', '#ff6666');
+
+    assert.deepEqual(
+        model.annotationOverlay.matched.map(annotation => annotation.color),
+        ['#ff6666', '#ff6666']
+    );
+    view.destroy();
+});
+
+test('removes every page part a cross-page delete reached', async () => {
+    const { view, model, editorOptions } = crossPageWindow({
+        async onDeleteAnnotation() {
+            return ['PAGE0002', 'PAGE0001'];
+        },
+    });
+
+    await editorOptions().deleteAnnotation('PAGE0002');
+
+    assert.deepEqual(model.annotationOverlay.matched, []);
+    view.destroy();
+});
+
+test('changes only the clicked annotation when the action reports nothing', async () => {
+    const { view, model, editorOptions } = crossPageWindow({
+        async onChangeAnnotationColor() {},
+    });
+
+    await editorOptions().changeAnnotationColor('PAGE0001', '#ff6666');
+
+    assert.deepEqual(
+        model.annotationOverlay.matched.map(annotation => annotation.color),
+        ['#ff6666', '#ffd400']
+    );
+    view.destroy();
+});

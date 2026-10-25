@@ -1158,12 +1158,18 @@ class MarkdownTabView {
         if (typeof this.model.onChangeAnnotationColor !== 'function') {
             throw new Error('PDF annotation color changes are unavailable');
         }
-        await this.model.onChangeAnnotationColor(annotationID, color);
-        this.model.annotationOverlay = mapAnnotationOverlay(
-            this.model.annotationOverlay,
+        const reached = await this.model.onChangeAnnotationColor(
             annotationID,
-            annotation => ({ ...annotation, color })
+            color
         );
+        // A cross-page highlight is recolored on every page part it reached.
+        for (const id of reachedAnnotationIDs(reached, annotationID)) {
+            this.model.annotationOverlay = mapAnnotationOverlay(
+                this.model.annotationOverlay,
+                id,
+                annotation => ({ ...annotation, color })
+            );
+        }
         this.render(this.model);
     }
 
@@ -1183,8 +1189,14 @@ class MarkdownTabView {
         if (typeof this.model.onDeleteAnnotation !== 'function') {
             throw new Error('PDF annotation deletion is unavailable');
         }
-        await this.model.onDeleteAnnotation(annotationID);
-        this.removeVisibleAnnotation(annotationID);
+        const reached = await this.model.onDeleteAnnotation(annotationID);
+        for (const id of reachedAnnotationIDs(reached, annotationID)) {
+            this.model.annotationOverlay = filterAnnotationOverlay(
+                this.model.annotationOverlay,
+                id
+            );
+        }
+        this.render(this.model);
     }
 
     async createMarkdownAnnotation(annotation, selectionContext) {
@@ -7638,6 +7650,15 @@ function appendMatchedAnnotation(annotationOverlay, annotation) {
         matched: [...(overlay.matched || []), annotation],
         unmatched: [...(overlay.unmatched || [])],
     };
+}
+
+// The ids a grouped action reports reaching, or just the one it was asked
+// about when the action reports nothing.
+function reachedAnnotationIDs(reached, annotationID) {
+    const ids = Array.isArray(reached)
+        ? reached.map(id => String(id || '')).filter(Boolean)
+        : [];
+    return ids.length ? ids : [String(annotationID || '')];
 }
 
 function findOverlayAnnotation(annotationOverlay, annotationID) {

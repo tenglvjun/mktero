@@ -147,6 +147,14 @@ Selections that cross a PDF page break are split into one single-page Zotero
 highlight per page, so the complete Markdown selection remains navigable. A
 paragraph that resumes a page or two later is located the same way, across the
 full-page figure or running footer in between.
+Changing the color of one part, or deleting it, from the Markdown reader
+applies to every part Mktero created from that selection; a note stays on the
+part it was written on. Mktero remembers which parts belong together in
+`mktero-annotations/groups-v1` in the Zotero profile, storing only Zotero
+annotation keys. A part that matched a highlight you had already made in Zotero
+is never grouped or deleted this way, and a part already deleted in the Zotero
+reader is skipped. Cross-page highlights made before this version have no group
+and change one part at a time.
 Common MinerU LaTeX math symbols and simple subscripts are normalized to the
 PDF's extracted text, and a few characters the PDF text layer mangles inside a
 passage are tolerated, so selections that include formulas can still be

@@ -97,6 +97,11 @@ export class MarkdownLocalAnnotations {
         deletePDFAnnotation = null,
         updatePDFAnnotationComment = null,
         changePDFAnnotationColor = null,
+        // Told the Zotero annotation keys one synchronized highlight became,
+        // when it crossed a page and became several.
+        onPDFAnnotationGroup = () => {},
+        // Told the Zotero annotation keys this layer deleted.
+        onPDFAnnotationsDeleted = () => {},
         onError = () => {},
         onSynchronizationChange = () => {},
     }) {
@@ -109,6 +114,8 @@ export class MarkdownLocalAnnotations {
         this.deletePDFAnnotation = deletePDFAnnotation;
         this.updatePDFAnnotationComment = updatePDFAnnotationComment;
         this.changePDFAnnotationColor = changePDFAnnotationColor;
+        this.onPDFAnnotationGroup = onPDFAnnotationGroup;
+        this.onPDFAnnotationsDeleted = onPDFAnnotationsDeleted;
         this.onError = onError;
         this.onSynchronizationChange = onSynchronizationChange;
         // itemID -> local id -> PDF annotation ids this extension created.
@@ -324,6 +331,7 @@ export class MarkdownLocalAnnotations {
                 id => this.deletePDFAnnotation(itemID, id)
             );
             this.synchronizedAliases.get(itemID)?.delete(targetID);
+            this.#notifyHook(this.onPDFAnnotationsDeleted, itemID, deleted);
             return deleted;
         }
         this.#clearSynchronizationFailure(itemID, targetID);
@@ -607,7 +615,16 @@ export class MarkdownLocalAnnotations {
             });
             this.#clearSynchronizationFailure(itemID, annotation.id);
             if (status === 'removed') {
-                this.#forgetOwnedAnnotations(itemID, annotation.id);
+                // Only the parts this extension created form the group, so a
+                // grouped delete can never reach a highlight the user made.
+                const owned = new Set(
+                    this.#forgetOwnedAnnotations(itemID, annotation.id)
+                );
+                const parts = synchronizedPDFAnnotationIDs(saved)
+                    .filter(id => owned.has(id));
+                if (parts.length > 1) {
+                    this.#notifyHook(this.onPDFAnnotationGroup, itemID, parts);
+                }
                 this.#clearSynchronizationBlocks(itemID, [annotation.id]);
                 this.#notifySynchronizationChange(itemID);
             }
@@ -627,13 +644,22 @@ export class MarkdownLocalAnnotations {
                     annotation.id
                 );
                 if (typeof this.deletePDFAnnotation === 'function') {
+                    const deleted = [];
                     for (const annotationID of ownedIDs) {
                         try {
                             await this.deletePDFAnnotation(itemID, annotationID);
+                            deleted.push(annotationID);
                         }
                         catch (error) {
                             this.#reportError(error);
                         }
+                    }
+                    if (deleted.length) {
+                        this.#notifyHook(
+                            this.onPDFAnnotationsDeleted,
+                            itemID,
+                            deleted
+                        );
                     }
                 }
             }
@@ -765,6 +791,16 @@ export class MarkdownLocalAnnotations {
         }
         if (failure) throw failure;
         return reached;
+    }
+
+    #notifyHook(hook, itemID, annotationIDs) {
+        try {
+            const pending = hook(itemID, [...annotationIDs]);
+            Promise.resolve(pending).catch(error => this.#reportError(error));
+        }
+        catch (error) {
+            this.#reportError(error);
+        }
     }
 
     #reportError(error) {
