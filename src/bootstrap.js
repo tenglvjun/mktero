@@ -141,7 +141,10 @@ import {
     createEmptyAnnotationOverlay,
     MarkdownAnnotationOverlay,
 } from './core/markdown-annotation-overlay.js';
-import { MarkdownLocalAnnotations } from './core/markdown-local-annotations.js';
+import {
+    isLocalMarkdownAnnotationID,
+    MarkdownLocalAnnotations,
+} from './core/markdown-local-annotations.js';
 import {
     createEvidenceSnippet,
     formatEvidenceMarkdown,
@@ -536,6 +539,16 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ),
         deletePDFAnnotation: (itemID, annotationID) => (
             runtime.annotationActions.deleteAnnotation(itemID, annotationID)
+        ),
+        updatePDFAnnotationComment: (itemID, annotationID, comment) => (
+            runtime.annotationActions.updateComment(
+                itemID,
+                annotationID,
+                comment
+            )
+        ),
+        changePDFAnnotationColor: (itemID, annotationID, color) => (
+            runtime.annotationActions.changeColor(itemID, annotationID, color)
         ),
         onSynchronizationChange: itemID => (
             runtime.annotationOverlayRefresher?.refresh([itemID])
@@ -3558,6 +3571,7 @@ function validParserProfile(value) {
 
 async function runAnnotationAction(action, ...args) {
     try {
+        if (await runLocalIDAnnotationAction(action, ...args)) return;
         const handler = runtime.annotationActions?.[action];
         if (typeof handler !== 'function') {
             throw new Error('PDF annotation actions are unavailable');
@@ -3567,6 +3581,38 @@ async function runAnnotationAction(action, ...args) {
     catch (error) {
         Zotero.logError?.(error);
         throw error;
+    }
+}
+
+// A popup or note editor opened on a local highlight keeps its `mktero-` id
+// after the highlight is synchronized into the PDF and the overlay refreshes,
+// so its edits arrive here instead of the Markdown branch. Route them through
+// the local layer, which knows the PDF annotation the highlight became.
+// Resolves true when the local layer handled the action.
+async function runLocalIDAnnotationAction(action, itemID, annotationID, value) {
+    const local = runtime.localAnnotations;
+    if (!local || !isLocalMarkdownAnnotationID(annotationID)) return false;
+    switch (action) {
+        case 'changeColor':
+            await local.update(itemID, annotationID, { color: value });
+            return true;
+        case 'updateComment':
+            await local.update(itemID, annotationID, { comment: value });
+            return true;
+        case 'deleteAnnotation':
+            await local.delete(itemID, annotationID);
+            return true;
+        case 'openInPDF': {
+            const [primary] = local.synchronizedAnnotationIDs(
+                itemID,
+                annotationID
+            ) || [];
+            if (!primary) return false;
+            await runtime.annotationActions?.openInPDF?.(itemID, primary);
+            return true;
+        }
+        default:
+            return false;
     }
 }
 

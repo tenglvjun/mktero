@@ -1870,6 +1870,93 @@ test('updates an existing highlight at the same PDF position', async () => {
     assert.equal(createCalls, 0);
 });
 
+function reusableHighlightFixture(existingComment) {
+    const position = {
+        pageIndex: 0,
+        rects: [[72, 700, 280, 720]],
+    };
+    const state = { itemSaveCalls: 0, createCalls: 0 };
+    const existing = {
+        key: 'EXIST001',
+        annotationType: 'highlight',
+        annotationText: 'The sound of stress recovery',
+        annotationComment: existingComment,
+        annotationColor: '#ffd400',
+        annotationPageLabel: '1',
+        annotationSortIndex: '00000|000001|00000',
+        annotationPosition: JSON.stringify(position),
+        isEditable: () => true,
+        async saveTx() {
+            state.itemSaveCalls++;
+        },
+    };
+    const zotero = createZoteroForAnnotationCreation({
+        view: {},
+        async saveFromJSON() {
+            state.createCalls++;
+        },
+    });
+    zotero.Items.get(42).getAnnotations = () => [existing];
+    zotero.Items.loadDataTypes = async () => {};
+    const actions = createZoteroAnnotationActions(zotero, {
+        async locateText() {
+            return {
+                text: existing.annotationText,
+                pageLabel: existing.annotationPageLabel,
+                sortIndex: existing.annotationSortIndex,
+                position,
+            };
+        },
+    });
+    return { actions, existing, state };
+}
+
+test('keeps the note of a highlight the user made when it is highlighted again', async () => {
+    const { actions, existing, state } = reusableHighlightFixture(
+        'Written in the Zotero reader'
+    );
+
+    const synchronized = await actions.createFromText(42, {
+        text: existing.annotationText,
+        comment: '',
+        color: '#ff6666',
+    });
+
+    assert.equal(synchronized.reused, true);
+    assert.equal(synchronized.comment, 'Written in the Zotero reader');
+    assert.equal(existing.annotationComment, 'Written in the Zotero reader');
+    assert.equal(existing.annotationColor, '#ff6666');
+    assert.equal(state.itemSaveCalls, 1);
+    assert.equal(state.createCalls, 0);
+});
+
+test('does not save a user highlight again when only an empty note differs', async () => {
+    const { actions, existing, state } = reusableHighlightFixture('Keep me');
+
+    await actions.createFromText(42, {
+        text: existing.annotationText,
+        comment: '',
+        color: '#ffd400',
+    });
+
+    assert.equal(existing.annotationComment, 'Keep me');
+    assert.equal(state.itemSaveCalls, 0);
+});
+
+test('clears the note of a highlight this extension created', async () => {
+    const { actions, existing, state } = reusableHighlightFixture('Old note');
+
+    await actions.createFromText(42, {
+        text: existing.annotationText,
+        comment: '',
+        color: '#ffd400',
+        ownedAnnotationIDs: ['EXIST001'],
+    });
+
+    assert.equal(existing.annotationComment, '');
+    assert.equal(state.itemSaveCalls, 1);
+});
+
 test('changes the color of an annotation owned by the current PDF', async () => {
     const queue = {};
     let saveOptions;

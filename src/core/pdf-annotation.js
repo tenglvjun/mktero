@@ -77,6 +77,15 @@ export function comparePdfAnnotations(left, right) {
         );
 }
 
+// Set on the error an action throws when the Zotero annotation it targets no
+// longer exists or cannot be edited, so a caller can tell that apart from a
+// failed save.
+export const PDF_ANNOTATION_UNAVAILABLE = 'MKTERO_PDF_ANNOTATION_UNAVAILABLE';
+
+export function isPDFAnnotationUnavailableError(error) {
+    return error?.code === PDF_ANNOTATION_UNAVAILABLE;
+}
+
 export function accessibleAnnotationText(value) {
     const text = String(value || '').replace(/\s+/gu, ' ').trim();
     return text.length <= 200 ? text : `${text.slice(0, 199)}…`;

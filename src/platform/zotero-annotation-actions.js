@@ -2,6 +2,7 @@ import {
     isZoteroAnnotationColor,
     MAX_PDF_ANNOTATION_TEXT_LENGTH,
     normalizePDFAnnotationTextQuote,
+    PDF_ANNOTATION_UNAVAILABLE,
 } from '../core/pdf-annotation.js';
 import {
     createDehyphenatedPdfAnnotationTextIndex,
@@ -91,6 +92,11 @@ export function createZoteroAnnotationActions(zotero, {
             const textQuote = normalizePDFAnnotationTextQuote(
                 draft?.textQuote
             );
+            const ownedAnnotationIDs = new Set(
+                Array.isArray(draft?.ownedAnnotationIDs)
+                    ? draft.ownedAnnotationIDs.map(String).filter(Boolean)
+                    : []
+            );
             if (!text.trim()
                 || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH
                 || comment.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) {
@@ -142,7 +148,11 @@ export function createZoteroAnnotationActions(zotero, {
                     );
                     throwIfAborted(signal);
                     if (existing) {
-                        await updateMatchingAnnotation(zotero, existing, json);
+                        await updateMatchingAnnotation(zotero, existing, json, {
+                            owned: ownedAnnotationIDs.has(
+                                String(existing.key || '')
+                            ),
+                        });
                         savedParts.push({
                             annotation: normalizeCreatedAnnotation(existing, {
                                 ...json,
@@ -258,15 +268,25 @@ async function findMatchingAnnotation(zotero, attachment, draft) {
     )) || null;
 }
 
-async function updateMatchingAnnotation(zotero, annotation, draft) {
+// A reused annotation the user made in Zotero keeps its note when the draft
+// has none: highlighting the same text again must not erase it. Only a
+// highlight this extension created takes an empty note, which is how a note
+// cleared in the reader reaches the PDF.
+async function updateMatchingAnnotation(
+    zotero,
+    annotation,
+    draft,
+    { owned = false } = {}
+) {
     const comment = String(annotation.annotationComment || '');
     const color = String(annotation.annotationColor || '').toLowerCase();
-    if (comment === draft.comment && color === draft.color) return;
+    const nextComment = draft.comment || owned ? draft.comment : comment;
+    if (comment === nextComment && color === draft.color) return;
     const previousComment = annotation.annotationComment;
     const previousColor = annotation.annotationColor;
     try {
         await withNotifierQueue(zotero, async notifierQueue => {
-            annotation.annotationComment = draft.comment;
+            annotation.annotationComment = nextComment;
             annotation.annotationColor = draft.color;
             await annotation.saveTx({
                 skipDateModifiedUpdate: true,
@@ -1179,7 +1199,9 @@ function editableAnnotation(zotero, itemID, annotationID) {
     if (!annotation?.isAnnotation?.()
         || annotation.parentID !== attachment.id
         || !annotation.isEditable?.()) {
-        throw new Error('PDF annotation is unavailable or read-only');
+        const error = new Error('PDF annotation is unavailable or read-only');
+        error.code = PDF_ANNOTATION_UNAVAILABLE;
+        throw error;
     }
     return annotation;
 }
