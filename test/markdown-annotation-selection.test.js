@@ -473,3 +473,211 @@ test('creates a highlight from a figure caption selection', async () => {
     editor.destroy();
     dom.window.close();
 });
+
+function captionPointerEvent(ownerWindow, type, node, offset, extras = {}) {
+    const event = new ownerWindow.MouseEvent(type, {
+        bubbles: true,
+        button: 0,
+        buttons: type === 'mousemove' ? 1 : 0,
+        detail: 1,
+        ...extras,
+    });
+    Object.defineProperty(event, 'rangeParent', { value: node });
+    Object.defineProperty(event, 'rangeOffset', { value: offset });
+    return event;
+}
+
+test('clamps a figure-caption drag that leaked into the previous paragraph', async () => {
+    const markdown = [
+        'Before the figure, this paragraph must not be selected.',
+        '',
+        '![Figure 1. Consolidated Standards of Reporting Trial.](generated/figures/fig-1.png)',
+        '',
+        'After the figure, this paragraph stays outside.',
+    ].join('\n');
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    const figcaption = document.querySelector('figcaption');
+    const captionText = textNodeContaining(figcaption, 'Reporting');
+    const before = textNodeContaining(
+        document.querySelector('#editor'),
+        'Before the figure'
+    );
+    assert.ok(captionText);
+    assert.ok(before);
+    const start = captionText.textContent.indexOf('Reporting');
+    const focus = captionText.textContent.indexOf('Trial') + 'Trial'.length;
+    figcaption.dispatchEvent(captionPointerEvent(
+        dom.window,
+        'mousedown',
+        captionText,
+        start
+    ));
+    document.getSelection().setBaseAndExtent(before, 0, captionText, focus);
+    document.dispatchEvent(new dom.window.Event('selectionchange'));
+
+    const selection = document.getSelection();
+    assert.equal(figcaption.contains(selection.anchorNode), true);
+    assert.equal(figcaption.contains(selection.focusNode), true);
+    assert.equal(selection.anchorOffset, start);
+    assert.equal(selection.focusOffset, focus);
+
+    figcaption.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    const actions = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(actions);
+    actions.querySelector('[data-color="#2ea8e5"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].text, 'Reporting Trial');
+    assert.equal(created[0].text.includes('Before the figure'), false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not clamp a caption selection whose gesture started in the paragraph', async () => {
+    const markdown = [
+        'Before the figure, this paragraph must not be selected.',
+        '',
+        '![Figure 1. Consolidated Standards of Reporting Trial.](generated/figures/fig-1.png)',
+        '',
+        'After the figure, this paragraph stays outside.',
+    ].join('\n');
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+    });
+    const figcaption = document.querySelector('figcaption');
+    const captionText = textNodeContaining(figcaption, 'Reporting');
+    const before = textNodeContaining(
+        document.querySelector('#editor'),
+        'Before the figure'
+    );
+    before.parentElement.dispatchEvent(captionPointerEvent(
+        dom.window,
+        'mousedown',
+        before,
+        0
+    ));
+    document.getSelection().setBaseAndExtent(before, 0, captionText, 8);
+    document.dispatchEvent(new dom.window.Event('selectionchange'));
+    assert.equal(document.getSelection().anchorNode, before);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not clamp once the pointer has entered the following paragraph', async () => {
+    const markdown = [
+        'Before the figure, this paragraph must not be selected.',
+        '',
+        '![Figure 1. Consolidated Standards of Reporting Trial.](generated/figures/fig-1.png)',
+        '',
+        'After the figure, this paragraph stays outside.',
+    ].join('\n');
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+    });
+    const figcaption = document.querySelector('figcaption');
+    const captionText = textNodeContaining(figcaption, 'Reporting');
+    const before = textNodeContaining(
+        document.querySelector('#editor'),
+        'Before the figure'
+    );
+    const after = textNodeContaining(
+        document.querySelector('#editor'),
+        'After the figure'
+    );
+    const start = captionText.textContent.indexOf('Reporting');
+    figcaption.dispatchEvent(captionPointerEvent(
+        dom.window,
+        'mousedown',
+        captionText,
+        start
+    ));
+    after.parentElement.dispatchEvent(captionPointerEvent(
+        dom.window,
+        'mousemove',
+        after,
+        0,
+        { buttons: 1, clientX: 8, clientY: 8 }
+    ));
+    document.getSelection().setBaseAndExtent(before, 0, captionText, start + 4);
+    document.dispatchEvent(new dom.window.Event('selectionchange'));
+    assert.equal(document.getSelection().anchorNode, before);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('a re-entered caption selectionchange does not loop', async () => {
+    const markdown = '![Figure 1. Consolidated Standards of Reporting Trial.](generated/figures/fig-1.png)';
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+    });
+    const figcaption = document.querySelector('figcaption');
+    const captionText = textNodeContaining(figcaption, 'Reporting');
+    const beforeHost = document.createElement('p');
+    beforeHost.textContent = 'Before the figure, leaked.';
+    document.body.append(beforeHost);
+    const before = beforeHost.firstChild;
+    const start = captionText.textContent.indexOf('Reporting');
+    figcaption.dispatchEvent(captionPointerEvent(
+        dom.window,
+        'mousedown',
+        captionText,
+        start
+    ));
+    const selection = document.getSelection();
+    const original = selection.setBaseAndExtent.bind(selection);
+    let writes = 0;
+    selection.setBaseAndExtent = (...args) => {
+        writes += 1;
+        if (writes > 4) throw new Error('caption selection clamp looped');
+        original(...args);
+        if (writes === 1) {
+            document.dispatchEvent(new dom.window.Event('selectionchange'));
+        }
+    };
+    selection.setBaseAndExtent(before, 0, captionText, start + 4);
+    document.dispatchEvent(new dom.window.Event('selectionchange'));
+    assert.ok(writes <= 4);
+    assert.equal(figcaption.contains(selection.anchorNode), true);
+
+    editor.destroy();
+    dom.window.close();
+});
