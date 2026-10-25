@@ -681,3 +681,437 @@ test('a re-entered caption selectionchange does not loop', async () => {
     editor.destroy();
     dom.window.close();
 });
+
+async function highlightedAnnotation(markdown, select) {
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    try {
+        select(document, dom.window);
+        await Promise.resolve();
+        await Promise.resolve();
+        return created[0];
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+}
+
+function selectText(document, ownerWindow, node, from, to) {
+    selectAndHighlight(document, ownerWindow, range => {
+        range.setStart(node, from);
+        range.setEnd(node, to);
+    }, '#2ea8e5', node);
+}
+
+test('partial inline markup selection saves the text the reader sees', async () => {
+    const bold = 'We report **strong results** today.';
+    const boldEnd = 'strong results';
+    const boldAnnotation = await highlightedAnnotation(bold, (document, ownerWindow) => {
+        const content = document.querySelector('.cm-content');
+        const start = textNodeContaining(content, 'We report');
+        const end = textNodeContaining(content, boldEnd);
+        selectAndHighlight(document, ownerWindow, range => {
+            range.setStart(start, start.textContent.indexOf('We report'));
+            range.setEnd(end, end.textContent.indexOf(boldEnd) + boldEnd.length);
+        }, '#2ea8e5', end);
+    });
+    assert.equal(boldAnnotation.text, 'We report strong results');
+    assert.deepEqual(boldAnnotation.ranges, [
+        { from: 0, to: bold.indexOf('**') },
+        {
+            from: bold.indexOf(boldEnd),
+            to: bold.indexOf(boldEnd) + boldEnd.length,
+        },
+    ]);
+    assert.equal(boldAnnotation.ranges.some(range => (
+        bold.slice(range.from, range.to).includes('**')
+    )), false);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            bold,
+            boldAnnotation.ranges,
+            boldAnnotation.text
+        ),
+        true
+    );
+
+    const conclusions = '**Conclusions** we found more.';
+    const conclusionsAnnotation = await highlightedAnnotation(
+        conclusions,
+        (document, ownerWindow) => {
+            const content = document.querySelector('.cm-content');
+            const start = textNodeContaining(content, 'Conclusions');
+            const end = textNodeContaining(content, 'we found');
+            selectAndHighlight(document, ownerWindow, range => {
+                range.setStart(start, start.textContent.indexOf('Conclusions'));
+                range.setEnd(
+                    end,
+                    end.textContent.indexOf('found') + 'found'.length
+                );
+            }, '#2ea8e5', end);
+        }
+    );
+    assert.equal(conclusionsAnnotation.text, 'Conclusions we found');
+    assert.equal(conclusionsAnnotation.ranges.some(range => (
+        conclusions.slice(range.from, range.to).includes('**')
+    )), false);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            conclusions,
+            conclusionsAnnotation.ranges,
+            conclusionsAnnotation.text
+        ),
+        true
+    );
+
+    const link = 'See [paper](https://x.org/a) now.';
+    const linkAnnotation = await highlightedAnnotation(link, (document, ownerWindow) => {
+        const content = document.querySelector('.cm-content');
+        const start = textNodeContaining(content, 'paper');
+        const end = textNodeContaining(content, 'now.');
+        selectAndHighlight(document, ownerWindow, range => {
+            range.setStart(start, start.textContent.indexOf('per'));
+            range.setEnd(end, end.textContent.indexOf('now.') + 'now.'.length);
+        }, '#2ea8e5', end);
+    });
+    assert.equal(linkAnnotation.text, 'per now.');
+    assert.equal(linkAnnotation.ranges.some(range => (
+        link.slice(range.from, range.to).includes('](')
+    )), false);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            link,
+            linkAnnotation.ranges,
+            linkAnnotation.text
+        ),
+        true
+    );
+});
+
+test('a previously stored partial-mark annotation still matches its old text', () => {
+    const markdown = 'We report **strong results** today.';
+    const to = markdown.indexOf('strong results') + 'strong results'.length;
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            markdown,
+            [{ from: 0, to }],
+            'We report **strong results'
+        ),
+        true
+    );
+    const table = '<table><tr><td colspan="2">td</td></tr></table>';
+    const tagFrom = table.indexOf('<td') + 1;
+    assert.equal(table.slice(tagFrom, tagFrom + 2), 'td');
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            table,
+            [{ from: tagFrom, to: tagFrom + 2 }],
+            'td'
+        ),
+        true
+    );
+});
+
+test('selecting python in a fenced code body does not save the info string', async () => {
+    const markdown = 'Intro.\n\n```python\nprint(python)\n```\n';
+    const annotation = await highlightedAnnotation(markdown, (document, ownerWindow) => {
+        const code = document.querySelector('.cm-mktero-code-block code');
+        const node = textNodeContaining(code, 'print(python)');
+        const offset = node.textContent.indexOf('python');
+        selectText(document, ownerWindow, node, offset, offset + 'python'.length);
+    });
+    const bodyPython = markdown.indexOf('print(python)') + 'print('.length;
+    assert.equal(annotation.text, 'python');
+    assert.deepEqual(annotation.ranges, [{
+        from: bodyPython,
+        to: bodyPython + 'python'.length,
+    }]);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            markdown,
+            annotation.ranges,
+            annotation.text
+        ),
+        true
+    );
+});
+
+test('an HTML table cell selection maps the rendered text, not tags or entities', async () => {
+    const entity = '<table><tr><td>A &amp; B</td></tr></table>';
+    const entityAnnotation = await highlightedAnnotation(
+        entity,
+        (document, ownerWindow) => {
+            const cell = document.querySelector('.cm-mktero-html-table td');
+            const node = textNodeContaining(cell, 'A');
+            selectText(document, ownerWindow, node, 0, node.textContent.length);
+        }
+    );
+    const entityFrom = entity.indexOf('A &amp; B');
+    assert.equal(entityAnnotation.text, 'A & B');
+    assert.deepEqual(entityAnnotation.ranges, [{
+        from: entityFrom,
+        to: entityFrom + 'A &amp; B'.length,
+    }]);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            entity,
+            entityAnnotation.ranges,
+            entityAnnotation.text
+        ),
+        true
+    );
+
+    const tagged = '<table><tr><td>A &amp; B</td><td colspan="2">td</td></tr></table>';
+    const taggedAnnotation = await highlightedAnnotation(
+        tagged,
+        (document, ownerWindow) => {
+            const cell = [...document.querySelectorAll('.cm-mktero-html-table td')]
+                .find(candidate => candidate.textContent === 'td');
+            const node = textNodeContaining(cell, 'td');
+            selectText(document, ownerWindow, node, 0, node.textContent.length);
+        }
+    );
+    const taggedFrom = tagged.lastIndexOf('>td<') + 1;
+    assert.equal(taggedAnnotation.text, 'td');
+    assert.deepEqual(taggedAnnotation.ranges, [{
+        from: taggedFrom,
+        to: taggedFrom + 2,
+    }]);
+
+    const colspan = '<table><tr><td colspan="2">2</td></tr></table>';
+    const colspanAnnotation = await highlightedAnnotation(
+        colspan,
+        (document, ownerWindow) => {
+            const node = textNodeContaining(
+                document.querySelector('.cm-mktero-html-table td'),
+                '2'
+            );
+            const offset = node.textContent.indexOf('2');
+            selectText(document, ownerWindow, node, offset, offset + 1);
+        }
+    );
+    const colspanFrom = colspan.indexOf('>2<') + 1;
+    assert.equal(colspanAnnotation.text, '2');
+    assert.deepEqual(colspanAnnotation.ranges, [{
+        from: colspanFrom,
+        to: colspanFrom + 1,
+    }]);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            colspan,
+            colspanAnnotation.ranges,
+            colspanAnnotation.text
+        ),
+        true
+    );
+});
+
+test('selecting the plain cell after inline math in a table opens a highlight', async () => {
+    const markdown = '| $x$ | x |\n| --- | --- |\n';
+    const annotation = await highlightedAnnotation(markdown, (document, ownerWindow) => {
+        const cells = [...document.querySelectorAll('.cm-mktero-table th, .cm-mktero-table td')];
+        const node = textNodeContaining(cells[1], 'x');
+        selectText(document, ownerWindow, node, 0, node.textContent.length);
+    });
+    const from = markdown.indexOf('| x |') + '| '.length;
+    assert.equal(annotation.text, 'x');
+    assert.deepEqual(annotation.ranges, [{ from, to: from + 1 }]);
+    assert.equal(markdown.slice(from, from + 1), 'x');
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            markdown,
+            annotation.ranges,
+            annotation.text
+        ),
+        true
+    );
+});
+
+test('an indented code block maps a word on the first line to that line', async () => {
+    const markdown = 'Intro.\n\n    foo one\n    foo two\n';
+    const annotation = await highlightedAnnotation(markdown, (document, ownerWindow) => {
+        const code = document.querySelector('.cm-mktero-code-block pre');
+        const node = textNodeContaining(code, 'foo one');
+        const offset = node.textContent.indexOf('foo one');
+        selectText(document, ownerWindow, node, offset, offset + 'foo'.length);
+    });
+    const firstFoo = markdown.indexOf('foo one');
+    assert.equal(annotation.text, 'foo');
+    assert.deepEqual(annotation.ranges, [{ from: firstFoo, to: firstFoo + 3 }]);
+});
+
+test('an indented code block still opens a highlight for a word on one line', async () => {
+    const markdown = 'Intro.\n\n    foo one\n    foo two\n';
+    const annotation = await highlightedAnnotation(markdown, (document, ownerWindow) => {
+        const code = document.querySelector('.cm-mktero-code-block pre');
+        const node = textNodeContaining(code, 'one');
+        const offset = node.textContent.indexOf('one');
+        selectText(document, ownerWindow, node, offset, offset + 'one'.length);
+    });
+    const one = markdown.indexOf('one');
+    assert.equal(annotation.text, 'one');
+    assert.deepEqual(annotation.ranges, [{ from: one, to: one + 3 }]);
+});
+
+for (const [label, table] of [
+    ['a formula', '<table><tr><td>$x^2$</td><td>plain</td></tr></table>'],
+    ['an entity the mapping does not decode', '<table><tr><td>2 &times; 3</td><td>plain</td></tr></table>'],
+    ['a caption', '<table><caption>Table 1</caption><tr><td>plain</td></tr></table>'],
+]) {
+    test(`a plain HTML table cell is still selectable next to ${label}`, async () => {
+        const annotation = await highlightedAnnotation(table, (document, ownerWindow) => {
+            const cell = [...document.querySelectorAll('.cm-mktero-html-table td')]
+                .find(candidate => candidate.textContent.includes('plain'));
+            const node = textNodeContaining(cell, 'plain');
+            const offset = node.textContent.indexOf('plain');
+            selectText(document, ownerWindow, node, offset, offset + 'plain'.length);
+        });
+        const from = table.indexOf('plain');
+        assert.equal(annotation?.text, 'plain');
+        assert.deepEqual(annotation.ranges, [{ from, to: from + 5 }]);
+    });
+}
+
+function selectBetween(document, ownerWindow, start, startText, end, endText) {
+    const content = document.querySelector('.cm-content');
+    const startNode = textNodeContaining(content, start);
+    const endNode = textNodeContaining(content, end);
+    selectAndHighlight(document, ownerWindow, range => {
+        range.setStart(startNode, startNode.textContent.indexOf(startText));
+        range.setEnd(
+            endNode,
+            endNode.textContent.indexOf(endText) + endText.length
+        );
+    }, '#2ea8e5', endNode);
+}
+
+test('a selection over a hidden superscript wrapper saves the reader text', async () => {
+    const cited = 'The Value<sup>2</sup> grows.\n\n<sup>2</sup> A note.';
+    const citedAnnotation = await highlightedAnnotation(cited, (document, ownerWindow) => {
+        selectBetween(document, ownerWindow, 'The Value', 'Value', ' grows.', ' grows');
+    });
+    assert.equal(citedAnnotation.text, 'Value2 grows');
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(cited, citedAnnotation.ranges, citedAnnotation.text),
+        true
+    );
+
+    const dagger = 'Alice Smith$^{\\dagger}$ wrote this.';
+    const daggerAnnotation = await highlightedAnnotation(dagger, (document, ownerWindow) => {
+        selectBetween(document, ownerWindow, 'Alice Smith', 'Smith', ' wrote this.', ' wrote');
+    });
+    assert.equal(daggerAnnotation.text, 'Smith† wrote');
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(dagger, daggerAnnotation.ranges, daggerAnnotation.text),
+        true
+    );
+});
+
+test('an annotation stored with raw superscript markup still matches', () => {
+    const cited = 'The Value<sup>2</sup> grows.\n\n<sup>2</sup> A note.';
+    const dagger = 'Alice Smith$^{\\dagger}$ wrote this.';
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            cited,
+            [{ from: cited.indexOf('Value'), to: cited.indexOf(' grows') }],
+            'Value<sup>2</sup>'
+        ),
+        true
+    );
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            dagger,
+            [{ from: dagger.indexOf('Smith'), to: dagger.indexOf(' this') }],
+            'Smith$^{\\dagger}$ wrote'
+        ),
+        true
+    );
+});
+
+test('a selection across hidden page chrome saves separated words', async () => {
+    const markdown = 'Hello\n\n12\n\nWorld';
+    const chromeFrom = markdown.indexOf('\n\n12\n\n');
+    const chromeTo = chromeFrom + '\n\n12\n\n'.length;
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    try {
+        editor.setDocument({
+            markdown,
+            chromeRanges: [{ from: chromeFrom, to: chromeTo }],
+        });
+        selectBetween(document, dom.window, 'Hello', 'Hello', 'World', 'World');
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+    assert.equal(created.length, 1);
+    assert.equal(created[0].text, 'Hello World');
+    assert.deepEqual(created[0].ranges, [
+        { from: 0, to: chromeFrom },
+        { from: chromeTo, to: markdown.length },
+    ]);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(markdown, created[0].ranges, created[0].text),
+        true
+    );
+    // Saved before segments were separated.
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(markdown, created[0].ranges, 'HelloWorld'),
+        true
+    );
+});
+
+test('annotations stored before marks, cells and link titles were shown still match', () => {
+    const marks = 'Alice Smith $^{*}$ and Lee$^{1,\\dagger}$ wrote.';
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            marks,
+            [{ from: marks.indexOf('Smith'), to: marks.indexOf(' wrote') }],
+            'Smith $^{*}$ and Lee$^{1,\\dagger}$'
+        ),
+        true
+    );
+    const titled = 'See [the text](https://x.org "Title") now.';
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            titled,
+            [{ from: 0, to: titled.lastIndexOf('.') }],
+            'See the text "Title" now'
+        ),
+        true
+    );
+    const table = '<table><tr><td>Alpha</td><td>Beta</td></tr></table>';
+    const cells = [
+        { from: table.indexOf('Alpha'), to: table.indexOf('Alpha') + 5 },
+        { from: table.indexOf('Beta'), to: table.indexOf('Beta') + 4 },
+    ];
+    assert.equal(markdownAnnotationRangeMatchesSource(table, cells, 'AlphaBeta'), true);
+    assert.equal(markdownAnnotationRangeMatchesSource(table, cells, 'Alpha Beta'), true);
+});

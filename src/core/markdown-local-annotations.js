@@ -10,6 +10,7 @@ import {
 import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
+    legacyVisibleMarkdownTextForRanges,
     visibleMarkdownTextForRanges,
 } from '../markdown/markdown-visible-text.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
@@ -57,6 +58,26 @@ export function invalidMarkdownAnnotationStoreError(message, cause) {
 
 export function isInvalidMarkdownAnnotationStoreError(error) {
     return error?.code === INVALID_STORE_ERROR_CODE;
+}
+
+// Stored annotations keep at most this many ranges. A longer selection would
+// be saved with its ranges cut short while its text stays whole, so a write
+// refuses it instead. Reading an older, longer record stays tolerant.
+// An HTML table selection keeps one range per cell, so a large table needs
+// several hundred.
+export const MAX_MARKDOWN_ANNOTATION_SEGMENTS = 512;
+export const MARKDOWN_ANNOTATION_TOO_MANY_SEGMENTS
+    = 'MKTERO_ANNOTATION_TOO_MANY_SEGMENTS';
+
+export function assertMarkdownAnnotationSegmentLimit(ranges) {
+    if (!Array.isArray(ranges)
+        || ranges.filter(range => validRange(range)).length
+            <= MAX_MARKDOWN_ANNOTATION_SEGMENTS) {
+        return;
+    }
+    const error = new Error('Markdown annotation has too many segments');
+    error.code = MARKDOWN_ANNOTATION_TOO_MANY_SEGMENTS;
+    throw error;
 }
 
 export class MarkdownLocalAnnotations {
@@ -182,6 +203,7 @@ export class MarkdownLocalAnnotations {
 
     async create(itemID, draft) {
         const created = await this.#withOperation(itemID, async () => {
+            assertMarkdownAnnotationSegmentLimit(draft?.ranges);
             const annotation = normalizeAnnotation({
                 ...draft,
                 id: `mktero-${this.createID()}`,
@@ -194,7 +216,7 @@ export class MarkdownLocalAnnotations {
             }
             validateAggregateBudget([...annotations, annotation]);
             await this.#writeUserChange(itemID, [...annotations, annotation]);
-            return resolvedAnnotation(annotation, annotation.ranges[0]);
+            return resolvedAnnotation(annotation, annotation.ranges);
         });
         this.#clearSynchronizationFailure(itemID, created.id);
         this.#clearSynchronizationBlocks(itemID, [created.id]);
@@ -210,6 +232,7 @@ export class MarkdownLocalAnnotations {
                 annotation.id === targetID
             ));
             if (index < 0) throw new Error('Markdown annotation is unavailable');
+            assertMarkdownAnnotationSegmentLimit(changes?.ranges);
             const annotation = normalizeAnnotation({
                 ...annotations[index],
                 ...changes,
@@ -222,7 +245,7 @@ export class MarkdownLocalAnnotations {
             ));
             validateAggregateBudget(updated);
             await this.#writeUserChange(itemID, updated);
-            return resolvedAnnotation(annotation, annotation.ranges[0]);
+            return resolvedAnnotation(annotation, annotation.ranges);
         });
         this.#clearSynchronizationFailure(itemID, updated.id);
         this.#clearSynchronizationBlocks(itemID, [updated.id]);
@@ -260,9 +283,15 @@ export class MarkdownLocalAnnotations {
             const updated = annotations.map(annotation => {
                 const mapping = normalizedMappings.get(annotation.id);
                 if (!mapping) return annotation;
+                const ranges = annotation.ranges.map((range, index) => {
+                    const next = mapping.get(index);
+                    return next
+                        ? { from: next.from, to: next.to }
+                        : { from: range.from, to: range.to };
+                });
                 if (!markdownAnnotationRangeMatchesSource(
                     markdown,
-                    mapping,
+                    ranges,
                     annotation.text
                 )) {
                     throw new Error(
@@ -271,12 +300,12 @@ export class MarkdownLocalAnnotations {
                 }
                 return {
                     ...annotation,
-                    ranges: [{ from: mapping.from, to: mapping.to }],
+                    ranges,
                 };
             });
             const matched = updated.flatMap(annotation => (
                 normalizedMappings.has(annotation.id)
-                    ? [resolvedAnnotation(annotation, annotation.ranges[0])]
+                    ? [resolvedAnnotation(annotation, annotation.ranges)]
                     : []
             ));
             const refreshed = refreshAnnotationAnchors(
@@ -728,9 +757,15 @@ export function markdownAnnotationRangeMatchesSource(markdown, rangeOrRanges, te
         || ranges.some(range => !validRange(range, source.length))) {
         return false;
     }
+    const normalized = normalizeVisibleText(text);
+    if (normalizeVisibleText(visibleMarkdownTextForRanges(source, ranges))
+        === normalized) {
+        return true;
+    }
+    // Ranges saved by the slice re-parser still carry its leaked markers.
     return normalizeVisibleText(
-        visibleMarkdownTextForRanges(source, ranges)
-    ) === normalizeVisibleText(text);
+        legacyVisibleMarkdownTextForRanges(source, ranges)
+    ) === normalized;
 }
 
 export function createMarkdownAnnotationTextQuote(
@@ -816,8 +851,7 @@ function sameAnnotation(left, right) {
         && left.pdfPageIndexHint === right.pdfPageIndexHint
         && samePDFRegion(left.pdfRegion, right.pdfRegion)
         && sameTextQuote(left.textQuote, right.textQuote)
-        && left.ranges[0].from === right.ranges[0].from
-        && left.ranges[0].to === right.ranges[0].to;
+        && sameStoredRanges(left.ranges, right.ranges);
 }
 
 function sameTextQuote(left, right) {
@@ -849,7 +883,7 @@ function normalizeAnnotation(value) {
     const text = String(value?.text || '');
     const comment = String(value?.comment || '');
     const color = String(value?.color || DEFAULT_ANNOTATION_COLOR).toLowerCase();
-    const range = value?.ranges?.[0];
+    const ranges = normalizeAnnotationRanges(value?.ranges);
     const pdfPageIndexHint = value?.pdfPageIndexHint;
     const pdfRegion = normalizePDFRegion(value?.pdfRegion);
     let textQuote;
@@ -870,7 +904,7 @@ function normalizeAnnotation(value) {
             && (!Number.isSafeInteger(pdfPageIndexHint)
                 || pdfPageIndexHint < 0))
         || (value?.pdfRegion !== undefined && !pdfRegion)
-        || !validRange(range)) {
+        || !ranges.length) {
         throw new Error('Invalid Markdown annotation');
     }
     return {
@@ -880,7 +914,7 @@ function normalizeAnnotation(value) {
         text,
         comment,
         color,
-        ranges: [{ from: range.from, to: range.to }],
+        ranges,
         ...(pdfPageIndexHint === undefined ? {} : { pdfPageIndexHint }),
         ...(pdfRegion ? { pdfRegion } : {}),
         ...(textQuote ? { textQuote } : {}),
@@ -910,16 +944,44 @@ function samePDFRegion(left, right) {
         && left.bbox.every((value, index) => value === right.bbox[index]);
 }
 
+function normalizeAnnotationRanges(ranges) {
+    if (!Array.isArray(ranges) || !validRange(ranges[0])) return [];
+    const normalized = [];
+    for (const range of ranges) {
+        if (!validRange(range)) continue;
+        normalized.push({ from: range.from, to: range.to });
+        if (normalized.length === MAX_MARKDOWN_ANNOTATION_SEGMENTS) break;
+    }
+    return normalized;
+}
+
+function sameStoredRanges(left, right) {
+    return Array.isArray(left)
+        && Array.isArray(right)
+        && left.length === right.length
+        && left.every((range, index) => (
+            range.from === right[index].from && range.to === right[index].to
+        ));
+}
+
 function normalizeRangeMappings(mappings, documentLength) {
     const normalized = new Map();
     for (const mapping of Array.isArray(mappings) ? mappings : []) {
         if (mapping?.source !== 'markdown'
             || !LOCAL_ANNOTATION_ID.test(String(mapping?.id || ''))
-            || mapping?.rangeIndex !== 0
+            || !Number.isSafeInteger(mapping.rangeIndex)
+            || mapping.rangeIndex < 0
+            || mapping.rangeIndex >= MAX_MARKDOWN_ANNOTATION_SEGMENTS
             || !validRange(mapping, documentLength)) {
             continue;
         }
-        normalized.set(String(mapping.id), {
+        const id = String(mapping.id);
+        let ranges = normalized.get(id);
+        if (!ranges) {
+            ranges = new Map();
+            normalized.set(id, ranges);
+        }
+        ranges.set(mapping.rangeIndex, {
             from: mapping.from,
             to: mapping.to,
         });
@@ -934,7 +996,7 @@ function refreshAnnotationAnchors(
     markdown
 ) {
     const matchedRanges = new Map(matched.map(annotation => (
-        [annotation.id, annotation.ranges[0]]
+        [annotation.id, annotation.ranges]
     )));
     const visible = matchedRanges.size
         ? createVisibleMarkdownTextIndex(markdown)
@@ -943,18 +1005,25 @@ function refreshAnnotationAnchors(
     let changed = false;
     const changedIDs = new Set();
     const updated = annotations.map(annotation => {
-        const range = matchedRanges.get(annotation.id);
-        if (!range) return annotation;
+        const ranges = matchedRanges.get(annotation.id);
+        if (!ranges?.length) return annotation;
+        const storedRanges = ranges.map(range => ({
+            from: range.from,
+            to: range.to,
+        }));
+        const primary = storedRanges[0];
         let refreshed = refreshAnnotationTextQuote(
             {
                 ...annotation,
-                ranges: [{ from: range.from, to: range.to }],
+                ranges: storedRanges,
             },
-            range,
+            {
+                from: primary.from,
+                to: storedRanges.at(-1).to,
+            },
             visible
         );
-        if (annotation.ranges[0].from !== range.from
-            || annotation.ranges[0].to !== range.to) {
+        if (!sameStoredRanges(annotation.ranges, storedRanges)) {
             changed = true;
             changedIDs.add(annotation.id);
         }
@@ -975,12 +1044,12 @@ function refreshAnnotationAnchors(
         remainingWork -= sourceMap.length;
         const pdfPageIndexHint = resolvePDFPageIndexHint(
             sourceMap,
-            range,
+            primary,
             markdown.length
         );
         const pdfRegion = resolveSourceMapRegion(
             sourceMap,
-            range,
+            primary,
             markdown.length
         );
         const currentHint = refreshed.pdfPageIndexHint ?? null;
@@ -1068,7 +1137,10 @@ function validateAggregateBudget(annotations) {
         throw new Error('Markdown annotation context exceeds the safety limit');
     }
     const sourceLength = annotations.reduce((length, annotation) => (
-        length + annotation.ranges[0].to - annotation.ranges[0].from
+        length + annotation.ranges.reduce(
+            (rangeLength, range) => rangeLength + range.to - range.from,
+            0
+        )
     ), 0);
     if (sourceLength > MAX_TOTAL_SOURCE_RANGE_LENGTH) {
         throw new Error('Markdown annotation ranges exceed the safety limit');

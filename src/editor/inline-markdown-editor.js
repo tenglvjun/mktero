@@ -1051,7 +1051,11 @@ export function createInlineMarkdownEditor({
         activateDOMGlobals(ownerWindow);
         const domSelection = rootSelectionFor(parent);
         clampSelectionFocusToPointerLine(view, domSelection, event);
-        const selection = selectedMarkdownAnnotation(view, currentChromeRanges);
+        const selection = selectedMarkdownAnnotation(
+            view,
+            currentChromeRanges,
+            { analysisCache }
+        );
         if (!selection) return;
         if (markdownSelectionSide(
             domSelection,

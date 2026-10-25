@@ -76,6 +76,9 @@ import {
 import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
+    htmlTableVisibleSourceAtoms,
+    readerMathMarkText,
+    trimDanglingMarkdownMarkRanges,
     visibleMarkdownTextForRanges,
 } from '../markdown/markdown-visible-text.js';
 import {
@@ -2480,7 +2483,14 @@ function pressCanStartDrag(interaction) {
         || Boolean(interaction.element?.closest?.('.cm-mktero-rendered'));
 }
 
-export function selectedMarkdownAnnotation(view, chromeRanges = []) {
+// `analysisCache` is the reader's cache of whole-document analyses. It lets
+// the selection text reuse the citation analysis the reader already ran.
+export function selectedMarkdownAnnotation(
+    view,
+    chromeRanges = [],
+    { analysisCache = null } = {}
+) {
+    const analyses = documentAnalyses(view, analysisCache);
     const selection = rootSelectionFor(view.dom);
     if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
         return null;
@@ -2514,8 +2524,18 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
     }
     const selectedText = selection.toString();
     if (!selectedText.trim()) return null;
-    const renderedIntersections = intersectingRenderedContent(view, range);
-    if (renderedIntersections === null) return null;
+    const intersected = intersectingRenderedContent(view, range);
+    if (intersected === null) return null;
+    // A page-boundary comment between two paragraphs renders as a widget, but
+    // it is not text the reader selected. Leave it out like page chrome, so a
+    // selection across a page break maps to the text on both sides.
+    const pageMarkers = intersected.filter(isRenderedPageMarker);
+    const renderedIntersections = intersected.filter(container => (
+        !isRenderedPageMarker(container)
+    ));
+    const hiddenRanges = pageMarkers.length
+        ? [...chromeRanges, ...pageMarkers.map(renderedSourceRange)]
+        : chromeRanges;
     try {
         const first = selectionMarkdownPosition(
             view,
@@ -2529,14 +2549,15 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
             range.endOffset,
             'end'
         );
-        const selectionFrom = Math.min(first, second);
-        const selectionTo = Math.max(first, second);
-        const leadingWhitespace = selectedText.length
-            - selectedText.trimStart().length;
-        const trailingWhitespace = selectedText.length
-            - selectedText.trimEnd().length;
-        const from = selectionFrom + leadingWhitespace;
-        const to = selectionTo - trailingWhitespace;
+        // Trim on the source text. The DOM string's whitespace does not match
+        // the source: a browser adds newlines between blocks the source counts
+        // differently, so subtracting its count could leave the range one past
+        // the block it ends in.
+        const { from, to } = trimSourceWhitespace(
+            view.state.doc,
+            Math.min(first, second),
+            Math.max(first, second)
+        );
         if (to <= from) return null;
         if (renderedIntersections.length) {
             return selectedInlineMathAnnotation(
@@ -2544,23 +2565,55 @@ export function selectedMarkdownAnnotation(view, chromeRanges = []) {
                 renderedIntersections,
                 from,
                 to,
-                chromeRanges
+                hiddenRanges,
+                analyses
             ) || (
                 renderedIntersections.every(isRenderedMathContainer)
                     ? annotationSelectionWithoutChrome(
                         view,
                         from,
                         to,
-                        chromeRanges
+                        hiddenRanges,
+                        analyses
                     )
                     : null
             );
         }
-        return annotationSelectionWithoutChrome(view, from, to, chromeRanges);
+        return annotationSelectionWithoutChrome(
+            view,
+            from,
+            to,
+            hiddenRanges,
+            analyses
+        );
     }
     catch {
         return null;
     }
+}
+
+function trimSourceWhitespace(doc, from, to) {
+    let start = from;
+    let end = to;
+    while (start < end && /\s/u.test(doc.sliceString(start, start + 1))) {
+        start++;
+    }
+    while (end > start && /\s/u.test(doc.sliceString(end - 1, end))) {
+        end--;
+    }
+    return { from: start, to: end };
+}
+
+function isRenderedPageMarker(container) {
+    return Boolean(container?.querySelector?.('.page-marker'))
+        && !container.querySelector('table, img, figure, .math, pre');
+}
+
+function renderedSourceRange(container) {
+    return {
+        from: Number(container.dataset.markdownFrom),
+        to: Number(container.dataset.markdownTo),
+    };
 }
 
 // A selection boundary inside a math widget maps to the whole formula's
@@ -2585,17 +2638,37 @@ function selectionMarkdownPosition(view, node, offset, side) {
     return view.posAtDOM(node, offset);
 }
 
-function annotationSelectionWithoutChrome(view, from, to, chromeRanges) {
+function documentAnalyses(view, analysisCache) {
+    if (!analysisCache) return null;
+    let markdown = null;
+    const source = () => markdown ??= view.state.doc.toString();
+    return {
+        citations: () => computeMarkdownCitations(analysisCache, source()),
+        footnotes: () => computeMarkdownFootnotes(analysisCache, source()),
+    };
+}
+
+function annotationSelectionWithoutChrome(
+    view,
+    from,
+    to,
+    chromeRanges,
+    analyses = null
+) {
     const markdown = view.state.doc.toString();
     const expanded = expandMarkdownRangeToMathBoundaries(
         markdown,
         { from, to }
     );
-    const ranges = subtractChromeRanges(expanded, chromeRanges);
+    const ranges = trimDanglingMarkdownMarkRanges(
+        markdown,
+        subtractChromeRanges(expanded, chromeRanges)
+    );
     if (!ranges.length) return null;
     const text = visibleMarkdownTextForRanges(
         markdown,
-        ranges
+        ranges,
+        { analyses }
     ).trim();
     if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     return { text, ranges };
@@ -2624,6 +2697,8 @@ function selectedRenderedMathAnnotation(view, container, chromeRanges) {
 }
 
 function visibleMathAnnotationText(source) {
+    const mark = readerMathMarkText(source.trim());
+    if (mark !== null) return mark;
     const display = findDisplayMathMatches(source);
     if (coversWholeSource(source, display[0])) {
         return normalizeText(display[0].text);
@@ -2697,6 +2772,19 @@ function selectedRenderedMarkdownAnnotation(
             ? { text: selectedCaption.text, ranges }
             : null;
     }
+    // Tag text and entities are not in the visible-text index, so an HTML
+    // table is mapped from the cell the pointer is in, like a caption. When the
+    // source and rendered cells do not line up character for character (a
+    // formula, an entity this mapping does not decode, a caption), the text
+    // search below still handles the table as it did before.
+    if (start.classList.contains('cm-mktero-html-table')) {
+        const mappedTable = finishRenderedSourceAnnotation(
+            selectedHTMLTableByPosition(start, range, source),
+            sourceFrom,
+            chromeRanges
+        );
+        if (mappedTable) return mappedTable;
+    }
     const content = renderedMarkdownContentContainer(start);
     const renderedOffset = renderedSelectionTextOffset(
         content,
@@ -2705,13 +2793,39 @@ function selectedRenderedMarkdownAnnotation(
     );
     if (renderedOffset === null) return null;
     const renderedCandidates = findTextOccurrences(
-        content.textContent || '',
+        visibleRenderedText(content),
         text,
         MAX_MATCH_CANDIDATES
     );
     if (renderedCandidates.truncated) return null;
     const ordinal = renderedCandidates.offsets.indexOf(renderedOffset);
     if (ordinal < 0) return null;
+    // The info string is outside the rendered code body. Matching the whole
+    // fence would save the language name instead of the same word in the body.
+    // Only a plain fenced block, whose rendered body is its source text, is
+    // matched this way; indented code and code inside a list or quote keep
+    // the text search below.
+    if (start.classList.contains('cm-mktero-code-block')) {
+        const body = codeBodyRange(view, sourceFrom, sourceTo);
+        const bodyText = body ? source.slice(body.from, body.to) : '';
+        if (body && sameCodeText(visibleRenderedText(content), bodyText)) {
+            const candidates = findTextOccurrences(
+                bodyText,
+                text,
+                MAX_MATCH_CANDIDATES
+            );
+            if (candidates.truncated || ordinal >= candidates.offsets.length) {
+                return null;
+            }
+            return finishRenderedSourceAnnotation({
+                text,
+                ranges: [{
+                    from: body.from + candidates.offsets[ordinal],
+                    to: body.from + candidates.offsets[ordinal] + text.length,
+                }],
+            }, sourceFrom, chromeRanges);
+        }
+    }
     const visible = createVisibleMarkdownTextIndex(source);
     const candidates = findTextOccurrences(
         visible.text,
@@ -2726,12 +2840,135 @@ function selectedRenderedMarkdownAnnotation(
         visible.sourceRange(candidates.offsets[ordinal], text.length).from,
         visible.sourceRange(candidates.offsets[ordinal], text.length).to
     );
-    const ranges = subtractChromeRanges({
-        from: sourceFrom + selectedRange.from,
-        to: sourceFrom + selectedRange.to,
-    }, chromeRanges);
-    if (!ranges.length) return null;
-    return { text, ranges };
+    return finishRenderedSourceAnnotation({
+        text,
+        ranges: [selectedRange],
+    }, sourceFrom, chromeRanges);
+}
+
+function finishRenderedSourceAnnotation(mapped, sourceFrom, chromeRanges) {
+    if (!mapped?.text || mapped.text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) {
+        return null;
+    }
+    const ranges = (mapped.ranges || []).flatMap(item => subtractChromeRanges({
+        from: sourceFrom + item.from,
+        to: sourceFrom + item.to,
+    }, chromeRanges));
+    return ranges.length ? { text: mapped.text, ranges } : null;
+}
+
+// The body of a top-level fenced block: exactly one CodeText inside a
+// FencedCode. Indented blocks and fences nested in a list or quote split the
+// body into one CodeText per line, with indentation or markers between them
+// that the rendered code does not show, so they return null.
+function codeBodyRange(view, sourceFrom, sourceTo) {
+    let fenced = false;
+    let codeTexts = 0;
+    let codeText = null;
+    let closingFrom = null;
+    syntaxTree(view.state).iterate({
+        from: sourceFrom,
+        to: sourceTo,
+        enter(node) {
+            if (node.from < sourceFrom || node.to > sourceTo) return;
+            if (node.name === 'FencedCode') fenced = true;
+            if (node.name === 'CodeText') {
+                codeTexts++;
+                codeText = { from: node.from, to: node.to };
+            }
+            if (node.name === 'CodeMark'
+                && codeText
+                && node.from >= codeText.to) {
+                closingFrom = node.from;
+            }
+        },
+    });
+    if (!fenced || codeTexts !== 1 || !codeText) return null;
+    return {
+        from: codeText.from - sourceFrom,
+        to: (closingFrom ?? codeText.to) - sourceFrom,
+    };
+}
+
+// The rendered body ends with the newline before the closing fence; the
+// source body is otherwise the same text.
+function sameCodeText(rendered, source) {
+    return rendered.replace(/\n+$/, '') === source.replace(/\n+$/, '');
+}
+
+function selectedHTMLTableByPosition(container, range, source) {
+    const sourceAtoms = htmlTableVisibleSourceAtoms(source);
+    const domAtoms = renderedHTMLTableAtoms(container);
+    if (!sourceAtoms.length
+        || sourceAtoms.length !== domAtoms.length
+        || sourceAtoms.some((atom, index) => atom.text !== domAtoms[index].text)) {
+        return null;
+    }
+    const selected = [];
+    for (let index = 0; index < domAtoms.length; index++) {
+        if (!atomSelected(range, domAtoms[index])) continue;
+        selected.push(sourceAtoms[index]);
+    }
+    if (!selected.length) return null;
+    const raw = selected.map(atom => atom.text).join('');
+    if (!raw.trim()) return null;
+    const leading = raw.length - raw.trimStart().length;
+    const trailing = raw.length - raw.trimEnd().length;
+    const kept = selected.slice(leading, selected.length - trailing);
+    const keptRanges = [];
+    for (const atom of kept) {
+        const previous = keptRanges.at(-1);
+        if (previous && previous.to === atom.from) previous.to = atom.to;
+        else keptRanges.push({ from: atom.from, to: atom.to });
+    }
+    // The reader lays cells out apart, so text from two cells keeps a space
+    // between them, as visibleMarkdownTextForRanges joins them.
+    let text = '';
+    for (const [index, atom] of kept.entries()) {
+        const previous = kept[index - 1];
+        if (previous
+            && previous.cell !== atom.cell
+            && !/\s$/u.test(text)
+            && !/^\s/u.test(atom.text)) {
+            text += ' ';
+        }
+        text += atom.text;
+    }
+    return keptRanges.length ? { text, ranges: keptRanges } : null;
+}
+
+function renderedHTMLTableAtoms(container) {
+    const atoms = [];
+    for (const cell of container.querySelectorAll('td, th')) {
+        const document = cell.ownerDocument;
+        const walker = document.createTreeWalker(
+            cell,
+            document.defaultView.NodeFilter.SHOW_TEXT
+        );
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (hiddenMathTextNode(node)) continue;
+            const text = node.textContent || '';
+            for (let index = 0; index < text.length; index++) {
+                atoms.push({ node, offset: index, text: text[index] });
+            }
+        }
+    }
+    return atoms;
+}
+
+function visibleRenderedText(container) {
+    const document = container?.ownerDocument;
+    if (!document) return '';
+    const walker = document.createTreeWalker(
+        container,
+        document.defaultView.NodeFilter.SHOW_TEXT
+    );
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (hiddenMathTextNode(node)) continue;
+        text += node.textContent;
+    }
+    return text;
 }
 
 // The browser selection string includes the TeX source MathML keeps in a
@@ -2998,7 +3235,8 @@ function renderedSelectionTextOffset(container, range, selectedText) {
     }
     const leadingWhitespace = selectedText.length
         - selectedText.trimStart().length;
-    return prefix.toString().length + leadingWhitespace;
+    // Range.toString() includes TeX stored in MathML <annotation> nodes.
+    return visibleSelectionText(container, prefix).length + leadingWhitespace;
 }
 
 function intersectingRenderedContent(view, range) {
@@ -3022,7 +3260,8 @@ function selectedInlineMathAnnotation(
     containers,
     from,
     to,
-    chromeRanges = []
+    chromeRanges = [],
+    analyses = null
 ) {
     for (const container of containers) {
         const markdownFrom = Number(container.dataset.markdownFrom);
@@ -3035,13 +3274,16 @@ function selectedInlineMathAnnotation(
             return null;
         }
     }
-    const visible = createVisibleMarkdownTextIndex(
-        view.state.sliceDoc(from, to)
-    ).text;
-    const text = normalizeText(visible);
-    if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     const ranges = subtractChromeRanges({ from, to }, chromeRanges);
     if (!ranges.length) return null;
+    // The same text the saved ranges validate against, so a footnote glyph
+    // and a hidden superscript wrapper match what the reader shows.
+    const text = normalizeText(visibleMarkdownTextForRanges(
+        view.state.doc.toString(),
+        ranges,
+        { analyses }
+    ));
+    if (!text || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) return null;
     return { text, ranges };
 }
 
