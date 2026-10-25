@@ -7,15 +7,21 @@ const MAX_STORE_BYTES = 4 * 1024 * 1024;
 const MAX_STORED_ANNOTATIONS = 5_000;
 const MAX_BACKUP_NAME_ATTEMPTS = 1_000;
 
+// `directory` selects a sibling collection under mktero-annotations, such as
+// the cross-page highlight groups; the local annotations stay in v1.
 export function createZoteroMarkdownAnnotationStore({
     zotero,
     ioUtils,
     pathUtils,
+    directory = 'v1',
 }) {
     const profilePath = zotero?.Profile?.dir;
     if (!profilePath) throw new Error('The Zotero profile directory is unavailable');
+    if (!/^[a-z0-9-]{1,32}$/u.test(String(directory))) {
+        throw new TypeError('Invalid Markdown annotation store directory');
+    }
     return new MarkdownAnnotationStore({
-        rootPath: pathUtils.join(profilePath, 'mktero-annotations', 'v1'),
+        rootPath: pathUtils.join(profilePath, 'mktero-annotations', directory),
         ioUtils,
         pathUtils,
     });

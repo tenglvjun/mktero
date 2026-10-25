@@ -5,6 +5,7 @@ import {
     invalidMarkdownAnnotationStoreError,
     MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING,
     MarkdownLocalAnnotations,
+    MAX_MARKDOWN_ANNOTATION_SEGMENTS,
     markdownAnnotationRangeMatchesSource,
     mergeAnnotationOverlays,
 } from '../src/core/markdown-local-annotations.js';
@@ -1281,6 +1282,229 @@ function createMemoryStore(initial = []) {
     };
 }
 
+function synchronizedLocalAnnotations({
+    saved = { id: 'ZOTERO001', reused: false },
+    pdfCalls = [],
+    store = createMemoryStore(),
+} = {}) {
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            return structuredClone(saved);
+        },
+        async deletePDFAnnotation(itemID, annotationID) {
+            pdfCalls.push(['delete', itemID, annotationID]);
+        },
+        async updatePDFAnnotationComment(itemID, annotationID, comment) {
+            pdfCalls.push(['comment', itemID, annotationID, comment]);
+        },
+        async changePDFAnnotationColor(itemID, annotationID, color) {
+            pdfCalls.push(['color', itemID, annotationID, color]);
+        },
+    });
+    return { annotations, pdfCalls, store };
+}
+
+async function createSynchronizedHighlight(annotations, store) {
+    const created = await annotations.create(42, {
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    });
+    await waitFor(async () => (await store.get(42)).length === 0);
+    return created;
+}
+
+test('saves a note opened before synchronization on the PDF annotation', async () => {
+    const { annotations, pdfCalls, store } = synchronizedLocalAnnotations();
+    const created = await createSynchronizedHighlight(annotations, store);
+
+    assert.deepEqual(
+        annotations.synchronizedAnnotationIDs(42, created.id),
+        ['ZOTERO001']
+    );
+    const saved = await annotations.update(42, created.id, {
+        comment: 'Written after the sync',
+        text: 'Selected text',
+        ranges: [{ from: 0, to: 13 }],
+    });
+
+    assert.equal(saved, null);
+    assert.deepEqual(pdfCalls, [
+        ['comment', 42, 'ZOTERO001', 'Written after the sync'],
+    ]);
+    assert.deepEqual(await store.get(42), []);
+});
+
+test('recolors every page part of a synchronized cross-page highlight', async () => {
+    const { annotations, pdfCalls, store } = synchronizedLocalAnnotations({
+        saved: {
+            id: 'ZOTERO001',
+            annotationIDs: ['ZOTERO001', 'ZOTERO002'],
+            createdAnnotationIDs: ['ZOTERO001', 'ZOTERO002'],
+            reused: false,
+        },
+    });
+    const created = await createSynchronizedHighlight(annotations, store);
+
+    await annotations.update(42, created.id, { color: '#ff6666' });
+    await annotations.update(42, created.id, { comment: 'Only the first part' });
+
+    assert.deepEqual(pdfCalls, [
+        ['color', 42, 'ZOTERO001', '#ff6666'],
+        ['color', 42, 'ZOTERO002', '#ff6666'],
+        ['comment', 42, 'ZOTERO001', 'Only the first part'],
+    ]);
+});
+
+test('deletes a synchronized highlight through its local id', async () => {
+    const { annotations, pdfCalls, store } = synchronizedLocalAnnotations({
+        saved: {
+            id: 'ZOTERO001',
+            annotationIDs: ['ZOTERO001', 'ZOTERO002'],
+            createdAnnotationIDs: ['ZOTERO001', 'ZOTERO002'],
+            reused: false,
+        },
+    });
+    const created = await createSynchronizedHighlight(annotations, store);
+
+    await annotations.delete(42, created.id);
+
+    assert.deepEqual(pdfCalls, [
+        ['delete', 42, 'ZOTERO001'],
+        ['delete', 42, 'ZOTERO002'],
+    ]);
+    assert.equal(annotations.synchronizedAnnotationIDs(42, created.id), null);
+    await assert.rejects(
+        annotations.delete(42, created.id),
+        /Markdown annotation is unavailable/
+    );
+});
+
+test('still rejects an unknown local id that was never synchronized', async () => {
+    const { annotations, pdfCalls } = synchronizedLocalAnnotations();
+
+    await assert.rejects(
+        annotations.update(42, 'mktero-missing', { comment: 'x' }),
+        /Markdown annotation is unavailable/
+    );
+    assert.deepEqual(pdfCalls, []);
+});
+
+test('passes the PDF annotations it created to a follow-up synchronization', async () => {
+    const drafts = [];
+    let releaseFirst;
+    const firstPass = new Promise(resolve => {
+        releaseFirst = resolve;
+    });
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation(_itemID, draft) {
+            drafts.push(structuredClone(draft));
+            if (drafts.length === 1) {
+                await firstPass;
+                return { id: 'ZOTERO001', reused: false };
+            }
+            return { id: 'ZOTERO001', reused: true };
+        },
+    });
+    const created = await annotations.create(42, {
+        text: 'Selected text',
+        comment: 'First note',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    });
+    await waitFor(() => drafts.length === 1);
+
+    // The note is cleared while the first pass is still in flight.
+    await annotations.update(42, created.id, { comment: '' });
+    releaseFirst();
+    await waitFor(async () => (await store.get(42)).length === 0);
+
+    assert.equal(drafts.length, 2);
+    assert.equal(drafts[0].ownedAnnotationIDs, undefined);
+    assert.deepEqual(drafts[1].ownedAnnotationIDs, ['ZOTERO001']);
+    assert.equal(drafts[1].comment, '');
+    assert.deepEqual(
+        annotations.synchronizedAnnotationIDs(42, created.id),
+        ['ZOTERO001']
+    );
+});
+
+test('removes a highlight an earlier pass created when the draft is deleted later', async () => {
+    const deleted = [];
+    let releaseSecond;
+    const secondPass = new Promise(resolve => {
+        releaseSecond = resolve;
+    });
+    let calls = 0;
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            calls++;
+            if (calls === 1) return { id: 'ZOTERO001', reused: false };
+            await secondPass;
+            return { id: 'ZOTERO001', reused: true };
+        },
+        async deletePDFAnnotation(itemID, annotationID) {
+            deleted.push({ itemID, annotationID });
+        },
+    });
+    const created = await annotations.create(42, {
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    });
+    // Change the record before the first pass commits, so a second pass runs
+    // and reuses the annotation the first pass created.
+    await annotations.update(42, created.id, { color: '#ff6666' });
+    await waitFor(() => calls === 2);
+    await annotations.delete(42, created.id);
+    releaseSecond();
+
+    await waitFor(() => deleted.length === 1);
+    assert.deepEqual(deleted, [{ itemID: 42, annotationID: 'ZOTERO001' }]);
+});
+
+test('keeps a reused annotation the extension did not create', async () => {
+    const deleted = [];
+    let releaseSync;
+    const sync = new Promise(resolve => {
+        releaseSync = resolve;
+    });
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            await sync;
+            return { id: 'USER001', reused: true };
+        },
+        async deletePDFAnnotation(itemID, annotationID) {
+            deleted.push({ itemID, annotationID });
+        },
+    });
+    const created = await annotations.create(42, {
+        text: 'Selected text',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 13 }],
+    });
+    await annotations.delete(42, created.id);
+    releaseSync();
+
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(deleted, []);
+});
+
 async function waitFor(predicate) {
     for (let attempt = 0; attempt < 20; attempt++) {
         if (await predicate()) return;
@@ -1477,4 +1701,271 @@ test('does not write over a damaged annotation file that could not be set aside'
         error => error === damaged
     );
     assert.deepEqual(store.calls, ['get']);
+});
+
+test('finds a dagger highlight again after text is inserted before it', async () => {
+    const before = 'Alice Smith $^{\\dagger}$ wrote this.';
+    const store = createMemoryStore([{
+        id: 'mktero-dagger',
+        source: 'markdown',
+        type: 'highlight',
+        // What the reader now saves for a selection of "Smith … wrote".
+        text: 'Smith † wrote',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: before.indexOf('Smith'), to: before.indexOf(' this') }],
+    }]);
+    const annotations = new MarkdownLocalAnnotations({ store });
+
+    const result = await annotations.resolve(42, `A new opening paragraph.\n\n${before}`);
+
+    assert.equal(result.unmatched.length, 0);
+    assert.equal(result.matched.length, 1);
+    annotations.dispose();
+});
+
+test('reports the page parts of a synchronized cross-page highlight', async () => {
+    const groups = [];
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            return {
+                id: 'PAGE0001',
+                annotationIDs: ['PAGE0001', 'PAGE0002'],
+                createdAnnotationIDs: ['PAGE0001', 'PAGE0002'],
+                reused: false,
+            };
+        },
+        onPDFAnnotationGroup: (itemID, annotationIDs) => {
+            groups.push({ itemID, annotationIDs });
+        },
+    });
+
+    await createSynchronizedHighlight(annotations, store);
+
+    assert.deepEqual(groups, [{ itemID: 42, annotationIDs: ['PAGE0001', 'PAGE0002'] }]);
+});
+
+test('does not report a group for a single-page highlight', async () => {
+    const groups = [];
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            return { id: 'PAGE0001', reused: false };
+        },
+        onPDFAnnotationGroup: (itemID, annotationIDs) => {
+            groups.push({ itemID, annotationIDs });
+        },
+    });
+
+    await createSynchronizedHighlight(annotations, store);
+
+    assert.deepEqual(groups, []);
+});
+
+test('reports the PDF annotations deleted through a local id', async () => {
+    const deletedReports = [];
+    const { annotations, store } = synchronizedLocalAnnotations({
+        saved: {
+            id: 'PAGE0001',
+            annotationIDs: ['PAGE0001', 'PAGE0002'],
+            createdAnnotationIDs: ['PAGE0001', 'PAGE0002'],
+            reused: false,
+        },
+    });
+    annotations.onPDFAnnotationsDeleted = (itemID, annotationIDs) => {
+        deletedReports.push({ itemID, annotationIDs });
+    };
+    const created = await createSynchronizedHighlight(annotations, store);
+
+    await annotations.delete(42, created.id);
+
+    assert.deepEqual(deletedReports, [{ itemID: 42, annotationIDs: ['PAGE0001', 'PAGE0002'] }]);
+});
+
+test('never groups or deletes a reused highlight the user made', async () => {
+    const pdfCalls = [];
+    const groups = [];
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            // Page 1 is new; page 2 matched a highlight the user already had.
+            return {
+                id: 'PAGE0001',
+                annotationIDs: ['PAGE0001', 'USER0002'],
+                createdAnnotationIDs: ['PAGE0001'],
+                reused: false,
+            };
+        },
+        async deletePDFAnnotation(itemID, annotationID) {
+            pdfCalls.push(['delete', annotationID]);
+        },
+        async changePDFAnnotationColor(itemID, annotationID, color) {
+            pdfCalls.push(['color', annotationID, color]);
+        },
+        onPDFAnnotationGroup: (itemID, annotationIDs) => {
+            groups.push(annotationIDs);
+        },
+    });
+    const created = await createSynchronizedHighlight(annotations, store);
+
+    // One created part is no group, so the user's highlight cannot be swept
+    // into a grouped delete later.
+    assert.deepEqual(groups, []);
+    // A color reaches both parts, as highlighting the same text again does.
+    await annotations.update(42, created.id, { color: '#ff6666' });
+    // A delete reaches only the part this extension created.
+    const deleted = await annotations.delete(42, created.id);
+
+    assert.deepEqual(deleted, ['PAGE0001']);
+    assert.deepEqual(pdfCalls, [
+        ['color', 'PAGE0001', '#ff6666'],
+        ['color', 'USER0002', '#ff6666'],
+        ['delete', 'PAGE0001'],
+    ]);
+});
+
+test('a delete through a local id skips a part already deleted in Zotero', async () => {
+    const { PDF_ANNOTATION_UNAVAILABLE } = await import('../src/core/pdf-annotation.js');
+    const reached = [];
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+        async createPDFAnnotation() {
+            return {
+                id: 'PAGE0001',
+                annotationIDs: ['PAGE0001', 'PAGE0002'],
+                createdAnnotationIDs: ['PAGE0001', 'PAGE0002'],
+                reused: false,
+            };
+        },
+        async deletePDFAnnotation(itemID, annotationID) {
+            if (annotationID === 'PAGE0001') {
+                const error = new Error('PDF annotation is unavailable or read-only');
+                error.code = PDF_ANNOTATION_UNAVAILABLE;
+                throw error;
+            }
+            reached.push(annotationID);
+        },
+    });
+    const created = await createSynchronizedHighlight(annotations, store);
+
+    const deleted = await annotations.delete(42, created.id);
+
+    assert.deepEqual(deleted, ['PAGE0002']);
+    assert.deepEqual(reached, ['PAGE0002']);
+});
+
+function segmentedRanges(count) {
+    return Array.from({ length: count }, (_value, index) => ({
+        from: index * 10,
+        to: index * 10 + 4,
+    }));
+}
+
+test('refuses to create a highlight with more segments than the store keeps', async () => {
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+    });
+
+    await assert.rejects(
+        annotations.create(42, {
+            text: 'Many separate parts',
+            color: '#ffd400',
+            ranges: segmentedRanges(MAX_MARKDOWN_ANNOTATION_SEGMENTS + 1),
+        }),
+        error => error.code === 'MKTERO_ANNOTATION_TOO_MANY_SEGMENTS'
+    );
+    assert.deepEqual(await store.get(42), []);
+
+    const created = await annotations.create(42, {
+        text: 'Many separate parts',
+        color: '#ffd400',
+        ranges: segmentedRanges(MAX_MARKDOWN_ANNOTATION_SEGMENTS),
+    });
+    assert.equal(created.ranges.length, MAX_MARKDOWN_ANNOTATION_SEGMENTS);
+});
+
+test('refuses to update a highlight to more segments than the store keeps', async () => {
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-1',
+    });
+    const created = await annotations.create(42, {
+        text: 'Selected text',
+        color: '#ffd400',
+        ranges: [{ from: 5, to: 18 }],
+    });
+
+    await assert.rejects(
+        annotations.update(42, created.id, {
+            text: 'Many separate parts',
+            ranges: segmentedRanges(MAX_MARKDOWN_ANNOTATION_SEGMENTS + 1),
+        }),
+        error => error.code === 'MKTERO_ANNOTATION_TOO_MANY_SEGMENTS'
+    );
+    assert.deepEqual((await store.get(42))[0].ranges, [{ from: 5, to: 18 }]);
+});
+
+test('still reads and edits a stored highlight with more segments than the store keeps', async () => {
+    const store = createMemoryStore([{
+        id: 'mktero-legacy',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'Many separate parts',
+        comment: '',
+        color: '#ffd400',
+        ranges: segmentedRanges(MAX_MARKDOWN_ANNOTATION_SEGMENTS + 6),
+    }]);
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => 'local-2',
+    });
+
+    const updated = await annotations.update(42, 'mktero-legacy', {
+        comment: 'Still editable',
+    });
+    assert.equal(updated.comment, 'Still editable');
+});
+
+test('accepts a large table selection with one range per cell', async () => {
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({ store, createID: () => 'local-1' });
+
+    const created = await annotations.create(42, {
+        text: 'Many table cells',
+        comment: '',
+        color: '#ffd400',
+        ranges: segmentedRanges(200),
+    });
+
+    assert.equal(created.ranges.length, 200);
+});
+
+test('counts only valid ranges against the segment limit', async () => {
+    const store = createMemoryStore();
+    const annotations = new MarkdownLocalAnnotations({ store, createID: () => 'local-1' });
+    const ranges = [
+        ...segmentedRanges(MAX_MARKDOWN_ANNOTATION_SEGMENTS),
+        ...Array.from({ length: 5 }, () => ({ from: 9, to: 3 })),
+    ];
+
+    const created = await annotations.create(42, {
+        text: 'Mostly valid',
+        comment: '',
+        color: '#ffd400',
+        ranges,
+    });
+
+    assert.equal(created.ranges.length, MAX_MARKDOWN_ANNOTATION_SEGMENTS);
 });

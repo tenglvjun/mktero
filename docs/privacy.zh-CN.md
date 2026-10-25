@@ -22,6 +22,7 @@
 | 受保护的 Markdown 翻译批次 | 你配置的 AI Provider | Mktero 不同步 |
 | 选区翻译使用的选中文本 | 你配置的 AI Provider | Mktero 不同步 |
 | Zotero PDF 标注 | 本地 Zotero 文库 | 取决于 Zotero 设置 |
+| 尚未同步到 PDF 的本地 Markdown 高亮，以及跨页高亮各分段的 Zotero 标注 key | 当前 Zotero 配置文件，未加密 | 否 |
 | 保存的快照 Note 和附件（含可选图表元数据和 OCR 片段） | Zotero 条目和附件 | 取决于 Zotero 设置 |
 | 导出的 Markdown 和图片 | 用户选择的本地路径，包括 Obsidian 库。Mktero 不参与该副本的同步。 | 否 |
 | Obsidian 导出索引：文库 ID、条目 key、笔记文件夹名和内容哈希，以及库路径设置 | 当前 Zotero 配置文件，未加密 | 否 |

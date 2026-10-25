@@ -127,7 +127,13 @@ Cancel action leaves the document unchanged.
 
 Existing Zotero text highlights and underlines are loaded when a document opens.
 Drag across headings or body text to select it, including headings and paragraph
-endings immediately below figures and display formulas.
+endings immediately below figures and display formulas. A drag can also start
+on a citation, a figure or table reference, or a footnote mark; a click without
+a drag still opens it. The saved text is what the reader shows: a superscript
+mark such as `$^{*}$` is saved as its glyph, text from two table cells keeps a
+space between the cells, and a link's title is left out. A selection split into
+more than 512 separate parts is refused with a message instead of being saved
+incomplete.
 Selecting Markdown text can create a local annotation immediately; Mktero then
 creates the corresponding Zotero annotation only when the local PDF text index
 can identify one reliable match. Repeated or ambiguous text remains local and
@@ -143,11 +149,23 @@ Selections that cross a PDF page break are split into one single-page Zotero
 highlight per page, so the complete Markdown selection remains navigable. A
 paragraph that resumes a page or two later is located the same way, across the
 full-page figure or running footer in between.
+Changing the color of one part, or deleting it, from the Markdown reader
+applies to every part Mktero created from that selection; a note stays on the
+part it was written on. Mktero remembers which parts belong together in
+`mktero-annotations/groups-v1` in the Zotero profile, storing only Zotero
+annotation keys. A part that matched a highlight you had already made in Zotero
+is never grouped or deleted this way, and a part already deleted in the Zotero
+reader is skipped. Cross-page highlights made before this version have no group
+and change one part at a time.
 Common MinerU LaTeX math symbols and simple subscripts are normalized to the
 PDF's extracted text, and a few characters the PDF text layer mangles inside a
 passage are tolerated, so selections that include formulas can still be
 located. A display formula whose LaTeX never survives extraction falls back to
 the OCR region recorded for that block.
+
+A local highlight that has not reached the PDF yet shows a dashed underline.
+One whose sync failed shows a dotted warning underline, and hovering it shows
+the reason.
 
 ## Translate with AI
 

@@ -141,7 +141,11 @@ import {
     createEmptyAnnotationOverlay,
     MarkdownAnnotationOverlay,
 } from './core/markdown-annotation-overlay.js';
-import { MarkdownLocalAnnotations } from './core/markdown-local-annotations.js';
+import {
+    isLocalMarkdownAnnotationID,
+    MarkdownLocalAnnotations,
+} from './core/markdown-local-annotations.js';
+import { PDFAnnotationGroups } from './core/pdf-annotation-groups.js';
 import {
     createEvidenceSnippet,
     formatEvidenceMarkdown,
@@ -336,6 +340,7 @@ const runtime = {
     disposeAITargetLanguageObserver: null,
     annotationOverlayRefresher: null,
     localAnnotations: null,
+    annotationGroups: null,
     disposeToolbar: null,
     pendingSelectionReveals: new Map(),
     contextMenus: new Map(),
@@ -525,6 +530,18 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ),
         onError: error => Zotero.logError?.(error),
     });
+    // The page parts of a cross-page highlight, kept beside (not inside) the
+    // local annotation files so an older Mktero reading those is unaffected.
+    const annotationGroups = new PDFAnnotationGroups({
+        store: createZoteroMarkdownAnnotationStore({
+            zotero: Zotero,
+            ioUtils: IOUtils,
+            pathUtils: PathUtils,
+            directory: 'groups-v1',
+        }),
+        onError: error => Zotero.logError?.(error),
+    });
+    runtime.annotationGroups = annotationGroups;
     const localAnnotations = new MarkdownLocalAnnotations({
         store: createZoteroMarkdownAnnotationStore({
             zotero: Zotero,
@@ -536,6 +553,22 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ),
         deletePDFAnnotation: (itemID, annotationID) => (
             runtime.annotationActions.deleteAnnotation(itemID, annotationID)
+        ),
+        updatePDFAnnotationComment: (itemID, annotationID, comment) => (
+            runtime.annotationActions.updateComment(
+                itemID,
+                annotationID,
+                comment
+            )
+        ),
+        changePDFAnnotationColor: (itemID, annotationID, color) => (
+            runtime.annotationActions.changeColor(itemID, annotationID, color)
+        ),
+        onPDFAnnotationGroup: (itemID, annotationIDs) => (
+            annotationGroups.record(itemID, annotationIDs)
+        ),
+        onPDFAnnotationsDeleted: (itemID, annotationIDs) => (
+            annotationGroups.forget(itemID, annotationIDs)
         ),
         onSynchronizationChange: itemID => (
             runtime.annotationOverlayRefresher?.refresh([itemID])
@@ -1108,6 +1141,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeAITargetLanguageObserver = null;
     runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
+    runtime.annotationGroups = null;
     runtime.preferencePaneID = null;
     runtime.reasoningCatalogStore = null;
     runtime.disposeReasoningCatalogHost = null;
@@ -3556,17 +3590,71 @@ function validParserProfile(value) {
         && !/[\u0000-\u001F\u007F]/.test(value);
 }
 
+// A color change or a delete covers every page part of a cross-page
+// highlight; a note stays on the part it was written on. Resolves with the
+// annotation ids the action reached, so the reader can update all of them.
+const GROUPED_ANNOTATION_ACTIONS = new Set(['changeColor', 'deleteAnnotation']);
+
 async function runAnnotationAction(action, ...args) {
     try {
+        const local = await runLocalIDAnnotationAction(action, ...args);
+        if (local.handled) return local.reached;
         const handler = runtime.annotationActions?.[action];
         if (typeof handler !== 'function') {
             throw new Error('PDF annotation actions are unavailable');
         }
+        const [itemID, annotationID, ...rest] = args;
+        if (GROUPED_ANNOTATION_ACTIONS.has(action) && runtime.annotationGroups) {
+            return await runtime.annotationGroups.applyToGroup(
+                itemID,
+                annotationID,
+                memberID => handler(itemID, memberID, ...rest),
+                { forgetAfter: action === 'deleteAnnotation' }
+            );
+        }
         await handler(...args);
+        return undefined;
     }
     catch (error) {
         Zotero.logError?.(error);
         throw error;
+    }
+}
+
+// A popup or note editor opened on a local highlight keeps its `mktero-` id
+// after the highlight is synchronized into the PDF and the overlay refreshes,
+// so its edits arrive here instead of the Markdown branch. Route them through
+// the local layer, which knows the PDF annotation the highlight became.
+// Resolves `{ handled, reached }`. `reached` lists the PDF annotation ids a
+// color change or delete reached, so the reader can update every page part
+// instead of only the clicked one.
+async function runLocalIDAnnotationAction(action, itemID, annotationID, value) {
+    const local = runtime.localAnnotations;
+    const unhandled = { handled: false, reached: undefined };
+    if (!local || !isLocalMarkdownAnnotationID(annotationID)) return unhandled;
+    const parts = () => local.synchronizedAnnotationIDs(itemID, annotationID);
+    switch (action) {
+        case 'changeColor':
+            await local.update(itemID, annotationID, { color: value });
+            return { handled: true, reached: parts() || undefined };
+        case 'updateComment':
+            await local.update(itemID, annotationID, { comment: value });
+            return { handled: true, reached: undefined };
+        case 'deleteAnnotation': {
+            const deleted = await local.delete(itemID, annotationID);
+            return {
+                handled: true,
+                reached: Array.isArray(deleted) ? [annotationID, ...deleted] : undefined,
+            };
+        }
+        case 'openInPDF': {
+            const [primary] = parts() || [];
+            if (!primary) return unhandled;
+            await runtime.annotationActions?.openInPDF?.(itemID, primary);
+            return { handled: true, reached: undefined };
+        }
+        default:
+            return unhandled;
     }
 }
 

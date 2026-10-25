@@ -450,3 +450,83 @@ test('flattens LaTeX accents, sums, and exponents onto inline PDF glyphs', () =>
         'Ggenomic'
     );
 });
+
+test('flattens HTML and TeX footnote superscripts onto inline PDF glyphs', () => {
+    assert.equal(normalizePdfAnnotationText('Value<sup>2</sup> grows'), 'Value2 grows');
+    assert.equal(normalizePdfAnnotationText('H<sub>2</sub>O'), 'H2O');
+    assert.equal(normalizePdfAnnotationText('Smith$^{\\dagger}$ wrote'), 'Smith† wrote');
+    assert.equal(normalizePdfAnnotationText('Smith ${}^{\\ddagger}$'), 'Smith‡');
+    assert.equal(normalizePdfAnnotationText('Smith† wrote'), 'Smith† wrote');
+    assert.equal(normalizePdfAnnotationText('<sup class="x">2</sup>'), '2');
+    assert.match(normalizePdfAnnotationText('a <sup>2 and b</sub>'), /<sup>2 and b<\/sub>/u);
+    const markdown = 'Value<sup>2</sup>';
+    const index = createPdfAnnotationTextIndex(markdown);
+    const range = index.sourceRange(index.text.indexOf('2'), 1);
+    assert.equal(markdown.slice(range.from, range.to), '2');
+});
+
+test('a space between joined selection segments matches a PDF line break', () => {
+    assert.equal(normalizePdfAnnotationText('Hello World'), 'Hello World');
+    assert.equal(
+        normalizePdfAnnotationText('Hello World'),
+        normalizePdfAnnotationText('Hello\nWorld')
+    );
+    assert.notEqual(
+        normalizePdfAnnotationText('HelloWorld'),
+        normalizePdfAnnotationText('Hello\nWorld')
+    );
+});
+
+test('a literal dagger and a TeX dagger normalize to the same text', () => {
+    // The reader saves `Smith $^{\dagger}$` as "Smith † wrote", keeping the
+    // space MinerU writes before the mark; the PDF text layer has "Smith†".
+    const pdf = normalizePdfAnnotationText('Smith† wrote');
+    assert.equal(normalizePdfAnnotationText('Smith † wrote'), pdf);
+    assert.equal(normalizePdfAnnotationText('Smith $^{\\dagger}$ wrote'), pdf);
+    assert.equal(normalizePdfAnnotationText('Lee ‡ said'), normalizePdfAnnotationText('Lee‡ said'));
+    // Spacing away from a mark is unchanged.
+    assert.equal(normalizePdfAnnotationText('Smith wrote'), 'Smith wrote');
+});
+
+test('TeX, reader, and PDF forms of a footnote mark normalize to the same text', () => {
+    // The reader shows `$^{*}$` as KaTeX "∗" (or "*" as a footnote link) and
+    // `$^{\star}$` as "⋆"; the PDF text layer has "Smith*" or "Smith∗".
+    for (const [tex, glyphs, pdf] of [
+        ['Smith $^{*}$ wrote', ['Smith ∗ wrote', 'Smith∗ wrote'], ['Smith* wrote', 'Smith∗ wrote']],
+        ['Smith$^{\\ast}$ wrote', ['Smith∗ wrote'], ['Smith* wrote', 'Smith∗ wrote']],
+        ['Smith $^{a,*}$ wrote', ['Smitha,∗ wrote'], ['Smitha,* wrote', 'Smitha,∗ wrote']],
+        ['Smith $^{\\S}$ wrote', ['Smith § wrote', 'Smith§ wrote'], ['Smith§ wrote']],
+        ['Smith $^{\\P}$ wrote', ['Smith¶ wrote'], ['Smith¶ wrote']],
+        ['Smith $^{\\#}$ wrote', ['Smith# wrote'], ['Smith# wrote']],
+        ['Smith $^{\\dag}$ wrote', ['Smith † wrote', 'Smith† wrote'], ['Smith† wrote']],
+        ['Smith $^{\\star}$ wrote', ['Smith ⋆ wrote', 'Smith⋆ wrote'], ['Smith* wrote', 'Smith⋆ wrote']],
+        ['Smith $^{1,\\dagger}$ wrote', ['Smith 1,† wrote', 'Smith1,† wrote'], ['Smith1,† wrote']],
+        ['Smith${}^{*}$ wrote', ['Smith∗ wrote'], ['Smith* wrote']],
+    ]) {
+        const expected = normalizePdfAnnotationText(pdf[0]);
+        assert.equal(normalizePdfAnnotationText(tex), expected, tex);
+        for (const value of [...glyphs, ...pdf]) {
+            assert.equal(normalizePdfAnnotationText(value), expected, value);
+        }
+    }
+    assert.equal(normalizePdfAnnotationText('Smith $^{*}$ wrote'), 'Smith* wrote');
+    assert.equal(normalizePdfAnnotationText('Smith $^{1,\\dagger}$ wrote'), 'Smith1,† wrote');
+    // The mark maps back to its whole TeX source.
+    const markdown = 'Smith $^{\\ast}$ wrote';
+    const index = createPdfAnnotationTextIndex(markdown);
+    const range = index.sourceRange(index.text.indexOf('*'), 1);
+    assert.equal(markdown.slice(range.from, range.to), '$^{\\ast}$');
+    // Ordinary spacing and other superscripts are unchanged.
+    assert.equal(normalizePdfAnnotationText('Smith wrote 1, 2'), 'Smith wrote 1,2');
+    assert.equal(normalizePdfAnnotationText('x $^{a}$ y'), 'xa y');
+    assert.equal(normalizePdfAnnotationText('Smith $^{1,2}$ wrote'), 'Smith 1,2 wrote');
+    assert.equal(normalizePdfAnnotationText('$^{\\foo}$'), '$^{\\foo}$');
+});
+
+test('an ASCII asterisk or hash in prose keeps its spacing', () => {
+    assert.equal(normalizePdfAnnotationText('a * b'), 'a * b');
+    assert.equal(normalizePdfAnnotationText('5 * 3'), '5 * 3');
+    assert.equal(normalizePdfAnnotationText('item # 4'), 'item # 4');
+    // Letters or digits alone in a superscript are not a mark.
+    assert.equal(normalizePdfAnnotationText('Smith $^{ab}$ wrote'), normalizePdfAnnotationText('Smith $^{ab}$ wrote'));
+});

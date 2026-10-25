@@ -22,6 +22,7 @@
 | Protected Markdown translation batches | AI provider configured by you | Not by Mktero |
 | Selected Markdown text for selection translation | AI provider configured by you | Not by Mktero |
 | Zotero PDF annotations | Local Zotero library | According to Zotero settings |
+| Local Markdown highlights not yet in the PDF, and the Zotero annotation keys of the page parts of a cross-page highlight | Active Zotero profile, unencrypted | No |
 | Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
 | Exported Markdown and figures | User-selected local path, including an Obsidian vault. Mktero does not sync that copy. | No |
 | Obsidian export index: library ID, item key, note folder name, and content hash; the vault path preference | Active Zotero profile, unencrypted | No |

@@ -8172,3 +8172,305 @@ test('annotationQuoteText falls back to saved text when markdown is empty', () =
     const quoteText = view.annotationQuoteText(annotation, 0, '');
     assert.equal(quoteText, 'saved text');
 });
+
+function createAnnotationWindow(changes = {}, options = {}) {
+    const created = [];
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        onCreateMarkdownAnnotation: annotation => {
+            created.push(annotation);
+            return {
+                ...annotation,
+                id: `mktero-local-${created.length}`,
+                source: 'markdown',
+                type: 'highlight',
+            };
+        },
+        ...changes,
+    });
+    const { view, shadow } = createView(model, {}, {
+        ...options,
+        editorFactory(editorFactoryOptions) {
+            editorOptions = editorFactoryOptions;
+            return {
+                setDocument() {},
+                setCorrectionState() {},
+                refreshRendering() {},
+                destroy() {},
+            };
+        },
+    });
+    return { view, shadow, model, created, editorOptions };
+}
+
+test('relocates a draft highlight from its text quote after the Markdown was replaced', async () => {
+    const before = 'Short intro.\n\nThe target sentence stays.';
+    const after = 'A much longer restored intro.\n\nThe target sentence stays.';
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown: before,
+    });
+    const from = before.indexOf('The target');
+    const draft = {
+        text: 'target sentence',
+        comment: 'Draft note',
+        color: '#ffd400',
+        ranges: [{ from: from + 4, to: from + 19 }],
+        textQuote: { prefix: 'Short intro. The ', suffix: ' stays.' },
+    };
+    view.render({ ...model, markdown: after });
+
+    await editorOptions.createMarkdownAnnotation(draft, { side: 'source' });
+
+    const relocated = after.indexOf('target sentence');
+    assert.equal(created.length, 1);
+    assert.deepEqual(created[0].ranges, [{
+        from: relocated,
+        to: relocated + 'target sentence'.length,
+    }]);
+    assert.equal(created[0].comment, 'Draft note');
+    assert.equal(created[0].textQuote.suffix, ' stays.');
+    view.destroy();
+});
+
+test('uses the saved text quote to pick between repeated relocated text', async () => {
+    const before = 'Alpha one. repeat here. Beta two. repeat here.';
+    const after = `Prefix added. ${before}`;
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown: before,
+    });
+    const from = before.lastIndexOf('repeat here');
+    view.render({ ...model, markdown: after });
+
+    await editorOptions.createMarkdownAnnotation({
+        text: 'repeat here',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from, to: from + 11 }],
+        textQuote: { prefix: 'Beta two. ', suffix: '.' },
+    }, { side: 'source' });
+
+    const expected = after.lastIndexOf('repeat here');
+    assert.deepEqual(created[0].ranges, [{ from: expected, to: expected + 11 }]);
+    view.destroy();
+});
+
+test('still rejects a draft highlight whose text is gone from the Markdown', async () => {
+    const before = 'Short intro.\n\nThe target sentence stays.';
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown: before,
+    });
+    const from = before.indexOf('target');
+    view.render({ ...model, markdown: 'A different document entirely.' });
+
+    await assert.rejects(
+        editorOptions.createMarkdownAnnotation({
+            text: 'target sentence',
+            comment: '',
+            color: '#ffd400',
+            ranges: [{ from, to: from + 15 }],
+            textQuote: { prefix: 'Short intro. The ', suffix: ' stays.' },
+        }, { side: 'source' }),
+        /require original text/
+    );
+    assert.equal(created.length, 0);
+    view.destroy();
+});
+
+test('maps a multi-range comparison highlight to its source paragraphs', async () => {
+    const markdown = 'Alpha source sentence.\n\nBeta source sentence.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: 'Alpha translated.',
+    }, {
+        id: blocks[1].id,
+        markdown: 'Beta translated.',
+    }]);
+    const [first, second] = views.blockRanges;
+    const { view, created, editorOptions } = createAnnotationWindow({
+        markdown,
+        translationStatus: 'ready',
+        translationView: 'compare',
+        translatedMarkdown: views.translatedMarkdown,
+        comparisonMarkdown: views.comparisonMarkdown,
+        translationBlockRanges: views.blockRanges,
+    });
+    const firstStart = first.comparisonSourceFrom + 'Alpha '.length;
+
+    await editorOptions.createMarkdownAnnotation({
+        text: 'source sentence.Beta source sentence.',
+        comment: '',
+        color: '#ffd400',
+        ranges: [
+            { from: firstStart, to: first.comparisonSourceTo },
+            {
+                from: second.comparisonSourceFrom,
+                to: second.comparisonSourceTo,
+            },
+        ],
+    }, { side: 'source' });
+
+    assert.equal(created.length, 1);
+    assert.deepEqual(created[0].ranges, [
+        { from: first.sourceFrom + 'Alpha '.length, to: first.sourceTo },
+        { from: second.sourceFrom, to: second.sourceTo },
+    ]);
+    assert.equal(created[0].text, 'source sentence.Beta source sentence.');
+    view.destroy();
+});
+
+test('shows a highlight failure the selection popup could no longer show', () => {
+    let timers;
+    const { view, shadow, editorOptions } = createAnnotationWindow({
+        markdown: 'Some text.',
+    }, {
+        configureWindow(window) {
+            timers = installManualTimers(window);
+        },
+    });
+    try {
+        const logged = [];
+        view.zotero = { logError: error => logged.push(error) };
+        const failure = new Error('store failed');
+
+        editorOptions.onAnnotationActionError(
+            'annotation.createFailed',
+            failure
+        );
+
+        const status = shadow.querySelector('.markdown-reader-action-status');
+        assert.equal(status.hidden, false);
+        assert.equal(status.textContent, 'The highlight could not be saved.');
+        assert.deepEqual(logged, [failure]);
+        runManualTimer(timers.timers);
+        assert.equal(status.hidden, true);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
+test('rejects a relocation whose only match sits in a different context', async () => {
+    const before = 'Methods. The cohort was small. Results follow.';
+    // The selected sentence was rewritten; the same words now appear only in
+    // an unrelated passage, so a unique match is the wrong place.
+    const after = 'Methods were revised. Discussion: the cohort was small in 2019 too.';
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown: before,
+    });
+    const from = before.indexOf('cohort was small');
+    view.render({ ...model, markdown: after });
+
+    await assert.rejects(
+        editorOptions.createMarkdownAnnotation({
+            text: 'cohort was small',
+            comment: '',
+            color: '#ffd400',
+            ranges: [{ from, to: from + 'cohort was small'.length }],
+            textQuote: { prefix: 'Methods. The ', suffix: '. Results follow.' },
+        }, { side: 'source' }),
+        /require original text/
+    );
+    assert.equal(created.length, 0);
+    view.destroy();
+});
+
+function crossPageWindow(callbacks) {
+    let editorOptions;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'First part. Second part.',
+        annotationOverlay: {
+            matched: [
+                { id: 'PAGE0001', type: 'highlight', text: 'First part.', comment: '', color: '#ffd400', pageLabel: '4', ranges: [{ from: 0, to: 11 }] },
+                { id: 'PAGE0002', type: 'highlight', text: 'Second part.', comment: '', color: '#ffd400', pageLabel: '5', ranges: [{ from: 12, to: 24 }] },
+            ],
+            unmatched: [],
+        },
+        ...callbacks,
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            editorOptions = options;
+            return { setDocument() {}, refreshRendering() {}, destroy() {} };
+        },
+    });
+    return { view, model, editorOptions: () => editorOptions };
+}
+
+test('recolors every page part a cross-page color change reached', async () => {
+    const { view, model, editorOptions } = crossPageWindow({
+        async onChangeAnnotationColor() {
+            return ['PAGE0001', 'PAGE0002'];
+        },
+    });
+
+    await editorOptions().changeAnnotationColor('PAGE0001', '#ff6666');
+
+    assert.deepEqual(
+        model.annotationOverlay.matched.map(annotation => annotation.color),
+        ['#ff6666', '#ff6666']
+    );
+    view.destroy();
+});
+
+test('removes every page part a cross-page delete reached', async () => {
+    const { view, model, editorOptions } = crossPageWindow({
+        async onDeleteAnnotation() {
+            return ['PAGE0002', 'PAGE0001'];
+        },
+    });
+
+    await editorOptions().deleteAnnotation('PAGE0002');
+
+    assert.deepEqual(model.annotationOverlay.matched, []);
+    view.destroy();
+});
+
+test('changes only the clicked annotation when the action reports nothing', async () => {
+    const { view, model, editorOptions } = crossPageWindow({
+        async onChangeAnnotationColor() {},
+    });
+
+    await editorOptions().changeAnnotationColor('PAGE0001', '#ff6666');
+
+    assert.deepEqual(
+        model.annotationOverlay.matched.map(annotation => annotation.color),
+        ['#ff6666', '#ffd400']
+    );
+    view.destroy();
+});
+
+test('does not save a highlight that has more segments than the store keeps', async () => {
+    const { MAX_MARKDOWN_ANNOTATION_SEGMENTS } = await import('../src/core/markdown-local-annotations.js');
+    const words = Array.from(
+        { length: MAX_MARKDOWN_ANNOTATION_SEGMENTS + 1 },
+        (_value, index) => `w${index}`
+    );
+    const markdown = words.join(' ');
+    const { view, created, editorOptions } = createAnnotationWindow({
+        markdown,
+    });
+    let offset = 0;
+    const ranges = words.map(word => {
+        const range = { from: offset, to: offset + word.length };
+        offset += word.length + 1;
+        return range;
+    });
+
+    await assert.rejects(
+        editorOptions.createMarkdownAnnotation({
+            text: words.join(''),
+            comment: '',
+            color: '#ffd400',
+            ranges,
+        }, { side: 'source' }),
+        error => error.code === 'MKTERO_ANNOTATION_TOO_MANY_SEGMENTS'
+    );
+    assert.equal(created.length, 0);
+    view.destroy();
+});

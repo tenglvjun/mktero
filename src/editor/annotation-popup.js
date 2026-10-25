@@ -21,6 +21,7 @@ const ANNOTATION_ERROR_KEYS = new Map([
     ['MKTERO_PDF_TEXT_AMBIGUOUS', 'annotation.pdfTextAmbiguous'],
     ['MKTERO_PDF_READER_UNAVAILABLE', 'annotation.pdfReaderUnavailable'],
     ['MKTERO_PDF_TEXT_SEARCH_TIMEOUT', 'annotation.pdfTextSearchTimeout'],
+    ['MKTERO_ANNOTATION_TOO_MANY_SEGMENTS', 'annotation.tooManySegments'],
 ]);
 const SELECTION_TRANSLATION_ERROR_KEYS = new Map([
     ['AI_CONFIGURATION_ERROR', 'ai.configurationRequired'],
@@ -46,6 +47,7 @@ export function createAnnotationPopup(parent, {
     openAnnotationInPDF,
     onNoteEditorClose,
     onSourceNavigationError,
+    onDetachedActionError,
 } = {}) {
     const t = localization.t.bind(localization);
     const ownerWindow = parent.ownerDocument.defaultView;
@@ -58,6 +60,12 @@ export function createAnnotationPopup(parent, {
     let hoverOpenAnchor = null;
     let activeSelectionTranslationCancel = null;
     let saveNoteBeforeDismiss = null;
+    let selectionHintOpen = false;
+    // A live region inserted together with its text may never be announced.
+    // This one exists for the popup's whole life, so a hint only changes the
+    // text of a region the screen reader already tracks.
+    const status = createVisuallyHiddenStatus(parent.ownerDocument);
+    parent.appendChild(status);
 
     const cancelScheduledOpen = anchor => {
         if (hoverOpenTimer === null
@@ -74,6 +82,9 @@ export function createAnnotationPopup(parent, {
     );
     const isNoteOpen = () => (
         saveNoteBeforeDismiss !== null && anchoredPopup.isOpen()
+    );
+    const isSelectionHintOpen = () => (
+        selectionHintOpen && anchoredPopup.isOpen()
     );
 
     const cancelActiveSelectionTranslation = () => {
@@ -273,6 +284,8 @@ export function createAnnotationPopup(parent, {
                                 }
                             }
                             : undefined,
+                        viewPDFSourceReportsErrors:
+                            typeof onSourceNavigationError === 'function',
                         openNote: () => {
                             onOpenNote?.();
                             openDraftNote({
@@ -283,6 +296,7 @@ export function createAnnotationPopup(parent, {
                         },
                         close,
                         reposition,
+                        onDetachedActionError,
                         registerPopupCancel: cancel => {
                             registeredSelectionPopupCancel = true;
                             cancelSelectionPopup = cancel;
@@ -295,6 +309,31 @@ export function createAnnotationPopup(parent, {
         if (registeredSelectionPopupCancel) {
             activeSelectionTranslationCancel = cancelSelectionPopup;
         }
+    };
+    // A compare-mode selection that holds no original text gets no actions.
+    // Say why instead of leaving the selection without any response.
+    const openSelectionHint = ({ anchor }) => {
+        if (!anchor) return;
+        cancelScheduledOpen();
+        const message = t('annotation.originalTextOnly');
+        openPopup({
+            anchor,
+            label: t('annotation.originalTextOnlyLabel'),
+            popupClassName: 'mktero-annotation-popup--hint',
+            dismissOnMouseLeave: false,
+            onClose: () => {
+                selectionHintOpen = false;
+                status.textContent = '';
+            },
+            renderContent({ document }) {
+                const hint = document.createElementNS(XHTML_NAMESPACE, 'div');
+                hint.className = 'mktero-annotation-selection-hint';
+                hint.textContent = message;
+                return hint;
+            },
+        });
+        selectionHintOpen = anchoredPopup.isOpen();
+        if (selectionHintOpen) status.textContent = message;
     };
     const openActions = ({ anchor, annotation, focus = false }) => {
         if (!annotation) return;
@@ -347,6 +386,7 @@ export function createAnnotationPopup(parent, {
         open: openNote,
         openNote,
         openSelection,
+        openSelectionHint,
         openActions,
         scheduleOpenActions,
         cancelScheduledOpen,
@@ -354,10 +394,36 @@ export function createAnnotationPopup(parent, {
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
         isSelectionOpen,
+        isSelectionHintOpen,
         isNoteOpen,
         contains: anchoredPopup.contains,
-        destroy: close,
+        destroy() {
+            close();
+            status.remove();
+        },
     };
+}
+
+function createVisuallyHiddenStatus(document) {
+    const status = document.createElementNS(XHTML_NAMESPACE, 'div');
+    status.className = 'mktero-annotation-popup-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    for (const [property, value] of [
+        ['position', 'absolute'],
+        ['width', '1px'],
+        ['height', '1px'],
+        ['margin', '-1px'],
+        ['padding', '0'],
+        ['border', '0'],
+        ['overflow', 'hidden'],
+        ['clip', 'rect(0 0 0 0)'],
+        ['clip-path', 'inset(50%)'],
+        ['white-space', 'nowrap'],
+    ]) {
+        status.style.setProperty(property, value);
+    }
+    return status;
 }
 
 function createAnnotationMetadata(document, annotation, translate) {
@@ -454,7 +520,8 @@ function createAnnotationNoteEditor(
         saving = Promise.resolve()
             .then(() => saveComment(input.value))
             .then(() => {
-                close?.();
+                // The shared popup may already show newer content.
+                if (form.isConnected) close?.();
             })
             .catch(cause => {
                 error.textContent = annotationErrorMessage(
@@ -513,9 +580,11 @@ function createMarkdownSelectionActions(
         registerPopupCancel,
         copySourcedMarkdown,
         viewPDFSource,
+        viewPDFSourceReportsErrors = false,
         openNote,
         close,
         reposition,
+        onDetachedActionError,
     }
 ) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
@@ -669,10 +738,21 @@ function createMarkdownSelectionActions(
         reposition?.();
     };
 
-    const setExistingControlsBusy = busy => {
+    // A pending action (a highlight create) and a running translation each
+    // keep the controls disabled. A translation that finishes first must not
+    // re-enable a color that would create the same highlight twice.
+    let actionPending = false;
+    let translationBusy = false;
+    const syncControlsDisabled = () => {
         for (const control of controls) {
-            control.button.disabled = busy || !control.enabled;
+            control.button.disabled = actionPending
+                || translationBusy
+                || !control.enabled;
         }
+    };
+    const setExistingControlsBusy = busy => {
+        translationBusy = busy;
+        syncControlsDisabled();
     };
 
     const startTranslation = async () => {
@@ -778,14 +858,33 @@ function createMarkdownSelectionActions(
         translationButtons
     );
 
-    const run = async (action, errorKey = 'annotation.actionFailed') => {
-        for (const control of controls) control.button.disabled = true;
+    const run = async (
+        action,
+        errorKey = 'annotation.actionFailed',
+        { errorReported = false } = {}
+    ) => {
+        if (actionPending) return;
+        actionPending = true;
+        syncControlsDisabled();
         error.hidden = true;
         try {
             await action();
-            close?.();
+            // The shared popup may already show a newer selection.
+            if (content.isConnected) close?.();
         }
         catch (cause) {
+            if (!content.isConnected) {
+                // A refresh or an outside click closed this popup while the
+                // action ran. Its error element is detached, so the failure
+                // has to be shown somewhere the reader can still see.
+                // An action that already logged its failure passes no
+                // error, so the reader sees the message without a second log.
+                onDetachedActionError?.(
+                    annotationErrorKey(cause, errorKey),
+                    errorReported ? undefined : cause
+                );
+                return;
+            }
             error.textContent = annotationErrorMessage(
                 cause,
                 translate,
@@ -795,9 +894,8 @@ function createMarkdownSelectionActions(
             reposition?.();
         }
         finally {
-            for (const control of controls) {
-                control.button.disabled = !control.enabled;
-            }
+            actionPending = false;
+            syncControlsDisabled();
         }
     };
 
@@ -816,7 +914,7 @@ function createMarkdownSelectionActions(
         button.disabled = !canCreate;
         button.addEventListener('click', () => run(() => (
             createMarkdownAnnotation({ ...annotation, color: option.value })
-        )));
+        ), 'annotation.createFailed'));
         controls.push({ button, enabled: canCreate });
         palette.appendChild(button);
     }
@@ -852,7 +950,8 @@ function createMarkdownSelectionActions(
         ));
         sourceButton.addEventListener('click', () => run(
             viewPDFSource,
-            'source.navigationFailed'
+            'source.navigationFailed',
+            { errorReported: viewPDFSourceReportsErrors }
         ));
         controls.push({ button: sourceButton, enabled: true });
         toolbar.appendChild(sourceButton);
@@ -1042,10 +1141,12 @@ function isFatalSelectionTranslationError(error) {
     return SELECTION_TRANSLATION_ERROR_KEYS.has(error?.code);
 }
 
-function annotationErrorMessage(error, translate, fallbackKey) {
-    return translate(
-        SELECTION_TRANSLATION_ERROR_KEYS.get(error?.code)
+function annotationErrorKey(error, fallbackKey) {
+    return SELECTION_TRANSLATION_ERROR_KEYS.get(error?.code)
         || ANNOTATION_ERROR_KEYS.get(error?.code)
-        || fallbackKey
-    );
+        || fallbackKey;
+}
+
+function annotationErrorMessage(error, translate, fallbackKey) {
+    return translate(annotationErrorKey(error, fallbackKey));
 }

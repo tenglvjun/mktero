@@ -98,6 +98,13 @@ test('resolves an OCR region only when one mapped block is covered', () => {
         resolveSourceMapRegion(sourceMap, { from: 10, to: 200 }, 200),
         null
     );
+    // The equation plus part of the next paragraph is not the equation alone:
+    // falling back to its region would highlight the equation for text that
+    // also covers the paragraph.
+    assert.equal(
+        resolveSourceMapRegion(sourceMap, { from: 10, to: 120 }, 200),
+        null
+    );
     assert.equal(
         resolveSourceMapRegion(sourceMap, { from: 10, to: 40 }, 30),
         null
@@ -701,5 +708,29 @@ test('maps a figure-captioned table rewritten into its extracted image', () => {
             markdownTo: markdown.length,
             locations: [{ pageIndex: 10, bbox: [129, 119, 862, 406] }],
         }]
+    );
+});
+
+test('does not use an equation region when the selection reaches into the paragraph before it', () => {
+    const sourceMap = [{
+        type: 'text',
+        markdownFrom: 0,
+        markdownTo: 60,
+        locations: [{ pageIndex: 2, bbox: [80, 100, 900, 200] }],
+    }, {
+        type: 'interline_equation',
+        markdownFrom: 62,
+        markdownTo: 90,
+        locations: [{ pageIndex: 2, bbox: [100, 220, 900, 300] }],
+    }];
+
+    assert.equal(
+        resolveSourceMapRegion(sourceMap, { from: 40, to: 90 }, 120),
+        null
+    );
+    // Whitespace around the equation is not another block.
+    assert.deepEqual(
+        resolveSourceMapRegion(sourceMap, { from: 61, to: 92 }, 120),
+        { pageIndex: 2, bbox: [100, 220, 900, 300] }
     );
 });

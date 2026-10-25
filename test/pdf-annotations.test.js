@@ -7,6 +7,7 @@ import {
 } from '../src/core/pdf-annotation.js';
 import {
     annotationAttributes,
+    annotationClassName,
     installRenderedAnnotations,
 } from '../src/editor/pdf-annotations.js';
 
@@ -942,4 +943,32 @@ test('explains when selected Markdown text is ambiguous in the PDF', async () =>
 
     popup.destroy();
     dom.window.close();
+});
+
+test('marks a local highlight that has not reached the PDF', () => {
+    const keyTranslate = (key, values) => (values ? `${key}:${values.text}` : key);
+    const base = { id: 'mktero-a', type: 'highlight', text: 'Result', color: '#ffd400' };
+
+    assert.equal(
+        annotationClassName({ ...base, synchronization: { status: 'failed', reason: 'text-not-found' } }),
+        'cm-mktero-pdf-annotation cm-mktero-pdf-annotation--highlight cm-mktero-pdf-annotation--sync-failed'
+    );
+    assert.match(
+        annotationClassName({ ...base, synchronization: { status: 'pending' } }),
+        /--sync-pending$/
+    );
+    assert.equal(
+        annotationClassName({ ...base, id: 'ZOTERO01' }),
+        'cm-mktero-pdf-annotation cm-mktero-pdf-annotation--highlight'
+    );
+
+    const failed = annotationAttributes(
+        { ...base, synchronization: { status: 'failed', reason: 'text-not-found' } },
+        keyTranslate
+    );
+    // The title is the description; the name stays the action, so a screen
+    // reader does not announce the state twice.
+    assert.equal(failed.title, 'annotation.syncFailed.textNotFound');
+    assert.equal(failed['aria-label'], 'annotation.edit:Result');
+    assert.equal('title' in annotationAttributes({ ...base, id: 'ZOTERO01' }, keyTranslate), false);
 });

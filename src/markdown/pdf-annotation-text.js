@@ -15,6 +15,42 @@ const SENTENCE_FOOTNOTE_SUPERSCRIPT = /\$\^\{([0-9]{1,4})\}\$/gu;
 // MinerU writes biological markers as LaTeX ("CD4 $^{+}$, PD-1 $^{hi}$") while the
 // PDF text layer keeps the same marks inline ("CD4+, PD-1hi").
 const MARKER_SUPERSCRIPT = /\$\^\{\s*([+\-−±A-Za-z]{1,12})\s*\}\$/gu;
+// OCR Markdown keeps an HTML superscript or subscript ("Value<sup>2</sup>")
+// and a TeX footnote mark ("Smith$^{\dagger}$"); the PDF text layer and the
+// reader show only the mark: "Value2", "Smith†".
+const HTML_SCRIPT_TAG = /<(sup|sub)(?:\s[^<>]*)?>([^<>\r\n]{1,80})<\/\1\s*>/giu;
+const DAGGER_SUPERSCRIPT = /\$(?:\{\s*\})?\^\s*(?:\{\s*\\(dagger|ddagger)\s*\}|\\(dagger|ddagger)(?![A-Za-z]))\$/gu;
+const DAGGER_TEXT = { dagger: '†', ddagger: '‡' };
+// A footnote mark such as `$^{*}$`, `$^{\star}$` or `$^{1,\dagger}$`. The
+// reader draws it as KaTeX glyphs ("∗", "⋆", "1,†") or as a footnote link
+// ("*"); the PDF text layer has "Smith*", "Smith∗" or "Smith1,†".
+const MARK_SUPERSCRIPT = /\$(?:\{\s*\})?\^\s*(?:\{([^{}$\r\n]{1,64})\}|(\*|\\#|\\[A-Za-z]+))\$/gu;
+// One piece of a mark: a citation number, a single affiliation letter
+// ("a" in `$^{a,*}$`), or a symbol written literally or as a TeX command.
+// Letters and digits alone are not a mark; one symbol makes it one.
+const MARK_SUPERSCRIPT_TOKEN = /\s*(?:(\d{1,4})|([A-Za-z])(?![A-Za-z])|([*§¶#†‡])|\\(#)|\\(ast|star|dagger|ddagger|dag|ddag|S|P|sharp)(?![A-Za-z]))/uy;
+const MARK_SUPERSCRIPT_GLYPHS = {
+    '*': '∗',
+    '§': '§',
+    '¶': '¶',
+    '#': '#',
+    '†': '†',
+    '‡': '‡',
+    ast: '∗',
+    star: '⋆',
+    dagger: '†',
+    ddagger: '‡',
+    dag: '†',
+    ddag: '‡',
+    S: '§',
+    P: '¶',
+    sharp: '♯',
+};
+// The space before a footnote glyph after a word, or before a numbered list
+// that ends in one ("Smith 1,†"). Only glyphs prose does not use: an
+// ASCII "*" or "#" ("a * b", "5 * 3") keeps its spacing. The selection text
+// already drops the space before a mark it knows from TeX or a footnote.
+const LITERAL_MARK_SPACING = /(?<=[\p{L}\p{N}])[ \t]+(?=(?:(?:\d{1,4}|[A-Za-z])\s*,\s*)*[\u2020\u2021\u2217\u22C6\u00A7\u00B6](?![\p{L}\p{N}]))/gu;
 // Some PDF text layers emit a spacing diaeresis before a dotless i: "na¨ıve".
 const SPACING_DIAERESIS_I = /\u00A8[ \t]*[\u0131i]/gu;
 const GREEK_ATTACHMENT_EDGE = /[-\u2010-\u2015\u2212]/u;
@@ -221,6 +257,9 @@ const MATH_SYMBOL_CANONICAL_FORMS = new Map([
     ['ς', 'σ'],
     ['ϕ', 'φ'],
     ['∆', 'Δ'],
+    // A footnote asterisk is "*", "∗" or "⋆" depending on the font.
+    ['∗', '*'],
+    ['⋆', '*'],
 ]);
 const WHITESPACE_FOLDING_MATH_SYMBOLS = new Set([
     '↦', '→', '←', '↔', '⇒', '⇐',
@@ -244,6 +283,41 @@ function preprocessPdfText(text) {
 export function normalizePdfAnnotationText(text) {
     const preprocessed = preprocessPdfText(text);
     return createPdfAnnotationTextIndex(preprocessed).text.trim();
+}
+
+// The glyphs KaTeX draws for a superscript footnote mark (`^{1,\dagger}` is
+// "1,†"), or null when the superscript holds anything else. A mark needs a
+// symbol: a numeric superscript is a citation and keeps its source form.
+export function superscriptMarkGlyphs(content) {
+    const body = superscriptMarkBody(String(content || '').trim());
+    if (body === null) return null;
+    const parts = body.split(',');
+    const glyphs = [];
+    let symbol = false;
+    for (const part of parts) {
+        if (!part.trim()) return null;
+        const tokens = MARK_SUPERSCRIPT_TOKEN;
+        let text = '';
+        tokens.lastIndex = 0;
+        while (tokens.lastIndex < part.length) {
+            if (!part.slice(tokens.lastIndex).trim()) break;
+            const token = tokens.exec(part);
+            if (!token) return null;
+            if (token[1] || token[2]) text += token[1] || token[2];
+            else {
+                text += MARK_SUPERSCRIPT_GLYPHS[token[3] || token[4] || token[5]];
+                symbol = true;
+            }
+        }
+        glyphs.push(text);
+    }
+    return symbol ? glyphs.join(',') : null;
+}
+
+function superscriptMarkBody(content) {
+    const match = /^(?:\{\s*\})?\^\s*(?:\{([^{}]*)\}|(\*|\\#|\\[A-Za-z]+))$/u
+        .exec(content);
+    return match ? match[1] ?? match[2] : null;
 }
 
 export function expandPdfAnnotationSourceRange(source, range) {
@@ -475,6 +549,9 @@ function normalizePdfAnnotationCharacter(
 function collectNormalizationMarkup(text) {
     const ignoredOffsets = new Set();
     const replacements = new Map();
+    const tagOffsets = markHTMLScriptTags(text, ignoredOffsets);
+    markDaggerSuperscripts(text, ignoredOffsets, replacements);
+    markLiteralDaggerSpacing(text, ignoredOffsets);
     markAnnotationSymbols(text, ignoredOffsets, replacements);
     markLatexAccents(text, ignoredOffsets, replacements);
     markLatexSubscripts(text, ignoredOffsets, replacements);
@@ -482,7 +559,8 @@ function collectNormalizationMarkup(text) {
     markLatexTags(text, ignoredOffsets, replacements);
     markStatisticalNumericExponents(text, ignoredOffsets, replacements);
     markPdfMathAccents(text, ignoredOffsets);
-    markMathematicalWhitespace(text, ignoredOffsets);
+    markMathematicalWhitespace(text, ignoredOffsets, tagOffsets);
+    markSuperscriptMarks(text, ignoredOffsets, replacements);
     for (const match of text.matchAll(CITATION_WRAPPER)) {
         if (!isNumericCitationContent(match[1])) continue;
         ignoredOffsets.add(match.index);
@@ -619,6 +697,83 @@ function collectNormalizationMarkup(text) {
         }
     }
     return { ignoredOffsets, replacements };
+}
+
+// Returns the offsets of the tags, so their angle brackets are not read as
+// relational operators.
+function markHTMLScriptTags(text, ignoredOffsets) {
+    const tagOffsets = new Set();
+    for (const match of text.matchAll(HTML_SCRIPT_TAG)) {
+        const contentFrom = match.index + match[0].indexOf('>') + 1;
+        const contentTo = contentFrom + match[2].length;
+        const matchTo = match.index + match[0].length;
+        for (let offset = match.index; offset < matchTo; offset++) {
+            if (offset >= contentFrom && offset < contentTo) continue;
+            ignoredOffsets.add(offset);
+            tagOffsets.add(offset);
+        }
+    }
+    return tagOffsets;
+}
+
+function markDaggerSuperscripts(text, ignoredOffsets, replacements) {
+    for (const match of text.matchAll(DAGGER_SUPERSCRIPT)) {
+        replacements.set(match.index, {
+            from: match.index,
+            to: match.index + match[0].length,
+            text: DAGGER_TEXT[match[1] || match[2]],
+        });
+        markOffsetRange(ignoredOffsets, match.index + 1, match[0].length - 1);
+        for (
+            let offset = match.index - 1;
+            offset >= 0 && /[ \t]/u.test(text[offset]);
+            offset--
+        ) {
+            ignoredOffsets.add(offset);
+        }
+    }
+}
+
+// A mark the dagger pattern does not cover: `$^{*}$`, `$^{\ast}$`,
+// `$^{\star}$`, `$^{1,\dagger}$`. It runs after the other passes and owns its
+// whole source range, so their partial matches inside it are dropped.
+function markSuperscriptMarks(text, ignoredOffsets, replacements) {
+    for (const match of text.matchAll(MARK_SUPERSCRIPT)) {
+        if (replacements.get(match.index)?.to === match.index + match[0].length) {
+            continue;
+        }
+        const glyphs = superscriptMarkGlyphs(match[0].slice(1, -1));
+        if (glyphs === null) continue;
+        const from = match.index;
+        const to = from + match[0].length;
+        for (let offset = from; offset < to; offset++) {
+            replacements.delete(offset);
+            ignoredOffsets.delete(offset);
+        }
+        replacements.set(from, {
+            from,
+            to,
+            text: normalizeMathSymbolText(glyphs),
+        });
+        markOffsetRange(ignoredOffsets, from + 1, match[0].length - 1);
+        for (
+            let offset = from - 1;
+            offset >= 0 && /[ \t]/u.test(text[offset]);
+            offset--
+        ) {
+            ignoredOffsets.add(offset);
+        }
+    }
+}
+
+// The reader saves `Smith $^{\dagger}$` as "Smith †", keeping the space MinerU
+// writes before the mark. The PDF text layer has "Smith†", and the TeX form
+// above already drops that space, so a literal mark drops it too. Otherwise the
+// same passage normalizes two ways and a saved highlight is not found again.
+function markLiteralDaggerSpacing(text, ignoredOffsets) {
+    for (const match of text.matchAll(LITERAL_MARK_SPACING)) {
+        markOffsetRange(ignoredOffsets, match.index, match[0].length);
+    }
 }
 
 function markStatisticalNumericExponents(
@@ -1000,7 +1155,7 @@ function markMathLetterWhitespace(text, ignoredOffsets) {
     }
 }
 
-function markMathematicalWhitespace(text, ignoredOffsets) {
+function markMathematicalWhitespace(text, ignoredOffsets, tagOffsets = new Set()) {
     markMathLetterWhitespace(text, ignoredOffsets);
     for (const pattern of [
         RELATIONAL_OPERATOR_PATTERN,
@@ -1008,7 +1163,12 @@ function markMathematicalWhitespace(text, ignoredOffsets) {
         LATEX_MATH_RELATION_WHITESPACE_PATTERN,
         UNICODE_MATH_RELATION_WHITESPACE_PATTERN,
     ]) {
-        markRelationalOperatorWhitespace(text, pattern, ignoredOffsets);
+        markRelationalOperatorWhitespace(
+            text,
+            pattern,
+            ignoredOffsets,
+            tagOffsets
+        );
     }
     for (const match of text.matchAll(NUMERIC_SET_COMMA_WHITESPACE_PATTERN)) {
         markOffsetRange(ignoredOffsets, match.index + 1, match[1].length);
@@ -1062,9 +1222,16 @@ function markMathematicalWhitespace(text, ignoredOffsets) {
     }
 }
 
-function markRelationalOperatorWhitespace(text, pattern, ignoredOffsets) {
+function markRelationalOperatorWhitespace(
+    text,
+    pattern,
+    ignoredOffsets,
+    tagOffsets = new Set()
+) {
     for (const match of text.matchAll(pattern)) {
         const leftLength = match[1].length;
+        const operatorFrom = match.index + leftLength + match[2].length;
+        if (tagOffsets.has(operatorFrom)) continue;
         markOffsetRange(
             ignoredOffsets,
             match.index + leftLength,

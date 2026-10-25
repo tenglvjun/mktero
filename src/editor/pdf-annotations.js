@@ -8,7 +8,10 @@ import {
 import {
     createVisibleMarkdownTextIndex,
 } from '../markdown/markdown-visible-text.js';
-import { accessibleAnnotationText } from '../core/pdf-annotation.js';
+import {
+    accessibleAnnotationText,
+    annotationSynchronizationLabelKey,
+} from '../core/pdf-annotation.js';
 import { translateEnglish } from '../i18n/localization.js';
 import {
     createLucideIcon,
@@ -18,12 +21,18 @@ import {
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const MAX_RENDERED_MATCH_CANDIDATES = 10_000;
 
+// A local highlight that has not reached the PDF yet, or could not, is marked
+// in the text as well as in the note list: it otherwise looks synchronized.
 export function annotationClassName(annotation) {
     const type = annotation.type === 'underline' ? 'underline' : 'highlight';
+    const status = annotation.synchronization?.status;
     return [
         'cm-mktero-pdf-annotation',
         `cm-mktero-pdf-annotation--${type}`,
-    ].join(' ');
+        status === 'pending' || status === 'failed'
+            ? `cm-mktero-pdf-annotation--sync-${status}`
+            : '',
+    ].filter(Boolean).join(' ');
 }
 
 export function annotationHasComment(annotation) {
@@ -31,6 +40,11 @@ export function annotationHasComment(annotation) {
 }
 
 export function annotationAttributes(annotation, translate) {
+    const label = translate('annotation.edit', {
+        text: accessibleAnnotationText(annotation.text),
+    });
+    const syncKey = annotationSynchronizationLabelKey(annotation.synchronization);
+    const syncLabel = syncKey ? translate(syncKey) : '';
     return {
         'data-annotation-id': String(annotation.id || ''),
         style: `--mktero-annotation-color: ${safeAnnotationColor(
@@ -38,9 +52,10 @@ export function annotationAttributes(annotation, translate) {
         )}`,
         role: 'button',
         tabindex: '0',
-        'aria-label': translate('annotation.edit', {
-            text: accessibleAnnotationText(annotation.text),
-        }),
+        // The title is read as the description, so the name stays the
+        // action alone and the state is not announced twice.
+        'aria-label': label,
+        ...(syncLabel ? { title: syncLabel } : {}),
     };
 }
 

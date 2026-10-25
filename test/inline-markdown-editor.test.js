@@ -7949,11 +7949,16 @@ test('allows annotations only from original bilingual selections', async () => {
         null
     );
 
+    // A drag into the translation keeps only its original part.
     select(original, 0, translated, translated.textContent.length);
-    assert.equal(
-        document.querySelector('.mktero-markdown-selection-actions'),
-        null
-    );
+    const mixed = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(mixed);
+    mixed.querySelector('[data-color="#ffd400"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(created.length, 1);
+    assert.equal(created[0].annotation.text, 'AI original.');
+    assert.deepEqual(created[0].annotation.ranges, [{ from: 0, to: 12 }]);
 
     select(original, 0, original, 2);
     const actions = document.querySelector('.mktero-markdown-selection-actions');
@@ -7961,9 +7966,9 @@ test('allows annotations only from original bilingual selections', async () => {
     actions.querySelector('[data-color="#ffd400"]').click();
     await Promise.resolve();
     await Promise.resolve();
-    assert.equal(created.length, 1);
-    assert.equal(created[0].annotation.text, 'AI');
-    assert.deepEqual(created[0].selectionContext, { side: 'source' });
+    assert.equal(created.length, 2);
+    assert.equal(created[1].annotation.text, 'AI');
+    assert.deepEqual(created[1].selectionContext, { side: 'source' });
 
     editor.destroy();
     dom.window.close();
@@ -11470,4 +11475,352 @@ test('opens the selection actions for a caption selection that crosses a formula
     caption.dispatchEvent(new document.defaultView.MouseEvent('mouseup', { bubbles: true, button: 0 }));
     assert.ok(document.querySelector('.mktero-markdown-selection-actions'));
     close();
+});
+
+function selectEditorText(dom, document, startText, endText = startText) {
+    const content = document.querySelector('.cm-content');
+    const start = textNodeContaining(content, startText);
+    const end = textNodeContaining(content, endText);
+    const range = document.createRange();
+    range.setStart(start, start.textContent.indexOf(startText));
+    range.setEnd(
+        end,
+        end.textContent.indexOf(endText) + endText.length
+    );
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+    end.parentElement.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+}
+
+function settle() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
+test('keeps an open selection popup when an annotation refresh keeps the Markdown', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'First passage here.\n\nSecond passage here.';
+    let cancellations = 0;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        createMarkdownAnnotation: async annotation => annotation,
+        translateSelection: () => new Promise(() => {}),
+        cancelSelectionTranslation: () => {
+            cancellations += 1;
+        },
+    });
+    selectEditorText(dom, document, 'Second passage here.');
+    const actions = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(actions);
+    actions.querySelector('[data-action="translate-selection"]').click();
+
+    // The previous highlight's sync republishes the same text.
+    editor.setDocument({
+        markdown,
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+
+    assert.equal(
+        document.querySelector('.mktero-markdown-selection-actions'),
+        actions
+    );
+    assert.equal(actions.isConnected, true);
+    assert.equal(cancellations, 0);
+
+    // A different document still closes it.
+    editor.setDocument({ markdown: `${markdown}\n\nThird.` });
+    assert.equal(actions.isConnected, false);
+    assert.equal(cancellations, 1);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('reports a highlight failure when its selection popup already closed', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Highlight this passage.';
+    let rejectCreate;
+    const reported = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        createMarkdownAnnotation: () => new Promise((_resolve, reject) => {
+            rejectCreate = reject;
+        }),
+        onAnnotationActionError: (messageKey, error) => {
+            reported.push({ messageKey, error });
+        },
+    });
+    selectEditorText(dom, document, 'Highlight this passage.');
+    document.querySelector('[data-color="#ffd400"]').click();
+    editor.setDocument({ markdown: `${markdown} Replaced.` });
+    assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    const failure = new Error('Markdown annotations require original text');
+    rejectCreate(failure);
+    await settle();
+
+    assert.deepEqual(reported, [{
+        messageKey: 'annotation.createFailed',
+        error: failure,
+    }]);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not clear a selection started while an earlier highlight was saving', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const frames = [];
+    dom.window.requestAnimationFrame = callback => {
+        frames.push(callback);
+        return frames.length;
+    };
+    const markdown = 'First passage here.\n\nSecond passage here.';
+    let resolveCreate;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        createMarkdownAnnotation: annotation => new Promise(resolve => {
+            resolveCreate = () => resolve(annotation);
+        }),
+    });
+    selectEditorText(dom, document, 'First passage here.');
+    document.querySelector('[data-color="#ffd400"]').click();
+
+    // The reader starts the next selection while the first one saves.
+    document.querySelector('#editor').dispatchEvent(
+        new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 })
+    );
+    selectEditorText(dom, document, 'Second passage here.');
+    assert.ok(document.querySelector('.mktero-markdown-selection-actions'));
+
+    resolveCreate();
+    await settle();
+    for (const frame of frames.splice(0)) frame();
+
+    assert.equal(document.getSelection().toString(), 'Second passage here.');
+    assert.ok(document.querySelector('.mktero-markdown-selection-actions'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('passes the selection text quote to a new highlight', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Before context. Target phrase. After context.';
+    const created = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    selectEditorText(dom, document, 'Target phrase.');
+    document.querySelector('[data-color="#ffd400"]').click();
+    await settle();
+
+    assert.equal(created.length, 1);
+    assert.equal(created[0].text, 'Target phrase.');
+    assert.equal(created[0].textQuote.prefix, 'Before context. ');
+    assert.equal(created[0].textQuote.suffix, ' After context.');
+
+    editor.destroy();
+    dom.window.close();
+});
+
+function createComparisonEditor(dom, options = {}) {
+    const { document } = dom.window;
+    const sourceA = 'Alpha source sentence.';
+    const translatedA = 'Alpha translated sentence.';
+    const sourceB = 'Beta source sentence.';
+    const translatedB = 'Beta translated sentence.';
+    const markdown = [sourceA, translatedA, sourceB, translatedB].join('\n\n');
+    const sourceAFrom = 0;
+    const translatedAFrom = markdown.indexOf(translatedA);
+    const sourceBFrom = markdown.indexOf(sourceB);
+    const translatedBFrom = markdown.indexOf(translatedB);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        ...options,
+    });
+    editor.setDocument({
+        markdown,
+        sourceActionRanges: [
+            { from: sourceAFrom, to: sourceAFrom + sourceA.length },
+            { from: sourceBFrom, to: sourceBFrom + sourceB.length },
+        ],
+        translationPairs: [{
+            id: 'translation-0',
+            sourceFrom: sourceAFrom,
+            sourceTo: sourceAFrom + sourceA.length,
+            translatedFrom: translatedAFrom,
+            translatedTo: translatedAFrom + translatedA.length,
+        }, {
+            id: 'translation-1',
+            sourceFrom: sourceBFrom,
+            sourceTo: sourceBFrom + sourceB.length,
+            translatedFrom: translatedBFrom,
+            translatedTo: translatedBFrom + translatedB.length,
+        }],
+    });
+    return {
+        editor,
+        markdown,
+        sourceA,
+        sourceB,
+        translatedA,
+        sourceAFrom,
+        sourceBFrom,
+    };
+}
+
+test('annotates only the source text of a drag across a translated paragraph', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const created = [];
+    const {
+        editor,
+        sourceA,
+        sourceB,
+        sourceAFrom,
+        sourceBFrom,
+    } = createComparisonEditor(dom, {
+        createMarkdownAnnotation: async (annotation, selectionContext) => {
+            created.push({ annotation, selectionContext });
+            return annotation;
+        },
+    });
+
+    selectEditorText(dom, document, 'source sentence', sourceB);
+    const actions = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(actions, 'the popup opens on the remaining source text');
+    actions.querySelector('[data-color="#ffd400"]').click();
+    await settle();
+
+    assert.equal(created.length, 1);
+    const { annotation, selectionContext } = created[0];
+    const startOffset = sourceA.indexOf('source sentence');
+    assert.deepEqual(annotation.ranges, [
+        { from: sourceAFrom + startOffset, to: sourceAFrom + sourceA.length },
+        { from: sourceBFrom, to: sourceBFrom + sourceB.length },
+    ]);
+    // How separated segments are joined belongs to the visible-text index.
+    assert.equal(
+        annotation.text.replace(/\s+/gu, ''),
+        `${sourceA.slice(startOffset)}${sourceB}`.replace(/\s+/gu, '')
+    );
+    assert.doesNotMatch(annotation.text, /translated/);
+    assert.doesNotMatch(annotation.textQuote?.suffix || '', /translated/);
+    assert.deepEqual(selectionContext, { side: 'source' });
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('explains that a translated-only comparison selection has no actions', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const { editor, translatedA } = createComparisonEditor(dom, {
+        createMarkdownAnnotation: async () => assert.fail('must not create'),
+    });
+
+    selectEditorText(dom, document, translatedA);
+
+    assert.equal(
+        document.querySelector('.mktero-markdown-selection-actions'),
+        null
+    );
+    assert.equal(
+        document.querySelector('.mktero-annotation-selection-hint')?.textContent,
+        'Highlights, notes and translation work on the original text only.'
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps the selection popup through the scroll restore after a same-text refresh', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'First passage here.\n\nSecond passage here.';
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        createMarkdownAnnotation: async annotation => annotation,
+    });
+    selectEditorText(dom, document, 'Second passage here.');
+    const actions = document.querySelector('.mktero-markdown-selection-actions');
+    assert.ok(actions);
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: refreshedAnnotationOverlay(),
+    });
+    // CodeMirror restores its scroll anchor after the refresh.
+    document.querySelector('.cm-scroller').dispatchEvent(
+        new dom.window.Event('scroll', { bubbles: false })
+    );
+    assert.equal(actions.isConnected, true);
+
+    // The reader turning the wheel still dismisses it.
+    document.querySelector('.cm-scroller').dispatchEvent(
+        new dom.window.WheelEvent('wheel', { bubbles: true })
+    );
+    assert.equal(actions.isConnected, false);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('closes the translated-only comparison hint with Escape', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const { editor, translatedA } = createComparisonEditor(dom, {
+        createMarkdownAnnotation: async () => assert.fail('must not create'),
+    });
+    selectEditorText(dom, document, translatedA);
+    assert.ok(document.querySelector('.mktero-annotation-selection-hint'));
+
+    const escape = new dom.window.KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'Escape',
+    });
+    document.dispatchEvent(escape);
+
+    assert.equal(escape.defaultPrevented, true);
+    assert.equal(
+        document.querySelector('.mktero-annotation-selection-hint'),
+        null
+    );
+
+    editor.destroy();
+    dom.window.close();
 });
