@@ -419,6 +419,13 @@ export function resolveSourceMapRegion(
     ));
     if (contained.length !== 1) return null;
     const entry = contained[0];
+    // The region stands in for the whole selection when its text cannot be
+    // found in the PDF. A selection that also reaches into a neighboring block
+    // would then be highlighted as the block alone, so it gets no region.
+    if (overlappingSourceMapEntries(sourceMap, range, documentLength)
+        .some(candidate => candidate !== entry)) {
+        return null;
+    }
     const pageIndex = uniqueSourceMapEntryPage(entry);
     if (pageIndex === null) return null;
     const location = entry.locations.find(candidate => (
