@@ -99,3 +99,15 @@ test('an escaped asterisk opens a note', () => {
     // A plain asterisk is not a citing mark.
     assert.equal(item.citation, null);
 });
+
+test('a footnote link shows every mark of a TeX superscript', async () => {
+    const { footnoteMarkDisplayText } = await import('../src/markdown/footnote-marks.js');
+
+    assert.equal(footnoteMarkDisplayText('1,\\dagger'), '1,†');
+    assert.equal(footnoteMarkDisplayText('a,\\ast'), 'a,*');
+    assert.equal(footnoteMarkDisplayText('\\S, \\P'), '§,¶');
+    assert.equal(footnoteMarkDisplayText('\\dagger'), '†');
+    // A part the link does not know keeps the first mark alone.
+    assert.equal(footnoteMarkDisplayText('\\dagger,\\unknown'), '†');
+    assert.equal(footnoteMarkDisplayText(''), '');
+});

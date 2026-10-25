@@ -7,6 +7,16 @@ const MARK_NAMES = new Map([
 const SUPERSCRIPT_DIGITS = new Map([...'⁰¹²³⁴⁵⁶⁷⁸⁹'].map((digit, value) => [digit, String(value)]));
 const MARK_KEY = /^(?:\d{1,3}|[a-z]|[*†‡§¶#°△]+)$/u;
 
+// What a footnote link shows for a TeX mark: every mark it holds, as the PDF
+// prints them ("1,\dagger" → "1,†"). When a part is not a mark the link
+// knows, it shows the first mark alone rather than a partial list.
+export function footnoteMarkDisplayText(value) {
+    const parts = String(value || '').trim().split(/\s*,\s*/u).filter(Boolean);
+    const keys = footnoteMarkKeys(value);
+    if (!keys.length) return '';
+    return keys.length === parts.length ? keys.join(',') : keys[0];
+}
+
 // Normalized marks of a superscript: "1,3" → ["1", "3"], "\dagger" → ["†"],
 // "¹²" → ["12"].
 export function footnoteMarkKeys(value) {

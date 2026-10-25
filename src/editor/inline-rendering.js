@@ -94,7 +94,7 @@ import {
     BILINGUAL_LIST_BOUNDARY,
 } from '../markdown/markdown-translation-blocks.js';
 import { findMarkdownDirectives, SECTION_LABEL_KEYS } from '../markdown/markdown-directives.js';
-import { footnoteMarkKeys } from '../markdown/footnote-marks.js';
+import { footnoteMarkDisplayText } from '../markdown/footnote-marks.js';
 
 // Expanded sections stay open across a translation that copies the same
 // directives: the key is the kind plus the ordinal of that kind. An edit
@@ -2121,7 +2121,7 @@ function decorateFootnoteEndpoint(
     };
     const content = state.sliceDoc(markup.contentFrom, markup.contentTo);
     if (markup.raiseContent && content.includes('\\')) {
-        const [symbol] = footnoteMarkKeys(content);
+        const symbol = footnoteMarkDisplayText(content);
         if (!symbol || rangeOverlapsAny(markup.wrapperFrom, markup.wrapperTo, replacedRanges)) return;
         decorations.push(Decoration.replace({
             widget: new FootnoteMarkWidget(symbol, className, attributes),

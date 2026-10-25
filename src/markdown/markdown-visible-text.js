@@ -5,7 +5,7 @@ import {
 } from './markdown-html.js';
 import { analyzeMarkdownCitations } from './markdown-citations.js';
 import { analyzeMarkdownFootnotes } from './markdown-footnotes.js';
-import { footnoteMarkKeys } from './footnote-marks.js';
+import { footnoteMarkDisplayText } from './footnote-marks.js';
 import { superscriptMarkGlyphs } from './pdf-annotation-text.js';
 import { isNumericCitationContent } from './text-normalization.js';
 
@@ -404,7 +404,7 @@ function footnoteWidgetTexts(markdown, footnotes) {
             }
             const content = markdown.slice(endpoint.contentFrom, endpoint.contentTo);
             const text = content.includes('\\')
-                ? footnoteMarkKeys(content)[0]
+                ? footnoteMarkDisplayText(content)
                 : content;
             if (text) texts.set(`${endpoint.from}:${endpoint.to}`, text);
         }

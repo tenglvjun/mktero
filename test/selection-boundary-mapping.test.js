@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 import { markdownAnnotationRangeMatchesSource } from '../src/core/markdown-local-annotations.js';
+import { normalizePdfAnnotationText } from '../src/markdown/pdf-annotation-text.js';
 
 async function highlight(markdown, select) {
     const created = [];
@@ -179,4 +180,39 @@ test('a link selection leaves out the title and the autolink marks', async () =>
         assert.doesNotMatch(autolink.slice(range.from, range.to), /[<>]/u);
     }
     assertMatchesSource(autolink, autolinkAnnotation);
+});
+
+test('a footnote link with several marks shows and saves all of them', async () => {
+    const markdown = [
+        'Alice Smith$^{1,\\dagger}$ wrote this.',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{1}$ First note.',
+        '',
+        '<!-- mktero-note: footnote -->',
+        '> $^{\\dagger}$ Corresponding author.',
+    ].join('\n');
+    const annotation = await highlight(markdown, (document, range) => {
+        const line = document.querySelector('.cm-line');
+        // The link shows every mark, as the PDF prints them.
+        assert.deepEqual(
+            [...line.querySelectorAll('.cm-mktero-footnote-ref')].map(mark => mark.textContent),
+            ['1,†']
+        );
+        const start = textNode(line, 'Smith');
+        const end = textNode(line, ' wrote');
+        range.setStart(start, start.textContent.indexOf('Smith'));
+        range.setEnd(end, end.textContent.indexOf(' wrote') + ' wrote'.length);
+        return line;
+    });
+
+    assert.equal(annotation?.text, 'Smith1,† wrote');
+    assert.equal(
+        normalizePdfAnnotationText(annotation.text),
+        normalizePdfAnnotationText('Smith1,† wrote')
+    );
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(markdown, annotation.ranges, annotation.text),
+        true
+    );
 });
