@@ -24,6 +24,43 @@ export function rootSelectionFor(node) {
     return rootSelection(node?.getRootNode?.() || node?.ownerDocument);
 }
 
+// A drag in the reader is visible both as the browser selection and as
+// CodeMirror's selection layer. The layer reads the shadow root's selection,
+// which is not always the window selection, so a highlight has to clear both.
+export function clearReaderTextSelection(node, extraRoot) {
+    const roots = [
+        node?.getRootNode?.(),
+        extraRoot,
+        node?.ownerDocument,
+    ];
+    const seen = new Set();
+    for (const root of roots) {
+        if (!root || seen.has(root)) continue;
+        seen.add(root);
+        clearSelection(rootSelection(root));
+        clearSelection(root.getSelection?.());
+        clearSelection(root.ownerDocument?.getSelection?.());
+        clearSelection(root.defaultView?.getSelection?.());
+    }
+}
+
+function clearSelection(selection) {
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    try {
+        selection.removeAllRanges();
+    }
+    catch {
+        // A retargeted selection can reject a range that lives in a shadow tree.
+    }
+    if (!selection.rangeCount || !selection.anchorNode) return;
+    try {
+        selection.collapse(selection.anchorNode, selection.anchorOffset);
+    }
+    catch {
+        // Some shadow selections ignore removeAllRanges until collapsed.
+    }
+}
+
 function isShadowRoot(root) {
     return Boolean(root?.host) && root.nodeType === 11;
 }

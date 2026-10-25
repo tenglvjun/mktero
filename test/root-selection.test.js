@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { rootSelection, rootSelectionFor } from '../src/editor/root-selection.js';
+import {
+    clearReaderTextSelection,
+    rootSelection,
+    rootSelectionFor,
+} from '../src/editor/root-selection.js';
 
 function createReader() {
     const dom = new JSDOM('<!doctype html><p id="outside">Outside text</p><div id="host"></div>');
@@ -33,6 +37,19 @@ function fakeSelection({ anchorNode, anchorOffset = 0, focusNode = anchorNode, f
         ...extra,
     };
 }
+
+test('clears a shadow-root selection the window selection does not own', () => {
+    const { host, root, text } = createReader();
+    const windowSelection = fakeSelection({ anchorNode: null, focusNode: null, focusOffset: 0 });
+    windowSelection.isCollapsed = true;
+    windowSelection.rangeCount = 0;
+    const shadowSelection = fakeSelection({ anchorNode: text });
+    root.getSelection = () => shadowSelection;
+    host.ownerDocument.getSelection = () => windowSelection;
+    clearReaderTextSelection(root);
+    assert.equal(shadowSelection.removed, true);
+    assert.equal(windowSelection.removed, undefined);
+});
 
 test('keeps a Gecko selection that already reports shadow-tree nodes', () => {
     const { document, root, text } = createReader();

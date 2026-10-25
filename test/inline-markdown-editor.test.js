@@ -9507,7 +9507,52 @@ test('creates a local highlight from the selected Markdown text', async () => {
     assert.deepEqual(created.ranges, [{ from: 0, to: 26 }]);
     assert.equal(created.source, 'markdown');
     assert.equal(document.getSelection().rangeCount, 0);
+    assert.equal(
+        EditorView.findFromDOM(document.querySelector('.cm-editor'))
+            .state.selection.main.empty,
+        true
+    );
     assert.equal(document.querySelector('.mktero-annotation-popup'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('drops the editor selection layer after a highlight so it does not cover the mark', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'Select this Markdown text.',
+        async createMarkdownAnnotation(annotation) {
+            return {
+                ...annotation,
+                id: 'mktero-local-1',
+                matchKind: 'local',
+            };
+        },
+    });
+    const line = document.querySelector('.cm-line');
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    document.getSelection().addRange(range);
+    line.dispatchEvent(new dom.window.MouseEvent('mouseup', {
+        bubbles: true,
+        button: 0,
+    }));
+    const editorView = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    editorView.dispatch({ selection: { anchor: 0, head: 10 } });
+
+    document.querySelector('[data-color="#ffd400"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(editorView.state.selection.main.empty, true);
+    assert.equal(document.getSelection().rangeCount, 0);
+    assert.equal(document.querySelector('.cm-mktero-selection-retained'), null);
 
     editor.destroy();
     dom.window.close();
