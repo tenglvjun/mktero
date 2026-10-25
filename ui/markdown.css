@@ -2827,7 +2827,7 @@ blockquote.mktero-note,
 
 .markdown-editor-host > .cm-editor
     .cm-mktero-translation-line[data-translation-start='true'] {
-    margin-top: 0.38em;
+    padding-top: 0.38em;
 }
 
 .markdown-editor-host > .cm-editor
@@ -2869,8 +2869,7 @@ blockquote.mktero-note,
     flex-wrap: wrap;
     justify-content: space-between;
     gap: 8px;
-    margin: 14px 0 6px;
-    padding: 8px 10px;
+    padding: 22px 10px 14px;
     border-inline-start: 3px solid var(--warning);
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 7%, var(--reader-background));
@@ -4246,8 +4245,7 @@ blockquote.mktero-note,
     display: flex;
     align-items: center;
     width: 100%;
-    margin: 0.7em 0;
-    padding: 6px 10px;
+    padding: calc(6px + 0.7em) 10px;
     border: 0;
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--surface) 72%, transparent);
@@ -4475,7 +4473,8 @@ blockquote.mktero-note,
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-code-block {
-    margin: 1.75rem 0;
+    display: flow-root;
+    padding: 1.75rem 0;
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -4629,8 +4628,13 @@ blockquote.mktero-note,
     font-variant-ligatures: inherit;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-divider {
+    display: flow-root;
+    padding: 28px 0;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-divider hr {
-    margin: 28px 0;
+    margin: 0;
     border: 0;
     border-top: 1px solid var(--border);
 }
@@ -4642,6 +4646,7 @@ blockquote.mktero-note,
 .markdown-editor-host > .cm-editor .cm-mktero-table,
 .markdown-editor-host > .cm-editor .cm-mktero-html-table {
     /* Anchors the copy actions to the table's top corner. */
+    display: flow-root;
     position: relative;
     width: 100%;
     max-width: 100%;
@@ -4649,7 +4654,7 @@ blockquote.mktero-note,
     overflow-y: hidden;
     overscroll-behavior-x: contain;
     scrollbar-width: thin;
-    margin: 28px 0;
+    padding: 28px 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--reader-background);
@@ -4748,8 +4753,7 @@ blockquote.mktero-note,
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin: 8px 0;
-    padding: 5px 8px 5px 12px;
+    padding: 13px 8px 13px 12px;
     overflow: hidden;
     border: 1px dashed color-mix(in srgb, var(--accent) 34%, var(--border));
     border-radius: var(--radius-sm);
@@ -4965,7 +4969,7 @@ blockquote.mktero-note,
 
 .page-marker {
     display: block;
-    margin: 28px 0 12px;
+    padding: 28px 0 12px;
     color: var(--muted);
     font-family: var(--ui-font);
     font-size: var(--reader-page-marker-font-size);
