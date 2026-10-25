@@ -7,6 +7,9 @@ import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
 import {
+    createMarkdownAnnotationTextQuote,
+} from '../core/markdown-local-annotations.js';
+import {
     resolveSourceMapSelectionLocation,
 } from '../core/markdown-source-map.js';
 import {
@@ -73,6 +76,13 @@ import {
 import { readerPointerSelectionExtension } from './reader-selection-style.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+// How long after a same-text refresh the editor's scroll is treated as
+// CodeMirror restoring its anchor rather than the reader scrolling.
+const SAME_TEXT_REFRESH_SCROLL_MS = 250;
+
+function editorClock() {
+    return globalThis.performance?.now?.() ?? Date.now();
+}
 const editorNavigationMeasureKey = {};
 // One stable identity for "no ranges", so the rendering field can skip a
 // rebuild when a model update carries nothing new.
@@ -165,6 +175,7 @@ export function createInlineMarkdownEditor({
     openSourceLocation,
     openAnnotationInPDF,
     onSourceNavigationError,
+    onAnnotationActionError,
     onViewportChange,
     onNavigationBackChange,
     onNavigationForwardChange,
@@ -202,11 +213,17 @@ export function createInlineMarkdownEditor({
         localization,
         createMarkdownAnnotation: typeof createMarkdownAnnotation === 'function'
             ? async (annotation, selectionContext) => {
+                // A selection started while this one saves bumps the epoch;
+                // reading it after the await would clear that new selection.
+                const epoch = annotationSelectionClearEpoch;
                 const saved = await createMarkdownAnnotation(
-                    annotation,
+                    withSelectionTextQuote(
+                        annotation,
+                        selectionSources.get(selectionContext)
+                    ),
                     withoutSelectionTranslationContext(selectionContext)
                 );
-                clearFinishedAnnotationSelection();
+                clearFinishedAnnotationSelection(epoch);
                 return saved;
             }
             : undefined,
@@ -228,6 +245,9 @@ export function createInlineMarkdownEditor({
         openAnnotationInPDF,
         onNoteEditorClose: clearRetainedSelectionHighlight,
         onSourceNavigationError,
+        onDetachedActionError: typeof onAnnotationActionError === 'function'
+            ? (messageKey, error) => onAnnotationActionError(messageKey, error)
+            : undefined,
     });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
         resolveImageURL,
@@ -296,6 +316,14 @@ export function createInlineMarkdownEditor({
     let captionGesture = null;
     let clampingCaptionSelection = false;
     let annotationSelectionClearEpoch = 0;
+    // When an annotation refresh republished the same text. CodeMirror then
+    // restores its scroll anchor, and that scroll must not dismiss a selection
+    // popup the refresh deliberately kept open.
+    let sameTextRefreshAt = -Infinity;
+    // The document a selection was read from, keyed by the context object
+    // the popup hands back on create. A draft note can be saved after a
+    // different document replaced it, so its quote must come from this one.
+    const selectionSources = new WeakMap();
     let navigationBackStack = [];
     let navigationForwardStack = [];
     let navigationBackAvailable = false;
@@ -496,10 +524,21 @@ export function createInlineMarkdownEditor({
                 // An open note editor holds typed text and stays fixed in the
                 // window, so scrolling the reader underneath it, or
                 // CodeMirror restoring its scroll anchor after a refresh,
-                // must not dismiss it.
-                const keepNote = annotationPopup.isNoteOpen();
+                // must not dismiss it. The editor's own scroll right after a
+                // same-text refresh is that restore, not the reader moving, so
+                // a selection popup survives it too. A wheel is always the
+                // reader.
+                const restoringAfterRefresh = event.type === 'scroll'
+                    && event.target === view.scrollDOM
+                    && annotationPopup.isSelectionOpen()
+                    && editorClock() - sameTextRefreshAt
+                        < SAME_TEXT_REFRESH_SCROLL_MS;
+                const keepAnnotation = annotationPopup.isNoteOpen()
+                    || restoringAfterRefresh;
                 for (const popup of interactionPopups) {
-                    if (!(keepNote && popup === annotationPopup)) popup.close();
+                    if (!(keepAnnotation && popup === annotationPopup)) {
+                        popup.close();
+                    }
                 }
             }
             const isEditorScroll = event.type === 'scroll'
@@ -1051,21 +1090,37 @@ export function createInlineMarkdownEditor({
         activateDOMGlobals(ownerWindow);
         const domSelection = rootSelectionFor(parent);
         clampSelectionFocusToPointerLine(view, domSelection, event);
-        const selection = selectedMarkdownAnnotation(
+        const readerSelection = selectedMarkdownAnnotation(
             view,
             currentChromeRanges,
             { analysisCache }
         );
-        if (!selection) return;
-        if (markdownSelectionSide(
-            domSelection,
-            currentSourceActionRanges
-        ) !== 'source' || !selectionSupportsSourceActions(
+        if (!readerSelection) return;
+        const hiddenRanges = selectionHiddenRanges(
+            currentChromeRanges,
+            currentSourceActionRanges,
+            view.state.doc.length
+        );
+        const selection = currentSourceActionRanges === null
+            ? readerSelection
+            : selectedMarkdownAnnotation(view, hiddenRanges, { analysisCache });
+        if (!selection || !selectionSupportsSourceActions(
             selection,
             currentSourceActionRanges
         )) {
             openSelectionKey = null;
-            annotationPopup.close();
+            // A translation-only view has no source text anywhere; only a
+            // comparison selection of translated text needs explaining.
+            if (!currentSourceActionRanges?.length) {
+                annotationPopup.close();
+                return;
+            }
+            for (const popup of interactionPopups) {
+                if (popup !== annotationPopup) popup.close();
+            }
+            annotationPopup.openSelectionHint({
+                anchor: selectionAnchor(domSelection, event.target, event),
+            });
             return;
         }
         const selectionKey = markdownSelectionKey(selection);
@@ -1084,6 +1139,11 @@ export function createInlineMarkdownEditor({
         for (const popup of interactionPopups) {
             if (popup !== annotationPopup) popup.close();
         }
+        const selectionContext = { side: 'source' };
+        selectionSources.set(selectionContext, {
+            doc: view.state.doc,
+            hiddenRanges,
+        });
         annotationPopup.openSelection({
             anchor: selectionAnchor(
                 domSelection,
@@ -1092,9 +1152,7 @@ export function createInlineMarkdownEditor({
             ),
             onOpenNote: () => retainSelectionHighlight(selection),
             selection,
-            selectionContext: {
-                side: 'source',
-            },
+            selectionContext,
             copyTarget,
             sourceLocation: selectionSourceLocation(
                 currentSourceMap,
@@ -1107,9 +1165,10 @@ export function createInlineMarkdownEditor({
     // CodeMirror copies a drag into its own selection and paints Highlight
     // over the text. Clearing only the window selection leaves that layer,
     // and in the shadow root it may not even be the selection CodeMirror reads.
-    const clearFinishedAnnotationSelection = () => {
+    const clearFinishedAnnotationSelection = (
+        epoch = annotationSelectionClearEpoch
+    ) => {
         if (destroyed) return;
-        const epoch = annotationSelectionClearEpoch;
         const clear = () => {
             if (destroyed || epoch !== annotationSelectionClearEpoch) return;
             clearReaderTextSelection(parent, view?.root);
@@ -1166,7 +1225,9 @@ export function createInlineMarkdownEditor({
         );
     }
     const closeSelectionActionsOnEscape = event => {
-        if (event.key !== 'Escape' || !annotationPopup.isSelectionOpen()) {
+        if (event.key !== 'Escape'
+            || !(annotationPopup.isSelectionOpen()
+                || annotationPopup.isSelectionHintOpen())) {
             return;
         }
         event.preventDefault();
@@ -1332,8 +1393,13 @@ export function createInlineMarkdownEditor({
         // Annotation syncs republish the same Markdown while the reader may be
         // typing a note. Keep that editor and its draft; save it before a
         // different document replaces the text it quotes.
+        // An open selection popup stays too: the reader may be choosing a
+        // color or reading its translation while another highlight syncs.
         if (documentChanged) annotationPopup.close({ saveNote: true });
-        else if (!annotationPopup.isNoteOpen()) annotationPopup.close();
+        else if (!annotationPopup.isNoteOpen()
+            && !annotationPopup.isSelectionOpen()) {
+            annotationPopup.close();
+        }
         currentSourceMap = Array.isArray(sourceMap) ? sourceMap : [];
         currentFigureViews = figureViews
             || computeDocumentFigures(analysisCache, value, { figureMap });
@@ -1391,6 +1457,7 @@ export function createInlineMarkdownEditor({
             ]),
         ];
         if (value === view.state.doc.toString()) {
+            sameTextRefreshAt = editorClock();
             view.dispatch({ effects });
             return;
         }
@@ -1691,26 +1758,42 @@ function withoutSelectionTranslationContext(selectionContext) {
     return annotationContext;
 }
 
-function markdownSelectionSide(selection, sourceActionRanges) {
-    if (sourceActionRanges === null) return 'source';
-    if (!selection || selection.rangeCount !== 1) return null;
-    const range = selection.getRangeAt(0);
-    const startSide = translationPairSide(range.startContainer);
-    const endSide = translationPairSide(range.endContainer);
-    return startSide === 'translated' || endSide === 'translated'
-        ? 'translated'
-        : 'source';
+// In a comparison view everything outside the source action ranges is
+// translated text. Hiding it like page chrome keeps a drag from one source
+// paragraph to the next as a multi-range selection of the source parts.
+function selectionHiddenRanges(chromeRanges, sourceActionRanges, length) {
+    if (sourceActionRanges === null) return chromeRanges;
+    const sorted = [...sourceActionRanges].sort((left, right) => (
+        left.from - right.from || left.to - right.to
+    ));
+    const outside = [];
+    let position = 0;
+    for (const range of sorted) {
+        if (range.from > position) {
+            outside.push({ from: position, to: range.from });
+        }
+        position = Math.max(position, range.to);
+    }
+    if (position < length) outside.push({ from: position, to: length });
+    return [...chromeRanges, ...outside];
 }
 
-function translationPairSide(node) {
-    const element = node?.nodeType === 1 ? node : node?.parentElement;
-    if (element?.closest?.('.cm-mktero-translation-pair-source')) {
-        return 'source';
+function withSelectionTextQuote(annotation, source) {
+    if (!source || annotation?.textQuote || !Array.isArray(annotation?.ranges)) {
+        return annotation;
     }
-    if (element?.closest?.('.cm-mktero-translation-pair-translated')) {
-        return 'translated';
+    let textQuote = null;
+    try {
+        textQuote = createMarkdownAnnotationTextQuote(
+            source.doc.toString(),
+            annotation.ranges,
+            source.hiddenRanges
+        );
     }
-    return null;
+    catch {
+        // The quote only helps relocate the ranges; the highlight still saves.
+    }
+    return textQuote ? { ...annotation, textQuote } : annotation;
 }
 
 function normalizeProtectedCorrectionRanges(ranges, block) {

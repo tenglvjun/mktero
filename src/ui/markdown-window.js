@@ -20,8 +20,10 @@ import {
     protectEditableBlocksWithAnnotations,
 } from '../core/markdown-revision-session.js';
 import {
+    assertMarkdownAnnotationSegmentLimit,
     createMarkdownAnnotationTextQuote,
     markdownAnnotationRangeMatchesSource,
+    MarkdownLocalAnnotations,
 } from '../core/markdown-local-annotations.js';
 import {
     resolvePDFPageIndexHint,
@@ -558,6 +560,9 @@ class MarkdownTabView {
                 this.openAnnotationInPDF(annotationID)
             ),
             onSourceNavigationError: error => this.zotero?.logError?.(error),
+            onAnnotationActionError: (messageKey, error) => (
+                this.reportAnnotationActionFailure(messageKey, error)
+            ),
             onViewportChange: offset => {
                 this.syncActiveNavigation(offset);
                 this.schedulePersistedReadingPosition();
@@ -1102,6 +1107,17 @@ class MarkdownTabView {
         return !isExternalTextFocus(active);
     }
 
+    // The selection popup closed while its highlight was saving, so it can
+    // no longer show the failure itself. Uses the toolbar status, which a
+    // render does not clear, so the message stays for its timeout.
+    reportAnnotationActionFailure(messageKey, error) {
+        if (error) this.zotero?.logError?.(error);
+        if (this.destroyed || !this.elements?.actionStatus) return;
+        this.setDocumentActionStatus(messageKey || 'annotation.actionFailed', {
+            dismissAfter: true,
+        });
+    }
+
     // Uses the toolbar status, which a render does not clear, so the message
     // stays for its timeout.
     reportCopyDeliveryFailure() {
@@ -1210,12 +1226,25 @@ class MarkdownTabView {
             && selectionContext?.side !== 'source') {
             throw new Error('Markdown annotations require original text');
         }
-        const sourceAnnotation = this.model.translationView === 'compare'
+        const mappedAnnotation = this.model.translationView === 'compare'
             ? mapComparisonAnnotationToSource(
                 annotation,
                 this.model.translationBlockRanges
             )
             : annotation;
+        const sourceAnnotation = mappedAnnotation
+            && markdownAnnotationRangeMatchesSource(
+                this.model.markdown,
+                mappedAnnotation.ranges,
+                mappedAnnotation.text
+            )
+            ? mappedAnnotation
+            // New Markdown was published after the selection was read, for
+            // example while a draft note was open. Find the text again.
+            : await relocateMarkdownAnnotation(
+                this.model.markdown,
+                mappedAnnotation || annotation
+            );
         if (!sourceAnnotation
             || !String(sourceAnnotation.text || '').trim()
             || !markdownAnnotationRangeMatchesSource(
@@ -1225,6 +1254,9 @@ class MarkdownTabView {
             )) {
             throw new Error('Markdown annotations require original text');
         }
+        // The store keeps a bounded number of ranges. Refuse here rather than
+        // save a highlight whose ranges no longer cover its text.
+        assertMarkdownAnnotationSegmentLimit(sourceAnnotation.ranges);
         const pdfPageIndexHint = resolvePDFPageIndexHint(
             this.model.sourceMap,
             sourceAnnotation?.ranges?.[0],
@@ -7585,6 +7617,79 @@ function mapComparisonTargetToSource(target, blockRanges) {
         return range ? { ...target, ...range } : null;
     }
     return null;
+}
+
+// Re-locates a selection read from an older document with the same text and
+// quote matching the local annotation store applies to saved highlights. The
+// store here is in memory and only ever holds this one draft.
+async function relocateMarkdownAnnotation(markdown, annotation) {
+    const text = String(annotation?.text || '');
+    if (typeof markdown !== 'string' || !text.trim()) return null;
+    const ranges = Array.isArray(annotation?.ranges) ? annotation.ranges : [];
+    const draft = {
+        id: 'mktero-relocation',
+        source: 'markdown',
+        type: 'highlight',
+        text,
+        comment: '',
+        color: '#ffd400',
+        ranges: ranges.length ? ranges : [{ from: 0, to: 1 }],
+        ...(annotation?.textQuote ? { textQuote: annotation.textQuote } : {}),
+    };
+    let stored = [draft];
+    const matcher = new MarkdownLocalAnnotations({
+        store: {
+            get: async () => stored,
+            put: async (_itemID, annotations) => {
+                stored = annotations;
+            },
+        },
+    });
+    try {
+        const result = await matcher.resolve('relocation', markdown);
+        const [match] = result.matched;
+        if (!match?.ranges?.length) return null;
+        // Unique text alone can be the wrong passage: the selected words may
+        // have been deleted and the same words exist elsewhere. When both
+        // sides of the saved quote disagree with the new place, refuse.
+        if (annotation?.textQuote && !quoteContextAgrees(
+            annotation.textQuote,
+            createMarkdownAnnotationTextQuote(markdown, match.ranges)
+        )) {
+            return null;
+        }
+        const { textQuote: _staleQuote, ...withoutQuote } = annotation;
+        return {
+            ...withoutQuote,
+            ranges: match.ranges.map(range => ({
+                from: range.from,
+                to: range.to,
+            })),
+        };
+    }
+    catch {
+        return null;
+    }
+    finally {
+        matcher.dispose();
+    }
+}
+
+// The saved quote is the text around the selection when it was made. One side
+// still agreeing is enough, since an edit next to the selection changes only
+// that side. A side that was empty (document start or end) agrees.
+const QUOTE_CONTEXT_CHARS = 16;
+
+function quoteContextAgrees(saved, current) {
+    if (!current) return false;
+    const normalize = value => String(value || '').replace(/\s+/gu, ' ').trim();
+    const prefix = normalize(saved.prefix).slice(-QUOTE_CONTEXT_CHARS);
+    const suffix = normalize(saved.suffix).slice(0, QUOTE_CONTEXT_CHARS);
+    const prefixAgrees = !prefix
+        || normalize(current.prefix).endsWith(prefix);
+    const suffixAgrees = !suffix
+        || normalize(current.suffix).startsWith(suffix);
+    return prefixAgrees || suffixAgrees;
 }
 
 function mapComparisonAnnotationToSource(annotation, blockRanges) {

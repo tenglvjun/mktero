@@ -131,7 +131,9 @@ endings immediately below figures and display formulas. A drag can also start
 on a citation, a figure or table reference, or a footnote mark; a click without
 a drag still opens it. The saved text is what the reader shows: a superscript
 mark such as `$^{*}$` is saved as its glyph, text from two table cells keeps a
-space between the cells, and a link's title is left out.
+space between the cells, and a link's title is left out. A selection split into
+more than 512 separate parts is refused with a message instead of being saved
+incomplete.
 Selecting Markdown text can create a local annotation immediately; Mktero then
 creates the corresponding Zotero annotation only when the local PDF text index
 can identify one reliable match. Repeated or ambiguous text remains local and
