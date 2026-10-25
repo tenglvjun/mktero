@@ -77,6 +77,28 @@ export function comparePdfAnnotations(left, right) {
         );
 }
 
+// The localization key that explains a local highlight's Zotero sync state,
+// or null when it is synchronized. Shared by the highlight in the text and the
+// note list, so both say the same thing.
+export function annotationSynchronizationLabelKey(synchronization) {
+    if (synchronization?.status === 'pending') return 'annotation.syncPending';
+    if (synchronization?.status !== 'failed') return null;
+    switch (synchronization.reason) {
+        case 'pdf-index-unavailable':
+            return 'annotation.syncFailed.pdfIndexUnavailable';
+        case 'text-not-found':
+            return 'annotation.syncFailed.textNotFound';
+        case 'text-ambiguous':
+            return 'annotation.syncFailed.textAmbiguous';
+        case 'reader-unavailable':
+            return 'annotation.syncFailed.readerUnavailable';
+        case 'search-timeout':
+            return 'annotation.syncFailed.searchTimeout';
+        default:
+            return 'annotation.syncFailed.unknown';
+    }
+}
+
 // Set on the error an action throws when the Zotero annotation it targets no
 // longer exists or cannot be edited, so a caller can tell that apart from a
 // failed save.

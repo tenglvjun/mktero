@@ -59,6 +59,7 @@ import {
 } from '../config/reader-preferences.js';
 import {
     accessibleAnnotationText,
+    annotationSynchronizationLabelKey,
     comparePdfAnnotations,
 } from '../core/pdf-annotation.js';
 import {
@@ -7100,8 +7101,8 @@ class MarkdownTabView {
         if (status !== 'pending' && status !== 'failed') return null;
         const failed = status === 'failed';
         const label = failed
-            ? this.t(synchronizationFailureLabelKey(
-                annotation.synchronization?.reason
+            ? this.t(annotationSynchronizationLabelKey(
+                annotation.synchronization
             ))
             : this.t('annotation.syncPending');
         const element = this.createElement('span', {
@@ -7782,23 +7783,6 @@ function annotationUnavailableLabelKey(annotation) {
     return annotation?.reason === 'ambiguous'
         ? 'viewer.noteAmbiguous'
         : 'viewer.noteUnavailable';
-}
-
-function synchronizationFailureLabelKey(reason) {
-    switch (reason) {
-        case 'pdf-index-unavailable':
-            return 'annotation.syncFailed.pdfIndexUnavailable';
-        case 'text-not-found':
-            return 'annotation.syncFailed.textNotFound';
-        case 'text-ambiguous':
-            return 'annotation.syncFailed.textAmbiguous';
-        case 'reader-unavailable':
-            return 'annotation.syncFailed.readerUnavailable';
-        case 'search-timeout':
-            return 'annotation.syncFailed.searchTimeout';
-        default:
-            return 'annotation.syncFailed.unknown';
-    }
 }
 
 function annotationUpdate(annotation, changes) {

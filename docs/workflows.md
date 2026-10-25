@@ -163,6 +163,10 @@ passage are tolerated, so selections that include formulas can still be
 located. A display formula whose LaTeX never survives extraction falls back to
 the OCR region recorded for that block.
 
+A local highlight that has not reached the PDF yet shows a dashed underline.
+One whose sync failed shows a dotted warning underline, and hovering it shows
+the reason.
+
 ## Translate with AI
 
 AI translation is always opt-in and never rewrites the source Markdown. Mktero

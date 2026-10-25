@@ -3086,6 +3086,24 @@ blockquote.mktero-note,
     );
 }
 
+/* A local highlight not yet in the PDF: a quiet dashed edge. One whose sync
+   failed: a warning-colored dotted edge. The fill stays the user's color. */
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation--sync-pending {
+    text-decoration-line: underline;
+    text-decoration-style: dashed;
+    text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation--sync-failed {
+    text-decoration-line: underline;
+    text-decoration-style: dotted;
+    text-decoration-color: var(--warning);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-pdf-annotation--underline {
     text-decoration-line: underline;
     text-decoration-color: var(--mktero-annotation-color);
