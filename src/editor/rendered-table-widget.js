@@ -168,13 +168,21 @@ export class RenderedTableWidget extends WidgetType {
         return container;
     }
 
+    // A press belongs to the browser, so a drag selects natively and a cell
+    // enters correction on its own dblclick. A citation or a PDF highlight
+    // still reaches the editor for hover, focus, and the click that opens it,
+    // whether or not the table can be corrected. A cell being corrected keeps
+    // every event to itself.
     ignoreEvent(event) {
-        if (this.#canCorrect()) return true;
-        if (event.type === 'mousedown'
-            && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
+        if (event.type === 'mousedown') return true;
+        const target = event.target;
+        if (target?.closest?.('td, th')
+            ?.getAttribute?.('contenteditable') === 'true') {
             return true;
         }
-        return !event.target?.closest?.('.cm-mktero-pdf-annotation');
+        return !target?.closest?.(
+            '.cm-mktero-citation, .cm-mktero-pdf-annotation'
+        );
     }
 
     #configureCells(container) {
