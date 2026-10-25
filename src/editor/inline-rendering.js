@@ -463,11 +463,11 @@ class RenderedMarkdownWidget extends WidgetType {
         return container;
     }
 
+    // A press anywhere in a rendered block, a citation included, belongs to
+    // the browser, so a drag selects natively. A click on a citation still
+    // reaches the editor, which opens it unless the click ends a drag.
     ignoreEvent(event) {
-        if (event.type === 'mousedown'
-            && event.target?.closest?.('.cm-mktero-pdf-annotation')) {
-            return true;
-        }
+        if (event.type === 'mousedown') return true;
         return !event.target?.closest?.(
             '.cm-mktero-citation, .cm-mktero-pdf-annotation'
         );
@@ -1288,6 +1288,13 @@ export function createInlineRenderingExtension({
             },
             focusin(event, view) {
                 const interaction = referenceInteraction(event, view, context);
+                // A press inside a rendered widget now belongs to the
+                // browser, which focuses a citation there. That focus is a
+                // click or the start of a drag, not the reader tabbing in.
+                if (interaction?.element?.closest?.('.cm-mktero-rendered')
+                    && !focusIsVisible(interaction.element)) {
+                    return false;
+                }
                 if (interaction?.openImmediately) {
                     interaction.openImmediately();
                 }
@@ -1313,7 +1320,7 @@ export function createInlineRenderingExtension({
                 }
                 if (event.button === 0
                     && interaction
-                    && !interaction.allowTextSelection) {
+                    && !startsSelectableDrag(interaction)) {
                     event.preventDefault();
                     return true;
                 }
@@ -1333,11 +1340,8 @@ export function createInlineRenderingExtension({
             click(event, view) {
                 const interaction = referenceInteraction(event, view, context);
                 if (interaction && event.button === 0) {
-                    if (interaction.allowTextSelection
-                        && hasSelectedInteractionText(
-                            view,
-                            interaction.element
-                        )) {
+                    if (pressCanStartDrag(interaction)
+                        && hasSelectedInteractionText(view, interaction.element)) {
                         return false;
                     }
                     event.preventDefault();
@@ -2409,11 +2413,71 @@ function referenceInteraction(event, view, context) {
     return null;
 }
 
+// The click that ends a drag sees a selection touching the reference and
+// leaves it alone. A footnote widget is an atom, so the selection can end
+// beside it rather than inside: a range crossing the element counts too.
 function hasSelectedInteractionText(view, element) {
     const selection = rootSelectionFor(view.dom);
     if (!selection || selection.isCollapsed) return false;
-    return element.contains(selection.anchorNode)
-        || element.contains(selection.focusNode);
+    if (element.contains(selection.anchorNode)
+        || element.contains(selection.focusNode)) {
+        return true;
+    }
+    try {
+        return selection.rangeCount > 0
+            && selection.getRangeAt(0).intersectsNode(element);
+    }
+    catch {
+        return false;
+    }
+}
+
+// A citation or a figure or table reference in running text is a mark on the
+// line, so a drag can start on it like on any other word; the click that ends
+// a drag sees the selection and does not open the reference. A footnote mark
+// drawn as a widget sits on the line as an atom and drags the same way.
+// Inside any other widget (a caption, a table cell, inline math) the browser
+// selects natively and a drag that started there was never CodeMirror's, so
+// those keep preventing the default.
+export function startsSelectableDrag(interaction) {
+    if (interaction.allowTextSelection) return true;
+    const element = interaction.element;
+    const line = element?.closest?.('.cm-line');
+    if (!line) return false;
+    for (let node = element; node && node !== line; node = node.parentElement) {
+        if ((node.contentEditable === 'false'
+            || node.getAttribute?.('contenteditable') === 'false')
+            && !isFootnoteMarkWidget(node, element)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function isFootnoteMarkWidget(node, element) {
+    return node === element
+        && Boolean(node.matches?.(
+            '.cm-mktero-footnote-ref, .cm-mktero-footnote-back'
+        ));
+}
+
+function focusIsVisible(element) {
+    try {
+        return element.matches(':focus-visible');
+    }
+    catch {
+        return true;
+    }
+}
+
+// Whether the press on this reference could have begun a drag, so the click
+// that follows may be the end of one. A reference inside a rendered widget is
+// pressed natively (the widget ignores mousedown). Anything else, such as a
+// note marker, has its press claimed by the editor: the selection the reader
+// made before stays, and a click on the marker must still open it.
+function pressCanStartDrag(interaction) {
+    return startsSelectableDrag(interaction)
+        || Boolean(interaction.element?.closest?.('.cm-mktero-rendered'));
 }
 
 export function selectedMarkdownAnnotation(view, chromeRanges = []) {
