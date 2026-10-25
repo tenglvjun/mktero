@@ -70,6 +70,7 @@ import {
     setRetainedSelection,
     setSelectionFlash,
 } from './selection-flash.js';
+import { readerPointerSelectionExtension } from './reader-selection-style.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const editorNavigationMeasureKey = {};
@@ -707,6 +708,7 @@ export function createInlineMarkdownEditor({
                 ]),
                 createDocumentSearchHighlightExtension(),
                 createSelectionFlashExtension(),
+                readerPointerSelectionExtension(),
                 EditorView.lineWrapping,
                 EditorView.updateListener.of(update => {
                     if (update.docChanged
