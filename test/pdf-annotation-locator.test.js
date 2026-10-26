@@ -2548,6 +2548,55 @@ test('locates a TeX selection against the glyphs of the PDF text layer', async (
     locator.dispose();
 });
 
+test('locates a TeX accent selection against a PDF spacing accent glyph', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('Algorithm 2 RRSI, selection side.', {
+            y: 700,
+            width: 400,
+            hasEOL: true,
+        }),
+        createTextItem(
+            'Require: screened H\u{1D461} , (\u{1D43B}\u{1D461} , \u02C6\u{1D446}\u{1D461} , \u02C6\u{1D436}\u{1D461} ), \u{1D446}\u2605, \u{1D6FF}, \u{1D458}',
+            { y: 686, width: 600, hasEOL: true }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'Require: screened \\mathcal{H}_t, (H_t, \\hat{S}_t, \\hat{C}_t), S^*, \\delta, k',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
+    locator.dispose();
+});
+
+test('locates TeX selections with primes, stars and \\max against PDF glyphs', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            '12: if \u02C6\u{1D446}\u2032 \u2265 \u{1D446}\u2605 \u2212 \u{1D6FF} and \u{1D450} and \u{1D454} then',
+            { y: 700, width: 500, hasEOL: true }
+        ),
+        createTextItem(
+            'The running best score is then updated as \u{1D446}\u2605 \u2190 max(\u{1D446}\u2605, \u02C6\u{1D446}(\u{1D43B}\u{1D461}+1)).',
+            { y: 686, width: 800, hasEOL: true }
+        ),
+    ]]);
+
+    for (const selectedText of [
+        "12: if \\hat{S}' ≥ S^* - \\delta and c and g then",
+        'The running best score is then updated as S^{\\star} \\leftarrow \\max(S^{\\star}, \\hat{S}(H_{t+1}))',
+    ]) {
+        const located = await locator.locate(42, selectedText, {
+            pdfPageIndexHint: 0,
+        });
+        assert.equal(located.position.pageIndex, 0, selectedText);
+        assert.equal(located.position.rects.length, 1, selectedText);
+    }
+    locator.dispose();
+});
+
 test('keeps an unmatched TeX selection as not found', async () => {
     const locator = await createSyntheticLocator([[
         createTextItem('An unrelated paragraph about agents and benchmarks.', {
