@@ -3897,16 +3897,17 @@ function disposeAllContextMenus() {
     runtime.contextMenus.clear();
 }
 
+// Zotero.logError reads `this`. Call both as methods of Zotero: a detached
+// call throws, and on a conversion failure that throw left the tab on its
+// progress screen instead of showing the error.
 function debugMktero(message) {
     runtime.diagnosticLog?.record('debug', message);
-    const debug = Zotero.debug;
-    debug?.(message);
+    Zotero.debug?.(message);
 }
 
 function logMkteroError(error) {
     runtime.diagnosticLog?.recordError(error);
-    const logError = Zotero.logError;
-    logError?.(error);
+    Zotero.logError?.(error);
 }
 
 function recordDiagnosticJob(job) {
