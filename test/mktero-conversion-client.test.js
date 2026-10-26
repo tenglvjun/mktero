@@ -85,6 +85,7 @@ function resultArchive() {
 
 test('converts through the hosted service and decodes the MinerU archive', async () => {
     const requests = [];
+    const jobs = [];
     const archive = resultArchive();
     const responses = [
         jsonResponse(201, {
@@ -109,6 +110,7 @@ test('converts through the hosted service and decodes the MinerU archive', async
             return responses.shift();
         },
         sleep: async () => {},
+        onJob: job => jobs.push(job),
     });
 
     const converted = await client.convert({
@@ -146,6 +148,11 @@ test('converts through the hosted service and decodes the MinerU archive', async
         `${API_BASE}/api/v1/conversions/job-1/result-url`
     );
     assert.equal(requests[6].url, 'https://r2.example/result.zip');
+    assert.deepEqual(jobs.map(job => job.status), [
+        'awaiting_upload',
+        'succeeded',
+    ]);
+    assert.equal(jobs.every(job => job.id === 'job-1' && job.provider === 'mktero'), true);
 });
 
 test('downloads an existing result without uploading when the service already has it', async () => {

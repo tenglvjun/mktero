@@ -12,8 +12,9 @@ import {
 
 const MARKDOWN_BUTTON_SELECTOR = '.mktero-markdown-button';
 const GRAPH_BUTTON_SELECTOR = '.mktero-citation-graph-button';
+const REPORT_BUTTON_SELECTOR = '.mktero-report-button';
 const SELECTION_BUTTON_SELECTOR = '.mktero-selection-markdown-button';
-const BUTTON_SELECTOR = `${MARKDOWN_BUTTON_SELECTOR}, ${GRAPH_BUTTON_SELECTOR}`;
+const BUTTON_SELECTOR = `${MARKDOWN_BUTTON_SELECTOR}, ${GRAPH_BUTTON_SELECTOR}, ${REPORT_BUTTON_SELECTOR}`;
 const CUSTOM_SECTIONS_SELECTOR = '.toolbar .end .custom-sections';
 
 export function registerReaderToolbar({
@@ -24,6 +25,7 @@ export function registerReaderToolbar({
     isMarkdownReady = null,
     onSelectionUnresolved = null,
     onPDFReaderAvailable = null,
+    onReport = null,
     onError = defaultErrorHandler,
     translate = translateEnglish,
 }) {
@@ -100,6 +102,19 @@ export function registerReaderToolbar({
                 title: translate('toolbar.openMarkdown'),
                 ariaLabel: translate('toolbar.openMarkdownAria'),
                 onClick: () => onOpen(reader),
+                onError,
+            }));
+        }
+        if (typeof onReport === 'function'
+            && !doc.querySelector?.(REPORT_BUTTON_SELECTOR)) {
+            append(createToolbarButton({
+                doc,
+                reader,
+                className: 'mktero-report-button',
+                icon: LUCIDE_ICONS.bug,
+                title: translate('diagnostics.toolbar'),
+                ariaLabel: translate('diagnostics.toolbarAria'),
+                onClick: () => onReport(reader),
                 onError,
             }));
         }

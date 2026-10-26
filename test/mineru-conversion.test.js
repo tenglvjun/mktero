@@ -141,8 +141,10 @@ test('resumes a pending cached figure restoration without re-uploading', async (
 
 test('uses the progressive result preparer and streams its events', async () => {
     const events = [];
+    const jobs = [];
     let progressiveContext = null;
     const conversion = new MinerUConversion({
+        onJob: job => jobs.push(job),
         client: {
             async submit() {
                 return { batchID: 'batch-progressive', dataID: 'mktero-progressive', fileName: 'paper.pdf' };
@@ -175,6 +177,11 @@ test('uses the progressive result preparer and streams its events', async () => 
     assert.equal(progressiveContext.fileData.byteLength, 1);
     assert.deepEqual(events, [{ type: 'document', document: { markdown: '# Provisional' }, cacheKey: CONVERSION_KEY }]);
     assert.equal(result.origin, 'fresh');
+    assert.deepEqual(jobs, [{
+        provider: 'mineru',
+        id: 'batch-progressive',
+        status: 'submitted',
+    }]);
 });
 
 test('resumes an uploaded MinerU task across conversion instances', async t => {

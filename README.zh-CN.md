@@ -152,6 +152,7 @@ npm run build
 [GitHub Discussions](https://github.com/tenglvjun/mktero/discussions)。确认且可复现的问题请提交到
 [GitHub Issues](https://github.com/tenglvjun/mktero/issues)。
 
+PDF 阅读器工具栏和“工具”菜单里有“报告问题”。它会在这台电脑上复制或保存一份脱敏的诊断文件，不会上传。
 请勿在 QQ 群、微信、Discord、Issue 或 Pull Request 中发送 API Key、PDF 原文或带凭据的日志。
 
 QQ 是用户群：可以扫码，也可以在 QQ 中搜索群号 `616518076`。

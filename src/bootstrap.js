@@ -231,7 +231,19 @@ import {
     refreshMarkdownReadinessColumn,
     registerMarkdownReadinessColumn,
 } from './ui/markdown-readiness-column.js';
+import { createDiagnosticLog } from './diagnostics/diagnostic-log.js';
+import {
+    buildDiagnosticReport,
+    diagnosticReportFileName,
+    serializeDiagnosticReport,
+} from './diagnostics/diagnostic-report.js';
 import { createZoteroClipboard } from './platform/zotero-clipboard.js';
+import { saveDiagnosticText } from './platform/zotero-diagnostic-export.js';
+import { readDiagnosticEnvironment } from './platform/zotero-diagnostic-snapshot.js';
+import {
+    closeDiagnosticReportDialogs,
+    openDiagnosticReportDialog,
+} from './ui/diagnostic-report-dialog.js';
 import {
     createZoteroEvidenceReference,
 } from './platform/zotero-evidence-reference.js';
@@ -333,6 +345,8 @@ const runtime = {
     actionsTags: null,
     sourceNavigation: null,
     clipboard: null,
+    diagnosticLog: null,
+    diagnosticMenus: new Map(),
     evidenceReference: null,
     disposeAnnotationObserver: null,
     disposeReferenceObserver: null,
@@ -357,6 +371,7 @@ globalThis.install = async function install() {};
 globalThis.startup = async function startup({ id, rootURI }) {
     runtime.id = id;
     runtime.rootURI = rootURI;
+    runtime.diagnosticLog = createDiagnosticLog();
     const localization = createLocalization({
         zoteroLocale: getZoteroLocale(
             Zotero,
@@ -366,7 +381,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.localization = localization;
     runtime.actionsTags = createZoteroActionsTagsBridge({
         zotero: Zotero,
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     runtime.sourceNavigation = createZoteroSourceNavigation(Zotero);
     runtime.clipboard = createZoteroClipboard(
@@ -422,11 +437,11 @@ globalThis.startup = async function startup({ id, rootURI }) {
         aiGateway: new AISDKGateway({
             createAbortController: createZoteroAbortController,
             runtimeWindow: () => liveZoteroWindow(),
-            onDebug: message => Zotero.debug(message),
+            onDebug: message => debugMktero(message),
         }),
         cache,
         getSettings: () => getAISettings(Zotero),
-        onCacheError: error => Zotero.logError?.(error),
+        onCacheError: error => logMkteroError(error),
     });
     runtime.translationRequests = new TranslationRequestTracker({
         createAbortController: createZoteroAbortController,
@@ -471,7 +486,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         loadFile: loadPDFFile,
         measureText: createZoteroTextMeasurer(Zotero),
         readerLocator: readerTextLocator,
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     runtime.pdfAnnotationLocator = pdfAnnotationLocator;
     runtime.sourcePeekRenderer = createZoteroSourcePeekRenderer({
@@ -513,7 +528,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             resolveSourceItem: manifest => (
                 resolveZoteroSavedMarkdownSourceItem(Zotero, manifest)
             ),
-            onCacheError: error => Zotero.logError?.(error),
+            onCacheError: error => logMkteroError(error),
         });
     }
     const annotationOverlay = new MarkdownAnnotationOverlay({
@@ -528,7 +543,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
                 }
             )
         ),
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     // The page parts of a cross-page highlight, kept beside (not inside) the
     // local annotation files so an older Mktero reading those is unaffected.
@@ -539,7 +554,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             pathUtils: PathUtils,
             directory: 'groups-v1',
         }),
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     runtime.annotationGroups = annotationGroups;
     const localAnnotations = new MarkdownLocalAnnotations({
@@ -573,7 +588,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         onSynchronizationChange: itemID => (
             runtime.annotationOverlayRefresher?.refresh([itemID])
         ),
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     runtime.localAnnotations = localAnnotations;
     const pendingTasks = createZoteroMinerUPendingTaskStore({
@@ -595,17 +610,17 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     const figureRegionRenderer = createWorkerFigureRegionRenderer({
         loadWorkerSource: () => loadFigureWorkerSource(rootURI).catch(error => {
-            Zotero.debug(`Mktero: figure worker unavailable, using main-thread rendering (${error.message})`);
+            debugMktero(`Mktero: figure worker unavailable, using main-thread rendering (${error.message})`);
             throw error;
         }),
         createWorker: url => new (mainWindowWorker())(url),
         createObjectURL: url => Zotero.getMainWindow().URL.createObjectURL(url),
         revokeObjectURL: url => Zotero.getMainWindow().URL.revokeObjectURL(url),
         loadPdfAssets: () => loadFigurePDFAssets(rootURI).then(assets => {
-            Zotero.debug(`Mktero: figure PDF assets loaded (${assets.size})`);
+            debugMktero(`Mktero: figure PDF assets loaded (${assets.size})`);
             return assets;
         }).catch(error => {
-            Zotero.debug(`Mktero: figure PDF assets unavailable (${error.message}); non-embedded fonts may render incorrectly`);
+            debugMktero(`Mktero: figure PDF assets unavailable (${error.message}); non-embedded fonts may render incorrectly`);
             throw error;
         }),
         rendererOptions: {
@@ -650,7 +665,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }
         catch (error) {
             if (error?.name === 'AbortError' || context.signal?.aborted) throw error;
-            Zotero.debug?.(`Mktero: PDF text geometry unavailable (${error?.name || 'Error'})`);
+            debugMktero(`Mktero: PDF text geometry unavailable (${error?.name || 'Error'})`);
             return null;
         }
     };
@@ -687,6 +702,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         });
     };
     const conversion = new MinerUConversion({
+        onJob: recordDiagnosticJob,
         client: new MinerUClient({
             createAbortController: createZoteroAbortController,
         }),
@@ -715,11 +731,12 @@ globalThis.startup = async function startup({ id, rootURI }) {
             provider: 'mineru',
             requestProfile: MINERU_REQUEST_PROFILE_ID,
         }),
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     const localConversion = new MinerULocalConversion({
         client: new MinerULocalClient({
             createAbortController: createZoteroAbortController,
+            onJob: recordDiagnosticJob,
         }),
         cache,
         // The PDF's text layer is only read for a result with structure.
@@ -735,7 +752,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         createTranslationSourceKeys: fileData => Promise.all(
             MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS.map(parserProfile => createMarkdownCacheKey(fileData, { parserProfile }))
         ),
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     const mineruConversion = createMinerUConversionFacade({
         getEndpoint: () => getMinerUEndpoint(Zotero),
@@ -784,7 +801,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         createPreviousCacheKeys: fileData => Promise.all(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
             createMarkdownCacheKey(fileData, { parserProfile })
         ))),
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
     const mistralExtractor = new MistralDocumentExtractor({
         zotero: Zotero,
@@ -811,6 +828,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         zotero: Zotero,
         conversion: new MkteroConversionClient({
             createAbortController: createZoteroAbortController,
+            onJob: recordDiagnosticJob,
         }),
         getApiBase: () => getAccountApiBase(Zotero),
         getAccessToken: options => ensureAccountAccessToken(options),
@@ -878,7 +896,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             onChange: itemIDs => (
                 runtime.annotationOverlayRefresher?.refresh(itemIDs)
             ),
-            onError: error => Zotero.logError?.(error),
+            onError: error => logMkteroError(error),
         }
     );
     runtime.disposeCacheObserver = observeLocalCacheCleared(
@@ -892,7 +910,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
                 updateOpenDocumentTranslationLanguage(targetLanguage);
             }
             catch (error) {
-                Zotero.logError?.(error);
+                logMkteroError(error);
             }
         }
     );
@@ -908,15 +926,15 @@ globalThis.startup = async function startup({ id, rootURI }) {
     );
     void runtime.reasoningCatalogStore.load();
     Promise.resolve(readinessReady)
-        .catch(error => Zotero.logError(error))
+        .catch(error => logMkteroError(error))
         .then(() => cache.prune())
         .then(() => cache.listReadableEntries())
         .then(entries => runtime.readiness?.retainLiveEntries(entries))
-        .catch(error => Zotero.logError(error));
-    runtime.citationCache?.prune().catch(error => Zotero.logError(error));
-    pdfTextIndexCache.prune().catch(error => Zotero.logError(error));
-    mineruResultStore.prune().catch(error => Zotero.logError(error));
-    pendingTasks.prune().catch(error => Zotero.logError(error));
+        .catch(error => logMkteroError(error));
+    runtime.citationCache?.prune().catch(error => logMkteroError(error));
+    pdfTextIndexCache.prune().catch(error => logMkteroError(error));
+    mineruResultStore.prune().catch(error => logMkteroError(error));
+    pendingTasks.prune().catch(error => logMkteroError(error));
     presenter.ensureSessionStateFilter();
     const preferencePaneID = await registerMinerUPreferencesPane({
         zotero: Zotero,
@@ -931,8 +949,9 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.preferencePaneID = preferencePaneID;
     registerReaderToolbarAction();
     registerMainWindowContextMenu(Zotero.getMainWindow?.());
+    registerDiagnosticMenu(Zotero.getMainWindow?.());
 
-    Zotero.debug('Mktero: started');
+    debugMktero('Mktero: started');
 };
 
 function mainWindowWorker() {
@@ -947,7 +966,7 @@ function logFigureAssetSizes(label, document) {
         typeof asset?.path === 'string' && asset.path.startsWith('generated/figures/')
     ));
     if (!generated.length) return;
-    Zotero.debug(`Mktero: ${label}: figure assets ` + generated.map(asset => (
+    debugMktero(`Mktero: ${label}: figure assets ` + generated.map(asset => (
         `${asset.path.split('/').pop()}=${asset.data?.byteLength ?? '?'}`
     )).join(', '));
 }
@@ -1059,6 +1078,8 @@ async function loadFigureWorkerSource(rootURI) {
 }
 
 globalThis.shutdown = function shutdown() {
+    closeDiagnosticReportDialogs();
+    disposeDiagnosticMenus();
     runtime.pendingSelectionReveals?.clear();
     abortAllConversions();
     abortObsidianExport();
@@ -1090,7 +1111,7 @@ globalThis.shutdown = function shutdown() {
         runtime.presenter?.dispose();
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
     }
     const revisionSessionsDestroyed = destroyAllRevisionSessions();
     if (runtime.preferencePaneID) {
@@ -1134,6 +1155,9 @@ globalThis.shutdown = function shutdown() {
     runtime.actionsTags = null;
     runtime.sourceNavigation = null;
     runtime.clipboard = null;
+    runtime.diagnosticLog?.clear();
+    runtime.diagnosticLog = null;
+    runtime.diagnosticMenus = new Map();
     runtime.evidenceReference = null;
     runtime.disposeAnnotationObserver = null;
     runtime.disposeReferenceObserver = null;
@@ -1155,12 +1179,15 @@ globalThis.shutdown = function shutdown() {
 globalThis.uninstall = async function uninstall() {};
 globalThis.onMainWindowLoad = function onMainWindowLoad({ window }) {
     registerMainWindowContextMenu(window);
+    registerDiagnosticMenu(window);
     installProgressButton(window);
     installObsidianExportProgressButton(window);
 };
 globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
     runtime.presenter?.closeForWindow(window);
+    closeDiagnosticReportDialogs(window?.document);
     disposeMainWindowContextMenu(window);
+    disposeDiagnosticMenu(window);
     disposeProgressButton(window);
     disposeObsidianExportProgressButton(window);
     runtime.citationPresenter?.closeForWindow(window);
@@ -1571,7 +1598,7 @@ async function executeItemConversion(itemID, {
 }) {
     runtime.pdfIndexOperations.start(itemID, controller);
     let lastLoggedProgress = null;
-    Zotero.debug(
+    debugMktero(
         `Mktero: conversion started for item ${itemID} `
         + `(force refresh: ${forceRefresh})`
     );
@@ -1583,7 +1610,7 @@ async function executeItemConversion(itemID, {
                 const normalizedProgress = normalizeConversionProgress(progress);
                 if (normalizedProgress !== lastLoggedProgress) {
                     lastLoggedProgress = normalizedProgress;
-                    Zotero.debug(
+                    debugMktero(
                         `Mktero: item ${itemID}: `
                         + `${conversionProgressLog(
                             normalizedProgress,
@@ -1597,7 +1624,7 @@ async function executeItemConversion(itemID, {
             onProgressiveFigures(event) {
                 if (!event || signal.aborted) return;
                 if (event.type === 'figure') {
-                    Zotero.debug(
+                    debugMktero(
                         `Mktero: item ${itemID}: figure ${event.figure?.id} `
                         + `${event.figure?.status}`
                     );
@@ -1608,7 +1635,7 @@ async function executeItemConversion(itemID, {
                 onProgressiveFigures(event);
             },
         });
-        Zotero.debug(
+        debugMktero(
             result.cacheHit
                 ? `Mktero: item ${itemID}: completed from local cache`
                 : result.resumedTask
@@ -1627,7 +1654,7 @@ function noteProgressiveDocument(itemID, event) {
     if (!event || event.type !== 'document') return;
     backgroundFigureRestorations.add(itemID);
     if (event.figureInput) {
-        Zotero.debug(`Mktero: item ${itemID}: progressive figures started`);
+        debugMktero(`Mktero: item ${itemID}: progressive figures started`);
     }
     if (!(event.figureInput && event.cacheKey && runtime.cache
         && getMinerUCacheEnabled(Zotero))) {
@@ -1644,7 +1671,7 @@ function noteProgressiveDocument(itemID, event) {
     }).then(() => rememberMarkdownReadiness(itemID, {
         cacheKey: event.cacheKey,
         parserProfile: currentConversionParserProfile(),
-    })).catch(error => Zotero.logError?.(error));
+    })).catch(error => logMkteroError(error));
 }
 
 async function publishConversionResult(presentation, itemID, result, signal) {
@@ -1678,10 +1705,10 @@ function publishConversionFailure(presentation, itemID, error, previousResult) {
     }
     runtime.pendingSelectionReveals?.delete(itemID);
     if (presentation.closed) return;
-    Zotero.debug(
+    debugMktero(
         `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
     );
-    Zotero.logError(error);
+    logMkteroError(error);
     if (conversionNeedsSettings(error)) openMinerUPreferences(Zotero);
     runtime.presenter?.update(
         presentation,
@@ -1991,7 +2018,7 @@ async function openSavedMarkdownNote(noteID) {
         );
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
     }
     const presentation = runtime.presenter.open(noteID, {
         sourceItemID: sourceItem?.id ?? null,
@@ -2154,7 +2181,7 @@ async function readRevisionSnapshot({ itemID, cacheKey, signal }) {
         if (signal?.aborted || error?.name === 'AbortError') throw error;
         // Unreadable corrections must not block the OCR result. The revision
         // session reports them when the document attaches its corrections.
-        if (!isInvalidMarkdownRevisionError(error)) Zotero.logError?.(error);
+        if (!isInvalidMarkdownRevisionError(error)) logMkteroError(error);
         return null;
     }
 }
@@ -2181,7 +2208,7 @@ async function attachReadingPosition(result) {
         };
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         return result;
     }
 }
@@ -2196,7 +2223,7 @@ function saveReadingPosition(itemID, anchor) {
     Promise.resolve(runtime.readingPositions.save(model.sourceHash, {
         cacheKey: model.cacheKey,
         anchor,
-    })).catch(error => Zotero.logError?.(error));
+    })).catch(error => logMkteroError(error));
 }
 
 async function attachRevisionSession(itemID, result, signal) {
@@ -2232,7 +2259,7 @@ async function attachRevisionSession(itemID, result, signal) {
             if (signal?.aborted || error?.name === 'AbortError') throw error;
             // A read failure can be temporary, so the saved corrections stay
             // on disk and this tab opens without correction editing.
-            Zotero.logError?.(error);
+            logMkteroError(error);
             return {
                 ...result,
                 editableBlocks: [],
@@ -2272,7 +2299,7 @@ async function replaceRevisionSession(itemID, baseDocument, { signal } = {}) {
     return registry.open(itemID, baseDocument, {
         signal,
         store,
-        onError: error => Zotero.logError?.(error),
+        onError: error => logMkteroError(error),
     });
 }
 
@@ -2283,7 +2310,7 @@ async function closeRevisionSession(itemID) {
 function destroyAllRevisionSessions() {
     const sessions = runtime.revisionSessions;
     return Promise.resolve(sessions?.destroyAll())
-        .catch(error => Zotero.logError?.(error));
+        .catch(error => logMkteroError(error));
 }
 
 function setCorrectionMode(itemID, enabled) {
@@ -2470,7 +2497,7 @@ async function translateDocument(documentID, {
                     }
             );
         }
-        if (error?.name !== 'AbortError') Zotero.logError?.(error);
+        if (error?.name !== 'AbortError') logMkteroError(error);
         throw error;
     }
 }
@@ -2661,7 +2688,7 @@ async function updateRevisionSession(itemID, mutate, {
         );
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         return {
             snapshot,
             translation: translationState.result,
@@ -2704,7 +2731,7 @@ async function resolveTranslationAfterRevision(snapshot, {
                 }) || null;
         }
         catch (error) {
-            Zotero.logError?.(error);
+            logMkteroError(error);
         }
     }
     let recoveredSnapshot = null;
@@ -2715,7 +2742,7 @@ async function resolveTranslationAfterRevision(snapshot, {
             recoveredSnapshot = await attachCachedDocumentTranslation(snapshot);
         }
         catch (error) {
-            Zotero.logError?.(error);
+            logMkteroError(error);
         }
     }
     const recovered = currentTranslationResult(recoveredSnapshot);
@@ -3072,7 +3099,7 @@ async function loadRevisionSessionForItem(itemID) {
     catch (error) {
         if (!isInvalidMarkdownRevisionError(error)) throw error;
         // Reparsing starts over, so a damaged entry is removed here.
-        Zotero.logError?.(error);
+        logMkteroError(error);
         await runtime.revisionStore.delete(cacheKey);
         return null;
     }
@@ -3110,7 +3137,7 @@ function initializeMarkdownReadiness(cache, pluginID, rootURI) {
         runtime.readiness = createMarkdownReadinessController({
             store,
             onChange: () => refreshMarkdownReadinessColumn(Zotero),
-            onError: error => Zotero.logError?.(error),
+            onError: error => logMkteroError(error),
         });
         cache.setStoreChangeListener?.(event => {
             void runtime.readiness?.handleCacheEvent(event);
@@ -3125,7 +3152,7 @@ function initializeMarkdownReadiness(cache, pluginID, rootURI) {
             ) === true,
             isPreparing: item => runtime.conversionActivity?.isActive(item) === true,
             translate: runtimeTranslate,
-            onError: error => Zotero.logError?.(error),
+            onError: error => logMkteroError(error),
         });
         runtime.disposeConversionProfileObserver = observeConversionProfile(
             Zotero,
@@ -3134,7 +3161,7 @@ function initializeMarkdownReadiness(cache, pluginID, rootURI) {
         return runtime.readiness.load();
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         return Promise.resolve();
     }
 }
@@ -3162,7 +3189,7 @@ async function rememberMarkdownReadiness(itemID, result) {
         });
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
     }
 }
 
@@ -3579,7 +3606,7 @@ async function saveSnapshotForModel(pdfItemOrID, model) {
         containsUserCorrections: Boolean(model.hasCorrections),
         correctionCount: model.correctionCount || 0,
     });
-    Zotero.debug('Mktero: saved Markdown snapshot for item ' + pdfItem.id);
+    debugMktero('Mktero: saved Markdown snapshot for item ' + pdfItem.id);
     return result;
 }
 
@@ -3616,7 +3643,7 @@ async function runAnnotationAction(action, ...args) {
         return undefined;
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         throw error;
     }
 }
@@ -3666,7 +3693,7 @@ async function openSourceInPDF(itemID, location) {
         await runtime.sourceNavigation.open(itemID, location);
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         const message = runtimeTranslate('source.navigationFailed');
         Zotero.getMainWindow?.()?.alert?.(`Mktero: ${message}`);
     }
@@ -3702,7 +3729,7 @@ async function copySourcedMarkdown(itemID, target) {
         await runtime.clipboard.writeText(markdown);
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         throw error;
     }
 }
@@ -3716,7 +3743,7 @@ async function copyCode(code) {
         await runtime.clipboard.writeText(code);
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         throw error;
     }
 }
@@ -3754,7 +3781,7 @@ async function runMarkdownAnnotationAction(action, ...args) {
         return await handler.call(runtime.localAnnotations, ...args);
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         throw error;
     }
 }
@@ -3870,8 +3897,99 @@ function disposeAllContextMenus() {
     runtime.contextMenus.clear();
 }
 
+function debugMktero(message) {
+    runtime.diagnosticLog?.record('debug', message);
+    const debug = Zotero.debug;
+    debug?.(message);
+}
+
+function logMkteroError(error) {
+    runtime.diagnosticLog?.recordError(error);
+    const logError = Zotero.logError;
+    logError?.(error);
+}
+
+function recordDiagnosticJob(job) {
+    runtime.diagnosticLog?.recordJob(job);
+}
+
+function registerDiagnosticMenu(window) {
+    const document = window?.document;
+    const popup = document?.getElementById?.('menu_ToolsPopup');
+    if (!popup || !runtime.id || runtime.diagnosticMenus.has(window)) return;
+    document.getElementById('mktero-report-problem')?.remove();
+    const item = document.createXULElement?.('menuitem')
+        || document.createElement('menuitem');
+    item.id = 'mktero-report-problem';
+    item.setAttribute('label', runtimeTranslate('diagnostics.menu'));
+    const handleCommand = () => {
+        Promise.resolve(openDiagnosticReport(window)).catch(logMkteroError);
+    };
+    item.addEventListener('command', handleCommand);
+    popup.append(item);
+    runtime.diagnosticMenus.set(window, () => {
+        item.removeEventListener('command', handleCommand);
+        item.remove();
+    });
+}
+
+function disposeDiagnosticMenu(window) {
+    const dispose = runtime.diagnosticMenus.get(window);
+    if (!dispose) return;
+    runtime.diagnosticMenus.delete(window);
+    dispose();
+}
+
+function disposeDiagnosticMenus() {
+    for (const dispose of runtime.diagnosticMenus.values()) dispose();
+    runtime.diagnosticMenus.clear();
+}
+
+function openDiagnosticReport(ownerWindow, context = null) {
+    const document = ownerWindow?.document;
+    const parent = document?.documentElement;
+    if (!document || !parent) return null;
+    return openDiagnosticReportDialog({
+        document,
+        parent,
+        translate: runtimeTranslate,
+        buildReport: input => buildDiagnosticPackage(input, context),
+        copyText: text => runtime.clipboard.writeText(text),
+        saveText: (fileName, text) => saveDiagnosticText({
+            createFilePicker: createZoteroFilePicker,
+            ioUtils: IOUtils,
+            ownerWindow,
+            fileName,
+            text,
+            translate: runtimeTranslate,
+        }),
+    });
+}
+
+async function buildDiagnosticPackage(input, context) {
+    const generatedAt = new Date().toISOString();
+    const environment = await readDiagnosticEnvironment({
+        zotero: Zotero,
+        services: typeof Services === 'undefined' ? null : Services,
+        context,
+        includeAccountEmail: input?.includeAccountEmail === true,
+    });
+    const report = buildDiagnosticReport({
+        environment,
+        logEntries: runtime.diagnosticLog?.entries() || [],
+        jobs: runtime.diagnosticLog?.jobs() || [],
+        note: input?.note,
+        expected: input?.expected,
+        generatedAt,
+    });
+    return {
+        text: serializeDiagnosticReport(report),
+        fileName: diagnosticReportFileName(generatedAt),
+    };
+}
+
 function handleOpenError(error) {
-    Zotero.logError(error);
+    logMkteroError(error);
     const owner = Zotero.getMainWindow?.();
     owner?.alert?.(`Mktero: ${userFacingError(error)}`);
 }
@@ -3963,6 +4081,10 @@ function registerReaderToolbarAction() {
                 reader.itemID,
                 { reader }
             )
+        ),
+        onReport: reader => openDiagnosticReport(
+            reader?._iframeWindow || Zotero.getMainWindow?.(),
+            { itemID: reader?.itemID }
         ),
         onError: handleOpenError,
         translate: runtimeTranslate,
@@ -4093,7 +4215,7 @@ async function loadSelectionSource(itemID) {
     catch (error) {
         // A document whose corrections cannot be read opens with the original
         // result, so the selection maps onto that text.
-        Zotero.logError?.(error);
+        logMkteroError(error);
         return baseSource;
     }
     if (!stored) return baseSource;
@@ -4109,7 +4231,7 @@ async function loadSelectionSource(itemID) {
         };
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         return isInvalidMarkdownRevisionError(error) ? baseSource : null;
     }
 }
@@ -4176,7 +4298,7 @@ function initializeCitationGraph(localization) {
             }],
             cache: citationCache,
             createCacheKey: createCitationCacheKey,
-            onCacheError: error => Zotero.logError?.(error),
+            onCacheError: error => logMkteroError(error),
         });
         runtime.citationCache = citationCache;
         runtime.citationLibrary = citationLibrary;
@@ -4195,7 +4317,7 @@ function initializeCitationGraph(localization) {
         });
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         runtime.citationCache = null;
         runtime.citationLibrary = null;
         runtime.citationGraph = null;
@@ -4231,11 +4353,11 @@ function initializeReferenceImport() {
         runtime.disposeReferenceObserver = registerReferenceIndexObserver(
             Zotero,
             () => referenceImportService.invalidate(),
-            error => Zotero.logError?.(error)
+            error => logMkteroError(error)
         );
     }
     catch (error) {
-        Zotero.logError?.(error);
+        logMkteroError(error);
         runtime.referenceLibrary = null;
         runtime.referenceImportService = null;
     }

@@ -6,6 +6,7 @@ import {
 import { prepareMinerUResult } from './document/prepare.js';
 import { extractMinerUResultFromZip } from './zip-markdown.js';
 import { throwIfFigureAborted as throwIfAborted } from '../figures/figure-async.js';
+import { notifyDiagnosticJob } from '../diagnostics/diagnostic-log.js';
 
 export class MinerUConversion {
     constructor({
@@ -26,6 +27,7 @@ export class MinerUConversion {
         maxTaskAgeMs = DEFAULT_PENDING_TASK_MAX_AGE_MS,
         maxInMemoryTasks = DEFAULT_PENDING_TASK_MAX_ENTRIES,
         onError = () => {},
+        onJob = null,
     }) {
         if (!client?.submit || !client?.collect) {
             throw new TypeError('A resumable MinerU client is required');
@@ -58,6 +60,7 @@ export class MinerUConversion {
         this.maxTaskAgeMs = maxTaskAgeMs;
         this.maxInMemoryTasks = maxInMemoryTasks;
         this.onError = onError;
+        this.onJob = onJob;
         this.operationTails = new Map();
         this.currentTasks = new Map();
     }
@@ -122,6 +125,13 @@ export class MinerUConversion {
             };
         });
         throwIfAborted(signal);
+        if (selected.task?.batchID) {
+            notifyDiagnosticJob(this.onJob, {
+                provider: 'mineru',
+                id: selected.task.batchID,
+                status: selected.origin === 'resumed' ? 'resumed' : 'submitted',
+            });
+        }
 
         if (selected.origin === 'cache') {
             onProgress(CONVERSION_PROGRESS.COMPLETE);

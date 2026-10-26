@@ -2,6 +2,7 @@ import {
     ArrowLeft,
     ArrowRight,
     BookOpen,
+    Bug,
     Check,
     ChevronDown,
     ChevronLeft,
@@ -63,6 +64,10 @@ export const LUCIDE_ICONS = Object.freeze({
     bookOpen: Object.freeze({
         name: 'book-open',
         nodes: BookOpen,
+    }),
+    bug: Object.freeze({
+        name: 'bug',
+        nodes: Bug,
     }),
     check: Object.freeze({
         name: 'check',

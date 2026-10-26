@@ -639,3 +639,39 @@ test('moves a PDF selection popup off the selected caption until cleanup', async
     assert.equal(popup.style.transform, 'translate(700px, 524px)');
     assert.notEqual(settled, 'translate(700px, 524px)');
 });
+
+test('adds a problem-report action to PDF reader toolbars', async () => {
+    let registered;
+    const zotero = {
+        Reader: {
+            registerEventListener(type, handler) {
+                registered = { type, handler };
+            },
+            unregisterEventListener() {},
+        },
+    };
+    const reported = [];
+    registerReaderToolbar({
+        zotero,
+        pluginID: 'mktero@example.com',
+        onOpen: () => {},
+        onReport: reader => reported.push(reader.itemID),
+        translate: key => translateMessage('en-US', key),
+    });
+    const appended = [];
+    const reader = { type: 'pdf', itemID: 9 };
+    registered.handler({
+        reader,
+        doc: createDocument(),
+        append: element => appended.push(element),
+    });
+
+    assert.equal(appended.length, 2);
+    const report = appended[1];
+    assert.equal(report.className.includes('mktero-report-button'), true);
+    assert.equal(report.children[0].attributes['data-lucide'], 'bug');
+    assert.equal(report.attributes['aria-label'], 'Report a Mktero problem');
+    report.click();
+    await Promise.resolve();
+    assert.deepEqual(reported, [9]);
+});
