@@ -50,18 +50,14 @@ export async function readDiagnosticEnvironment({
             ? MINERU_LOCAL_PARSER_PROFILE_ID
             : MINERU_PARSER_PROFILE_ID;
     const session = safe(() => getAccountSession(zotero), null);
+    const osName = clean(services?.appinfo?.OS, 32);
     return {
         pluginVersion,
         build,
         zoteroVersion: clean(zotero?.version, 32),
         locale: clean(zotero?.locale, 32),
-        osName: clean(services?.appinfo?.OS, 32),
-        osVersion: clean(
-            services?.appinfo?.macOSVersion
-                || services?.appinfo?.windowsVersion
-                || '',
-            64
-        ),
+        osName,
+        osVersion: await readOSVersion(zotero, services, osName),
         arch: clean(services?.appinfo?.XPCOMABI, 32),
         conversion: {
             provider,
@@ -90,6 +86,60 @@ export async function readDiagnosticEnvironment({
         },
         context: readContext(zotero, context),
     };
+}
+
+export const OS_VERSION_TIMEOUT_MS = 2000;
+const OS_LABEL_PREFIX = /^(?:macOS|Mac OS X|OS X|Darwin|Windows(?: NT)?|WINNT|Linux)\s+/i;
+const osVersionCache = new WeakMap();
+
+// readOSVersion asks Zotero, which reads `sw_vers -productVersion` on macOS
+// and maps the Windows 11 build. Services.sysinfo on macOS reports the Darwin
+// kernel, not the macOS release, so it is only a fallback elsewhere. The
+// answer does not change during a session, and the report is rebuilt on every
+// keystroke, so the subprocess runs once per Zotero runtime.
+export function readOSVersion(zotero, services, osName) {
+    const key = zotero && typeof zotero === 'object' ? zotero : null;
+    if (key && osVersionCache.has(key)) return osVersionCache.get(key);
+    const pending = resolveOSVersion(zotero, services, osName)
+        .then(version => {
+            if (!version && key) osVersionCache.delete(key);
+            return version;
+        });
+    if (key) osVersionCache.set(key, pending);
+    return pending;
+}
+
+async function resolveOSVersion(zotero, services, osName) {
+    if (typeof zotero?.getOSVersion === 'function') {
+        const label = await withTimeout(
+            Promise.resolve().then(() => zotero.getOSVersion()),
+            OS_VERSION_TIMEOUT_MS
+        ).catch(() => '');
+        const version = normalizeOSVersion(label);
+        if (version) return version;
+    }
+    if (osName === 'Darwin') return '';
+    const fallback = safe(
+        () => services?.sysinfo?.getProperty?.('version'),
+        ''
+    );
+    return normalizeOSVersion(fallback);
+}
+
+export function normalizeOSVersion(value) {
+    const text = String(value || '')
+        .replace(OS_LABEL_PREFIX, '')
+        .replace(/\s+(?:undefined|null)\b/g, '')
+        .trim();
+    return clean(text, 64);
+}
+
+function withTimeout(promise, timeoutMs) {
+    let timer = null;
+    const timeout = new Promise(resolve => {
+        timer = setTimeout(() => resolve(''), timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function readContext(zotero, context) {

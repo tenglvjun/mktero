@@ -9,6 +9,7 @@ const STYLE_ID = 'mktero-diagnostics-style';
 const NOTE_LIMIT = 4000;
 const openByParent = new WeakMap();
 const openDialogs = new Set();
+const styledDocuments = new Set();
 
 // openDiagnosticReportDialog shows a local problem report. Nothing here sends
 // data: Copy and Save hand the redacted text to the user, and Open GitHub
@@ -50,10 +51,17 @@ export function openDiagnosticReportDialog({
     return dialog;
 }
 
+// closeDiagnosticReportDialogs closes the dialogs of one document, or of all
+// documents, and removes the stylesheet it injected there. A plugin update
+// without a Zotero restart then finds no rules from the previous build.
 export function closeDiagnosticReportDialogs(ownerDocument = null) {
     for (const dialog of [...openDialogs]) {
         if (ownerDocument && dialog.element?.ownerDocument !== ownerDocument) continue;
         dialog.close({ restoreFocus: false });
+    }
+    for (const document of [...styledDocuments]) {
+        if (ownerDocument && document !== ownerDocument) continue;
+        removeStyle(document);
     }
 }
 
@@ -409,12 +417,30 @@ function scheduleDocumentMicrotask(document, callback) {
     callback();
 }
 
+// The id is fixed, so a stylesheet left by an earlier build of this plugin is
+// reused and rewritten instead of trusted. Skipping an existing node kept the
+// old rules after an update and broke the dialog layout until a restart.
 function ensureStyle(document) {
-    if (document.getElementById?.(STYLE_ID)) return;
-    const style = document.createElementNS(XHTML_NAMESPACE, 'style');
-    style.id = STYLE_ID;
-    style.textContent = DIAGNOSTIC_DIALOG_STYLE;
-    (document.head || document.documentElement).appendChild(style);
+    let style = document.getElementById?.(STYLE_ID);
+    if (!style) {
+        style = document.createElementNS(XHTML_NAMESPACE, 'style');
+        style.id = STYLE_ID;
+        (document.head || document.documentElement).appendChild(style);
+    }
+    if (style.textContent !== DIAGNOSTIC_DIALOG_STYLE) {
+        style.textContent = DIAGNOSTIC_DIALOG_STYLE;
+    }
+    styledDocuments.add(document);
+}
+
+function removeStyle(document) {
+    styledDocuments.delete(document);
+    try {
+        document.getElementById?.(STYLE_ID)?.remove();
+    }
+    catch {
+        // The window is already closing; its document goes with it.
+    }
 }
 
 // The dialog lives in the Zotero main window, outside the Markdown shadow

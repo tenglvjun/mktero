@@ -7,7 +7,10 @@ import {
     summarizeDiagnosticReport,
 } from '../src/diagnostics/diagnostic-report.js';
 import { translateEnglish } from '../src/i18n/localization.js';
-import { readDiagnosticEnvironment } from '../src/platform/zotero-diagnostic-snapshot.js';
+import {
+    normalizeOSVersion,
+    readDiagnosticEnvironment,
+} from '../src/platform/zotero-diagnostic-snapshot.js';
 
 function environment(overrides = {}) {
     return {
@@ -144,8 +147,9 @@ test('reads a Zotero environment without copying credentials or the email', asyn
             locale: 'en-US',
             Prefs: { get: key => prefs.get(key) },
             Items: { get: () => ({ libraryID: 2, key: 'ITEMKEY1', getField: () => 'Title' }) },
+            getOSVersion: async () => 'macOS 15.6',
         },
-        services: { appinfo: { OS: 'Darwin', macOSVersion: '15.6', XPCOMABI: 'arm64-gcc3' } },
+        services: { appinfo: { OS: 'Darwin', XPCOMABI: 'aarch64-gcc3' } },
         context: { itemID: 7 },
         hash: async () => 'abcdef1234567890',
         pluginVersion: '0.6.11',
@@ -163,7 +167,66 @@ test('reads a Zotero environment without copying credentials or the email', asyn
         itemKey: 'ITEMKEY1',
     });
     assert.equal(read.conversion.parser.profileSha256, 'abcdef123456');
+    assert.equal(read.osName, 'Darwin');
+    assert.equal(read.osVersion, '15.6');
     for (const secret of ['mineru-secret', 'refresh-secret', 'ai-secret', 'reader@example.com', 'Title']) {
         assert.equal(text.includes(secret), false, secret);
     }
+});
+
+function osZotero(getOSVersion) {
+    return { Prefs: { get: () => '' }, getOSVersion };
+}
+
+test('reads the macOS release from Zotero once per session, not the Darwin kernel', async () => {
+    let calls = 0;
+    const zotero = osZotero(async () => {
+        calls += 1;
+        return 'macOS 15.6.1';
+    });
+    // Services.sysinfo reports the Darwin kernel on macOS, never the release.
+    const services = {
+        appinfo: { OS: 'Darwin' },
+        sysinfo: { getProperty: () => '24.6.0' },
+    };
+    const first = await readDiagnosticEnvironment({ zotero, services, hash: async () => '' });
+    const second = await readDiagnosticEnvironment({ zotero, services, hash: async () => '' });
+
+    assert.equal(first.osVersion, '15.6.1');
+    assert.equal(second.osVersion, '15.6.1');
+    assert.equal(calls, 1);
+    const summary = summarizeDiagnosticReport(
+        buildDiagnosticReport({ environment: { ...first, pluginVersion: '0.6.11', zoteroVersion: '10.0.6' } }),
+        translateEnglish
+    );
+    assert.equal(summary[0].value, 'Mktero 0.6.11 · Zotero 10.0.6 · macOS 15.6.1');
+
+    const failed = await readDiagnosticEnvironment({
+        zotero: osZotero(async () => { throw new Error('sw_vers failed'); }),
+        services,
+        hash: async () => '',
+    });
+    assert.equal(failed.osVersion, '');
+});
+
+test('labels Windows 11 by its build and falls back to sysinfo without Zotero', async () => {
+    const windows = await readDiagnosticEnvironment({
+        zotero: osZotero(async () => 'Windows 11 22631'),
+        services: { appinfo: { OS: 'WINNT' } },
+        hash: async () => '',
+    });
+    assert.equal(windows.osVersion, '11 22631');
+    assert.match(
+        summarizeDiagnosticReport(buildDiagnosticReport({ environment: windows }), translateEnglish)[0].value,
+        /· Windows 11 22631$/
+    );
+
+    const linux = await readDiagnosticEnvironment({
+        zotero: { Prefs: { get: () => '' } },
+        services: { appinfo: { OS: 'Linux' }, sysinfo: { getProperty: () => '6.8.0' } },
+        hash: async () => '',
+    });
+    assert.equal(linux.osVersion, '6.8.0');
+    assert.equal(normalizeOSVersion('Linux 6.8.0 undefined'), '6.8.0');
+    assert.equal(normalizeOSVersion('Mac OS X 15.6'), '15.6');
 });

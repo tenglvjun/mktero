@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { translateEnglish } from '../src/i18n/localization.js';
-import { openDiagnosticReportDialog } from '../src/ui/diagnostic-report-dialog.js';
+import {
+    closeDiagnosticReportDialogs,
+    openDiagnosticReportDialog,
+} from '../src/ui/diagnostic-report-dialog.js';
 
 function flush() {
     return new Promise(resolve => setImmediate(resolve));
@@ -145,4 +148,52 @@ test('omits the GitHub action when no opener is available', async () => {
     await flush();
     assert.equal(find('[data-diagnostic-action="open-issue"]'), null);
     dialog.close();
+});
+
+function styleDocument(markup = '') {
+    return new JSDOM(`<!doctype html><html><head>${markup}</head><body></body></html>`)
+        .window.document;
+}
+
+function openPlain(document) {
+    return openDiagnosticReportDialog({
+        document,
+        parent: document.body,
+        buildReport: async () => ({ text: '{}', fileName: 'x.json', summary: [] }),
+    });
+}
+
+test('rewrites a stylesheet left by an earlier build instead of reusing it', () => {
+    // An earlier build left its rules in the window; the update did not restart Zotero.
+    const document = styleDocument(
+        '<style id="mktero-diagnostics-style">.mktero-diagnostics-dialog{width:520px}</style>'
+    );
+    const dialog = openPlain(document);
+    const styles = document.querySelectorAll('#mktero-diagnostics-style');
+
+    assert.equal(styles.length, 1);
+    assert.doesNotMatch(styles[0].textContent, /width:520px/);
+    assert.match(styles[0].textContent, /\.mktero-diagnostics-summary-row/);
+    assert.match(styles[0].textContent, /\.mktero-diagnostics-destination/);
+    dialog.close();
+    openPlain(document).close();
+    assert.equal(document.querySelectorAll('#mktero-diagnostics-style').length, 1);
+    closeDiagnosticReportDialogs(document);
+});
+
+test('removes the stylesheet from one window or from every window on shutdown', () => {
+    const first = styleDocument();
+    const second = styleDocument();
+    openPlain(first);
+    openPlain(second);
+
+    closeDiagnosticReportDialogs(first);
+    assert.equal(first.getElementById('mktero-diagnostics-style'), null);
+    assert.equal(first.querySelector('.mktero-diagnostics-backdrop'), null);
+    assert.ok(second.getElementById('mktero-diagnostics-style'));
+    assert.ok(second.querySelector('.mktero-diagnostics-backdrop'));
+
+    closeDiagnosticReportDialogs();
+    assert.equal(second.getElementById('mktero-diagnostics-style'), null);
+    assert.equal(second.querySelector('.mktero-diagnostics-backdrop'), null);
 });

@@ -1194,7 +1194,7 @@ globalThis.onMainWindowLoad = function onMainWindowLoad({ window }) {
 };
 globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
     runtime.presenter?.closeForWindow(window);
-    closeDiagnosticReportDialogs(window?.document);
+    if (window?.document) closeDiagnosticReportDialogs(window.document);
     disposeMainWindowContextMenu(window);
     disposeDiagnosticMenu(window);
     disposeProgressButton(window);
