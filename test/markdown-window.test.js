@@ -2472,6 +2472,75 @@ test('keeps conversion recovery actions visible when the first conversion fails'
     view.destroy();
 });
 
+test('offers a problem report beside the retry action on a failed conversion', () => {
+    const reports = [];
+    const model = createModel({
+        status: 'error',
+        error: 'The Mktero service could not convert this PDF. Try again.',
+        onReparse: () => {},
+        onReportProblem: options => reports.push(options),
+    });
+    const { view, shadow } = createView(model);
+
+    try {
+        const actions = shadow.querySelector('#mktero-error .message-actions');
+        const report = shadow.querySelector('#mktero-error-report');
+        assert.equal(report.hidden, false);
+        assert.equal(report.getAttribute('aria-label'), 'Report a problem with this paper');
+        assert.equal(report.textContent, 'Report a problem');
+        assert.equal(report.classList.contains('message-action--primary'), false);
+        assert.deepEqual(
+            [...actions.children].filter(child => !child.hidden).map(child => child.id),
+            ['mktero-error-retry', 'mktero-error-report']
+        );
+
+        report.click();
+        assert.equal(reports.length, 1);
+        assert.equal(reports[0].source, 'error-card');
+        assert.equal(reports[0].returnFocus, report);
+        // Opening the local dialog must not lock the retry action.
+        assert.equal(shadow.querySelector('#mktero-error-retry').disabled, false);
+
+        view.render({ ...model, onReportProblem: null });
+        assert.equal(report.hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('lists a problem report in the document actions menu of a ready paper', () => {
+    const reports = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper\n\nReadable text.',
+        sourceKind: 'markdown',
+        onReportProblem: options => reports.push(options),
+    }));
+
+    try {
+        const toggle = shadow.querySelector('#mktero-document-actions');
+        const menu = shadow.querySelector('#mktero-document-action-menu');
+        const report = shadow.querySelector('#mktero-report-problem');
+        assert.equal(toggle.hidden, false);
+        assert.equal(menu.lastElementChild, report);
+        assert.equal(report.hidden, false);
+        assert.equal(report.getAttribute('tabindex'), '-1');
+
+        toggle.click();
+        assert.equal(report.getAttribute('tabindex'), '0');
+        report.click();
+        assert.equal(reports.length, 1);
+        assert.equal(reports[0].source, 'document-menu');
+        assert.equal(reports[0].returnFocus, toggle);
+        assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('keeps the settings action beside previous content after a token reparse failure', () => {
     const calls = [];
     const { view, shadow } = createView(createModel({

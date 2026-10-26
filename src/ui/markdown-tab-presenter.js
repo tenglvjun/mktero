@@ -108,6 +108,7 @@ export class MarkdownTabPresenter {
         onSaveSnapshot,
         onExportMarkdown,
         onExportObsidian,
+        onReportProblem,
         onSetCorrectionMode,
         onCommitCorrection,
         onRestoreCorrection,
@@ -184,6 +185,9 @@ export class MarkdownTabPresenter {
             }
             if (onExportObsidian !== undefined) {
                 existing.model.onExportObsidian = onExportObsidian;
+            }
+            if (onReportProblem !== undefined) {
+                existing.model.onReportProblem = onReportProblem;
             }
             if (onSetCorrectionMode !== undefined) {
                 existing.model.onSetCorrectionMode = onSetCorrectionMode;
@@ -312,6 +316,7 @@ export class MarkdownTabPresenter {
                 onSaveSnapshot,
                 onExportMarkdown,
                 onExportObsidian,
+                onReportProblem,
                 onSetCorrectionMode,
                 onCommitCorrection,
                 onRestoreCorrection,
@@ -582,6 +587,16 @@ export class MarkdownTabPresenter {
         return [...this.presentations.values()].find(presentation => (
             String(presentation.model.sourceItemID) === sourceKey
         )) || null;
+    }
+
+    // sourceItemForTab returns the PDF item shown in a Mktero tab, or null
+    // for a tab this presenter does not own.
+    sourceItemForTab(tabID) {
+        if (!tabID) return null;
+        const presentation = [...this.presentations.values()].find(entry => (
+            !entry.closed && entry.tabID === tabID
+        ));
+        return presentation?.model.sourceItemID ?? null;
     }
 
     closeForSourceItem(sourceItemID, {

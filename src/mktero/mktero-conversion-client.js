@@ -5,6 +5,7 @@ import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import { CONVERSION_PROGRESS } from '../core/conversion-progress.js';
 import { sha256Hex } from '../core/sha256.js';
 import { mkteroVersion } from '../config/runtime-config.js';
+import { notifyDiagnosticJob } from '../diagnostics/diagnostic-log.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 600;
@@ -84,6 +85,7 @@ export class MkteroConversionClient {
         maxArchiveBytes = DEFAULT_MAX_ARCHIVE_BYTES,
         cancelTimeoutMs = CANCEL_TIMEOUT_MS,
         createAbortController = createRuntimeAbortController,
+        onJob = null,
     } = {}) {
         if (!fetch) throw new TypeError('A fetch implementation is required');
         if (typeof createAbortController !== 'function') {
@@ -100,6 +102,7 @@ export class MkteroConversionClient {
         this.maxArchiveBytes = maxArchiveBytes;
         this.cancelTimeoutMs = cancelTimeoutMs;
         this.createAbortController = createAbortController;
+        this.onJob = onJob;
     }
 
     /**
@@ -138,6 +141,11 @@ export class MkteroConversionClient {
                 metadata,
                 sha256: await pdfSHA256(bytes),
                 signal,
+            });
+            notifyDiagnosticJob(this.onJob, {
+                provider: 'mktero',
+                id: job.job_id,
+                status: job.status || 'created',
             });
             throwIfAborted(signal);
 
@@ -186,6 +194,11 @@ export class MkteroConversionClient {
 
             const result = this.extractResultFromZip(archive);
             const resultArchive = includeArchive ? tryCreateMinerUResultArchive(archive) : null;
+            notifyDiagnosticJob(this.onJob, {
+                provider: 'mktero',
+                id: finished?.job_id || job.job_id,
+                status: finished?.status || 'succeeded',
+            });
             return {
                 result,
                 origin: 'network',
@@ -194,6 +207,13 @@ export class MkteroConversionClient {
             };
         }
         catch (error) {
+            if (job?.job_id) {
+                notifyDiagnosticJob(this.onJob, {
+                    provider: 'mktero',
+                    id: job.job_id,
+                    status: error?.name === 'AbortError' ? 'aborted' : 'failed',
+                });
+            }
             this.#abandonJob({ apiBase, getAccessToken, job });
             throw error;
         }

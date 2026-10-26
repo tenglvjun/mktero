@@ -19,6 +19,7 @@
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
 | Anonymous models.dev catalog request on Zotero startup | models.dev, kept only in memory until Zotero quits | No |
+| Session diagnostic log: recent Mktero errors and stages, conversion job ids, and the versions collected by Report a problem | Memory only until Zotero quits. A redacted file only if you copy or save it. Nothing is uploaded. | No |
 | Protected Markdown translation batches | AI provider configured by you | Not by Mktero |
 | Selected Markdown text for selection translation | AI provider configured by you | Not by Mktero |
 | Zotero PDF annotations | Local Zotero library | According to Zotero settings |
@@ -43,9 +44,21 @@ and authenticated responses are not written to logs. Selection translation
 requests contain only the selected text; they
 are not written to the full-document translation cache.
 
-The version report carries only the extension's own build number. Mktero
+Report a problem keeps that diagnostic log in memory for the current Zotero
+session. It is not written to the profile. Open it from Help > Report a Mktero
+Problem, from the Report a problem button on a failed conversion, or from the
+document actions menu of a Mktero tab. Copy and Save create a redacted package
+on this computer only; this version does not upload it. Open GitHub issue opens
+the empty issue form in your browser and sends nothing from the report. The
+package can include the extension version, Zotero version, operating system,
+conversion provider, parser profile label, the item key of the paper, the error
+code of its last failed conversion, conversion job ids, your description, and
+redacted log lines. It never includes API keys, account tokens, your account
+email, PDF bytes, or file paths. The log is discarded when Zotero quits.
+
+The version report carries only the extension's own build number. That report
 collects no device fingerprint, no hardware, operating-system, or IP-derived
-identifier, and runs no third-party analytics. The version is sent only to the
+identifier, and Mktero runs no third-party analytics. The version is sent only to the
 Mktero service: it is never attached to a request that goes to object storage,
 to a MinerU or Mistral converter, or to an AI or citation provider you
 configure. It is not part of your account profile, so no product screen

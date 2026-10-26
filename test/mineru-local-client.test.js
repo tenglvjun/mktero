@@ -125,7 +125,10 @@ function client(fetch, overrides = {}) {
 
 test('uploads PDF bytes to a local MinerU service and reads markdown.md from the zip', async () => {
     const server = createFetch({ apiKey: 'local-secret' });
-    const result = await client(server.fetch).parse({
+    const jobs = [];
+    const result = await client(server.fetch, {
+        onJob: job => jobs.push(job),
+    }).parse({
         apiBase: `${BASE}/`,
         apiKey: 'local-secret',
         fileName: 'nested/paper.pdf',
@@ -135,6 +138,8 @@ test('uploads PDF bytes to a local MinerU service and reads markdown.md from the
     assert.equal(result.markdown, '# Parsed locally\n');
     assert.equal(result.detailedLayout, undefined);
     const upload = server.requests.find(request => request.method === 'PUT');
+    assert.deepEqual(jobs.map(job => job.status), ['created', 'completed']);
+    assert.equal(jobs.every(job => job.provider === 'mineru-local' && job.id === 'job-1'), true);
     assert.equal(upload.url, `${BASE}/v1/uploads/upload-1/content`);
     assert.equal(headerValue(upload.headers, 'authorization'), 'Bearer local-secret');
     const created = server.requests.find(request => request.url.endsWith('/v1/uploads'));

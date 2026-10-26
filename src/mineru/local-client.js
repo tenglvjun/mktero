@@ -12,6 +12,7 @@ import {
 import { extractMinerULocalResultFromZip } from './local-result.js';
 import { DEFAULT_MAX_ARCHIVE_BYTES } from './mineru-client.js';
 import { tryCreateMinerUResultArchive } from './result-archive.js';
+import { notifyDiagnosticJob } from '../diagnostics/diagnostic-log.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 3_000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 600;
@@ -41,6 +42,7 @@ export class MinerULocalClient {
         tier = MINERU_LOCAL_TIER,
         ocrMode = MINERU_LOCAL_OCR_MODE,
         createAbortController = createRuntimeAbortController,
+        onJob = null,
     } = {}) {
         if (!fetch) throw new TypeError('A fetch implementation is required');
         if (typeof hash !== 'function') throw new TypeError('A SHA-256 function is required');
@@ -63,6 +65,7 @@ export class MinerULocalClient {
         this.tier = tier;
         this.ocrMode = ocrMode;
         this.createAbortController = createAbortController;
+        this.onJob = onJob;
     }
 
     async parse({
@@ -111,11 +114,26 @@ export class MinerULocalClient {
         });
         const jobID = stringField(created.job_id);
         if (!jobID) throw invalidResponse();
+        notifyDiagnosticJob(this.onJob, {
+            provider: 'mineru-local',
+            id: jobID,
+            status: 'created',
+        });
         let completed;
         try {
             completed = await this.#pollJob(base, token, jobID, onProgress, signal);
+            notifyDiagnosticJob(this.onJob, {
+                provider: 'mineru-local',
+                id: jobID,
+                status: stringField(completed?.status) || 'completed',
+            });
         }
         catch (error) {
+            notifyDiagnosticJob(this.onJob, {
+                provider: 'mineru-local',
+                id: jobID,
+                status: error?.name === 'AbortError' ? 'aborted' : 'failed',
+            });
             if (signal?.aborted) await this.#cancelJob(base, token, jobID);
             throw error;
         }
