@@ -289,3 +289,49 @@ test('matches PDF highlights over primes and stars to Markdown TeX', async () =>
     assert.match(prime, /then$/u);
     assert.match(star, /^The running best score is then updated as \$S\^\{\\star\}/u);
 });
+
+// Dream-RSI, page 5: the PDF text layer prints a superscript before the
+// subscript of the same base ("T 𝑘\n𝑡" for T_{t}^{k}).
+const DREAM_TEX = 'Let T_{t}^{k} denote the new discovery tree after k completed decision rounds, with T_{t}^{0} = \\{r\\}. A node batch C_{t}^{k} \\in A(\\mathcal{T}_{t}^{k}; W) and each node v \\in C_{t}^{k} is assigned';
+const DREAM_PDF = 'Let T 𝑘\n𝑡 denote the new discovery tree after 𝑘 completed decision rounds, with T 0\n𝑡 = {𝑟}. A node batch 𝐶𝑘\n𝑡 ∈ 𝐴(T 𝑘\n𝑡 ; 𝑊)\nand each node 𝑣 ∈ 𝐶𝑘\n𝑡 is assigned';
+
+test('reads a base with both scripts superscript first, as the PDF prints it', () => {
+    assert.equal(mathCompactText('x_{i}^{2}'), mathCompactText('𝑥2\n𝑖'));
+    assert.equal(mathCompactText('S _ {i} ^ {n}'), mathCompactText('S^{n}_{i}'));
+    assert.equal(mathCompactText('x_\\alpha^2'), 'x2α');
+    assert.equal(mathCompactText('x_{i}'), 'xi');
+    assert.equal(mathCompactText(DREAM_TEX), mathCompactText(DREAM_PDF));
+});
+
+test('maps a reordered match back to the whole formula source', () => {
+    const tex = `before ${DREAM_TEX} after`;
+    const index = createMathCompactTextIndex(tex);
+    const key = mathCompactText(DREAM_PDF);
+    const [offset] = findMathCompactOccurrences(index, key);
+    const range = index.sourceRange(offset, key.length);
+
+    assert.equal(tex.slice(range.from, range.to), DREAM_TEX);
+    const short = createMathCompactTextIndex('T_{t}^{k}');
+    assert.deepEqual(short.sourceRange(0, 3), { from: 0, to: 8 });
+});
+
+// Dream-RSI, page 5: the PDF font leaves \bigcup as a lone "Ð", \sum as "Í"
+// and \prod as "Ö", and OCR reads the math-italic 𝑣 as \nu.
+test('reads misencoded big operators back only in the PDF text layer', () => {
+    const pdf = { pdfTextLayer: true };
+    assert.equal(
+        createMathCompactTextIndex('∪\nÐ\n𝑣∈𝐶', pdf).text,
+        mathCompactText('\\cup \\bigcup_{\\nu \\in C}')
+    );
+    assert.equal(
+        createMathCompactTextIndex('1\n𝑡\nÍ𝑡\n𝑖=1', pdf).text,
+        mathCompactText('1 t \\sum^{t}_{i=1}')
+    );
+    assert.equal(
+        createMathCompactTextIndex('=\nÖ\n𝑖∈', pdf).text,
+        mathCompactText('= \\prod_{i \\in')
+    );
+    // A Latin-1 letter inside a word stays a letter.
+    assert.equal(createMathCompactTextIndex('Íslands Ðenis', pdf).text, 'íslandsðenis');
+    assert.equal(mathCompactText('Ð'), 'ð');
+});

@@ -71,7 +71,21 @@ const CANONICAL_SYMBOLS = new Map([
     ['∙', '•'],
     ['⩽', '≤'],
     ['⩾', '≥'],
+    // OCR reads a math-italic v (𝑣) as \nu, which prints ν. In the
+    // last-resort key the two letters are one, as they look in the PDF.
+    ['ν', 'v'],
 ]);
+
+// A font with a nonstandard large-symbol encoding leaves the display
+// operators in the PDF text layer as Latin-1 letters on their own: Dream-RSI
+// prints \sum as "Í", \prod as "Ö", and \bigcup as "Ð". Only text-layer
+// keys read them back, and only when no Latin letter touches them.
+const MISENCODED_BIG_OPERATORS = new Map([
+    ['Í', '∑'],
+    ['Ö', '∏'],
+    ['Ð', '⋃'],
+]);
+const LATIN_LETTER = /\p{Script=Latin}/u;
 
 // Glyphs the two spellings of one formula do not share, so neither key
 // keeps them:
@@ -105,7 +119,7 @@ const PDF_MATH_GLYPHS = /[\p{Script=Greek}\u{1D400}-\u{1D7FF}\u210E\u210F\u2113\
  * Index `text` as its math-compact key. `sourceRange(from, length)` maps a
  * range of the key back to the offsets of `text` it came from.
  */
-export function createMathCompactTextIndex(text) {
+export function createMathCompactTextIndex(text, { pdfTextLayer = false } = {}) {
     const source = String(text ?? '');
     const characters = [];
     const offsets = [];
@@ -115,29 +129,57 @@ export function createMathCompactTextIndex(text) {
             offsets.push({ from, to });
         }
     };
-    for (let index = 0; index < source.length;) {
-        const character = source[index];
-        if (character === '\\') {
-            const command = /^\\([A-Za-z]+)/u.exec(source.slice(index, index + 64));
-            if (command) {
-                const end = index + command[0].length;
-                const symbol = COMMAND_SYMBOLS.get(command[1]);
-                // An unknown command (\mathcal, \frac, \tag, \quad) carries
-                // no glyph of its own; its argument is read on its own.
-                if (symbol) push(symbol, index, end);
-                index = end;
+    const walk = (start, end) => {
+        for (let index = start; index < end;) {
+            const character = source[index];
+            // A base carrying both scripts prints its superscript first in the
+            // PDF text layer ("T 𝑘\n𝑡" for T_{t}^{k}): TeX stacks the
+            // superscript above the subscript. Read `_{t}^{k}` as `^{k}_{t}`.
+            if (character === '_') {
+                const subEnd = scriptArgumentEnd(source, index, end);
+                let next = subEnd;
+                while (next < end && source[next] === ' ') next++;
+                if (subEnd > index + 1 && source[next] === '^') {
+                    const supEnd = scriptArgumentEnd(source, next, end);
+                    if (supEnd > next + 1) {
+                        walk(next, supEnd);
+                        walk(index + 1, subEnd);
+                        index = supEnd;
+                        continue;
+                    }
+                }
+            }
+            if (character === '\\') {
+                const command = /^\\([A-Za-z]+)/u.exec(source.slice(index, index + 64));
+                if (command) {
+                    const commandEnd = index + command[0].length;
+                    const symbol = COMMAND_SYMBOLS.get(command[1]);
+                    // An unknown command (\mathcal, \frac, \tag, \quad) carries
+                    // no glyph of its own; its argument is read on its own.
+                    if (symbol) push(symbol, index, commandEnd);
+                    index = commandEnd;
+                    continue;
+                }
+                // \{, \%, \, and the like: the escaped character is markup
+                // the rendered formula never prints as a separate glyph.
+                index += 2;
                 continue;
             }
-            // \{, \%, \, and the like: the escaped character is markup
-            // the rendered formula never prints as a separate glyph.
-            index += 2;
-            continue;
+            if (pdfTextLayer
+                && MISENCODED_BIG_OPERATORS.has(character)
+                && (index === 0 || /\s/u.test(source[index - 1]))
+                && !LATIN_LETTER.test(source[index + 1] || '')) {
+                push(MISENCODED_BIG_OPERATORS.get(character), index, index + 1);
+                index++;
+                continue;
+            }
+            const codePoint = source.codePointAt(index);
+            const width = codePoint > 0xFFFF ? 2 : 1;
+            push(String.fromCodePoint(codePoint), index, index + width);
+            index += width;
         }
-        const codePoint = source.codePointAt(index);
-        const width = codePoint > 0xFFFF ? 2 : 1;
-        push(String.fromCodePoint(codePoint), index, index + width);
-        index += width;
-    }
+    };
+    walk(0, source.length);
     return {
         text: characters.join(''),
         sourceRange(from, length) {
@@ -148,10 +190,15 @@ export function createMathCompactTextIndex(text) {
                 || from + length > offsets.length) {
                 return null;
             }
-            return {
-                from: offsets[from].from,
-                to: offsets[from + length - 1].to,
-            };
+            // Reordered scripts map out of source order, so take the
+            // extent of every character in the range.
+            let sourceFrom = Infinity;
+            let sourceTo = -Infinity;
+            for (let offset = from; offset < from + length; offset++) {
+                sourceFrom = Math.min(sourceFrom, offsets[offset].from);
+                sourceTo = Math.max(sourceTo, offsets[offset].to);
+            }
+            return { from: sourceFrom, to: sourceTo };
         },
     };
 }
@@ -181,6 +228,34 @@ export function findMathCompactOccurrences(index, needle) {
         from = index.text.indexOf(key, from + 1);
     }
     return offsets;
+}
+
+// The end of the script argument after the `_` or `^` at `index`: a braced
+// group, a command, or one character, after any spaces MinerU leaves
+// (`S _ {i}`). Returns `index + 1` when there is no argument before `end`.
+function scriptArgumentEnd(source, index, end) {
+    let start = index + 1;
+    while (start < end && source[start] === ' ') start++;
+    if (start >= end) return index + 1;
+    if (source[start] === '{') {
+        let depth = 0;
+        for (let cursor = start; cursor < end; cursor++) {
+            if (source[cursor] === '\\') {
+                cursor++;
+                continue;
+            }
+            if (source[cursor] === '{') depth++;
+            else if (source[cursor] === '}' && --depth === 0) return cursor + 1;
+        }
+        return index + 1;
+    }
+    if (source[start] === '\\') {
+        const command = /^\\(?:[A-Za-z]+|.)/u.exec(source.slice(start, Math.min(end, start + 64)));
+        return command ? start + command[0].length : index + 1;
+    }
+    if (/[\s}]/u.test(source[start])) return index + 1;
+    const codePoint = source.codePointAt(start);
+    return start + (codePoint > 0xFFFF ? 2 : 1);
 }
 
 function compactCharacters(value) {

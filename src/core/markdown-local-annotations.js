@@ -11,6 +11,7 @@ import {
 import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
+    legacyMathEmphasisVisibleTextForRanges,
     legacyVisibleMarkdownTextForRanges,
     unescapeImageMathText,
     visibleMarkdownTextForRanges,
@@ -875,7 +876,15 @@ function resolveAnnotations(markdown, annotations) {
             expandedRanges,
             annotation.text
         )) {
-            matched.push(resolvedAnnotation(annotation, expandedRanges));
+            const text = repairedAnnotationText(
+                markdown,
+                expandedRanges,
+                annotation.text
+            );
+            matched.push(resolvedAnnotation(
+                text === annotation.text ? annotation : { ...annotation, text },
+                expandedRanges
+            ));
             continue;
         }
         let result = locateAnnotationText(indexes, annotation, annotation.text);
@@ -1034,9 +1043,34 @@ export function markdownAnnotationRangeMatchesSource(markdown, rangeOrRanges, te
         return true;
     }
     // Ranges saved by the slice re-parser still carry its leaked markers.
-    return normalizeVisibleText(
+    if (normalizeVisibleText(
         legacyVisibleMarkdownTextForRanges(source, ranges)
-    ) === normalized;
+    ) === normalized) {
+        return true;
+    }
+    return matchesLegacyMathEmphasisText(source, ranges, normalized);
+}
+
+function matchesLegacyMathEmphasisText(source, ranges, normalizedText) {
+    return normalizeVisibleText(
+        legacyMathEmphasisVisibleTextForRanges(source, ranges)
+    ) === normalizedText;
+}
+
+// A highlight saved while the `_` of paired formulas was hidden as emphasis
+// keeps that text ("C{t}^{k}"), which the PDF text layer cannot match. Its
+// ranges still select the same source, so it takes the text the reader
+// shows for them now.
+function repairedAnnotationText(markdown, ranges, text) {
+    const current = visibleMarkdownTextForRanges(markdown, ranges).trim();
+    const normalized = normalizeVisibleText(text);
+    if (!current
+        || current.length > MAX_PDF_ANNOTATION_TEXT_LENGTH
+        || normalizeVisibleText(current) === normalized
+        || !matchesLegacyMathEmphasisText(markdown, ranges, normalized)) {
+        return text;
+    }
+    return current;
 }
 
 export function createMarkdownAnnotationTextQuote(
@@ -1271,6 +1305,9 @@ function refreshAnnotationAnchors(
     const matchedRanges = new Map(matched.map(annotation => (
         [annotation.id, annotation.ranges]
     )));
+    const matchedTexts = new Map(matched.map(annotation => (
+        [annotation.id, annotation.text]
+    )));
     const visible = matchedRanges.size
         ? createVisibleMarkdownTextIndex(markdown, [], { imageMath: true })
         : null;
@@ -1285,9 +1322,15 @@ function refreshAnnotationAnchors(
             to: range.to,
         }));
         const primary = storedRanges[0];
+        const text = matchedTexts.get(annotation.id) ?? annotation.text;
+        if (text !== annotation.text) {
+            changed = true;
+            changedIDs.add(annotation.id);
+        }
         let refreshed = refreshAnnotationTextQuote(
             {
                 ...annotation,
+                text,
                 ranges: storedRanges,
             },
             {

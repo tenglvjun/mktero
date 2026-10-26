@@ -476,7 +476,9 @@ export function createEmptyAnnotationOverlay() {
 // Maps each math-compact occurrence of `text` through the visible index back
 // to Markdown, grown to whole formulas so no delimiter is left behind.
 function mathCompactAnnotationRanges(markdown, visibleIndex, compactIndex, text) {
-    const key = mathCompactText(text);
+    // A Zotero highlight's text is PDF text-layer text, so a misencoded
+    // operator ("Ð" for \bigcup) reads back as the glyph it stands for.
+    const key = createMathCompactTextIndex(text, { pdfTextLayer: true }).text;
     const offsets = findMathCompactOccurrences(compactIndex, key);
     if (!offsets) return [];
     return offsets.flatMap(offset => {

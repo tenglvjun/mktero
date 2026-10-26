@@ -2633,3 +2633,75 @@ test('keeps an unmatched TeX selection as not found', async () => {
     );
     locator.dispose();
 });
+
+// Dream-RSI, page 5: the PDF prints T_{t}^{k} as "T 𝑘" over "𝑡".
+test('locates a TeX selection whose scripts the PDF prints superscript first', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('Let T \u{1D458}', { y: 700, width: 60, hasEOL: true }),
+        createTextItem(
+            '\u{1D461} denote the new discovery tree after \u{1D458} completed decision rounds, with T 0',
+            { y: 690, width: 700, hasEOL: true }
+        ),
+        createTextItem(
+            '\u{1D461} = {\u{1D45F}}. A node batch \u{1D436}\u{1D458}',
+            { y: 680, width: 300, hasEOL: true }
+        ),
+        createTextItem(
+            '\u{1D461} \u2208 \u{1D434}(T \u{1D458}',
+            { y: 670, width: 120, hasEOL: true }
+        ),
+        createTextItem(
+            '\u{1D461} ; \u{1D44A}) and each node is assigned to a worker.',
+            { y: 660, width: 500, hasEOL: true }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'Let T_{t}^{k} denote the new discovery tree after k completed decision rounds, with T_{t}^{0} = \\{r\\}. A node batch C_{t}^{k} \\in A(\\mathcal{T}_{t}^{k}; W) and each node is assigned',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 5);
+    locator.dispose();
+});
+
+// Dream-RSI, pages 5-6: a TeX selection runs off the foot of one page, and
+// the next page opens with \bigcup misencoded as a lone "Ð".
+test('locates a TeX selection that crosses a page break into a misencoded operator', async () => {
+    const header = 'Dream-RSI: Recursive Self-Improvement through Evolving Worlds';
+    const locator = await createSyntheticLocator([[
+        createTextItem(header, { y: 760, width: 400, hasEOL: true }),
+        createTextItem(
+            'After the exploration policy takes a nonempty batch, the next observed tree is T \u{1D458}+1',
+            { y: 700, width: 700, hasEOL: true }
+        ),
+        createTextItem('\u{1D456} = T \u{1D458}', { y: 690, width: 80, hasEOL: true }),
+        createTextItem('\u{1D456} \u222A', { y: 680, width: 30, hasEOL: true }),
+        createTextItem('1', { y: 40, width: 10, hasEOL: true }),
+    ], [
+        createTextItem(header, { y: 760, width: 400, hasEOL: true }),
+        createTextItem('\u00D0', { y: 700, width: 10, hasEOL: true }),
+        createTextItem('\u{1D463}\u2208\u{1D436}\u{1D458}', { y: 690, width: 40, hasEOL: true }),
+        createTextItem('\u{1D456}', { y: 680, width: 10, hasEOL: true }),
+        createTextItem(
+            'Child(\u{1D463}) denotes the node set containing unobserved children.',
+            { y: 670, width: 600, hasEOL: true }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'policy takes a nonempty batch, the next observed tree is T_{i}^{k+1} = T_{i}^{k} \\cup \\bigcup_{\\nu \\in C_{i}^{k}} \\text{Child}(\\nu) denotes the node set',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.segments.length, 2);
+    assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [0, 1]);
+    assert.match(located.segments[0].text, /^policy takes/u);
+    assert.match(located.segments[0].text, /\u222A$/u);
+    assert.match(located.segments[1].text, /^\u00D0/u);
+    assert.match(located.segments[1].text, /node set$/u);
+    locator.dispose();
+});

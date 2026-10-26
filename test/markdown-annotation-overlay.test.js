@@ -1347,3 +1347,31 @@ test('does not move an old caption highlight onto the same text elsewhere', asyn
     assert.deepEqual(result.matched, []);
     assert.equal(result.unmatched[0].reason, 'ambiguous');
 });
+
+test('matches a Zotero highlight whose text layer misencodes a big operator', async () => {
+    // Zotero copies the PDF text layer, where this font maps \bigcup to "Ð".
+    const annotation = {
+        id: 'BIGCUP01',
+        type: 'highlight',
+        text: 'Ð\n𝑣∈𝐶𝑚,𝑘\n𝑖\nChild(𝑣; T𝑖, T 𝑚,𝑘\n𝑖 ) where nodes',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '6',
+        pageIndex: 5,
+        sortIndex: '00005',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+    const formula = '$\\bigcup_{\\nu\\in C_{i}^{m,k}}\\text{Child}(\\nu;\\mathcal{T}_{i},\\mathcal{T}_{i}^{m,k})$';
+    const markdown = `Tree is ${formula} where nodes appear.`;
+
+    const result = await overlay.resolve(1, markdown);
+
+    assert.equal(result.unmatched.length, 0);
+    const [range] = result.matched[0].ranges;
+    assert.equal(
+        markdown.slice(range.from, result.matched[0].ranges.at(-1).to),
+        `${formula} where nodes`
+    );
+});
