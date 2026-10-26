@@ -216,7 +216,9 @@ function sourceOccurrenceOrdinal(
     );
     if (!annotationRange) return null;
 
-    const visibleIndex = createVisibleMarkdownTextIndex(source);
+    const visibleIndex = createVisibleMarkdownTextIndex(source, [], {
+        imageMath: true,
+    });
     const index = normalized
         ? createPdfAnnotationTextIndex(
             visibleIndex.text,
@@ -244,7 +246,9 @@ function sourceDerivedTextRange(content, annotation, source, sourceFrom) {
     if (!source || !Number.isInteger(sourceFrom)) return null;
     const range = annotationSourceRange(annotation, source, sourceFrom);
     if (!range) return null;
-    const visible = createVisibleMarkdownTextIndex(source);
+    const visible = createVisibleMarkdownTextIndex(source, [], {
+        imageMath: true,
+    });
     const from = Math.max(0, range.from - sourceFrom);
     const to = Math.min(source.length, range.to - sourceFrom);
     const text = visible.visibleOffsetAt
@@ -298,6 +302,16 @@ function wrapTextRange(container, from, to, annotation, translate) {
     const range = document.createRange();
     range.setStart(startNode, startOffset);
     range.setEnd(endNode, endOffset);
+    wrapRenderedAnnotationRange(range, annotation, translate);
+}
+
+// Moves the rendered content of `range` into one annotation mark.
+export function wrapRenderedAnnotationRange(
+    range,
+    annotation,
+    translate = translateEnglish
+) {
+    const document = range.commonAncestorContainer.ownerDocument;
     const element = document.createElementNS(XHTML_NAMESPACE, 'span');
     element.className = annotationClassName(annotation);
     for (const [name, value] of Object.entries(
@@ -311,6 +325,7 @@ function wrapTextRange(container, from, to, annotation, translate) {
     if (noteMarker) element.append(noteMarker);
     element.append(range.extractContents());
     range.insertNode(element);
+    return element;
 }
 
 export function safeAnnotationColor(color) {

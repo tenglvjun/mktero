@@ -54,18 +54,26 @@ const HTML_TABLE_CELL_BOUNDARY = /<\/?(?:td|th|tr|caption|br|p|div|li)\b/iu;
 // `readerMarkup` also hides the superscript wrappers the reader hides and
 // shows a footnote glyph for its TeX source. Selection text uses it, so a
 // saved annotation equals what the reader shows. `keepLinkTitles` is for
-// text saved before a link title was hidden.
+// text saved before a link title was hidden. `imageMath` reads a formula in
+// an image description as the reader typesets it: the description doubles
+// the formula's backslashes ("$\\Delta$"), and the reader undoes that.
 export function createVisibleMarkdownTextIndex(
     markdown,
     extraHiddenRanges = [],
-    { readerMarkup = false, analyses = null, keepLinkTitles = false } = {}
+    {
+        readerMarkup = false,
+        analyses = null,
+        keepLinkTitles = false,
+        imageMath = false,
+    } = {}
 ) {
-    const { hiddenRanges, mathRanges } = collectHiddenRanges(
+    const { hiddenRanges, mathRanges, imageRanges } = collectHiddenRanges(
         markdown,
         extraHiddenRanges,
         readerMarkup,
         analyses,
-        keepLinkTitles
+        keepLinkTitles,
+        imageMath
     );
     const segments = [];
     const chunks = [];
@@ -109,6 +117,13 @@ export function createVisibleMarkdownTextIndex(
     const text = chunks.join('');
     return {
         text,
+        // Whether `from..to` lies in an image description, when `imageMath`
+        // is on.
+        insideImage(from, to) {
+            return imageRanges.some(range => (
+                from >= range.from && to <= range.to
+            ));
+        },
         expandSourceRangeToMathBoundaries(range) {
             return expandRangeToMathSourceRanges(range, mathRanges);
         },
@@ -275,32 +290,102 @@ export function trimDanglingMarkdownMarkRanges(markdown, ranges) {
 }
 
 export function htmlTableVisibleSourceAtoms(source) {
+    return htmlTableSourceCells(source).flatMap(cell => cell.atoms);
+}
+
+// Every `td`, `th` and `caption` of an HTML table, in source order, with the
+// decoded characters it shows. Text after a nested cell closes stays with the
+// last cell opened. Each character records the run of text between two tags
+// it belongs to, and whether the renderer typesets formulas there: inside a
+// `td` or `th` and outside `code`, as sanitizeRawHTMLTable does.
+export function htmlTableSourceCells(source) {
     const text = String(source || '');
-    const atoms = [];
+    const cells = [];
     const tagPattern = /<\/?([a-zA-Z][\w:-]*)\b[^<>]*>/g;
     let cellDepth = 0;
-    let cell = -1;
+    let typesetCellDepth = 0;
+    let codeDepth = 0;
+    let segment = 0;
     let index = 0;
-    for (const match of text.matchAll(tagPattern)) {
-        if (cellDepth > 0 && match.index > index) {
-            appendDecodedHTMLAtoms(atoms, text, index, match.index, cell);
+    const appendText = to => {
+        const atoms = cells.at(-1).atoms;
+        const first = atoms.length;
+        appendDecodedHTMLAtoms(atoms, text, index, to, cells.length - 1);
+        for (let atom = first; atom < atoms.length; atom++) {
+            atoms[atom].segment = segment;
+            atoms[atom].typeset = typesetCellDepth > 0 && codeDepth === 0;
         }
+    };
+    for (const match of text.matchAll(tagPattern)) {
+        if (cellDepth > 0 && match.index > index) appendText(match.index);
+        segment++;
         const name = match[1].toLowerCase();
+        const closing = match[0].startsWith('</');
+        if (name === 'td' || name === 'th') {
+            typesetCellDepth = Math.max(0, typesetCellDepth + (closing ? -1 : 1));
+        }
+        if (name === 'code') codeDepth = Math.max(0, codeDepth + (closing ? -1 : 1));
         if (HTML_TABLE_CELL_TAGS.has(name)) {
-            if (match[0].startsWith('</')) {
+            if (closing) {
                 cellDepth = Math.max(0, cellDepth - 1);
             }
             else if (!match[0].endsWith('/>')) {
                 cellDepth += 1;
-                cell += 1;
+                cells.push({ tag: name, atoms: [] });
             }
         }
         index = match.index + match[0].length;
     }
-    if (cellDepth > 0 && index < text.length) {
-        appendDecodedHTMLAtoms(atoms, text, index, text.length, cell);
+    if (cellDepth > 0 && index < text.length) appendText(text.length);
+    return cells;
+}
+
+// The formulas the renderer typesets in one cell: each with the indexes of
+// its first and last character, and the indexes of the delimiters around its
+// TeX, which the reader does not show. A superscript mark keeps its
+// delimiters, as in the visible-text index. `source` is the table source the
+// atom offsets point into.
+export function htmlCellTypesetFormulas(source, atoms) {
+    const formulas = [];
+    let first = 0;
+    while (first < atoms.length) {
+        let last = first;
+        while (last + 1 < atoms.length
+            && atoms[last + 1].segment === atoms[first].segment) {
+            last++;
+        }
+        if (atoms[first].typeset) {
+            const from = atoms[first].from;
+            const raw = String(source).slice(from, atoms[last].to);
+            for (const match of findInlineMathMatches(raw)) {
+                const start = from + match.start;
+                const end = from + match.end;
+                const startIndex = atoms.findIndex((atom, atomIndex) => (
+                    atomIndex >= first && atomIndex <= last
+                    && atom.from <= start && atom.to > start
+                ));
+                const endIndex = atoms.findIndex((atom, atomIndex) => (
+                    atomIndex >= first && atomIndex <= last
+                    && atom.from < end && atom.to >= end
+                ));
+                if (startIndex < 0 || endIndex < startIndex) continue;
+                const delimiters = [];
+                const contentOffset = match.raw.indexOf(match.text);
+                if (!match.text.startsWith('^') && contentOffset >= 0) {
+                    const contentFrom = start + contentOffset;
+                    const contentTo = contentFrom + match.text.length;
+                    for (let atom = startIndex; atom <= endIndex; atom++) {
+                        if (atoms[atom].to <= contentFrom || atoms[atom].from >= contentTo) {
+                            delimiters.push(atom);
+                        }
+                    }
+                }
+                formulas.push({ startIndex, endIndex, delimiters });
+            }
+        }
+        first = last + 1;
     }
-    return atoms;
+    return formulas;
 }
 
 function visibleIndexFor(source, analyses = null) {
@@ -314,6 +399,7 @@ function visibleIndexFor(source, analyses = null) {
     const index = createVisibleMarkdownTextIndex(source, [], {
         readerMarkup: true,
         analyses,
+        imageMath: true,
     });
     visibleIndexCache.set(source, index);
     while (visibleIndexCache.size > VISIBLE_INDEX_CACHE_LIMIT) {
@@ -350,10 +436,19 @@ function visibleRangeText(source, index, range) {
     const mark = readerMathMarkText(slice.trim());
     if (mark !== null) return mark;
     const math = wholeSliceMathText(slice);
-    if (math !== null) return math;
+    if (math !== null) {
+        return index.insideImage(range.from, range.to)
+            ? unescapeImageMathText(math)
+            : math;
+    }
     const html = visibleHTMLTableRangeText(source, range.from, range.to);
     if (html !== null) return html;
     return index.textForSourceRange(range.from, range.to);
+}
+
+// The reader collapses the escaping an image description gives a formula.
+export function unescapeImageMathText(value) {
+    return String(value).replace(/\\\\/gu, '\\');
 }
 
 function visibleTextForMarkdownSlice(source) {
@@ -540,16 +635,23 @@ function subtractSourceRanges(range, hidden) {
     return visible;
 }
 
+// A cell shows its decoded text with each formula the renderer typesets, so
+// the `$` around such a formula is not text it shows, as in a GFM cell.
 function visibleHTMLTableRangeText(source, from, to) {
     const block = htmlTableBlockContaining(source, from, to);
     if (!block) return null;
+    const table = source.slice(block.from, block.to);
     let text = '';
-    for (const atom of htmlTableVisibleSourceAtoms(
-        source.slice(block.from, block.to)
-    )) {
-        const atomFrom = block.from + atom.from;
-        const atomTo = block.from + atom.to;
-        if (atomFrom >= from && atomTo <= to) text += atom.text;
+    for (const cell of htmlTableSourceCells(table)) {
+        const hidden = new Set(htmlCellTypesetFormulas(table, cell.atoms)
+            .flatMap(formula => formula.delimiters));
+        cell.atoms.forEach((atom, index) => {
+            const atomFrom = block.from + atom.from;
+            const atomTo = block.from + atom.to;
+            if (atomFrom >= from && atomTo <= to && !hidden.has(index)) {
+                text += atom.text;
+            }
+        });
     }
     return text;
 }
@@ -634,11 +736,13 @@ function collectHiddenRanges(
     extraHiddenRanges = [],
     readerMarkup = false,
     analyses = null,
-    keepLinkTitles = false
+    keepLinkTitles = false,
+    imageMath = false
 ) {
     const ranges = [];
     const replacements = [];
     const escapeRanges = [];
+    const imageRanges = [];
     const inlineMathRanges = [];
     const mathSourceRanges = [];
     const mathExcludedRanges = [];
@@ -660,6 +764,9 @@ function collectHiddenRanges(
                     || (node.name === 'Link'
                         && !isBracketedNumericCitation(node, markdown)))) {
                 citationExcludedRanges.push({ from: node.from, to: node.to });
+            }
+            if (imageMath && node.name === 'Image') {
+                imageRanges.push({ from: node.from, to: node.to });
             }
             if (HIDDEN_SUBTREE_NAMES.has(node.name)) {
                 ranges.push({ from: node.from, to: node.to });
@@ -727,7 +834,13 @@ function collectHiddenRanges(
         if (overlapsAnyRange(match, mathExcludedRanges)) continue;
         mathSourceRanges.push({ from: match.start, to: match.end });
     }
-    appendMarkdownEscapeRanges(ranges, escapeRanges, inlineMathRanges);
+    appendMarkdownEscapeRanges(
+        ranges,
+        escapeRanges,
+        inlineMathRanges,
+        imageRanges,
+        markdown
+    );
     if (readerMarkup) {
         appendHTMLSuperscriptWrappers(
             ranges,
@@ -752,6 +865,7 @@ function collectHiddenRanges(
     return {
         hiddenRanges: mergeHiddenRanges(ranges, replacements),
         mathRanges: mergeMathSourceRanges(mathSourceRanges),
+        imageRanges,
     };
 }
 
@@ -858,7 +972,16 @@ function overlapsAnyRange(target, ranges) {
     return ranges.some(range => target.start < range.to && target.end > range.from);
 }
 
-function appendMarkdownEscapeRanges(output, escapeRanges, inlineMathRanges) {
+// A formula keeps its escapes: TeX reads them. In an image description the
+// one escape the description added, a doubled backslash, is not the
+// formula's, so its first backslash is hidden like any other escape.
+function appendMarkdownEscapeRanges(
+    output,
+    escapeRanges,
+    inlineMathRanges,
+    imageRanges = [],
+    markdown = ''
+) {
     let mathIndex = 0;
     for (const escapeRange of escapeRanges) {
         while (inlineMathRanges[mathIndex]?.to <= escapeRange.from) {
@@ -866,6 +989,12 @@ function appendMarkdownEscapeRanges(output, escapeRanges, inlineMathRanges) {
         }
         const mathRange = inlineMathRanges[mathIndex];
         if (!mathRange || escapeRange.to <= mathRange.from) {
+            output.push(escapeRange);
+        }
+        else if (markdown[escapeRange.to] === '\\'
+            && imageRanges.some(range => (
+                escapeRange.from >= range.from && escapeRange.to < range.to
+            ))) {
             output.push(escapeRange);
         }
     }

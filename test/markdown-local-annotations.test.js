@@ -1969,3 +1969,60 @@ test('counts only valid ranges against the segment limit', async () => {
 
     assert.equal(created.ranges.length, MAX_MARKDOWN_ANNOTATION_SEGMENTS);
 });
+
+// A caption highlight saved before the reader undid the image description's
+// doubled backslash reads "\\Delta" and must still find its caption, whether
+// its range still fits or the caption moved.
+test('keeps matching a caption highlight saved with the doubled backslash', async () => {
+    const caption = '![Figure 4: Heatmaps report $\\\\Delta$ in points.)](f.png)';
+    const oldText = 'Heatmaps report \\\\Delta in points.)';
+    const newText = 'Heatmaps report \\Delta in points.)';
+    const range = {
+        from: caption.indexOf('Heatmaps'),
+        to: caption.indexOf('](f.png)'),
+    };
+    assert.equal(markdownAnnotationRangeMatchesSource(caption, range, oldText), true);
+    assert.equal(markdownAnnotationRangeMatchesSource(caption, range, newText), true);
+
+    for (const text of [oldText, newText]) {
+        const store = createMemoryStore([{
+            id: 'mktero-local-1',
+            source: 'markdown',
+            type: 'highlight',
+            text,
+            comment: '',
+            color: '#ffd400',
+            ranges: [range],
+        }]);
+        const annotations = new MarkdownLocalAnnotations({ store });
+        const moved = `A preface.\n\n${caption}`;
+
+        const result = await annotations.resolve(42, moved);
+
+        assert.equal(result.unmatched.length, 0, text);
+        assert.deepEqual(result.matched[0].ranges, [{
+            from: range.from + 'A preface.\n\n'.length,
+            to: range.to + 'A preface.\n\n'.length,
+        }], text);
+    }
+});
+
+test('does not move an old caption highlight onto the same text in code', async () => {
+    const markdown = 'See code `\\\\Delta` here.\n\n![Figure 1: $\\\\Delta$](a.png)\n';
+    const store = createMemoryStore([{
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: '\\\\Delta',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: 4 }],
+    }]);
+    const annotations = new MarkdownLocalAnnotations({ store });
+
+    const result = await annotations.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, []);
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+    assert.deepEqual((await store.get(42))[0].ranges, [{ from: 0, to: 4 }]);
+});

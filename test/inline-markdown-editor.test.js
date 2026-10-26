@@ -2596,6 +2596,301 @@ test('renders PDF annotations inside an academic figure caption', () => {
     dom.window.close();
 });
 
+test('places two caption highlights around escaped formulas by source range', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '![Figure 4: Heatmaps report $\\\\Delta$ in points, '
+        + 'and bars report $\\\\alpha$ per unit.](images/figure.png)';
+    const first = {
+        from: markdown.indexOf('Heatmaps'),
+        to: markdown.indexOf(' in points') + ' in points'.length,
+    };
+    const second = {
+        from: markdown.indexOf('bars'),
+        to: markdown.indexOf(' per unit') + ' per unit'.length,
+    };
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => 'blob:mktero-figure',
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'CAPTION1',
+                type: 'highlight',
+                text: 'Heatmaps report \\\\Delta in points',
+                comment: 'Delta note',
+                color: '#ffd400',
+                pageLabel: '8',
+                ranges: [first],
+            }, {
+                id: 'CAPTION2',
+                type: 'highlight',
+                text: 'bars report \\\\alpha per unit',
+                comment: '',
+                color: '#5fb236',
+                pageLabel: '8',
+                ranges: [second],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const visible = element => {
+        const walker = document.createTreeWalker(
+            element,
+            dom.window.NodeFilter.SHOW_TEXT
+        );
+        let text = '';
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (!node.parentElement.closest('annotation')) text += node.textContent;
+        }
+        return text;
+    };
+    const rendered = [...document.querySelectorAll(
+        'figcaption .cm-mktero-pdf-annotation'
+    )];
+    assert.deepEqual(
+        rendered.map(element => element.dataset.annotationId),
+        ['CAPTION1', 'CAPTION2']
+    );
+    assert.equal(visible(rendered[0]), 'Heatmaps report Δ in points');
+    assert.equal(visible(rendered[1]), 'bars report α per unit');
+    assert.equal(
+        document.querySelectorAll('.cm-mktero-pdf-annotation-note').length,
+        1
+    );
+    assert.equal(
+        rendered[0].querySelector('.cm-mktero-pdf-annotation-note') !== null,
+        true
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('shows the table part of a highlight that starts in the paragraph above', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Intro text.\n\n| A | B |\n| --- | --- |\n| ratio $\\frac{a}{b}$ | 3 |\n';
+    const from = markdown.indexOf('text.');
+    const to = markdown.indexOf(' | 3 |');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'CROSS001',
+                type: 'highlight',
+                text: 'text. A B ratio \\frac{a}{b}',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '3',
+                ranges: [{ from, to }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const cells = [...document.querySelectorAll('.cm-mktero-table th, .cm-mktero-table td')];
+    assert.deepEqual(
+        cells.map(cell => cell.querySelectorAll('.cm-mktero-pdf-annotation').length),
+        [1, 1, 1, 0]
+    );
+    assert.ok(cells[2].querySelector('.cm-mktero-pdf-annotation .math-inline'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('keeps a table caption highlight that reaches into the first cell', () => {
+    for (const [label, markdown, captionText] of [
+        ['plain', 'Table 1. Accuracy of the model\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n', 'Accuracy of the model'],
+        ['formula', 'Table 1. Accuracy of $\\frac{a}{b}$ ratios\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n', 'Accuracy of ab ratios'],
+    ]) {
+        const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+            pretendToBeVisual: true,
+        });
+        const { document } = dom.window;
+        const from = markdown.indexOf('Accuracy');
+        const to = markdown.indexOf('| a') + '| a'.length;
+        const editor = createInlineMarkdownEditor({
+            parent: document.querySelector('#editor'),
+            initialMarkdown: '',
+            resolveImageURL: () => null,
+        });
+
+        editor.setDocument({
+            markdown,
+            annotationOverlay: {
+                matched: [{
+                    id: 'TCAP0001',
+                    type: 'highlight',
+                    text: markdown.slice(from, markdown.indexOf('\n')),
+                    comment: 'Caption note',
+                    color: '#ffd400',
+                    pageLabel: '2',
+                    ranges: [{ from, to }],
+                }],
+                unmatched: [],
+            },
+        });
+
+        const caption = document.querySelector('.cm-mktero-table caption');
+        assert.ok(caption, label);
+        const marks = [...caption.querySelectorAll('.cm-mktero-pdf-annotation')];
+        const visible = element => {
+            const walker = document.createTreeWalker(
+                element,
+                dom.window.NodeFilter.SHOW_TEXT
+            );
+            let text = '';
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                if (!node.parentElement.closest('annotation')) text += node.textContent;
+            }
+            return text;
+        };
+        assert.equal(marks.map(visible).join(''), captionText, label);
+        assert.ok(caption.querySelector('.cm-mktero-pdf-annotation-note'), label);
+
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
+test('shows a highlight in a table caption split over a label line', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Table 1.\n\nAccuracy of $\\frac{a}{b}$ ratios\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n';
+    const from = markdown.indexOf('Accuracy');
+    const to = markdown.indexOf('ratios') + 'ratios'.length;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'SPLIT001',
+                type: 'highlight',
+                text: 'Accuracy of \\frac{a}{b} ratios',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '2',
+                ranges: [{ from, to }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const caption = document.querySelector('.cm-mktero-table caption');
+    assert.ok(caption);
+    const mark = caption.querySelector('.cm-mktero-pdf-annotation');
+    assert.ok(mark?.querySelector('.math-inline'));
+    assert.equal(mark.querySelector('.mktero-table-label'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('places cell highlights in a GFM table whose caption mentions a table tag', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Table 1. Compare the <table> element\n\n| a | b |\n| --- | --- |\n| ratio $\\frac{a}{b}$ | 2 |\n';
+    const from = markdown.indexOf('ratio');
+    const to = markdown.indexOf(' | 2 |');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'TTAG0001',
+                type: 'highlight',
+                text: 'ratio \\frac{a}{b}',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '2',
+                ranges: [{ from, to }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const cells = [...document.querySelectorAll('.cm-mktero-table td')];
+    assert.ok(cells[0].querySelector('.cm-mktero-pdf-annotation .math-inline'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('places cell highlights in the second HTML table of a block', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '<table><tr><td>first $\\frac{a}{b}$ one</td></tr></table>\n'
+        + '<table><tr><td>second $\\hat{y}$ two</td></tr></table>\n';
+    const ranges = ['first', 'second'].map(word => ({
+        from: markdown.indexOf(word),
+        to: markdown.indexOf(word === 'first' ? ' one' : ' two') + 4,
+    }));
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        resolveImageURL: () => null,
+    });
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: ranges.map((range, index) => ({
+                id: `HTML000${index}`,
+                type: 'highlight',
+                text: markdown.slice(range.from, range.to),
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '2',
+                ranges: [range],
+            })),
+            unmatched: [],
+        },
+    });
+
+    const cells = [...document.querySelectorAll('td')];
+    assert.equal(cells.length, 2);
+    for (const cell of cells) {
+        const mark = cell.querySelector('.cm-mktero-pdf-annotation');
+        assert.ok(mark?.querySelector('.math-inline'), cell.textContent);
+    }
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('keeps one highlight across a caption formula and its following prose', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

@@ -12,6 +12,7 @@ import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
     legacyVisibleMarkdownTextForRanges,
+    unescapeImageMathText,
     visibleMarkdownTextForRanges,
 } from '../markdown/markdown-visible-text.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
@@ -864,8 +865,7 @@ function resolveAnnotations(markdown, annotations) {
     }
     const matched = [];
     const unmatched = [];
-    let visibleIndex = null;
-    let normalizedIndex = null;
+    const indexes = { markdown, visible: null, normalized: null };
     for (const annotation of annotations) {
         const expandedRanges = annotation.ranges.map(range => (
             expandMarkdownRangeToMathBoundaries(markdown, range)
@@ -878,80 +878,109 @@ function resolveAnnotations(markdown, annotations) {
             matched.push(resolvedAnnotation(annotation, expandedRanges));
             continue;
         }
-        visibleIndex ||= createVisibleMarkdownTextIndex(markdown);
-        const candidates = findTextOccurrences(
-            visibleIndex.text,
-            annotation.text,
-            MAX_MATCH_CANDIDATES
-        );
-        let ambiguous = candidates.truncated || candidates.offsets.length > 1;
-        if (!candidates.truncated && candidates.offsets.length > 1) {
-            const selected = selectOffsetByTextQuote(
-                visibleIndex.text,
-                candidates.offsets,
-                annotation.text.length,
-                annotation.textQuote
+        let result = locateAnnotationText(indexes, annotation, annotation.text);
+        // A caption highlight saved before the reader undid an image
+        // description's doubled backslash still reads "\\Delta". Its text
+        // is also tried as the reader now reads it, and the two must not land
+        // in different places.
+        const legacyText = unescapeImageMathText(annotation.text);
+        if (!result.ambiguous && legacyText !== annotation.text) {
+            result = pickLocatedText(
+                result,
+                locateAnnotationText(indexes, annotation, legacyText)
             );
-            if (selected !== null) {
-                matched.push(resolvedAnnotation(
-                    annotation,
-                    expandMarkdownRangeToMathBoundaries(
-                        markdown,
-                        visibleIndex.sourceRange(selected, annotation.text.length)
-                    )
-                ));
-                continue;
-            }
         }
-        if (!candidates.truncated && candidates.offsets.length === 1) {
-            matched.push(resolvedAnnotation(
-                annotation,
-                expandMarkdownRangeToMathBoundaries(
-                    markdown,
-                    visibleIndex.sourceRange(
-                        candidates.offsets[0],
-                        annotation.text.length
-                    )
-                )
-            ));
+        if (result.range) {
+            matched.push(resolvedAnnotation(annotation, result.range));
             continue;
-        }
-        const normalizedText = normalizePdfAnnotationText(annotation.text);
-        if (!candidates.truncated
-            && !candidates.offsets.length
-            && normalizedText) {
-            normalizedIndex ||= createPdfAnnotationTextIndex(
-                visibleIndex.text,
-                offset => visibleIndex.sourceOffsetAt(offset)
-            );
-            const normalizedCandidates = findTextOccurrences(
-                normalizedIndex.text,
-                normalizedText,
-                MAX_MATCH_CANDIDATES
-            );
-            if (!normalizedCandidates.truncated
-                && normalizedCandidates.offsets.length === 1) {
-                matched.push(resolvedAnnotation(
-                    annotation,
-                    expandMarkdownRangeToMathBoundaries(
-                        markdown,
-                        normalizedIndex.sourceRange(
-                            normalizedCandidates.offsets[0],
-                            normalizedText.length
-                        )
-                    )
-                ));
-                continue;
-            }
-            ambiguous = normalizedCandidates.truncated
-                || normalizedCandidates.offsets.length > 1;
         }
         unmatched.push({
             ...annotation,
-            reason: ambiguous ? 'ambiguous' : 'not-found',
+            reason: result.ambiguous ? 'ambiguous' : 'not-found',
         });
     }
     return { matched, unmatched };
+}
+
+// Either reading may be the one the highlight was made on, so a place only
+// one of them finds is kept when the other finds no place at all.
+function pickLocatedText(saved, legacy) {
+    if (saved.ambiguous || legacy.ambiguous) return { range: null, ambiguous: true };
+    if (saved.range && legacy.range) {
+        return saved.range.from === legacy.range.from
+            && saved.range.to === legacy.range.to
+            ? saved
+            : { range: null, ambiguous: true };
+    }
+    return saved.range ? saved : legacy;
+}
+
+// Finds a moved annotation by its text, exact first and then as PDF text.
+function locateAnnotationText(indexes, annotation, text) {
+    const { markdown } = indexes;
+    indexes.visible ||= createVisibleMarkdownTextIndex(markdown, [], {
+        imageMath: true,
+    });
+    const visibleIndex = indexes.visible;
+    const candidates = findTextOccurrences(
+        visibleIndex.text,
+        text,
+        MAX_MATCH_CANDIDATES
+    );
+    let ambiguous = candidates.truncated || candidates.offsets.length > 1;
+    if (!candidates.truncated && candidates.offsets.length > 1) {
+        const selected = selectOffsetByTextQuote(
+            visibleIndex.text,
+            candidates.offsets,
+            text.length,
+            annotation.textQuote
+        );
+        if (selected !== null) {
+            return {
+                range: expandMarkdownRangeToMathBoundaries(
+                    markdown,
+                    visibleIndex.sourceRange(selected, text.length)
+                ),
+            };
+        }
+    }
+    if (!candidates.truncated && candidates.offsets.length === 1) {
+        return {
+            range: expandMarkdownRangeToMathBoundaries(
+                markdown,
+                visibleIndex.sourceRange(candidates.offsets[0], text.length)
+            ),
+        };
+    }
+    const normalizedText = normalizePdfAnnotationText(text);
+    if (!candidates.truncated
+        && !candidates.offsets.length
+        && normalizedText) {
+        indexes.normalized ||= createPdfAnnotationTextIndex(
+            visibleIndex.text,
+            offset => visibleIndex.sourceOffsetAt(offset)
+        );
+        const normalizedCandidates = findTextOccurrences(
+            indexes.normalized.text,
+            normalizedText,
+            MAX_MATCH_CANDIDATES
+        );
+        if (!normalizedCandidates.truncated
+            && normalizedCandidates.offsets.length === 1) {
+            return {
+                range: expandMarkdownRangeToMathBoundaries(
+                    markdown,
+                    indexes.normalized.sourceRange(
+                        normalizedCandidates.offsets[0],
+                        normalizedText.length
+                    )
+                ),
+            };
+        }
+        ambiguous = normalizedCandidates.truncated
+            || normalizedCandidates.offsets.length > 1;
+    }
+    return { range: null, ambiguous };
 }
 
 function selectOffsetByTextQuote(text, offsets, length, quote) {
@@ -1025,7 +1054,9 @@ export function createMarkdownAnnotationTextQuote(
         || ranges.some(range => !validRange(range, source.length))) {
         return null;
     }
-    const visible = createVisibleMarkdownTextIndex(source, chromeRanges);
+    const visible = createVisibleMarkdownTextIndex(source, chromeRanges, {
+        imageMath: true,
+    });
     return createTextQuoteFromVisibleIndex({
         from: ranges[0].from,
         to: ranges.at(-1).to,
@@ -1241,7 +1272,7 @@ function refreshAnnotationAnchors(
         [annotation.id, annotation.ranges]
     )));
     const visible = matchedRanges.size
-        ? createVisibleMarkdownTextIndex(markdown)
+        ? createVisibleMarkdownTextIndex(markdown, [], { imageMath: true })
         : null;
     let remainingWork = MAX_SOURCE_MAP_PAGE_HINT_WORK;
     let changed = false;
