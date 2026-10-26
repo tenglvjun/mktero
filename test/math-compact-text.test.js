@@ -35,6 +35,96 @@ test('only treats text with math markup as math', () => {
     assert.equal(hasMathMarkup('Let \u02C6y denote a parsed prediction'), true);
 });
 
+// What a selection or a Zotero highlight over a formula carries once the
+// TeX delimiters are gone, or as the PDF text layer prints it.
+test('treats bare TeX scripts and primes, and PDF math glyphs, as math', () => {
+    for (const text of [
+        "For a candidate H' relative to the current harness",
+        "the derivative f'' of the loss",
+        'Then S^* is updated and x^2 grows',
+        'where x_1 is the first input',
+        'noise band \u{1D6FF}. Let \u{1D446}\u2605 denote the best score',
+        'For a candidate \u{1D43B}\u2032 relative to the current harness',
+        'Defu Lian 2\u2217, Zhicheng Dou 3\u2217, Chaozhuo Li1',
+        'the Planck constant \u210E and the length \u2113',
+        'a relation u \u22A5 v holds',
+    ]) {
+        assert.equal(hasMathMarkup(text), true, text);
+    }
+    for (const text of [
+        "The students' results and Jones' notes are in the appendix.",
+        "It's the authors' choice, isn't it?",
+        'p < 0.05 for every run, and 3 + 4 = 7 in the table.',
+        'An ordinary sentence with an em dash \u2014 and \u201Cquotes\u201D.',
+    ]) {
+        assert.equal(hasMathMarkup(text), false, text);
+    }
+});
+
+// BRS paper, Appendix C and the author line: Zotero saves the PDF glyphs,
+// MinerU wrote TeX. Without math in the check, these never reached the
+// math-compact comparison.
+test('matches PDF highlights whose only math is glyphs to Markdown TeX', async () => {
+    const markdown = [
+        'Defu Lian $^{2*}$, Zhicheng Dou $^{3*}$, Chaozhuo Li $^{1}$, Qiwei Ye $^{1}$, Zheng Liu $^{1,4*}$',
+        '',
+        'We first evaluate the unchanged base harness and estimate an empirical noise band $\\delta$. Let $S^{\\star}$ denote the best evolve-set score observed so far.',
+    ].join('\n');
+    const annotations = [
+        'Defu Lian 2\u2217, Zhicheng Dou 3\u2217, Chaozhuo Li1, Qiwei Ye1, Zheng Liu 1,4\u2217',
+        'harness and estimate an empirical noise band \u{1D6FF}. Let \u{1D446}\u2605 denote the best evolve-set score observed so',
+    ].map((text, index) => ({
+        id: `GLYPHONLY${index}`,
+        type: 'highlight',
+        text,
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '1',
+        pageIndex: 0,
+        sortIndex: `00000|00010${index}|00160`,
+    }));
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => annotations },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.unmatched, []);
+    const [authors, band] = result.matched.map(annotation => markdown.slice(
+        annotation.ranges[0].from,
+        annotation.ranges.at(-1).to
+    ));
+    assert.match(authors, /^Defu Lian \$\^\{2\*\}\$/u);
+    assert.match(authors, /Zheng Liu \$\^\{1,4\*\}\$$/u);
+    assert.match(band, /^harness and estimate/u);
+    assert.match(band, /observed so$/u);
+});
+
+// KaTeX prints these commands as one glyph, and the PDF text layer keeps it.
+test('reads TeX symbol commands as the glyphs they print', () => {
+    for (const [tex, glyphs] of [
+        ['u \\perp v, a \\prec b \\preceq c', 'u \u22A5 v, a \u227A b \u2AAF c'],
+        ['p \\wedge q \\vee r, x \\ni y', 'p \u2227 q \u2228 r, x \u220B y'],
+        ['A \\vdash B \\dashv C, f \\asymp g', 'A \u22A2 B \u22A3 C, f \u224D g'],
+        ['\\hbar \\ell \\aleph_0 \\wp', '\u210F \u2113 \u2135 0 \u2118'],
+        ['a \\leqslant b \\geqslant c \\bullet d', 'a \u2264 b \u2265 c \u2022 d'],
+    ]) {
+        assert.equal(mathCompactText(tex), mathCompactText(glyphs), tex);
+    }
+});
+
+// BRS paper, Algorithm 2 line 5: MinerU wrote \triangleright, which KaTeX
+// prints as ▹, while the PDF text layer of this font keeps ⊲.
+test('drops the triangle glyphs the two spellings print differently', () => {
+    assert.equal(
+        mathCompactText('5: \\nu \\leftarrow \\nu_t(H\') \\quad \\triangleright new structural component types'),
+        mathCompactText('5: \u{1D708} \u2190 \u{1D708}\u{1D461} (\u{1D43B}\u2032) \u22B2 new structural component types')
+    );
+    for (const glyph of ['\u22B2', '\u22B3', '\u25C1', '\u25B7', '\u25C3', '\u25B9', '\u25C0', '\u25B6']) {
+        assert.equal(mathCompactText(`a ${glyph} b`), 'ab', glyph);
+    }
+});
+
 test('refuses keys too short to identify a passage', () => {
     const index = createMathCompactTextIndex('$x$ and $y$');
     assert.equal(findMathCompactOccurrences(index, mathCompactText('$x$')), null);

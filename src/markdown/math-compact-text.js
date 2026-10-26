@@ -1,3 +1,4 @@
+import { KATEX_COMMAND_GLYPHS } from './katex-command-glyphs.js';
 import { LATEX_MATH_SYMBOLS } from './pdf-annotation-text.js';
 
 // A last-resort comparison key for text that carries mathematics. The same
@@ -41,7 +42,10 @@ const OPERATOR_NAMES = [
     'sup', 'tan', 'tanh',
 ];
 
+// KaTeX's own table first: a command reads as the glyph KaTeX prints for it.
+// The hand-written maps after it keep their spelling where they differ.
 const COMMAND_SYMBOLS = new Map([
+    ...KATEX_COMMAND_GLYPHS,
     ...LATEX_MATH_SYMBOLS,
     ...EXTRA_COMMAND_SYMBOLS,
     ...OPERATOR_NAMES.map(name => [name, name]),
@@ -64,6 +68,9 @@ const CANONICAL_SYMBOLS = new Map([
     ['−', '-'],
     ['∶', ':'],
     ['⋅', '·'],
+    ['∙', '•'],
+    ['⩽', '≤'],
+    ['⩾', '≥'],
 ]);
 
 // Glyphs the two spellings of one formula do not share, so neither key
@@ -73,16 +80,26 @@ const CANONICAL_SYMBOLS = new Map([
 //   Accents that decompose to combining marks are already dropped by NFKC.
 // - a prime: MinerU writes ' or \prime, the PDF prints ′ (″ is two of them).
 // - a star: MinerU writes *, \ast or \star, the PDF prints ∗, ⋆ or ★.
+// - a left or right triangle: \triangleright prints ▹ in KaTeX, and a PDF
+//   font may keep ⊲ for it, which even points the other way.
 const DROPPED_GLYPHS = new Set([
     '\u02C6', '\u02C7', '\u02C9', '\u02CA', '\u02CB',
     '\u02B9', '\u2032',
     '\u2217', '\u22C6', '\u2605',
+    '\u22B2', '\u22B3', '\u25B6', '\u25B7', '\u25B9',
+    '\u25C0', '\u25C1', '\u25C3',
 ]);
 
 const KEPT_CHARACTER = /^(?:\p{L}|\p{N}|\p{Sm}|[|·∼∈∉⊂⊃⊆⊇∪∩∅∀∃∂∇∞≈≃≡∝≪≫∘•⟨⟩→←↔⇒⇐↦])$/u;
-// A spacing accent glyph is how the PDF text layer prints \hat or \bar,
-// so a Zotero highlight over one carries math too.
-const MATH_MARKUP = /\\[A-Za-z]+|[_^]\{|\$|[\p{Script=Greek}∼∈∉⊂⊃⊆⊇∪∩∑∏∫∂∇∞≈≃≡∝≤≥≠±∣\u02C6\u02C7\u02C9\u02CA\u02CB]/u;
+// What a formula leaves in text once its TeX delimiters are gone: a command,
+// a script (x^2, S^*, H_t, x_{1}), a `$`, or a prime on a lone letter (H',
+// f''). A possessive (students', Jones') has letters before the quote.
+const TEX_MATH_MARKUP = /\\[A-Za-z]+|[_^]\{|\$|(?<=[\p{L}\p{N})\]}])[_^][\p{L}\p{N}*'\\]|(?<![\p{L}\p{N}])\p{L}'+(?![\p{L}\p{N}])/u;
+// The glyphs a PDF text layer keeps where the TeX was: Greek and math-italic
+// letters (𝑆, 𝛿), the letterlike math symbols (ℎ, ℓ, ℵ), a spacing accent
+// (ˆ for \hat), a prime or star, and any math symbol beyond ASCII. ASCII
+// + < = > | ~ stay ordinary text.
+const PDF_MATH_GLYPHS = /[\p{Script=Greek}\u{1D400}-\u{1D7FF}\u210E\u210F\u2113\u2118\u2135-\u2138\u02C6\u02C7\u02C9\u02CA\u02CB\u2032-\u2034\u2217\u22C6\u2605∣]|(?![\u0000-\u007F])\p{Sm}/u;
 
 /**
  * Index `text` as its math-compact key. `sourceRange(from, length)` maps a
@@ -140,7 +157,8 @@ export function createMathCompactTextIndex(text) {
 }
 
 export function hasMathMarkup(text) {
-    return MATH_MARKUP.test(String(text ?? ''));
+    const value = String(text ?? '');
+    return TEX_MATH_MARKUP.test(value) || PDF_MATH_GLYPHS.test(value);
 }
 
 export function mathCompactText(text) {

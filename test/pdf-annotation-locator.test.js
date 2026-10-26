@@ -2597,6 +2597,26 @@ test('locates TeX selections with primes, stars and \\max against PDF glyphs', a
     locator.dispose();
 });
 
+// BRS paper, Appendix C: the selection saves H' with no TeX command left.
+test('locates a selection whose only math is a bare prime', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem(
+            'Ridge/\u{1D43F}2-Style Complexity-Aware Acceptance. For a candidate \u{1D43B}\u2032 relative to the current harness',
+            { y: 700, width: 900, hasEOL: true }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        "For a candidate H' relative to the",
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 1);
+    locator.dispose();
+});
+
 test('keeps an unmatched TeX selection as not found', async () => {
     const locator = await createSyntheticLocator([[
         createTextItem('An unrelated paragraph about agents and benchmarks.', {
