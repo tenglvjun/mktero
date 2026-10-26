@@ -131,7 +131,9 @@ endings immediately below figures and display formulas. A drag can also start
 on a citation, a figure or table reference, or a footnote mark; a click without
 a drag still opens it. The saved text is what the reader shows: a superscript
 mark such as `$^{*}$` is saved as its glyph, text from two table cells keeps a
-space between the cells, and a link's title is left out. A selection split into
+space between the cells, and a link's title is left out. A formula is saved as
+its TeX, also inside a figure caption or a table cell; a highlight there is
+shown over the rendered formula. A selection split into
 more than 512 separate parts is refused with a message instead of being saved
 incomplete.
 Selecting Markdown text can create a local annotation immediately; Mktero then

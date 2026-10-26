@@ -474,6 +474,102 @@ test('creates a highlight from a figure caption selection', async () => {
     dom.window.close();
 });
 
+// The image description doubles the formula's backslash ("$\\Delta$"). The
+// saved text is the formula's TeX, "\Delta", as the caption renders it, and
+// the caption shows "Δ": the highlight is placed from its source range.
+test('shows a highlight made in a caption whose formula the description escapes', async () => {
+    const caption = 'Figure 4: Validation-unit-specific effects of execution paradigms. '
+        + 'Heatmaps report the corresponding $\\\\Delta$ in percentage points.)';
+    const markdown = `![${caption}](generated/figures/fig-p7-b78.png)`;
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => 'blob:mktero-figure',
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    const figcaption = document.querySelector('figcaption');
+    const start = textNodeContaining(figcaption, 'Validation-unit');
+    const end = textNodeContaining(figcaption, 'percentage points.)');
+    assert.ok(start && end && start !== end);
+    selectAndHighlight(document, dom.window, range => {
+        range.setStart(start, start.textContent.indexOf('Validation-unit'));
+        range.setEnd(end, end.textContent.length);
+    }, '#ffd400', start);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.length, 1);
+    const from = markdown.indexOf('Validation-unit');
+    const to = markdown.indexOf('](generated');
+    assert.deepEqual(created[0].ranges, [{ from, to }]);
+    assert.ok(created[0].text.endsWith(
+        'corresponding \\Delta in percentage points.)'
+    ));
+    assert.equal(created[0].text.includes('\\\\'), false);
+    assert.equal(
+        markdownAnnotationRangeMatchesSource(
+            markdown,
+            created[0].ranges,
+            created[0].text
+        ),
+        true
+    );
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'CAPTION1',
+                type: 'highlight',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '8',
+                pageIndex: 7,
+                ...created[0],
+            }],
+            unmatched: [],
+        },
+    });
+
+    const highlights = document.querySelectorAll(
+        'figcaption .cm-mktero-pdf-annotation'
+    );
+    assert.equal(highlights.length, 1);
+    const shown = visibleText(highlights[0]);
+    assert.ok(shown.startsWith('Validation-unit-specific effects'));
+    assert.ok(shown.endsWith('corresponding Δ in percentage points.)'));
+    assert.equal(
+        highlights[0].closest('figcaption')?.querySelector(
+            '.mktero-figure-label .cm-mktero-pdf-annotation'
+        ),
+        null
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+function visibleText(element) {
+    const walker = element.ownerDocument.createTreeWalker(
+        element,
+        element.ownerDocument.defaultView.NodeFilter.SHOW_TEXT
+    );
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.parentElement?.closest('annotation, annotation-xml')) continue;
+        text += node.textContent;
+    }
+    return text;
+}
+
 function captionPointerEvent(ownerWindow, type, node, offset, extras = {}) {
     const event = new ownerWindow.MouseEvent(type, {
         bubbles: true,
@@ -938,6 +1034,166 @@ test('selecting the plain cell after inline math in a table opens a highlight', 
         ),
         true
     );
+});
+
+// A cell formula renders as glyphs ("a/b" stacked, "ŷ"), so the cell text
+// cannot be found in its Markdown. The selection maps by position instead.
+test('a table cell selection across a formula opens a highlight and shows it', async () => {
+    const gfm = '| Metric | Value |\n| --- | --- |\n| ratio $\\frac{a}{b}$ grows fast | 3 |\n';
+    const html = '<table><tr><td>Metric</td><td>Value</td></tr>'
+        + '<tr><td>estimate $\\hat{y}_{t+1}$ is close</td><td>3</td></tr></table>';
+    for (const [markdown, first, last, formula] of [
+        [gfm, 'ratio', 'grows fast', '$\\frac{a}{b}$'],
+        [html, 'estimate', 'is close', '$\\hat{y}_{t+1}$'],
+    ]) {
+        const created = [];
+        const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+            pretendToBeVisual: true,
+        });
+        const { document } = dom.window;
+        const editor = createInlineMarkdownEditor({
+            parent: document.querySelector('#editor'),
+            initialMarkdown: markdown,
+            resolveImageURL: () => null,
+            createMarkdownAnnotation: async annotation => {
+                created.push(annotation);
+                return annotation;
+            },
+        });
+        const cell = [...document.querySelectorAll('td')]
+            .find(candidate => candidate.textContent.includes(last));
+        const start = textNodeContaining(cell, first);
+        const end = textNodeContaining(cell, last);
+        selectAndHighlight(document, dom.window, range => {
+            range.setStart(start, start.textContent.indexOf(first));
+            range.setEnd(end, end.textContent.indexOf(last) + last.length);
+        }, '#ffd400', start);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        assert.equal(created.length, 1, markdown);
+        const from = markdown.indexOf(first);
+        const to = markdown.indexOf(last) + last.length;
+        assert.deepEqual(created[0].ranges, [{ from, to }]);
+        assert.ok(markdown.slice(from, to).includes(formula));
+        assert.equal(
+            markdownAnnotationRangeMatchesSource(
+                markdown,
+                created[0].ranges,
+                created[0].text
+            ),
+            true
+        );
+
+        editor.setDocument({
+            markdown,
+            annotationOverlay: {
+                matched: [{
+                    id: 'CELL0001',
+                    type: 'highlight',
+                    comment: '',
+                    color: '#ffd400',
+                    ...created[0],
+                }],
+                unmatched: [],
+            },
+        });
+        const highlights = document.querySelectorAll(
+            'td .cm-mktero-pdf-annotation'
+        );
+        assert.equal(highlights.length, 1, markdown);
+        assert.ok(highlights[0].querySelector('.math-inline'));
+        const shown = visibleText(highlights[0]);
+        assert.ok(shown.startsWith(first) && shown.endsWith(last), shown);
+
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
+// The renderer typesets formulas only in a cell outside `code`. A caption or
+// code keeps showing `$…$`, so its saved text keeps it and still matches.
+test('a selection over an untypeset formula in an HTML table keeps matching', async () => {
+    for (const [markdown, selector] of [
+        ['<table><caption>rate $\\Delta$ high</caption><tr><td>A</td></tr></table>', 'caption'],
+        ['<table><tr><td><code>rate $\\Delta$ high</code></td></tr></table>', 'td code'],
+    ]) {
+        const annotation = await highlightedAnnotation(markdown, (document, ownerWindow) => {
+            const element = document.querySelector(`.cm-mktero-html-table ${selector}`);
+            const node = textNodeContaining(element, 'rate');
+            selectText(document, ownerWindow, node, 0, node.textContent.length);
+        });
+        assert.ok(annotation, markdown);
+        assert.equal(annotation.text, 'rate $\\Delta$ high', markdown);
+        assert.equal(
+            markdownAnnotationRangeMatchesSource(
+                markdown,
+                annotation.ranges,
+                annotation.text
+            ),
+            true,
+            markdown
+        );
+    }
+});
+
+test('a selection across two formula cells keeps one range and one mark per cell', async () => {
+    const markdown = '| A | B |\n| --- | --- |\n| ratio $\\frac{a}{b}$ | grows $\\hat{y}$ fast |\n';
+    const created = [];
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    const cells = [...document.querySelectorAll('td')];
+    const start = textNodeContaining(cells[0], 'ratio');
+    const end = textNodeContaining(cells[1], 'grows');
+    selectAndHighlight(document, dom.window, range => {
+        range.setStart(start, start.textContent.indexOf('ratio'));
+        range.setEnd(end, end.textContent.indexOf('grows') + 'grows'.length);
+    }, '#ffd400', start);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(created.length, 1);
+    const firstFrom = markdown.indexOf('ratio');
+    const secondFrom = markdown.indexOf('grows');
+    assert.deepEqual(created[0].ranges, [
+        { from: firstFrom, to: markdown.indexOf(' | grows') },
+        { from: secondFrom, to: secondFrom + 'grows'.length },
+    ]);
+    assert.equal(created[0].text, 'ratio \\frac{a}{b} grows');
+
+    editor.setDocument({
+        markdown,
+        annotationOverlay: {
+            matched: [{
+                id: 'CELLS001',
+                type: 'highlight',
+                color: '#ffd400',
+                ...created[0],
+                comment: 'Across cells',
+            }],
+            unmatched: [],
+        },
+    });
+    const marks = [...document.querySelectorAll('td .cm-mktero-pdf-annotation')];
+    assert.deepEqual(marks.map(mark => visibleText(mark)), ['ratio ab', 'grows']);
+    assert.equal(
+        document.querySelectorAll('.cm-mktero-pdf-annotation-note').length,
+        1
+    );
+
+    editor.destroy();
+    dom.window.close();
 });
 
 test('an indented code block maps a word on the first line to that line', async () => {

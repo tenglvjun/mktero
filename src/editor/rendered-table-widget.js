@@ -10,6 +10,7 @@ import {
 import { isCorrectionInteractionTarget } from './correction-interactions.js';
 import { enhanceTableCopyActions } from './table-copy-actions.js';
 import { installRenderedAnnotations } from './pdf-annotations.js';
+import { installAnnotationsByPosition } from './rendered-source-alignment.js';
 import {
     createBlockHeightIdentity,
     holdBlockHeightWhileImagesLoad,
@@ -123,6 +124,15 @@ export class RenderedTableWidget extends WidgetType {
         container.dataset.markdownTo = String(
             this.annotationSourceFrom + this.annotationSource.length
         );
+        // A caption line can sit in the block before the table; the cell
+        // alignment reads the table from here.
+        const tableFrom = this.annotationSource.indexOf(this.source);
+        if (tableFrom >= 0) {
+            container.dataset.tableSourceFrom = String(tableFrom);
+            container.dataset.tableSourceTo = String(
+                tableFrom + this.source.length
+            );
+        }
         appendRenderedMarkdown(
             container,
             this.source,
@@ -138,7 +148,13 @@ export class RenderedTableWidget extends WidgetType {
         this.#configureCells(container);
         installRenderedAnnotations(
             container,
-            this.annotations,
+            installAnnotationsByPosition(
+                container,
+                this.annotations,
+                this.translate,
+                this.annotationSource,
+                this.annotationSourceFrom
+            ),
             this.translate,
             {
                 source: this.annotationSource,

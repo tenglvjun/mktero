@@ -1289,3 +1289,61 @@ test('fails annotation matching softly above the Markdown size budget', async ()
         'Zotero PDF annotations could not be loaded.'
     );
 });
+
+// An image description doubles a formula's backslash. A caption highlight
+// saved before the reader undid that reads "\\Delta"; one saved after reads
+// "\Delta". Both land on the same caption text.
+test('matches a caption highlight saved with or without the doubled backslash', async () => {
+    const markdown = 'Intro.\n\n![Figure 4: Heatmaps report the corresponding '
+        + '$\\\\Delta$ in points.)](generated/figures/f.png)\n';
+    const from = markdown.indexOf('Heatmaps');
+    const to = markdown.indexOf('](generated');
+    for (const text of [
+        'Heatmaps report the corresponding \\\\Delta in points.)',
+        'Heatmaps report the corresponding \\Delta in points.)',
+    ]) {
+        const overlay = new MarkdownAnnotationOverlay({
+            extractor: {
+                extract: async () => [{
+                    id: 'CAPTION1',
+                    type: 'highlight',
+                    text,
+                    comment: '',
+                    color: '#ffd400',
+                    pageLabel: '8',
+                    pageIndex: 7,
+                    sortIndex: '00007',
+                }],
+            },
+        });
+
+        const result = await overlay.resolve(42, markdown);
+
+        assert.equal(result.unmatched.length, 0, text);
+        assert.equal(result.matched[0].text, text);
+        assert.deepEqual(result.matched[0].ranges, [{ from, to }], text);
+    }
+});
+
+test('does not move an old caption highlight onto the same text elsewhere', async () => {
+    const markdown = 'See code `\\\\Delta` here.\n\n![Figure 1: $\\\\Delta$](a.png)\n';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: {
+            extract: async () => [{
+                id: 'CAPTION2',
+                type: 'highlight',
+                text: '\\\\Delta',
+                comment: '',
+                color: '#ffd400',
+                pageLabel: '1',
+                pageIndex: 0,
+                sortIndex: '00001',
+            }],
+        },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.matched, []);
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+});

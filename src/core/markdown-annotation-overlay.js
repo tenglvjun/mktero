@@ -9,6 +9,7 @@ import {
 import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
+    unescapeImageMathText,
 } from '../markdown/markdown-visible-text.js';
 import {
     leadingCodePoints,
@@ -76,227 +77,247 @@ export class MarkdownAnnotationOverlay {
                 'Markdown exceeds the PDF annotation matching safety limit'
             );
         }
-        const index = createVisibleMarkdownTextIndex(markdown);
-        let normalizedIndex = null;
-        let dehyphenatedIndex = null;
-        let mathCompactIndex = null;
+        const state = {
+            index: createVisibleMarkdownTextIndex(markdown, [], {
+                imageMath: true,
+            }),
+            normalizedIndex: null,
+            dehyphenatedIndex: null,
+            mathCompactIndex: null,
+            previousSourceTo: 0,
+        };
         const matched = [];
         const unmatched = [];
-        let previousSourceTo = 0;
+        const context = { itemID, markdown, sourceMap };
 
         for (const annotation of annotations) {
-            const candidateResult = findTextOccurrences(
-                index.text,
-                annotation.text,
-                MAX_MATCH_CANDIDATES
-            );
-            const candidates = candidateResult.offsets;
-            const exactRanges = candidateResult.truncated
-                ? []
-                : candidates.map(candidate => expandMarkdownRangeToMathBoundaries(
-                    markdown,
-                    expandPdfAnnotationSourceRange(
-                        markdown,
-                        index.sourceRange(candidate, annotation.text.length)
-                    )
-                ));
-            const exactPageRanges = selectPageCandidates(
-                exactRanges,
-                annotation.pageIndex,
-                sourceMap,
-                markdown.length
-            );
-            let exactRange = selectCandidateRange(
-                exactPageRanges,
-                previousSourceTo
-            );
-            if (!exactRange && exactPageRanges.length > 1) {
-                const textQuote = await this.#locateTextQuote(
-                    itemID,
-                    annotation
-                );
-                if (textQuote) {
-                    normalizedIndex ||= createPdfAnnotationTextIndex(
-                        index.text,
-                        offset => index.sourceOffsetAt(offset)
-                    );
-                    exactRange = selectTextQuoteCandidateRange(
-                        exactPageRanges,
-                        normalizedIndex,
-                        textQuote
-                    );
-                }
-            }
-            if (exactRange) {
-                matched.push(resolvedAnnotation(
-                    annotation,
-                    'exact',
-                    exactRange
-                ));
-                previousSourceTo = Math.max(previousSourceTo, exactRange.to);
-                continue;
-            }
-            const normalizedText = normalizePdfAnnotationText(annotation.text);
-            if (!normalizedIndex && !candidates.length) {
-                normalizedIndex = createPdfAnnotationTextIndex(
-                    index.text,
-                    offset => index.sourceOffsetAt(offset)
-                );
-            }
-            const normalizedCandidateResult = candidates.length
-                ? { offsets: [], truncated: false }
-                : findTextOccurrences(
-                    normalizedIndex.text,
-                    normalizedText,
-                    MAX_MATCH_CANDIDATES
-                );
-            const normalizedCandidates = normalizedCandidateResult.offsets;
-            const normalizedRanges = normalizedCandidateResult.truncated
-                ? []
-                : normalizedCandidates.map(candidate => (
-                    expandMarkdownRangeToMathBoundaries(
-                        markdown,
-                        normalizedIndex.sourceRange(
-                            candidate,
-                            normalizedText.length
-                        )
-                    )
-                ));
-            const normalizedPageRanges = selectPageCandidates(
-                normalizedRanges,
-                annotation.pageIndex,
-                sourceMap,
-                markdown.length
-            );
-            let normalizedRange = selectCandidateRange(
-                normalizedPageRanges,
-                previousSourceTo
-            );
-            if (!normalizedRange && normalizedPageRanges.length > 1) {
-                const textQuote = await this.#locateTextQuote(
-                    itemID,
-                    annotation
-                );
-                if (textQuote) {
-                    normalizedRange = selectTextQuoteCandidateRange(
-                        normalizedPageRanges,
-                        normalizedIndex,
-                        textQuote
-                    );
-                }
-            }
-            if (normalizedRange) {
-                matched.push(resolvedAnnotation(
-                    annotation,
-                    'normalized',
-                    normalizedRange
-                ));
-                previousSourceTo = Math.max(previousSourceTo, normalizedRange.to);
-                continue;
-            }
-            const dehyphenatedText = createDehyphenatedPdfAnnotationTextIndex(
+            const before = state.previousSourceTo;
+            let result = await this.#match(
+                context,
+                state,
+                annotation,
                 annotation.text
-            ).text;
-            if (!dehyphenatedIndex
-                && !candidates.length
-                && !normalizedCandidates.length) {
-                dehyphenatedIndex = createDehyphenatedPdfAnnotationTextIndex(
-                    index.text,
-                    offset => index.sourceOffsetAt(offset)
-                );
-            }
-            const dehyphenatedCandidateResult = candidates.length
-                || normalizedCandidates.length
-                ? { offsets: [], truncated: false }
-                : findTextOccurrences(
-                    dehyphenatedIndex.text,
-                    dehyphenatedText,
-                    MAX_MATCH_CANDIDATES
-                );
-            const dehyphenatedCandidates = dehyphenatedCandidateResult.offsets;
-            const dehyphenatedRanges = dehyphenatedCandidateResult.truncated
-                ? []
-                : dehyphenatedCandidates.map(candidate => (
-                    expandMarkdownRangeToMathBoundaries(
-                        markdown,
-                        dehyphenatedIndex.sourceRange(
-                            candidate,
-                            dehyphenatedText.length
-                        )
-                    )
-                ));
-            const dehyphenatedPageRanges = selectPageCandidates(
-                dehyphenatedRanges,
-                annotation.pageIndex,
-                sourceMap,
-                markdown.length
             );
-            const dehyphenatedRange = selectCandidateRange(
-                dehyphenatedPageRanges,
-                previousSourceTo
-            );
-            if (dehyphenatedRange) {
-                matched.push(resolvedAnnotation(
+            // A caption highlight saved before the reader undid an image
+            // description's doubled backslash still reads "\\Delta". Its
+            // text is also tried as the reader now reads it, and the two must
+            // not land in different places.
+            const legacyText = unescapeImageMathText(annotation.text);
+            if (legacyText !== annotation.text && result.reason !== 'ambiguous') {
+                state.previousSourceTo = before;
+                const legacy = await this.#match(
+                    context,
+                    state,
                     annotation,
-                    'normalized',
-                    dehyphenatedRange
-                ));
-                previousSourceTo = Math.max(
-                    previousSourceTo,
-                    dehyphenatedRange.to
+                    legacyText
                 );
-                continue;
+                result = pickTextVariant(result, legacy);
+                state.previousSourceTo = result.annotation
+                    ? Math.max(before, result.annotation.ranges[0].to)
+                    : before;
             }
-            // A formula's TeX and its PDF glyphs only agree once both are
-            // reduced to the symbols they print. This runs last, and only for
-            // text that carries math, so prose keeps its stricter matches.
-            let mathCompactCandidates = [];
-            if (!candidates.length
-                && !normalizedCandidates.length
-                && !dehyphenatedCandidates.length
-                && hasMathMarkup(annotation.text)) {
-                mathCompactIndex ||= createMathCompactTextIndex(index.text);
-                mathCompactCandidates = mathCompactAnnotationRanges(
-                    markdown,
-                    index,
-                    mathCompactIndex,
-                    annotation.text
-                );
-                const mathCompactRange = selectCandidateRange(
-                    selectPageCandidates(
-                        mathCompactCandidates,
-                        annotation.pageIndex,
-                        sourceMap,
-                        markdown.length
-                    ),
-                    previousSourceTo
-                );
-                if (mathCompactRange) {
-                    matched.push(resolvedAnnotation(
-                        annotation,
-                        'normalized',
-                        mathCompactRange
-                    ));
-                    previousSourceTo = Math.max(
-                        previousSourceTo,
-                        mathCompactRange.to
-                    );
-                    continue;
-                }
-            }
-            const ambiguous = mathCompactCandidates.length > 1
-                || candidateResult.truncated
-                || candidates.length
-                || normalizedCandidateResult.truncated
-                || normalizedCandidates.length
-                || dehyphenatedCandidateResult.truncated
-                || dehyphenatedCandidates.length;
-            unmatched.push({
-                ...annotation,
-                reason: ambiguous ? 'ambiguous' : 'not-found',
-            });
+            if (result.annotation) matched.push(result.annotation);
+            else unmatched.push({ ...annotation, reason: result.reason });
         }
         return { matched, unmatched };
+    }
+
+    async #match({ itemID, markdown, sourceMap }, state, annotation, text) {
+        const candidateResult = findTextOccurrences(
+            state.index.text,
+            text,
+            MAX_MATCH_CANDIDATES
+        );
+        const candidates = candidateResult.offsets;
+        const exactRanges = candidateResult.truncated
+            ? []
+            : candidates.map(candidate => expandMarkdownRangeToMathBoundaries(
+                markdown,
+                expandPdfAnnotationSourceRange(
+                    markdown,
+                    state.index.sourceRange(candidate, text.length)
+                )
+            ));
+        const exactPageRanges = selectPageCandidates(
+            exactRanges,
+            annotation.pageIndex,
+            sourceMap,
+            markdown.length
+        );
+        let exactRange = selectCandidateRange(
+            exactPageRanges,
+            state.previousSourceTo
+        );
+        if (!exactRange && exactPageRanges.length > 1) {
+            const textQuote = await this.#locateTextQuote(
+                itemID,
+                annotation
+            );
+            if (textQuote) {
+                state.normalizedIndex ||= createPdfAnnotationTextIndex(
+                    state.index.text,
+                    offset => state.index.sourceOffsetAt(offset)
+                );
+                exactRange = selectTextQuoteCandidateRange(
+                    exactPageRanges,
+                    state.normalizedIndex,
+                    textQuote
+                );
+            }
+        }
+        if (exactRange) {
+            return matchedAnnotation(state, resolvedAnnotation(
+                annotation,
+                'exact',
+                exactRange
+            ));
+        }
+        const normalizedText = normalizePdfAnnotationText(text);
+        if (!state.normalizedIndex && !candidates.length) {
+            state.normalizedIndex = createPdfAnnotationTextIndex(
+                state.index.text,
+                offset => state.index.sourceOffsetAt(offset)
+            );
+        }
+        const normalizedCandidateResult = candidates.length
+            ? { offsets: [], truncated: false }
+            : findTextOccurrences(
+                state.normalizedIndex.text,
+                normalizedText,
+                MAX_MATCH_CANDIDATES
+            );
+        const normalizedCandidates = normalizedCandidateResult.offsets;
+        const normalizedRanges = normalizedCandidateResult.truncated
+            ? []
+            : normalizedCandidates.map(candidate => (
+                expandMarkdownRangeToMathBoundaries(
+                    markdown,
+                    state.normalizedIndex.sourceRange(
+                        candidate,
+                        normalizedText.length
+                    )
+                )
+            ));
+        const normalizedPageRanges = selectPageCandidates(
+            normalizedRanges,
+            annotation.pageIndex,
+            sourceMap,
+            markdown.length
+        );
+        let normalizedRange = selectCandidateRange(
+            normalizedPageRanges,
+            state.previousSourceTo
+        );
+        if (!normalizedRange && normalizedPageRanges.length > 1) {
+            const textQuote = await this.#locateTextQuote(
+                itemID,
+                annotation
+            );
+            if (textQuote) {
+                normalizedRange = selectTextQuoteCandidateRange(
+                    normalizedPageRanges,
+                    state.normalizedIndex,
+                    textQuote
+                );
+            }
+        }
+        if (normalizedRange) {
+            return matchedAnnotation(state, resolvedAnnotation(
+                annotation,
+                'normalized',
+                normalizedRange
+            ));
+        }
+        const dehyphenatedText = createDehyphenatedPdfAnnotationTextIndex(
+            text
+        ).text;
+        if (!state.dehyphenatedIndex
+            && !candidates.length
+            && !normalizedCandidates.length) {
+            state.dehyphenatedIndex = createDehyphenatedPdfAnnotationTextIndex(
+                state.index.text,
+                offset => state.index.sourceOffsetAt(offset)
+            );
+        }
+        const dehyphenatedCandidateResult = candidates.length
+            || normalizedCandidates.length
+            ? { offsets: [], truncated: false }
+            : findTextOccurrences(
+                state.dehyphenatedIndex.text,
+                dehyphenatedText,
+                MAX_MATCH_CANDIDATES
+            );
+        const dehyphenatedCandidates = dehyphenatedCandidateResult.offsets;
+        const dehyphenatedRanges = dehyphenatedCandidateResult.truncated
+            ? []
+            : dehyphenatedCandidates.map(candidate => (
+                expandMarkdownRangeToMathBoundaries(
+                    markdown,
+                    state.dehyphenatedIndex.sourceRange(
+                        candidate,
+                        dehyphenatedText.length
+                    )
+                )
+            ));
+        const dehyphenatedPageRanges = selectPageCandidates(
+            dehyphenatedRanges,
+            annotation.pageIndex,
+            sourceMap,
+            markdown.length
+        );
+        const dehyphenatedRange = selectCandidateRange(
+            dehyphenatedPageRanges,
+            state.previousSourceTo
+        );
+        if (dehyphenatedRange) {
+            return matchedAnnotation(state, resolvedAnnotation(
+                annotation,
+                'normalized',
+                dehyphenatedRange
+            ));
+        }
+        // A formula's TeX and its PDF glyphs only agree once both are
+        // reduced to the symbols they print. This runs last, and only for
+        // text that carries math, so prose keeps its stricter matches.
+        let mathCompactCandidates = [];
+        if (!candidates.length
+            && !normalizedCandidates.length
+            && !dehyphenatedCandidates.length
+            && hasMathMarkup(text)) {
+            state.mathCompactIndex ||= createMathCompactTextIndex(
+                state.index.text
+            );
+            mathCompactCandidates = mathCompactAnnotationRanges(
+                markdown,
+                state.index,
+                state.mathCompactIndex,
+                text
+            );
+            const mathCompactRange = selectCandidateRange(
+                selectPageCandidates(
+                    mathCompactCandidates,
+                    annotation.pageIndex,
+                    sourceMap,
+                    markdown.length
+                ),
+                state.previousSourceTo
+            );
+            if (mathCompactRange) {
+                return matchedAnnotation(state, resolvedAnnotation(
+                    annotation,
+                    'normalized',
+                    mathCompactRange
+                ));
+            }
+        }
+        const ambiguous = mathCompactCandidates.length > 1
+            || candidateResult.truncated
+            || candidates.length
+            || normalizedCandidateResult.truncated
+            || normalizedCandidates.length
+            || dehyphenatedCandidateResult.truncated
+            || dehyphenatedCandidates.length;
+        return { reason: ambiguous ? 'ambiguous' : 'not-found' };
     }
 
     async #locateTextQuote(itemID, annotation) {
@@ -316,6 +337,30 @@ export class MarkdownAnnotationOverlay {
             return null;
         }
     }
+}
+
+// Either reading may be the one the highlight was made on, so a place only
+// one of them finds is kept when the other finds no place at all.
+function pickTextVariant(saved, legacy) {
+    if (saved.reason === 'ambiguous' || legacy.reason === 'ambiguous') {
+        return { reason: 'ambiguous' };
+    }
+    if (saved.annotation && legacy.annotation) {
+        const [left] = saved.annotation.ranges;
+        const [right] = legacy.annotation.ranges;
+        return left.from === right.from && left.to === right.to
+            ? saved
+            : { reason: 'ambiguous' };
+    }
+    return saved.annotation ? saved : legacy;
+}
+
+function matchedAnnotation(state, annotation) {
+    state.previousSourceTo = Math.max(
+        state.previousSourceTo,
+        annotation.ranges[0].to
+    );
+    return { annotation };
 }
 
 function resolvedAnnotation(annotation, matchKind, range) {
