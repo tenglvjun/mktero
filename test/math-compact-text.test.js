@@ -314,3 +314,24 @@ test('maps a reordered match back to the whole formula source', () => {
     const short = createMathCompactTextIndex('T_{t}^{k}');
     assert.deepEqual(short.sourceRange(0, 3), { from: 0, to: 8 });
 });
+
+// Dream-RSI, page 5: the PDF font leaves \bigcup as a lone "Ð", \sum as "Í"
+// and \prod as "Ö", and OCR reads the math-italic 𝑣 as \nu.
+test('reads misencoded big operators back only in the PDF text layer', () => {
+    const pdf = { pdfTextLayer: true };
+    assert.equal(
+        createMathCompactTextIndex('∪\nÐ\n𝑣∈𝐶', pdf).text,
+        mathCompactText('\\cup \\bigcup_{\\nu \\in C}')
+    );
+    assert.equal(
+        createMathCompactTextIndex('1\n𝑡\nÍ𝑡\n𝑖=1', pdf).text,
+        mathCompactText('1 t \\sum^{t}_{i=1}')
+    );
+    assert.equal(
+        createMathCompactTextIndex('=\nÖ\n𝑖∈', pdf).text,
+        mathCompactText('= \\prod_{i \\in')
+    );
+    // A Latin-1 letter inside a word stays a letter.
+    assert.equal(createMathCompactTextIndex('Íslands Ðenis', pdf).text, 'íslandsðenis');
+    assert.equal(mathCompactText('Ð'), 'ð');
+});

@@ -461,7 +461,8 @@ function locateInIndex(index, text, {
         located = findMathCompactMatch(pages, selectedText, quote)
             || (pages === index.pages
                 ? null
-                : findMathCompactMatch(index.pages, selectedText, quote));
+                : findMathCompactMatch(index.pages, selectedText, quote))
+            || findMathCompactCrossPageMatch(index.pages, selectedText);
     }
     if (!located) {
         const regionLocated = locatePDFRegion(index, pdfRegion, selectedText);
@@ -515,7 +516,9 @@ function findMathCompactMatch(pages, selectedText, textQuote) {
     for (const page of pages) {
         let compact = mathCompactPageIndexes.get(page);
         if (!compact) {
-            compact = createMathCompactTextIndex(page.rawText);
+            compact = createMathCompactTextIndex(page.rawText, {
+                pdfTextLayer: true,
+            });
             mathCompactPageIndexes.set(page, compact);
         }
         const offsets = findMathCompactOccurrences(compact, key);
@@ -534,12 +537,14 @@ function findMathCompactMatch(pages, selectedText, textQuote) {
         const suffix = mathCompactText(textQuote.suffix || '');
         const scored = matches.filter(candidate => {
             const compact = mathCompactPageIndexes.get(candidate.page);
-            const before = mathCompactText(
-                candidate.page.rawText.slice(0, candidate.sourceRange.from)
-            );
-            const after = mathCompactText(
-                candidate.page.rawText.slice(candidate.sourceRange.to)
-            );
+            const before = createMathCompactTextIndex(
+                candidate.page.rawText.slice(0, candidate.sourceRange.from),
+                { pdfTextLayer: true }
+            ).text;
+            const after = createMathCompactTextIndex(
+                candidate.page.rawText.slice(candidate.sourceRange.to),
+                { pdfTextLayer: true }
+            ).text;
             return Boolean(compact)
                 && (!prefix || before.endsWith(prefix.slice(-24)))
                 && (!suffix || after.startsWith(suffix.slice(0, 24)));
@@ -550,6 +555,65 @@ function findMathCompactMatch(pages, selectedText, textQuote) {
     }
     if (matches.length > 1) throw ambiguousError();
     return null;
+}
+
+const MIN_MATH_COMPACT_CROSS_PAGE_PART_LENGTH = 3;
+
+// A TeX selection that runs off the foot of one page and onto the next:
+// the head must end the first page's body (before its page number and
+// chrome) and the tail must open the next page's body (after a repeated
+// running header). Only a unique split is accepted.
+function findMathCompactCrossPageMatch(pages, selectedText) {
+    const key = mathCompactText(selectedText);
+    if ([...key].length < MIN_PAGE_BREAK_MATCH_LENGTH) return null;
+    const bodies = pages.map((page, pageIndex) => {
+        const range = crossPageContentRange(pages, pageIndex, page.rawText);
+        return {
+            page,
+            from: range.from,
+            compact: createMathCompactTextIndex(
+                page.rawText.slice(range.from, range.to),
+                { pdfTextLayer: true }
+            ),
+        };
+    });
+    const minPart = MIN_MATH_COMPACT_CROSS_PAGE_PART_LENGTH;
+    const matches = [];
+    for (let index = 1; index < bodies.length; index++) {
+        const head = bodies[index - 1];
+        const tail = bodies[index];
+        if (tail.page.pageIndex !== head.page.pageIndex + 1) continue;
+        for (let split = minPart; split <= key.length - minPart; split++) {
+            const rest = key.slice(split);
+            if (!tail.compact.text.startsWith(rest)) continue;
+            const lead = key.slice(0, split);
+            if (!head.compact.text.endsWith(lead)) continue;
+            const headRange = head.compact.sourceRange(
+                head.compact.text.length - lead.length,
+                lead.length
+            );
+            const tailRange = tail.compact.sourceRange(0, rest.length);
+            if (!headRange || !tailRange) continue;
+            matches.push([
+                {
+                    page: head.page,
+                    sourceRange: {
+                        from: head.from + headRange.from,
+                        to: head.from + headRange.to,
+                    },
+                },
+                {
+                    page: tail.page,
+                    sourceRange: {
+                        from: tail.from + tailRange.from,
+                        to: tail.from + tailRange.to,
+                    },
+                },
+            ]);
+            if (matches.length > 1) return null;
+        }
+    }
+    return matches.length === 1 ? { segments: matches[0] } : null;
 }
 
 // Display equations rarely survive the PDF text layer intact, so when every

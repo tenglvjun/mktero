@@ -71,7 +71,21 @@ const CANONICAL_SYMBOLS = new Map([
     ['∙', '•'],
     ['⩽', '≤'],
     ['⩾', '≥'],
+    // OCR reads a math-italic v (𝑣) as \nu, which prints ν. In the
+    // last-resort key the two letters are one, as they look in the PDF.
+    ['ν', 'v'],
 ]);
+
+// A font with a nonstandard large-symbol encoding leaves the display
+// operators in the PDF text layer as Latin-1 letters on their own: Dream-RSI
+// prints \sum as "Í", \prod as "Ö", and \bigcup as "Ð". Only text-layer
+// keys read them back, and only when no Latin letter touches them.
+const MISENCODED_BIG_OPERATORS = new Map([
+    ['Í', '∑'],
+    ['Ö', '∏'],
+    ['Ð', '⋃'],
+]);
+const LATIN_LETTER = /\p{Script=Latin}/u;
 
 // Glyphs the two spellings of one formula do not share, so neither key
 // keeps them:
@@ -105,7 +119,7 @@ const PDF_MATH_GLYPHS = /[\p{Script=Greek}\u{1D400}-\u{1D7FF}\u210E\u210F\u2113\
  * Index `text` as its math-compact key. `sourceRange(from, length)` maps a
  * range of the key back to the offsets of `text` it came from.
  */
-export function createMathCompactTextIndex(text) {
+export function createMathCompactTextIndex(text, { pdfTextLayer = false } = {}) {
     const source = String(text ?? '');
     const characters = [];
     const offsets = [];
@@ -149,6 +163,14 @@ export function createMathCompactTextIndex(text) {
                 // \{, \%, \, and the like: the escaped character is markup
                 // the rendered formula never prints as a separate glyph.
                 index += 2;
+                continue;
+            }
+            if (pdfTextLayer
+                && MISENCODED_BIG_OPERATORS.has(character)
+                && (index === 0 || /\s/u.test(source[index - 1]))
+                && !LATIN_LETTER.test(source[index + 1] || '')) {
+                push(MISENCODED_BIG_OPERATORS.get(character), index, index + 1);
+                index++;
                 continue;
             }
             const codePoint = source.codePointAt(index);
