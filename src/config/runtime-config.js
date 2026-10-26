@@ -2,6 +2,9 @@ export const MKTERO_RELEASE_API_BASE = 'https://api.mktero.com';
 export const MKTERO_DEBUG_API_BASE = 'http://127.0.0.1:8080';
 export const MKTERO_RELEASE_SITE_BASE = 'https://mktero.com';
 export const MKTERO_DEBUG_SITE_BASE = 'http://127.0.0.1:4173';
+// The empty issue form. A problem report is pasted by the user, never sent
+// in the URL, because a GitHub issue is public.
+export const MKTERO_NEW_ISSUE_URL = 'https://github.com/tenglvjun/mktero/issues/new';
 
 export function mkteroBuild() {
     return typeof __MKTERO_BUILD__ === 'string' ? __MKTERO_BUILD__ : 'debug';

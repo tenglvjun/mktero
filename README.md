@@ -238,8 +238,10 @@ feedback belong in
 Reproducible bugs belong in
 [GitHub Issues](https://github.com/tenglvjun/mktero/issues).
 
-The PDF reader toolbar and the Tools menu include Report a problem. It copies
-or saves a redacted diagnostic file on this computer and does not upload it.
+To report a problem, use Help > Report a Mktero Problem, the Report a problem
+button on a failed conversion, or the document actions menu of a Mktero tab. It
+copies or saves a redacted diagnostic file on this computer and does not upload
+it; paste it into an issue or send it to the group.
 Do not paste API keys, PDF contents, or logs that contain credentials into the
 QQ group, WeChat, Discord, issues, or pull requests.
 

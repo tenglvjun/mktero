@@ -78,12 +78,14 @@ function formatDiagnosticError(error) {
     if (error == null) return 'Unknown error';
     if (typeof error !== 'object') return String(error);
     const name = cleanToken(error.name, 80) || 'Error';
-    const code = cleanToken(error.code, 80);
+    const codes = [cleanToken(error.code, 80), cleanToken(error.errorCode, 80)]
+        .filter((code, index, all) => code && all.indexOf(code) === index);
     const message = error.message == null ? String(error) : String(error.message);
     const stack = typeof error.stack === 'string'
         ? error.stack.split('\n').slice(0, 8).join('\n')
         : '';
-    return `${name}${code ? ` [${code}]` : ''}: ${message}${stack ? `\n${stack}` : ''}`;
+    const label = codes.length ? ` [${codes.join(' / ')}]` : '';
+    return `${name}${label}: ${message}${stack ? `\n${stack}` : ''}`;
 }
 
 function normalizeJob(job, at, redact) {

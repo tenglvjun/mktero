@@ -232,13 +232,20 @@ import {
     registerMarkdownReadinessColumn,
 } from './ui/markdown-readiness-column.js';
 import { createDiagnosticLog } from './diagnostics/diagnostic-log.js';
+import { MKTERO_NEW_ISSUE_URL } from './config/runtime-config.js';
 import {
     buildDiagnosticReport,
+    DIAGNOSTIC_SOURCES,
     diagnosticReportFileName,
     serializeDiagnosticReport,
+    summarizeDiagnosticReport,
 } from './diagnostics/diagnostic-report.js';
 import { createZoteroClipboard } from './platform/zotero-clipboard.js';
 import { saveDiagnosticText } from './platform/zotero-diagnostic-export.js';
+import {
+    registerDiagnosticMenuItem,
+    selectedDiagnosticItemID,
+} from './platform/zotero-diagnostic-entry.js';
 import { readDiagnosticEnvironment } from './platform/zotero-diagnostic-snapshot.js';
 import {
     closeDiagnosticReportDialogs,
@@ -298,6 +305,7 @@ import {
 // Conversions whose OCR is done and only local figure stitching remains must
 // keep running after the reader tab is closed, so the next open is instant.
 const backgroundFigureRestorations = new Set();
+const conversionFailures = new Map();
 const batchItemWatchers = new Map();
 const backgroundContinuations = new Map();
 const OBSIDIAN_EXPORT_QUEUE_ID = 'mktero-obsidian-export';
@@ -1080,6 +1088,7 @@ async function loadFigureWorkerSource(rootURI) {
 globalThis.shutdown = function shutdown() {
     closeDiagnosticReportDialogs();
     disposeDiagnosticMenus();
+    conversionFailures.clear();
     runtime.pendingSelectionReveals?.clear();
     abortAllConversions();
     abortObsidianExport();
@@ -1253,6 +1262,7 @@ async function openItemAsMarkdown(itemID, {
         onSaveSnapshot: () => saveSnapshotForItem(itemID),
         onExportMarkdown: options => exportMarkdownForDocument(itemID, options),
         onExportObsidian: options => exportObsidianForDocument(itemID, options),
+        onReportProblem: reportProblemForItem(itemID),
         onSetCorrectionMode: enabled => setCorrectionMode(itemID, enabled),
         onCommitCorrection: correction => commitCorrection(itemID, correction),
         onRestoreCorrection: blockID => restoreCorrection(itemID, blockID),
@@ -1597,6 +1607,7 @@ async function executeItemConversion(itemID, {
     onProgressiveFigures,
 }) {
     runtime.pdfIndexOperations.start(itemID, controller);
+    conversionFailures.delete(itemID);
     let lastLoggedProgress = null;
     debugMktero(
         `Mktero: conversion started for item ${itemID} `
@@ -1643,6 +1654,10 @@ async function executeItemConversion(itemID, {
                     : `Mktero: item ${itemID}: completed through a new conversion request`
         );
         return result;
+    }
+    catch (error) {
+        rememberConversionFailure(itemID, error);
+        throw error;
     }
     finally {
         backgroundFigureRestorations.delete(itemID);
@@ -1704,6 +1719,7 @@ function publishConversionFailure(presentation, itemID, error, previousResult) {
         clearAccountSession(Zotero);
     }
     runtime.pendingSelectionReveals?.delete(itemID);
+    rememberConversionFailure(itemID, error);
     if (presentation.closed) return;
     debugMktero(
         `Mktero: conversion failed for item ${itemID}: ${userFacingError(error)}`
@@ -2026,6 +2042,7 @@ async function openSavedMarkdownNote(noteID) {
             abortDocumentTranslations(noteID);
             runtime.citationPresenter?.closeForItem(sourceItem?.id);
         },
+        onReportProblem: reportProblemForItem(sourceItem?.id ?? null),
         ...createSavedMarkdownActions(noteID, sourceItem),
     });
     try {
@@ -3914,24 +3931,34 @@ function recordDiagnosticJob(job) {
     runtime.diagnosticLog?.recordJob(job);
 }
 
-function registerDiagnosticMenu(window) {
-    const document = window?.document;
-    const popup = document?.getElementById?.('menu_ToolsPopup');
-    if (!popup || !runtime.id || runtime.diagnosticMenus.has(window)) return;
-    document.getElementById('mktero-report-problem')?.remove();
-    const item = document.createXULElement?.('menuitem')
-        || document.createElement('menuitem');
-    item.id = 'mktero-report-problem';
-    item.setAttribute('label', runtimeTranslate('diagnostics.menu'));
-    const handleCommand = () => {
-        Promise.resolve(openDiagnosticReport(window)).catch(logMkteroError);
-    };
-    item.addEventListener('command', handleCommand);
-    popup.append(item);
-    runtime.diagnosticMenus.set(window, () => {
-        item.removeEventListener('command', handleCommand);
-        item.remove();
+// The last conversion failure of each PDF, so a report opened from the
+// error card or the Help menu can name the error without the user copying it.
+function rememberConversionFailure(itemID, error) {
+    if (!itemID || !error || isCancellation(error)) return;
+    conversionFailures.set(itemID, {
+        code: typeof error.code === 'string' ? error.code : '',
+        serviceCode: typeof error.errorCode === 'string' ? error.errorCode : '',
     });
+}
+
+function registerDiagnosticMenu(window) {
+    if (!window || !runtime.id || runtime.diagnosticMenus.has(window)) return;
+    const dispose = registerDiagnosticMenuItem({
+        window,
+        translate: runtimeTranslate,
+        onCommand: () => openDiagnosticReport(window, {
+            source: DIAGNOSTIC_SOURCES.HELP_MENU,
+            itemID: selectedDiagnosticItemID({
+                zotero: Zotero,
+                window,
+                sourceItemForTab: tabID => (
+                    runtime.presenter?.sourceItemForTab(tabID) ?? null
+                ),
+            }),
+        }),
+        onError: logMkteroError,
+    });
+    if (dispose) runtime.diagnosticMenus.set(window, dispose);
 }
 
 function disposeDiagnosticMenu(window) {
@@ -3946,15 +3973,26 @@ function disposeDiagnosticMenus() {
     runtime.diagnosticMenus.clear();
 }
 
-function openDiagnosticReport(ownerWindow, context = null) {
+function openDiagnosticReport(ownerWindow, {
+    source = DIAGNOSTIC_SOURCES.HELP_MENU,
+    itemID = null,
+    returnFocus = null,
+} = {}) {
     const document = ownerWindow?.document;
     const parent = document?.documentElement;
     if (!document || !parent) return null;
+    const context = itemID ? { itemID } : null;
+    const failure = itemID ? conversionFailures.get(itemID) || null : null;
     return openDiagnosticReportDialog({
         document,
         parent,
         translate: runtimeTranslate,
-        buildReport: input => buildDiagnosticPackage(input, context),
+        returnFocus,
+        buildReport: input => buildDiagnosticPackage(input, {
+            source,
+            context,
+            failure,
+        }),
         copyText: text => runtime.clipboard.writeText(text),
         saveText: (fileName, text) => saveDiagnosticText({
             createFilePicker: createZoteroFilePicker,
@@ -3964,28 +4002,37 @@ function openDiagnosticReport(ownerWindow, context = null) {
             text,
             translate: runtimeTranslate,
         }),
+        openIssue: () => Zotero.launchURL(MKTERO_NEW_ISSUE_URL),
     });
 }
 
-async function buildDiagnosticPackage(input, context) {
+function reportProblemForItem(itemID) {
+    return ({ source, returnFocus } = {}) => openDiagnosticReport(
+        Zotero.getMainWindow?.(),
+        { source, itemID, returnFocus }
+    );
+}
+
+async function buildDiagnosticPackage(input, { source, context, failure }) {
     const generatedAt = new Date().toISOString();
     const environment = await readDiagnosticEnvironment({
         zotero: Zotero,
         services: typeof Services === 'undefined' ? null : Services,
         context,
-        includeAccountEmail: input?.includeAccountEmail === true,
     });
     const report = buildDiagnosticReport({
         environment,
         logEntries: runtime.diagnosticLog?.entries() || [],
         jobs: runtime.diagnosticLog?.jobs() || [],
         note: input?.note,
-        expected: input?.expected,
+        source,
+        failure,
         generatedAt,
     });
     return {
         text: serializeDiagnosticReport(report),
         fileName: diagnosticReportFileName(generatedAt),
+        summary: summarizeDiagnosticReport(report, runtimeTranslate),
     };
 }
 
@@ -4082,10 +4129,6 @@ function registerReaderToolbarAction() {
                 reader.itemID,
                 { reader }
             )
-        ),
-        onReport: reader => openDiagnosticReport(
-            reader?._iframeWindow || Zotero.getMainWindow?.(),
-            { itemID: reader?.itemID }
         ),
         onError: handleOpenError,
         translate: runtimeTranslate,

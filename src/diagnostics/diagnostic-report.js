@@ -3,8 +3,24 @@ import { redactDiagnosticText } from './redact-diagnostics.js';
 export const DIAGNOSTIC_REPORT_VERSION = 1;
 export const DIAGNOSTIC_NOTE_LIMIT = 4000;
 
+// Where the report was opened. The error card and the document menu know
+// the paper; the Help menu reads the current selection.
+export const DIAGNOSTIC_SOURCES = Object.freeze({
+    ERROR_CARD: 'error-card',
+    DOCUMENT_MENU: 'document-menu',
+    HELP_MENU: 'help-menu',
+});
+
+const SOURCES = new Set(Object.values(DIAGNOSTIC_SOURCES));
 const PROVIDERS = new Set(['mktero', 'mineru', 'mistral']);
 const ENDPOINTS = new Set(['cloud', 'local']);
+const JOB_PROVIDERS = new Set(['mktero', 'mineru', 'mineru-local']);
+const ERROR_CODE = /^[A-Za-z0-9_.:-]{1,80}$/;
+const OS_LABELS = Object.freeze({
+    Darwin: 'macOS',
+    WINNT: 'Windows',
+    Linux: 'Linux',
+});
 
 // buildDiagnosticReport copies only the fields a maintainer needs. Callers
 // cannot add tokens or paths by passing extra environment properties.
@@ -13,12 +29,15 @@ export function buildDiagnosticReport({
     logEntries = [],
     jobs = [],
     note = '',
-    expected = '',
+    source = DIAGNOSTIC_SOURCES.HELP_MENU,
+    failure = null,
     generatedAt,
 } = {}) {
     const report = {
         schemaVersion: DIAGNOSTIC_REPORT_VERSION,
         generatedAt: normalizeTime(generatedAt),
+        source: SOURCES.has(source) ? source : DIAGNOSTIC_SOURCES.HELP_MENU,
+        note: clip(redactDiagnosticText(note), DIAGNOSTIC_NOTE_LIMIT),
         plugin: {
             version: clean(environment.pluginVersion, 32),
             build: clean(environment.build, 16),
@@ -33,15 +52,14 @@ export function buildDiagnosticReport({
             arch: clean(environment.arch, 32),
         },
         conversion: normalizeConversion(environment.conversion),
-        account: normalizeAccount(environment.account),
+        account: { signedIn: environment.account?.signedIn === true },
         jobs: normalizeJobs(jobs),
         log: normalizeLog(logEntries),
-        note: clip(redactDiagnosticText(note), DIAGNOSTIC_NOTE_LIMIT),
     };
-    const expectedText = clip(redactDiagnosticText(expected), DIAGNOSTIC_NOTE_LIMIT);
-    if (expectedText) report.expected = expectedText;
     const context = normalizeContext(environment.context);
     if (context) report.context = context;
+    const normalizedFailure = normalizeFailure(failure);
+    if (normalizedFailure) report.failure = normalizedFailure;
     return report;
 }
 
@@ -57,6 +75,68 @@ export function diagnosticReportFileName(generatedAt) {
         ? `${match[1]}${match[2]}${match[3]}-${match[4]}${match[5]}${match[6]}`
         : 'report';
     return `mktero-diagnostics-${stamp}.json`;
+}
+
+// summarizeDiagnosticReport turns a built report into the few lines a user
+// reads before sharing it. It reads only the normalized report.
+export function summarizeDiagnosticReport(report, translate) {
+    const t = typeof translate === 'function' ? translate : key => key;
+    const versions = [
+        report?.plugin?.version ? `Mktero ${report.plugin.version}` : '',
+        report?.zotero?.version ? `Zotero ${report.zotero.version}` : '',
+        osLabel(report?.os),
+    ].filter(Boolean).join(' · ');
+    const lines = [
+        { label: t('diagnostics.summaryVersions'), value: versions || '—' },
+        {
+            label: t('diagnostics.summaryConverter'),
+            value: converterLabel(report?.conversion, t),
+        },
+        {
+            label: t('diagnostics.summaryItem'),
+            value: report?.context?.itemKey
+                || (report?.context?.itemID ? String(report.context.itemID) : '')
+                || t('diagnostics.summaryNoItem'),
+        },
+    ];
+    if (report?.failure?.code) {
+        lines.push({
+            label: t('diagnostics.summaryError'),
+            value: [report.failure.code, report.failure.serviceCode]
+                .filter(Boolean)
+                .join(' · '),
+        });
+    }
+    const log = Array.isArray(report?.log) ? report.log : [];
+    lines.push({
+        label: t('diagnostics.summaryActivity'),
+        value: t('diagnostics.summaryActivityValue', {
+            jobs: Array.isArray(report?.jobs) ? report.jobs.length : 0,
+            lines: log.length,
+            errors: log.filter(entry => entry.level === 'error').length,
+        }),
+    });
+    return lines;
+}
+
+function osLabel(os) {
+    const name = OS_LABELS[os?.name] || os?.name || '';
+    return [name, os?.version].filter(Boolean).join(' ');
+}
+
+function converterLabel(conversion, t) {
+    switch (conversion?.provider) {
+    case 'mktero':
+        return t('diagnostics.converterMktero');
+    case 'mineru':
+        return conversion.mineruEndpoint === 'local'
+            ? t('diagnostics.converterMinerULocal')
+            : 'MinerU';
+    case 'mistral':
+        return 'Mistral OCR';
+    default:
+        return '—';
+    }
 }
 
 function normalizeConversion(conversion) {
@@ -91,15 +171,6 @@ function normalizeConversion(conversion) {
     return result;
 }
 
-function normalizeAccount(account) {
-    const result = { signedIn: account?.signedIn === true };
-    const email = typeof account?.email === 'string' ? account.email.trim() : '';
-    if (email && email.length <= 254 && !/[\s/\\]/.test(email)) {
-        result.email = email;
-    }
-    return result;
-}
-
 function normalizeContext(context) {
     const itemID = Number(context?.itemID);
     if (!Number.isSafeInteger(itemID) || itemID <= 0) return null;
@@ -113,12 +184,23 @@ function normalizeContext(context) {
     return result;
 }
 
+function normalizeFailure(failure) {
+    const code = clean(failure?.code, 80);
+    if (!ERROR_CODE.test(code)) return null;
+    const result = { code };
+    const serviceCode = clean(failure?.serviceCode, 80);
+    if (ERROR_CODE.test(serviceCode) && serviceCode !== code) {
+        result.serviceCode = serviceCode;
+    }
+    return result;
+}
+
 function normalizeJobs(jobs) {
     if (!Array.isArray(jobs)) return [];
     return jobs.slice(-20).flatMap(job => {
         const provider = String(job?.provider || '');
         const id = String(job?.id || '');
-        if (!['mktero', 'mineru', 'mineru-local'].includes(provider)) return [];
+        if (!JOB_PROVIDERS.has(provider)) return [];
         if (!id || id.length > 128 || redactDiagnosticText(id) !== id) return [];
         return [{
             provider,

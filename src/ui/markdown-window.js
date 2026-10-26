@@ -1438,7 +1438,27 @@ class MarkdownTabView {
             'aria-label': this.t('viewer.openSettings'),
             title: this.t('viewer.openSettings'),
         }, this.t('viewer.openSettings'));
-        appendChildren(errorActions, errorRetry, errorSettings);
+        const errorReport = this.createElement('button', {
+            id: 'mktero-error-report',
+            class: 'message-action',
+            type: 'button',
+            'aria-label': this.t('diagnostics.actionAria'),
+            title: this.t('diagnostics.actionAria'),
+        });
+        errorReport.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.bug,
+            {
+                className: 'message-action-icon',
+                size: 15,
+            }
+        ));
+        errorReport.appendChild(this.createElement(
+            'span',
+            { class: 'message-action-label' },
+            this.t('diagnostics.action')
+        ));
+        appendChildren(errorActions, errorRetry, errorSettings, errorReport);
         appendChildren(error, errorMessage, errorActions);
         const spinner = createLucideIcon(
             this.document,
@@ -1763,6 +1783,7 @@ class MarkdownTabView {
             errorMessage,
             errorRetry,
             errorSettings,
+            errorReport,
             content,
             loading,
             loadingTitle,
@@ -1854,6 +1875,8 @@ class MarkdownTabView {
             exportMarkdownLabel: documentActions.exportMarkdownLabel,
             exportObsidian: documentActions.exportObsidian,
             exportObsidianLabel: documentActions.exportObsidianLabel,
+            reportProblem: documentActions.reportProblem,
+            reportProblemLabel: documentActions.reportProblemLabel,
             readerControls: documentActions.readerControls,
             readerFontSize: documentActions.readerFontSize,
             readerFontSizeLabel: documentActions.readerFontSizeLabel,
@@ -2655,6 +2678,27 @@ class MarkdownTabView {
             this.t('viewer.exportObsidianShort')
         );
         exportObsidian.appendChild(exportObsidianLabel);
+        const reportProblem = this.createElement('button', {
+            id: 'mktero-report-problem',
+            class: 'markdown-reader-action markdown-reader-action--child',
+            type: 'button',
+            'aria-label': this.t('diagnostics.actionAria'),
+            title: this.t('diagnostics.actionAria'),
+        });
+        reportProblem.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.bug,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        const reportProblemLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-action-label' },
+            this.t('diagnostics.action')
+        );
+        reportProblem.appendChild(reportProblemLabel);
         const citationGraphButton = this.createElement('button', {
             id: 'mktero-citation-graph',
             class: 'markdown-reader-action markdown-reader-action--child',
@@ -2684,6 +2728,7 @@ class MarkdownTabView {
         menu.appendChild(saveSnapshot);
         menu.appendChild(exportMarkdown);
         menu.appendChild(exportObsidian);
+        menu.appendChild(reportProblem);
         const status = this.createElement('span', {
             class: 'markdown-reader-action-status',
             'aria-live': 'polite',
@@ -2753,6 +2798,8 @@ class MarkdownTabView {
             exportMarkdownLabel,
             exportObsidian,
             exportObsidianLabel,
+            reportProblem,
+            reportProblemLabel,
             citationGraphButton,
             citationGraphLabel,
             githubRepos,
@@ -3076,6 +3123,12 @@ class MarkdownTabView {
         });
         this.listen(this.elements.errorSettings, 'click', () => {
             this.runDocumentAction('openSettings', 'onOpenSettings');
+        });
+        this.listen(this.elements.errorReport, 'click', () => {
+            this.reportProblem('error-card', this.elements.errorReport);
+        });
+        this.listen(this.elements.reportProblem, 'click', () => {
+            this.reportProblem('document-menu', this.elements.actionToggle);
         });
         this.listen(this.elements.warningSettings, 'click', () => {
             this.runDocumentAction('openWarningSettings', 'onOpenSettings');
@@ -3472,6 +3525,20 @@ class MarkdownTabView {
                     createLoadingPresentation(this.model, this.t)
                 );
             });
+    }
+
+    // A problem report only opens a local dialog, so it does not take the
+    // document-action busy state that conversions and exports use.
+    reportProblem(source, returnFocus) {
+        if (typeof this.model.onReportProblem !== 'function') return;
+        this.setDocumentActionsOpen(false);
+        try {
+            const result = this.model.onReportProblem({ source, returnFocus });
+            Promise.resolve(result).catch(error => this.zotero?.logError?.(error));
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
     }
 
     openCitationGraph() {
@@ -5269,6 +5336,18 @@ class MarkdownTabView {
         this.elements.exportObsidianLabel.textContent = this.t(
             'viewer.exportObsidianShort'
         );
+        for (const button of [
+            this.elements.reportProblem,
+            this.elements.errorReport,
+        ]) {
+            button.setAttribute('aria-label', this.t('diagnostics.actionAria'));
+            button.setAttribute('title', this.t('diagnostics.actionAria'));
+        }
+        this.elements.reportProblemLabel.textContent = this.t(
+            'diagnostics.action'
+        );
+        this.elements.errorReport.querySelector('.message-action-label')
+            .replaceChildren(this.t('diagnostics.action'));
         this.elements.retranslateDocument.setAttribute(
             'aria-label',
             this.t('ai.retranslateDocument')
@@ -5447,6 +5526,8 @@ class MarkdownTabView {
             && typeof model.onTranslateDocument === 'function';
         const citationGraphAvailable = model.status === 'ready'
             && typeof model.onOpenCitationGraph === 'function';
+        const reportAvailable = model.status === 'ready'
+            && typeof model.onReportProblem === 'function';
         const documentActionsAvailable = reparseAvailable
             || saveAvailable
             || exportAvailable
@@ -5454,7 +5535,8 @@ class MarkdownTabView {
             || correctionAvailable
             || restoreAvailable
             || translationAvailable
-            || citationGraphAvailable;
+            || citationGraphAvailable
+            || reportAvailable;
         const readerControlsAvailable = model.status === 'ready'
             || loadingView.preserveContent;
         const toolbarAvailable = documentActionsAvailable
@@ -5481,6 +5563,8 @@ class MarkdownTabView {
         this.elements.saveSnapshot.hidden = !saveAvailable;
         this.elements.exportMarkdown.hidden = !exportAvailable;
         this.elements.exportObsidian.hidden = !obsidianAvailable;
+        this.elements.reportProblem.hidden = !reportAvailable;
+        this.elements.reportProblem.disabled = !reportAvailable;
         this.elements.correctionToggle.hidden = !correctionAvailable;
         if (!translationAvailable) {
             this.elements.translationProgress.hidden = true;
@@ -5940,8 +6024,12 @@ class MarkdownTabView {
         const settingsAvailable = errorVisible
             && model.errorAction === 'open-settings'
             && typeof model.onOpenSettings === 'function';
+        const reportAvailable = errorVisible
+            && typeof model.onReportProblem === 'function';
         this.elements.errorRetry.hidden = !retryAvailable;
         this.elements.errorSettings.hidden = !settingsAvailable;
+        this.elements.errorReport.hidden = !reportAvailable;
+        this.elements.errorReport.disabled = !reportAvailable;
         this.elements.errorRetry.disabled = !retryAvailable
             || Boolean(this.documentActionBusy);
         this.elements.errorSettings.disabled = !settingsAvailable
@@ -6089,6 +6177,7 @@ class MarkdownTabView {
         this.elements.saveSnapshot.setAttribute('tabindex', menuTabIndex);
         this.elements.exportMarkdown.setAttribute('tabindex', menuTabIndex);
         this.elements.exportObsidian.setAttribute('tabindex', menuTabIndex);
+        this.elements.reportProblem.setAttribute('tabindex', menuTabIndex);
         this.elements.correctionToggle.setAttribute('tabindex', menuTabIndex);
         this.elements.retranslateDocument.setAttribute(
             'tabindex',

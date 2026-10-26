@@ -31,12 +31,11 @@ import {
 } from '../config/runtime-config.js';
 
 // readDiagnosticEnvironment collects the whitelist a problem report may
-// include. It never returns tokens, PDF paths, or titles.
+// include. It never returns tokens, the account email, PDF paths, or titles.
 export async function readDiagnosticEnvironment({
     zotero,
     services = null,
     context = null,
-    includeAccountEmail = false,
     hash = sha256Hex,
     pluginVersion = mkteroVersion(),
     build = mkteroBuild(),
@@ -51,7 +50,6 @@ export async function readDiagnosticEnvironment({
             ? MINERU_LOCAL_PARSER_PROFILE_ID
             : MINERU_PARSER_PROFILE_ID;
     const session = safe(() => getAccountSession(zotero), null);
-    const email = includeAccountEmail ? cleanEmail(session?.email) : '';
     return {
         pluginVersion,
         build,
@@ -89,7 +87,6 @@ export async function readDiagnosticEnvironment({
         },
         account: {
             signedIn: safe(() => isAccountSignedIn(session), false) === true,
-            ...(email ? { email } : {}),
         },
         context: readContext(zotero, context),
     };
@@ -132,12 +129,6 @@ function endpointOrigin(value) {
     catch {
         return '';
     }
-}
-
-function cleanEmail(value) {
-    const email = String(value || '').trim();
-    if (!email || email.length > 254 || /\s/.test(email)) return '';
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
 }
 
 function configured(read) {

@@ -8,85 +8,141 @@ function flush() {
     return new Promise(resolve => setImmediate(resolve));
 }
 
-function createFixture() {
-    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+function createFixture({ openIssue = () => {} } = {}) {
+    const dom = new JSDOM('<!doctype html><html><body><button id="trigger">Report</button></body></html>', {
         pretendToBeVisual: true,
     });
-    const copied = [];
-    const saved = [];
+    const { document } = dom.window;
+    const trigger = document.getElementById('trigger');
+    trigger.focus();
+    const calls = { builds: [], copied: [], saved: [], issues: 0 };
     const dialog = openDiagnosticReportDialog({
-        document: dom.window.document,
-        parent: dom.window.document.body,
+        document,
+        parent: document.body,
         translate: translateEnglish,
-        buildReport: async ({ note, expected, includeAccountEmail }) => ({
-            text: JSON.stringify({ note, expected, includeAccountEmail }),
-            fileName: 'mktero-diagnostics-test.json',
-        }),
-        copyText: async text => copied.push(text),
+        buildReport: async ({ note }) => {
+            calls.builds.push(note);
+            return {
+                text: JSON.stringify({ note, failure: { code: 'MKTERO_CONVERSION_FAILED' } }),
+                fileName: 'mktero-diagnostics-test.json',
+                summary: [
+                    { label: 'Paper', value: 'ABCD2345' },
+                    { label: 'Error', value: 'MKTERO_CONVERSION_FAILED' },
+                ],
+            };
+        },
+        copyText: async text => calls.copied.push(text),
         saveText: async (fileName, text) => {
-            saved.push({ fileName, text });
+            calls.saved.push({ fileName, text });
             return { status: 'saved' };
         },
+        openIssue: openIssue && (() => {
+            calls.issues += 1;
+            openIssue();
+        }),
     });
-    return { dom, dialog, copied, saved };
+    const backdrop = document.querySelector('.mktero-diagnostics-backdrop');
+    const find = selector => backdrop.querySelector(selector);
+    return { dom, document, trigger, dialog, backdrop, find, calls };
 }
 
-test('shows the redacted preview and does not copy until a description is entered', async () => {
-    const fixture = createFixture();
+test('summarizes the report and keeps the full JSON folded', async () => {
+    const { dialog, find, backdrop } = createFixture();
     await flush();
 
-    const backdrop = fixture.dom.window.document.querySelector(
-        '.mktero-diagnostics-backdrop'
+    assert.equal(find('[role="dialog"]').getAttribute('aria-modal'), 'true');
+    assert.equal(backdrop.querySelectorAll('textarea').length, 1);
+    assert.equal(backdrop.querySelector('input[type="checkbox"]'), null);
+    assert.deepEqual(
+        [...backdrop.querySelectorAll('.mktero-diagnostics-summary-row')]
+            .map(row => row.textContent),
+        ['PaperABCD2345', 'ErrorMKTERO_CONVERSION_FAILED']
     );
-    const modal = backdrop.querySelector('[role="dialog"]');
-    const copy = backdrop.querySelector('[data-diagnostic-action="copy"]');
-    const save = backdrop.querySelector('[data-diagnostic-action="save"]');
-    const happened = backdrop.querySelector('#mktero-diagnostics-happened');
-
-    assert.equal(modal.getAttribute('aria-modal'), 'true');
-    assert.equal(copy.disabled, true);
-    assert.equal(save.disabled, true);
-    assert.match(backdrop.querySelector('.mktero-diagnostics-note').textContent,
-        /do not upload/);
-
-    happened.value = 'The figure is missing';
-    happened.dispatchEvent(new fixture.dom.window.Event('input', { bubbles: true }));
-    await flush();
-
-    assert.equal(copy.disabled, false);
-    assert.match(backdrop.querySelector('#mktero-diagnostics-preview').textContent,
-        /The figure is missing/);
-    copy.click();
-    await flush();
-    assert.deepEqual(fixture.copied, [
-        JSON.stringify({
-            note: 'The figure is missing',
-            expected: '',
-            includeAccountEmail: false,
-        }),
-    ]);
-    assert.match(backdrop.querySelector('.mktero-diagnostics-status').textContent,
-        /Copied/);
-
-    save.click();
-    await flush();
-    assert.equal(fixture.saved[0].fileName, 'mktero-diagnostics-test.json');
-    fixture.dialog.close();
-    assert.equal(backdrop.isConnected, false);
+    const preview = find('#mktero-diagnostics-preview');
+    const toggle = find('[aria-controls="mktero-diagnostics-preview"]');
+    assert.equal(preview.hidden, true);
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    toggle.click();
+    assert.equal(preview.hidden, false);
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(toggle.textContent, 'Hide full report');
+    assert.match(preview.textContent, /MKTERO_CONVERSION_FAILED/);
+    dialog.close();
 });
 
-test('reuses the open dialog instead of stacking another one', () => {
-    const fixture = createFixture();
-    const again = openDiagnosticReportDialog({
-        document: fixture.dom.window.document,
-        parent: fixture.dom.window.document.body,
-        buildReport: async () => ({ text: '{}', fileName: 'other.json' }),
-    });
+test('explains why Copy and Save wait for a description', async () => {
+    const { dom, dialog, find, calls } = createFixture();
+    await flush();
+    const happened = find('#mktero-diagnostics-happened');
+    const copy = find('[data-diagnostic-action="copy"]');
+    const save = find('[data-diagnostic-action="save"]');
+    const hint = find('#mktero-diagnostics-hint');
 
-    assert.equal(again, fixture.dialog);
-    assert.equal(
-        fixture.dom.window.document.querySelectorAll('.mktero-diagnostics-backdrop').length,
-        1
+    assert.equal(happened.getAttribute('aria-required'), 'true');
+    assert.equal(happened.getAttribute('aria-describedby'), 'mktero-diagnostics-hint');
+    assert.equal(copy.disabled, true);
+    assert.equal(save.disabled, true);
+    assert.equal(hint.hidden, false);
+    assert.match(hint.textContent, /Describe the problem to enable Copy and Save/);
+    assert.ok(copy.classList.contains('mktero-diagnostics-button--primary'));
+    assert.equal(copy.parentNode.lastElementChild, copy);
+
+    happened.value = 'The figure is missing';
+    happened.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    await flush();
+
+    assert.equal(hint.hidden, true);
+    assert.equal(copy.disabled, false);
+    copy.click();
+    await flush();
+    assert.deepEqual(calls.copied, [JSON.stringify({
+        note: 'The figure is missing',
+        failure: { code: 'MKTERO_CONVERSION_FAILED' },
+    })]);
+    assert.match(find('.mktero-diagnostics-status').textContent, /Paste it where you report/);
+    save.click();
+    await flush();
+    assert.equal(calls.saved[0].fileName, 'mktero-diagnostics-test.json');
+    dialog.close();
+});
+
+test('says where to send the report and opens the empty GitHub issue form', async () => {
+    const { dialog, find, calls } = createFixture();
+    await flush();
+
+    assert.match(
+        find('.mktero-diagnostics-destination').textContent,
+        /GitHub issue.*QQ group or Discord\. GitHub issues are public\./
     );
-    fixture.dialog.close();
+    find('[data-diagnostic-action="open-issue"]').click();
+    assert.equal(calls.issues, 1);
+    dialog.close();
+});
+
+test('returns focus on close and reuses an open dialog', async () => {
+    const { dom, document, trigger, dialog, backdrop } = createFixture();
+    await flush();
+    assert.equal(document.activeElement.id, 'mktero-diagnostics-happened');
+
+    const again = openDiagnosticReportDialog({
+        document,
+        parent: document.body,
+        buildReport: async () => ({ text: '{}', fileName: 'other.json', summary: [] }),
+    });
+    assert.equal(again, dialog);
+    assert.equal(document.querySelectorAll('.mktero-diagnostics-backdrop').length, 1);
+
+    backdrop.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+        bubbles: true,
+        key: 'Escape',
+    }));
+    assert.equal(backdrop.isConnected, false);
+    assert.equal(document.activeElement, trigger);
+});
+
+test('omits the GitHub action when no opener is available', async () => {
+    const { dialog, find } = createFixture({ openIssue: null });
+    await flush();
+    assert.equal(find('[data-diagnostic-action="open-issue"]'), null);
+    dialog.close();
 });

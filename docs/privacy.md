@@ -45,13 +45,16 @@ requests contain only the selected text; they
 are not written to the full-document translation cache.
 
 Report a problem keeps that diagnostic log in memory for the current Zotero
-session. It is not written to the profile. Copy and Save create a redacted
-package on this computer only; this version does not upload it. The package
-can include the extension version, Zotero version, operating system, conversion
-provider, parser profile label, item key, conversion job ids, your description,
-and redacted log lines. It does not include API keys, account tokens, PDF
-bytes, or file paths. Your account email is included only if you check that
-option. The log is discarded when Zotero quits.
+session. It is not written to the profile. Open it from Help > Report a Mktero
+Problem, from the Report a problem button on a failed conversion, or from the
+document actions menu of a Mktero tab. Copy and Save create a redacted package
+on this computer only; this version does not upload it. Open GitHub issue opens
+the empty issue form in your browser and sends nothing from the report. The
+package can include the extension version, Zotero version, operating system,
+conversion provider, parser profile label, the item key of the paper, the error
+code of its last failed conversion, conversion job ids, your description, and
+redacted log lines. It never includes API keys, account tokens, your account
+email, PDF bytes, or file paths. The log is discarded when Zotero quits.
 
 The version report carries only the extension's own build number. That report
 collects no device fingerprint, no hardware, operating-system, or IP-derived

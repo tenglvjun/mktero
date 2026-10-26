@@ -51,6 +51,7 @@ test('shows a hosted conversion failure instead of staying on the progress scree
         ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
     ]);
     const logged = [];
+    const launched = [];
     // Zotero's logError reads `this`, so it must be called as a method of
     // Zotero. A detached call throws before the tab can show the failure.
     const zotero = {
@@ -72,6 +73,7 @@ test('shows a hosted conversion failure instead of staying on the progress scree
         PreferencePanes: { register: async options => options.id, unregister() {} },
         Reader: { registerEventListener: (_type, handler) => { toolbarHandler = handler; } },
         getMainWindow: () => owner,
+        launchURL: url => launched.push(url),
         debug() {},
         log(message, type) {
             logged.push({ message: String(message), type });
@@ -153,6 +155,34 @@ test('shows a hosted conversion failure instead of staying on the progress scree
     assert.ok(requests.includes(`GET http://127.0.0.1:8080/api/v1/conversions/${JOB_ID}`));
     assert.ok(logged.some(entry => entry.type === 'error'
         && entry.message === 'The Mktero conversion failed'));
+
+    // The error card opens the report with this paper and its failure.
+    const report = shadow.querySelector('#mktero-error-report');
+    assert.equal(report.hidden, false);
+    report.click();
+    const dialog = await waitFor(() => window.document.querySelector(
+        '.mktero-diagnostics-backdrop'
+    ));
+    const rows = await waitFor(() => {
+        const found = [...dialog.querySelectorAll('.mktero-diagnostics-summary-row')];
+        return found.length ? found : null;
+    });
+    const summary = Object.fromEntries(rows.map(row => [
+        row.querySelector('dt').textContent,
+        row.querySelector('dd').textContent,
+    ]));
+    assert.equal(summary.Paper, 'PAPERKEY');
+    assert.equal(summary.Converter, 'Mktero hosted');
+    assert.equal(summary.Error, 'MKTERO_CONVERSION_FAILED · MINERU_TASK_FAILED');
+    const full = JSON.parse(dialog.querySelector('#mktero-diagnostics-preview').textContent);
+    assert.equal(full.source, 'error-card');
+    assert.deepEqual(full.context, { itemID: 42, libraryID: 1, itemKey: 'PAPERKEY' });
+    assert.ok(full.jobs.some(job => job.id === JOB_ID && job.status === 'failed'));
+    assert.equal(JSON.stringify(full).includes('reader@example.com'), false);
+    assert.equal(JSON.stringify(full).includes('X-Amz-Signature'), false);
+
+    dialog.querySelector('[data-diagnostic-action="open-issue"]').click();
+    assert.deepEqual(launched, ['https://github.com/tenglvjun/mktero/issues/new']);
 });
 
 function jsonResponse(status, body) {

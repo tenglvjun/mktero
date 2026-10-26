@@ -200,11 +200,8 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         append: button => toolbarButtons.push(button),
     });
 
-    const markdownButton = toolbarButtons.find(button => (
-        button.className.includes('mktero-markdown-button')
-    ));
-    assert.ok(markdownButton);
-    markdownButton.click();
+    assert.equal(toolbarButtons.length, 1);
+    toolbarButtons[0].click();
     const markdownRoot = await waitFor(() => mainWindow.tabRoot('tab-1'));
     const markdownShadow = markdownRoot.shadowRoot;
     const graphButton = await waitFor(() => {
