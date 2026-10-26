@@ -24,20 +24,27 @@ const EXTRA_COMMAND_SYMBOLS = new Map([
     ['ne', '≠'],
     ['pm', '±'],
     ['mp', '∓'],
-    ['ast', '*'],
-    ['star', '⋆'],
     ['circ', '∘'],
     ['bullet', '•'],
-    ['prime', '′'],
     ['langle', '⟨'],
     ['rangle', '⟩'],
     ['lbrace', ''],
     ['rbrace', ''],
 ]);
 
+// \max, \log and the other operator names print their name as upright
+// letters, which the PDF text layer keeps ("arg max", "log N").
+const OPERATOR_NAMES = [
+    'arccos', 'arcsin', 'arctan', 'arg', 'cos', 'cosh', 'cot', 'coth', 'csc',
+    'deg', 'det', 'dim', 'exp', 'gcd', 'hom', 'inf', 'ker', 'lg', 'lim',
+    'liminf', 'limsup', 'ln', 'log', 'max', 'min', 'Pr', 'sec', 'sin', 'sinh',
+    'sup', 'tan', 'tanh',
+];
+
 const COMMAND_SYMBOLS = new Map([
     ...LATEX_MATH_SYMBOLS,
     ...EXTRA_COMMAND_SYMBOLS,
+    ...OPERATOR_NAMES.map(name => [name, name]),
 ]);
 
 // Glyphs that print the same symbol under different code points.
@@ -59,8 +66,23 @@ const CANONICAL_SYMBOLS = new Map([
     ['⋅', '·'],
 ]);
 
-const KEPT_CHARACTER = /^(?:\p{L}|\p{N}|\p{Sm}|[|·∼∈∉⊂⊃⊆⊇∪∩∅∀∃∂∇∞≈≃≡∝≪≫′⋆∘•⟨⟩→←↔⇒⇐↦])$/u;
-const MATH_MARKUP = /\\[A-Za-z]+|[_^]\{|\$|[\p{Script=Greek}∼∈∉⊂⊃⊆⊇∪∩∑∏∫∂∇∞≈≃≡∝≤≥≠±∣]/u;
+// Glyphs the two spellings of one formula do not share, so neither key
+// keeps them:
+// - a hat, caron, macron, acute or grave the PDF text layer keeps as its own
+//   spacing glyph ("ˆy" for \hat{y}), where TeX has only the accent command.
+//   Accents that decompose to combining marks are already dropped by NFKC.
+// - a prime: MinerU writes ' or \prime, the PDF prints ′ (″ is two of them).
+// - a star: MinerU writes *, \ast or \star, the PDF prints ∗, ⋆ or ★.
+const DROPPED_GLYPHS = new Set([
+    '\u02C6', '\u02C7', '\u02C9', '\u02CA', '\u02CB',
+    '\u02B9', '\u2032',
+    '\u2217', '\u22C6', '\u2605',
+]);
+
+const KEPT_CHARACTER = /^(?:\p{L}|\p{N}|\p{Sm}|[|·∼∈∉⊂⊃⊆⊇∪∩∅∀∃∂∇∞≈≃≡∝≪≫∘•⟨⟩→←↔⇒⇐↦])$/u;
+// A spacing accent glyph is how the PDF text layer prints \hat or \bar,
+// so a Zotero highlight over one carries math too.
+const MATH_MARKUP = /\\[A-Za-z]+|[_^]\{|\$|[\p{Script=Greek}∼∈∉⊂⊃⊆⊇∪∩∑∏∫∂∇∞≈≃≡∝≤≥≠±∣\u02C6\u02C7\u02C9\u02CA\u02CB]/u;
 
 /**
  * Index `text` as its math-compact key. `sourceRange(from, length)` maps a
@@ -146,6 +168,7 @@ export function findMathCompactOccurrences(index, needle) {
 function compactCharacters(value) {
     const output = [];
     for (const raw of value.normalize('NFKC')) {
+        if (DROPPED_GLYPHS.has(raw)) continue;
         const canonical = CANONICAL_SYMBOLS.get(raw) || raw;
         for (const character of canonical.toLowerCase()) {
             if (KEPT_CHARACTER.test(character)) output.push(character);
