@@ -2026,3 +2026,33 @@ test('does not move an old caption highlight onto the same text in code', async 
     assert.equal(result.unmatched[0].reason, 'ambiguous');
     assert.deepEqual((await store.get(42))[0].ranges, [{ from: 0, to: 4 }]);
 });
+
+// Dream-RSI: a highlight saved while the `_` of two formulas was hidden as
+// emphasis keeps "C{t}", which the PDF text layer cannot match.
+test('repairs a highlight saved without the subscripts of paired formulas', async () => {
+    const markdown = 'Let $\\mathcal{T}_{t}$ and $C_{t}$ end.';
+    const store = createMemoryStore([{
+        id: 'mktero-local-1',
+        source: 'markdown',
+        type: 'highlight',
+        text: 'Let \\mathcal{T}{t} and C{t} end.',
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: markdown.length }],
+    }]);
+    const synchronized = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation(_itemID, draft) {
+            synchronized.push(draft);
+            return { deferred: true };
+        },
+    });
+
+    const result = await annotations.resolve(42, markdown);
+
+    assert.equal(result.matched[0].text, 'Let \\mathcal{T}_{t} and C_{t} end.');
+    await waitFor(() => synchronized.length === 1);
+    assert.equal(synchronized[0].text, 'Let \\mathcal{T}_{t} and C_{t} end.');
+    assert.equal((await store.get(42))[0].text, 'Let \\mathcal{T}_{t} and C_{t} end.');
+});

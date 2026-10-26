@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     createVisibleMarkdownTextIndex,
+    trimDanglingMarkdownMarkRanges,
     visibleMarkdownTextForRanges,
 } from '../src/markdown/markdown-visible-text.js';
 
@@ -415,5 +416,35 @@ test('a line break inside one HTML table cell separates its words', () => {
             { from: beta, to: beta + 4 },
         ]),
         'Alpha Beta'
+    );
+});
+
+// Dream-RSI: the Markdown parser pairs `_` of two formulas as emphasis.
+test('keeps the subscripts of formulas the parser pairs as emphasis', () => {
+    const markdown = 'Let $\\mathcal{T}_{t}$ and $C_{t}$ end, $x$ ~~a $y~z$ b~~ *real*.';
+    const index = createVisibleMarkdownTextIndex(markdown);
+
+    assert.equal(index.text, 'Let \\mathcal{T}_{t} and C_{t} end, x a y~z b real.');
+    assert.equal(
+        visibleMarkdownTextForRanges(markdown, [{ from: 0, to: markdown.length }]),
+        index.text
+    );
+    assert.equal(
+        createVisibleMarkdownTextIndex('An _emphasised_ and $a_{1}$ word.').text,
+        'An emphasised and a_{1} word.'
+    );
+});
+
+test('keeps a selected subscript whose emphasis pair lies outside the selection', () => {
+    const markdown = 'Let $\\mathcal{T}_{t}$ and $C_{t}$ end.';
+    const to = markdown.indexOf(' and');
+
+    assert.deepEqual(
+        trimDanglingMarkdownMarkRanges(markdown, [{ from: 0, to }]),
+        [{ from: 0, to }]
+    );
+    assert.deepEqual(
+        trimDanglingMarkdownMarkRanges('A *bold* word', [{ from: 0, to: 4 }]),
+        [{ from: 0, to: 2 }, { from: 3, to: 4 }]
     );
 });

@@ -12119,3 +12119,29 @@ test('closes the translated-only comparison hint with Escape', () => {
     editor.destroy();
     dom.window.close();
 });
+
+// Dream-RSI: the `_` of two formulas pair as emphasis in the Markdown parser.
+test('does not italicise prose between formulas whose subscripts pair as emphasis', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Batch $A(\\mathcal{T}_{t}^{k}; W)$ and each node $v \\in C_{t}^{k}$ is *assigned*.';
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const inlineMath = [...document.querySelectorAll('.cm-mktero-math')];
+    const emphasis = [...document.querySelectorAll('.cm-mktero-emphasis')];
+
+    assert.deepEqual(
+        inlineMath.map(widget => widget.querySelector('annotation').textContent),
+        ['A(\\mathcal{T}_{t}^{k}; W)', 'v \\in C_{t}^{k}']
+    );
+    assert.deepEqual(emphasis.map(element => element.textContent), ['assigned']);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});

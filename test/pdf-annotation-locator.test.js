@@ -2633,3 +2633,36 @@ test('keeps an unmatched TeX selection as not found', async () => {
     );
     locator.dispose();
 });
+
+// Dream-RSI, page 5: the PDF prints T_{t}^{k} as "T 𝑘" over "𝑡".
+test('locates a TeX selection whose scripts the PDF prints superscript first', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('Let T \u{1D458}', { y: 700, width: 60, hasEOL: true }),
+        createTextItem(
+            '\u{1D461} denote the new discovery tree after \u{1D458} completed decision rounds, with T 0',
+            { y: 690, width: 700, hasEOL: true }
+        ),
+        createTextItem(
+            '\u{1D461} = {\u{1D45F}}. A node batch \u{1D436}\u{1D458}',
+            { y: 680, width: 300, hasEOL: true }
+        ),
+        createTextItem(
+            '\u{1D461} \u2208 \u{1D434}(T \u{1D458}',
+            { y: 670, width: 120, hasEOL: true }
+        ),
+        createTextItem(
+            '\u{1D461} ; \u{1D44A}) and each node is assigned to a worker.',
+            { y: 660, width: 500, hasEOL: true }
+        ),
+    ]]);
+
+    const located = await locator.locate(
+        42,
+        'Let T_{t}^{k} denote the new discovery tree after k completed decision rounds, with T_{t}^{0} = \\{r\\}. A node batch C_{t}^{k} \\in A(\\mathcal{T}_{t}^{k}; W) and each node is assigned',
+        { pdfPageIndexHint: 0 }
+    );
+
+    assert.equal(located.position.pageIndex, 0);
+    assert.equal(located.position.rects.length, 5);
+    locator.dispose();
+});

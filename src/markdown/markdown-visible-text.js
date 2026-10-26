@@ -19,6 +19,13 @@ const HIDDEN_NODE_NAMES = new Set([
     'QuoteMark',
     'StrikethroughMark',
 ]);
+// The marks of emphasis and strikethrough. Inside a formula `_`, `*` and `~`
+// are TeX, but the Markdown parser does not know about `$`, so it can pair
+// the `_` of `\mathcal{D}_{t}` with the `_` of a later `x_{i}`.
+const MATH_PAIRABLE_MARK_NAMES = new Set([
+    'EmphasisMark',
+    'StrikethroughMark',
+]);
 const HIDDEN_SUBTREE_NAMES = new Set([
     'Comment',
     'CommentBlock',
@@ -65,6 +72,7 @@ export function createVisibleMarkdownTextIndex(
         analyses = null,
         keepLinkTitles = false,
         imageMath = false,
+        legacyMathEmphasis = false,
     } = {}
 ) {
     const { hiddenRanges, mathRanges, imageRanges } = collectHiddenRanges(
@@ -73,7 +81,8 @@ export function createVisibleMarkdownTextIndex(
         readerMarkup,
         analyses,
         keepLinkTitles,
-        imageMath
+        imageMath,
+        legacyMathEmphasis
     );
     const segments = [];
     const chunks = [];
@@ -232,6 +241,7 @@ const NAMED_HTML_ENTITIES = {
 // last document of another open tab, instead of rebuilding on every mouseup.
 const VISIBLE_INDEX_CACHE_LIMIT = 4;
 const visibleIndexCache = new Map();
+const legacyMathEmphasisIndexCache = new Map();
 let htmlTableBlockCache = null;
 
 // Segments of one selection split around hidden page chrome are joined with
@@ -243,7 +253,29 @@ let htmlTableBlockCache = null;
 export function visibleMarkdownTextForRanges(markdown, ranges, { analyses = null } = {}) {
     const source = String(markdown || '');
     if (!Array.isArray(ranges)) return '';
-    const index = visibleIndexFor(source, analyses);
+    return joinedRangeText(source, visibleIndexFor(source, analyses), ranges);
+}
+
+// Selections used to hide the `_` of a formula the Markdown parser paired
+// with a `_` in another formula as emphasis ("\mathcal{T}{t}" for
+// "$\mathcal{T}_{t}$"). Those saved annotations still have to match.
+export function legacyMathEmphasisVisibleTextForRanges(markdown, ranges) {
+    const source = String(markdown || '');
+    if (!Array.isArray(ranges)) return '';
+    let index = legacyMathEmphasisIndexCache.get(source);
+    if (!index) {
+        index = createVisibleMarkdownTextIndex(source, [], {
+            readerMarkup: true,
+            imageMath: true,
+            legacyMathEmphasis: true,
+        });
+        legacyMathEmphasisIndexCache.clear();
+        legacyMathEmphasisIndexCache.set(source, index);
+    }
+    return joinedRangeText(source, index, ranges);
+}
+
+function joinedRangeText(source, index, ranges) {
     let text = '';
     let previous = null;
     for (const range of ranges) {
@@ -545,11 +577,22 @@ function danglingMarkdownMarkRanges(source, selection) {
     const tree = MARKDOWN_PARSER.parse(source);
     const labels = collectLinkReferenceLabels(tree, source);
     const dangling = [];
+    let formulas = null;
     tree.iterate({
         enter(node) {
             if (!PAIRED_MARK_PARENTS.has(node.name)) return;
             const hidden = hiddenMarkChildren(node.node, source, labels);
             if (!hidden.length) return;
+            // A pair with a mark inside a formula is TeX, shown as written.
+            if (MATH_PAIRABLE_PARENT_NAMES.has(node.name)) {
+                formulas ??= formulaSourceRanges(source, tree);
+                if (hidden.some(mark => overlapsAnyRange(
+                    { start: mark.from, end: mark.to },
+                    formulas
+                ))) {
+                    return;
+                }
+            }
             const covered = node.name !== 'Autolink'
                 && hidden.every(child => selection.some(range => (
                     range.from <= child.from && range.to >= child.to
@@ -565,6 +608,27 @@ function danglingMarkdownMarkRanges(source, selection) {
         },
     });
     return dangling;
+}
+
+const MATH_PAIRABLE_PARENT_NAMES = new Set([
+    'Emphasis',
+    'StrongEmphasis',
+    'Strikethrough',
+]);
+
+// The source of every inline and display formula outside code and HTML.
+function formulaSourceRanges(source, tree) {
+    const excluded = [];
+    tree.iterate({
+        enter(node) {
+            if (!MATH_EXCLUDED_NODE_NAMES.has(node.name)) return undefined;
+            excluded.push({ from: node.from, to: node.to });
+            return false;
+        },
+    });
+    return [...findInlineMathMatches(source), ...findDisplayMathMatches(source)]
+        .filter(match => !overlapsAnyRange(match, excluded))
+        .map(match => ({ from: match.start, to: match.end }));
 }
 
 function hiddenMarkChildren(node, markdown, labels) {
@@ -737,9 +801,12 @@ function collectHiddenRanges(
     readerMarkup = false,
     analyses = null,
     keepLinkTitles = false,
-    imageMath = false
+    imageMath = false,
+    legacyMathEmphasis = false
 ) {
     const ranges = [];
+    // Emphasis and strikethrough marks, grouped by the node they pair in.
+    const pairedMarks = new Map();
     const replacements = [];
     const escapeRanges = [];
     const imageRanges = [];
@@ -774,6 +841,16 @@ function collectHiddenRanges(
             }
             if (node.name === 'Escape') {
                 escapeRanges.push({ from: node.from, to: node.from + 1 });
+            }
+            if (!legacyMathEmphasis
+                && MATH_PAIRABLE_MARK_NAMES.has(node.name)
+                && node.node.parent) {
+                const parent = node.node.parent;
+                const key = `${parent.from}:${parent.to}:${parent.name}`;
+                let marks = pairedMarks.get(key);
+                if (!marks) pairedMarks.set(key, marks = []);
+                marks.push({ from: node.from, to: node.to });
+                return undefined;
             }
             if ((HIDDEN_NODE_NAMES.has(node.name)
                 && !isVisibleMarkdownMark(
@@ -833,6 +910,17 @@ function collectHiddenRanges(
     for (const match of findDisplayMathMatches(markdown)) {
         if (overlapsAnyRange(match, mathExcludedRanges)) continue;
         mathSourceRanges.push({ from: match.start, to: match.end });
+    }
+    // A pair with a mark inside a formula is TeX, not emphasis: the reader
+    // typesets the formula and shows the other mark as written.
+    for (const marks of pairedMarks.values()) {
+        if (marks.some(mark => overlapsAnyRange(
+            { start: mark.from, end: mark.to },
+            mathSourceRanges
+        ))) {
+            continue;
+        }
+        ranges.push(...marks);
     }
     appendMarkdownEscapeRanges(
         ranges,

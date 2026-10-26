@@ -3549,6 +3549,9 @@ function decorateSyntaxNode(node, state, decorations, context) {
         InlineCode: 'cm-mktero-code',
     };
     if (inlineClasses[node.name]) {
+        // `_` inside `$\mathcal{T}_{t}$` and `$C_{t}$` is TeX; the parser
+        // pairs it across the two formulas. The text between stays plain.
+        if (isMathPairedMarkNode(node.node, state)) return;
         decorations.push(Decoration.mark({
             class: inlineClasses[node.name],
         }).range(node.from, node.to));
@@ -3557,7 +3560,7 @@ function decorateSyntaxNode(node, state, decorations, context) {
 
     if (['HeaderMark', 'EmphasisMark', 'StrikethroughMark', 'CodeMark'].includes(node.name)) {
         const parent = node.node.parent;
-        if (parent) {
+        if (parent && !isMathPairedMarkNode(parent, state)) {
             let to = node.to;
             if (node.name === 'HeaderMark' && state.sliceDoc(to, to + 1) === ' ') to++;
             decorations.push(Decoration.replace({}).range(node.from, to));
@@ -4313,6 +4316,32 @@ function wrapRenderedMathAnnotations(container, annotations, translate) {
         wrapper.append(...container.childNodes);
         container.append(wrapper);
     }
+}
+
+const MATH_PAIRABLE_NODE_NAMES = new Set([
+    'Emphasis',
+    'StrongEmphasis',
+    'Strikethrough',
+]);
+
+// Whether an emphasis or strikethrough node has a mark inside an inline
+// formula of its block, so the marks are TeX rather than Markdown.
+function isMathPairedMarkNode(node, state) {
+    if (!MATH_PAIRABLE_NODE_NAMES.has(node?.name)) return false;
+    let block = node.parent;
+    while (block && MATH_PAIRABLE_NODE_NAMES.has(block.name)) block = block.parent;
+    if (!block) return false;
+    const marks = [];
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.name === 'EmphasisMark' || child.name === 'StrikethroughMark') {
+            marks.push(child);
+        }
+    }
+    if (!marks.length) return false;
+    const source = state.sliceDoc(block.from, block.to);
+    return findInlineMathMatches(source).some(match => marks.some(mark => (
+        mark.from < block.from + match.end && mark.to > block.from + match.start
+    )));
 }
 
 function collectExcludedMathRanges(state) {
