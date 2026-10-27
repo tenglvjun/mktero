@@ -8,7 +8,9 @@ import {
 } from '../src/editor/inline-markdown-editor.js';
 import {
     enhanceRenderedTableBlocks,
+    enhanceTableCopyActions,
 } from '../src/editor/table-copy-actions.js';
+import { renderZoteroNoteHTML } from '../src/markdown/zotero-note-html-renderer.js';
 
 const GFM_TABLE = [
     '| Model | Acc. |',
@@ -27,8 +29,8 @@ function createEditor(markdown, options = {}) {
     const editor = createInlineMarkdownEditor({
         parent: document.querySelector('#editor'),
         initialMarkdown: markdown,
-        copyCode: async code => {
-            copies.push(code);
+        copyCode: async (...args) => {
+            copies.push(args);
         },
         ...options,
     });
@@ -59,12 +61,20 @@ test('offers Markdown and CSV copying from a GFM table', async () => {
     assert.equal(buttons[1].textContent, 'Copy as CSV');
 
     await click(buttons[0]);
-    assert.deepEqual(copies, [GFM_TABLE]);
+    assert.deepEqual(copies, [[
+        GFM_TABLE,
+        { html: renderZoteroNoteHTML(GFM_TABLE) },
+    ]]);
+    assert.match(copies[0][1].html, /<table\b/);
     assert.equal(buttons[0].textContent, 'Copied');
 
     // The second action clears the state the first one left behind.
     await click(buttons[1]);
-    assert.deepEqual(copies, [GFM_TABLE, 'Model,Acc.\r\nA,91.2']);
+    assert.deepEqual(copies, [
+        [GFM_TABLE, { html: renderZoteroNoteHTML(GFM_TABLE) }],
+        ['Model,Acc.\r\nA,91.2'],
+    ]);
+    assert.equal(copies[1].length, 1);
     assert.equal(buttons[1].textContent, 'Copied');
     assert.equal(buttons[0].textContent, 'Copy as Markdown');
     assert.equal(buttons[0].dataset.state, undefined);
@@ -85,11 +95,17 @@ test('converts an OCR HTML table back to Markdown and CSV', async () => {
     );
 
     await click(buttons[0]);
-    assert.deepEqual(copies, ['| Raw | Table |\n| --- | --- |']);
+    const gfm = '| Raw | Table |\n| --- | --- |';
+    assert.deepEqual(copies, [[gfm, { html: renderZoteroNoteHTML(gfm) }]]);
+    assert.match(copies[0][1].html, /<table\b/);
     assert.equal(buttons[0].textContent, 'Copied');
 
     await click(buttons[1]);
-    assert.deepEqual(copies, ['| Raw | Table |\n| --- | --- |', 'Raw,Table']);
+    assert.deepEqual(copies, [
+        [gfm, { html: renderZoteroNoteHTML(gfm) }],
+        ['Raw,Table'],
+    ]);
+    assert.equal(copies[1].length, 1);
 
     editor.destroy();
     dom.window.close();
@@ -146,8 +162,8 @@ test('adds table copying to the tables of a saved snapshot', async () => {
     const root = document.querySelector('#root');
     const copies = [];
     const options = {
-        copyCode: async code => {
-            copies.push(code);
+        copyCode: async (...args) => {
+            copies.push(args);
         },
     };
 
@@ -176,9 +192,27 @@ test('adds table copying to the tables of a saved snapshot', async () => {
     );
 
     await click(buttons[0]);
-    assert.deepEqual(copies, ['| A | B |\n| --- | --- |\n| 1 | 2 |']);
+    const gfm = '| A | B |\n| --- | --- |\n| 1 | 2 |';
+    assert.deepEqual(copies, [[gfm, { html: [
+        '<table>',
+        '<thead>',
+        '<tr>',
+        '<th>A</th>',
+        '<th>B</th>',
+        '</tr>',
+        '</thead>',
+        '<tbody><tr>',
+        '<td>1</td>',
+        '<td>2</td>',
+        '</tr>',
+        '</tbody></table>',
+    ].join('\n') }]]);
     await click(buttons[1]);
-    assert.deepEqual(copies, ['| A | B |\n| --- | --- |\n| 1 | 2 |', 'A,B\r\n1,2']);
+    assert.deepEqual(copies, [
+        copies[0],
+        ['A,B\r\n1,2'],
+    ]);
+    assert.equal(copies[1].length, 1);
 
     dom.window.close();
 });
@@ -212,6 +246,72 @@ test('leaves a snapshot table alone when no clipboard handler is available', () 
     assert.equal(root.querySelector('.cm-mktero-table-copy-block'), null);
     assert.equal(root.querySelector('.cm-mktero-table-toolbar'), null);
 
+    dom.window.close();
+});
+
+test('escapes a hostile cell in the Markdown HTML flavor', async () => {
+    const source = [
+        '| Cell |',
+        '| --- |',
+        '| <img src=x onerror=1><script>alert(1)</script> |',
+    ].join('\n');
+    const dom = new JSDOM(
+        '<!doctype html><div id="host"><table><tr><td>x</td></tr></table></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const host = document.querySelector('#host');
+    const copies = [];
+    enhanceTableCopyActions(host, host.querySelector('table'), {
+        copyCode: async (...args) => {
+            copies.push(args);
+        },
+        source,
+    });
+
+    const buttons = [...host.querySelectorAll('.cm-mktero-table-copy')];
+    await click(buttons[0]);
+    assert.equal(copies[0][0], source);
+    const html = copies[0][1].html;
+    assert.match(html, /<table\b/);
+    assert.match(html, /&lt;img src=x onerror=1&gt;/);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.equal(html.includes('<script'), false);
+    assert.equal(html.includes('<img'), false);
+    const parsed = new JSDOM(html).window.document;
+    assert.ok(parsed.querySelector('table'));
+    assert.equal(parsed.querySelector('script, img'), null);
+    for (const element of parsed.querySelectorAll('*')) {
+        for (const attribute of [...element.attributes]) {
+            assert.equal(/^on/i.test(attribute.name), false);
+        }
+    }
+
+    await click(buttons[1]);
+    assert.equal(copies[1].length, 1);
+    assert.equal(typeof copies[1][0], 'string');
+
+    dom.window.close();
+});
+
+test('copies Markdown as text only when note HTML has no table', async () => {
+    const dom = new JSDOM(
+        '<!doctype html><div id="host"><table><tr><td>1</td></tr></table></div>',
+        { pretendToBeVisual: true }
+    );
+    const { document } = dom.window;
+    const host = document.querySelector('#host');
+    const copies = [];
+    enhanceTableCopyActions(host, host.querySelector('table'), {
+        copyCode: async (...args) => {
+            copies.push(args);
+        },
+        source: 'Not a table.',
+    });
+
+    await click(host.querySelector('[data-action="copy-table-markdown"]'));
+
+    assert.deepEqual(copies, [['Not a table.']]);
     dom.window.close();
 });
 

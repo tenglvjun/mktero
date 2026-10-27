@@ -13,6 +13,7 @@ import {
     findInlineMathMatches,
     safeMarkdownLinkURL,
 } from '../markdown/markdown-html.js';
+import { renderZoteroNoteHTML } from '../markdown/zotero-note-html-renderer.js';
 import { translateEnglish } from '../i18n/localization.js';
 import {
     findAcademicTableGroups,
@@ -837,7 +838,11 @@ function enhanceRenderedMathBlock(
         if (copyButton.disabled) return;
         copyButton.disabled = true;
         try {
-            await copyCode(latex);
+            // Rendered on click. Note HTML is kept only when it is real math
+            // markup; a fallback or a renderer failure still copies the TeX.
+            const html = zoteroNoteMathHTML(latex);
+            if (html) await copyCode(latex, { html });
+            else await copyCode(latex);
             copyButton.dataset.state = 'copied';
             copyButton.textContent = translate('markdown.mathCopied');
         }
@@ -851,6 +856,20 @@ function enhanceRenderedMathBlock(
     });
     toolbar.append(copyButton);
     container.append(toolbar);
+}
+
+// Zotero notes store display math as `<pre class="math">$$…$$</pre>`. The
+// snapshot renderer produces that markup; anything else is copied as TeX only.
+function zoteroNoteMathHTML(latex) {
+    try {
+        const html = renderZoteroNoteHTML(`$$\n${latex}\n$$`);
+        return typeof html === 'string' && html.includes('class="math"')
+            ? html
+            : '';
+    }
+    catch {
+        return '';
+    }
 }
 
 /**

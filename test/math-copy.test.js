@@ -20,8 +20,8 @@ function createEditor(markdown, options = {}) {
     const editor = createInlineMarkdownEditor({
         parent: document.querySelector('#editor'),
         initialMarkdown: markdown,
-        copyCode: async code => {
-            copies.push(code);
+        copyCode: async (...args) => {
+            copies.push(args);
         },
         ...options,
     });
@@ -53,7 +53,10 @@ test('copies the rendered LaTeX from a display formula', async () => {
 
     await clickCopyButton(button);
 
-    assert.deepEqual(copies, ['E = mc^2']);
+    assert.deepEqual(copies, [[
+        'E = mc^2',
+        { html: '<pre class="math">$$E = mc^2$$</pre>' },
+    ]]);
     assert.equal(button.dataset.state, 'copied');
     assert.equal(button.textContent, 'LaTeX copied');
     assert.equal(button.disabled, false);
@@ -106,9 +109,10 @@ test('copies the source of a formula shown as plain TeX', async () => {
     await clickCopyButton(button);
 
     assert.equal(copies.length, 1);
-    assert.ok(copies[0].startsWith('a+a+'));
-    assert.ok(copies[0].length > 100);
-    assert.equal(copies[0].includes('$'), false);
+    assert.equal(copies[0].length, 1);
+    assert.ok(copies[0][0].startsWith('a+a+'));
+    assert.ok(copies[0][0].length > 100);
+    assert.equal(copies[0][0].includes('$'), false);
 
     editor.destroy();
     dom.window.close();
@@ -122,7 +126,7 @@ test('copies rejected TeX that the reader shows as plain source', async () => {
     assert.ok(document.querySelector('.cm-mktero-math-display .math-fallback'));
     await clickCopyButton(document.querySelector('.cm-mktero-math-copy'));
 
-    assert.deepEqual(copies, ['\\def\\x{boom}']);
+    assert.deepEqual(copies, [['\\def\\x{boom}']]);
 
     editor.destroy();
     dom.window.close();
@@ -157,8 +161,8 @@ test('adds formula copying to a saved snapshot that keeps TeX', async () => {
     const root = document.querySelector('#root');
     const copies = [];
     const options = {
-        copyCode: async code => {
-            copies.push(code);
+        copyCode: async (...args) => {
+            copies.push(args);
         },
     };
 
@@ -180,7 +184,68 @@ test('adds formula copying to a saved snapshot that keeps TeX', async () => {
 
     await clickCopyButton(wrapper.querySelector('.cm-mktero-math-copy'));
 
-    assert.deepEqual(copies, ['E = mc^2']);
+    assert.deepEqual(copies, [[
+        'E = mc^2',
+        { html: '<pre class="math">$$E = mc^2$$</pre>' },
+    ]]);
 
+    dom.window.close();
+});
+
+test('escapes hostile TeX in the formula HTML flavor', async () => {
+    const latex = '<img src=x onerror=1>';
+    const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const root = document.querySelector('#root');
+    const pre = document.createElement('pre');
+    pre.className = 'math';
+    pre.textContent = `$$${latex}$$`;
+    root.append(pre);
+    const copies = [];
+    enhanceRenderedMathBlocks(root, document, {
+        copyCode: async (...args) => {
+            copies.push(args);
+        },
+    });
+
+    await clickCopyButton(root.querySelector('.cm-mktero-math-copy'));
+
+    assert.equal(copies[0][0], latex);
+    assert.equal(
+        copies[0][1].html,
+        '<pre class="math">$$&lt;img src=x onerror=1&gt;$$</pre>'
+    );
+    const html = copies[0][1].html;
+    assert.equal(html.includes('<img'), false);
+    assert.equal(html.includes('<script'), false);
+    assert.match(html, /class="math"/);
+    const parsed = new JSDOM(html).window.document;
+    assert.equal(parsed.querySelector('img, script'), null);
+    assert.equal(parsed.querySelector('pre.math').textContent, `$$${latex}$$`);
+    for (const element of parsed.querySelectorAll('*')) {
+        for (const attribute of [...element.attributes]) {
+            assert.equal(/^on/i.test(attribute.name), false);
+        }
+    }
+
+    dom.window.close();
+});
+
+test('copies a display formula as Zotero note math HTML', async () => {
+    const latex = 'a^2+b^2=c^2';
+    const { dom, document, editor, copies } = createEditor(
+        `$$\n${latex}\n$$`
+    );
+
+    await clickCopyButton(document.querySelector('.cm-mktero-math-copy'));
+
+    assert.deepEqual(copies, [[
+        latex,
+        { html: `<pre class="math">$$${latex}$$</pre>` },
+    ]]);
+
+    editor.destroy();
     dom.window.close();
 });

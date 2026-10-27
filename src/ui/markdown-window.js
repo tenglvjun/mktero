@@ -47,6 +47,12 @@ import {
     MARKDOWN_READER_FONT_SIZE_MIN as MIN_READER_FONT_SIZE,
     MARKDOWN_READER_LINE_HEIGHT_DEFAULT,
     MARKDOWN_READER_LINE_HEIGHT_OPTIONS,
+    MARKDOWN_READER_NOTES_WIDTH_DEFAULT,
+    MARKDOWN_READER_NOTES_WIDTH_MAX,
+    MARKDOWN_READER_NOTES_WIDTH_MIN,
+    MARKDOWN_READER_OUTLINE_WIDTH_DEFAULT,
+    MARKDOWN_READER_OUTLINE_WIDTH_MAX,
+    MARKDOWN_READER_OUTLINE_WIDTH_MIN,
     MARKDOWN_READER_SOURCE_PEEK_DEFAULT,
     MARKDOWN_READER_WIDTH_DEFAULT,
     MARKDOWN_READER_WIDTH_OPTIONS,
@@ -54,9 +60,17 @@ import {
     normalizeMarkdownReaderFont,
     normalizeMarkdownReaderFontSize,
     normalizeMarkdownReaderLineHeight,
+    normalizeMarkdownReaderPanelLayout,
     normalizeMarkdownReaderSourcePeek,
     normalizeMarkdownReaderWidth,
 } from '../config/reader-preferences.js';
+import {
+    NOTE_ANNOTATION_NOT_IN_PDF,
+    NOTE_EDITOR_UNAVAILABLE,
+    NOTE_SELECTION_NOT_LOCATED,
+    noteBridgeError,
+} from '../core/zotero-note-bridge.js';
+import { createZoteroNotesPanel } from './zotero-notes-panel.js';
 import {
     accessibleAnnotationText,
     annotationSynchronizationLabelKey,
@@ -155,6 +169,23 @@ const WARNING_TOAST_TIMEOUT_MS = 5_000;
 const CORRECTION_UNDO_TIMEOUT_MS = 8_000;
 const OUTLINE_SEGMENT_HEADINGS = 'headings';
 const OUTLINE_SEGMENT_FIGURES = 'figures';
+const OUTLINE_SEGMENT_ANNOTATIONS = 'annotations';
+const OUTLINE_SEGMENTS = Object.freeze([
+    OUTLINE_SEGMENT_HEADINGS,
+    OUTLINE_SEGMENT_FIGURES,
+    OUTLINE_SEGMENT_ANNOTATIONS,
+]);
+const OUTLINE_SEGMENT_LABEL_KEYS = Object.freeze({
+    [OUTLINE_SEGMENT_HEADINGS]: 'viewer.outlineHeadings',
+    [OUTLINE_SEGMENT_FIGURES]: 'viewer.outlineFigures',
+    [OUTLINE_SEGMENT_ANNOTATIONS]: 'viewer.outlineAnnotations',
+});
+// Why a note cannot take an annotation, by the bridge's error code.
+const ADD_TO_NOTE_ERROR_KEYS = new Map([
+    [NOTE_EDITOR_UNAVAILABLE, 'notes.addToNoteNeedsNote'],
+    [NOTE_ANNOTATION_NOT_IN_PDF, 'notes.addToNoteNotInPDF'],
+    [NOTE_SELECTION_NOT_LOCATED, 'notes.addToNoteNotLocated'],
+]);
 const SOURCE_PEEK_DELAY_MS = 80;
 const READING_POSITION_SAVE_DELAY_MS = 500;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
@@ -228,9 +259,9 @@ const SIDE_PANEL_CONFIG = Object.freeze({
         resizerKey: 'outlineResizer',
         toggleKey: 'outlineToggle',
         widthProperty: '--outline-width',
-        defaultWidth: 256,
-        minWidth: 180,
-        maxWidth: 480,
+        defaultWidth: MARKDOWN_READER_OUTLINE_WIDTH_DEFAULT,
+        minWidth: MARKDOWN_READER_OUTLINE_WIDTH_MIN,
+        maxWidth: MARKDOWN_READER_OUTLINE_WIDTH_MAX,
         resizeDirection: 1,
         resizeClass: 'is-resizing-outline',
         collapsedClass: 'is-outline-collapsed',
@@ -245,9 +276,9 @@ const SIDE_PANEL_CONFIG = Object.freeze({
         resizerKey: 'notesResizer',
         toggleKey: 'notesToggle',
         widthProperty: '--notes-width',
-        defaultWidth: 300,
-        minWidth: 220,
-        maxWidth: 480,
+        defaultWidth: MARKDOWN_READER_NOTES_WIDTH_DEFAULT,
+        minWidth: MARKDOWN_READER_NOTES_WIDTH_MIN,
+        maxWidth: MARKDOWN_READER_NOTES_WIDTH_MAX,
         resizeDirection: -1,
         resizeClass: 'is-resizing-notes',
         collapsedClass: 'is-notes-collapsed',
@@ -281,6 +312,10 @@ export function createMarkdownTabView({
     onReaderSourcePeekChange = null,
     sourcePeekDelay = SOURCE_PEEK_DELAY_MS,
     readingPositionDelay = READING_POSITION_SAVE_DELAY_MS,
+    // The layout the reader left in the last tab, and where to report a
+    // change the reader makes. Responsive collapsing is not reported.
+    panelLayout = null,
+    onPanelLayoutChange = null,
 }) {
     return new MarkdownTabView({
         document,
@@ -304,6 +339,8 @@ export function createMarkdownTabView({
         onReaderSourcePeekChange,
         sourcePeekDelay,
         readingPositionDelay,
+        panelLayout,
+        onPanelLayoutChange,
     });
 }
 
@@ -330,6 +367,8 @@ class MarkdownTabView {
         onReaderSourcePeekChange,
         sourcePeekDelay,
         readingPositionDelay,
+        panelLayout,
+        onPanelLayoutChange,
     }) {
         this.localization = localization;
         this.t = localization.t.bind(localization);
@@ -450,13 +489,22 @@ class MarkdownTabView {
         this.displayedMarkdownLength = 0;
         this.activeTranslationFailureID = null;
         this.listeners = [];
+        const initialPanelLayout = normalizeMarkdownReaderPanelLayout(
+            panelLayout || {}
+        );
+        this.onPanelLayoutChange = typeof onPanelLayoutChange === 'function'
+            ? onPanelLayoutChange
+            : null;
+        this.outlineSegment = initialPanelLayout.outlineSegment;
+        this.notesColumnAvailable = false;
+        this.zoteroNotesAdapter = null;
         this.sidePanels = Object.fromEntries(
             Object.entries(SIDE_PANEL_CONFIG).map(([name, config]) => [
                 name,
                 {
                     ...config,
-                    visible: true,
-                    width: config.defaultWidth,
+                    visible: initialPanelLayout[name].visible,
+                    width: initialPanelLayout[name].width,
                     resize: null,
                 },
             ])
@@ -490,6 +538,22 @@ class MarkdownTabView {
         this.mount.appendChild(this.createStylesheet(stylesheetText));
         this.elements = this.createContent();
         this.mount.appendChild(this.elements.view);
+        this.zoteroNotesPanel = createZoteroNotesPanel({
+            document: this.document,
+            host: this.host,
+            aside: this.elements.notes,
+            translate: this.t,
+            onStateChange: () => this.syncZoteroNotesState(),
+            onError: error => this.reportNotesFailure(error),
+        });
+        this.syncOutlineSegmentButtons();
+        for (const name of Object.keys(SIDE_PANEL_CONFIG)) {
+            this.setSidePanelWidth(name, this.sidePanels[name].width);
+            this.setSidePanelVisibility(name, this.sidePanels[name].visible, {
+                source: 'restore',
+            });
+        }
+        this.syncZoteroNotesAdapter(model);
         this.confirmationDialog = createConfirmationDialog({
             document: this.document,
             parent: this.elements.view,
@@ -532,7 +596,7 @@ class MarkdownTabView {
             onCopyDeliveryFailed: () => this.reportCopyDeliveryFailure(),
             onCopyDeliveryError: error => this.zotero?.logError?.(error),
             copyCode: typeof model?.onCopyCode === 'function'
-                ? code => this.copyCode(code)
+                ? (code, options) => this.copyCode(code, options)
                 : null,
             translateSelection: typeof model?.onTranslateSelection === 'function'
                 ? (
@@ -559,6 +623,13 @@ class MarkdownTabView {
             openSourceLocation: location => this.openSourceLocation(location),
             openAnnotationInPDF: annotationID => (
                 this.openAnnotationInPDF(annotationID)
+            ),
+            addToNoteState: annotation => this.addToNoteState(annotation),
+            addAnnotationToNote: annotationID => (
+                this.addAnnotationToNote(annotationID)
+            ),
+            addSelectionToNote: (annotation, selectionContext) => (
+                this.addSelectionToNote(annotation, selectionContext)
             ),
             onSourceNavigationError: error => this.zotero?.logError?.(error),
             onAnnotationActionError: (messageKey, error) => (
@@ -623,6 +694,7 @@ class MarkdownTabView {
         this.model = model;
         const elements = this.elements;
         this.syncLocalization();
+        this.syncZoteroNotesAdapter(model);
         if (model.status !== 'ready' || model.renderMode === 'html') {
             this.clearCorrectionUndo();
         }
@@ -1037,6 +1109,7 @@ class MarkdownTabView {
         this.listeners = [];
         this.responsiveResizeObserver?.disconnect?.();
         this.responsiveResizeObserver = null;
+        this.zoteroNotesPanel?.destroy();
         this.confirmationDialog.destroy();
         this.editor?.destroy();
         this.revokeAssetURLs();
@@ -1074,11 +1147,15 @@ class MarkdownTabView {
         return this.model.onCopySourcedMarkdown(sourceTarget);
     }
 
-    copyCode(code) {
+    // `options.html` is an optional rich copy of the same content (a table
+    // or a formula), so a paste into a Zotero note keeps its structure.
+    copyCode(code, options) {
         if (typeof this.model.onCopyCode !== 'function') {
             throw new Error('Code copy is unavailable');
         }
-        return this.model.onCopyCode(code);
+        return options === undefined
+            ? this.model.onCopyCode(code)
+            : this.model.onCopyCode(code, options);
     }
 
     canDeliverReaderCopy(model = this.model) {
@@ -1220,6 +1297,23 @@ class MarkdownTabView {
         if (typeof this.model.onCreateMarkdownAnnotation !== 'function') {
             throw new Error('Markdown annotation creation is unavailable');
         }
+        const draft = await this.prepareMarkdownAnnotationDraft(
+            annotation,
+            selectionContext
+        );
+        const saved = await this.model.onCreateMarkdownAnnotation(draft);
+        this.model.annotationOverlay = appendMatchedAnnotation(
+            this.model.annotationOverlay,
+            saved
+        );
+        this.render(this.model);
+        return saved;
+    }
+
+    // A Markdown selection as a PDF locator draft: the original-text ranges,
+    // the page hint, the OCR region, and the quote context. Highlights and
+    // "Add to Note" locate a selection the same way.
+    async prepareMarkdownAnnotationDraft(annotation, selectionContext) {
         if (this.model.translationView === 'translated') {
             throw new Error('Markdown annotations require original text');
         }
@@ -1282,13 +1376,139 @@ class MarkdownTabView {
             ...(pdfRegion ? { pdfRegion } : {}),
             ...(textQuote ? { textQuote } : {}),
         };
-        const saved = await this.model.onCreateMarkdownAnnotation(draft);
-        this.model.annotationOverlay = appendMatchedAnnotation(
+        return draft;
+    }
+
+    // The model's `zoteroNotes` is the tab's notes bridge. It is fixed for a
+    // tab, but the PDF it resolves can arrive later (a saved snapshot learns
+    // its source PDF after it opens), so a new source refreshes the list.
+    syncZoteroNotesAdapter(model = this.model) {
+        if (!this.zoteroNotesPanel) return;
+        const adapter = typeof model?.zoteroNotes?.list === 'function'
+            ? model.zoteroNotes
+            : null;
+        const sourceKey = String(model?.sourceItemID ?? '');
+        if (adapter !== this.zoteroNotesAdapter) {
+            this.zoteroNotesAdapter = adapter;
+            this.zoteroNotesSourceKey = sourceKey;
+            this.zoteroNotesPanel.setAdapter(adapter);
+            this.setNotesColumnAvailable(Boolean(adapter));
+            return;
+        }
+        if (adapter && sourceKey !== this.zoteroNotesSourceKey) {
+            this.zoteroNotesSourceKey = sourceKey;
+            void this.zoteroNotesPanel.refresh();
+        }
+    }
+
+    // Without a notes bridge (the browser preview, a test, a PDF that is
+    // gone) the right column and its edge are not shown at all.
+    setNotesColumnAvailable(available) {
+        const next = Boolean(available);
+        if (next === this.notesColumnAvailable) return;
+        this.notesColumnAvailable = next;
+        this.renderSidePanelVisibility('notes');
+    }
+
+    syncZoteroNotesState() {
+        const panel = this.zoteroNotesPanel;
+        if (!panel || !this.elements?.annotationsNoteButton) return;
+        this.elements.annotationsNoteButton.hidden = !panel.canCreateFromAnnotations;
+        this.elements.annotationsToolbar.hidden = this.elements.notesCount.hidden
+            && !panel.canCreateFromAnnotations;
+        for (const button of this.elements.notesList.querySelectorAll(
+            '.markdown-note-add-to-note'
+        )) {
+            this.syncAddToNoteButton(button);
+        }
+    }
+
+    syncAddToNoteButton(button, annotation = findOverlayAnnotation(
+        this.displayedAnnotationOverlay || this.model.annotationOverlay,
+        button.getAttribute('data-annotation-id')
+    )) {
+        const state = this.addToNoteState(annotation);
+        button.hidden = state.status === 'hidden';
+        button.setAttribute('aria-disabled', state.status === 'enabled' ? 'false' : 'true');
+        const label = this.t(state.status === 'enabled'
+            ? 'notes.addToNote'
+            : state.reasonKey || 'notes.addToNote');
+        button.setAttribute('aria-label', label);
+        button.setAttribute('title', label);
+    }
+
+    // Whether "Add to Note" can take this annotation (or, without one, a
+    // Markdown selection) right now: hidden when the tab has no notes column,
+    // disabled with a reason, or enabled. A disabled control stays focusable
+    // and explains itself when used, since a disabled button shows no tooltip.
+    addToNoteState(annotation = null) {
+        const panel = this.zoteroNotesPanel;
+        if (!panel?.available) return { status: 'hidden' };
+        if (annotation && isMarkdownAnnotation(annotation)) {
+            return { status: 'disabled', reasonKey: 'notes.addToNoteNotInPDF' };
+        }
+        if (!panel.canInsert) {
+            return { status: 'disabled', reasonKey: 'notes.addToNoteNeedsNote' };
+        }
+        return { status: 'enabled' };
+    }
+
+    async addAnnotationToNote(annotationID) {
+        const annotation = findOverlayAnnotation(
             this.model.annotationOverlay,
-            saved
+            annotationID
         );
-        this.render(this.model);
-        return saved;
+        if (annotation && isMarkdownAnnotation(annotation)) {
+            throw noteBridgeError(
+                NOTE_ANNOTATION_NOT_IN_PDF,
+                'The annotation has not reached the PDF yet'
+            );
+        }
+        const panel = this.requireInsertableNote();
+        const adapter = this.zoteroNotesAdapter;
+        const annotations = await adapter.annotationsForNote([annotationID]);
+        await panel.insertAnnotations(annotations);
+    }
+
+    async addSelectionToNote(annotation, selectionContext) {
+        const panel = this.requireInsertableNote();
+        const draft = await this.prepareMarkdownAnnotationDraft(
+            annotation,
+            selectionContext
+        );
+        const annotations = await this.zoteroNotesAdapter.selectionForNote(draft);
+        await panel.insertAnnotations(annotations);
+    }
+
+    requireInsertableNote() {
+        const panel = this.zoteroNotesPanel;
+        if (!panel?.available) {
+            throw new Error('Zotero notes are unavailable');
+        }
+        if (!panel.canInsert) {
+            throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'No note is open');
+        }
+        return panel;
+    }
+
+    async createNoteFromAnnotations() {
+        const panel = this.zoteroNotesPanel;
+        if (!panel?.canCreateFromAnnotations) return;
+        if (!this.sidePanels.notes.visible) {
+            this.setSidePanelVisibility('notes', true, { source: 'user' });
+        }
+        await panel.createFromAnnotations();
+    }
+
+    // An expected refusal (no open note, an annotation not in the PDF yet, a
+    // passage the PDF index cannot place) is explained, not logged.
+    reportNotesFailure(error, messageKey = 'notes.actionFailed') {
+        const expectedKey = ADD_TO_NOTE_ERROR_KEYS.get(error?.code);
+        if (error && !expectedKey) this.zotero?.logError?.(error);
+        if (this.destroyed || !this.elements?.actionStatus) return;
+        this.setDocumentActionStatus(expectedKey || messageKey, {
+            dismissAfter: true,
+        });
     }
 
     removeVisibleAnnotation(annotationID) {
@@ -1652,24 +1872,18 @@ class MarkdownTabView {
             this.t('viewer.outlineTitle')
         );
         outlineTitle.appendChild(outlineTitleLabel);
-        const outlineHeadingsButton = this.createOutlineSegmentButton(
-            OUTLINE_SEGMENT_HEADINGS,
-            'viewer.outlineHeadings'
-        );
-        const outlineFiguresButton = this.createOutlineSegmentButton(
-            OUTLINE_SEGMENT_FIGURES,
-            'viewer.outlineFigures'
-        );
+        const outlineSegmentButtons = OUTLINE_SEGMENTS.map(segment => (
+            this.createOutlineSegmentButton(
+                segment,
+                OUTLINE_SEGMENT_LABEL_KEYS[segment]
+            )
+        ));
         const outlineSegments = this.createElement('div', {
             class: 'markdown-outline-segments',
             role: 'tablist',
             'aria-label': this.t('viewer.outlineSections'),
         });
-        appendChildren(
-            outlineSegments,
-            outlineHeadingsButton,
-            outlineFiguresButton
-        );
+        appendChildren(outlineSegments, ...outlineSegmentButtons);
         const outlineHeader = this.createElement('div', {
             class: 'markdown-outline-header',
         });
@@ -1680,43 +1894,13 @@ class MarkdownTabView {
             role: 'tabpanel',
             'aria-labelledby': 'mktero-outline-segment-headings',
         });
-        const outline = this.createElement('aside', {
-            id: 'mktero-outline',
-            class: 'markdown-outline',
-            'aria-label': this.t('viewer.outline'),
-        });
-        appendChildren(outline, outlineHeader, outlineList);
-        outline.style.setProperty(
-            '--outline-width',
-            `${this.sidePanels.outline.width}px`
-        );
-        const outlineControls = this.createSidePanelEdge('outline');
 
-        const notesTitle = this.createElement('h2', {
-            class: 'markdown-notes-title',
-        });
-        notesTitle.appendChild(createLucideIcon(
-            this.document,
-            LUCIDE_ICONS.messageSquareText,
-            { className: 'markdown-panel-title-icon', size: 16 }
-        ));
-        const notesTitleLabel = this.createElement(
-            'span',
-            { class: 'markdown-panel-title-label' },
-            this.t('viewer.notesTitle')
-        );
-        notesTitle.appendChild(notesTitleLabel);
+        // The paper's annotations, the third segment of the left column, as
+        // in the Zotero PDF reader's sidebar.
         const notesCount = this.createElement('span', {
             class: 'markdown-notes-count',
         });
-        const notesTitleActions = this.createElement('span', {
-            class: 'markdown-notes-title-actions',
-        });
-        notesTitleActions.appendChild(notesCount);
-        const notesTitleRow = this.createElement('div', {
-            class: 'markdown-notes-title-row',
-        });
-        appendChildren(notesTitleRow, notesTitle, notesTitleActions);
+        notesCount.hidden = true;
         const notesSearchInput = this.createElement('input', {
             id: 'mktero-notes-search',
             class: 'markdown-notes-search-input',
@@ -1732,6 +1916,27 @@ class MarkdownTabView {
         });
         notesSearch.appendChild(notesSearchInput);
         notesSearch.hidden = true;
+        const annotationsNoteButton = this.createElement('button', {
+            class: 'markdown-annotations-note-button',
+            type: 'button',
+            'aria-label': this.t('notes.fromAnnotations'),
+            title: this.t('notes.fromAnnotations'),
+        });
+        annotationsNoteButton.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.notebookPen,
+            { className: 'markdown-annotations-note-icon', size: 15 }
+        ));
+        annotationsNoteButton.hidden = true;
+        const annotationsToolbar = this.createElement('div', {
+            class: 'markdown-annotations-toolbar',
+        });
+        appendChildren(
+            annotationsToolbar,
+            notesSearch,
+            notesCount,
+            annotationsNoteButton
+        );
         const notesFilters = this.createElement('div', {
             class: 'markdown-notes-filters',
         });
@@ -1739,16 +1944,35 @@ class MarkdownTabView {
         const notesHeader = this.createElement('div', {
             class: 'markdown-notes-header',
         });
-        appendChildren(notesHeader, notesTitleRow, notesSearch, notesFilters);
+        appendChildren(notesHeader, annotationsToolbar, notesFilters);
         const notesList = this.createElement('ol', {
             class: 'markdown-notes-list',
         });
+        const annotationsPanel = this.createElement('div', {
+            id: 'mktero-annotations',
+            class: 'markdown-annotations',
+            role: 'tabpanel',
+            'aria-labelledby': 'mktero-outline-segment-annotations',
+        });
+        appendChildren(annotationsPanel, notesHeader, notesList);
+        const outline = this.createElement('aside', {
+            id: 'mktero-outline',
+            class: 'markdown-outline',
+            'aria-label': this.t('viewer.outline'),
+        });
+        appendChildren(outline, outlineHeader, outlineList, annotationsPanel);
+        outline.style.setProperty(
+            '--outline-width',
+            `${this.sidePanels.outline.width}px`
+        );
+        const outlineControls = this.createSidePanelEdge('outline');
+
+        // The paper's Zotero notes. The notes panel fills it.
         const notes = this.createElement('aside', {
             id: 'mktero-notes',
             class: 'markdown-notes',
             'aria-label': this.t('viewer.notes'),
         });
-        appendChildren(notes, notesHeader, notesList);
         notes.style.setProperty(
             '--notes-width',
             `${this.sidePanels.notes.width}px`
@@ -1797,14 +2021,16 @@ class MarkdownTabView {
             outlineTitle,
             outlineTitleLabel,
             outlineSegments,
-            outlineSegmentButtons: [outlineHeadingsButton, outlineFiguresButton],
+            outlineSegmentButtons,
             outlineList,
             outlineResizer: outlineControls.resizer,
             outlineToggle: outlineControls.toggle,
+            outlineEdge: outlineControls.edge,
+            annotationsPanel,
+            annotationsToolbar,
+            annotationsNoteButton,
             notes,
             notesHeader,
-            notesTitle,
-            notesTitleLabel,
             notesCount,
             notesSearch,
             notesSearchInput,
@@ -1812,6 +2038,7 @@ class MarkdownTabView {
             notesList,
             notesResizer: notesControls.resizer,
             notesToggle: notesControls.toggle,
+            notesEdge: notesControls.edge,
             readingLayout,
             primaryPane,
             editorHost,
@@ -2910,10 +3137,12 @@ class MarkdownTabView {
             role: 'tab',
             id: `mktero-outline-segment-${segment}`,
             'data-outline-segment': segment,
-            'aria-selected': segment === OUTLINE_SEGMENT_HEADINGS
+            'aria-selected': segment === this.outlineSegment
                 ? 'true'
                 : 'false',
-            'aria-controls': 'mktero-outline-list',
+            'aria-controls': segment === OUTLINE_SEGMENT_ANNOTATIONS
+                ? 'mktero-annotations'
+                : 'mktero-outline-list',
         }, this.t(labelKey));
     }
 
@@ -2936,6 +3165,7 @@ class MarkdownTabView {
         // Bubble phase: the editor consumes the chord first when it has focus,
         // so this only runs when focus is on the outline, notes, or toolbar.
         this.listen(this.host, 'keydown', event => {
+            if (this.isHostedNoteEvent(event)) return;
             this.handleNavigationShortcut(event);
         });
         this.listen(this.elements.documentSearchToggle, 'click', () => {
@@ -2975,6 +3205,7 @@ class MarkdownTabView {
             this.handleDocumentSearchInputKeydown(event);
         });
         this.listen(this.host, 'keydown', event => {
+            if (this.isHostedNoteEvent(event)) return;
             this.handleDocumentSearchShortcut(event);
         }, true);
         this.listen(this.ownerWindow, 'keydown', event => {
@@ -3004,6 +3235,7 @@ class MarkdownTabView {
         // while that note is focused. Selecting the tab focuses this surface,
         // because opening it otherwise leaves the keyboard on the Zotero chrome.
         this.listen(this.mount, 'keydown', event => {
+            if (this.isHostedNoteEvent(event)) return;
             this.handleReaderJumpShortcut(event);
         });
         this.listen(this.elements.actionToggle, 'click', () => {
@@ -3309,6 +3541,21 @@ class MarkdownTabView {
             }
         });
         this.listen(this.elements.notesList, 'click', event => {
+            const addToNote = event.target?.closest?.(
+                '.markdown-note-add-to-note'
+            );
+            if (addToNote && this.elements.notesList.contains(addToNote)) {
+                const annotationID = addToNote.getAttribute('data-annotation-id');
+                this.runNoteButtonAction(addToNote, async () => {
+                    try {
+                        await this.addAnnotationToNote(annotationID);
+                    }
+                    catch (error) {
+                        this.reportNotesFailure(error, 'notes.addToNoteFailed');
+                    }
+                });
+                return;
+            }
             const openPDF = event.target?.closest?.(
                 '.markdown-note-open-pdf'
             );
@@ -3377,6 +3624,17 @@ class MarkdownTabView {
             if (!color || !this.elements.notesFilters.contains(color)) return;
             if (color.disabled) return;
             this.toggleNoteColor(color.getAttribute('data-note-color'));
+        });
+        this.listen(this.elements.annotationsNoteButton, 'click', () => {
+            const button = this.elements.annotationsNoteButton;
+            this.runNoteButtonAction(button, async () => {
+                try {
+                    await this.createNoteFromAnnotations();
+                }
+                catch (error) {
+                    this.reportNotesFailure(error);
+                }
+            });
         });
         this.bindSidePanelActions('outline');
         this.bindSidePanelActions('notes');
@@ -4669,6 +4927,30 @@ class MarkdownTabView {
         this.editor?.focus?.();
     }
 
+    // Zotero's note editor sits in the host's light DOM, slotted into the
+    // notes column, so its keys reach the host and the shadow root. They
+    // belong to the note, the same as keys typed in Zotero's context pane.
+    isHostedNoteEvent(event) {
+        const container = this.zoteroNotesPanel?.editorContainer;
+        if (!container) return false;
+        const candidates = [
+            event.originalTarget,
+            event.explicitOriginalTarget,
+            event.target,
+        ];
+        if (typeof event.composedPath === 'function') {
+            candidates.push(...event.composedPath());
+        }
+        return candidates.some(node => (
+            node
+            && typeof node === 'object'
+            && (node === container
+                || container.contains?.(node)
+                || (node.ownerDocument
+                    && node.ownerDocument !== this.document))
+        ));
+    }
+
     // The note editor is an iframe in this same window. Its Cmd+F and
     // history chord are delivered here with the frame, or with the caret's
     // own document, as the target. Either one belongs to the note.
@@ -5486,13 +5768,12 @@ class MarkdownTabView {
         for (const button of this.elements.outlineSegmentButtons) {
             const segment = button.getAttribute('data-outline-segment');
             button.textContent = this.t(
-                segment === OUTLINE_SEGMENT_FIGURES
-                    ? 'viewer.outlineFigures'
-                    : 'viewer.outlineHeadings'
+                OUTLINE_SEGMENT_LABEL_KEYS[segment] || 'viewer.outlineHeadings'
             );
         }
         this.renderOutlineList();
         this.syncNoteListLabels();
+        this.zoteroNotesPanel?.syncLocalization();
         this.syncSidePanelControlLabels('outline');
         this.syncSidePanelControlLabels('notes');
     }
@@ -6277,8 +6558,11 @@ class MarkdownTabView {
     finishSidePanelResize(name) {
         const panel = this.sidePanels[name];
         if (!panel.resize) return;
+        const resized = panel.resize.active
+            && panel.width !== panel.resize.widthAtStart;
         panel.resize = null;
         this.elements.workspace.classList.remove(panel.resizeClass);
+        if (resized) this.reportPanelLayout({ [name]: { width: panel.width } });
     }
 
     cancelSidePanelResize(name, { keepActive = false } = {}) {
@@ -6305,9 +6589,11 @@ class MarkdownTabView {
         resizer.setAttribute('aria-valuenow', String(nextWidth));
     }
 
+    // `source` is 'user' for a reader action, 'responsive' for a collapse the
+    // window width caused, and 'restore' for the saved layout a tab opens
+    // with. Only a reader action is remembered for the next tab.
     setSidePanelVisibility(name, visible, { source = 'user' } = {}) {
         const panel = this.sidePanels[name];
-        const { element, resizer, toggle } = this.sidePanelElements(name);
         this.finishSidePanelResize(name);
         if (source === 'user') {
             const responsive = this.responsivePanels[name];
@@ -6318,7 +6604,20 @@ class MarkdownTabView {
                 && containerWidth <= breakpoint;
         }
         panel.visible = visible;
-        element.hidden = !visible;
+        this.renderSidePanelVisibility(name);
+        if (source === 'user') {
+            this.reportPanelLayout({ [name]: { visible: Boolean(visible) } });
+        }
+    }
+
+    renderSidePanelVisibility(name) {
+        const panel = this.sidePanels[name];
+        const { element, resizer, toggle } = this.sidePanelElements(name);
+        const visible = panel.visible;
+        const available = name !== 'notes' || this.notesColumnAvailable;
+        element.hidden = !visible || !available;
+        const edge = this.elements[`${name}Edge`];
+        if (edge) edge.hidden = !available;
         resizer.classList.toggle(
             panel.collapsedClass,
             !visible
@@ -6328,6 +6627,16 @@ class MarkdownTabView {
         ));
         toggle.setAttribute('aria-expanded', String(visible));
         this.syncSidePanelControlLabels(name);
+    }
+
+    reportPanelLayout(changes) {
+        if (!this.onPanelLayoutChange || this.destroyed) return;
+        try {
+            this.onPanelLayoutChange(changes);
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+        }
     }
 
     syncResponsiveSidePanels(measuredWidth = null) {
@@ -6395,6 +6704,7 @@ class MarkdownTabView {
         if (!(event.key in widths)) return;
         event.preventDefault();
         this.setSidePanelWidth(name, widths[event.key]);
+        this.reportPanelLayout({ [name]: { width: panel.width } });
     }
 
     sidePanelElements(name) {
@@ -6455,14 +6765,12 @@ class MarkdownTabView {
     }
 
     setOutlineSegment(segment) {
-        if (segment !== OUTLINE_SEGMENT_HEADINGS
-            && segment !== OUTLINE_SEGMENT_FIGURES) {
-            return;
-        }
+        if (!OUTLINE_SEGMENTS.includes(segment)) return;
         if (this.outlineSegment === segment) return;
         this.outlineSegment = segment;
         this.syncOutlineSegmentButtons();
-        this.renderOutlineList();
+        if (segment !== OUTLINE_SEGMENT_ANNOTATIONS) this.renderOutlineList();
+        this.reportPanelLayout({ outlineSegment: segment });
     }
 
     syncOutlineSegmentButtons() {
@@ -6472,7 +6780,12 @@ class MarkdownTabView {
                 === this.outlineSegment;
             button.setAttribute('aria-selected', selected ? 'true' : 'false');
         }
-        this.elements.outlineList.setAttribute('aria-labelledby', selectedID);
+        const annotations = this.outlineSegment === OUTLINE_SEGMENT_ANNOTATIONS;
+        this.elements.outlineList.hidden = annotations;
+        this.elements.annotationsPanel.hidden = !annotations;
+        if (!annotations) {
+            this.elements.outlineList.setAttribute('aria-labelledby', selectedID);
+        }
     }
 
     renderOutlineList() {
@@ -6641,8 +6954,16 @@ class MarkdownTabView {
     }
 
     syncNoteListLabels() {
-        this.elements.notes.setAttribute('aria-label', this.t('viewer.notes'));
-        this.elements.notesTitleLabel.textContent = this.t('viewer.notesTitle');
+        this.elements.annotationsPanel.setAttribute(
+            'aria-label',
+            this.t('viewer.annotations')
+        );
+        const fromAnnotations = this.t('notes.fromAnnotations');
+        this.elements.annotationsNoteButton.setAttribute(
+            'aria-label',
+            fromAnnotations
+        );
+        this.elements.annotationsNoteButton.setAttribute('title', fromAnnotations);
         this.elements.notesSearchInput.setAttribute(
             'aria-label',
             this.t('viewer.notesSearch')
@@ -6736,6 +7057,8 @@ class MarkdownTabView {
                 }
             );
         this.elements.notesSearch.hidden = !showSearch;
+        this.elements.annotationsToolbar.hidden = view.totalCount === 0
+            && !this.zoteroNotesPanel?.canCreateFromAnnotations;
         const input = this.elements.notesSearchInput;
         const query = this.noteListFilter.query;
         if (!this.noteSearchComposing
@@ -7062,6 +7385,20 @@ class MarkdownTabView {
             class: 'markdown-note-item',
         });
         item.appendChild(button);
+        if (this.zoteroNotesPanel?.available) {
+            const addToNote = this.createElement('button', {
+                class: 'markdown-note-add-to-note',
+                type: 'button',
+                'data-annotation-id': String(annotation.id || ''),
+            });
+            addToNote.appendChild(createLucideIcon(
+                this.document,
+                LUCIDE_ICONS.notebookPen,
+                { className: 'markdown-note-add-to-note-icon', size: 15 }
+            ));
+            item.appendChild(addToNote);
+            this.syncAddToNoteButton(addToNote, annotation);
+        }
         if (!isMarkdownAnnotation(annotation)
             && typeof this.model.onOpenAnnotationInPDF === 'function') {
             const openPDF = this.createElement('button', {
@@ -7392,19 +7729,19 @@ class MarkdownTabView {
         elements.snapshotHost.replaceChildren(...template.content.childNodes);
         enhanceRenderedCodeBlocks(elements.snapshotHost, this.document, {
             copyCode: typeof this.model?.onCopyCode === 'function'
-                ? code => this.copyCode(code)
+                ? (code, options) => this.copyCode(code, options)
                 : null,
             translate: this.t,
         });
         enhanceRenderedMathBlocks(elements.snapshotHost, this.document, {
             copyCode: typeof this.model?.onCopyCode === 'function'
-                ? code => this.copyCode(code)
+                ? (code, options) => this.copyCode(code, options)
                 : null,
             translate: this.t,
         });
         enhanceRenderedTableBlocks(elements.snapshotHost, this.document, {
             copyCode: typeof this.model?.onCopyCode === 'function'
-                ? code => this.copyCode(code)
+                ? (code, options) => this.copyCode(code, options)
                 : null,
             translate: this.t,
         });

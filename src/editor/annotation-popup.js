@@ -22,6 +22,9 @@ const ANNOTATION_ERROR_KEYS = new Map([
     ['MKTERO_PDF_READER_UNAVAILABLE', 'annotation.pdfReaderUnavailable'],
     ['MKTERO_PDF_TEXT_SEARCH_TIMEOUT', 'annotation.pdfTextSearchTimeout'],
     ['MKTERO_ANNOTATION_TOO_MANY_SEGMENTS', 'annotation.tooManySegments'],
+    ['MKTERO_NOTE_EDITOR_UNAVAILABLE', 'notes.addToNoteNeedsNote'],
+    ['MKTERO_NOTE_ANNOTATION_NOT_IN_PDF', 'notes.addToNoteNotInPDF'],
+    ['MKTERO_NOTE_SELECTION_NOT_LOCATED', 'notes.addToNoteNotLocated'],
 ]);
 const SELECTION_TRANSLATION_ERROR_KEYS = new Map([
     ['AI_CONFIGURATION_ERROR', 'ai.configurationRequired'],
@@ -45,6 +48,9 @@ export function createAnnotationPopup(parent, {
     copySelectionTranslation,
     openSourceLocation,
     openAnnotationInPDF,
+    addToNoteState,
+    addAnnotationToNote,
+    addSelectionToNote,
     onNoteEditorClose,
     onSourceNavigationError,
     onDetachedActionError,
@@ -286,6 +292,15 @@ export function createAnnotationPopup(parent, {
                             : undefined,
                         viewPDFSourceReportsErrors:
                             typeof onSourceNavigationError === 'function',
+                        addToNote: typeof addSelectionToNote === 'function'
+                            ? {
+                                state: noteState(addToNoteState, null),
+                                run: () => addSelectionToNote(
+                                    annotation,
+                                    selectionContext
+                                ),
+                            }
+                            : undefined,
                         openNote: () => {
                             onOpenNote?.();
                             openDraftNote({
@@ -347,6 +362,12 @@ export function createAnnotationPopup(parent, {
                     changeAnnotationColor,
                     deleteAnnotation,
                     openNote: () => openNote({ anchor, annotation }),
+                    addToNote: typeof addAnnotationToNote === 'function'
+                        ? {
+                            state: noteState(addToNoteState, annotation),
+                            run: () => addAnnotationToNote(annotation.id),
+                        }
+                        : undefined,
                     viewInPDF: annotation.source !== 'markdown'
                         && typeof openAnnotationInPDF === 'function'
                         ? async () => {
@@ -581,6 +602,7 @@ function createMarkdownSelectionActions(
         copySourcedMarkdown,
         viewPDFSource,
         viewPDFSourceReportsErrors = false,
+        addToNote,
         openNote,
         close,
         reposition,
@@ -936,6 +958,19 @@ function createMarkdownSelectionActions(
     controls.push({ button: noteButton, enabled: canCreate });
     toolbar.appendChild(noteButton);
 
+    const addToNoteButton = createAddToNoteButton(document, translate, addToNote, {
+        run: action => run(action, 'notes.addToNoteFailed'),
+        explain: key => {
+            error.textContent = translate(key);
+            error.hidden = false;
+            reposition?.();
+        },
+    });
+    if (addToNoteButton) {
+        controls.push({ button: addToNoteButton, enabled: true });
+        toolbar.appendChild(addToNoteButton);
+    }
+
     if (typeof viewPDFSource === 'function') {
         const sourceButton = document.createElementNS(XHTML_NAMESPACE, 'button');
         sourceButton.className = 'mktero-annotation-source-button';
@@ -1018,6 +1053,7 @@ function createAnnotationActions(
         changeAnnotationColor,
         deleteAnnotation,
         openNote,
+        addToNote,
         viewInPDF,
         close,
         reposition,
@@ -1093,6 +1129,19 @@ function createAnnotationActions(
     noteButton.addEventListener('click', openNote);
     content.appendChild(noteButton);
 
+    const addToNoteButton = createAddToNoteButton(document, translate, addToNote, {
+        run: action => run(action, 'notes.addToNoteFailed'),
+        explain: key => {
+            error.textContent = translate(key);
+            error.hidden = false;
+            reposition?.();
+        },
+    });
+    if (addToNoteButton) {
+        controls.push(addToNoteButton);
+        content.appendChild(addToNoteButton);
+    }
+
     if (typeof viewInPDF === 'function') {
         const sourceButton = document.createElementNS(XHTML_NAMESPACE, 'button');
         sourceButton.className = 'mktero-annotation-source-button';
@@ -1134,6 +1183,48 @@ function createAnnotationActions(
     content.appendChild(deleteButton);
     content.appendChild(error);
     return content;
+}
+
+// "Add to Note" sends the annotation or selection to the Zotero note open in
+// the notes column. Without an open note, or for a highlight that has not
+// reached the PDF, the button stays focusable and explains why instead of
+// acting: a disabled button would show no tooltip.
+function createAddToNoteButton(document, translate, addToNote, { run, explain }) {
+    if (!addToNote || addToNote.state?.status === 'hidden') return null;
+    const button = document.createElementNS(XHTML_NAMESPACE, 'button');
+    button.className = 'mktero-annotation-add-to-note-button';
+    button.type = 'button';
+    button.dataset.action = 'add-to-note';
+    const enabled = addToNote.state?.status === 'enabled';
+    const label = translate(enabled
+        ? 'notes.addToNote'
+        : addToNote.state?.reasonKey || 'notes.addToNote');
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+    button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    button.appendChild(createLucideIcon(
+        document,
+        LUCIDE_ICONS.notebookPen,
+        { className: 'mktero-annotation-note-action-icon', size: 16 }
+    ));
+    button.addEventListener('click', () => {
+        if (!enabled) {
+            explain(addToNote.state?.reasonKey || 'notes.addToNoteNeedsNote');
+            return;
+        }
+        run(addToNote.run);
+    });
+    return button;
+}
+
+function noteState(addToNoteState, annotation) {
+    if (typeof addToNoteState !== 'function') return { status: 'enabled' };
+    try {
+        return addToNoteState(annotation) || { status: 'hidden' };
+    }
+    catch {
+        return { status: 'hidden' };
+    }
 }
 
 function isFatalSelectionTranslationError(error) {

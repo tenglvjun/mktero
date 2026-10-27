@@ -169,10 +169,10 @@ test('localizes fallback titles and conversion warnings', () => {
     assert.equal(result.title, '未命名 PDF');
     assert.deepEqual(result.warnings, [
         '本地 Markdown 缓存不可用。',
-        '无法读取 Zotero PDF 标注。',
-        '无法读取本地 Markdown 标注。',
-        '已保存的本地 Markdown 标注未能完整读取，原文件已另存为备份。可以继续添加新标注。',
-        '部分本地 Markdown 标注无法同步到 PDF。',
+        '无法读取 Zotero PDF 注释。',
+        '无法读取本地 Markdown 注释。',
+        '已保存的本地 Markdown 注释未能完整读取，原文件已另存为备份。可以继续添加新注释。',
+        '部分本地 Markdown 注释无法同步到 PDF。',
         '转换过程中发生了一个不影响阅读的问题。',
     ]);
 });

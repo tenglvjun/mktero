@@ -44,7 +44,7 @@ test('creates a fixed localization from the Zotero locale', () => {
         '2 个本地缓存条目，1.5 KB'
     );
     assert.equal(chinese.t('missing.message'), 'missing.message');
-    assert.equal(chinese.t('annotation.noteEditor'), '编辑笔记');
+    assert.equal(chinese.t('annotation.noteEditor'), '编辑评论');
     assert.equal(chinese.t('annotation.saveNote'), '保存');
     assert.equal(
         localization.t('preferences.conversion.provider.mineru'),

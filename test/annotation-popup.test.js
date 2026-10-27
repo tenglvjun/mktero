@@ -151,7 +151,7 @@ test('shows a localized hint when a selection has no original text', () => {
     assert.ok(hint);
     assert.equal(
         hint.textContent,
-        'Highlights, notes and translation work on the original text only.'
+        'Highlights, comments and translation work on the original text only.'
     );
     assert.equal(
         parent.querySelector('.mktero-markdown-selection-actions'),
@@ -186,7 +186,7 @@ test('announces the original-text hint through a status region that already exis
     );
     assert.equal(
         status.textContent,
-        'Highlights, notes and translation work on the original text only.'
+        'Highlights, comments and translation work on the original text only.'
     );
     assert.equal(
         parent.querySelector('.mktero-annotation-selection-hint')
@@ -290,4 +290,163 @@ test('shows a localized message for a selection with too many segments', async (
 
     popup.destroy();
     dom.window.close();
+});
+
+function addToNoteButton(parent) {
+    return parent.querySelector('.mktero-annotation-add-to-note-button');
+}
+
+function finishPopup(fixture) {
+    fixture.popup.destroy();
+    fixture.dom.window.close();
+}
+
+function openAddToNotePopup(kind, options) {
+    const fixture = createPopupFixture(options);
+    if (kind === 'selection') fixture.openSelection();
+    else {
+        fixture.popup.openActions({
+            anchor: fixture.parent.querySelector('span'),
+            annotation: {
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Cited passage',
+                color: '#ffd400',
+                pageLabel: '2',
+            },
+        });
+    }
+    return fixture;
+}
+
+const ADD_TO_NOTE_ERROR_MESSAGES = [
+    [
+        'MKTERO_NOTE_EDITOR_UNAVAILABLE',
+        'Open or create a note in the Notes column first.',
+    ],
+    [
+        'MKTERO_NOTE_ANNOTATION_NOT_IN_PDF',
+        'This annotation has not reached the PDF yet. Retry its sync first.',
+    ],
+    [
+        'MKTERO_NOTE_SELECTION_NOT_LOCATED',
+        'This passage could not be located in the PDF, so it cannot be cited in a note.',
+    ],
+];
+
+for (const kind of ['selection', 'actions']) {
+    const label = kind === 'selection' ? 'selection popup' : 'annotation popup';
+
+    test(`hides Add to Note in the ${label} when notes are unavailable`, () => {
+        const called = [];
+        const fixture = openAddToNotePopup(kind, {
+            addToNoteState: () => ({ status: 'hidden' }),
+            addSelectionToNote: () => called.push('selection'),
+            addAnnotationToNote: () => called.push('annotation'),
+        });
+
+        assert.equal(addToNoteButton(fixture.parent), null);
+        assert.ok(fixture.parent.querySelector('.mktero-annotation-popup'));
+        assert.deepEqual(called, []);
+
+        finishPopup(fixture);
+    });
+
+    test(`explains a disabled Add to Note in the ${label} without acting`, () => {
+        const called = [];
+        const fixture = openAddToNotePopup(kind, {
+            addToNoteState: () => ({
+                status: 'disabled',
+                reasonKey: 'notes.addToNoteNeedsNote',
+            }),
+            addSelectionToNote: () => called.push('selection'),
+            addAnnotationToNote: () => called.push('annotation'),
+        });
+        const button = addToNoteButton(fixture.parent);
+
+        assert.ok(button);
+        assert.equal(button.getAttribute('data-action'), 'add-to-note');
+        assert.equal(button.getAttribute('aria-disabled'), 'true');
+        assert.equal(button.disabled, false);
+        assert.equal(
+            button.getAttribute('aria-label'),
+            'Open or create a note in the Notes column first.'
+        );
+        button.click();
+
+        const error = fixture.parent.querySelector('.mktero-annotation-action-error');
+        assert.equal(error.hidden, false);
+        assert.equal(
+            error.textContent,
+            'Open or create a note in the Notes column first.'
+        );
+        assert.ok(fixture.parent.querySelector('.mktero-annotation-popup'));
+        assert.deepEqual(called, []);
+
+        finishPopup(fixture);
+    });
+
+    test(`adds to the open note from the ${label} and closes`, async () => {
+        const called = [];
+        const fixture = openAddToNotePopup(kind, {
+            addToNoteState: () => ({ status: 'enabled' }),
+            addSelectionToNote: async (annotation, selectionContext) => {
+                called.push({ annotation, selectionContext });
+            },
+            addAnnotationToNote: async annotationID => {
+                called.push(annotationID);
+            },
+        });
+        const button = addToNoteButton(fixture.parent);
+        assert.equal(button.getAttribute('aria-disabled'), 'false');
+        assert.equal(button.getAttribute('aria-label'), 'Add to Note');
+
+        button.click();
+        await flush();
+
+        if (kind === 'selection') {
+            assert.equal(called.length, 1);
+            assert.equal(called[0].annotation.text, 'Selected text');
+            assert.deepEqual(called[0].selectionContext, { side: 'source' });
+        }
+        else {
+            assert.deepEqual(called, ['HIGH0001']);
+        }
+        assert.equal(fixture.parent.querySelector('.mktero-annotation-popup'), null);
+
+        finishPopup(fixture);
+    });
+}
+
+test('maps an Add to Note failure in both popups', async () => {
+    for (const kind of ['selection', 'actions']) {
+        for (const [code, message] of ADD_TO_NOTE_ERROR_MESSAGES) {
+            const fixture = openAddToNotePopup(kind, {
+                addToNoteState: () => ({ status: 'enabled' }),
+                addSelectionToNote: async () => {
+                    const error = new Error(code);
+                    error.code = code;
+                    throw error;
+                },
+                addAnnotationToNote: async () => {
+                    const error = new Error(code);
+                    error.code = code;
+                    throw error;
+                },
+            });
+            addToNoteButton(fixture.parent).click();
+            await flush();
+
+            const error = fixture.parent.querySelector(
+                '.mktero-annotation-action-error'
+            );
+            assert.equal(error.hidden, false, `${kind} ${code}`);
+            assert.equal(error.textContent, message, `${kind} ${code}`);
+            assert.ok(
+                fixture.parent.querySelector('.mktero-annotation-popup'),
+                `${kind} ${code} keeps the popup open`
+            );
+            finishPopup(fixture);
+        }
+    }
 });

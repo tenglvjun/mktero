@@ -141,7 +141,7 @@ export function createSelfTest(context) {
             });
             if (!marks) throw new Error('No annotation decoration in view');
             const notes = queryAll('.markdown-note-item');
-            if (notes.length < 4) throw new Error(`Notes pane lists ${notes.length} notes`);
+            if (notes.length < 4) throw new Error(`Annotations segment lists ${notes.length} annotations`);
             return { decorations: marks.length, notes: notes.length };
         }],
         ['citation-popup', async () => {

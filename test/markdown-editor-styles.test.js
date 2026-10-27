@@ -1132,6 +1132,7 @@ test('styles Zotero-colored PDF annotations and their action popup', () => {
         '.mktero-annotation-color-button,',
         '.mktero-annotation-delete-button,',
         '.mktero-annotation-note-button,',
+        '.mktero-annotation-add-to-note-button,',
         '.mktero-annotation-source-button,',
         '.mktero-annotation-copy-button',
     ].join('\n'));

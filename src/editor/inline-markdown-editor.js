@@ -174,6 +174,9 @@ export function createInlineMarkdownEditor({
     onCopyDeliveryError,
     openSourceLocation,
     openAnnotationInPDF,
+    addToNoteState,
+    addAnnotationToNote,
+    addSelectionToNote,
     onSourceNavigationError,
     onAnnotationActionError,
     onViewportChange,
@@ -243,6 +246,17 @@ export function createInlineMarkdownEditor({
         copySelectionTranslation,
         openSourceLocation,
         openAnnotationInPDF,
+        addToNoteState,
+        addAnnotationToNote,
+        addSelectionToNote: typeof addSelectionToNote === 'function'
+            ? (annotation, selectionContext) => addSelectionToNote(
+                withSelectionTextQuote(
+                    annotation,
+                    selectionSources.get(selectionContext)
+                ),
+                withoutSelectionTranslationContext(selectionContext)
+            )
+            : undefined,
         onNoteEditorClose: clearRetainedSelectionHighlight,
         onSourceNavigationError,
         onDetachedActionError: typeof onAnnotationActionError === 'function'

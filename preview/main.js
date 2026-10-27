@@ -407,6 +407,9 @@ async function start() {
             debug: () => {},
         },
         localization,
+        // The preview has no Zotero library, so it has no notes column. It
+        // opens on the annotations segment to show the sample highlights.
+        panelLayout: { outlineSegment: 'annotations' },
     });
     if (forceLight) {
         const styles = view.host.shadowRoot.querySelector('style[data-mktero-styles]');

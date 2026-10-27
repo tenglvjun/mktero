@@ -206,6 +206,14 @@ import {
     createZoteroPDFTextLocator,
 } from './platform/zotero-annotation-actions.js';
 import { PDFAnnotationLocator } from './pdf/pdf-annotation-locator.js';
+import { createZoteroNotes } from './platform/zotero-notes.js';
+import {
+    NOTE_ANNOTATION_NOT_IN_PDF,
+    NOTE_SELECTION_NOT_LOCATED,
+    noteBridgeError,
+    selectionPartsToNoteAnnotations,
+} from './core/zotero-note-bridge.js';
+import { isSavedMarkdownNote } from './core/saved-markdown-note-format.js';
 import {
     PDFIndexOperationTracker,
 } from './pdf/pdf-index-operation-tracker.js';
@@ -601,6 +609,14 @@ globalThis.startup = async function startup({ id, rootURI }) {
         onError: error => logMkteroError(error),
     });
     runtime.localAnnotations = localAnnotations;
+    runtime.zoteroNotes = createZoteroNotes(Zotero, {
+        // A snapshot note is Mktero's, not the reader's: it is not listed and
+        // never receives "Add to Note".
+        isSnapshotNote: item => (
+            runtime.savedMarkdownStore?.isSavedMarkdownNote?.(item)
+            ?? isSavedMarkdownNote(item?.getNote?.() || '')
+        ),
+    });
     const pendingTasks = createZoteroMinerUPendingTaskStore({
         zotero: Zotero,
         ioUtils: IOUtils,
@@ -1117,6 +1133,7 @@ globalThis.shutdown = function shutdown() {
     runtime.readinessColumn?.dispose();
     runtime.readiness?.dispose();
     runtime.localAnnotations?.dispose();
+    runtime.zoteroNotes?.dispose();
     runtime.pdfAnnotationLocator?.dispose();
     void runtime.sourcePeekRenderer?.disposeAll();
     void runtime.figureRegionRenderer?.disposeAll();
@@ -1186,6 +1203,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeAITargetLanguageObserver = null;
     runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
+    runtime.zoteroNotes = null;
     runtime.annotationGroups = null;
     runtime.preferencePaneID = null;
     runtime.reasoningCatalogStore = null;
@@ -1309,7 +1327,7 @@ async function openItemAsMarkdown(itemID, {
         ),
         onDisposeSourcePeek: () => runtime.sourcePeekRenderer?.dispose(itemID),
         onCopySourcedMarkdown: target => copySourcedMarkdown(itemID, target),
-        onCopyCode: code => copyCode(code),
+        onCopyCode: (code, options) => copyCode(code, options),
         ...readerCopyDeliveryHooks(),
         onCreateMarkdownAnnotation: draft => (
             runMarkdownAnnotationAction('create', itemID, draft)
@@ -1337,6 +1355,7 @@ async function openItemAsMarkdown(itemID, {
             { getSourceItemID: () => itemID }
         ),
         onReadingPositionChange: anchor => saveReadingPosition(itemID, anchor),
+        zoteroNotes: createTabNotesBridge(() => itemID),
     });
     if (presentation.created) {
         void runtime.actionsTags?.openMarkdownSession({
@@ -2127,7 +2146,7 @@ function createSavedMarkdownActions(noteID, sourceItem) {
         onCopySourcedMarkdown: withSource((itemID, target) => (
             copySourcedMarkdown(itemID, target)
         )),
-        onCopyCode: code => copyCode(code),
+        onCopyCode: (code, options) => copyCode(code, options),
         ...readerCopyDeliveryHooks(),
         onTranslateSelection: ({ text, onTextDelta } = {}) => (
             translateSelection(noteID, { text, onTextDelta })
@@ -2171,7 +2190,108 @@ function createSavedMarkdownActions(noteID, sourceItem) {
             runtime.referenceImportService,
             { getSourceItemID: currentSourceItemID }
         ),
+        zoteroNotes: createTabNotesBridge(currentSourceItemID),
     };
+}
+
+// The notes column of one Mktero tab: the Zotero child notes of the PDF the
+// tab shows, through runtime.zoteroNotes. `getAttachmentID` is read on every
+// call because a saved snapshot learns its source PDF after it opens.
+function createTabNotesBridge(getAttachmentID) {
+    const notes = runtime.zoteroNotes;
+    if (!notes) return null;
+    const attachmentID = () => {
+        const id = getAttachmentID();
+        if (!id) throw new Error('The source PDF is unavailable');
+        return id;
+    };
+    const logged = action => async (...args) => {
+        try {
+            return await action(...args);
+        }
+        catch (error) {
+            if (!isExpectedNoteRefusal(error)) logMkteroError(error);
+            throw error;
+        }
+    };
+    return {
+        async list() {
+            const id = getAttachmentID();
+            if (!id) {
+                return { status: 'unavailable', notes: [], editable: false, annotationCount: 0 };
+            }
+            return notes.list(id);
+        },
+        canHostEditor: context => notes.canHostEditor(context),
+        mountEditor: logged((container, options = {}) => notes.mountEditor(container, {
+            ...options,
+            attachmentID: attachmentID(),
+        })),
+        openInWindow: logged((options = {}) => notes.openInWindow({
+            ...options,
+            attachmentID: attachmentID(),
+        })),
+        createFromAnnotations: logged(() => (
+            notes.createFromAnnotations(attachmentID())
+        )),
+        showInLibrary: logged(options => notes.showInLibrary(options)),
+        moveToTrash: logged(options => notes.moveToTrash(options)),
+        // The Zotero annotations behind one annotation of the reader: every
+        // page part of a cross-page highlight, or the PDF annotation a local
+        // highlight became once it synchronized.
+        annotationsForNote: logged(async annotationIDs => {
+            const itemID = attachmentID();
+            const keys = [];
+            for (const annotationID of annotationIDs || []) {
+                const id = String(annotationID || '');
+                if (isLocalMarkdownAnnotationID(id)) {
+                    const parts = runtime.localAnnotations
+                        ?.synchronizedAnnotationIDs(itemID, id);
+                    if (!parts?.length) {
+                        throw noteBridgeError(
+                            NOTE_ANNOTATION_NOT_IN_PDF,
+                            'The annotation has not reached the PDF yet'
+                        );
+                    }
+                    keys.push(...parts);
+                    continue;
+                }
+                const members = runtime.annotationGroups
+                    ? await runtime.annotationGroups.membersOf(itemID, id)
+                    : [id];
+                keys.push(...(members?.length ? members : [id]));
+            }
+            return notes.annotationsForNote(itemID, keys);
+        }),
+        // A Markdown selection placed in the PDF, as the unsaved highlight the
+        // Zotero reader sends to a note. Nothing is saved to the PDF.
+        selectionForNote: logged(async draft => {
+            const itemID = attachmentID();
+            const located = await runtime.annotationActions.locateSelection(
+                itemID,
+                draft
+            );
+            if (!located?.parts?.length) {
+                throw noteBridgeError(
+                    NOTE_SELECTION_NOT_LOCATED,
+                    'The selection could not be located in the PDF'
+                );
+            }
+            return selectionPartsToNoteAnnotations(located.parts, itemID);
+        }),
+        observe: listener => notes.observe(listener),
+    };
+}
+
+function isExpectedNoteRefusal(error) {
+    return [
+        'MKTERO_NOTE_EDITOR_UNAVAILABLE',
+        'MKTERO_NOTE_ANNOTATION_NOT_IN_PDF',
+        'MKTERO_NOTE_SELECTION_NOT_LOCATED',
+        'MKTERO_NOTE_NO_PARENT_ITEM',
+        'MKTERO_PDF_TEXT_NOT_FOUND',
+        'MKTERO_PDF_TEXT_AMBIGUOUS',
+    ].includes(error?.code);
 }
 
 async function saveSnapshotForItem(itemID) {
@@ -3763,11 +3883,18 @@ async function copySourcedMarkdown(itemID, target) {
     }
 }
 
-async function copyCode(code) {
+// `html`, when given, goes on the clipboard beside the text, so a table or a
+// formula pasted into a Zotero note keeps its structure. An application that
+// reads HTML gets that markup too; one that reads only text gets the text.
+async function copyCode(code, { html = '' } = {}) {
     try {
         if (typeof code !== 'string'
             || typeof runtime.clipboard?.writeText !== 'function') {
             throw new Error('Code copy is unavailable');
+        }
+        if (html && typeof runtime.clipboard.writeRich === 'function') {
+            await runtime.clipboard.writeRich({ text: code, html });
+            return;
         }
         await runtime.clipboard.writeText(code);
     }

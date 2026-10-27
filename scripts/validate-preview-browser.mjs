@@ -263,10 +263,23 @@ async function runInteractions(page) {
     const scrollerTop = () => page.evaluate(() => (
         window.__mkteroPreview.view.host.shadowRoot.querySelector('.cm-scroller').scrollTop
     ));
+    // The self-test's last step saves and restores a correction, and the
+    // reader restores its reading position after that asynchronously. A jump
+    // made before that restore lands is undone, so jump until it holds.
+    const scrollToTop = async () => {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+            await page.evaluate(() => window.__mkteroPreview.view.editor.scrollToOffset(0));
+            await page.waitForTimeout(300);
+            if (await scrollerTop() < 50) {
+                await page.waitForTimeout(300);
+                if (await scrollerTop() < 50) return;
+            }
+        }
+        throw new Error(`The reader did not stay at the top (scrollTop ${await scrollerTop()})`);
+    };
 
     await step('wheel-scroll', async () => {
-        await page.evaluate(() => window.__mkteroPreview.view.editor.scrollToOffset(0));
-        await page.waitForTimeout(200);
+        await scrollToTop();
         const box = await page.locator('.cm-content').boundingBox();
         await page.mouse.move(box.x + box.width / 2, box.y + 200);
         const before = await scrollerTop();
@@ -319,6 +332,8 @@ async function runInteractions(page) {
     });
 
     await step('outline-click', async () => {
+        // The preview opens on the annotations segment of the left column.
+        await page.locator('.markdown-outline-segment[data-outline-segment="headings"]').click();
         await page.locator('.markdown-outline-link', { hasText: 'Experiments' }).first().click();
         await page.waitForTimeout(500);
         const visible = await page.evaluate(() => {
@@ -334,6 +349,7 @@ async function runInteractions(page) {
     });
 
     await step('note-opens-pdf', async () => {
+        await page.locator('.markdown-outline-segment[data-outline-segment="annotations"]').click();
         await page.locator('.markdown-note-item .markdown-note-open-pdf').first().click();
         await page.waitForFunction(() => window.__mkteroPreview.shell.activeTab === 'pdf'
             && document.querySelector('.pdf-location-flash'), null, { timeout: 3000 });

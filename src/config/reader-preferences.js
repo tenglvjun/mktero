@@ -16,6 +16,30 @@ export const MARKDOWN_READER_WIDTH_DEFAULT = 'standard';
 export const MARKDOWN_READER_ALIGNMENT_PREF
     = 'extensions.mktero.readerAlignment';
 export const MARKDOWN_READER_ALIGNMENT_DEFAULT = 'start';
+// Side panel layout. Every Mktero tab opens with the layout the reader left in
+// the last one: visibility and width per column, and the left column segment.
+export const MARKDOWN_READER_OUTLINE_VISIBLE_PREF
+    = 'extensions.mktero.readerOutlineVisible';
+export const MARKDOWN_READER_OUTLINE_WIDTH_PREF
+    = 'extensions.mktero.readerOutlineWidth';
+export const MARKDOWN_READER_OUTLINE_SEGMENT_PREF
+    = 'extensions.mktero.readerOutlineSegment';
+export const MARKDOWN_READER_NOTES_VISIBLE_PREF
+    = 'extensions.mktero.readerNotesVisible';
+export const MARKDOWN_READER_NOTES_WIDTH_PREF
+    = 'extensions.mktero.readerNotesWidth';
+export const MARKDOWN_READER_OUTLINE_WIDTH_DEFAULT = 256;
+export const MARKDOWN_READER_OUTLINE_WIDTH_MIN = 180;
+export const MARKDOWN_READER_OUTLINE_WIDTH_MAX = 480;
+export const MARKDOWN_READER_NOTES_WIDTH_DEFAULT = 300;
+export const MARKDOWN_READER_NOTES_WIDTH_MIN = 220;
+export const MARKDOWN_READER_NOTES_WIDTH_MAX = 480;
+export const MARKDOWN_READER_OUTLINE_SEGMENTS = Object.freeze([
+    'headings',
+    'figures',
+    'annotations',
+]);
+export const MARKDOWN_READER_OUTLINE_SEGMENT_DEFAULT = 'headings';
 export const MARKDOWN_READER_FONT_OPTIONS = Object.freeze([
     Object.freeze({
         value: 'system-serif',
@@ -306,6 +330,99 @@ export function getMarkdownReaderAlignmentCss(value) {
         MARKDOWN_READER_ALIGNMENT_OPTIONS,
         normalizeMarkdownReaderAlignment(value)
     );
+}
+
+// The layout the reader left in the last Mktero tab. Every value is clamped,
+// so a hand-edited preference cannot open a column wider than it can be
+// dragged.
+export function getMarkdownReaderPanelLayout(zotero) {
+    const read = pref => zotero?.Prefs?.get?.(pref, true);
+    return normalizeMarkdownReaderPanelLayout({
+        outline: {
+            visible: read(MARKDOWN_READER_OUTLINE_VISIBLE_PREF),
+            width: read(MARKDOWN_READER_OUTLINE_WIDTH_PREF),
+        },
+        notes: {
+            visible: read(MARKDOWN_READER_NOTES_VISIBLE_PREF),
+            width: read(MARKDOWN_READER_NOTES_WIDTH_PREF),
+        },
+        outlineSegment: read(MARKDOWN_READER_OUTLINE_SEGMENT_PREF),
+    });
+}
+
+// Writes only the fields present in `changes`, and returns the normalized
+// layout after the write.
+export function setMarkdownReaderPanelLayout(zotero, changes = {}) {
+    const current = getMarkdownReaderPanelLayout(zotero);
+    const next = normalizeMarkdownReaderPanelLayout({
+        outline: { ...current.outline, ...(changes.outline || {}) },
+        notes: { ...current.notes, ...(changes.notes || {}) },
+        outlineSegment: changes.outlineSegment ?? current.outlineSegment,
+    });
+    const write = (pref, value) => zotero?.Prefs?.set?.(pref, value, true);
+    if (changes.outline && 'visible' in changes.outline) {
+        write(MARKDOWN_READER_OUTLINE_VISIBLE_PREF, next.outline.visible);
+    }
+    if (changes.outline && 'width' in changes.outline) {
+        write(MARKDOWN_READER_OUTLINE_WIDTH_PREF, next.outline.width);
+    }
+    if (changes.notes && 'visible' in changes.notes) {
+        write(MARKDOWN_READER_NOTES_VISIBLE_PREF, next.notes.visible);
+    }
+    if (changes.notes && 'width' in changes.notes) {
+        write(MARKDOWN_READER_NOTES_WIDTH_PREF, next.notes.width);
+    }
+    if ('outlineSegment' in changes) {
+        write(MARKDOWN_READER_OUTLINE_SEGMENT_PREF, next.outlineSegment);
+    }
+    return next;
+}
+
+export function normalizeMarkdownReaderPanelLayout(layout = {}) {
+    return {
+        outline: {
+            visible: normalizePanelVisible(layout?.outline?.visible),
+            width: normalizePanelWidth(
+                layout?.outline?.width,
+                MARKDOWN_READER_OUTLINE_WIDTH_DEFAULT,
+                MARKDOWN_READER_OUTLINE_WIDTH_MIN,
+                MARKDOWN_READER_OUTLINE_WIDTH_MAX
+            ),
+        },
+        notes: {
+            visible: normalizePanelVisible(layout?.notes?.visible),
+            width: normalizePanelWidth(
+                layout?.notes?.width,
+                MARKDOWN_READER_NOTES_WIDTH_DEFAULT,
+                MARKDOWN_READER_NOTES_WIDTH_MIN,
+                MARKDOWN_READER_NOTES_WIDTH_MAX
+            ),
+        },
+        outlineSegment: normalizeMarkdownReaderOutlineSegment(
+            layout?.outlineSegment
+        ),
+    };
+}
+
+export function normalizeMarkdownReaderOutlineSegment(value) {
+    const normalized = String(value ?? '').trim();
+    return MARKDOWN_READER_OUTLINE_SEGMENTS.includes(normalized)
+        ? normalized
+        : MARKDOWN_READER_OUTLINE_SEGMENT_DEFAULT;
+}
+
+function normalizePanelVisible(value) {
+    if (value === false || value === 0 || value === 'false') return false;
+    return true;
+}
+
+function normalizePanelWidth(value, fallback, min, max) {
+    const numeric = Number(value);
+    if (value === null || value === undefined || value === ''
+        || !Number.isFinite(numeric)) {
+        return fallback;
+    }
+    return Math.min(max, Math.max(min, Math.round(numeric)));
 }
 
 function observeReaderPreference(zotero, pref, onChange) {

@@ -5,7 +5,10 @@ import { createLocalization } from '../src/i18n/localization.js';
 import {
     TranslationRequestTracker,
 } from '../src/ai/translation-request-tracker.js';
-import { MarkdownTabPresenter } from '../src/ui/markdown-tab-presenter.js';
+import {
+    MarkdownTabPresenter,
+    MKTERO_TAB_SELECTED_ATTRIBUTE,
+} from '../src/ui/markdown-tab-presenter.js';
 
 function createMainWindow(document = {}) {
     const added = [];
@@ -1148,4 +1151,177 @@ test('releases a document whose tab Zotero closed without reporting it', () => {
     assert.deepEqual(errors, ['Tab bar is gone']);
     assert.deepEqual(harness.views.map(view => view.destroyCalls), [1, 1, 1]);
     assert.equal(presenter.list().length, 0);
+});
+
+test('opens the reader with the saved panel layout and writes layout changes', () => {
+    const stored = new Map([
+        ['extensions.mktero.readerOutlineVisible', false],
+        ['extensions.mktero.readerOutlineWidth', 190],
+        ['extensions.mktero.readerOutlineSegment', 'annotations'],
+        ['extensions.mktero.readerNotesVisible', true],
+        ['extensions.mktero.readerNotesWidth', 240],
+    ]);
+    const writes = [];
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness, {
+        Prefs: {
+            get: key => stored.get(key),
+            set(key, value, global) {
+                writes.push({ key, value, global });
+                stored.set(key, value);
+            },
+        },
+    });
+
+    presenter.open(42);
+
+    assert.deepEqual(harness.calls[0].panelLayout, {
+        outline: { visible: false, width: 190 },
+        notes: { visible: true, width: 240 },
+        outlineSegment: 'annotations',
+    });
+    const returned = harness.calls[0].onPanelLayoutChange({
+        notes: { visible: false },
+        outlineSegment: 'figures',
+    });
+    assert.deepEqual(writes, [
+        {
+            key: 'extensions.mktero.readerNotesVisible',
+            value: false,
+            global: true,
+        },
+        {
+            key: 'extensions.mktero.readerOutlineSegment',
+            value: 'figures',
+            global: true,
+        },
+    ]);
+    assert.deepEqual(returned, {
+        outline: { visible: false, width: 190 },
+        notes: { visible: false, width: 240 },
+        outlineSegment: 'figures',
+    });
+    presenter.dispose();
+});
+
+test('puts the notes bridge on a new Markdown tab model', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const notes = { async list() { return { status: 'unavailable' }; } };
+
+    const presentation = presenter.open(42, { zoteroNotes: notes });
+
+    assert.equal(presentation.model.zoteroNotes, notes);
+    assert.equal(harness.views[0].renderCalls[0].zoteroNotes, notes);
+    presenter.dispose();
+});
+
+test('does not replace an existing notes bridge when the tab is opened again', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const first = { id: 'first', async list() {} };
+    const second = { id: 'second', async list() {} };
+    const presentation = presenter.open(42, { zoteroNotes: first });
+
+    const again = presenter.open(42, { zoteroNotes: second });
+    presenter.open(42, { zoteroNotes: null });
+
+    assert.equal(again.created, false);
+    assert.equal(again.model, presentation.model);
+    assert.equal(presentation.model.zoteroNotes, first);
+    assert.equal(harness.views[0].renderCalls.length, 1);
+    assert.equal(harness.calls.length, 1);
+    presenter.dispose();
+});
+
+test('fills in a notes bridge when the open tab does not have one yet', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const notes = { id: 'filled', async list() {} };
+    const presentation = presenter.open(42);
+
+    assert.equal(presentation.model.zoteroNotes, null);
+    presenter.open(42, { zoteroNotes: notes });
+
+    assert.equal(presentation.model.zoteroNotes, notes);
+    assert.equal(harness.views[0].renderCalls.length, 2);
+    assert.equal(harness.views[0].renderCalls[1].zoteroNotes, notes);
+    presenter.dispose();
+});
+
+test('hides the context pane while a Mktero tab is selected and clears it on dispose', () => {
+    assert.equal(MKTERO_TAB_SELECTED_ATTRIBUTE, 'mktero-tab-selected');
+    const { document } = parseHTML('<html><body></body></html>');
+    const mainWindow = createMainWindow(document);
+    mainWindow.Zotero_Tabs.selectedType = 'library';
+    const registrations = [];
+    const unregistered = [];
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness, {
+        Notifier: {
+            registerObserver(observer, types, id) {
+                registrations.push({ observer, types, id });
+                return 'tab-notifier';
+            },
+            unregisterObserver(id) {
+                unregistered.push(id);
+            },
+        },
+    });
+
+    presenter.open(42);
+    presenter.open(43);
+
+    const style = document.getElementById('mktero-context-pane-style');
+    assert.ok(style);
+    assert.equal(style.parentNode, document.documentElement);
+    assert.equal(document.querySelectorAll('#mktero-context-pane-style').length, 1);
+    assert.match(style.textContent, /mktero-tab-selected/);
+    assert.match(style.textContent, /#zotero-context-pane/);
+    assert.match(style.textContent, /display:\s*none/);
+    assert.equal(
+        document.documentElement.hasAttribute('mktero-tab-selected'),
+        false
+    );
+    assert.equal(registrations.length, 1);
+    assert.deepEqual(registrations[0].types, ['tab']);
+    assert.equal(registrations[0].id, 'mktero-context-pane');
+
+    mainWindow.Zotero_Tabs.selectedType = 'mktero';
+    registrations[0].observer.notify('modify', 'tab');
+    assert.equal(
+        document.documentElement.hasAttribute('mktero-tab-selected'),
+        false
+    );
+    registrations[0].observer.notify('select', 'tab', ['tab-1']);
+    assert.equal(
+        document.documentElement.hasAttribute('mktero-tab-selected'),
+        true
+    );
+
+    mainWindow.Zotero_Tabs.selectedType = 'reader';
+    mainWindow.added[0].container.onTabSelectionChanged(false);
+    assert.equal(
+        document.documentElement.hasAttribute('mktero-tab-selected'),
+        false
+    );
+    mainWindow.Zotero_Tabs.selectedType = 'mktero';
+    mainWindow.added[0].container.onTabSelectionChanged(true);
+    assert.equal(
+        document.documentElement.hasAttribute('mktero-tab-selected'),
+        true
+    );
+
+    presenter.dispose();
+
+    assert.deepEqual(unregistered, ['tab-notifier']);
+    assert.equal(document.getElementById('mktero-context-pane-style'), null);
+    assert.equal(
+        document.documentElement.hasAttribute('mktero-tab-selected'),
+        false
+    );
 });
