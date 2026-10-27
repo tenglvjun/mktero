@@ -360,3 +360,124 @@ test('finds a correction made under an earlier MinerU profile', async () => {
     assert.equal(result.cacheKey, 'b'.repeat(64));
     assert.deepEqual(profiles, [MINERU_PARSER_PROFILE_ID, earlier]);
 });
+
+function createPageLimitGuard(error = null) {
+    const calls = [];
+    const guard = async (fileData, options) => {
+        calls.push({ fileData, options });
+        if (error) throw error;
+    };
+    guard.calls = calls;
+    return guard;
+}
+
+function pageLimitError() {
+    const error = new Error('The PDF has 201 pages; the conversion service accepts at most 200');
+    error.code = 'PDF_PAGE_LIMIT_EXCEEDED';
+    return error;
+}
+
+test('checks the page limit before uploading to the hosted service', async () => {
+    const fileData = new Uint8Array([1, 2, 3]);
+    const controller = new AbortController();
+    const assertPageLimit = createPageLimitGuard();
+    const extractor = createExtractor({
+        readFile: async () => fileData,
+        assertPageLimit,
+    });
+
+    const result = await extractor.extract(42, { signal: controller.signal });
+
+    assert.equal(result.markdown, '# Hosted result');
+    assert.equal(assertPageLimit.calls.length, 1);
+    assert.equal(assertPageLimit.calls[0].fileData, fileData);
+    assert.equal(assertPageLimit.calls[0].options.signal, controller.signal);
+});
+
+test('a PDF over the page limit is not uploaded and no session is read', async () => {
+    let converted = false;
+    let tokenReads = 0;
+    const extractor = createExtractor({
+        conversion: {
+            async convert() {
+                converted = true;
+                return { result: { markdown: 'fresh' }, origin: 'network' };
+            },
+        },
+        getAccessToken: () => {
+            tokenReads++;
+            return 'access-token';
+        },
+        assertPageLimit: createPageLimitGuard(pageLimitError()),
+    });
+
+    await assert.rejects(extractor.extract(42, {}), { code: 'PDF_PAGE_LIMIT_EXCEEDED' });
+    assert.equal(converted, false);
+    assert.equal(tokenReads, 0);
+});
+
+test('cached Markdown, a correction, and a stored result skip the page check', async () => {
+    const assertPageLimit = createPageLimitGuard(pageLimitError());
+    const noConversion = { async convert() { assert.fail('No hosted conversion was expected'); } };
+    const cached = createExtractor({
+        conversion: noConversion,
+        createCacheKey: async () => 'a'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: { async get() { return { markdown: '# Cached' }; }, async put() {} },
+        assertPageLimit,
+    });
+    const corrected = createExtractor({
+        conversion: noConversion,
+        createCacheKey: async () => 'a'.repeat(64),
+        readRevision: async () => ({ markdown: '# Edited', userEdited: true }),
+        assertPageLimit,
+    });
+    const stored = createExtractor({
+        conversion: noConversion,
+        createCacheKey: async () => 'a'.repeat(64),
+        createSourceHash: async () => 'e'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: { async get() { return null; }, async put() {} },
+        resultStore: {
+            async get() { return { archive: new Uint8Array([9]), totalPages: 250 }; },
+            async put() { assert.fail('A stored result is not stored again'); },
+        },
+        createResultKey: async () => 'r'.repeat(64),
+        extractStoredResult: () => ({ markdown: '# Stored' }),
+        assertPageLimit,
+    });
+
+    assert.equal((await cached.extract(42, {})).markdown, '# Cached');
+    assert.equal((await corrected.extract(42, {})).markdown, '# Edited');
+    assert.equal((await stored.extract(42, {})).markdown, '# Stored');
+    assert.equal(assertPageLimit.calls.length, 0);
+});
+
+test('a forced refresh checks the page limit even with cached Markdown', async () => {
+    const assertPageLimit = createPageLimitGuard(pageLimitError());
+    const extractor = createExtractor({
+        conversion: { async convert() { assert.fail('No hosted conversion was expected'); } },
+        createCacheKey: async () => 'a'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: { async get() { return { markdown: '# Cached' }; }, async put() {} },
+        assertPageLimit,
+    });
+
+    await assert.rejects(extractor.extract(42, { forceRefresh: true }), { code: 'PDF_PAGE_LIMIT_EXCEEDED' });
+    assert.equal(assertPageLimit.calls.length, 1);
+});
+
+test('readCached never checks the page limit', async () => {
+    const assertPageLimit = createPageLimitGuard(pageLimitError());
+    const extractor = createExtractor({
+        conversion: { async convert() { assert.fail('readCached does not convert'); } },
+        assertPageLimit,
+    });
+
+    assert.equal(await extractor.readCached(42, {}), null);
+    assert.equal(assertPageLimit.calls.length, 0);
+});
+
+test('rejects a hosted page limit check that is not a function', () => {
+    assert.throws(() => createExtractor({ assertPageLimit: 'yes' }), TypeError);
+});

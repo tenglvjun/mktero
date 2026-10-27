@@ -23,6 +23,7 @@ export class MinerUConversion {
         createResultKey = null,
         extractStoredResult = extractMinerUResultFromZip,
         createDataID = createTaskDataID,
+        assertPageLimit = null,
         now = Date.now,
         maxTaskAgeMs = DEFAULT_PENDING_TASK_MAX_AGE_MS,
         maxInMemoryTasks = DEFAULT_PENDING_TASK_MAX_ENTRIES,
@@ -56,6 +57,10 @@ export class MinerUConversion {
         this.createResultKey = typeof createResultKey === 'function' ? createResultKey : null;
         this.extractStoredResult = extractStoredResult;
         this.createDataID = createDataID;
+        if (assertPageLimit !== null && typeof assertPageLimit !== 'function') {
+            throw new TypeError('A PDF page limit check must be a function');
+        }
+        this.assertPageLimit = assertPageLimit;
         this.now = now;
         this.maxTaskAgeMs = maxTaskAgeMs;
         this.maxInMemoryTasks = maxInMemoryTasks;
@@ -110,6 +115,9 @@ export class MinerUConversion {
                 });
                 if (cached) return cached;
             }
+            // Only a new submission is checked: a resumed task was accepted
+            // already, and a cached result never reaches the service.
+            await this.#assertPageLimit(fileData, signal);
             const task = await this.#submitTask({
                 key,
                 apiKey,
@@ -190,6 +198,7 @@ export class MinerUConversion {
         onProgressiveFigures,
         signal,
     }) {
+        await this.#assertPageLimit(fileData, signal);
         const task = await this.client.submit({
             apiKey,
             fileName,
@@ -439,6 +448,12 @@ export class MinerUConversion {
             warnings.push('The local Markdown cache could not be read.');
             return null;
         }
+    }
+
+    async #assertPageLimit(fileData, signal) {
+        if (!this.assertPageLimit) return;
+        await this.assertPageLimit(fileData, { signal });
+        throwIfAborted(signal);
     }
 
     async #recoverFigures(result, context) {

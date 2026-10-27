@@ -79,6 +79,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命
 文件大小、页数、额度和服务可用性由当前所选的转换服务决定。改用 MinerU 或 Mistral 时，以
 [MinerU API 文档](https://mineru.net/apiManage/docs)或
 [Mistral OCR 文档](https://docs.mistral.ai/studio/document-processing/basic_ocr)中的当前限制为准。
+Mktero 账号托管转换和 MinerU 云端每个 PDF 最多 200 页。发送前 Mktero 会在本地统计页数，超过时直接提示，不会上传；本地 MinerU 和 Mistral 不做这项检查。
 
 ### 安装
 

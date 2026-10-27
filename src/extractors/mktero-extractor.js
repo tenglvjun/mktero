@@ -35,6 +35,7 @@ export class MkteroDocumentExtractor {
         resultStore = null,
         createResultKey = null,
         extractStoredResult = extractMinerUResultFromZip,
+        assertPageLimit = null,
         onCacheError = error => zotero.logError?.(error),
         onPDFIndexError = error => zotero.logError?.(error),
     }) {
@@ -65,6 +66,10 @@ export class MkteroDocumentExtractor {
         this.resultStore = resultStore?.get && resultStore?.put ? resultStore : null;
         this.createResultKey = typeof createResultKey === 'function' ? createResultKey : null;
         this.extractStoredResult = extractStoredResult;
+        if (assertPageLimit !== null && typeof assertPageLimit !== 'function') {
+            throw new TypeError('A PDF page limit check must be a function');
+        }
+        this.assertPageLimit = assertPageLimit;
         this.onCacheError = onCacheError;
         this.onPDFIndexError = onPDFIndexError;
     }
@@ -89,6 +94,12 @@ export class MkteroDocumentExtractor {
             : null;
         let converted = forceRefresh ? null : await this.#readStoredResult(resultKey, signal);
         if (!converted) {
+            // Checked only when the PDF is about to be uploaded: a correction,
+            // cached Markdown, or a stored result never reaches the service.
+            if (this.assertPageLimit) {
+                await this.assertPageLimit(opened.fileData, { signal });
+                throwIfAborted(signal);
+            }
             try {
                 converted = await this.conversion.convert({
                     apiBase: this.getApiBase(),

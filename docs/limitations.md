@@ -11,6 +11,12 @@
   Batch preparation queues every selected PDF after skipping duplicates, and converts three at a time.
 - Only local PDF attachments are supported. A scanned PDF may convert through
   OCR but still lacks the text layer needed for precise Zotero highlights.
+- The hosted Mktero conversion and MinerU cloud accept at most 200 pages per
+  PDF. A longer PDF stops before upload with a message to split it or choose
+  another provider. Cached Markdown and corrections still open. The page
+  count is read on this computer; when it cannot be read, as with an
+  encrypted PDF, the PDF is sent and the service decides. A local MinerU
+  service and Mistral are not checked.
 - Source navigation depends on provider blocks and coordinates; older cached
   results may remain readable without source links. MinerU cloud, local MinerU,
   and Mistral results have independent parser profiles and caches.
