@@ -17,8 +17,33 @@ const MARKDOWN_STYLES = readFileSync(
     'utf8'
 );
 
+// A notes bridge with no notes, so the right column is available as it is
+// in Zotero. One shared object: a new bridge per render would reset the
+// column each time.
+const EMPTY_ZOTERO_NOTES = Object.freeze({
+    async list() {
+        return { status: 'ready', notes: [], editable: true, annotationCount: 0 };
+    },
+    canHostEditor: () => false,
+    async mountEditor() {
+        throw new Error('No note editor in tests');
+    },
+    async openInWindow() {},
+    async createFromAnnotations() {
+        return { noteID: null };
+    },
+    async annotationsForNote() {
+        return [];
+    },
+    async selectionForNote() {
+        return [];
+    },
+    observe: () => () => {},
+});
+
 function createModel(changes = {}) {
     return {
+        zoteroNotes: EMPTY_ZOTERO_NOTES,
         itemID: 42,
         title: 'Converting PDF…',
         status: 'loading',
@@ -76,6 +101,8 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         onReaderSourcePeekChange: options.onReaderSourcePeekChange,
         sourcePeekDelay: options.sourcePeekDelay,
         readingPositionDelay: options.readingPositionDelay,
+        panelLayout: options.panelLayout,
+        onPanelLayoutChange: options.onPanelLayoutChange,
     });
     view.render(model);
     return { document, view, shadow: view.host.shadowRoot };
@@ -4472,7 +4499,7 @@ test('removes the visible annotation after Zotero deletes it', async () => {
     assert.deepEqual(model.annotationOverlay, { matched: [], unmatched: [] });
     assert.match(
         shadow.querySelector('.markdown-notes-list').textContent,
-        /No notes/
+        /No annotations/
     );
     view.destroy();
 });
@@ -5441,14 +5468,18 @@ test('shows PDF notes safely and jumps matched notes to Markdown', () => {
             return editor;
         },
     });
-    const notes = shadow.querySelector('#mktero-notes');
+    const notes = shadow.querySelector('#mktero-annotations');
     const buttons = [...notes.querySelectorAll('.markdown-note-link')];
 
     try {
-        assert.equal(notes.getAttribute('aria-label'), 'Notes');
+        assert.equal(notes.getAttribute('aria-label'), 'Annotations');
         assert.equal(
-            notes.querySelector('.markdown-notes-title').textContent,
-            'Notes'
+            shadow.querySelector('#mktero-outline').contains(notes),
+            true
+        );
+        assert.equal(
+            shadow.querySelector('#mktero-notes').contains(notes),
+            false
         );
         assert.equal(buttons.length, 2);
         assert.equal(buttons[0].hasAttribute('disabled'), true);
@@ -6063,7 +6094,7 @@ test('shows an empty outline state when Markdown has no headings', () => {
     assert.equal(shadow.querySelectorAll('.markdown-outline-link').length, 0);
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, 'No headings');
     assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 0);
-    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, 'No notes');
+    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, 'No annotations');
     view.destroy();
 });
 
@@ -6240,8 +6271,14 @@ test('localizes the Markdown viewer chrome from the Zotero locale', () => {
         '图表'
     );
     assert.equal(shadow.querySelector('.markdown-outline-empty').textContent, '暂无目录');
-    assert.equal(shadow.querySelector('.markdown-notes-title').textContent, '笔记');
-    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, '暂无笔记');
+    assert.equal(
+        shadow.querySelector(
+            '.markdown-outline-segment[data-outline-segment="annotations"]'
+        ).textContent,
+        '注释'
+    );
+    assert.equal(shadow.querySelector('.mktero-zotero-notes-title').textContent, '笔记');
+    assert.equal(shadow.querySelector('.markdown-notes-empty').textContent, '暂无注释');
     assert.equal(
         shadow.querySelector('#mktero-reparse').getAttribute('title'),
         '重新解析 PDF。这会再次上传 PDF，并可能消耗转换服务额度。'
@@ -7066,7 +7103,7 @@ test('hides note search and filters when a paper has no notes', () => {
     assert.equal(shadow.querySelector('.markdown-notes-count').hidden, true);
     assert.equal(
         shadow.querySelector('.markdown-notes-empty').textContent,
-        '暂无笔记'
+        '暂无注释'
     );
     assert.equal(
         shadow.querySelector('.markdown-notes-empty').getAttribute('data-notes-empty'),
@@ -7214,7 +7251,7 @@ test('shows a distinct empty state when note search matches nothing', () => {
     assert.equal(shadow.querySelector('.markdown-note-link'), null);
     assert.equal(
         shadow.querySelector('.markdown-notes-empty').textContent,
-        '没有匹配的笔记'
+        '没有匹配的注释'
     );
     assert.equal(
         shadow.querySelector('.markdown-notes-empty').getAttribute('data-notes-empty'),
@@ -7626,6 +7663,89 @@ test('Alt+N jumps to matched annotations', () => {
     }
 });
 
+test('clicking an annotation centers and flashes that range', () => {
+    const calls = [];
+    const flashes = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Before text Important result after text.',
+        sourceKind: 'markdown',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important result',
+                color: '#ffd400',
+                pageLabel: '4',
+                pageIndex: 3,
+                sortIndex: '00002',
+                ranges: [{ from: 12, to: 28 }],
+            }],
+            unmatched: [],
+        },
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = (offset, scrollOptions) => {
+                calls.push({ offset, scrollOptions });
+            };
+            editor.flashRange = (from, to) => flashes.push([from, to]);
+            return editor;
+        },
+    });
+
+    try {
+        shadow.querySelector('.markdown-note-link').click();
+        assert.deepEqual(calls, [{
+            offset: 12,
+            scrollOptions: { align: 'center' },
+        }]);
+        assert.deepEqual(flashes, [[12, 28]]);
+        assert.equal(
+            shadow.querySelector('.markdown-note-link.is-active')
+                ?.getAttribute('data-annotation-id'),
+            'HIGH0001'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('Alt+N from the window locates the annotation while the tab is open', () => {
+    const { view, document, jumps } = createLandmarkView({
+        markdown: 'Before text Important result after text.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important result',
+                color: '#ffd400',
+                pageLabel: '4',
+                pageIndex: 3,
+                sortIndex: '00002',
+                ranges: [{ from: 12, to: 28 }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    try {
+        view.syncActiveNavigation(0);
+        dispatchShortcut(document.defaultView, { key: 'n', altKey: true, code: 'KeyN' });
+        assert.deepEqual(jumps, [12]);
+
+        jumps.length = 0;
+        view.host.getClientRects = () => [];
+        dispatchShortcut(document.defaultView, { key: 'n', altKey: true, code: 'KeyN' });
+        assert.deepEqual(jumps, []);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('landmark keys do nothing in correction mode', () => {
     const { view, shadow, jumps } = createLandmarkView({
         correctionMode: true,
@@ -7864,6 +7984,113 @@ test('selecting the markdown tab leaves a note editor focused', () => {
     }
 });
 
+test('selecting the tab takes focus back from a hidden frame outside it', () => {
+    let focused = 0;
+    let timers;
+    const { document, view } = createView(
+        createModel({ status: 'ready', markdown: 'Hello' }),
+        {},
+        {
+            configureWindow(window) {
+                timers = installManualTimers(window);
+            },
+            editorFactory(options) {
+                const editor = createTestInlineEditor(options);
+                editor.focus = () => {
+                    focused += 1;
+                };
+                return editor;
+            },
+        }
+    );
+    const tab = document.createElement('div');
+    document.body.appendChild(tab);
+    tab.appendChild(view.root);
+    const otherFrame = document.createElement('iframe');
+    document.body.appendChild(otherFrame);
+    Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get() {
+            return otherFrame;
+        },
+    });
+
+    try {
+        view.handleTabSelection(true);
+        runManualTimer(timers.timers);
+        assert.equal(focused, 1);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
+test('closing the hosted note editor returns focus to the reader', async () => {
+    let focused = 0;
+    let timers;
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [{ id: 1, title: 'Note' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return {
+                    noteID,
+                    editable: true,
+                    insertAnnotations() {},
+                    destroy() {},
+                };
+            },
+        }),
+    }), {}, {
+        configureWindow(window) {
+            timers = installManualTimers(window);
+        },
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.focus = () => {
+                focused += 1;
+            };
+            return editor;
+        },
+    });
+    document.body.appendChild(view.root);
+
+    try {
+        await flushView();
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-editor-view').hidden,
+            false
+        );
+
+        shadow.querySelector('.mktero-zotero-note-back').click();
+        runManualTimer(timers.timers);
+
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-list-view').hidden,
+            false
+        );
+        assert.equal(focused, 1);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
 test('landmark keys do nothing while a note outside the markdown view is focused', () => {
     const { document, view, shadow, jumps } = createLandmarkView();
 
@@ -7970,42 +8197,52 @@ test('saves an open correction when the closing window cannot clear its timers',
         replacementMarkdown: 'The study included 50 participants.',
     };
     let editorOptions;
-    const { view } = createView(createModel({
-        status: 'ready',
-        progress: 100,
-        markdown,
-        cacheKey: 'c'.repeat(64),
-        sourceKind: 'markdown',
-        onCommitCorrection(correction) {
-            commits.push(correction);
-            return Promise.resolve({});
-        },
-        onReadingPositionChange: anchor => positions.push(anchor),
-    }), { logError: error => errors.push(error.message) }, {
-        readingPositionDelay: 1000,
-        // A main window that is unloading still runs scripts, but its timer
-        // functions can throw.
-        configureWindow(window) {
-            window.setTimeout = () => 7;
-            window.clearTimeout = () => {
-                throw new Error('NS_ERROR_NOT_INITIALIZED');
-            };
-        },
-        editorFactory(options) {
-            editorOptions = options;
-            return {
-                ...createTestInlineEditor(options),
-                getPendingCorrection: () => pending,
-            };
-        },
-    });
-    editorOptions.onViewportChange(markdown.indexOf('The study'));
-    assert.equal(positions.length, 0);
+    // linkedom's window timers are the process timers. Replacing them
+    // without restoring them makes every later test's clearTimeout throw.
+    const previousSetTimeout = globalThis.setTimeout;
+    const previousClearTimeout = globalThis.clearTimeout;
+    try {
+        const { view } = createView(createModel({
+            status: 'ready',
+            progress: 100,
+            markdown,
+            cacheKey: 'c'.repeat(64),
+            sourceKind: 'markdown',
+            onCommitCorrection(correction) {
+                commits.push(correction);
+                return Promise.resolve({});
+            },
+            onReadingPositionChange: anchor => positions.push(anchor),
+        }), { logError: error => errors.push(error.message) }, {
+            readingPositionDelay: 1000,
+            // A main window that is unloading still runs scripts, but its timer
+            // functions can throw.
+            configureWindow(window) {
+                window.setTimeout = () => 7;
+                window.clearTimeout = () => {
+                    throw new Error('NS_ERROR_NOT_INITIALIZED');
+                };
+            },
+            editorFactory(options) {
+                editorOptions = options;
+                return {
+                    ...createTestInlineEditor(options),
+                    getPendingCorrection: () => pending,
+                };
+            },
+        });
+        editorOptions.onViewportChange(markdown.indexOf('The study'));
+        assert.equal(positions.length, 0);
 
-    assert.doesNotThrow(() => view.destroy());
+        assert.doesNotThrow(() => view.destroy());
 
-    assert.deepEqual(commits, [pending]);
-    assert.ok(errors.includes('NS_ERROR_NOT_INITIALIZED'));
+        assert.deepEqual(commits, [pending]);
+        assert.ok(errors.includes('NS_ERROR_NOT_INITIALIZED'));
+    }
+    finally {
+        globalThis.setTimeout = previousSetTimeout;
+        globalThis.clearTimeout = previousClearTimeout;
+    }
 });
 
 function createCopyDeliveryView({
@@ -8542,4 +8779,957 @@ test('does not save a highlight that has more segments than the store keeps', as
     );
     assert.equal(created.length, 0);
     view.destroy();
+});
+
+function flushView() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
+function wideReaderWindow(window) {
+    Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        writable: true,
+        value: 1400,
+    });
+}
+
+function noteBridgeFailure(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+}
+
+function createNotesBridge(overrides = {}) {
+    return {
+        async list() {
+            return {
+                status: 'ready',
+                notes: [],
+                editable: true,
+                annotationCount: 0,
+            };
+        },
+        canHostEditor: () => false,
+        async mountEditor() {
+            throw new Error('No note editor in tests');
+        },
+        async openInWindow() {},
+        async createFromAnnotations() {
+            return { noteID: null };
+        },
+        async annotationsForNote() {
+            return [];
+        },
+        async selectionForNote() {
+            return [];
+        },
+        observe: () => () => {},
+        ...overrides,
+    };
+}
+
+function actionStatus(shadow) {
+    return shadow.querySelector('.markdown-reader-action-status');
+}
+
+test('switches the outline between headings, figures, and annotations', () => {
+    const changes = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview\n\n## Methods',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        onPanelLayoutChange: change => changes.push(change),
+    });
+
+    try {
+        const segments = [
+            ...shadow.querySelectorAll('.markdown-outline-segment'),
+        ];
+        assert.deepEqual(
+            segments.map(button => button.getAttribute('data-outline-segment')),
+            ['headings', 'figures', 'annotations']
+        );
+        assert.deepEqual(
+            segments.map(button => button.textContent),
+            ['Headings', 'Figures', 'Annotations']
+        );
+        assert.equal(segments[0].getAttribute('aria-selected'), 'true');
+        assert.equal(segments[0].getAttribute('aria-controls'), 'mktero-outline-list');
+        assert.equal(
+            segments[2].getAttribute('aria-controls'),
+            'mktero-annotations'
+        );
+        const outlineList = shadow.querySelector('#mktero-outline-list');
+        const annotations = shadow.querySelector('#mktero-annotations');
+        assert.equal(outlineList.hidden, false);
+        assert.equal(annotations.hidden, true);
+
+        segments[2].click();
+
+        assert.equal(outlineList.hidden, true);
+        assert.equal(annotations.hidden, false);
+        assert.equal(segments[2].getAttribute('aria-selected'), 'true');
+        assert.equal(segments[0].getAttribute('aria-selected'), 'false');
+        assert.deepEqual(changes, [{ outlineSegment: 'annotations' }]);
+
+        segments[2].click();
+        assert.deepEqual(changes, [{ outlineSegment: 'annotations' }]);
+        segments[1].click();
+        assert.equal(outlineList.hidden, false);
+        assert.equal(annotations.hidden, true);
+        assert.deepEqual(changes.at(-1), { outlineSegment: 'figures' });
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('restores a saved panel layout and clamps widths and the segment', () => {
+    const changes = [];
+    const restored = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        panelLayout: {
+            outline: { visible: false, width: 200 },
+            notes: { visible: true, width: 240 },
+            outlineSegment: 'annotations',
+        },
+        onPanelLayoutChange: change => changes.push(change),
+    });
+    const clamped = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        panelLayout: {
+            outline: { visible: true, width: 12 },
+            notes: { visible: false, width: 9000 },
+            outlineSegment: 'not-a-segment',
+        },
+    });
+
+    try {
+        const outline = restored.shadow.querySelector('#mktero-outline');
+        const notes = restored.shadow.querySelector('#mktero-notes');
+        assert.equal(outline.hidden, true);
+        assert.equal(
+            outline.style.getPropertyValue('--outline-width'),
+            '200px'
+        );
+        assert.equal(
+            restored.shadow.querySelector('#mktero-outline-resizer')
+                .getAttribute('aria-valuenow'),
+            '200'
+        );
+        assert.equal(notes.hidden, false);
+        assert.equal(notes.style.getPropertyValue('--notes-width'), '240px');
+        assert.equal(
+            restored.shadow.querySelector('#mktero-outline-list').hidden,
+            true
+        );
+        assert.equal(
+            restored.shadow.querySelector('#mktero-annotations').hidden,
+            false
+        );
+        assert.equal(
+            restored.shadow.querySelector(
+                '.markdown-outline-segment[data-outline-segment="annotations"]'
+            ).getAttribute('aria-selected'),
+            'true'
+        );
+        assert.deepEqual(changes, []);
+
+        const clampedOutline = clamped.shadow.querySelector('#mktero-outline');
+        const clampedNotes = clamped.shadow.querySelector('#mktero-notes');
+        assert.equal(clampedOutline.hidden, false);
+        assert.equal(
+            clampedOutline.style.getPropertyValue('--outline-width'),
+            '180px'
+        );
+        assert.equal(clampedNotes.hidden, true);
+        assert.equal(
+            clampedNotes.style.getPropertyValue('--notes-width'),
+            '480px'
+        );
+        assert.equal(
+            clamped.shadow.querySelector(
+                '.markdown-outline-segment[data-outline-segment="headings"]'
+            ).getAttribute('aria-selected'),
+            'true'
+        );
+        assert.equal(
+            clamped.shadow.querySelector('#mktero-annotations').hidden,
+            true
+        );
+    }
+    finally {
+        restored.view.destroy();
+        clamped.view.destroy();
+    }
+});
+
+test('reports a user panel toggle and a completed drag or keyboard resize', () => {
+    const changes = [];
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        onPanelLayoutChange: change => changes.push(change),
+    });
+    const outlineResizer = shadow.querySelector('#mktero-outline-resizer');
+
+    try {
+        shadow.querySelector('#mktero-notes-toggle').click();
+        assert.deepEqual(changes, [{ notes: { visible: false } }]);
+
+        dispatchMouseEvent(outlineResizer, 'mousedown', 256);
+        dispatchMouseEvent(document.defaultView, 'mousemove', 300);
+        assert.deepEqual(changes, [{ notes: { visible: false } }]);
+        dispatchMouseEvent(document.defaultView, 'mouseup', 300);
+        assert.deepEqual(changes, [
+            { notes: { visible: false } },
+            { outline: { width: 300 } },
+        ]);
+
+        dispatchKeyboardEvent(outlineResizer, 'ArrowRight');
+        assert.deepEqual(changes.at(-1), { outline: { width: 316 } });
+        assert.equal(outlineResizer.getAttribute('aria-valuenow'), '316');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('does not report a responsive side-panel collapse', () => {
+    const changes = [];
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        onPanelLayoutChange: change => changes.push(change),
+    });
+
+    try {
+        assert.equal(shadow.querySelector('#mktero-outline').hidden, false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+        document.defaultView.innerWidth = 800;
+        document.defaultView.dispatchEvent(
+            new document.defaultView.Event('resize')
+        );
+
+        assert.equal(shadow.querySelector('#mktero-outline').hidden, true);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        assert.deepEqual(changes, []);
+
+        shadow.querySelector('#mktero-outline-toggle').click();
+        assert.deepEqual(changes, [{ outline: { visible: true } }]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('hides the notes column when the document has no notes bridge', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview',
+        sourceKind: 'markdown',
+        zoteroNotes: null,
+    }), {}, {
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        assert.equal(shadow.querySelector('#mktero-outline').hidden, false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        assert.equal(shadow.querySelector('.markdown-notes-edge').hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('shows Zotero note titles and previews as text', async () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [
+                        {
+                            id: 1,
+                            title: hostile,
+                            preview: '<script>alert(1)</script>',
+                            dateLabel: 'Today',
+                        },
+                        { id: 2, title: 'Second note', preview: 'A preview' },
+                    ],
+                };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        await flushView();
+        const links = [
+            ...shadow.querySelectorAll('.mktero-zotero-note-link'),
+        ];
+        assert.equal(links.length, 2);
+        assert.equal(
+            links[0].querySelector('.mktero-zotero-note-title').textContent,
+            hostile
+        );
+        assert.equal(links[0].querySelector('img'), null);
+        assert.equal(
+            links[0].querySelector('.mktero-zotero-note-preview').textContent,
+            '<script>alert(1)</script>'
+        );
+        assert.equal(links[0].querySelector('script'), null);
+        assert.match(links[0].innerHTML, /&lt;img/);
+        assert.equal(
+            links[1].querySelector('.mktero-zotero-note-title').textContent,
+            'Second note'
+        );
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-count').textContent,
+            '2'
+        );
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-count').hidden,
+            false
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('hosts an open Zotero note and returns to the list', async () => {
+    const destroyed = [];
+    const mounted = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [{ id: 7, title: 'Methods', preview: 'Quoted' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(container, { noteID }) {
+                mounted.push({ container, noteID });
+                const editor = container.ownerDocument.createElement('div');
+                editor.className = 'fake-note-editor';
+                container.appendChild(editor);
+                return {
+                    noteID,
+                    editable: true,
+                    insertAnnotations() {},
+                    focus() {},
+                    save() {},
+                    destroy() {
+                        destroyed.push(noteID);
+                    },
+                };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        await flushView();
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+
+        const editorHost = view.host.querySelector('.mktero-note-editor-host');
+        assert.ok(editorHost);
+        assert.equal(editorHost.parentElement, view.host);
+        assert.equal(editorHost.getAttribute('slot'), 'mktero-note-editor');
+        assert.equal(shadow.querySelector('.mktero-note-editor-host'), null);
+        assert.equal(mounted[0].container, editorHost);
+        assert.equal(mounted[0].noteID, 7);
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-editor-view').hidden,
+            false
+        );
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-list-view').hidden,
+            true
+        );
+
+        shadow.querySelector('.mktero-zotero-note-back').click();
+        assert.deepEqual(destroyed, [7]);
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-list-view').hidden,
+            false
+        );
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-editor-view').hidden,
+            true
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('opens a note in a window when the tab cannot host the editor', async () => {
+    const opened = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [{ id: 11, title: 'Window note' }],
+                };
+            },
+            canHostEditor: () => false,
+            async openInWindow(options) {
+                opened.push(options);
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        await flushView();
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+
+        assert.deepEqual(opened.map(options => options.noteID), [11]);
+        assert.equal(view.host.querySelector('.mktero-note-editor-host'), null);
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-editor-view').hidden,
+            true
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('explains when a PDF cannot have child notes', async () => {
+    const cases = [
+        [
+            'no-parent',
+            'This PDF is not attached to a library item, so it cannot have child notes.',
+        ],
+        [
+            'unavailable',
+            'Notes are unavailable for this document.',
+        ],
+    ];
+    for (const [status, message] of cases) {
+        const { view, shadow } = createView(createModel({
+            status: 'ready',
+            progress: 100,
+            markdown: 'Paper',
+            sourceKind: 'markdown',
+            zoteroNotes: createNotesBridge({
+                async list() {
+                    return {
+                        status,
+                        notes: [],
+                        editable: false,
+                        annotationCount: 0,
+                    };
+                },
+            }),
+        }), {}, {
+            configureWindow: wideReaderWindow,
+        });
+        try {
+            await flushView();
+            assert.equal(
+                shadow.querySelector('.mktero-zotero-notes-status').textContent,
+                message
+            );
+            assert.equal(
+                shadow.querySelector('.mktero-zotero-note-new').hidden,
+                true
+            );
+        }
+        finally {
+            view.destroy();
+        }
+    }
+});
+
+test('adds a PDF annotation to the open note and refuses one that cannot', async () => {
+    const inserted = [];
+    const requested = [];
+    const logged = [];
+    let annotationsForNote = async ids => {
+        requested.push(ids);
+        return [{ id: ids[0], type: 'highlight', text: 'Alpha' }];
+    };
+    const model = readyNotesModel([
+        noteAnnotation({
+            id: 'HIGH0001',
+            text: 'Alpha',
+            color: '#ffd400',
+        }),
+        noteAnnotation({
+            id: 'mktero-local-1',
+            source: 'markdown',
+            text: 'Local',
+            color: '#a28ae5',
+        }),
+    ], {
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 1,
+                    notes: [{ id: 4, title: 'Note' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return {
+                    noteID,
+                    editable: true,
+                    async insertAnnotations(annotations) {
+                        inserted.push(annotations);
+                    },
+                    destroy() {},
+                };
+            },
+            annotationsForNote: ids => annotationsForNote(ids),
+        }),
+    });
+    const { view, shadow } = createView(model, {
+        logError: error => logged.push(error),
+    }, {
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        await flushView();
+        const pdfButton = shadow.querySelector(
+            '.markdown-note-add-to-note[data-annotation-id="HIGH0001"]'
+        );
+        const localButton = shadow.querySelector(
+            '.markdown-note-add-to-note[data-annotation-id="mktero-local-1"]'
+        );
+        assert.equal(pdfButton.getAttribute('aria-disabled'), 'true');
+        assert.equal(
+            pdfButton.getAttribute('title'),
+            'Open or create a note in the Notes column first.'
+        );
+        assert.equal(localButton.getAttribute('aria-disabled'), 'true');
+        assert.equal(
+            localButton.getAttribute('title'),
+            'This annotation has not reached the PDF yet. Retry its sync first.'
+        );
+
+        pdfButton.click();
+        await flushView();
+        assert.equal(
+            actionStatus(shadow).textContent,
+            'Open or create a note in the Notes column first.'
+        );
+        assert.deepEqual(logged, []);
+        assert.deepEqual(requested, []);
+
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+        assert.equal(pdfButton.getAttribute('aria-disabled'), 'false');
+        assert.equal(pdfButton.getAttribute('title'), 'Add to Note');
+        assert.equal(localButton.getAttribute('aria-disabled'), 'true');
+
+        localButton.click();
+        await flushView();
+        assert.equal(
+            actionStatus(shadow).textContent,
+            'This annotation has not reached the PDF yet. Retry its sync first.'
+        );
+        assert.deepEqual(logged, []);
+        assert.deepEqual(requested, []);
+
+        pdfButton.click();
+        await flushView();
+        assert.deepEqual(requested, [['HIGH0001']]);
+        assert.deepEqual(inserted, [[{
+            id: 'HIGH0001',
+            type: 'highlight',
+            text: 'Alpha',
+        }]]);
+
+        const notLocated = noteBridgeFailure(
+            'MKTERO_NOTE_SELECTION_NOT_LOCATED',
+            'The passage has no PDF position'
+        );
+        annotationsForNote = async () => {
+            throw notLocated;
+        };
+        pdfButton.click();
+        await flushView();
+        assert.equal(
+            actionStatus(shadow).textContent,
+            'This passage could not be located in the PDF, so it cannot be cited in a note.'
+        );
+        assert.deepEqual(logged, []);
+
+        const unexpected = new Error('disk full');
+        annotationsForNote = async () => {
+            throw unexpected;
+        };
+        pdfButton.click();
+        await flushView();
+        assert.equal(
+            actionStatus(shadow).textContent,
+            'The note could not be updated.'
+        );
+        assert.deepEqual(logged, [unexpected]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('creates a note from annotations and opens it in the notes column', async () => {
+    const hidden = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+    }), {}, {
+        configureWindow: wideReaderWindow,
+    });
+    await flushView();
+    assert.equal(
+        hidden.shadow.querySelector('.markdown-annotations-note-button').hidden,
+        true
+    );
+    hidden.view.destroy();
+
+    const readOnly = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    notes: [],
+                    editable: false,
+                    annotationCount: 3,
+                };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+    });
+    await flushView();
+    assert.equal(
+        readOnly.shadow.querySelector('.markdown-annotations-note-button').hidden,
+        true
+    );
+    readOnly.view.destroy();
+
+    const created = [];
+    const mounted = [];
+    const changes = [];
+    const notes = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    notes: [...notes],
+                    editable: true,
+                    annotationCount: 2,
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                mounted.push(noteID);
+                return {
+                    noteID,
+                    editable: true,
+                    insertAnnotations() {},
+                    destroy() {},
+                };
+            },
+            async createFromAnnotations() {
+                created.push(true);
+                notes.push({ id: 42, title: 'From annotations' });
+                return { noteID: 42 };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        onPanelLayoutChange: change => changes.push(change),
+    });
+
+    try {
+        await flushView();
+        shadow.querySelector(
+            '.markdown-outline-segment[data-outline-segment="annotations"]'
+        ).click();
+        const button = shadow.querySelector('.markdown-annotations-note-button');
+        assert.equal(button.hidden, false);
+        assert.equal(
+            shadow.querySelector('#mktero-annotations').hidden,
+            false
+        );
+        assert.equal(
+            button.getAttribute('aria-label'),
+            'Add Note from Annotations'
+        );
+
+        shadow.querySelector('#mktero-notes-toggle').click();
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        button.click();
+        await flushView();
+
+        assert.deepEqual(created, [true]);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+        assert.ok(changes.some(change => change.notes?.visible === true));
+        assert.deepEqual(mounted, [42]);
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-editor-view').hidden,
+            false
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('typing n in the hosted note editor does not jump the reader', async () => {
+    const jumps = [];
+    let caret = null;
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Overview\n\n## Methods\n\n### Results\n\nBody.',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [{ id: 1, title: 'Note' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(container, { noteID }) {
+                caret = container.ownerDocument.createElement('div');
+                caret.className = 'fake-note-caret';
+                caret.setAttribute('contenteditable', 'true');
+                container.appendChild(caret);
+                return {
+                    noteID,
+                    editable: true,
+                    insertAnnotations() {},
+                    destroy() {},
+                };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => jumps.push(offset);
+            editor.recordNavigationPoint = () => {};
+            return editor;
+        },
+    });
+    document.body.appendChild(view.root);
+
+    try {
+        await flushView();
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+        assert.ok(caret);
+        view.syncActiveNavigation(0);
+
+        const typed = dispatchShortcut(caret, { key: 'n' });
+        assert.equal(typed.defaultPrevented, false);
+        assert.deepEqual(jumps, []);
+
+        const inside = dispatchShortcut(
+            shadow.querySelector('#mktero-content'),
+            { key: 'n' }
+        );
+        assert.equal(inside.defaultPrevented, true);
+        assert.deepEqual(jumps, [12]);
+
+        // linkedom does not retarget a slotted key into the shadow root.
+        // The guard still sees the note when the event that reaches the
+        // reader names the caret as its original target.
+        const retargeted = dispatchShortcut(
+            shadow.querySelector('#mktero-content'),
+            { key: 'n', originalTarget: caret }
+        );
+        assert.equal(retargeted.defaultPrevented, false);
+        assert.deepEqual(jumps, [12]);
+
+        // A key in the reader can name a node from another frame (the PDF
+        // reader, the hidden context pane). That frame is not the note, so
+        // the key still jumps.
+        const { document: otherDocument } = parseHTML(
+            '<html><body><div id="caret"></div></body></html>'
+        );
+        const foreign = dispatchShortcut(
+            shadow.querySelector('#mktero-content'),
+            {
+                key: 'n',
+                originalTarget: otherDocument.getElementById('caret'),
+            }
+        );
+        assert.equal(foreign.defaultPrevented, true);
+        assert.equal(jumps.length, 2);
+
+        // A key Firefox retargets out of the note editor's own frame names a
+        // node of that frame, and stays with the note.
+        const frame = document.createElement('iframe');
+        const frameDocument = parseHTML(
+            '<html><body><div id="caret"></div></body></html>'
+        ).document;
+        Object.defineProperty(frame, 'contentDocument', {
+            value: frameDocument,
+        });
+        view.host.querySelector('.mktero-note-editor-host').appendChild(frame);
+        const framed = dispatchShortcut(
+            shadow.querySelector('#mktero-content'),
+            {
+                key: 'n',
+                originalTarget: frameDocument.getElementById('caret'),
+            }
+        );
+        assert.equal(framed.defaultPrevented, false);
+        assert.equal(jumps.length, 2);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('destroying the reader destroys the open note and its editor host', async () => {
+    const destroyed = [];
+    const { view } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [{ id: 5, title: 'Open' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(container, { noteID }) {
+                container.appendChild(
+                    container.ownerDocument.createElement('textarea')
+                );
+                return {
+                    noteID,
+                    editable: true,
+                    insertAnnotations() {},
+                    destroy() {
+                        destroyed.push(noteID);
+                    },
+                };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+    });
+    await flushView();
+    view.host.shadowRoot.querySelector('.mktero-zotero-note-link').click();
+    await flushView();
+    const editorHost = view.host.querySelector('.mktero-note-editor-host');
+    assert.ok(editorHost);
+
+    view.destroy();
+
+    assert.deepEqual(destroyed, [5]);
+    assert.equal(view.host.querySelector('.mktero-note-editor-host'), null);
+    assert.equal(editorHost.parentElement, null);
+});
+
+test('localizes the notes column and annotation segment in Simplified Chinese', async () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '正文',
+        sourceKind: 'markdown',
+    }), {}, {
+        localization: createLocalization({ zoteroLocale: 'zh-CN' }),
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        await flushView();
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-title').textContent,
+            '笔记'
+        );
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-note-new').getAttribute('aria-label'),
+            '新建笔记'
+        );
+        assert.equal(
+            shadow.querySelector(
+                '.markdown-outline-segment[data-outline-segment="annotations"]'
+            ).textContent,
+            '注释'
+        );
+    }
+    finally {
+        view.destroy();
+    }
 });

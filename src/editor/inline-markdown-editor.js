@@ -84,6 +84,11 @@ function editorClock() {
     return globalThis.performance?.now?.() ?? Date.now();
 }
 const editorNavigationMeasureKey = {};
+// A jump sets scrollTop, then Zotero's offscreen-viewport repair and
+// CodeMirror's scroll anchor can put the old position back. Hold the
+// target across that frame so the jump the reader asked for stays put.
+const NAVIGATION_REVEAL_MS = 500;
+const navigationReveals = new WeakMap();
 // One stable identity for "no ranges", so the rendering field can skip a
 // rebuild when a model update carries nothing new.
 const NO_EDITOR_RANGES = Object.freeze([]);
@@ -131,7 +136,13 @@ const COPY_SHORTCUT_GRACE_MS = 200;
 // That dispatch is not a reader copy, so the verification ignores it.
 let syntheticCopyDispatch = false;
 
-function requestEditorScroll(view, position, requestedDocument, correctAfterRender = true) {
+function requestEditorScroll(
+    view,
+    position,
+    requestedDocument,
+    correctAfterRender = true,
+    align = 'start'
+) {
     // Outline, search, notes, landmarks, and citation jumps all land here.
     // Expand before measuring so a collapsed section has a real height.
     expandMarkdownSectionAt(view, position);
@@ -139,21 +150,100 @@ function requestEditorScroll(view, position, requestedDocument, correctAfterRend
         key: editorNavigationMeasureKey,
         read(editorView) {
             if (editorView.state.doc !== requestedDocument) return null;
+            const block = editorView.lineBlockAt(position);
             return {
-                top: editorView.lineBlockAt(position).top,
+                top: block.top,
+                bottom: block.bottom,
+                align,
                 targetIsRendered: position >= editorView.viewport.from
                     && position <= editorView.viewport.to,
             };
         },
         write(measurement, editorView) {
             if (!measurement || editorView.state.doc !== requestedDocument) return;
-            editorView.scrollDOM.scrollTop = Math.max(0, measurement.top);
+            const nextTop = navigationScrollTop(editorView, measurement);
+            holdNavigationReveal(editorView, nextTop, measurement);
+            editorView.scrollDOM.scrollTop = nextTop;
+            if (measurement.align === 'center') {
+                // scrollTop puts the line in view. scrollIntoView tells
+                // CodeMirror's own viewport the same target, so a later
+                // measure does not anchor back to the place we left.
+                try {
+                    editorView.dispatch({
+                        effects: EditorView.scrollIntoView(position, {
+                            y: 'center',
+                        }),
+                    });
+                }
+                catch {
+                    // The scrollTop above is the position the reader keeps.
+                }
+                const reveal = activeNavigationReveal(editorView);
+                if (reveal) editorView.scrollDOM.scrollTop = reveal.scrollTop;
+            }
             if (correctAfterRender && !measurement.targetIsRendered) {
                 // Offscreen block-widget heights are estimates until this scroll renders them.
-                requestEditorScroll(editorView, position, requestedDocument, false);
+                requestEditorScroll(
+                    editorView,
+                    position,
+                    requestedDocument,
+                    false,
+                    align
+                );
             }
         },
     });
+}
+
+function navigationScrollTop(editorView, measurement) {
+    const top = Math.max(0, Number(measurement.top) || 0);
+    if (measurement.align !== 'center') return top;
+    const clientHeight = Number(editorView.scrollDOM?.clientHeight);
+    if (!Number.isFinite(clientHeight) || clientHeight <= 0) return top;
+    const blockHeight = Math.max(
+        0,
+        Number(measurement.bottom) - Number(measurement.top)
+    );
+    // Leave the browser to clamp past the document end. Clamping to a
+    // not-yet-updated scrollHeight would pin a jump at the top.
+    return Math.max(0, top - Math.max(0, (clientHeight - blockHeight) / 2));
+}
+
+function holdNavigationReveal(editorView, scrollTop, measurement = null) {
+    navigationReveals.set(editorView, {
+        until: editorClock() + NAVIGATION_REVEAL_MS,
+        scrollTop,
+        measurement,
+    });
+    const win = editorView.dom?.ownerDocument?.defaultView;
+    const reapply = () => {
+        const reveal = activeNavigationReveal(editorView);
+        if (!reveal) return;
+        // The first measure can see a zero-height scroller in Zotero's tab.
+        // Recompute once the scroller has a height, or the jump stays at the top.
+        if (reveal.measurement?.align === 'center') {
+            reveal.scrollTop = navigationScrollTop(
+                editorView,
+                reveal.measurement
+            );
+        }
+        try {
+            if (Math.abs(Number(editorView.scrollDOM?.scrollTop) - reveal.scrollTop) > 1) {
+                editorView.scrollDOM.scrollTop = reveal.scrollTop;
+            }
+        }
+        catch {
+            // The editor can close before the follow-up frame.
+        }
+    };
+    win?.requestAnimationFrame?.(reapply);
+    win?.setTimeout?.(reapply, 50);
+}
+
+function activeNavigationReveal(editorView) {
+    const reveal = navigationReveals.get(editorView);
+    if (!reveal || editorClock() >= reveal.until) return null;
+    return reveal;
 }
 
 export function createInlineMarkdownEditor({
@@ -174,6 +264,9 @@ export function createInlineMarkdownEditor({
     onCopyDeliveryError,
     openSourceLocation,
     openAnnotationInPDF,
+    addToNoteState,
+    addAnnotationToNote,
+    addSelectionToNote,
     onSourceNavigationError,
     onAnnotationActionError,
     onViewportChange,
@@ -243,6 +336,17 @@ export function createInlineMarkdownEditor({
         copySelectionTranslation,
         openSourceLocation,
         openAnnotationInPDF,
+        addToNoteState,
+        addAnnotationToNote,
+        addSelectionToNote: typeof addSelectionToNote === 'function'
+            ? (annotation, selectionContext) => addSelectionToNote(
+                withSelectionTextQuote(
+                    annotation,
+                    selectionSources.get(selectionContext)
+                ),
+                withoutSelectionTranslationContext(selectionContext)
+            )
+            : undefined,
         onNoteEditorClose: clearRetainedSelectionHighlight,
         onSourceNavigationError,
         onDetachedActionError: typeof onAnnotationActionError === 'function'
@@ -543,20 +647,33 @@ export function createInlineMarkdownEditor({
             }
             const isEditorScroll = event.type === 'scroll'
                 && event.target === view.scrollDOM;
-            // An open correction already owns the caret. scrollIntoView plus
-            // a synchronous measure here fights that caret on every scroll.
-            const viewportRepaired = isEditorScroll
-                && !activeCorrection
-                && repairViewport();
-            if (!activeCorrection) view.requestMeasure();
+            const navigationReveal = isEditorScroll
+                ? activeNavigationReveal(view)
+                : null;
+            if (navigationReveal) {
+                // The jump just set this offset. The repair below would
+                // treat it as a stalled viewport and put the old place back.
+                const target = navigationReveal.scrollTop;
+                if (Math.abs(Number(view.scrollDOM.scrollTop) - target) > 1) {
+                    view.scrollDOM.scrollTop = target;
+                }
+            }
+            else {
+                // An open correction already owns the caret. scrollIntoView plus
+                // a synchronous measure here fights that caret on every scroll.
+                const viewportRepaired = isEditorScroll
+                    && !activeCorrection
+                    && repairViewport();
+                if (!activeCorrection) view.requestMeasure();
+                if (isEditorScroll
+                    && !activeCorrection
+                    && !viewportRepaired
+                    && typeof ownerWindow.IntersectionObserver !== 'function') {
+                    view.measure();
+                }
+            }
             if (isEditorScroll) {
                 onViewportChange?.(editorViewportOffset(view));
-            }
-            if (isEditorScroll
-                && !activeCorrection
-                && !viewportRepaired
-                && typeof ownerWindow.IntersectionObserver !== 'function') {
-                view.measure();
             }
         }
     );
@@ -1566,14 +1683,20 @@ export function createInlineMarkdownEditor({
             activateDOMGlobals(ownerWindow);
             view.focus();
         },
-        scrollToOffset(offset) {
+        scrollToOffset(offset, { align = 'start' } = {}) {
             activateDOMGlobals(ownerWindow);
             const requested = Number(offset);
             const position = Number.isFinite(requested)
                 ? Math.max(0, Math.min(Math.trunc(requested), view.state.doc.length))
                 : 0;
             const requestedDocument = view.state.doc;
-            requestEditorScroll(view, position, requestedDocument);
+            requestEditorScroll(
+                view,
+                position,
+                requestedDocument,
+                true,
+                align === 'center' ? 'center' : 'start'
+            );
         },
         setDocumentSearchHighlights(value = {}) {
             activateDOMGlobals(ownerWindow);

@@ -2222,6 +2222,212 @@ test('restores the previous comment when Zotero cannot save the annotation', asy
     assert.equal(committed, true);
 });
 
+function createSelectionActions({
+    locateText = async () => null,
+    attachment = { id: 42, isPDFAttachment: () => true },
+} = {}) {
+    const saved = [];
+    const zotero = {
+        Items: {
+            get: () => attachment,
+        },
+        Annotations: {
+            async saveFromJSON(...args) {
+                saved.push(args);
+                throw new Error('locateSelection must not save an annotation');
+            },
+        },
+        DataObjectUtilities: {
+            generateKey() {
+                saved.push(['key']);
+                throw new Error('locateSelection must not allocate an annotation key');
+            },
+        },
+    };
+    return {
+        saved,
+        actions: createZoteroAnnotationActions(zotero, { locateText }),
+    };
+}
+
+function locatedSelection(overrides = {}) {
+    return {
+        text: 'Selected passage',
+        pageLabel: '3',
+        sortIndex: '00002|000001|00000',
+        position: {
+            pageIndex: 2,
+            rects: [[72, 700, 420, 720]],
+        },
+        ...overrides,
+    };
+}
+
+test('locates a selection without saving it or requiring a color', async () => {
+    const located = locatedSelection();
+    let calls = 0;
+    const reader = { itemID: 42 };
+    const { actions, saved } = createSelectionActions({
+        async locateText(itemID, text, options) {
+            calls += 1;
+            assert.equal(itemID, 42);
+            assert.equal(text, 'Selected passage');
+            assert.equal(options.pdfPageIndexHint, 2);
+            assert.equal(options.reader, reader);
+            return located;
+        },
+    });
+
+    const withoutColor = await actions.locateSelection(42, {
+        text: 'Selected passage',
+        pdfPageIndexHint: 2,
+    }, { reader });
+    const withInvalidColor = await actions.locateSelection(42, {
+        text: 'Selected passage',
+        pdfPageIndexHint: 2,
+        color: 'not-a-color',
+    }, { reader });
+
+    assert.equal(calls, 2);
+    assert.deepEqual(saved, []);
+    assert.deepEqual(withoutColor, {
+        parts: [{
+            text: 'Selected passage',
+            pageLabel: '3',
+            sortIndex: '00002|000001|00000',
+            position: {
+                pageIndex: 2,
+                rects: [[72, 700, 420, 720]],
+            },
+        }],
+    });
+    assert.deepEqual(withInvalidColor, withoutColor);
+    withoutColor.parts[0].position.rects[0][0] = 1;
+    assert.equal(located.position.rects[0][0], 72);
+});
+
+test('returns one part per page for a multi-page selection', async () => {
+    const { actions, saved } = createSelectionActions({
+        locateText: async () => ({
+            text: 'complete cross-page passage',
+            pageLabel: '4',
+            sortIndex: '00003|000001|00000',
+            position: {
+                pageIndex: 3,
+                rects: [[72, 700, 300, 720]],
+            },
+            segments: [
+                {
+                    text: 'complete cross-page',
+                    pageLabel: '4',
+                    sortIndex: '00003|000001|00000',
+                    position: {
+                        pageIndex: 3,
+                        rects: [[72, 700, 300, 720]],
+                    },
+                },
+                {
+                    text: 'passage',
+                    pageLabel: '5',
+                    sortIndex: '00004|000001|00000',
+                    position: {
+                        pageIndex: 4,
+                        rects: [[72, 700, 150, 720]],
+                    },
+                },
+            ],
+        }),
+    });
+
+    const result = await actions.locateSelection(42, {
+        text: 'complete cross-page passage',
+    });
+
+    assert.deepEqual(saved, []);
+    assert.deepEqual(result.parts.map(part => part.text), [
+        'complete cross-page',
+        'passage',
+    ]);
+    assert.deepEqual(result.parts.map(part => part.position.pageIndex), [3, 4]);
+    assert.equal(result.parts[1].pageLabel, '5');
+    assert.equal(result.parts[1].sortIndex, '00004|000001|00000');
+    assert.equal('deferred' in result, false);
+});
+
+test('defers a selection the PDF index cannot place and does not save it', async () => {
+    let calls = 0;
+    const { actions, saved } = createSelectionActions({
+        async locateText() {
+            calls += 1;
+            return null;
+        },
+    });
+
+    const result = await actions.locateSelection(42, {
+        text: 'Selected passage',
+    });
+
+    assert.equal(calls, 1);
+    assert.deepEqual(result, { deferred: true });
+    assert.deepEqual(saved, []);
+});
+
+test('rejects an invalid selection before locating or saving it', async () => {
+    let calls = 0;
+    const { actions, saved } = createSelectionActions({
+        attachment: { id: 42, isPDFAttachment: () => true },
+        async locateText() {
+            calls += 1;
+            return null;
+        },
+    });
+
+    await assert.rejects(
+        actions.locateSelection(42, { text: '' }),
+        /Invalid PDF annotation text/
+    );
+    await assert.rejects(
+        actions.locateSelection(42, { text: '   ' }),
+        /Invalid PDF annotation text/
+    );
+    await assert.rejects(
+        actions.locateSelection(42, {
+            text: 'x'.repeat(MAX_PDF_ANNOTATION_TEXT_LENGTH + 1),
+        }),
+        /Invalid PDF annotation text/
+    );
+    await assert.rejects(
+        actions.locateSelection(42, {
+            text: 'Selected passage',
+            pdfPageIndexHint: -1,
+        }),
+        /Invalid PDF annotation page hint/
+    );
+    await assert.rejects(
+        actions.locateSelection(42, {
+            text: 'Selected passage',
+            pdfPageIndexHint: 1.5,
+        }),
+        /Invalid PDF annotation page hint/
+    );
+    assert.equal(calls, 0);
+    assert.deepEqual(saved, []);
+
+    const missingPDF = createSelectionActions({
+        attachment: { id: 42, isPDFAttachment: () => false },
+        async locateText() {
+            calls += 1;
+            return null;
+        },
+    });
+    await assert.rejects(
+        missingPDF.actions.locateSelection(42, { text: 'Selected passage' }),
+        /PDF attachment is unavailable/
+    );
+    assert.equal(calls, 0);
+    assert.deepEqual(missingPDF.saved, []);
+});
+
 async function createAnnotationWithNormalizedPDFSearch(
     markdownPassage,
     pdfPassage

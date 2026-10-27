@@ -84,35 +84,19 @@ export function createZoteroAnnotationActions(zotero, {
             const reader = context?.reader || null;
             const signal = context?.signal;
             throwIfAborted(signal);
-            const text = String(draft?.text || '');
-            const comment = String(draft?.comment || '');
-            const color = String(draft?.color || '').toLowerCase();
-            const pdfPageIndexHint = draft?.pdfPageIndexHint;
-            const pdfRegion = normalizePDFRegion(draft?.pdfRegion);
-            const textQuote = normalizePDFAnnotationTextQuote(
-                draft?.textQuote
-            );
+            const {
+                text,
+                comment,
+                color,
+                pdfPageIndexHint,
+                pdfRegion,
+                textQuote,
+            } = normalizeTextDraft(draft, { requireColor: true });
             const ownedAnnotationIDs = new Set(
                 Array.isArray(draft?.ownedAnnotationIDs)
                     ? draft.ownedAnnotationIDs.map(String).filter(Boolean)
                     : []
             );
-            if (!text.trim()
-                || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH
-                || comment.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) {
-                throw new Error('Invalid PDF annotation text');
-            }
-            if (pdfPageIndexHint !== undefined
-                && (!Number.isSafeInteger(pdfPageIndexHint)
-                    || pdfPageIndexHint < 0)) {
-                throw new Error('Invalid PDF annotation page hint');
-            }
-            if (draft?.pdfRegion !== undefined && !pdfRegion) {
-                throw new Error('Invalid PDF annotation region');
-            }
-            if (!isZoteroAnnotationColor(color)) {
-                throw new Error('Unsupported PDF annotation color');
-            }
             const attachment = zotero.Items.get(itemID);
             if (!attachment?.isPDFAttachment?.()) {
                 throw new Error('PDF attachment is unavailable');
@@ -199,6 +183,35 @@ export function createZoteroAnnotationActions(zotero, {
                     .map(part => part.annotation.id),
             };
         },
+        // Finds where a Markdown selection sits in the PDF without saving
+        // anything, for inserting the passage into a Zotero note. Resolves
+        // { parts } with one entry per PDF page, or { deferred: true } when
+        // the local PDF index cannot place it yet.
+        async locateSelection(itemID, draft, context = null) {
+            const signal = context?.signal;
+            throwIfAborted(signal);
+            const {
+                text,
+                pdfPageIndexHint,
+                pdfRegion,
+                textQuote,
+            } = normalizeTextDraft(draft, { requireColor: false });
+            const attachment = zotero.Items.get(itemID);
+            if (!attachment?.isPDFAttachment?.()) {
+                throw new Error('PDF attachment is unavailable');
+            }
+            const locatedText = await textLocator(itemID, text, {
+                reader: context?.reader || null,
+                pdfPageIndexHint,
+                ...(pdfRegion ? { pdfRegion } : {}),
+                textQuote,
+                signal,
+            });
+            throwIfAborted(signal);
+            if (!locatedText) return { deferred: true };
+            const located = validateLocatedText(locatedText);
+            return { parts: located.segments || [located] };
+        },
         async changeColor(itemID, annotationID, color) {
             const normalizedColor = String(color || '').toLowerCase();
             if (!isZoteroAnnotationColor(normalizedColor)) {
@@ -245,6 +258,41 @@ export function createZoteroAnnotationActions(zotero, {
                 normalizedComment
             );
         },
+    };
+}
+
+// The fields a highlight draft and a note-insertion draft share. A note
+// insertion has no color of its own, so only highlight creation requires one.
+function normalizeTextDraft(draft, { requireColor }) {
+    const text = String(draft?.text || '');
+    const comment = String(draft?.comment || '');
+    const color = String(draft?.color || '').toLowerCase();
+    const pdfPageIndexHint = draft?.pdfPageIndexHint;
+    const pdfRegion = normalizePDFRegion(draft?.pdfRegion);
+    const textQuote = normalizePDFAnnotationTextQuote(draft?.textQuote);
+    if (!text.trim()
+        || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH
+        || comment.length > MAX_PDF_ANNOTATION_TEXT_LENGTH) {
+        throw new Error('Invalid PDF annotation text');
+    }
+    if (pdfPageIndexHint !== undefined
+        && (!Number.isSafeInteger(pdfPageIndexHint)
+            || pdfPageIndexHint < 0)) {
+        throw new Error('Invalid PDF annotation page hint');
+    }
+    if (draft?.pdfRegion !== undefined && !pdfRegion) {
+        throw new Error('Invalid PDF annotation region');
+    }
+    if (requireColor && !isZoteroAnnotationColor(color)) {
+        throw new Error('Unsupported PDF annotation color');
+    }
+    return {
+        text,
+        comment,
+        color,
+        pdfPageIndexHint,
+        pdfRegion,
+        textQuote,
     };
 }
 

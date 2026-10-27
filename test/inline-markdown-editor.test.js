@@ -1444,7 +1444,7 @@ test('shows one note marker for a commented multiline PDF annotation', () => {
     assert.match(
         document.querySelector('.cm-mktero-pdf-annotation')
             ?.getAttribute('aria-label') || '',
-        /Add or edit note/
+        /Add or edit comment/
     );
     const firstHighlight = document.querySelector(
         '.cm-mktero-pdf-annotation'
@@ -1744,7 +1744,7 @@ test('edits PDF annotation notes safely after clicking the note marker', async (
     );
     assert.equal(noteMarker.getAttribute('role'), 'button');
     assert.equal(noteMarker.getAttribute('tabindex'), '0');
-    assert.equal(noteMarker.getAttribute('aria-label'), 'Edit note');
+    assert.equal(noteMarker.getAttribute('aria-label'), 'Edit comment');
 
     noteMarker.dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
@@ -11386,13 +11386,13 @@ test('renders a footnote citation as a link and not as math or a reference', () 
     assert.equal(reference?.textContent, '1');
     assert.equal(reference?.getAttribute('role'), 'link');
     assert.equal(reference?.getAttribute('tabindex'), '0');
-    assert.equal(reference?.getAttribute('aria-label'), 'Go to note 1');
+    assert.equal(reference?.getAttribute('aria-label'), 'Go to footnote 1');
     assert.equal(reference?.classList.contains('cm-mktero-citation'), false);
     assert.equal(reference?.classList.contains('cm-mktero-citation-superscript'), true);
     assert.equal(back?.textContent, '1');
     assert.equal(back?.getAttribute('role'), 'link');
     assert.equal(back?.getAttribute('tabindex'), '0');
-    assert.equal(back?.getAttribute('aria-label'), 'Back to the text of note 1');
+    assert.equal(back?.getAttribute('aria-label'), 'Back to the text of footnote 1');
     assert.equal(back?.classList.contains('cm-mktero-citation'), false);
     assert.equal(back?.classList.contains('cm-mktero-citation-superscript'), true);
     assert.equal(back?.closest('.cm-mktero-math'), null);
@@ -12050,7 +12050,7 @@ test('explains that a translated-only comparison selection has no actions', () =
     );
     assert.equal(
         document.querySelector('.mktero-annotation-selection-hint')?.textContent,
-        'Highlights, notes and translation work on the original text only.'
+        'Highlights, comments and translation work on the original text only.'
     );
 
     editor.destroy();

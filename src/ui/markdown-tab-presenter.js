@@ -6,6 +6,7 @@ import {
     getMarkdownReaderFont,
     getMarkdownReaderFontSize,
     getMarkdownReaderLineHeight,
+    getMarkdownReaderPanelLayout,
     getMarkdownReaderSourcePeek,
     getMarkdownReaderWidth,
     normalizeMarkdownReaderAlignment,
@@ -24,6 +25,7 @@ import {
     setMarkdownReaderFont,
     setMarkdownReaderFontSize,
     setMarkdownReaderLineHeight,
+    setMarkdownReaderPanelLayout,
     setMarkdownReaderSourcePeek,
     setMarkdownReaderWidth,
 } from '../config/reader-preferences.js';
@@ -39,6 +41,21 @@ import {
 const TAB_TYPE = 'mktero';
 const TAB_ICON = 'markdown';
 const TAB_ICON_STYLE_ID = 'mktero-markdown-tab-icon-style';
+const CONTEXT_PANE_STYLE_ID = 'mktero-context-pane-style';
+export const MKTERO_TAB_SELECTED_ATTRIBUTE = 'mktero-tab-selected';
+// Zotero updates its context pane only for reader and note tabs (Zotero 7.0
+// checks for 'reader'; 8.0 to 10.0 use Zotero_Tabs._hasContextPaneTypes). On
+// a Mktero tab the pane would keep showing the tab selected before it, with
+// another paper's notes. While a Mktero tab is selected the pane is hidden;
+// the tab shows its own notes column. Nothing of Zotero's state is changed,
+// so the pane comes back as it was when another tab is selected.
+const CONTEXT_PANE_CSS = `
+:root[${MKTERO_TAB_SELECTED_ATTRIBUTE}] #zotero-context-splitter,
+:root[${MKTERO_TAB_SELECTED_ATTRIBUTE}] #zotero-context-splitter-stacked,
+:root[${MKTERO_TAB_SELECTED_ATTRIBUTE}] #zotero-context-pane {
+    display: none !important;
+}
+`;
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
 export const MARKDOWN_TAB_CLOSE_REASONS = Object.freeze({
@@ -95,8 +112,11 @@ export class MarkdownTabPresenter {
         this.sessionStateTabs = null;
         this.disposeSessionStateFilter = null;
         this.tabIconStyle = null;
+        this.contextPaneWindows = new Set();
+        this.tabNotifierID = null;
         this.removeStaleSessionTabs();
         this.ensureSessionStateFilter();
+        this.observeTabSelection();
     }
 
     open(documentID, {
@@ -143,6 +163,7 @@ export class MarkdownTabPresenter {
         onOpenReferenceMatch,
         onSubscribeReferenceUpdates,
         onReadingPositionChange,
+        zoteroNotes,
     } = {}) {
         this.ensureSessionStateFilter();
         const owner = this.zotero.getMainWindow?.();
@@ -151,6 +172,7 @@ export class MarkdownTabPresenter {
             throw new Error(this.localization.t('error.tabManagerUnavailable'));
         }
         this.ensureTabIconStyle(owner.document);
+        this.ensureContextPaneStyle(owner);
 
         let existing = this.presentations.get(documentID);
         // A document whose window is gone, or that already closed, cannot be
@@ -300,6 +322,11 @@ export class MarkdownTabPresenter {
             if (onReadingPositionChange !== undefined) {
                 existing.model.onReadingPositionChange = onReadingPositionChange;
             }
+            // Replacing the bridge would close a note the reader has open.
+            if (zoteroNotes && !existing.model.zoteroNotes) {
+                existing.model.zoteroNotes = zoteroNotes;
+                existing.view.render(existing.model);
+            }
             if (this.selectPresentation(existing, owner)) {
                 return { ...existing, created: false };
             }
@@ -351,6 +378,7 @@ export class MarkdownTabPresenter {
                 onOpenReferenceMatch,
                 onSubscribeReferenceUpdates,
                 onReadingPositionChange,
+                zoteroNotes: zoteroNotes || null,
             },
             this.localization.t.bind(this.localization)
         );
@@ -379,6 +407,8 @@ export class MarkdownTabPresenter {
             onReaderSourcePeekChange: enabled => (
                 this.updateReaderSourcePeek(enabled)
             ),
+            panelLayout: getMarkdownReaderPanelLayout(this.zotero),
+            onPanelLayoutChange: changes => this.updatePanelLayout(changes),
         });
         view.render(model);
         this.closeForSourceItem(sourceItemID, {
@@ -413,8 +443,10 @@ export class MarkdownTabPresenter {
             // selected. The first select already happened inside add().
             result.container.onTabSelectionChanged = selected => {
                 view.handleTabSelection?.(selected);
+                this.syncContextPane(owner);
             };
             view.handleTabSelection?.(true);
+            this.syncContextPane(owner);
         }
         catch (error) {
             view.destroy?.();
@@ -581,6 +613,18 @@ export class MarkdownTabPresenter {
         }
     }
 
+    // The next tab opens with the layout the reader leaves here. Open tabs
+    // keep their own layout.
+    updatePanelLayout(changes) {
+        try {
+            return setMarkdownReaderPanelLayout(this.zotero, changes);
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+            return null;
+        }
+    }
+
     getForSourceItem(sourceItemID) {
         if (sourceItemID === null || sourceItemID === undefined) return null;
         const sourceKey = String(sourceItemID);
@@ -647,6 +691,7 @@ export class MarkdownTabPresenter {
         this.restoreSessionStateFilter();
         this.tabIconStyle?.remove?.();
         this.tabIconStyle = null;
+        this.releaseContextPanes();
     }
 
     // closeForWindow releases the documents of a main window that is going
@@ -663,6 +708,7 @@ export class MarkdownTabPresenter {
                 MARKDOWN_TAB_CLOSE_REASONS.USER
             );
         }
+        this.releaseContextPane(window);
     }
 
     closePresentation(presentation, reason) {
@@ -742,6 +788,115 @@ export class MarkdownTabPresenter {
 `;
         document.documentElement.appendChild(style);
         this.tabIconStyle = style;
+    }
+
+    ensureContextPaneStyle(window) {
+        const document = window?.document;
+        if (!document?.documentElement?.appendChild || !document.createElementNS) {
+            return;
+        }
+        if (!document.getElementById?.(CONTEXT_PANE_STYLE_ID)) {
+            const style = document.createElementNS(XHTML_NAMESPACE, 'style');
+            style.setAttribute('id', CONTEXT_PANE_STYLE_ID);
+            style.textContent = CONTEXT_PANE_CSS;
+            document.documentElement.appendChild(style);
+        }
+        this.contextPaneWindows.add(window);
+    }
+
+    // Marks the window while its selected tab is a Mktero tab. Zotero does
+    // not move focus out of its context pane when such a tab is selected, so
+    // focus left in the hidden pane (a note of the previous tab's paper) is
+    // released; the reader claims the keyboard after its own selection.
+    syncContextPane(window) {
+        const document = window?.document;
+        const root = document?.documentElement;
+        if (!root?.toggleAttribute) return;
+        let mktero = false;
+        try {
+            mktero = window.Zotero_Tabs?.selectedType === TAB_TYPE;
+        }
+        catch {
+            mktero = false;
+        }
+        root.toggleAttribute(MKTERO_TAB_SELECTED_ATTRIBUTE, mktero);
+        if (!mktero) return;
+        try {
+            const pane = document.getElementById?.('zotero-context-pane');
+            const active = document.activeElement;
+            if (pane && active && active !== root && pane.contains?.(active)) {
+                active.blur?.();
+            }
+        }
+        catch {
+            // A window that is closing can throw on access.
+        }
+    }
+
+    releaseContextPane(window) {
+        this.contextPaneWindows.delete(window);
+        try {
+            const document = window?.document;
+            document?.documentElement?.removeAttribute?.(
+                MKTERO_TAB_SELECTED_ATTRIBUTE
+            );
+            document?.getElementById?.(CONTEXT_PANE_STYLE_ID)?.remove?.();
+        }
+        catch {
+            // A closing window can throw on access; it takes its DOM along.
+        }
+    }
+
+    syncContextPanes() {
+        for (const window of [...this.contextPaneWindows]) {
+            let closed = true;
+            try {
+                closed = window.closed === true;
+            }
+            catch {
+                closed = true;
+            }
+            if (closed) {
+                this.contextPaneWindows.delete(window);
+                continue;
+            }
+            this.syncContextPane(window);
+        }
+    }
+
+    // Zotero 7.0 does not call a tab container's onTabSelectionChanged; every
+    // supported version sends the tab notifier's 'select' event.
+    observeTabSelection() {
+        const notifier = this.zotero?.Notifier;
+        if (typeof notifier?.registerObserver !== 'function') return;
+        try {
+            this.tabNotifierID = notifier.registerObserver({
+                notify: (event, type) => {
+                    if (type !== 'tab') return;
+                    if (!['select', 'add', 'close'].includes(event)) return;
+                    this.syncContextPanes();
+                },
+            }, ['tab'], 'mktero-context-pane');
+        }
+        catch (error) {
+            this.zotero.logError?.(error);
+            this.tabNotifierID = null;
+        }
+    }
+
+    releaseContextPanes() {
+        if (this.tabNotifierID !== null) {
+            try {
+                this.zotero?.Notifier?.unregisterObserver?.(this.tabNotifierID);
+            }
+            catch (error) {
+                this.zotero.logError?.(error);
+            }
+            this.tabNotifierID = null;
+        }
+        for (const window of [...this.contextPaneWindows]) {
+            this.releaseContextPane(window);
+        }
     }
 
     ensureSessionStateFilter() {

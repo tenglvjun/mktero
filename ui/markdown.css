@@ -676,12 +676,70 @@ main {
     user-select: none;
 }
 
+/* The annotations segment of the left column. */
+.markdown-annotations {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .markdown-notes-header {
     position: sticky;
     z-index: 1;
     top: 0;
+    flex: 0 0 auto;
     background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised));
     border-bottom: 1px solid var(--border-subtle);
+}
+
+.markdown-annotations-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+}
+
+.markdown-annotations-toolbar .markdown-notes-search {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding: 0;
+}
+
+.markdown-annotations-toolbar .markdown-notes-count {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+.markdown-annotations-note-button {
+    display: inline-grid;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--muted);
+    background: var(--surface-raised);
+    cursor: pointer;
+}
+
+.markdown-annotations-note-button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+}
+
+.markdown-annotations-note-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: 1px;
+}
+
+.markdown-annotations-note-button:disabled {
+    cursor: default;
+    opacity: 0.5;
 }
 
 .markdown-notes-title-row {
@@ -779,6 +837,8 @@ main {
 }
 
 .markdown-notes-list {
+    min-height: 0;
+    flex: 1 1 auto;
     margin: 0;
     padding: 10px 9px 28px;
     overflow-x: hidden;
@@ -787,21 +847,20 @@ main {
     scrollbar-width: thin;
 }
 
+/* The quote takes the row; the actions keep their size beside it. */
 .markdown-note-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 3px;
+    display: flex;
+    align-items: flex-start;
+    gap: 1px;
     margin: 4px 0;
 }
 
-.markdown-note-item:has(.markdown-note-delete) {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-}
 
 .markdown-note-link {
     display: block;
     width: 100%;
+    min-width: 0;
+    flex: 1 1 auto;
     padding: 10px 11px;
     overflow: hidden;
     border: 1px solid transparent;
@@ -880,13 +939,15 @@ main {
 .markdown-note-sync-label { overflow-wrap: anywhere; }
 
 .markdown-note-sync-retry,
+.markdown-note-add-to-note,
 .markdown-note-open-pdf,
 .markdown-note-delete {
     display: inline-grid;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
     place-items: center;
-    margin: 5px 5px 0 0;
+    margin: 5px 0 0 0;
     padding: 0;
     border: 1px solid transparent;
     border-radius: 5px;
@@ -896,8 +957,23 @@ main {
 
 .markdown-note-sync-retry { color: var(--warning); }
 
+.markdown-note-add-to-note,
 .markdown-note-open-pdf,
 .markdown-note-delete { color: var(--muted); }
+
+/* Not disabled: a disabled button shows no tooltip and cannot explain why. */
+.markdown-note-add-to-note[aria-disabled='true'] { opacity: 0.45; }
+
+.markdown-note-add-to-note:hover:not([aria-disabled='true']) {
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.markdown-note-add-to-note:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
 
 .markdown-note-sync-retry:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--warning) 30%, transparent);
@@ -932,6 +1008,7 @@ main {
 }
 
 .markdown-note-sync-retry:disabled,
+.markdown-note-add-to-note:disabled,
 .markdown-note-open-pdf:disabled,
 .markdown-note-delete:disabled {
     cursor: default;
@@ -964,6 +1041,180 @@ main {
     padding: 6px 8px;
     color: var(--muted);
     font-size: 12px;
+}
+
+/* The right column: the paper's Zotero notes. */
+.mktero-zotero-notes-list-view,
+.mktero-zotero-notes-editor-view {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.mktero-zotero-notes-header {
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border-subtle);
+    background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised));
+}
+
+.mktero-zotero-notes-title-row {
+    display: flex;
+    min-height: 50px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 16px;
+}
+
+.mktero-zotero-notes-title {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.mktero-zotero-notes-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mktero-zotero-notes-count {
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.mktero-zotero-notes-button {
+    display: inline-grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--muted);
+    background: transparent;
+    cursor: pointer;
+}
+
+.mktero-zotero-notes-button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.mktero-zotero-notes-button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.mktero-zotero-notes-button:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
+.mktero-zotero-notes-status {
+    margin: 0;
+    padding: 12px 16px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.mktero-zotero-notes-list {
+    min-height: 0;
+    flex: 1 1 auto;
+    margin: 0;
+    padding: 8px 9px 28px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    list-style: none;
+    scrollbar-width: thin;
+}
+
+.mktero-zotero-note-item { margin: 4px 0; }
+
+.mktero-zotero-note-link {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    gap: 3px;
+    padding: 9px 11px;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    background: var(--surface-raised);
+    font: inherit;
+    line-height: 1.35;
+    text-align: left;
+    cursor: pointer;
+}
+
+.mktero-zotero-note-link:hover {
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+    background: color-mix(in srgb, var(--accent) 6%, var(--surface-raised));
+}
+
+.mktero-zotero-note-link:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: -2px;
+}
+
+.mktero-zotero-note-title {
+    overflow: hidden;
+    font-size: 12.5px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mktero-zotero-note-preview {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    color: var(--muted);
+    font-size: 12px;
+    -webkit-line-clamp: 2;
+}
+
+.mktero-zotero-note-date {
+    color: var(--muted);
+    font-size: 10.5px;
+    text-align: end;
+}
+
+.mktero-zotero-notes-editor-bar {
+    display: flex;
+    min-height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: color-mix(in srgb, var(--surface) 92%, var(--surface-raised));
+}
+
+/* Zotero's note editor is light DOM on the host, assigned to this slot. */
+.mktero-zotero-note-slot {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+}
+
+.mktero-zotero-note-slot::slotted(*) {
+    min-height: 0;
+    flex: 1 1 auto;
 }
 
 .loading-state {
@@ -3398,6 +3649,7 @@ blockquote.mktero-note,
 .mktero-annotation-color-button,
 .mktero-annotation-delete-button,
 .mktero-annotation-note-button,
+.mktero-annotation-add-to-note-button,
 .mktero-annotation-source-button,
 .mktero-annotation-copy-button {
     display: inline-flex;
@@ -3427,6 +3679,7 @@ blockquote.mktero-note,
 .mktero-annotation-color-button:hover,
 .mktero-annotation-delete-button:hover,
 .mktero-annotation-note-button:hover,
+.mktero-annotation-add-to-note-button:hover,
 .mktero-annotation-source-button:hover,
 .mktero-annotation-copy-button:hover {
     border-color: color-mix(in srgb, var(--text) 18%, transparent);
@@ -3441,6 +3694,7 @@ blockquote.mktero-note,
 .mktero-annotation-color-button:focus-visible,
 .mktero-annotation-delete-button:focus-visible,
 .mktero-annotation-note-button:focus-visible,
+.mktero-annotation-add-to-note-button:focus-visible,
 .mktero-annotation-source-button:focus-visible,
 .mktero-annotation-copy-button:focus-visible {
     outline: 2px solid var(--accent);
@@ -3450,6 +3704,7 @@ blockquote.mktero-note,
 .mktero-annotation-color-button:disabled,
 .mktero-annotation-delete-button:disabled,
 .mktero-annotation-note-button:disabled,
+.mktero-annotation-add-to-note-button:disabled,
 .mktero-annotation-source-button:disabled,
 .mktero-annotation-copy-button:disabled {
     cursor: progress;
@@ -3508,14 +3763,21 @@ blockquote.mktero-note,
     height: 16px;
 }
 
+.mktero-annotation-add-to-note-button,
 .mktero-annotation-source-button,
 .mktero-annotation-copy-button {
     border-radius: 6px;
 }
 
+.mktero-annotation-add-to-note-button:hover,
 .mktero-annotation-source-button:hover,
 .mktero-annotation-copy-button:hover {
     color: var(--accent);
+}
+
+/* Not disabled, so it can still say why it cannot act. */
+.mktero-annotation-add-to-note-button[aria-disabled="true"] {
+    opacity: 0.45;
 }
 
 .mktero-evidence-copy-icon {

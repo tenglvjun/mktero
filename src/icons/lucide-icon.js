@@ -23,7 +23,9 @@ import {
     MessageSquareText,
     MoreHorizontal,
     Network,
+    NotebookPen,
     Pencil,
+    Plus,
     RefreshCw,
     RotateCcw,
     Save,
@@ -149,6 +151,14 @@ export const LUCIDE_ICONS = Object.freeze({
     messageSquareText: Object.freeze({
         name: 'message-square-text',
         nodes: MessageSquareText,
+    }),
+    notebookPen: Object.freeze({
+        name: 'notebook-pen',
+        nodes: NotebookPen,
+    }),
+    plus: Object.freeze({
+        name: 'plus',
+        nodes: Plus,
     }),
     mktero: Object.freeze({
         name: 'mktero',

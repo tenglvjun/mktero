@@ -24,6 +24,8 @@
 | Selected Markdown text for selection translation | AI provider configured by you | Not by Mktero |
 | Zotero PDF annotations | Local Zotero library | According to Zotero settings |
 | Local Markdown highlights not yet in the PDF, and the Zotero annotation keys of the page parts of a cross-page highlight | Active Zotero profile, unencrypted | No |
+| Zotero notes written in the Notes column, and passages added with Add to Note or Add Note from Annotations | Zotero note items in the local Zotero library | According to Zotero settings |
+| Reader layout preferences: which columns are open, their widths, and the selected left segment | Active Zotero profile, unencrypted | No |
 | Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
 | Exported Markdown and figures | User-selected local path, including an Obsidian vault. Mktero does not sync that copy. | No |
 | Obsidian export index: library ID, item key, note folder name, and content hash; the vault path preference | Active Zotero profile, unencrypted | No |
@@ -31,8 +33,9 @@
 
 Mktero does not send PDF annotations, local PDF.js indexes, Zotero notes,
 complete item records, local paths, or cached Markdown to reference/PDF
-providers. Reference import requests are local-first. A title-only metadata
-lookup sends only bounded citation text after the explicit import action. A
+providers. Mktero does not send notes anywhere. Reference import requests are
+local-first. A title-only metadata lookup sends only bounded citation text
+after the explicit import action. A
 unique high-confidence match continues automatically; uncertain matches require
 candidate confirmation. Citation and reference requests use anonymous provider access and
 contain only the bounded citation text, normalized identifiers, and confirmed

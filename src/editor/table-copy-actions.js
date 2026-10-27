@@ -4,6 +4,7 @@ import {
     tableElementToCSV,
     tableElementToGFM,
 } from '../markdown/markdown-table-export.js';
+import { renderZoteroNoteHTML } from '../markdown/zotero-note-html-renderer.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
@@ -15,7 +16,8 @@ const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
  * HTML table, or a table inside a saved snapshot) is converted back into one.
  *
  * The export runs on click, not on render: a paper can hold many wide tables,
- * and only the one the reader copies pays for being serialized.
+ * and only the one the reader copies pays for being serialized. The Markdown
+ * action renders that same text as Zotero note HTML then, too.
  */
 export function enhanceTableCopyActions(container, table, {
     copyCode,
@@ -33,6 +35,7 @@ export function enhanceTableCopyActions(container, table, {
             action: 'copy-table-markdown',
             labelKey: 'markdown.tableCopyMarkdown',
             read: () => (source || tableElementToGFM(table)),
+            noteHTML: true,
         },
         {
             action: 'copy-table-csv',
@@ -86,7 +89,12 @@ export function enhanceRenderedTableBlocks(root, document, options = {}) {
     }
 }
 
-function createCopyButton(toolbar, { action, labelKey, read }, {
+function createCopyButton(toolbar, {
+    action,
+    labelKey,
+    read,
+    noteHTML = false,
+}, {
     copyCode,
     translate,
     resetAll,
@@ -110,7 +118,9 @@ function createCopyButton(toolbar, { action, labelKey, read }, {
             // A malformed table and one past the export budget both read as
             // unavailable, and report the same way a clipboard failure does.
             if (!text) throw new Error('Table export is unavailable');
-            await copyCode(text);
+            const html = noteHTML ? zoteroNoteTableHTML(text) : '';
+            if (html) await copyCode(text, { html });
+            else await copyCode(text);
             button.dataset.state = 'copied';
             button.textContent = translate('markdown.tableCopied');
         }
@@ -123,6 +133,18 @@ function createCopyButton(toolbar, { action, labelKey, read }, {
         }
     });
     return button;
+}
+
+// The note renderer is the sanitizer. A throw, or HTML with no table, keeps
+// the Markdown text and omits the HTML flavor.
+function zoteroNoteTableHTML(markdown) {
+    try {
+        const html = renderZoteroNoteHTML(markdown);
+        return typeof html === 'string' && /<table\b/i.test(html) ? html : '';
+    }
+    catch {
+        return '';
+    }
 }
 
 function resetCopyButton(button, translate, labelKey) {
