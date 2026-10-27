@@ -5,7 +5,9 @@ const SUPPORTS_STRING_CONTRACT = '@mozilla.org/supports-string;1';
 const TEXT_FLAVOR = 'text/plain';
 const HTML_FLAVOR = 'text/html';
 
-export function createZoteroClipboard(components) {
+// `onRichWriteError` hears why a rich copy fell back to plain text. The
+// fallback still copies the text, so without it the lost HTML is invisible.
+export function createZoteroClipboard(components, { onRichWriteError } = {}) {
     return {
         async writeText(value) {
             if (typeof value !== 'string' || !value.trim()) {
@@ -35,7 +37,8 @@ export function createZoteroClipboard(components) {
             try {
                 writeRichClipboard(components, text, html);
             }
-            catch {
+            catch (error) {
+                reportRichWriteError(onRichWriteError, error);
                 return this.writeText(text);
             }
         },
@@ -66,6 +69,16 @@ export function createZoteroClipboard(components) {
             return typeof value === 'string' ? value : null;
         },
     };
+}
+
+function reportRichWriteError(onRichWriteError, error) {
+    if (typeof onRichWriteError !== 'function') return;
+    try {
+        onRichWriteError(error);
+    }
+    catch {
+        // A failing logger must not cost the user the plain-text copy.
+    }
 }
 
 function writeRichClipboard(components, text, html) {

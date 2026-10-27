@@ -402,7 +402,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.sourceNavigation = createZoteroSourceNavigation(Zotero);
     runtime.clipboard = createZoteroClipboard(
-        typeof Components === 'undefined' ? null : Components
+        typeof Components === 'undefined' ? null : Components,
+        { onRichWriteError: error => logMkteroError(error) }
     );
     runtime.evidenceReference = createZoteroEvidenceReference(
         Zotero,
