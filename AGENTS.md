@@ -108,14 +108,35 @@ documentation-only. Report any command that could not be run.
   Do not make them restorable without redesigning stale-tab cleanup and tests.
 - The Markdown reading surface is intentionally read-only. Keep the document
   `EditorView.editable.of(false)` / `EditorState.readOnly.of(true)`. The only
-  editable surface is the inline correction editor, and corrections must
+  editable Mktero surface is the inline correction editor, and corrections must
   persist through the revision store instead of mutating the cached OCR
-  Markdown.
+  Markdown. The notes column hosts Zotero's own `note-editor`, which edits a
+  Zotero note item, never the Markdown.
 - The viewer lives in a shadow root and mixes Zotero XUL containers with HTML.
   Create HTML elements with the XHTML namespace and test against Zotero-like
   DOM behavior.
 - Keep the reader toolbar compatible with Zotero 7 through 10, including the
   Zotero 9.0 listener cleanup workaround.
+
+## Annotations and Zotero notes
+
+- Displayed terms follow Zotero: annotation (`注释`) for a Zotero PDF
+  annotation or a local Markdown highlight not yet in the PDF, comment
+  (`评论`) for its text, note (`笔记`) only for a Zotero note item, and
+  footnote (`脚注`) for a paper's footnote. Internal i18n keys and CSS classes
+  such as `viewer.notes*` and `.markdown-note-*` keep their historical names.
+- The reader's left column has the Headings, Figures, and Annotations
+  segments. The right column lists and edits the paper's Zotero child notes.
+- Mktero stores no notes. Notes are Zotero note items edited with Zotero's own
+  `note-editor`; do not add a note store, a rich-text editor, or a note cache.
+- Do not patch Zotero's context pane (`_hasContextPaneTypes` in 8.0 to 10.0,
+  the hardcoded `'reader'` check in 7.0). The Mktero tab hosts its own
+  `note-editor`, hides the leftover context pane while selected, and falls
+  back to Zotero's note window when the editor cannot be hosted.
+- `Add to Note` goes through the editor instance's `insertAnnotations()` and
+  needs a PDF position. Refuse an annotation or selection the PDF index cannot
+  locate instead of inserting text without a source. Never target or list a
+  `Mktero Markdown Snapshot` note.
 
 ## Data and security invariants
 

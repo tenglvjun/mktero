@@ -26,9 +26,9 @@ muted note right after the first paragraph of that page that carries its mark
 last paragraph of its page, without crossing a heading. Table and figure notes
 use the same style directly below their table or figure. Notes are ordinary
 quoted text: you can search, annotate, translate, and copy them. A footnote
-mark in the text is a link to its note, and the mark at the start of the note
-links back; both are recorded as jumps, so `Alt+Left` (`Cmd+[` on macOS)
-returns to where you were.
+mark in the text is a link to its note, labeled `Go to footnote`, and the mark
+at the start of the note links back; both are recorded as jumps, so `Alt+Left`
+(`Cmd+[` on macOS) returns to where you were.
 
 Article metadata that is not part of the reading text goes into a collapsed
 section: affiliations, contact and contribution notes, funding, dates, and a
@@ -76,8 +76,15 @@ quoted the RFC 4180 way, and the caption is not part of the data. A copy is
 refused, rather than truncated, when a table is larger than the reader's export
 budget.
 
+A table's `Copy as Markdown` and a formula's copy action also put HTML on
+the clipboard, so a paste into a Zotero note keeps the table or the formula.
+An application that reads HTML from the clipboard, such as a word processor
+or a browser editor, receives the same table or formula; an application that
+reads only text receives the same plain text as before. CSV and code copy are
+unchanged.
+
 All of these actions read the rendered document only. They send nothing, and
-they do not change the cached OCR Markdown, the corrections, or the note.
+they do not change the cached OCR Markdown, the corrections, or comments.
 
 ## Find your place and get back
 
@@ -87,7 +94,7 @@ and is hidden in focus mode.
 
 Jumping away from where you are reading records that spot, so you can return to
 it. These jumps are recorded: opening a citation, a table reference, or a
-figure reference; choosing an outline entry or a note; following an in-document
+figure reference; choosing an outline entry or an annotation; following an in-document
 link; and searching. Stepping through the matches of one search counts as a
 single jump. `Alt+Left` goes back and `Alt+Right` goes forward on Windows and
 Linux, and `Cmd+[` and `Cmd+]` do the same on macOS; either platform's chord
@@ -146,14 +153,15 @@ Zotero profile, shows a warning, keeps the annotations that are still
 readable, and accepts new annotations. When a highlight
 overlaps a citation, table reference, or figure reference, that semantic
 reference keeps interaction priority; annotation actions remain available from
-the surrounding highlighted text or its note marker.
+the surrounding highlighted text or its comment marker.
 Selections that cross a PDF page break are split into one single-page Zotero
 highlight per page, so the complete Markdown selection remains navigable. A
 paragraph that resumes a page or two later is located the same way, across the
 full-page figure or running footer in between.
 Changing the color of one part, or deleting it, from the Markdown reader
-applies to every part Mktero created from that selection; a note stays on the
-part it was written on. Mktero remembers which parts belong together in
+applies to every part Mktero created from that selection; a comment stays on
+the part it was written on. The annotation popup labels the comment actions
+`Add comment` and `Edit comment`. Mktero remembers which parts belong together in
 `mktero-annotations/groups-v1` in the Zotero profile, storing only Zotero
 annotation keys. A part that matched a highlight you had already made in Zotero
 is never grouped or deleted this way, and a part already deleted in the Zotero
@@ -168,6 +176,54 @@ the OCR region recorded for that block.
 A local highlight that has not reached the PDF yet shows a dashed underline.
 One whose sync failed shows a dotted warning underline, and hovering it shows
 the reason.
+
+## Zotero notes beside the reader
+
+The left column has three segments: `Headings`, `Figures`, and `Annotations`.
+The `Annotations` segment lists the paper's annotations, with search, a color
+filter, a jump to the Markdown position, `View in PDF`, delete, retry sync for
+a local highlight, and `Add to Note`.
+
+The right column is `Notes`. It lists the Zotero child notes of the PDF's
+parent item, newest first. `New note` creates a child note. Clicking a note
+edits it in Zotero's own note editor inside the Mktero tab. `Back to notes`
+returns to the list. `Edit in a Separate Window` opens Zotero's note window.
+Right-clicking a note in the list opens the menu Zotero's notes pane shows:
+`Show in Library` selects the note in the library tab, `Edit in a Separate
+Window` opens it in Zotero's note window, and `Move to Trash` moves it to the
+Zotero trash, where it can be restored. In a read-only library `Move to Trash`
+is unavailable.
+`Mktero Markdown Snapshot` notes are not listed. A standalone PDF without a
+parent item has no child notes, and the column says so. In a read-only
+library, notes open read-only and `New note` is unavailable. If Zotero cannot
+show its note editor inside the tab, the note opens in Zotero's note window
+instead. Mktero stores no notes. These are Zotero note items.
+
+`Add to Note` is in the text-selection popup, in an annotation's popup, and on
+each item in the `Annotations` segment. It inserts the passage into the note
+open in the `Notes` column, the same way the Zotero PDF reader's `Add to Note`
+does: the highlighted text, a citation, and the page. Clicking that citation
+in the note opens Zotero's PDF reader, not Mktero. It needs an open note. It
+also needs a PDF position. A local highlight that has not reached the PDF yet,
+or a selection the local PDF index cannot locate (not found, or ambiguous), is
+refused with the reason. Mktero does not insert it without a source. Adding a
+plain selection to a note does not save a highlight.
+
+`Add Note from Annotations` is a button in the `Annotations` segment. It
+creates a new child note that contains every annotation of the PDF except ink
+annotations, like Zotero's command of the same name, and opens that note in
+the `Notes` column.
+
+While a Mktero tab is selected, Mktero hides Zotero's right-hand item pane,
+the context pane. The pane returns when another tab is selected. Zotero does
+not update that pane for a Mktero tab, so leaving it visible would show the
+previous tab's paper.
+
+Which columns are open, their widths, and the selected left segment are saved
+in Zotero preferences (`extensions.mktero.readerOutlineVisible`,
+`readerOutlineWidth`, `readerOutlineSegment`, `readerNotesVisible`, and
+`readerNotesWidth`) and used by the next Mktero tab. Automatic collapsing on
+a narrow window is not saved.
 
 ## Translate with AI
 
@@ -203,7 +259,7 @@ Markdown selections` setting is off by default; when enabled, a stable
 selection starts one bounded request automatically after a short delay. The
 translated side of `Bilingual`, `Translation` reading, and saved HTML snapshots
 do not offer selection translation. Selection results stay in the popup, do not
-modify Markdown or notes, and are not added to the full-document translation
+modify Markdown or comments, and are not added to the full-document translation
 cache. Each selection request sends only the selected text to the configured
 AI provider and may incur provider usage costs.
 

@@ -75,7 +75,8 @@ conversions for the same PDF and parser profile.
 ### Annotations and translation
 
 - Display Zotero PDF highlights and underlines in Markdown, and create,
-  recolor, comment on, or delete annotations.
+  recolor, comment on, or delete annotations. Add a passage to a Zotero note,
+  or add the paper's annotations to a new note.
 - Correct recognition errors in existing paragraphs, headings, and GFM table
   cells without modifying the immutable OCR result.
 - Translate a complete article through a configured Vercel AI SDK provider and
@@ -166,8 +167,8 @@ See [Configuration](./docs/configuration.md) for every setting and
 2. Follow the upload, conversion, and download progress in the temporary Mktero
    tab. A valid cache entry skips the remote conversion. A batch uses Zotero's
    progress window; minimizing it keeps preparation running.
-3. Use the outline, find, citations, figure/table previews, source links, and
-   Zotero notes panel to navigate the document.
+3. Use the outline, find, citations, figure/table previews, source links, the
+   Annotations segment, and the Notes column to navigate the document.
 
 > [!NOTE]
 > Mktero tabs are session-only and are not restored after Zotero restarts.
@@ -182,7 +183,7 @@ See [Configuration](./docs/configuration.md) for every setting and
 | Guide | What it covers |
 | --- | --- |
 | [Configuration](./docs/configuration.md) | Every setting and its default |
-| [Reading and annotation workflows](./docs/workflows.md) | Corrections, annotations, AI translation, citations, references, snapshots, and export |
+| [Reading and annotation workflows](./docs/workflows.md) | Corrections, annotations, Zotero notes, AI translation, citations, references, snapshots, and export |
 | [Figure pipeline](./docs/figure-pipeline.md) | How figures are rebuilt from the local PDF |
 | [Privacy and data handling](./docs/privacy.md) | What Mktero sends and where it is stored |
 | [Limitations](./docs/limitations.md) | Supported PDFs, navigation, and resource limits |
