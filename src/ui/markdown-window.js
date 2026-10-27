@@ -1165,13 +1165,17 @@ class MarkdownTabView {
     }
 
     // The editor reaches the system clipboard through the model so its own
-    // module stays free of Zotero.
-    deliverReaderCopy({ action, text } = {}) {
+    // module stays free of Zotero. A write may carry the copy's note HTML.
+    deliverReaderCopy({ action, text, html } = {}) {
         if (!this.canDeliverReaderCopy()) {
             throw new Error('Clipboard delivery is unavailable');
         }
         if (action === 'read') return this.model.onReadClipboard();
-        if (action === 'write') return this.model.onWriteClipboard(text);
+        if (action === 'write') {
+            return html
+                ? this.model.onWriteClipboard(text, { html })
+                : this.model.onWriteClipboard(text);
+        }
         throw new Error('Clipboard request is unavailable');
     }
 

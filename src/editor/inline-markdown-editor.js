@@ -19,7 +19,13 @@ import {
 import { createLocalization } from '../i18n/localization.js';
 import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
-import { computeDocumentFigures } from '../markdown/markdown-analysis-cache.js';
+import {
+    computeDocumentFigures,
+} from '../markdown/markdown-analysis-cache.js';
+import {
+    codeMirrorCopyHTML,
+    renderedSelectionCopy,
+} from './reader-copy-html.js';
 import {
     createInlineRenderingExtension,
     expandMarkdownSectionAt,
@@ -1368,7 +1374,9 @@ export function createInlineMarkdownEditor({
         && typeof ownerWindow.setTimeout === 'function'
         ? createCopyDelivery({
             readText: () => deliverCopy({ action: 'read' }),
-            writeText: text => deliverCopy({ action: 'write', text }),
+            writeText: (text, { html = '' } = {}) => deliverCopy(
+                html ? { action: 'write', text, html } : { action: 'write', text }
+            ),
             setTimeout: ownerWindow.setTimeout?.bind(ownerWindow),
             clearTimeout: ownerWindow.clearTimeout?.bind(ownerWindow),
             // A view without the hook (the browser preview) never stops a
@@ -1410,6 +1418,19 @@ export function createInlineMarkdownEditor({
         if (!copyDelivery) return;
         deliverReaderCopy(readerCopyRequest(event, view, parent));
     };
+    // Adds the note HTML of the copied passage, so a paste into a Zotero
+    // note keeps its formulas and tables. Registered before the delivery
+    // check, which then hands both flavors to a rewrite.
+    const enrichReaderCopy = event => {
+        if (destroyed || activeCorrection || tableCorrectionEditing) return;
+        enrichReaderCopyEvent(event, view, {
+            chromeRanges: currentChromeRanges,
+            analysisCache,
+            popups: interactionPopups,
+            onError: onCopyDeliveryError,
+        });
+    };
+    parent.addEventListener('copy', enrichReaderCopy);
     parent.addEventListener('copy', verifyReaderCopy);
     // Ctrl/Cmd+C normally ends in a copy event above. When it does not, for
     // example because keyboard focus is in another frame while the reader's
@@ -1425,7 +1446,14 @@ export function createInlineMarkdownEditor({
             if (copyShortcutWatch !== watch) return;
             copyShortcutWatch = null;
             if (watch.observed || destroyed) return;
-            const request = fallbackReaderCopyRequest(view, parent);
+            const request = fallbackReaderCopyRequest(
+                view,
+                parent,
+                () => renderedSelectionCopy(view, {
+                    chromeRanges: currentChromeRanges,
+                    analysisCache,
+                })
+            );
             if (request) deliverReaderCopy({ ...request, writeFirst: true });
         }, COPY_SHORTCUT_GRACE_MS);
         copyShortcutWatch = watch;
@@ -1789,6 +1817,7 @@ export function createInlineMarkdownEditor({
                 );
                 copyDelivery?.cancel();
                 clearCopyShortcutWatch();
+                parent.removeEventListener('copy', enrichReaderCopy);
                 parent.removeEventListener('copy', verifyReaderCopy);
                 parent.removeEventListener(
                     'mousedown',
@@ -2393,9 +2422,15 @@ function createTimedTargetHighlight({
 // editor copies its quote) is matched exactly. Otherwise Firefox copies the
 // selection's rendered text, which the selection reports too. A copy from a
 // text field inside the reader belongs to that field and is left alone.
+// The note HTML the reader added rides along, so a rewrite keeps it.
 function readerCopyRequest(event, view, parent) {
     const supplied = event.defaultPrevented ? clipboardEventText(event) : '';
-    if (supplied.trim()) return { text: supplied, exact: true };
+    if (supplied.trim()) {
+        const html = clipboardEventText(event, 'text/html');
+        return html.trim()
+            ? { text: supplied, html, exact: true }
+            : { text: supplied, exact: true };
+    }
     if (event.defaultPrevented) return null;
     const origin = event.composedPath?.()[0] || event.target;
     if (isTextInputElement(origin)) return null;
@@ -2403,12 +2438,59 @@ function readerCopyRequest(event, view, parent) {
     return text ? { text, exact: false } : null;
 }
 
-function clipboardEventText(event) {
+function clipboardEventText(event, type = 'text/plain') {
     try {
-        return String(event.clipboardData?.getData?.('text/plain') || '');
+        return String(event.clipboardData?.getData?.(type) || '');
     }
     catch {
         return '';
+    }
+}
+
+// The note HTML of a reader copy. CodeMirror copies the Markdown of its
+// selection; that copy gets the note HTML of the same text. A selection
+// inside a rendered formula or table, which CodeMirror leaves to the
+// browser, gets both flavors here: its Markdown source and its note HTML.
+// A popup's own copy, a text field, and a copy with no reader selection are
+// left alone.
+function enrichReaderCopyEvent(
+    event,
+    view,
+    { chromeRanges, analysisCache, popups = [], onError = null }
+) {
+    const data = event.clipboardData;
+    if (!data || typeof data.setData !== 'function') return;
+    const origin = event.composedPath?.()[0] || event.target;
+    if (isTextInputElement(origin)) return;
+    const originElement = origin?.nodeType === 1 ? origin : origin?.parentElement;
+    if (popups.some(popup => popup?.contains?.(originElement))) return;
+    try {
+        if (event.defaultPrevented) {
+            if (!originElement || !view.contentDOM.contains(originElement)) return;
+            if (clipboardEventText(event, 'text/html')) return;
+            const text = clipboardEventText(event);
+            if (!text.trim()) return;
+            const html = codeMirrorCopyHTML(view.state, text, { chromeRanges });
+            if (html) data.setData('text/html', html);
+            return;
+        }
+        if (!originElement || !view.dom.contains(originElement)) return;
+        const copy = renderedSelectionCopy(view, { chromeRanges, analysisCache });
+        if (!copy?.text) return;
+        data.clearData?.();
+        data.setData('text/plain', copy.text);
+        if (copy.html) data.setData('text/html', copy.html);
+        event.preventDefault();
+    }
+    catch (error) {
+        // A copy not yet cancelled keeps what the browser and CodeMirror put
+        // on it; Firefox drops a change to an event it was not told to keep.
+        try {
+            onError?.(error);
+        }
+        catch {
+            // Logging must not make the copy fail.
+        }
     }
 }
 
@@ -2426,20 +2508,37 @@ function readerSelectionText(selection, view) {
 
 // The copy Ctrl/Cmd+C should have made when no copy event arrived. The
 // selection is offered to CodeMirror as a copy, so a plain passage copies its
-// Markdown source exactly as it does normally. A selection CodeMirror leaves
-// to the browser, such as one inside a rendered formula or table, copies its
-// rendered text. The editor's state must already follow the DOM selection;
-// a stale state would copy another passage, so that falls back as well.
-function fallbackReaderCopyRequest(view, parent) {
+// Markdown source exactly as it does normally, with the note HTML the copy
+// listener adds. A selection CodeMirror leaves to the browser, such as one
+// inside a rendered formula or table, copies its source and note HTML when
+// `renderedCopy` maps it, and its rendered text otherwise. The editor's
+// state must already follow the DOM selection; a stale state would copy
+// another passage, so that falls back as well.
+function fallbackReaderCopyRequest(view, parent, renderedCopy = null) {
     const selection = rootSelectionFor(parent);
     const rendered = readerSelectionText(selection, view);
     if (!rendered) return null;
     const supplied = stateFollowsSelection(view, selection)
         ? codeMirrorCopyText(selection, view)
-        : '';
-    return supplied.trim()
-        ? { text: supplied, exact: true }
-        : { text: rendered, exact: false };
+        : { text: '', html: '' };
+    if (supplied.text.trim()) {
+        return supplied.html
+            ? { text: supplied.text, html: supplied.html, exact: true }
+            : { text: supplied.text, exact: true };
+    }
+    let mapped = null;
+    try {
+        mapped = renderedCopy?.() || null;
+    }
+    catch {
+        mapped = null;
+    }
+    if (mapped?.text?.trim()) {
+        return mapped.html
+            ? { text: mapped.text, html: mapped.html, exact: true }
+            : { text: mapped.text, exact: true };
+    }
+    return { text: rendered, exact: false };
 }
 
 function stateFollowsSelection(view, selection) {
@@ -2463,12 +2562,12 @@ function codeMirrorCopyText(selection, view) {
         target = selection.getRangeAt(0).startContainer;
     }
     catch {
-        return '';
+        return { text: '', html: '' };
     }
     const element = target?.nodeType === 1 ? target : target?.parentElement;
-    if (!element || !view.contentDOM.contains(element)) return '';
+    if (!element || !view.contentDOM.contains(element)) return { text: '', html: '' };
     const ownerWindow = element.ownerDocument?.defaultView;
-    if (!ownerWindow?.Event) return '';
+    if (!ownerWindow?.Event) return { text: '', html: '' };
     const data = new Map();
     const event = new ownerWindow.Event('copy', {
         bubbles: true,
@@ -2486,12 +2585,14 @@ function codeMirrorCopyText(selection, view) {
         element.dispatchEvent(event);
     }
     catch {
-        return '';
+        return { text: '', html: '' };
     }
     finally {
         syntheticCopyDispatch = false;
     }
-    return event.defaultPrevented ? data.get('text/plain') || '' : '';
+    return event.defaultPrevented
+        ? { text: data.get('text/plain') || '', html: data.get('text/html') || '' }
+        : { text: '', html: '' };
 }
 
 const TEXT_INPUT_TAGS = new Set(['TEXTAREA', 'TEXTBOX', 'SELECT', 'INPUT']);

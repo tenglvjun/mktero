@@ -3920,9 +3920,14 @@ function readerCopyDeliveryHooks() {
             }
             return runtime.clipboard.readText();
         },
-        onWriteClipboard: text => {
+        onWriteClipboard: (text, { html = '' } = {}) => {
             if (typeof runtime.clipboard?.writeText !== 'function') {
                 throw new Error('Clipboard write is unavailable');
+            }
+            // A rewrite keeps the note HTML the copy had, so a paste into a
+            // Zotero note still renders its formulas.
+            if (html && typeof runtime.clipboard.writeRich === 'function') {
+                return runtime.clipboard.writeRich({ text, html });
             }
             return runtime.clipboard.writeText(text);
         },

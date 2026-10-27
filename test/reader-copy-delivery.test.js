@@ -91,6 +91,7 @@ function createCopyEditor({
             .filter(request => request.action === 'write')
             .map(request => request.text),
         reads: () => requests.filter(request => request.action === 'read').length,
+        requests: () => [...requests],
     };
 }
 
@@ -166,6 +167,27 @@ test('writes a reader copy again when the clipboard kept the previous text', asy
         await reader.timers.fire(80);
         assert.deepEqual(reader.writes(), [MARKDOWN_SOURCE]);
         assert.deepEqual(reader.failures, []);
+    }
+    finally {
+        reader.editor.destroy();
+        reader.dom.window.close();
+    }
+});
+
+test('a rewrite keeps the note HTML of a reader copy', async () => {
+    const source = 'Mean $\\mu$ at locus $i$.';
+    const reader = createCopyEditor({ reads: ['previous copy', source] });
+    try {
+        reader.editor.setDocument({ markdown: `${source}\n\nSecond paragraph.` });
+        const target = await selectFirstParagraph(reader);
+        const { data } = dispatchCopy(reader.window, target);
+        assert.equal(data.get('text/plain'), source);
+        assert.match(data.get('text/html'), /<span class="math">\$i\$<\/span>/u);
+
+        await reader.timers.fire(40);
+        const write = reader.requests().find(request => request.action === 'write');
+        assert.equal(write.text, source);
+        assert.equal(write.html, data.get('text/html'));
     }
     finally {
         reader.editor.destroy();
