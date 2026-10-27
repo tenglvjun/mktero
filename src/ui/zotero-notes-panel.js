@@ -168,20 +168,28 @@ class ZoteroNotesPanel {
         await this.showEditor({ noteID: null });
     }
 
-    async createFromAnnotations() {
+    // `options.segmentsFor` passes each annotation's text and formulas on to
+    // the note, so the note shows the formulas the reader shows.
+    async createFromAnnotations(options = undefined) {
         if (!this.adapter) return;
-        const result = await this.adapter.createFromAnnotations();
+        const result = options === undefined
+            ? await this.adapter.createFromAnnotations()
+            : await this.adapter.createFromAnnotations(options);
         await this.refresh();
         if (result?.noteID) await this.openNote(result.noteID);
     }
 
-    async insertAnnotations(annotations) {
+    async insertAnnotations(annotations, options = undefined) {
         if (!this.canInsert) {
             const error = new Error('No note is open');
             error.code = NOTE_EDITOR_UNAVAILABLE;
             throw error;
         }
-        await this.handle.insertAnnotations(annotations);
+        if (options === undefined) {
+            await this.handle.insertAnnotations(annotations);
+            return;
+        }
+        await this.handle.insertAnnotations(annotations, options);
     }
 
     back() {

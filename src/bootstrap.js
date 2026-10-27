@@ -2232,8 +2232,8 @@ function createTabNotesBridge(getAttachmentID) {
             ...options,
             attachmentID: attachmentID(),
         })),
-        createFromAnnotations: logged(() => (
-            notes.createFromAnnotations(attachmentID())
+        createFromAnnotations: logged((options = {}) => (
+            notes.createFromAnnotations(attachmentID(), options)
         )),
         showInLibrary: logged(options => notes.showInLibrary(options)),
         moveToTrash: logged(options => notes.moveToTrash(options)),

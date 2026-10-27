@@ -2,6 +2,7 @@ import { GFM, parser } from '@lezer/markdown';
 import {
     findDisplayMathMatches,
     findInlineMathMatches,
+    zoteroNoteMathSource,
 } from './markdown-html.js';
 import { analyzeMarkdownCitations } from './markdown-citations.js';
 import { analyzeMarkdownFootnotes } from './markdown-footnotes.js';
@@ -75,7 +76,7 @@ export function createVisibleMarkdownTextIndex(
         legacyMathEmphasis = false,
     } = {}
 ) {
-    const { hiddenRanges, mathRanges, imageRanges } = collectHiddenRanges(
+    const { hiddenRanges, mathRanges, imageRanges, formulas } = collectHiddenRanges(
         markdown,
         extraHiddenRanges,
         readerMarkup,
@@ -135,6 +136,15 @@ export function createVisibleMarkdownTextIndex(
         },
         expandSourceRangeToMathBoundaries(range) {
             return expandRangeToMathSourceRanges(range, mathRanges);
+        },
+        // The formulas the reader typesets that lie wholly inside
+        // `from..to`, in source order, as `{ from, to, tex, display }`.
+        // Footnote marks, a superscript the reader shows as source, and a
+        // dollar-wrapped citation are text, not formulas.
+        formulasInRange(from, to) {
+            return formulas.filter(formula => (
+                formula.from >= from && formula.to <= to
+            ));
         },
         // The text a replaced segment shows when it spans exactly `from..to`.
         replacedTextForSourceRange(from, to) {
@@ -216,6 +226,124 @@ export function expandMarkdownRangeToMathBoundaries(markdown, range) {
     const source = String(markdown || '');
     return createVisibleMarkdownTextIndex(source)
         .expandSourceRangeToMathBoundaries(range);
+}
+
+// Formulas a note can hold in one selection. Past it the note gets the text.
+const MAX_NOTE_FORMULAS = 200;
+
+/**
+ * The text and formulas of Markdown `ranges`, as the reader shows them, for a
+ * Zotero note: `[{ type: 'text', text }, { type: 'math', tex, display }]`.
+ * The visible text of the segments, joined, is the selection's visible text
+ * with each formula's TeX in place of its delimited source.
+ *
+ * Returns null when the ranges hold no formula a note can typeset, so a caller
+ * keeps its plain-text path.
+ */
+export function noteMathSegmentsForRanges(
+    markdown,
+    ranges,
+    { analyses = null } = {}
+) {
+    const source = String(markdown || '');
+    if (!Array.isArray(ranges) || !ranges.length) return null;
+    const index = visibleIndexFor(source, analyses);
+    const segments = [];
+    const pushText = text => {
+        if (!text) return;
+        const last = segments.at(-1);
+        if (last?.type === 'text') last.text += text;
+        else segments.push({ type: 'text', text });
+    };
+    const textBefore = () => {
+        const last = segments.at(-1);
+        return last?.type === 'text' ? last.text : '';
+    };
+    let formulaCount = 0;
+    let previous = null;
+    for (const range of ranges) {
+        if (!validSourceRange(range, source.length)) continue;
+        const parts = [];
+        let cursor = range.from;
+        for (const formula of index.formulasInRange(range.from, range.to)) {
+            // Every formula checked counts, typeset or not, so a passage of
+            // broken TeX cannot run KaTeX without end.
+            const tex = formulaCount++ < MAX_NOTE_FORMULAS
+                ? zoteroNoteMathSource(formula.tex, formula.display)
+                : null;
+            if (cursor < formula.from) {
+                parts.push({ type: 'text', range: { from: cursor, to: formula.from } });
+            }
+            if (tex) {
+                parts.push({
+                    type: 'math',
+                    tex,
+                    source: formula.tex,
+                    display: formula.display,
+                });
+            }
+            else {
+                parts.push({ type: 'text', range: { from: formula.from, to: formula.to } });
+            }
+            cursor = formula.to;
+        }
+        if (cursor < range.to) {
+            parts.push({ type: 'text', range: { from: cursor, to: range.to } });
+        }
+        const separate = previous
+            && needsSegmentSeparator(source, index, previous, range);
+        let first = true;
+        for (const part of parts) {
+            const text = part.type === 'text'
+                ? visibleRangeText(source, index, part.range)
+                : '';
+            if (part.type === 'text' && !text) continue;
+            if (first && separate && segments.length) {
+                const before = textBefore();
+                const spaced = /\s$/u.test(before)
+                    || (part.type === 'text' && /^\s/u.test(text));
+                if (!spaced) pushText(' ');
+            }
+            first = false;
+            if (part.type === 'text') pushText(text);
+            else {
+                segments.push({
+                    type: 'math',
+                    tex: part.tex,
+                    source: part.source,
+                    display: part.display,
+                });
+            }
+        }
+        previous = range;
+    }
+    if (!segments.some(segment => segment.type === 'math')) return null;
+    return trimNoteSegments(segments);
+}
+
+// The text a reader saw for `segments`: each formula as the TeX the source
+// wrote. A selection's saved text compares equal through
+// `noteSegmentTextKey`.
+export function noteMathSegmentsText(segments) {
+    return (segments || []).map(segment => (
+        segment.type === 'math' ? segment.source ?? segment.tex : segment.text
+    )).join('');
+}
+
+// Whitespace and the formula delimiters do not decide whether two texts of
+// one selection agree: a saved annotation keeps a display formula's `$$`
+// when other text shares its range, and its TeX alone otherwise.
+export function noteSegmentTextKey(text) {
+    return String(text || '').replace(/[\s$]+/gu, '');
+}
+
+function trimNoteSegments(segments) {
+    const output = segments.map(segment => ({ ...segment }));
+    const first = output[0];
+    if (first?.type === 'text') first.text = first.text.trimStart();
+    const last = output.at(-1);
+    if (last?.type === 'text') last.text = last.text.trimEnd();
+    return output.filter(segment => segment.type !== 'text' || segment.text);
 }
 
 const PAIRED_MARK_PARENTS = new Set([
@@ -814,6 +942,7 @@ function collectHiddenRanges(
     const mathSourceRanges = [];
     const mathExcludedRanges = [];
     const citationExcludedRanges = [];
+    const formulas = [];
     let footnoteAnalysis = null;
     const footnotes = () => footnoteAnalysis ??= (
         analyses?.footnotes?.() || analyzeMarkdownFootnotes(markdown)
@@ -896,6 +1025,13 @@ function collectHiddenRanges(
             continue;
         }
         if (match.text.startsWith('^')) continue;
+        if (!isDollarWrappedCitation(match.text)) {
+            formulas.push({
+                ...mathRange,
+                tex: match.text,
+                display: false,
+            });
+        }
         const contentOffset = match.raw.indexOf(match.text);
         if (contentOffset < 0) continue;
         const contentFrom = match.start + contentOffset;
@@ -910,6 +1046,14 @@ function collectHiddenRanges(
     for (const match of findDisplayMathMatches(markdown)) {
         if (overlapsAnyRange(match, mathExcludedRanges)) continue;
         mathSourceRanges.push({ from: match.start, to: match.end });
+        // A display formula's match runs through its closing line break; a
+        // selection that ends at the closing `$$` still holds all of it.
+        formulas.push({
+            from: match.start,
+            to: match.start + match.raw.trimEnd().length,
+            tex: match.text,
+            display: true,
+        });
     }
     // A pair with a mark inside a formula is TeX, not emphasis: the reader
     // typesets the formula and shows the other mark as written.
@@ -954,7 +1098,34 @@ function collectHiddenRanges(
         hiddenRanges: mergeHiddenRanges(ranges, replacements),
         mathRanges: mergeMathSourceRanges(mathSourceRanges),
         imageRanges,
+        formulas: selectFormulas(formulas),
     };
+}
+
+// `$[12]$` is how OCR wraps a numeric citation; the reader shows the citation.
+function isDollarWrappedCitation(text) {
+    const content = String(text || '').trim();
+    return content.startsWith('[')
+        && content.endsWith(']')
+        && isNumericCitationContent(content.slice(1, -1).trim());
+}
+
+// One formula per stretch of source, a display formula before an inline one
+// that starts there.
+function selectFormulas(formulas) {
+    const sorted = [...formulas].sort((left, right) => (
+        left.from - right.from
+        || Number(right.display) - Number(left.display)
+        || right.to - left.to
+    ));
+    const selected = [];
+    let end = 0;
+    for (const formula of sorted) {
+        if (formula.from < end) continue;
+        selected.push(formula);
+        end = formula.to;
+    }
+    return selected;
 }
 
 // A replacement shows its text for its whole source range. One that a hidden

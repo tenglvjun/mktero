@@ -90,11 +90,17 @@ import {
     headingLevelsForDocumentStructure,
     computeDocumentFigures,
     computeMarkdownAssetOutline,
+    computeMarkdownCitations,
+    computeMarkdownFootnotes,
     computeMarkdownFragmentIndex,
     computeVisibleChromeRanges,
     createMarkdownAnalysisCache,
 } from '../markdown/markdown-analysis-cache.js';
-import { createVisibleMarkdownTextIndex, expandMarkdownRangeToMathBoundaries } from '../markdown/markdown-visible-text.js';
+import {
+    createVisibleMarkdownTextIndex,
+    expandMarkdownRangeToMathBoundaries,
+    noteMathSegmentsForRanges,
+} from '../markdown/markdown-visible-text.js';
 import {
     createMarkdownFragmentID,
     createMarkdownReadingPositionAnchor,
@@ -1472,7 +1478,9 @@ class MarkdownTabView {
         const panel = this.requireInsertableNote();
         const adapter = this.zoteroNotesAdapter;
         const annotations = await adapter.annotationsForNote([annotationID]);
-        await panel.insertAnnotations(annotations);
+        await panel.insertAnnotations(annotations, {
+            segmentsFor: json => this.noteSegmentsForAnnotationKey(json?.id),
+        });
     }
 
     async addSelectionToNote(annotation, selectionContext) {
@@ -1482,7 +1490,52 @@ class MarkdownTabView {
             selectionContext
         );
         const annotations = await this.zoteroNotesAdapter.selectionForNote(draft);
-        await panel.insertAnnotations(annotations);
+        // A passage split across pages is placed part by part from the PDF
+        // text, which says nothing of where its formulas are.
+        const segments = annotations.length === 1
+            ? this.noteSegmentsForRanges(draft.ranges)
+            : null;
+        await panel.insertAnnotations(annotations, {
+            segmentsFor: () => segments,
+        });
+    }
+
+    // The text and formulas the reader shows for Markdown `ranges`, for a
+    // note highlight, or null when the passage has no formula.
+    noteSegmentsForRanges(ranges) {
+        const markdown = String(this.model?.markdown || '');
+        const cache = this.analysisCache;
+        try {
+            return noteMathSegmentsForRanges(markdown, ranges, {
+                analyses: cache
+                    ? {
+                        citations: () => computeMarkdownCitations(cache, markdown),
+                        footnotes: () => computeMarkdownFootnotes(cache, markdown),
+                    }
+                    : null,
+            });
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+            return null;
+        }
+    }
+
+    // The note segments of the PDF annotation `key`, from where the reader
+    // placed it in the Markdown. An annotation the reader could not place, or
+    // a local highlight, has none.
+    noteSegmentsForAnnotationKey(key) {
+        const matched = this.model?.annotationOverlay?.matched;
+        if (this.noteAnnotationIndex?.source !== matched) {
+            this.noteAnnotationIndex = {
+                source: matched,
+                byID: new Map((Array.isArray(matched) ? matched : [])
+                    .map(item => [String(item?.id || ''), item])),
+            };
+        }
+        const annotation = this.noteAnnotationIndex.byID.get(String(key || ''));
+        if (!annotation || isMarkdownAnnotation(annotation)) return null;
+        return this.noteSegmentsForRanges(annotation.ranges);
     }
 
     requireInsertableNote() {
@@ -1502,7 +1555,9 @@ class MarkdownTabView {
         if (!this.sidePanels.notes.visible) {
             this.setSidePanelVisibility('notes', true, { source: 'user' });
         }
-        await panel.createFromAnnotations();
+        await panel.createFromAnnotations({
+            segmentsFor: key => this.noteSegmentsForAnnotationKey(key),
+        });
     }
 
     // An expected refusal (no open note, an annotation not in the PDF yet, a

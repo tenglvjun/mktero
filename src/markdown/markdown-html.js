@@ -1478,6 +1478,31 @@ function renderZoteroNoteMath(source, displayMode) {
         + `${delimiter}</${tagName}>`;
 }
 
+/**
+ * The TeX a Zotero note may store as a formula for `source`, or null when the
+ * reader would show it as source instead: an unsafe command, a formula past
+ * the length budget, or one KaTeX cannot typeset. The checks match
+ * `renderMath` for the `zotero-note` target, so a formula inserted into a
+ * note renders there exactly when a copied snapshot's would.
+ */
+export function zoteroNoteMathSource(source, displayMode = false) {
+    const normalizedSource = normalizeOcrMathSource(String(source ?? '').trim());
+    if (!normalizedSource
+        || UNSAFE_MATH_COMMAND.test(normalizedSource)
+        || normalizedSource.length > MAX_MATH_SOURCE_LENGTH) {
+        return null;
+    }
+    try {
+        const rendered = renderZoteroNoteMath(normalizedSource, displayMode);
+        return rendered && rendered.length <= MAX_MATH_OUTPUT_LENGTH
+            ? normalizedSource
+            : null;
+    }
+    catch {
+        return null;
+    }
+}
+
 function wrapMkteroMath(rendered, displayMode) {
     return displayMode
         ? `<div class="math math-display">${rendered}</div>`
