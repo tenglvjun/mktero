@@ -69,6 +69,7 @@ import {
 } from './ai/translation-request-tracker.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import { ConversionProviderRouter } from './core/conversion-provider.js';
+import { createPDFPageLimitGuard } from './core/pdf-page-limit.js';
 import { MkteroConversionClient } from './mktero/mktero-conversion-client.js';
 import {
     MkteroDocumentExtractor,
@@ -481,13 +482,14 @@ globalThis.startup = async function startup({ id, rootURI }) {
         Zotero,
         path => IOUtils.read(path)
     );
+    const pdfTextEngine = createPDFJSTextEngine({
+        workerSrc: `${rootURI}pdf.worker.mjs`,
+        cMapUrl: `${rootURI}pdfjs/cmaps/`,
+        standardFontDataUrl: `${rootURI}pdfjs/standard_fonts/`,
+        wasmUrl: `${rootURI}pdfjs/wasm/`,
+    });
     const pdfAnnotationLocator = new PDFAnnotationLocator({
-        engine: createPDFJSTextEngine({
-            workerSrc: `${rootURI}pdf.worker.mjs`,
-            cMapUrl: `${rootURI}pdfjs/cmaps/`,
-            standardFontDataUrl: `${rootURI}pdfjs/standard_fonts/`,
-            wasmUrl: `${rootURI}pdfjs/wasm/`,
-        }),
+        engine: pdfTextEngine,
         cache: pdfTextIndexCache,
         createAbortController: createZoteroAbortController,
         createSourceHash: fileData => sha256Hex(fileData),
@@ -709,6 +711,14 @@ globalThis.startup = async function startup({ id, rootURI }) {
             onEvent: context.onEvent,
         });
     };
+    // MinerU cloud and the hosted Mktero service share MinerU's page limit.
+    // The engine is the locator's, so the locator's dispose releases it.
+    const assertHostedPageLimit = createPDFPageLimitGuard({
+        countPages: (fileData, options) => pdfTextEngine.countPages(fileData, options),
+        onError: error => debugMktero(
+            `Mktero: PDF page count unavailable (${error?.name || 'Error'})`
+        ),
+    });
     const conversion = new MinerUConversion({
         onJob: recordDiagnosticJob,
         client: new MinerUClient({
@@ -739,6 +749,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             provider: 'mineru',
             requestProfile: MINERU_REQUEST_PROFILE_ID,
         }),
+        assertPageLimit: assertHostedPageLimit,
         onError: error => logMkteroError(error),
     });
     const localConversion = new MinerULocalConversion({
@@ -865,6 +876,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             provider: 'mktero',
             requestProfile: MINERU_REQUEST_PROFILE_ID,
         }),
+        assertPageLimit: assertHostedPageLimit,
     });
     const extractor = new ConversionProviderRouter({
         getProvider: () => getConversionProvider(Zotero),

@@ -48,6 +48,46 @@ test('localizes known conversion errors and hides unknown internal messages', ()
     );
 });
 
+test('tells the user the PDF is over the page limit instead of to retry', () => {
+    const chinese = createLocalization({ zoteroLocale: 'zh-CN' });
+    const translate = chinese.t.bind(chinese);
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const translateEnglish = english.t.bind(english);
+
+    const local = new Error('The PDF has 317 pages; the conversion service accepts at most 200');
+    local.code = 'PDF_PAGE_LIMIT_EXCEEDED';
+    local.pages = 317;
+    local.limit = 200;
+    assert.equal(
+        localizeConversionError(local, translate),
+        '此 PDF 共 317 页，当前转换服务每个 PDF 最多支持 200 页。请拆分 PDF，或在“设置 -> Mktero”中更换转换服务。'
+    );
+    assert.match(localizeConversionError(local, translateEnglish), /317 pages.*at most 200 pages/);
+
+    const hosted = new Error('The Mktero conversion failed');
+    hosted.code = 'MKTERO_CONVERSION_FAILED';
+    hosted.errorCode = 'MINERU_PAGE_LIMIT_EXCEEDED';
+    assert.equal(
+        localizeConversionError(hosted, translate),
+        '此 PDF 超过 200 页，超出当前转换服务每个 PDF 的页数上限。请拆分 PDF，或在“设置 -> Mktero”中更换转换服务。'
+    );
+    assert.doesNotMatch(localizeConversionError(hosted, translateEnglish), /mineru|try again/i);
+
+    const otherFailure = new Error('The Mktero conversion failed');
+    otherFailure.code = 'MKTERO_CONVERSION_FAILED';
+    otherFailure.errorCode = 'MINERU_TASK_FAILED';
+    assert.equal(
+        localizeConversionError(otherFailure, translate),
+        'Mktero 服务无法转换此 PDF。请重试。'
+    );
+
+    const malformed = new Error('The PDF is too long');
+    malformed.code = 'PDF_PAGE_LIMIT_EXCEEDED';
+    malformed.pages = '<b>9</b>';
+    assert.doesNotMatch(localizeConversionError(malformed, translateEnglish), /<b>/);
+    assert.match(localizeConversionError(malformed, translateEnglish), /more than 200 pages/);
+});
+
 test('tells the user to retry an upload instead of fixing storage', () => {
     const localization = createLocalization({ zoteroLocale: 'zh-CN' });
     const translate = localization.t.bind(localization);

@@ -54,32 +54,61 @@ export function createPDFJSTextEngine({
             return Promise.reject(error);
         }
     };
+    const openDocument = (fileData, signal) => {
+        if (!active) throw indexUnavailableError();
+        validatePDFData(fileData);
+        throwIfAborted(signal);
+        // PDF.js may transfer the buffer it is given; callers keep theirs.
+        const pdfData = Uint8Array.from(fileData);
+        throwIfAborted(signal);
+        const loadingTask = loadDocument({
+            data: pdfData,
+            cMapUrl: cMapUrl || undefined,
+            cMapPacked: true,
+            standardFontDataUrl: standardFontDataUrl || undefined,
+            wasmUrl: wasmUrl || undefined,
+            useWorkerFetch: false,
+            isOffscreenCanvasSupported: false,
+            isImageDecoderSupported: false,
+            useWasm: Boolean(wasmUrl),
+            verbosity: 0,
+        });
+        if (!loadingTask || typeof loadingTask !== 'object') {
+            throw new Error('PDF.js loading task is unavailable');
+        }
+        loadingTasks.add(loadingTask);
+        const abort = () => { void destroyLoadingTask(loadingTask); };
+        signal?.addEventListener?.('abort', abort, { once: true });
+        return {
+            loadingTask,
+            async release() {
+                signal?.removeEventListener?.('abort', abort);
+                loadingTasks.delete(loadingTask);
+                await destroyLoadingTask(loadingTask).catch(() => {});
+            },
+        };
+    };
     return {
         profile: PDF_TEXT_INDEX_PROFILE,
-        async extract(fileData, { signal } = {}) {
-            if (!active) throw indexUnavailableError();
-            validatePDFData(fileData);
-            throwIfAborted(signal);
-            const pdfData = Uint8Array.from(fileData);
-            throwIfAborted(signal);
-            const loadingTask = loadDocument({
-                data: pdfData,
-                cMapUrl: cMapUrl || undefined,
-                cMapPacked: true,
-                standardFontDataUrl: standardFontDataUrl || undefined,
-                wasmUrl: wasmUrl || undefined,
-                useWorkerFetch: false,
-                isOffscreenCanvasSupported: false,
-                isImageDecoderSupported: false,
-                useWasm: Boolean(wasmUrl),
-                verbosity: 0,
-            });
-            if (!loadingTask || typeof loadingTask !== 'object') {
-                throw new Error('PDF.js loading task is unavailable');
+        // Opening a document reads the cross-reference table and the page
+        // tree root only; no page content is parsed.
+        async countPages(fileData, { signal } = {}) {
+            const { loadingTask, release } = openDocument(fileData, signal);
+            try {
+                const document = await loadingTask.promise;
+                throwIfAborted(signal);
+                return document.numPages;
             }
-            loadingTasks.add(loadingTask);
-            const abort = () => { void destroyLoadingTask(loadingTask); };
-            signal?.addEventListener?.('abort', abort, { once: true });
+            catch (error) {
+                throwIfAborted(signal);
+                throw error;
+            }
+            finally {
+                await release();
+            }
+        },
+        async extract(fileData, { signal } = {}) {
+            const { loadingTask, release } = openDocument(fileData, signal);
             try {
                 const document = await loadingTask.promise;
                 if (!Number.isSafeInteger(document.numPages)
@@ -143,9 +172,7 @@ export function createPDFJSTextEngine({
                 };
             }
             finally {
-                signal?.removeEventListener?.('abort', abort);
-                loadingTasks.delete(loadingTask);
-                await destroyLoadingTask(loadingTask).catch(() => {});
+                await release();
             }
         },
         async dispose() {

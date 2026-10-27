@@ -1235,6 +1235,188 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
     )), false);
 });
 
+function createPageLimitGuard(error = null) {
+    const calls = [];
+    const guard = async (fileData, options) => {
+        calls.push({ fileData, options });
+        if (error) throw error;
+    };
+    guard.calls = calls;
+    return guard;
+}
+
+function pageLimitError() {
+    const error = new Error('The PDF has 201 pages; the conversion service accepts at most 200');
+    error.code = 'PDF_PAGE_LIMIT_EXCEEDED';
+    return error;
+}
+
+test('checks the page limit before uploading a new MinerU task', async () => {
+    const fileData = new Uint8Array([1]);
+    const controller = new AbortController();
+    const assertPageLimit = createPageLimitGuard();
+    const conversion = new MinerUConversion({
+        client: createSuccessfulClient('# Fresh result'),
+        pendingTasks: createMemoryPendingTasks(),
+        createDataID: () => 'mktero-task-checked',
+        assertPageLimit,
+    });
+
+    const result = await conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData,
+        signal: controller.signal,
+    });
+
+    assert.equal(result.origin, 'fresh');
+    assert.equal(assertPageLimit.calls.length, 1);
+    assert.equal(assertPageLimit.calls[0].fileData, fileData);
+    assert.equal(assertPageLimit.calls[0].options.signal, controller.signal);
+});
+
+test('a PDF over the page limit is neither uploaded nor recorded as pending', async () => {
+    let pendingWrites = 0;
+    const pendingTasks = createMemoryPendingTasks();
+    const conversion = new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: {
+            ...pendingTasks,
+            async put(...args) {
+                pendingWrites++;
+                return pendingTasks.put(...args);
+            },
+        },
+        assertPageLimit: createPageLimitGuard(pageLimitError()),
+    });
+
+    await assert.rejects(conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+    }), { code: 'PDF_PAGE_LIMIT_EXCEEDED' });
+    assert.equal(pendingWrites, 0);
+});
+
+test('the page limit is checked before a missing token is reported', async () => {
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() {
+                throw new Error('A MinerU API Token is required');
+            },
+            async collect() {
+                throw new Error('MinerU collection was not expected');
+            },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        assertPageLimit: createPageLimitGuard(pageLimitError()),
+    });
+
+    await assert.rejects(conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: '',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+    }), { code: 'PDF_PAGE_LIMIT_EXCEEDED' });
+});
+
+test('a cached MinerU result is returned without a page check', async () => {
+    const assertPageLimit = createPageLimitGuard(pageLimitError());
+    const conversion = new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: { async get() { return { markdown: '# Cached result' }; } },
+        assertPageLimit,
+    });
+
+    const result = await conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: '',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+
+    assert.equal(result.origin, 'cache');
+    assert.equal(assertPageLimit.calls.length, 0);
+});
+
+test('a resumed MinerU task is collected without a page check', async () => {
+    const assertPageLimit = createPageLimitGuard(pageLimitError());
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() {
+                throw new Error('the PDF must not be uploaded again');
+            },
+            async collect() {
+                return { markdown: '# Resumed result' };
+            },
+        },
+        pendingTasks: createMemoryPendingTasks({
+            batchID: 'batch-resumed',
+            dataID: 'mktero-task-resumed',
+            uploadedAt: 1_700_000_000_000,
+        }),
+        now: () => 1_700_000_000_001,
+        assertPageLimit,
+    });
+
+    const result = await conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+    });
+
+    assert.equal(result.origin, 'resumed');
+    assert.equal(assertPageLimit.calls.length, 0);
+});
+
+test('a forced refresh checks the page limit even with a cached result', async () => {
+    const assertPageLimit = createPageLimitGuard(pageLimitError());
+    const conversion = new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: createMemoryPendingTasks(),
+        cache: { async get() { return { markdown: '# Cached result' }; } },
+        assertPageLimit,
+    });
+
+    await assert.rejects(conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+        forceRefresh: true,
+    }), { code: 'PDF_PAGE_LIMIT_EXCEEDED' });
+    assert.equal(assertPageLimit.calls.length, 1);
+});
+
+test('a conversion without a content key checks the page limit before uploading', async () => {
+    const conversion = new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: createMemoryPendingTasks(),
+        assertPageLimit: createPageLimitGuard(pageLimitError()),
+    });
+
+    await assert.rejects(conversion.convert({
+        key: null,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+    }), { code: 'PDF_PAGE_LIMIT_EXCEEDED' });
+});
+
+test('rejects a page limit check that is not a function', () => {
+    assert.throws(() => new MinerUConversion({
+        client: createUnexpectedClient(),
+        pendingTasks: createMemoryPendingTasks(),
+        assertPageLimit: 200,
+    }), TypeError);
+});
+
 function createSuccessfulClient(result) {
     return {
         async submit({ dataID, fileName }) {

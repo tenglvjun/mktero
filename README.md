@@ -123,7 +123,10 @@ The selected converter controls file-size, page-count, quota, and
 service-availability limits. When you choose MinerU or Mistral, see the
 [MinerU API documentation](https://mineru.net/apiManage/docs) or
 [Mistral OCR documentation](https://docs.mistral.ai/studio/document-processing/basic_ocr)
-for that service's current limits.
+for that service's current limits. The hosted Mktero conversion and MinerU
+cloud accept at most 200 pages per PDF. Before such a PDF is sent, Mktero
+counts its pages locally and stops with a message when it has more; a local
+MinerU service and Mistral are not checked.
 
 ### Install
 

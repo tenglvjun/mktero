@@ -49,6 +49,105 @@ test('extracts PDF text without loading a packaged fake-worker URL', async () =>
     }
 });
 
+test('counts the pages of a real PDF', async () => {
+    const fileData = new Uint8Array(await readFile(
+        new URL('./fixtures/offline-annotation.pdf', import.meta.url)
+    ));
+    const original = Uint8Array.from(fileData);
+    const engine = createTestPDFEngine();
+
+    try {
+        assert.equal(await engine.countPages(fileData), 1);
+        assert.deepEqual(fileData, original);
+    }
+    finally {
+        await engine.dispose();
+    }
+});
+
+test('counts pages without reading page content and releases the document', async () => {
+    const fileData = new Uint8Array([1, 2, 3]);
+    let destroyed = 0;
+    let received = null;
+    const engine = createTestPDFEngine({
+        loadDocument({ data }) {
+            received = data;
+            return {
+                promise: Promise.resolve({
+                    numPages: 317,
+                    async getPage() { throw new Error('countPages must not read a page'); },
+                }),
+                async destroy() { destroyed++; },
+            };
+        },
+    });
+
+    try {
+        assert.equal(await engine.countPages(fileData), 317);
+        assert.notEqual(received, fileData);
+        assert.deepEqual(received, fileData);
+        assert.equal(destroyed, 1);
+    }
+    finally {
+        await engine.dispose();
+    }
+});
+
+test('a page count failure is reported and still releases the document', async () => {
+    let destroyed = 0;
+    const failure = new Error('No password given');
+    failure.name = 'PasswordException';
+    const engine = createTestPDFEngine({
+        loadDocument() {
+            return {
+                promise: Promise.reject(failure),
+                async destroy() { destroyed++; },
+            };
+        },
+    });
+
+    try {
+        await assert.rejects(engine.countPages(new Uint8Array([1])), failure);
+        assert.equal(destroyed, 1);
+    }
+    finally {
+        await engine.dispose();
+    }
+});
+
+test('a cancelled page count rejects with the cancellation', async () => {
+    const controller = new AbortController();
+    let rejectLoad;
+    const engine = createTestPDFEngine({
+        loadDocument() {
+            return {
+                promise: new Promise((_resolve, reject) => { rejectLoad = reject; }),
+                async destroy() { rejectLoad(new Error('Worker was destroyed')); },
+            };
+        },
+    });
+
+    try {
+        const counting = engine.countPages(new Uint8Array([1]), { signal: controller.signal });
+        controller.abort();
+        await assert.rejects(counting, { name: 'AbortError' });
+    }
+    finally {
+        await engine.dispose();
+    }
+});
+
+test('a disposed engine does not count pages', async () => {
+    const engine = createTestPDFEngine({
+        loadDocument() { assert.fail('A disposed engine must not load a PDF'); },
+    });
+    await engine.dispose();
+
+    await assert.rejects(engine.countPages(new Uint8Array([1])), {
+        code: 'MKTERO_PDF_INDEX_UNAVAILABLE',
+    });
+});
+
 test('keeps PDF bookmarks when getOutline succeeds and ignores outline failures', async () => {
     const fileData = new Uint8Array([1]);
     const engine = createTestPDFEngine({

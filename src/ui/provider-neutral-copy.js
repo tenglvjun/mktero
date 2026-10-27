@@ -1,6 +1,10 @@
 import { translateEnglish } from '../i18n/localization.js';
 import { MKTERO_REQUEST_STAGES } from '../mktero/mktero-conversion-client.js';
 import {
+    HOSTED_MINERU_MAX_PAGES,
+    PDF_PAGE_LIMIT_ERROR_CODE,
+} from '../core/pdf-page-limit.js';
+import {
     MARKDOWN_ANNOTATIONS_SET_ASIDE_WARNING,
 } from '../core/markdown-local-annotations.js';
 
@@ -139,11 +143,39 @@ function stageMessageKey(error) {
     return null;
 }
 
+// The local check knows the page count. A hosted job the service rejected
+// for its page count (a PDF the local check could not read) knows only the
+// limit.
+const SERVICE_PAGE_LIMIT_CODE = 'MINERU_PAGE_LIMIT_EXCEEDED';
+
+function pageLimitMessage(error, translate) {
+    if (error?.code === PDF_PAGE_LIMIT_ERROR_CODE) {
+        const limit = positiveInteger(error.limit) ?? HOSTED_MINERU_MAX_PAGES;
+        const pages = positiveInteger(error.pages);
+        return pages
+            ? translate('error.pageLimitExceeded', { pages, limit })
+            : translate('error.servicePageLimitExceeded', { limit });
+    }
+    if (error?.errorCode === SERVICE_PAGE_LIMIT_CODE) {
+        return translate('error.servicePageLimitExceeded', {
+            limit: HOSTED_MINERU_MAX_PAGES,
+        });
+    }
+    return null;
+}
+
+function positiveInteger(value) {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 export function localizeConversionError(error, translate = translateEnglish) {
     const message = error instanceof Error ? error.message : String(error || '');
     if (/no extractable text/i.test(message)) {
         return translate('error.noExtractableText');
     }
+
+    const pageLimit = pageLimitMessage(error, translate);
+    if (pageLimit) return pageLimit;
 
     const messageKey = ERROR_MESSAGE_KEYS.get(message);
     if (messageKey) return translate(messageKey);
