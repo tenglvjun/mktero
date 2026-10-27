@@ -232,15 +232,41 @@ test('strips tags and script or style content without returning markup', () => {
         summarizeNoteHTML('<script>alert(1)</script><style>.x{}</style>'),
         { title: '', preview: '' }
     );
-    // One pass of a tag strip turns `<s<script>cript>` back into `<script>`.
+    // Removing `<script>` from `<s<script>cript>` must not leave `<script`.
+    // A browser reads `<s<script>` as one tag and the rest as text.
     const nested = summarizeNoteHTML('<s<script>cript>alert(1)</script><p>Kept</p>');
     const nestedPlain = `${nested.title}\n${nested.preview}`;
-    assert.equal(nested.title, 'Kept');
-    assert.equal(nestedPlain.toLowerCase().includes('<script'), false);
-    assert.equal(nestedPlain.includes('alert'), false);
+    assert.equal(nestedPlain.includes('<'), false);
     assert.equal(
-        summarizeNoteHTML('<s<script>cript>').title.toLowerCase().includes('<script'),
+        summarizeNoteHTML('<s<script>cript>').title.includes('<'),
         false
+    );
+});
+
+test('reads note markup the way an HTML tokenizer does', () => {
+    assert.deepEqual(
+        summarizeNoteHTML('<p>a < b</p><p>c</p>'),
+        { title: 'a < b', preview: 'c' }
+    );
+    assert.deepEqual(
+        summarizeNoteHTML('<p data-x="a>b" title=\'c>d\'>Text</p><p>Next</p>'),
+        { title: 'Text', preview: 'Next' }
+    );
+    assert.deepEqual(
+        summarizeNoteHTML('<!-- <script>x</script> --><p>Shown</p>'),
+        { title: 'Shown', preview: '' }
+    );
+    assert.deepEqual(
+        summarizeNoteHTML('<p>Kept</p><span class="cut'),
+        { title: 'Kept', preview: '' }
+    );
+    assert.deepEqual(
+        summarizeNoteHTML('<SCRIPT>if (a < b) x()</SCRIPT ><p>After</p>'),
+        { title: 'After', preview: '' }
+    );
+    assert.deepEqual(
+        summarizeNoteHTML('<style>p{}</styled><p>Hidden</p></style><p>Shown</p>'),
+        { title: 'Shown', preview: '' }
     );
 });
 

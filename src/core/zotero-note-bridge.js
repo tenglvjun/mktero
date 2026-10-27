@@ -90,44 +90,110 @@ function noteHTMLToLines(html) {
         .filter(Boolean);
 }
 
-// A single tag replacement can reveal the tag it just removed:
-// `<scr<script>ipt>` becomes `<script>` after one pass. Repeat until a
-// pass changes nothing, and drop a revealed script or style element
-// before the next tag pass so its text does not survive. Entities are
-// decoded only after that, so a literal `&lt;` stays a text character
-// instead of opening a tag that swallows the rest of the line.
+// Note HTML to plain text in one left-to-right scan, the way an HTML
+// tokenizer reads it: a tag is skipped whole, script and style content is
+// dropped, and a `<` that cannot open a tag stays text. Nothing is spliced
+// and scanned again, so removing one tag cannot join its neighbours into a
+// new one (`<s<script>cript>`). Entities are decoded after the scan, so a
+// literal `&lt;` stays a character. The result is only ever assigned with
+// textContent.
 function plainTextFromNoteHTML(value) {
-    return decodeNoteEntities(stripNoteMarkup(value));
+    return decodeNoteEntities(stripNoteMarkup(String(value || '')));
 }
 
-function stripNoteMarkup(value) {
-    let current = String(value || '');
-    let previous;
-    do {
-        previous = current;
-        current = replaceUntilStable(
-            current,
-            /<(script|style)\b[\s\S]*?<\/\1\s*>/gi,
-            ' '
-        );
-        current = current
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<\/(p|div|h[1-6]|li|blockquote|pre|tr)\s*>/gi, '\n');
-        const tags = /<[^>]*>/g;
-        current = current.replace(tags, '');
-    } while (current !== previous);
-    return current;
+const RAW_TEXT_TAGS = new Set(['script', 'style']);
+const LINE_BREAK_END_TAGS = new Set([
+    'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'li', 'blockquote', 'pre', 'tr',
+]);
+
+function stripNoteMarkup(source) {
+    let text = '';
+    let index = 0;
+    while (index < source.length) {
+        const open = source.indexOf('<', index);
+        if (open < 0) {
+            text += source.slice(index);
+            break;
+        }
+        text += source.slice(index, open);
+        if (!opensMarkup(source, open)) {
+            text += '<';
+            index = open + 1;
+            continue;
+        }
+        if (source.startsWith('<!--', open)) {
+            const close = source.indexOf('-->', open + 4);
+            index = close < 0 ? source.length : close + 3;
+            continue;
+        }
+        const end = findTagEnd(source, open + 1);
+        // An unterminated tag runs to the end of the input, as in a browser.
+        if (end < 0) break;
+        const tag = readTag(source.slice(open + 1, end));
+        index = end + 1;
+        if (!tag) continue;
+        if (!tag.closing && RAW_TEXT_TAGS.has(tag.name)) {
+            index = skipRawText(source, index, tag.name);
+            text += ' ';
+            continue;
+        }
+        if ((!tag.closing && tag.name === 'br')
+            || (tag.closing && LINE_BREAK_END_TAGS.has(tag.name))) {
+            text += '\n';
+        }
+    }
+    return text;
 }
 
-function replaceUntilStable(value, pattern, replacement) {
-    let current = value;
-    let previous;
-    do {
-        previous = current;
-        pattern.lastIndex = 0;
-        current = current.replace(pattern, replacement);
-    } while (current !== previous);
-    return current;
+// `<` opens markup only before a tag name, `/`, `!` or `?`. Anything else,
+// such as `a < b`, is text.
+function opensMarkup(source, open) {
+    const next = source.charAt(open + 1);
+    return /[a-z/!?]/i.test(next);
+}
+
+// The first `>` outside a quoted attribute value.
+function findTagEnd(source, from) {
+    let quote = '';
+    for (let index = from; index < source.length; index += 1) {
+        const char = source[index];
+        if (quote) {
+            if (char === quote) quote = '';
+        }
+        else if (char === '"' || char === '\'') {
+            quote = char;
+        }
+        else if (char === '>') {
+            return index;
+        }
+    }
+    return -1;
+}
+
+function readTag(inner) {
+    const match = /^(\/?)([a-z][a-z0-9-]*)/i.exec(inner);
+    if (!match) return null;
+    return { closing: match[1] === '/', name: match[2].toLowerCase() };
+}
+
+// Script and style hold raw text up to their own end tag. Skip it whole.
+function skipRawText(source, from, name) {
+    const endTag = `</${name}`;
+    let index = from;
+    while (index < source.length) {
+        const close = source.indexOf('</', index);
+        if (close < 0) return source.length;
+        const candidate = source.slice(close, close + endTag.length);
+        const after = source.charAt(close + endTag.length);
+        if (candidate.toLowerCase() === endTag
+            && (after === '' || /[\s/>]/.test(after))) {
+            const end = findTagEnd(source, close + 2);
+            return end < 0 ? source.length : end + 1;
+        }
+        index = close + 2;
+    }
+    return source.length;
 }
 
 function decodeNoteEntities(value) {
