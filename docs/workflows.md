@@ -78,10 +78,19 @@ budget.
 
 A table's `Copy as Markdown` and a formula's copy action also put HTML on
 the clipboard, so a paste into a Zotero note keeps the table or the formula.
-An application that reads HTML from the clipboard, such as a word processor
-or a browser editor, receives the same table or formula; an application that
-reads only text receives the same plain text as before. CSV and code copy are
-unchanged.
+A copy with `Cmd/Ctrl+C` does the same when the passage has a formula or a
+table: the text stays the Markdown source of the selection, and the HTML is
+that passage as a Zotero note shows it, every formula included, a one-letter
+`$i$` as well. A passage without either is copied as before, text only. A
+selection inside a rendered formula copies the whole formula's source, one
+inside a table cell copies the cell's text, and one across cells of a
+rendered table copies those cells as a table. Page headers and footers the
+reader hides are left out of the HTML. A formula that is too large, or that
+uses a command Mktero refuses to render, stays as text, and a copy of a long
+stretch with very many formulas keeps the Markdown only. An application that
+reads HTML from the clipboard, such as a word processor or a browser editor,
+receives the same passage with its formulas as TeX between `$` signs; paste
+as plain text to get the Markdown there. CSV and code copy are unchanged.
 
 All of these actions read the rendered document only. They send nothing, and
 they do not change the cached OCR Markdown, the corrections, or comments.
@@ -209,10 +218,22 @@ or a selection the local PDF index cannot locate (not found, or ambiguous), is
 refused with the reason. Mktero does not insert it without a source. Adding a
 plain selection to a note does not save a highlight.
 
+A formula in the passage is inserted as a note formula, so the note renders
+it. Zotero's highlights cannot hold a formula, so the highlight stops before
+each formula and starts again after it, and a display formula becomes its own
+block. The text keeps the highlight color and its link back to the page; the
+formula itself has neither. The annotation saved in the PDF is unchanged. A
+passage split across pages, an annotation Mktero cannot place in the
+Markdown, and an annotation whose text no longer matches its place keep
+Zotero's plain text. If Zotero's note editor changes in a way Mktero does not
+recognize, the passage is inserted the way Zotero inserts it, without
+rendered formulas.
+
 `Add Note from Annotations` is a button in the `Annotations` segment. It
 creates a new child note that contains every annotation of the PDF except ink
 annotations, like Zotero's command of the same name, and opens that note in
-the `Notes` column.
+the `Notes` column. Zotero writes the note; Mktero then saves it once more
+with the formulas of each annotation it placed in the Markdown, as above.
 
 While a Mktero tab is selected, Mktero hides Zotero's right-hand item pane,
 the context pane. The pane returns when another tab is selected. Zotero does
