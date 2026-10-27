@@ -81,19 +81,60 @@ export function summarizeNoteHTML(html, { title = '' } = {}) {
 }
 
 function noteHTMLToLines(html) {
-    const source = String(html || '').slice(0, MAX_PREVIEW_SOURCE_LENGTH);
-    const text = source
-        .replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ')
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/(p|div|h[1-6]|li|blockquote|pre|tr)\s*>/gi, '\n')
-        .replace(/<[^>]*>/g, '')
-        .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity) => (
-            decodeEntity(entity) ?? match
-        ));
+    const text = plainTextFromNoteHTML(
+        String(html || '').slice(0, MAX_PREVIEW_SOURCE_LENGTH)
+    );
     return text
         .split('\n')
         .map(line => line.replace(/\s+/g, ' ').trim())
         .filter(Boolean);
+}
+
+// A single tag replacement can reveal the tag it just removed:
+// `<scr<script>ipt>` becomes `<script>` after one pass. Repeat until a
+// pass changes nothing, and drop a revealed script or style element
+// before the next tag pass so its text does not survive. Entities are
+// decoded only after that, so a literal `&lt;` stays a text character
+// instead of opening a tag that swallows the rest of the line.
+function plainTextFromNoteHTML(value) {
+    return decodeNoteEntities(stripNoteMarkup(value));
+}
+
+function stripNoteMarkup(value) {
+    let current = String(value || '');
+    let previous;
+    do {
+        previous = current;
+        current = replaceUntilStable(
+            current,
+            /<(script|style)\b[\s\S]*?<\/\1\s*>/gi,
+            ' '
+        );
+        current = current
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|h[1-6]|li|blockquote|pre|tr)\s*>/gi, '\n');
+        const tags = /<[^>]*>/g;
+        current = current.replace(tags, '');
+    } while (current !== previous);
+    return current;
+}
+
+function replaceUntilStable(value, pattern, replacement) {
+    let current = value;
+    let previous;
+    do {
+        previous = current;
+        pattern.lastIndex = 0;
+        current = current.replace(pattern, replacement);
+    } while (current !== previous);
+    return current;
+}
+
+function decodeNoteEntities(value) {
+    return value.replace(
+        /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+        (match, entity) => decodeEntity(entity) ?? match
+    );
 }
 
 function decodeEntity(entity) {

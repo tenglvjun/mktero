@@ -232,6 +232,16 @@ test('strips tags and script or style content without returning markup', () => {
         summarizeNoteHTML('<script>alert(1)</script><style>.x{}</style>'),
         { title: '', preview: '' }
     );
+    // One pass of a tag strip turns `<s<script>cript>` back into `<script>`.
+    const nested = summarizeNoteHTML('<s<script>cript>alert(1)</script><p>Kept</p>');
+    const nestedPlain = `${nested.title}\n${nested.preview}`;
+    assert.equal(nested.title, 'Kept');
+    assert.equal(nestedPlain.toLowerCase().includes('<script'), false);
+    assert.equal(nestedPlain.includes('alert'), false);
+    assert.equal(
+        summarizeNoteHTML('<s<script>cript>').title.toLowerCase().includes('<script'),
+        false
+    );
 });
 
 test('decodes note entities and ignores invalid code points', () => {
