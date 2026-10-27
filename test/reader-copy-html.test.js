@@ -10,6 +10,8 @@ import {
     zoteroNoteClipboardHTML,
     zoteroNoteTableClipboardHTML,
 } from '../src/markdown/zotero-note-clipboard.js';
+import { tableElementToGFM } from '../src/markdown/markdown-table-export.js';
+import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
 
 const PASSAGE = String.raw`where $\mu$ is the mean and $i$ is the locus.`;
 
@@ -249,5 +251,25 @@ test('a copy from a text field or outside the reader keeps the browser copy', ()
     finally {
         reader.editor.destroy();
         reader.dom.window.close();
+    }
+});
+
+test('Copy as Markdown of an OCR table keeps formulas with bars as TeX', () => {
+    const dom = new JSDOM(`<body>${renderMarkdownHTML(
+        '<table><tr><td>Norm</td><td>$\\|x\\|_2$</td></tr>'
+        + '<tr><td>Set</td><td>$a|b$ and $i$</td></tr></table>'
+    )}</body>`);
+    try {
+        const gfm = tableElementToGFM(dom.window.document.querySelector('table'));
+        assert.equal(
+            gfm,
+            '| Norm | $\\Vert x\\Vert _2$ |\n| --- | --- |\n| Set | $a\\vert b$ and $i$ |'
+        );
+        const html = zoteroNoteTableClipboardHTML(gfm);
+        assert.match(html, /<span class="math">\$a\\vert b\$<\/span>/u);
+        assert.match(html, /<span class="math">\$i\$<\/span>/u);
+    }
+    finally {
+        dom.window.close();
     }
 });
