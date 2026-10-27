@@ -30,6 +30,7 @@ class ZoteroNotesPanel {
         aside,
         translate,
         onStateChange = () => {},
+        onEditorClose = () => {},
         onError = () => {},
         createContextMenu = createNativeContextMenu,
     }) {
@@ -38,6 +39,7 @@ class ZoteroNotesPanel {
         this.aside = aside;
         this.t = translate;
         this.onStateChange = onStateChange;
+        this.onEditorClose = onEditorClose;
         this.onError = onError;
         this.contextMenu = createContextMenu(document);
         this.adapter = null;
@@ -342,6 +344,9 @@ class ZoteroNotesPanel {
             catch (error) {
                 this.onError(error);
             }
+            // The caret was in the editor. Hand it back so the reader's own
+            // keys (n, p, "?") work again without a click in the article.
+            if (!this.destroyed) this.onEditorClose();
         }
         this.editorContainer?.replaceChildren();
     }

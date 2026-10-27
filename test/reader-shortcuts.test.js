@@ -29,6 +29,11 @@ test('the cheat sheet names the platform history chord', () => {
     );
     assert.equal(macHistory.keys, '⌘[ / ⌘]');
     assert.equal(otherHistory.keys, 'Alt+← / Alt+→');
+    const annotationKeys = group => group[1].items.find(
+        item => item.labelKey === 'viewer.shortcutsJumpNote'
+    ).keys;
+    assert.equal(annotationKeys(mac), '⌥N / ⌥P');
+    assert.equal(annotationKeys(other), 'Alt+N / Alt+P');
 });
 
 test('the cheat sheet groups navigation and landmark jumps', () => {

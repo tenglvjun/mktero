@@ -7663,6 +7663,89 @@ test('Alt+N jumps to matched annotations', () => {
     }
 });
 
+test('clicking an annotation centers and flashes that range', () => {
+    const calls = [];
+    const flashes = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Before text Important result after text.',
+        sourceKind: 'markdown',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important result',
+                color: '#ffd400',
+                pageLabel: '4',
+                pageIndex: 3,
+                sortIndex: '00002',
+                ranges: [{ from: 12, to: 28 }],
+            }],
+            unmatched: [],
+        },
+    }), {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = (offset, scrollOptions) => {
+                calls.push({ offset, scrollOptions });
+            };
+            editor.flashRange = (from, to) => flashes.push([from, to]);
+            return editor;
+        },
+    });
+
+    try {
+        shadow.querySelector('.markdown-note-link').click();
+        assert.deepEqual(calls, [{
+            offset: 12,
+            scrollOptions: { align: 'center' },
+        }]);
+        assert.deepEqual(flashes, [[12, 28]]);
+        assert.equal(
+            shadow.querySelector('.markdown-note-link.is-active')
+                ?.getAttribute('data-annotation-id'),
+            'HIGH0001'
+        );
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('Alt+N from the window locates the annotation while the tab is open', () => {
+    const { view, document, jumps } = createLandmarkView({
+        markdown: 'Before text Important result after text.',
+        annotationOverlay: {
+            matched: [{
+                id: 'HIGH0001',
+                type: 'highlight',
+                text: 'Important result',
+                color: '#ffd400',
+                pageLabel: '4',
+                pageIndex: 3,
+                sortIndex: '00002',
+                ranges: [{ from: 12, to: 28 }],
+            }],
+            unmatched: [],
+        },
+    });
+
+    try {
+        view.syncActiveNavigation(0);
+        dispatchShortcut(document.defaultView, { key: 'n', altKey: true, code: 'KeyN' });
+        assert.deepEqual(jumps, [12]);
+
+        jumps.length = 0;
+        view.host.getClientRects = () => [];
+        dispatchShortcut(document.defaultView, { key: 'n', altKey: true, code: 'KeyN' });
+        assert.deepEqual(jumps, []);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('landmark keys do nothing in correction mode', () => {
     const { view, shadow, jumps } = createLandmarkView({
         correctionMode: true,
@@ -7894,6 +7977,113 @@ test('selecting the markdown tab leaves a note editor focused', () => {
         view.handleTabSelection(true);
         runManualTimer(timers.timers);
         assert.equal(focused, 0);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
+test('selecting the tab takes focus back from a hidden frame outside it', () => {
+    let focused = 0;
+    let timers;
+    const { document, view } = createView(
+        createModel({ status: 'ready', markdown: 'Hello' }),
+        {},
+        {
+            configureWindow(window) {
+                timers = installManualTimers(window);
+            },
+            editorFactory(options) {
+                const editor = createTestInlineEditor(options);
+                editor.focus = () => {
+                    focused += 1;
+                };
+                return editor;
+            },
+        }
+    );
+    const tab = document.createElement('div');
+    document.body.appendChild(tab);
+    tab.appendChild(view.root);
+    const otherFrame = document.createElement('iframe');
+    document.body.appendChild(otherFrame);
+    Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get() {
+            return otherFrame;
+        },
+    });
+
+    try {
+        view.handleTabSelection(true);
+        runManualTimer(timers.timers);
+        assert.equal(focused, 1);
+    }
+    finally {
+        view.destroy();
+        timers.restore();
+    }
+});
+
+test('closing the hosted note editor returns focus to the reader', async () => {
+    let focused = 0;
+    let timers;
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: 'Paper',
+        sourceKind: 'markdown',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [{ id: 1, title: 'Note' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return {
+                    noteID,
+                    editable: true,
+                    insertAnnotations() {},
+                    destroy() {},
+                };
+            },
+        }),
+    }), {}, {
+        configureWindow(window) {
+            timers = installManualTimers(window);
+        },
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.focus = () => {
+                focused += 1;
+            };
+            return editor;
+        },
+    });
+    document.body.appendChild(view.root);
+
+    try {
+        await flushView();
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-editor-view').hidden,
+            false
+        );
+
+        shadow.querySelector('.mktero-zotero-note-back').click();
+        runManualTimer(timers.timers);
+
+        assert.equal(
+            shadow.querySelector('.mktero-zotero-notes-list-view').hidden,
+            false
+        );
+        assert.equal(focused, 1);
     }
     finally {
         view.destroy();
@@ -9423,6 +9613,9 @@ test('typing n in the hosted note editor does not jump the reader', async () => 
         assert.equal(retargeted.defaultPrevented, false);
         assert.deepEqual(jumps, [12]);
 
+        // A key in the reader can name a node from another frame (the PDF
+        // reader, the hidden context pane). That frame is not the note, so
+        // the key still jumps.
         const { document: otherDocument } = parseHTML(
             '<html><body><div id="caret"></div></body></html>'
         );
@@ -9433,8 +9626,28 @@ test('typing n in the hosted note editor does not jump the reader', async () => 
                 originalTarget: otherDocument.getElementById('caret'),
             }
         );
-        assert.equal(foreign.defaultPrevented, false);
-        assert.deepEqual(jumps, [12]);
+        assert.equal(foreign.defaultPrevented, true);
+        assert.equal(jumps.length, 2);
+
+        // A key Firefox retargets out of the note editor's own frame names a
+        // node of that frame, and stays with the note.
+        const frame = document.createElement('iframe');
+        const frameDocument = parseHTML(
+            '<html><body><div id="caret"></div></body></html>'
+        ).document;
+        Object.defineProperty(frame, 'contentDocument', {
+            value: frameDocument,
+        });
+        view.host.querySelector('.mktero-note-editor-host').appendChild(frame);
+        const framed = dispatchShortcut(
+            shadow.querySelector('#mktero-content'),
+            {
+                key: 'n',
+                originalTarget: frameDocument.getElementById('caret'),
+            }
+        );
+        assert.equal(framed.defaultPrevented, false);
+        assert.equal(jumps.length, 2);
     }
     finally {
         view.destroy();

@@ -50,7 +50,8 @@ export function readerShortcutGroups({ isMac = false } = {}) {
                     labelKey: 'viewer.shortcutsJumpFigure',
                 }),
                 Object.freeze({
-                    keys: 'Alt+N / Alt+P',
+                    // The Option key sets altKey. macOS labels it ⌥, not Alt.
+                    keys: isMac ? '⌥N / ⌥P' : 'Alt+N / Alt+P',
                     labelKey: 'viewer.shortcutsJumpNote',
                 }),
             ]),

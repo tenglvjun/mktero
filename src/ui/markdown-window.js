@@ -544,6 +544,7 @@ class MarkdownTabView {
             aside: this.elements.notes,
             translate: this.t,
             onStateChange: () => this.syncZoteroNotesState(),
+            onEditorClose: () => this.scheduleReadingSurfaceFocus(),
             onError: error => this.reportNotesFailure(error),
         });
         this.syncOutlineSegmentButtons();
@@ -3238,6 +3239,13 @@ class MarkdownTabView {
             if (this.isHostedNoteEvent(event)) return;
             this.handleReaderJumpShortcut(event);
         });
+        // Alt/Option+N/P is not a typing key. It has to reach an annotation
+        // even when focus is still on Zotero's chrome or a hidden frame.
+        // Capture runs before the shadow listener, and a handled chord stops
+        // there, so the two listeners cannot jump twice.
+        this.listen(this.ownerWindow, 'keydown', event => {
+            this.handleAnnotationShortcut(event);
+        }, true);
         this.listen(this.elements.actionToggle, 'click', () => {
             if (this.elements.actionToggle.disabled) return;
             this.setReaderFontOptionsOpen(false);
@@ -3540,6 +3548,13 @@ class MarkdownTabView {
                 this.editor.scrollToOffset?.(offset);
             }
         });
+        // Focusing the card would scroll it into view through every ancestor
+        // and pull the caret out of the article. The click still fires.
+        this.listen(this.elements.notesList, 'mousedown', event => {
+            const button = event.target?.closest?.('.markdown-note-link');
+            if (!button || !this.elements.notesList.contains(button)) return;
+            event.preventDefault();
+        });
         this.listen(this.elements.notesList, 'click', event => {
             const addToNote = event.target?.closest?.(
                 '.markdown-note-add-to-note'
@@ -3594,12 +3609,7 @@ class MarkdownTabView {
                 || !this.elements.notesList.contains(button)) {
                 return;
             }
-            const offset = Number(button.getAttribute('data-offset'));
-            if (Number.isFinite(offset)) {
-                this.recordNavigationPoint();
-                this.syncActiveNavigation(offset);
-                this.editor.scrollToOffset?.(offset);
-            }
+            this.locateAnnotation(button.getAttribute('data-annotation-id'));
         });
         this.listen(this.elements.notesSearchInput, 'compositionstart', () => {
             this.noteSearchComposing = true;
@@ -4927,28 +4937,64 @@ class MarkdownTabView {
         this.editor?.focus?.();
     }
 
+    // Yield the keyboard only to a caret the reader can see: a field inside
+    // this view, or the note editor hosted in this tab. The Zotero context
+    // pane is hidden while this tab is selected, and another tab's frame is
+    // off screen; leaving the keyboard in either one is why n, p and "?"
+    // stopped reaching the reader.
+    shouldLeaveFocusAlone() {
+        const inner = this.mount?.activeElement || null;
+        if (inner) return true;
+        const active = this.document.activeElement;
+        if (!active || active === this.host || active.isConnected === false) {
+            return false;
+        }
+        const container = this.zoteroNotesPanel?.editorContainer;
+        if (container?.isConnected
+            && (active === container || container.contains(active))) {
+            return true;
+        }
+        const tab = this.host.parentElement;
+        if (tab && typeof tab.contains === 'function' && !tab.contains(active)) {
+            return false;
+        }
+        if (typeof active.closest === 'function'
+            && active.closest('#zotero-context-pane')) {
+            return false;
+        }
+        return isExternalTextFocus(active);
+    }
+
     // Zotero's note editor sits in the host's light DOM, slotted into the
-    // notes column, so its keys reach the host and the shadow root. They
-    // belong to the note, the same as keys typed in Zotero's context pane.
+    // notes column, so a key pressed in it can reach the host and the shadow
+    // root. Only that editor counts: a key whose path names some other frame
+    // (the PDF reader, the hidden context pane) still belongs to the reader.
     isHostedNoteEvent(event) {
         const container = this.zoteroNotesPanel?.editorContainer;
-        if (!container) return false;
+        if (!container?.isConnected) return false;
+        const frame = container.querySelector?.('iframe, browser, frame');
+        const frameDocument = frame?.contentDocument || null;
         const candidates = [
             event.originalTarget,
             event.explicitOriginalTarget,
             event.target,
         ];
         if (typeof event.composedPath === 'function') {
-            candidates.push(...event.composedPath());
+            try {
+                candidates.push(...event.composedPath());
+            }
+            catch {
+                // A cross-origin frame can refuse to expose its path.
+            }
         }
-        return candidates.some(node => (
-            node
-            && typeof node === 'object'
-            && (node === container
-                || container.contains?.(node)
-                || (node.ownerDocument
-                    && node.ownerDocument !== this.document))
-        ));
+        return candidates.some(node => {
+            if (!node || typeof node !== 'object') return false;
+            if (node === container || container.contains?.(node)) return true;
+            if (!frameDocument) return false;
+            return node === frameDocument
+                || node.ownerDocument === frameDocument
+                || node === frameDocument.defaultView;
+        });
     }
 
     // The note editor is an iframe in this same window. Its Cmd+F and
@@ -4982,17 +5028,6 @@ class MarkdownTabView {
             && active !== this.host
             && isExternalTextFocus(active)
         );
-    }
-
-    // Focus inside the shadow means the reader already has the keyboard.
-    // An iframe or note-editor is the context pane: typing there must not
-    // be pulled back into the article.
-    shouldLeaveFocusAlone() {
-        const inner = this.mount?.activeElement || null;
-        if (inner) return true;
-        const active = this.document.activeElement;
-        if (!active || active === this.host) return false;
-        return isExternalTextFocus(active);
     }
 
     isMarkdownTabForeground() {
@@ -5245,13 +5280,96 @@ class MarkdownTabView {
         }
         if (isNextNoteShortcut(event)) {
             consumeDocumentSearchShortcut(event);
-            this.jumpToLandmark('next', LANDMARK_FILTER_NOTE);
+            this.jumpToAnnotationLandmark('next');
             return;
         }
         if (isPreviousNoteShortcut(event)) {
             consumeDocumentSearchShortcut(event);
-            this.jumpToLandmark('previous', LANDMARK_FILTER_NOTE);
+            this.jumpToAnnotationLandmark('previous');
         }
+    }
+
+    // Annotation chords are delivered on the window so they work before the
+    // reading surface has the caret. A note editor and a text field in this
+    // view still keep the key.
+    handleAnnotationShortcut(event) {
+        if (this.destroyed || event.isComposing) return;
+        if (!isNextNoteShortcut(event) && !isPreviousNoteShortcut(event)) {
+            return;
+        }
+        if (!this.isMarkdownTabForeground()) return;
+        if (this.isHostedNoteEvent(event)) return;
+        const origin = event.composedPath?.()[0] || event.target;
+        if (isTextEditingOrigin(origin)
+            && (this.mount?.contains?.(origin)
+                || this.host?.contains?.(origin))) {
+            return;
+        }
+        this.handleReaderJumpShortcut(event);
+    }
+
+    locateAnnotation(annotationID) {
+        const entry = orderedAnnotationEntries(this.displayedAnnotationOverlay)
+            .find(({ annotation, matched }) => (
+                matched
+                && String(annotation?.id || '') === String(annotationID || '')
+            ));
+        if (!entry) return;
+        const offset = firstAnnotationOffset(
+            entry.annotation,
+            this.displayedMarkdownLength
+        );
+        if (offset === null) return;
+        const range = (entry.annotation.ranges || []).find(item => (
+            item?.from === offset
+        )) || null;
+        this.locateMarkdownOffset(offset, range);
+    }
+
+    jumpToAnnotationLandmark(direction) {
+        const notes = this.ensureLandmarkItems()
+            .filter(item => item.type === LANDMARK_FILTER_NOTE);
+        const target = direction === 'previous'
+            ? previousLandmark(notes, this.activeNavigationOffset)
+            : nextLandmark(notes, this.activeNavigationOffset);
+        if (!target) return;
+        this.locateMarkdownOffset(
+            target.offset,
+            this.annotationRangeAt(target.offset)
+        );
+    }
+
+    // Center the annotation and flash its range. Line-top scrolling is enough
+    // for a heading, but an annotation in the middle of a paragraph has to
+    // land in the reading area or the reader cannot tell that it moved.
+    locateMarkdownOffset(offset, range = null) {
+        const position = Number(offset);
+        if (!Number.isFinite(position)) return;
+        this.recordNavigationPoint();
+        this.syncActiveNavigation(position);
+        this.editor?.scrollToOffset?.(position, { align: 'center' });
+        const end = Number(range?.to);
+        if (Number.isFinite(end) && end > position) {
+            this.editor?.flashRange?.(position, end);
+        }
+    }
+
+    annotationRangeAt(offset) {
+        const target = Math.trunc(Number(offset));
+        if (!Number.isFinite(target)) return null;
+        for (const { annotation, matched } of orderedAnnotationEntries(
+            this.displayedAnnotationOverlay
+        )) {
+            if (!matched) continue;
+            const start = firstAnnotationOffset(
+                annotation,
+                this.displayedMarkdownLength
+            );
+            if (start !== target) continue;
+            return (annotation.ranges || []).find(item => item?.from === start)
+                || null;
+        }
+        return null;
     }
 
     // Jumps that take the reader away from where they are call this first, so
