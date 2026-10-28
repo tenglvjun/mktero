@@ -134,7 +134,7 @@ function noteItem(overrides = {}) {
     };
 }
 
-function createEditorWindow({ registered = true } = {}) {
+function createEditorWindow({ registered = true, iframe = null } = {}) {
     const editors = [];
     const window = {
         editors,
@@ -193,6 +193,7 @@ function createEditorWindow({ registered = true } = {}) {
                     remove() {
                         this.removed = true;
                     },
+                    _iframe: iframe,
                 };
                 editors.push(editor);
                 return editor;
@@ -505,6 +506,61 @@ test('hosts the note editor only when the window can create a note-editor', () =
     assert.equal(createZoteroNotes(zotero, {
         getMainWindow: () => createEditorWindow(),
     }).canHostEditor(), true);
+});
+
+test('pastes copied formula HTML when the note iframe only sees TeX', async () => {
+    const parent = parentItem({ id: 9, libraryID: 3 });
+    const attachment = pdfAttachment({ id: 42, libraryID: 3, parentID: 9 });
+    const zotero = createFakeZotero([attachment, parent]);
+    const posted = [];
+    const listeners = [];
+    const iframe = {
+        contentDocument: {
+            addEventListener(type, listener, capture) {
+                listeners.push({ type, listener, capture });
+            },
+            removeEventListener(type, listener) {
+                const index = listeners.findIndex(item => item.listener === listener);
+                if (index >= 0) listeners.splice(index, 1);
+            },
+        },
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    const window = createEditorWindow({ iframe });
+    const html = '<pre class="math">$$\\hat{G}_t$$</pre>';
+    const notes = createZoteroNotes(zotero, {
+        getMainWindow: () => window,
+        readClipboardHTML: () => html,
+    });
+    const handle = await notes.mountEditor(createContainer(), { attachmentID: 42 });
+    const editor = window.editors[0];
+    editor.instance = { _postMessage(message) { posted.push(message); } };
+
+    assert.equal(listeners.length, 1);
+    const event = {
+        shiftKey: false,
+        defaultPrevented: false,
+        prevented: false,
+        stopped: false,
+        preventDefault() { this.prevented = true; this.defaultPrevented = true; },
+        stopPropagation() { this.stopped = true; },
+    };
+    listeners[0].listener(event);
+
+    assert.equal(event.prevented, true);
+    assert.equal(event.stopped, true);
+    assert.deepEqual(posted, [{
+        action: 'insertHTML',
+        pos: null,
+        html,
+    }]);
+
+    posted.length = 0;
+    listeners[0].listener({ ...event, shiftKey: true, preventDefault() {}, stopPropagation() {} });
+    assert.deepEqual(posted, []);
+    handle.destroy();
+    assert.equal(listeners.length, 0);
 });
 
 test('mounts an editable note-editor for a new child note', async () => {
@@ -1079,4 +1135,244 @@ test('dispose unregisters the item observer and drops a pending notification', (
     assert.deepEqual(calls, []);
     observer.notify('add', 'item', [3]);
     assert.equal(timers.pending.size, 0);
+});
+
+// A note editor's ProseMirror view as far as the caret uses it. `pending` is
+// the document an insert message will produce, applied on the editor's next
+// turn, which here is the next poll.
+function fakeNode(name, children = [], { textblock = false, leaf = false, spec = {} } = {}) {
+    const size = children.reduce((sum, child) => sum + child.nodeSize, 0);
+    return {
+        type: { name, spec },
+        isTextblock: textblock,
+        isLeaf: leaf,
+        isAtom: leaf || Boolean(spec.atom),
+        childCount: children.length,
+        child: index => children[index],
+        content: { size },
+        nodeSize: leaf ? 1 : size + 2,
+    };
+}
+
+function fakeText(value) {
+    return { isLeaf: true, nodeSize: value.length, type: { name: 'text', spec: {} } };
+}
+
+function fakeDoc(children) {
+    const root = fakeNode('doc', children);
+    return { ...root, nodeSize: root.content.size };
+}
+
+function fakeParagraph(children = []) {
+    return fakeNode('paragraph', children, { textblock: true });
+}
+
+function fakeAnnotationParagraph() {
+    return fakeParagraph([
+        fakeNode('highlight', [fakeText('“genetic anchor is”')]),
+        fakeText(' '),
+        fakeNode('citation', [], { leaf: true }),
+    ]);
+}
+
+function createFakeNoteView(doc) {
+    const view = { pending: null, dispatched: [] };
+    const makeTr = state => {
+        const tr = {
+            steps: [],
+            doc: state.doc,
+            insert(pos, node) {
+                tr.steps.push(['insert', pos, node]);
+                return tr;
+            },
+            setSelection(selection) {
+                tr.steps.push(['select', selection]);
+                return tr;
+            },
+            scrollIntoView() {
+                tr.steps.push(['scroll']);
+                return tr;
+            },
+        };
+        tr.doc = { ...state.doc, resolve: pos => ({ pos }) };
+        return tr;
+    };
+    class FakeSelection {
+        static near($pos, bias) {
+            return { near: $pos.pos, bias };
+        }
+    }
+    const setDoc = next => {
+        view.state = {
+            doc: next,
+            selection: new FakeSelection(),
+            schema: { nodes: { paragraph: { createAndFill: () => ({ newParagraph: true }) } } },
+            get tr() {
+                return makeTr(view.state);
+            },
+        };
+    };
+    setDoc(doc);
+    view.dispatch = tr => view.dispatched.push(tr.steps);
+    view.applyPending = () => {
+        if (!view.pending) return;
+        setDoc(view.pending);
+        view.pending = null;
+    };
+    return view;
+}
+
+function noteInstanceWithView(view, extra = {}) {
+    return {
+        _initPromise: Promise.resolve(),
+        _iframeWindow: {
+            wrappedJSObject: {
+                _currentEditorInstance: { _editorCore: { view } },
+            },
+        },
+        focus() {},
+        ...extra,
+    };
+}
+
+async function mountNoteWithView(view, extra = {}, options = {}) {
+    const note = noteItem({ id: 8 });
+    const zotero = createFakeZotero([pdfAttachment(), parentItem(), note]);
+    const window = createEditorWindow(options.window);
+    const notes = createZoteroNotes(zotero, {
+        getMainWindow: () => window,
+        // The editor handles the insert message on its next turn.
+        delay: async () => {
+            view.applyPending();
+        },
+        ...options.notes,
+    });
+    const handle = await notes.mountEditor(createContainer(), {
+        attachmentID: 42,
+        noteID: 8,
+        focus: false,
+    });
+    window.editors[0].instance = noteInstanceWithView(view, extra);
+    return { handle, editor: window.editors[0], zotero };
+}
+
+test('Add to Note puts the caret after the inserted citation, not in the quote', async () => {
+    const view = createFakeNoteView(fakeDoc([fakeParagraph()]));
+    const inserted = fakeAnnotationParagraph();
+    const { handle } = await mountNoteWithView(view, {
+        async insertAnnotations() {
+            view.pending = fakeDoc([inserted]);
+        },
+    });
+
+    await handle.insertAnnotations([{ type: 'highlight', text: 'genetic anchor is' }]);
+
+    assert.deepEqual(view.dispatched, [[
+        ['select', { near: inserted.nodeSize - 1, bias: -1 }],
+        ['scroll'],
+    ]]);
+});
+
+test('Add to Note ending in a display formula puts the caret on a new line', async () => {
+    const view = createFakeNoteView(fakeDoc([fakeParagraph()]));
+    const formula = fakeNode('math_display', [fakeText('x')], {
+        textblock: true,
+        spec: { atom: true, code: true },
+    });
+    const { handle } = await mountNoteWithView(view, {
+        async insertAnnotations() {
+            view.pending = fakeDoc([formula]);
+        },
+    });
+
+    await handle.insertAnnotations([{ type: 'highlight', text: 'x' }]);
+
+    assert.deepEqual(view.dispatched, [[
+        ['insert', formula.nodeSize, { newParagraph: true }],
+        ['select', { near: formula.nodeSize + 1, bias: -1 }],
+        ['scroll'],
+    ]]);
+});
+
+test('Add to Note keeps the caret when the view is unavailable or nothing arrives', async () => {
+    // Without a view, the insert is as before and nothing waits.
+    const note = noteItem({ id: 8 });
+    const zotero = createFakeZotero([pdfAttachment(), parentItem(), note]);
+    const window = createEditorWindow();
+    const delays = [];
+    const notes = createZoteroNotes(zotero, {
+        getMainWindow: () => window,
+        delay: async milliseconds => {
+            delays.push(milliseconds);
+        },
+    });
+    const handle = await notes.mountEditor(createContainer(), {
+        attachmentID: 42,
+        noteID: 8,
+        focus: false,
+    });
+    const inserted = [];
+    window.editors[0].instance = {
+        _initPromise: Promise.resolve(),
+        async insertAnnotations(annotations) {
+            inserted.push(annotations);
+        },
+    };
+    await handle.insertAnnotations([{ type: 'highlight', text: 'x' }]);
+    assert.equal(inserted.length, 1);
+    // The instance wait races its own deadline; no caret poll follows.
+    assert.equal(delays.includes(25), false);
+
+    // An insert that never reaches the document gives up without a change.
+    const view = createFakeNoteView(fakeDoc([fakeParagraph()]));
+    const { handle: waiting } = await mountNoteWithView(view, {
+        async insertAnnotations() {},
+    });
+    await waiting.insertAnnotations([{ type: 'highlight', text: 'x' }]);
+    assert.deepEqual(view.dispatched, []);
+});
+
+test('a hosted formula paste puts the caret after the pasted formula', async () => {
+    const listeners = [];
+    const iframe = {
+        contentDocument: {
+            addEventListener(type, listener) {
+                listeners.push(listener);
+            },
+            removeEventListener() {},
+        },
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    const view = createFakeNoteView(fakeDoc([fakeParagraph()]));
+    const formula = fakeNode('math_display', [fakeText('x')], {
+        textblock: true,
+        spec: { atom: true, code: true },
+    });
+    const posted = [];
+    const { handle } = await mountNoteWithView(view, {
+        _postMessage(message) {
+            posted.push(message);
+            view.pending = fakeDoc([formula]);
+        },
+    }, {
+        window: { iframe },
+        notes: { readClipboardHTML: () => '<pre class="math">$$x$$</pre>' },
+    });
+
+    listeners[0]({
+        shiftKey: false,
+        defaultPrevented: false,
+        preventDefault() {},
+        stopPropagation() {},
+    });
+    for (let turn = 0; turn < 5; turn++) await Promise.resolve();
+
+    assert.equal(posted.length, 1);
+    assert.deepEqual(view.dispatched, [[
+        ['insert', formula.nodeSize, { newParagraph: true }],
+        ['select', { near: formula.nodeSize + 1, bias: -1 }],
+        ['scroll'],
+    ]]);
+    handle.destroy();
 });

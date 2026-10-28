@@ -1503,6 +1503,23 @@ export function zoteroNoteMathSource(source, displayMode = false) {
     }
 }
 
+/**
+ * The TeX the reader typesets for `source`, with its OCR repairs, for a copy
+ * of standard Markdown; null when the reader would not typeset it from this
+ * text (an unsafe command, or a formula past the length budget), so the
+ * caller keeps the source as written. It does not run KaTeX: a copy of a
+ * whole paper stays quick.
+ */
+export function portableMathSource(source) {
+    const normalizedSource = normalizeOcrMathSource(String(source ?? '').trim());
+    if (!normalizedSource
+        || UNSAFE_MATH_COMMAND.test(normalizedSource)
+        || normalizedSource.length > MAX_MATH_SOURCE_LENGTH) {
+        return null;
+    }
+    return normalizedSource;
+}
+
 function wrapMkteroMath(rendered, displayMode) {
     return displayMode
         ? `<div class="math math-display">${rendered}</div>`

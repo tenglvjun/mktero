@@ -68,7 +68,9 @@ conversions for the same PDF and parser profile.
 - Copy a display formula's LaTeX, a code block's text, or a table as Markdown
   or CSV without leaving the reader. These actions read the rendered document
   and never change the cached Markdown. A copy from the reader, by keyboard or
-  by these actions, pastes into a Zotero note with its formulas rendered.
+  by these actions, is standard Markdown with its formulas as `$…$` and `$$`
+  TeX, so it pastes with its formulas rendered into a Zotero note and into a
+  Markdown editor that renders TeX math.
 - Rebuild figures from the local PDF when layout evidence, page coordinates,
   and Markdown ranges agree. Restoration runs in a background worker and
   replaces placeholders in place, so slow figures never block reading.

@@ -256,6 +256,13 @@ function renderCellNode(node) {
         const source = annotation ? mathSource(annotation) : '';
         if (source) return source;
     }
+    // A table rendered as note HTML carries each formula as
+    // `<span class="math">$…$</span>`, the TeX between its delimiters.
+    if (node.classList?.contains?.('math')
+        && (node.localName === 'span' || node.localName === 'pre')) {
+        const source = noteMathSource(node);
+        if (source) return source;
+    }
     const name = node.localName;
     if (name === 'br') return ' ';
     if (name === 'strong' || name === 'b') return emphasize(node, '**');
@@ -300,9 +307,18 @@ function mathSource(annotation) {
     return text ? `$${gfmCellMathSource(text)}$` : '';
 }
 
+function noteMathSource(element) {
+    const text = String(element.textContent || '')
+        .trim()
+        .replace(/^\$\$?([\s\S]*?)\$\$?$/u, '$1')
+        .replace(/\s+/gu, ' ')
+        .trim();
+    return text ? `$${gfmCellMathSource(text)}$` : '';
+}
+
 // A `|` in a formula would end the GFM cell, and the `\|` GFM reads as an
 // escaped pipe is TeX's double bar. Their named forms typeset the same.
-function gfmCellMathSource(tex) {
+export function gfmCellMathSource(tex) {
     return tex.replace(/\\\\|\\\||\|/gu, match => {
         if (match === '\\\\') return match;
         return match === '|' ? '\\vert ' : '\\Vert ';

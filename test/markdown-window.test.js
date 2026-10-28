@@ -4084,7 +4084,7 @@ test('enhances display formulas in saved HTML snapshots', async () => {
         assert.ok(copyButton);
         copyButton.click();
         await new Promise(resolve => setImmediate(resolve));
-        assert.deepEqual(copied, ['E = mc^2']);
+        assert.deepEqual(copied, ['$$\nE = mc^2\n$$']);
         assert.equal(copyButton.textContent, 'LaTeX copied');
     }
     finally {
@@ -9489,6 +9489,7 @@ test('hands a PDF annotation\'s formulas to the note it is added to', async () =
             segments.filter(segment => segment.type === 'math').map(segment => segment.tex),
             ['\\mu', 'i']
         );
+        assert.equal(segments.legacySavedText, 'Mean \\mu at locus i here.');
         assert.equal(insertedOptions[0].segmentsFor({ id: 'OTHER' }), null);
 
         await view.createNoteFromAnnotations();

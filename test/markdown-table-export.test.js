@@ -272,3 +272,16 @@ test('returns no GFM for a table without rows', () => {
     assert.equal(tableElementToGFM(tableFromHTML('<table></table>')), null);
     assert.equal(tableElementToGFM(null), null);
 });
+
+test('a table rendered as note HTML keeps its formulas as TeX in GFM', () => {
+    const document = new JSDOM(
+        '<table><tr><th>Norm</th><th>Raw</th></tr>'
+        + '<tr><td><span class="math">$a|b$</span> and <span class="math">$i$</span></td>'
+        + '<td><code class="math-fallback">\\def\\x{1}</code></td></tr></table>'
+    ).window.document;
+
+    assert.equal(
+        tableElementToGFM(document.querySelector('table')),
+        '| Norm | Raw |\n| --- | --- |\n| $a\\vert b$ and $i$ | `\\def\\x{1}` |'
+    );
+});

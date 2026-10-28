@@ -55,11 +55,13 @@ unusual way, and metadata that does not look like metadata stays in the text.
 A display formula and a table show their copy actions in the top corner when
 you point at them, and a code block has one in its toolbar.
 
-Copying a formula puts the TeX behind the rendered formula on the clipboard,
-including the OCR repairs Mktero applied so the formula could be typeset. A
-formula that was too large to render, or that used a command Mktero refuses to
-render, copies its source instead. Every display formula in a saved snapshot
-offers the same action when that snapshot is open in the reader.
+Copying a formula puts it on the clipboard as standard Markdown, a `$$` block
+around the TeX behind the rendered formula, including the OCR repairs Mktero
+applied so the formula could be typeset. It pastes as a formula into a Zotero
+note and into a Markdown editor that renders TeX math. A formula that was too
+large to render, or that used a command Mktero refuses to render, copies its
+source alone instead. Every display formula in a saved snapshot offers the same
+action when that snapshot is open in the reader.
 
 A table offers `Copy as Markdown` and `Copy as CSV`. When the reader rendered
 the table from a GFM block, the Markdown action is that block, so it pastes
@@ -78,19 +80,26 @@ budget.
 
 A table's `Copy as Markdown` and a formula's copy action also put HTML on
 the clipboard, so a paste into a Zotero note keeps the table or the formula.
-A copy with `Cmd/Ctrl+C` does the same when the passage has a formula or a
-table: the text stays the Markdown source of the selection, and the HTML is
-that passage as a Zotero note shows it, every formula included, a one-letter
-`$i$` as well. A passage without either is copied as before, text only. A
-selection inside a rendered formula copies the whole formula's source, one
-inside a table cell copies the cell's text, and one across cells of a
-rendered table copies those cells as a table. Page headers and footers the
-reader hides are left out of the HTML. A formula that is too large, or that
-uses a command Mktero refuses to render, stays as text, and a copy of a long
-stretch with very many formulas keeps the Markdown only. An application that
-reads HTML from the clipboard, such as a word processor or a browser editor,
-receives the same passage with its formulas as TeX between `$` signs; paste
-as plain text to get the Markdown there. CSV and code copy are unchanged.
+A copy with `Cmd/Ctrl+C` puts the passage on the clipboard as standard
+Markdown, the way the reader shows it: each formula is `$…$` inline or a `$$`
+block with the TeX the reader typesets, a table the paper carries as HTML is a
+pipe table with its formulas, and the page headers, footers, and page labels
+the reader hides are left out. A Markdown editor that renders TeX math shows
+the same formulas and tables. When the passage has a formula or a table, the
+copy also carries HTML, which is that passage as a Zotero note shows it, every
+formula included, a one-letter `$i$` as well. A passage without either is
+copied as text only. A selection inside a rendered formula copies the whole
+formula, one inside a table cell copies the cell's text with its formulas, and
+one across cells of a rendered table copies those cells as a table. A formula
+that is too large, or that uses a command Mktero refuses to render, stays as
+its source, and a copy of a long stretch with very many formulas keeps the
+Markdown only. An application that reads HTML from the clipboard, such as a
+word processor or a browser editor, receives the same passage with its
+formulas as TeX between `$` signs; paste as plain text to get the Markdown
+there. A sourced copy from the selection menu quotes the passage with its
+formulas as Markdown math and adds its source link, and pastes into a Zotero
+note as a quote with typeset formulas and a working link. CSV and code copy
+are unchanged.
 
 All of these actions read the rendered document only. They send nothing, and
 they do not change the cached OCR Markdown, the corrections, or comments.

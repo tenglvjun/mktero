@@ -56,7 +56,9 @@ test('creates evidence for a selection spanning rendered inline math', () => {
         },
     });
 
-    assert.equal(snippet.markdown, '> Before n \\= 22 after\\.');
+    // The formula stays standard Markdown math, so a Markdown editor and a
+    // Zotero note typeset it as the reader does.
+    assert.equal(snippet.markdown, '> Before $n = 22$ after\\.');
 });
 
 test('formats evidence with localized links for every source page', () => {
@@ -171,11 +173,11 @@ test('copies a mapped prose block as safe visible Markdown', () => {
 
     assert.equal(
         snippet.markdown,
-        '> Important result \\<script\\>alert\\(1\\)\\<\\/script\\>\\.'
+        '> Important result \\<script\\>alert(1)\\<\\/script\\>\\.'
     );
 });
 
-test('neutralizes Markdown syntax, math, and bare links in quoted prose', () => {
+test('neutralizes Markdown syntax and bare links in quoted prose, keeping its math', () => {
     const markdown = 'Prefix # Result\nhttps://example.com and $x$ > baseline.';
     const snippet = createEvidenceSnippet({
         markdown,
@@ -190,7 +192,7 @@ test('neutralizes Markdown syntax, math, and bare links in quoted prose', () => 
 
     assert.equal(snippet.markdown, [
         '> Prefix \\# Result',
-        '> https\\:\\/\\/example\\.com and x \\> baseline\\.',
+        '> https\\:\\/\\/example\\.com and $x$ \\> baseline\\.',
     ].join('\n'));
 });
 
@@ -405,4 +407,117 @@ test('enforces limits after snippet generation and source attribution', () => {
     }, translateEnglish, {
         maxContentLength: 64,
     }), error => error?.code === 'MKTERO_EVIDENCE_TOO_LARGE');
+});
+
+function mappedSnippet(markdown, type, target) {
+    return createEvidenceSnippet({
+        markdown,
+        sourceMap: [{
+            type,
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 0, bbox: [100, 100, 900, 300] }],
+        }],
+        target,
+    });
+}
+
+test('a quoted selection writes its formulas with the TeX the reader typesets', () => {
+    const markdown = 'Estimate $\\hat {G} _ {t}$ and keep $\\sum_{i} x_i$.';
+    const snippet = mappedSnippet(markdown, 'text', {
+        kind: 'selection',
+        text: 'Estimate \\hat {G} _ {t} and keep \\sum_{i} x_i.',
+        ranges: [{ from: 0, to: markdown.length }],
+    });
+
+    assert.equal(
+        snippet.markdown,
+        '> Estimate $\\hat{G} _{t}$ and keep $\\sum_{i} x_i$\\.'
+    );
+});
+
+test('a quoted selection keeps a display formula as a block inside the quote', () => {
+    const markdown = 'Before\n\n$$\nE = mc^2\n$$\n\nAfter';
+    const snippet = mappedSnippet(markdown, 'text', {
+        kind: 'selection',
+        text: 'Before\n\n$$\nE = mc^2\n$$\n\nAfter',
+        ranges: [{ from: 0, to: markdown.length }],
+    });
+
+    assert.equal(snippet.markdown, [
+        '> Before',
+        '>',
+        '> $$',
+        '> E = mc^2',
+        '> $$',
+        '>',
+        '> After',
+    ].join('\n'));
+});
+
+test('a quoted formula with an unsafe command stays escaped text', () => {
+    const markdown = 'Link $\\href{https://example.com}{x}$ here.';
+    const snippet = mappedSnippet(markdown, 'text', {
+        kind: 'block',
+        from: 0,
+        to: markdown.length,
+    });
+
+    assert.doesNotMatch(snippet.markdown, /\$\\href/u);
+});
+
+test('a mapped equation is written with the TeX the reader typesets', () => {
+    const markdown = '$$\n\\int_ {0} ^ {1} f\n$$';
+    const snippet = mappedSnippet(markdown, 'equation', {
+        kind: 'block',
+        from: 0,
+        to: markdown.length,
+    });
+
+    assert.equal(snippet.markdown, '$$\n\\int_{0} ^{1} f\n$$');
+});
+
+test('a mapped GFM table keeps its cell formulas, with bars that cannot end a cell', () => {
+    const markdown = [
+        '| Norm | Value |',
+        '| --- | --- |',
+        '| $a \\| b$ | **2** |',
+    ].join('\n');
+    const snippet = mappedSnippet(markdown, 'table', {
+        kind: 'block',
+        from: 0,
+        to: markdown.length,
+    });
+
+    assert.equal(snippet.markdown, [
+        '| Norm | Value |',
+        '| --- | --- |',
+        '| $a \\vert b$ | 2 |',
+    ].join('\n'));
+});
+
+test('a mapped image caption keeps its formulas', () => {
+    const markdown = '![Figure 3. Error of $\\\\alpha$ over time](images/figure.png)';
+    const snippet = mappedSnippet(markdown, 'image', {
+        kind: 'block',
+        from: 0,
+        to: markdown.length,
+    });
+
+    assert.equal(snippet.markdown, '> Figure 3\\. Error of $\\alpha$ over time');
+});
+
+test('parentheses stay text, and a quote cannot start an ordered list', () => {
+    // An escaped `1\\)` shows as "1)", which must not open a list in the quote.
+    const markdown = 'In (2020) the rate rose.\n1\\) First result.';
+    const snippet = mappedSnippet(markdown, 'text', {
+        kind: 'block',
+        from: 0,
+        to: markdown.length,
+    });
+
+    assert.equal(snippet.markdown, [
+        '> In (2020) the rate rose\\.',
+        '> 1\\) First result\\.',
+    ].join('\n'));
 });

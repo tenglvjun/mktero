@@ -99,6 +99,7 @@ import {
 import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
+    legacyMathEmphasisVisibleTextForRanges,
     noteMathSegmentsForRanges,
 } from '../markdown/markdown-visible-text.js';
 import {
@@ -1535,7 +1536,16 @@ class MarkdownTabView {
         }
         const annotation = this.noteAnnotationIndex.byID.get(String(key || ''));
         if (!annotation || isMarkdownAnnotation(annotation)) return null;
-        return this.noteSegmentsForRanges(annotation.ranges);
+        const segments = this.noteSegmentsForRanges(annotation.ranges);
+        if (!segments) return null;
+        // The PDF still stores the text from before formula subscripts were
+        // kept. The note accepts that text as this same passage.
+        const legacy = legacyMathEmphasisVisibleTextForRanges(
+            String(this.model?.markdown || ''),
+            annotation.ranges
+        );
+        if (legacy) segments.legacySavedText = legacy;
+        return segments;
     }
 
     requireInsertableNote() {

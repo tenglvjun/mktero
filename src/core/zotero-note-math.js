@@ -116,9 +116,15 @@ function highlightAnnotationKey(span) {
 }
 
 // The template's text around the highlight's own text: Zotero adds quotation
-// marks unless the highlight is in a blockquote.
+// marks unless the highlight is in a blockquote. A highlight saved while a
+// formula subscript was hidden as emphasis still matches, and the formulas
+// inserted are the ones the reader shows now.
 function highlightAffixes(spanText, segments) {
-    const expected = noteMathSegmentsText(segments);
+    return affixesForExpected(spanText, noteMathSegmentsText(segments))
+        || affixesForExpected(spanText, segments?.legacySavedText);
+}
+
+function affixesForExpected(spanText, expected) {
     const spanKey = noteSegmentTextKey(spanText);
     const expectedKey = noteSegmentTextKey(expected);
     if (!expectedKey || !spanKey.includes(expectedKey)) return null;

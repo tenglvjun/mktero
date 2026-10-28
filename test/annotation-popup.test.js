@@ -450,3 +450,61 @@ test('maps an Add to Note failure in both popups', async () => {
         }
     }
 });
+
+function dispatchClipboardCopy(window, target) {
+    const data = new Map();
+    const event = new window.Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+        value: {
+            setData: (type, value) => data.set(type, String(value)),
+            getData: type => data.get(type) || '',
+        },
+    });
+    target.dispatchEvent(event);
+    return { event, data };
+}
+
+test('an empty note input copies the quote as a keyboard copy of it would', () => {
+    const quotes = [];
+    const fixture = createPopupFixture({
+        createMarkdownAnnotation: async annotation => annotation,
+        copyQuote: annotation => {
+            quotes.push(annotation.text);
+            return { text: 'Selected $x$ text', html: '<p>Selected <span class="math">$x$</span></p>' };
+        },
+    });
+    const { dom, parent, popup, openSelection } = fixture;
+    openSelection();
+    parent.querySelector('.mktero-annotation-note-button').click();
+    const input = parent.querySelector('.mktero-annotation-note-input');
+    const { event, data } = dispatchClipboardCopy(dom.window, input);
+
+    assert.equal(event.defaultPrevented, true);
+    assert.deepEqual(quotes, ['Selected text']);
+    assert.equal(data.get('text/plain'), 'Selected $x$ text');
+    assert.match(data.get('text/html'), /class="math"/u);
+
+    popup.destroy();
+    dom.window.close();
+});
+
+test('an empty note input copies the plain quote when no copy is available', () => {
+    for (const copyQuote of [() => null, () => { throw new Error('stale'); }, undefined]) {
+        const fixture = createPopupFixture({
+            createMarkdownAnnotation: async annotation => annotation,
+            copyQuote,
+        });
+        const { dom, parent, popup, openSelection } = fixture;
+        openSelection();
+        parent.querySelector('.mktero-annotation-note-button').click();
+        const input = parent.querySelector('.mktero-annotation-note-input');
+        const { event, data } = dispatchClipboardCopy(dom.window, input);
+
+        assert.equal(event.defaultPrevented, true);
+        assert.equal(data.get('text/plain'), 'Selected text');
+        assert.equal(data.has('text/html'), false);
+
+        popup.destroy();
+        dom.window.close();
+    }
+});

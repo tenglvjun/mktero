@@ -7,6 +7,8 @@ import { findDisplayMathMatches, findInlineMathMatches } from './markdown-html.j
 // checks before the note may store them.
 export const MAX_NOTE_CLIPBOARD_SOURCE_LENGTH = 100_000;
 export const MAX_NOTE_CLIPBOARD_FORMULAS = 300;
+const NOTE_MATH_MARKUP = /<(?:span|pre)\b[^>]*\bclass="math"/iu;
+const UNSAFE_NOTE_CLIPBOARD_HTML = /<(?:script|img|iframe|object|embed|link|meta|style)\b|javascript:|\son[a-z]+\s*=/iu;
 // Only a passage with a formula or a table needs the note markup. Without
 // one, a paste keeps working as it did, Markdown editors included.
 const NOTE_MARKUP_HINT = /\$|\\\(|\\\[|<table\b|^[ \t]*\|/mu;
@@ -50,6 +52,20 @@ export function zoteroNoteClipboardHTML(
     }
 }
 
+// HTML a hosted note may insert on paste. The note editor's content
+// iframe often receives only the plain text, so the host inserts this itself.
+// Anything that is not note math markup is left for the editor.
+export function noteMathClipboardHTML(html) {
+    const source = String(html || '').trim();
+    if (!source
+        || source.length > MAX_NOTE_CLIPBOARD_SOURCE_LENGTH
+        || UNSAFE_NOTE_CLIPBOARD_HTML.test(source)
+        || !NOTE_MATH_MARKUP.test(source)) {
+        return '';
+    }
+    return source;
+}
+
 /**
  * The note HTML of a GFM table, or '' when the Markdown is not a table.
  * A table copied in part from the reader comes here as the GFM of the cells
@@ -65,6 +81,27 @@ export function zoteroNoteTableClipboardHTML(gfm) {
     try {
         const html = renderZoteroNoteHTML(source);
         return /<table\b/iu.test(html) ? html.trim() : '';
+    }
+    catch {
+        return '';
+    }
+}
+
+/**
+ * The note HTML of a whole Markdown text Mktero wrote for the clipboard, such
+ * as a sourced quote, or '' when it is empty or past the clipboard budgets.
+ * Unlike a reader passage, it gets HTML without a formula too: its escaped
+ * punctuation and source link read as text and a link in a note.
+ */
+export function zoteroNoteMarkdownHTML(markdown) {
+    const source = String(markdown || '');
+    if (!source.trim()
+        || source.length > MAX_NOTE_CLIPBOARD_SOURCE_LENGTH
+        || formulaCount(source) > MAX_NOTE_CLIPBOARD_FORMULAS) {
+        return '';
+    }
+    try {
+        return stripPageMarkers(renderZoteroNoteHTML(source)).trim();
     }
     catch {
         return '';

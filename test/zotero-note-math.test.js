@@ -7,6 +7,7 @@ import {
     rewriteNoteHighlightMath,
 } from '../src/core/zotero-note-math.js';
 import {
+    legacyMathEmphasisVisibleTextForRanges,
     noteMathSegmentsForRanges,
     noteMathSegmentsText,
     noteSegmentTextKey,
@@ -202,6 +203,32 @@ test('rewrites the highlights of a saved note that match their annotation', () =
     );
 });
 
+test('rewrites a saved highlight whose formula subscripts were hidden', () => {
+    const note = '<div data-citation-items="%5B%5D" data-schema-version="9">'
+        + `<p><span class="highlight" data-annotation="${ANNOTATION}">`
+        + '\u201Cset point \\hat{G}t = w(t)\\hat{G}{\\mathrm{genomic}}\u201D</span></p>'
+        + '</div>';
+    const segments = [
+        { type: 'text', text: 'set point ' },
+        {
+            type: 'math',
+            tex: String.raw`\hat{G}_t = w(t)\hat{G}_{\mathrm{genomic}}`,
+            source: String.raw`\hat{G}_t = w(t)\hat{G}_{\mathrm{genomic}}`,
+            display: false,
+        },
+    ];
+
+    segments.legacySavedText = 'set point \\hat{G}t = w(t)\\hat{G}{\\mathrm{genomic}}';
+    const output = rewriteNoteHighlightMath(note, () => segments, { parseHTML });
+    const document = parseBody(output);
+
+    assert.equal(
+        document.querySelector('span.math').textContent,
+        String.raw`$\hat{G}_t = w(t)\hat{G}_{\mathrm{genomic}}$`
+    );
+    assert.match(document.body.textContent, /\u201Cset point /u);
+});
+
 function noteEditorHarness({ zoteroOverrides = {}, instanceOverrides = {} } = {}) {
     const posted = [];
     const inserted = [];
@@ -269,6 +296,22 @@ function noteEditorHarness({ zoteroOverrides = {}, instanceOverrides = {} } = {}
     return { notes, posted, inserted, serialized };
 }
 
+test('keeps a formula subscript the old reader hid, and a subscript it kept', () => {
+    const markdown = 'point $\\hat{G} = \\mu +\\sum_{i}\\beta_{i}g_{i}$, where $\\beta_{i}$ are sizes and $g_{i}\\in \\{0,1,2\\}$ counts. according to $\\hat{G}_t = w(t)\\hat{G}_{\\mathrm{genomic}}$, end';
+    const ranges = [{ from: 0, to: markdown.length }];
+    const segments = noteMathSegmentsForRanges(markdown, ranges);
+    const saved = legacyMathEmphasisVisibleTextForRanges(markdown, ranges);
+
+    assert.match(saved, /\\sum_\{i\}/u);
+    assert.doesNotMatch(saved, /\\hat\{G\}_t/u);
+    assert.notEqual(
+        noteSegmentTextKey(noteMathSegmentsText(segments)),
+        noteSegmentTextKey(saved)
+    );
+    segments.legacySavedText = saved;
+    assert.match(segments.find(segment => segment.tex?.includes('_t')).tex, /_t/u);
+});
+
 test('inserts a highlight with its formulas through the note editor', async () => {
     const harness = noteEditorHarness();
     const handle = await harness.notes.mountEditor({ replaceChildren() {} }, {
@@ -298,6 +341,37 @@ test('inserts a highlight with its formulas through the note editor', async () =
     assert.equal(harness.posted[1].pos, null);
     assert.match(harness.posted[1].html, /<span class="math">\$\\mu\$<\/span>/u);
     assert.doesNotMatch(harness.posted[1].html, /MKTERONOTEMATH/u);
+});
+
+test('inserts the reader formulas when the saved highlight hid their subscripts', async () => {
+    const harness = noteEditorHarness();
+    const handle = await harness.notes.mountEditor({ replaceChildren() {} }, {
+        attachmentID: 42,
+        noteID: 8,
+        focus: false,
+    });
+    const annotation = {
+        type: 'highlight',
+        text: String.raw`set point \hat{G}t = w(t)\hat{G}{\mathrm{genomic}}`,
+    };
+    const segments = [
+        { type: 'text', text: 'set point ' },
+        {
+            type: 'math',
+            tex: String.raw`\hat{G}_t = w(t)\hat{G}_{\mathrm{genomic}}`,
+            source: String.raw`\hat{G}_t = w(t)\hat{G}_{\mathrm{genomic}}`,
+            display: false,
+        },
+    ];
+
+    segments.legacySavedText = annotation.text;
+    await handle.insertAnnotations([annotation], { segmentsFor: () => segments });
+
+    assert.deepEqual(harness.inserted, []);
+    assert.match(
+        harness.posted[1].html,
+        /<span class="math">\$\\hat\{G\}_t = w\(t\)\\hat\{G\}_\{\\mathrm\{genomic\}\}\$<\/span>/u
+    );
 });
 
 test('keeps Zotero\'s insertAnnotations when the formulas cannot be inserted', async () => {

@@ -2,8 +2,15 @@ import {
     findUniqueContainingSourceMapEntry,
 } from '../core/markdown-source-map.js';
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
-import { createVisibleMarkdownTextIndex } from './markdown-visible-text.js';
+import { findInlineMathMatches, portableMathSource } from './markdown-html.js';
+import { gfmCellMathSource } from './markdown-table-export.js';
+import {
+    createVisibleMarkdownTextIndex,
+    noteMathSegmentsForRanges,
+    unescapeImageMathText,
+} from './markdown-visible-text.js';
 import { parseGFMTableRow } from './markdown-tables.js';
+import { portableMathMarkdown } from './portable-markdown.js';
 
 const SOURCE_UNAVAILABLE = 'MKTERO_EVIDENCE_SOURCE_UNAVAILABLE';
 const INVALID_EVIDENCE = 'MKTERO_EVIDENCE_INVALID';
@@ -12,7 +19,9 @@ const EVIDENCE_TOO_LARGE = 'MKTERO_EVIDENCE_TOO_LARGE';
 const DEFAULT_MAX_EVIDENCE_CONTENT_LENGTH = 256 * 1024;
 const DEFAULT_MAX_EVIDENCE_LOCATIONS = 256;
 const UNSAFE_MATH_COMMAND = /\\(?:catcode|csname|def|edef|futurelet|gdef|global|href|htmlClass|htmlData|htmlId|htmlStyle|include|includegraphics|input|let|newcommand|openin|openout|providecommand|read|renewcommand|url|usepackage|write|xdef)\b/;
-const MARKDOWN_ASCII_PUNCTUATION = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/g;
+// Parentheses are left alone: `\(` opens a formula in TeX-aware Markdown, and
+// with `[` escaped they cannot form a link.
+const MARKDOWN_ASCII_PUNCTUATION = /[!"#$%&'*+,\-./:;<=>?@[\\\]^_`{|}~]/g;
 
 export function createEvidenceSnippet({
     markdown,
@@ -60,7 +69,7 @@ export function createEvidenceSnippet({
         );
     }
     const content = target.kind === 'selection'
-        ? quoteMarkdownText(target.text)
+        ? selectionEvidenceMarkdown(source, target)
         : blockEvidenceMarkdown(
             source.slice(range.from, range.to),
             entry.type,
@@ -161,9 +170,90 @@ function uniqueLocations(locations) {
 function quoteMarkdownText(value) {
     const text = String(value).trim();
     if (!text) return '';
-    return text.split(/\r?\n/).map(line => (
-        `> ${escapeMarkdownText(line)}`.trimEnd()
-    )).join('\n');
+    return quoteMarkdownLines(text.split(/\r?\n/).map(escapeMarkdownText));
+}
+
+function quoteMarkdownLines(lines) {
+    return lines.map(line => `> ${line}`.trimEnd()).join('\n');
+}
+
+// A quote of a selection keeps each formula the reader typesets as standard
+// Markdown math; the text around it is escaped as any quote is.
+function selectionEvidenceMarkdown(document, target) {
+    const segments = noteMathSegmentsForRanges(document, target.ranges);
+    return segments
+        ? quoteMarkdownSegments(segments)
+        : quoteMarkdownText(target.text);
+}
+
+function quoteMarkdownSegments(segments) {
+    const markdown = segments.map(segment => {
+        if (segment.type !== 'math') {
+            return String(segment.text).split(/\r?\n/).map(escapeMarkdownText).join('\n');
+        }
+        if (UNSAFE_MATH_COMMAND.test(segment.tex)) {
+            return escapeMarkdownText(segment.tex);
+        }
+        const math = portableMathMarkdown(segment.tex, segment.display);
+        return segment.display ? `\n\n${math}\n\n` : math;
+    }).join('').trim();
+    if (!markdown) return '';
+    return quoteMarkdownLines(
+        markdown.replace(/\n[ \t]*(?:\n[ \t]*)+/gu, '\n\n').split('\n')
+    );
+}
+
+// The visible text of Markdown `source`, escaped, with each formula the
+// reader would typeset as standard Markdown math. `writeMath` may rewrite a
+// formula's TeX for where it goes, as a table cell does.
+function escapedMarkdownWithFormulas(source, { writeMath = tex => tex } = {}) {
+    const text = String(source || '');
+    const index = createVisibleMarkdownTextIndex(text);
+    if (!/[$\\]/u.test(text)) return escapeMarkdownText(index.text);
+    const code = [...text.matchAll(/(`+)[^`]*?\1/gu)].map(match => ({
+        from: match.index,
+        to: match.index + match[0].length,
+    }));
+    let output = '';
+    let cursor = 0;
+    for (const match of findInlineMathMatches(text)) {
+        if (match.start < cursor
+            || code.some(span => match.start < span.to && match.end > span.from)) {
+            continue;
+        }
+        const tex = safePortableMath(match.text);
+        if (tex === null) continue;
+        output += escapeMarkdownText(index.textForSourceRange(cursor, match.start));
+        output += portableMathMarkdown(writeMath(tex), false);
+        cursor = match.end;
+    }
+    return output + escapeMarkdownText(index.textForSourceRange(cursor, text.length));
+}
+
+// Plain text, such as a caption, escaped, with its `$…$` formulas kept.
+function escapedTextWithFormulas(value) {
+    const text = String(value || '');
+    if (!/[$\\]/u.test(text)) return escapeMarkdownText(text);
+    let output = '';
+    let cursor = 0;
+    for (const match of findInlineMathMatches(text)) {
+        const tex = safePortableMath(match.text);
+        if (tex === null) continue;
+        output += escapeMarkdownText(text.slice(cursor, match.start));
+        output += portableMathMarkdown(tex, false);
+        cursor = match.end;
+    }
+    return output + escapeMarkdownText(text.slice(cursor));
+}
+
+function safePortableMath(source) {
+    const tex = portableMathSource(source);
+    return tex === null || UNSAFE_MATH_COMMAND.test(tex) ? null : tex;
+}
+
+function quoteEscapedMarkdown(markdown) {
+    const text = String(markdown || '').trim();
+    return text ? quoteMarkdownLines(text.split(/\r?\n/)) : '';
 }
 
 function blockEvidenceMarkdown(source, type, document, range, figures) {
@@ -178,7 +268,11 @@ function blockEvidenceMarkdown(source, type, document, range, figures) {
                 UNSUPPORTED_EVIDENCE
             );
         }
-        return value;
+        // The TeX the reader typesets, OCR repairs included.
+        const tex = portableMathSource(body);
+        return tex === null || UNSAFE_MATH_COMMAND.test(tex)
+            ? value
+            : portableMathMarkdown(tex, true);
     }
     if (type === 'table') {
         const table = safeGFMTable(value);
@@ -192,13 +286,17 @@ function blockEvidenceMarkdown(source, type, document, range, figures) {
         const figure = figures.find(candidate => (
             candidate.from <= range.from && candidate.to >= range.to
         ));
-        if (figure?.caption?.text) return quoteMarkdownText(figure.caption.text);
+        if (figure?.caption?.text) {
+            return quoteEscapedMarkdown(escapedTextWithFormulas(
+                unescapeImageMathText(figure.caption.text)
+            ));
+        }
         throw evidenceError(
             'Evidence image caption is unavailable',
             UNSUPPORTED_EVIDENCE
         );
     }
-    return quoteMarkdownText(createVisibleMarkdownTextIndex(source).text);
+    return quoteEscapedMarkdown(escapedMarkdownWithFormulas(source));
 }
 
 function safeGFMTable(source) {
@@ -212,14 +310,25 @@ function safeGFMTable(source) {
         return null;
     }
     const safeRows = [rows[0], ...rows.slice(2)].map(row => row.map(cell => (
-        escapeMarkdownText(createVisibleMarkdownTextIndex(cell).text.trim())
+        escapedCellMarkdown(cell)
     )));
     safeRows.splice(1, 0, Array(columnCount).fill('---'));
     return safeRows.map(row => `| ${row.join(' | ')} |`).join('\n');
 }
 
+// One GFM cell: its visible text escaped, its formulas kept, with a `|`
+// inside a formula written so that it cannot end the cell.
+function escapedCellMarkdown(cell) {
+    return escapedMarkdownWithFormulas(cell, { writeMath: gfmCellMathSource })
+        .replace(/\s+/gu, ' ')
+        .trim();
+}
+
 function escapeMarkdownText(value) {
-    return String(value).replace(MARKDOWN_ASCII_PUNCTUATION, '\\$&');
+    return String(value)
+        .replace(MARKDOWN_ASCII_PUNCTUATION, '\\$&')
+        // "1)" opening a line would start an ordered list.
+        .replace(/^(\s*\d+)\)/gmu, '$1\\)');
 }
 
 function escapeMarkdownLabel(value) {

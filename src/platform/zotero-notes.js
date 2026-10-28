@@ -12,6 +12,8 @@ import {
     replaceNoteMathPlaceholders,
     rewriteNoteHighlightMath,
 } from '../core/zotero-note-math.js';
+import { noteCaretAfterInsert } from '../core/zotero-note-caret.js';
+import { noteMathClipboardHTML } from '../markdown/zotero-note-clipboard.js';
 import {
     noteMathSegmentsText,
     noteSegmentTextKey,
@@ -22,6 +24,9 @@ const MAX_NOTE_ANNOTATIONS = 5_000;
 const NOTIFY_DELAY_MS = 150;
 const EDITOR_INSTANCE_WAIT_MS = 10_000;
 const EDITOR_INSTANCE_POLL_MS = 25;
+// An insert reaches the note editor as a message; past this the caret is
+// left where the editor put it.
+const NOTE_CARET_WAIT_MS = 2_000;
 
 // Zotero notes of the paper a Mktero tab shows. The notes are ordinary
 // Zotero note items under the PDF's parent item, edited with Zotero's own
@@ -36,6 +41,11 @@ const EDITOR_INSTANCE_POLL_MS = 25;
 // inserts one: `serializeAnnotations()`, then the editor's `insertHTML`
 // message. Those two steps are not public API, so each is checked and a
 // missing one keeps the plain `insertAnnotations()`.
+//
+// After an insert, the caret is moved to where the inserted content ends
+// (`noteCaretAfterInsert`) through the editor's ProseMirror view, which is
+// not public API either. Without the view the caret stays where the editor
+// put it.
 export function createZoteroNotes(zotero, {
     getMainWindow = () => zotero?.getMainWindow?.() || null,
     isSnapshotNote = () => false,
@@ -49,6 +59,7 @@ export function createZoteroNotes(zotero, {
     delay = milliseconds => new Promise(resolve => (
         globalThis.setTimeout(resolve, milliseconds)
     )),
+    readClipboardHTML = () => '',
 } = {}) {
     const observers = new Set();
     let notifierID = null;
@@ -216,12 +227,27 @@ export function createZoteroNotes(zotero, {
             }
             container.replaceChildren(editor);
             editor.mode = editable ? 'edit' : 'view';
+            let stopMathPaste = () => {};
+            let destroyed = false;
+            if (editable) {
+                try {
+                    stopMathPaste = installNoteMathPaste(editor, {
+                        readClipboardHTML,
+                        schedule: callback => scheduleEditorTurn(editor, setTimeout, callback),
+                        delay,
+                        isDestroyed: () => destroyed,
+                        logError: error => zotero?.logError?.(error),
+                    });
+                }
+                catch (error) {
+                    zotero?.logError?.(error);
+                }
+            }
             editor.item = item;
             // The editor's own parent line would repeat the paper the tab
             // already shows, as in Zotero's context pane.
             editor.parentItem = null;
             if (focus) void editor.focus?.();
-            let destroyed = false;
             const instance = () => waitForEditorInstance(editor, {
                 delay,
                 isDestroyed: () => destroyed,
@@ -251,6 +277,7 @@ export function createZoteroNotes(zotero, {
                     }
                     const editorInstance = await instance();
                     editorInstance.focus?.();
+                    const before = noteEditorSnapshot(editor, editorInstance);
                     const inserted = await insertAnnotationsWithMath(
                         zotero,
                         editorInstance,
@@ -258,6 +285,11 @@ export function createZoteroNotes(zotero, {
                         { segmentsFor, parseHTML }
                     );
                     if (!inserted) await editorInstance.insertAnnotations(annotations);
+                    await moveCaretAfterInsert(editor, before, {
+                        delay,
+                        isDestroyed: () => destroyed,
+                        logError: error => zotero?.logError?.(error),
+                    });
                 },
                 focus() {
                     return editor.focus?.();
@@ -274,6 +306,7 @@ export function createZoteroNotes(zotero, {
                     if (destroyed) return;
                     this.save();
                     destroyed = true;
+                    stopMathPaste();
                     editor.remove();
                 },
             };
@@ -502,6 +535,191 @@ async function countNoteAnnotations(zotero, attachment) {
     }
 }
 
+// The note editor is a content iframe. A paste into it has been seen to keep
+// the plain Markdown Mktero copied, not the text/html formula beside it. When
+// the system clipboard still holds that formula, insert it before the editor
+// turns the Markdown into text, and put the caret after it. Shift-paste keeps
+// the plain text.
+function installNoteMathPaste(editor, {
+    readClipboardHTML,
+    schedule,
+    delay,
+    isDestroyed = () => false,
+    logError,
+}) {
+    let pasteTarget = null;
+    let removePaste = null;
+    let stopped = false;
+    const onPaste = event => {
+        if (event.shiftKey || event.defaultPrevented) return;
+        let html = '';
+        try {
+            html = noteMathClipboardHTML(readClipboardHTML?.());
+        }
+        catch (error) {
+            logError?.(error);
+            return;
+        }
+        if (!html) return;
+        const instance = editor.getCurrentInstance?.();
+        if (typeof instance?._postMessage !== 'function') return;
+        event.preventDefault();
+        event.stopPropagation();
+        const before = noteEditorSnapshot(editor, instance);
+        try {
+            instance._postMessage({ action: 'insertHTML', pos: null, html });
+        }
+        catch (error) {
+            logError?.(error);
+            return;
+        }
+        void moveCaretAfterInsert(editor, before, {
+            delay,
+            isDestroyed: () => stopped || isDestroyed(),
+            logError,
+        });
+    };
+    const attach = () => {
+        const frame = noteEditorFrame(editor);
+        const href = frame?.contentWindow?.location?.href || '';
+        // The iframe's first document is about:blank. A listener there is
+        // discarded when editor.html loads, so wait for that load.
+        if (href === 'about:blank') return false;
+        const target = frame?.contentDocument || frame?.contentWindow;
+        if (typeof target?.addEventListener !== 'function' || target === pasteTarget) {
+            return Boolean(removePaste);
+        }
+        removePaste?.();
+        target.addEventListener('paste', onPaste, true);
+        pasteTarget = target;
+        removePaste = () => target.removeEventListener('paste', onPaste, true);
+        return true;
+    };
+    const frame = noteEditorFrame(editor);
+    const onReady = () => {
+        if (!stopped) attach();
+    };
+    frame?.addEventListener?.('DOMContentLoaded', onReady, true);
+    frame?.addEventListener?.('load', onReady, true);
+    attach();
+    // connectedCallback may create the iframe just after this mount returns.
+    // The extension sandbox has no queueMicrotask; use the window or the
+    // injected timer.
+    schedule?.(() => {
+        if (!stopped) attach();
+    });
+    return () => {
+        stopped = true;
+        frame?.removeEventListener?.('DOMContentLoaded', onReady, true);
+        frame?.removeEventListener?.('load', onReady, true);
+        removePaste?.();
+        removePaste = null;
+        pasteTarget = null;
+    };
+}
+
+function noteEditorFrame(editor) {
+    return editor?._iframe
+        || editor?.querySelector?.('#editor-view')
+        || editor?.querySelector?.('iframe')
+        || null;
+}
+
+// The note editor's ProseMirror view, or null. `EditorInstance` keeps the
+// iframe's window; the editor page keeps its instance as
+// `_currentEditorInstance`, and that instance its view.
+function findNoteEditorView(editor, instance = editor?.getCurrentInstance?.()) {
+    try {
+        const frameWindow = instance?._iframeWindow
+            || noteEditorFrame(editor)?.contentWindow
+            || null;
+        const page = frameWindow?.wrappedJSObject || frameWindow;
+        const view = page?._currentEditorInstance?._editorCore?.view;
+        return view?.state?.doc && typeof view.dispatch === 'function'
+            ? view
+            : null;
+    }
+    catch {
+        return null;
+    }
+}
+
+function noteEditorSnapshot(editor, instance) {
+    const view = findNoteEditorView(editor, instance);
+    return view ? { view, doc: view.state.doc } : null;
+}
+
+// Waits for the insert the editor received as a message, then puts the caret
+// where the inserted content ends. A view replaced meanwhile (a new note is
+// saved first, which may reload it) restarts from its document. A failure is
+// logged and leaves the caret where the editor put it.
+async function moveCaretAfterInsert(editor, before, { delay, isDestroyed, logError }) {
+    if (!before || typeof delay !== 'function') return;
+    try {
+        let { view, doc } = before;
+        const attempts = Math.ceil(NOTE_CARET_WAIT_MS / EDITOR_INSTANCE_POLL_MS);
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            if (isDestroyed?.()) return;
+            const current = findNoteEditorView(editor);
+            if (!current) return;
+            if (current !== view) {
+                view = current;
+                doc = current.state.doc;
+            }
+            else if (documentChanged(current.state.doc, doc)) {
+                placeNoteCaret(current, doc);
+                return;
+            }
+            await delay(EDITOR_INSTANCE_POLL_MS);
+        }
+    }
+    catch (error) {
+        logError?.(error);
+    }
+}
+
+function documentChanged(current, before) {
+    if (current === before) return false;
+    return typeof current?.eq === 'function' ? !current.eq(before) : true;
+}
+
+// Moves the caret in `view` to where the insert since `before` ends. The
+// selection class is the editor's own, so the selection is one it accepts.
+function placeNoteCaret(view, before) {
+    const { state } = view;
+    const caret = noteCaretAfterInsert(before, state.doc);
+    if (!caret) return false;
+    const Selection = state.selection?.constructor;
+    if (typeof Selection?.near !== 'function') return false;
+    let { tr } = state;
+    if (caret.type === 'line' && caret.insert) {
+        const paragraph = state.schema?.nodes?.paragraph?.createAndFill?.();
+        if (!paragraph) return false;
+        tr = tr.insert(caret.pos, paragraph);
+    }
+    const pos = caret.type === 'line' && caret.insert ? caret.pos + 1 : caret.pos;
+    tr = tr.setSelection(Selection.near(tr.doc.resolve(pos), -1)).scrollIntoView();
+    view.dispatch(tr);
+    return true;
+}
+
+function scheduleEditorTurn(editor, setTimeout, callback) {
+    const view = editor?.ownerDocument?.defaultView;
+    if (typeof view?.queueMicrotask === 'function') {
+        view.queueMicrotask(callback);
+        return;
+    }
+    if (typeof view?.setTimeout === 'function') {
+        view.setTimeout(callback, 0);
+        return;
+    }
+    if (typeof setTimeout === 'function') {
+        setTimeout(callback, 0);
+        return;
+    }
+    callback();
+}
+
 // `note-editor` creates its EditorInstance after its iframe loads, and the
 // instance is usable once its init promise settles. Both waits share one
 // deadline, so a stuck editor fails instead of hanging the insert.
@@ -528,14 +746,20 @@ async function waitForEditorInstance(editor, { delay, isDestroyed }) {
 
 // The segments `segmentsFor` gives an annotation, when their text is the
 // annotation's: a passage the reader matched loosely keeps Zotero's text.
+// A highlight saved while a formula subscript was hidden as emphasis still
+// names this passage; the formulas inserted are the reader's, subscripts kept.
 function verifiedSegments(segments, text) {
     if (!Array.isArray(segments) || !segments.some(item => item?.type === 'math')) {
         return null;
     }
-    const expected = noteSegmentTextKey(text);
-    return expected && expected === noteSegmentTextKey(noteMathSegmentsText(segments))
-        ? segments
-        : null;
+    const saved = noteSegmentTextKey(text);
+    if (!saved) return null;
+    const current = noteSegmentTextKey(noteMathSegmentsText(segments));
+    if (saved === current) return segments;
+    // `legacySavedText` is the text this passage was saved as while a formula
+    // subscript was hidden as emphasis. It is not derived by deleting every `_`.
+    const legacy = noteSegmentTextKey(segments.legacySavedText);
+    return legacy && saved === legacy ? segments : null;
 }
 
 // Inserts `annotations` with their formulas, the way

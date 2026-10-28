@@ -20,10 +20,15 @@ import { createLocalization } from '../i18n/localization.js';
 import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
+    noteSegmentTextKey,
+    visibleMarkdownTextForRanges,
+} from '../markdown/markdown-visible-text.js';
+import {
     computeDocumentFigures,
 } from '../markdown/markdown-analysis-cache.js';
 import {
-    codeMirrorCopyHTML,
+    codeMirrorCopyPayload,
+    readerPassageCopy,
     renderedSelectionCopy,
 } from './reader-copy-html.js';
 import {
@@ -31,6 +36,7 @@ import {
     expandMarkdownSectionAt,
     markdownSectionExpandEffect,
     pointerTouchesRect,
+    readerDocumentAnalyses,
     refreshInlineRendering,
     selectedMarkdownAnnotation,
     selectionAnchor,
@@ -354,6 +360,12 @@ export function createInlineMarkdownEditor({
             )
             : undefined,
         onNoteEditorClose: clearRetainedSelectionHighlight,
+        // The quote a note input copies while it holds no selection of its
+        // own, as a keyboard copy of the same reader text would make it.
+        copyQuote: annotation => readerAnnotationCopy(view, annotation, {
+            chromeRanges: currentChromeRanges,
+            analysisCache,
+        }),
         onSourceNavigationError,
         onDetachedActionError: typeof onAnnotationActionError === 'function'
             ? (messageKey, error) => onAnnotationActionError(messageKey, error)
@@ -2470,8 +2482,16 @@ function enrichReaderCopyEvent(
             if (clipboardEventText(event, 'text/html')) return;
             const text = clipboardEventText(event);
             if (!text.trim()) return;
-            const html = codeMirrorCopyHTML(view.state, text, { chromeRanges });
-            if (html) data.setData('text/html', html);
+            // CodeMirror put the selection's source on the event; it becomes
+            // standard Markdown, and the note HTML of the same text joins it.
+            const copy = codeMirrorCopyPayload(view.state, text, {
+                chromeRanges,
+                document: view.dom.ownerDocument,
+                analyses: readerDocumentAnalyses(view, analysisCache),
+            });
+            if (!copy) return;
+            if (copy.text !== text) data.setData('text/plain', copy.text);
+            if (copy.html) data.setData('text/html', copy.html);
             return;
         }
         if (!originElement || !view.dom.contains(originElement)) return;
@@ -2492,6 +2512,33 @@ function enrichReaderCopyEvent(
             // Logging must not make the copy fail.
         }
     }
+}
+
+// Both flavors of the reader text a selection or a local annotation quotes,
+// or null when its ranges no longer show that text.
+function readerAnnotationCopy(view, annotation, { chromeRanges, analysisCache }) {
+    if (!view || !annotation?.text) return null;
+    const markdown = view.state.doc.toString();
+    const ranges = (Array.isArray(annotation.ranges) ? annotation.ranges : [])
+        .filter(range => Number.isSafeInteger(range?.from)
+            && Number.isSafeInteger(range?.to)
+            && range.from >= 0
+            && range.to > range.from
+            && range.to <= markdown.length);
+    if (!ranges.length) return null;
+    const analyses = readerDocumentAnalyses(view, analysisCache);
+    if (noteSegmentTextKey(visibleMarkdownTextForRanges(markdown, ranges, { analyses }))
+        !== noteSegmentTextKey(annotation.text)) {
+        return null;
+    }
+    return readerPassageCopy(markdown, {
+        from: Math.min(...ranges.map(range => range.from)),
+        to: Math.max(...ranges.map(range => range.to)),
+    }, {
+        chromeRanges,
+        document: view.dom.ownerDocument,
+        analyses,
+    });
 }
 
 // The rendered text of a selection that lies inside the reader, or ''.
