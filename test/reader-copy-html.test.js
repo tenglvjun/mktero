@@ -68,6 +68,29 @@ test('note HTML of a figure caption typesets the formula the reader shows', () =
     assert.doesNotMatch(html, />\$hat\{G\}\$</u);
 });
 
+test('a copy of a rendered figure caption keeps the formula the reader shows', () => {
+    const markdown = String.raw`![Figure 1. point $\\hat{G}$ and the deviation $P - \\hat{G}$ isolates.](figures/fig.png)
+`;
+    const reader = createEditor(markdown);
+    try {
+        const caption = reader.document.querySelector('figcaption');
+        assert.ok(caption);
+        selectNodeContents(reader.window, caption);
+        const { event, data } = dispatchCopy(reader.window, caption);
+
+        assert.equal(event.defaultPrevented, true);
+        assert.match(data.get('text/plain'), /\$\\hat\{G\}\$/u);
+        assert.match(data.get('text/plain'), /\$P - \\hat\{G\}\$/u);
+        assert.doesNotMatch(data.get('text/plain'), /\$\\\\hat/u);
+        assert.match(data.get('text/html'), /<span class="math">\$\\hat\{G\}\$<\/span>/u);
+        assert.equal(noteMathClipboardHTML(data.get('text/html')), data.get('text/html'));
+    }
+    finally {
+        reader.editor.destroy();
+        reader.dom.window.close();
+    }
+});
+
 test('note HTML of a passage keeps every formula, single letters included', () => {
     const markdown = `# Title\n\n${PASSAGE}\n`;
     const from = markdown.indexOf('where');
