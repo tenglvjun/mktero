@@ -232,6 +232,43 @@ export function expandMarkdownRangeToMathBoundaries(markdown, range) {
 const MAX_NOTE_FORMULAS = 200;
 
 /**
+ * The formulas the reader typesets wholly inside `range`, in source order, as
+ * `{ from, to, tex, display }`. A formula in an image description is the
+ * image's text, not one the reader typesets, so it is left out.
+ */
+export function typesetFormulasInRange(markdown, range, { analyses = null } = {}) {
+    const source = String(markdown || '');
+    if (!validSourceRange(range, source.length) || !/[$\\]/u.test(source)) {
+        return [];
+    }
+    const index = visibleIndexFor(source, analyses);
+    return index.formulasInRange(range.from, range.to)
+        .filter(formula => !index.insideImage(formula.from, formula.to));
+}
+
+// The HTML tables (`HTMLBlock`s that open with `<table`) wholly inside
+// `range`, as `{ from, to }`.
+export function htmlTableBlocksInRange(markdown, range) {
+    const source = String(markdown || '');
+    if (!validSourceRange(range, source.length)) return [];
+    return htmlTableBlocks(source).filter(block => (
+        block.from >= range.from && block.to <= range.to
+    ));
+}
+
+/**
+ * The text a selection inside one HTML table shows, with each formula the
+ * renderer typesets still between its delimiters, or null when `from..to` is
+ * not inside an HTML table. Tags are left out and entities decoded, as the
+ * reader shows them.
+ */
+export function htmlTableRangeSourceText(markdown, from, to) {
+    return visibleHTMLTableRangeText(String(markdown || ''), from, to, {
+        keepFormulaDelimiters: true,
+    });
+}
+
+/**
  * The text and formulas of Markdown `ranges`, as the reader shows them, for a
  * Zotero note: `[{ type: 'text', text }, { type: 'math', tex, display }]`.
  * The visible text of the segments, joined, is the selection's visible text
@@ -829,14 +866,30 @@ function subtractSourceRanges(range, hidden) {
 
 // A cell shows its decoded text with each formula the renderer typesets, so
 // the `$` around such a formula is not text it shows, as in a GFM cell.
-function visibleHTMLTableRangeText(source, from, to) {
+// `keepFormulaDelimiters` keeps them, for a copy that is Markdown.
+function visibleHTMLTableRangeText(
+    source,
+    from,
+    to,
+    { keepFormulaDelimiters = false } = {}
+) {
     const block = htmlTableBlockContaining(source, from, to);
     if (!block) return null;
     const table = source.slice(block.from, block.to);
     let text = '';
     for (const cell of htmlTableSourceCells(table)) {
-        const hidden = new Set(htmlCellTypesetFormulas(table, cell.atoms)
-            .flatMap(formula => formula.delimiters));
+        const hidden = keepFormulaDelimiters
+            ? new Set()
+            : new Set(htmlCellTypesetFormulas(table, cell.atoms)
+                .flatMap(formula => formula.delimiters));
+        // A copy that keeps the formulas keeps cells apart too, so the `$`
+        // of one cell cannot pair with the next.
+        if (keepFormulaDelimiters && text && !/\s$/u.test(text)
+            && cell.atoms.some(atom => (
+                block.from + atom.from >= from && block.from + atom.to <= to
+            ))) {
+            text += ' ';
+        }
         cell.atoms.forEach((atom, index) => {
             const atomFrom = block.from + atom.from;
             const atomTo = block.from + atom.to;

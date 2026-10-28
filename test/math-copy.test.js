@@ -53,8 +53,10 @@ test('copies the rendered LaTeX from a display formula', async () => {
 
     await clickCopyButton(button);
 
+    // The text is the formula as standard Markdown, so it pastes into any
+    // Markdown editor as a formula; the HTML is the Zotero note's math.
     assert.deepEqual(copies, [[
-        'E = mc^2',
+        '$$\nE = mc^2\n$$',
         { html: '<pre class="math">$$E = mc^2$$</pre>' },
     ]]);
     assert.equal(button.dataset.state, 'copied');
@@ -185,7 +187,7 @@ test('adds formula copying to a saved snapshot that keeps TeX', async () => {
     await clickCopyButton(wrapper.querySelector('.cm-mktero-math-copy'));
 
     assert.deepEqual(copies, [[
-        'E = mc^2',
+        '$$\nE = mc^2\n$$',
         { html: '<pre class="math">$$E = mc^2$$</pre>' },
     ]]);
 
@@ -212,7 +214,7 @@ test('escapes hostile TeX in the formula HTML flavor', async () => {
 
     await clickCopyButton(root.querySelector('.cm-mktero-math-copy'));
 
-    assert.equal(copies[0][0], latex);
+    assert.equal(copies[0][0], `$$\n${latex}\n$$`);
     assert.equal(
         copies[0][1].html,
         '<pre class="math">$$&lt;img src=x onerror=1&gt;$$</pre>'
@@ -242,7 +244,7 @@ test('copies a display formula as Zotero note math HTML', async () => {
     await clickCopyButton(document.querySelector('.cm-mktero-math-copy'));
 
     assert.deepEqual(copies, [[
-        latex,
+        `$$\n${latex}\n$$`,
         { html: `<pre class="math">$$${latex}$$</pre>` },
     ]]);
 

@@ -52,6 +52,7 @@ export function createAnnotationPopup(parent, {
     addAnnotationToNote,
     addSelectionToNote,
     onNoteEditorClose,
+    copyQuote,
     onSourceNavigationError,
     onDetachedActionError,
 } = {}) {
@@ -147,6 +148,7 @@ export function createAnnotationPopup(parent, {
                             )
                             : undefined,
                         close,
+                        copyQuote,
                         reopen: (failedComment, failedError) => openNote({
                             anchor,
                             annotation,
@@ -191,6 +193,7 @@ export function createAnnotationPopup(parent, {
                             }, selectionContext)
                             : undefined,
                         close,
+                        copyQuote,
                         reopen: (failedComment, failedError) => openDraftNote({
                             anchor,
                             annotation,
@@ -478,6 +481,7 @@ function createAnnotationNoteEditor(
         comment,
         errorText = '',
         saveComment,
+        copyQuote,
         close,
         reopen,
         reposition,
@@ -503,7 +507,7 @@ function createAnnotationNoteEditor(
     const canUpdate = typeof saveComment === 'function';
     input.readOnly = !canUpdate;
     input.addEventListener('copy', event => {
-        copyQuoteFromEmptyNoteInput(event, input, annotation);
+        copyQuoteFromEmptyNoteInput(event, input, annotation, copyQuote);
     });
     form.appendChild(input);
 
@@ -1029,12 +1033,26 @@ function createMarkdownSelectionActions(
 
 // Opening a note moves focus into its input while the quoted Markdown stays
 // highlighted. Copy then targets the empty input, so hand the clipboard the
-// quote the reader still sees selected.
-function copyQuoteFromEmptyNoteInput(event, input, annotation) {
+// quote the reader still sees selected, in the flavors a keyboard copy of it
+// would have: `copyQuote` returns them, and the quote's text is the fallback.
+function copyQuoteFromEmptyNoteInput(event, input, annotation, copyQuote) {
     if (input.selectionStart !== input.selectionEnd) return;
     const quote = String(annotation?.text || '');
     if (!quote.trim() || !event.clipboardData) return;
-    event.clipboardData.setData('text/plain', quote);
+    let copy = null;
+    try {
+        copy = typeof copyQuote === 'function' ? copyQuote(annotation) : null;
+    }
+    catch {
+        copy = null;
+    }
+    const text = typeof copy?.text === 'string' && copy.text.trim()
+        ? copy.text
+        : quote;
+    event.clipboardData.setData('text/plain', text);
+    if (text === copy?.text && copy.html) {
+        event.clipboardData.setData('text/html', copy.html);
+    }
     event.preventDefault();
 }
 

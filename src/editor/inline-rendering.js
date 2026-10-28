@@ -11,9 +11,11 @@ import { findMinerUAlgorithmGroups } from '../markdown/markdown-algorithms.js';
 import {
     findDisplayMathMatches,
     findInlineMathMatches,
+    portableMathSource,
     safeMarkdownLinkURL,
 } from '../markdown/markdown-html.js';
 import { renderZoteroNoteHTML } from '../markdown/zotero-note-html-renderer.js';
+import { portableMathMarkdown } from '../markdown/portable-markdown.js';
 import { translateEnglish } from '../i18n/localization.js';
 import {
     findAcademicTableGroups,
@@ -838,11 +840,18 @@ function enhanceRenderedMathBlock(
         if (copyButton.disabled) return;
         copyButton.disabled = true;
         try {
-            // Rendered on click. Note HTML is kept only when it is real math
-            // markup; a fallback or a renderer failure still copies the TeX.
+            // Rendered on click. The text is the formula as standard Markdown,
+            // a `$$` block, so it pastes into a Markdown editor as a
+            // formula. TeX the reader refuses to typeset (an unsafe command,
+            // or past the length budget) stays bare source, as it shows it.
+            // Note HTML is kept only when it is real math markup; a fallback
+            // or a renderer failure still copies the text.
+            const markdown = portableMathSource(latex) === null
+                ? latex
+                : portableMathMarkdown(latex, true);
             const html = zoteroNoteMathHTML(latex);
-            if (html) await copyCode(latex, { html });
-            else await copyCode(latex);
+            if (html) await copyCode(markdown, { html });
+            else await copyCode(markdown);
             copyButton.dataset.state = 'copied';
             copyButton.textContent = translate('markdown.mathCopied');
         }
@@ -2673,6 +2682,12 @@ function selectionMarkdownPosition(view, node, offset, side) {
         }
     }
     return view.posAtDOM(node, offset);
+}
+
+// The whole-document analyses `analysisCache` keeps for the reader's
+// document, for a caller that builds selection text outside a selection.
+export function readerDocumentAnalyses(view, analysisCache) {
+    return documentAnalyses(view, analysisCache);
 }
 
 function documentAnalyses(view, analysisCache) {

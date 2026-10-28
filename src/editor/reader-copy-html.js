@@ -4,12 +4,18 @@
 // that carries Markdown alone pastes `$…$` as text, or relies on the note
 // editor guessing that the text is Markdown. The HTML here is the note markup
 // of the copied passage (`renderZoteroNoteHTML`), so a paste into a note keeps
-// its formulas and tables. The text/plain flavor stays the Markdown source.
-// A passage with no formula and no table gets no HTML.
+// its formulas and tables. The text/plain flavor is the passage as standard
+// Markdown (`portableMarkdownForRange`), so a Markdown editor shows the same
+// formulas and tables. A passage with no formula and no table gets no HTML.
 
 import { selectedMarkdownAnnotation } from './inline-rendering.js';
 import { rootSelectionFor } from './root-selection.js';
 import { tableElementToGFM } from '../markdown/markdown-table-export.js';
+import { htmlTableBlocksInRange } from '../markdown/markdown-visible-text.js';
+import {
+    portableHTMLTableRangeText,
+    portableMarkdownForRange,
+} from '../markdown/portable-markdown.js';
 import {
     expandToFormulaBoundaries,
     MAX_NOTE_CLIPBOARD_SOURCE_LENGTH,
@@ -33,6 +39,20 @@ const RENDERED_COPY_BLOCKS = [
  * when the copied text is not that, so the two flavors never disagree.
  */
 export function codeMirrorCopyHTML(state, copiedText, { chromeRanges = [] } = {}) {
+    return codeMirrorCopyPayload(state, copiedText, { chromeRanges })?.html || '';
+}
+
+/**
+ * Both flavors of what CodeMirror copied as `copiedText`: `{ text, html }`,
+ * the copied ranges as standard Markdown and their note HTML (empty without
+ * a formula or a table). Null when the copied text is not CodeMirror's copy
+ * of this state, so another handler's copy is left alone.
+ */
+export function codeMirrorCopyPayload(
+    state,
+    copiedText,
+    { chromeRanges = [], document = null, analyses = null } = {}
+) {
     const ranges = state.selection.ranges.filter(range => !range.empty);
     const pieces = ranges.length
         ? ranges.map(range => ({ from: range.from, to: range.to }))
@@ -40,19 +60,66 @@ export function codeMirrorCopyHTML(state, copiedText, { chromeRanges = [] } = {}
             const line = state.doc.lineAt(from);
             return { from: line.from, to: line.to };
         });
-    const total = pieces.reduce((sum, range) => sum + range.to - range.from, 0);
-    if (total > MAX_NOTE_CLIPBOARD_SOURCE_LENGTH) return '';
     const expected = pieces
         .map(range => state.sliceDoc(range.from, range.to))
         .join(state.lineBreak);
     if (normalizeLineBreaks(expected) !== normalizeLineBreaks(copiedText)) {
-        return '';
+        return null;
     }
     const markdown = state.doc.toString();
-    return pieces
-        .map(range => zoteroNoteClipboardHTML(markdown, range, { chromeRanges }))
-        .filter(Boolean)
-        .join('\n');
+    const text = pieces
+        .map(range => (
+            portableMarkdownForRange(markdown, range, {
+                chromeRanges,
+                document,
+                analyses,
+            }) ?? state.sliceDoc(range.from, range.to)
+        ))
+        .join(state.lineBreak);
+    const total = pieces.reduce((sum, range) => sum + range.to - range.from, 0);
+    const html = total > MAX_NOTE_CLIPBOARD_SOURCE_LENGTH
+        ? ''
+        : pieces
+            .map(range => zoteroNoteClipboardHTML(markdown, range, { chromeRanges }))
+            .filter(Boolean)
+            .join('\n');
+    return { text: text.trim() ? text : String(copiedText), html };
+}
+
+/**
+ * Both flavors of the reader passage between `from` and `to` of `markdown`,
+ * as a keyboard copy of it would make: `{ text, html }`, or null when the
+ * range is not one of `markdown`. Inside an HTML table the text is the cell
+ * text with its formulas, as the reader shows it.
+ */
+export function readerPassageCopy(
+    markdown,
+    { from, to } = {},
+    { chromeRanges = [], document = null, analyses = null } = {}
+) {
+    const source = String(markdown || '');
+    if (!Number.isSafeInteger(from)
+        || !Number.isSafeInteger(to)
+        || from < 0
+        || to <= from
+        || to > source.length) {
+        return null;
+    }
+    const range = expandToFormulaBoundaries(source, { from, to });
+    // Part of an HTML table reads as its cell text; a whole one is a table.
+    const cellText = htmlTableBlocksInRange(source, range).length
+        ? null
+        : portableHTMLTableRangeText(source, range);
+    const text = cellText ?? portableMarkdownForRange(source, range, {
+        chromeRanges,
+        document,
+        analyses,
+    });
+    if (!text?.trim()) return null;
+    return {
+        text: text.trim(),
+        html: zoteroNoteClipboardHTML(source, range, { chromeRanges }),
+    };
 }
 
 /**
@@ -86,21 +153,24 @@ export function renderedSelectionCopy(
     ));
     if (!ranges?.length) return null;
     const markdown = view.state.doc.toString();
-    const { from, to } = expandToFormulaBoundaries(markdown, {
+    const sourceRange = expandToFormulaBoundaries(markdown, {
         from: Math.min(...ranges.map(item => item.from)),
         to: Math.max(...ranges.map(item => item.to)),
     });
-    const source = markdown.slice(from, to).trim();
-    if (!source) return null;
+    if (!markdown.slice(sourceRange.from, sourceRange.to).trim()) return null;
     // Inside a table the paper carries as HTML, the source is tags; the
-    // text a reader expects is the cell's own, with its formulas as TeX.
-    const text = inHTMLTable(view, range) && annotation.text
-        ? annotation.text
-        : source;
-    return {
-        text,
-        html: zoteroNoteClipboardHTML(markdown, { from, to }, { chromeRanges }),
-    };
+    // text is the cell's own, with its formulas as TeX.
+    const copy = readerPassageCopy(markdown, sourceRange, {
+        chromeRanges,
+        document: view.dom.ownerDocument,
+    });
+    if (copy) return copy;
+    return inHTMLTable(view, range) && annotation.text
+        ? {
+            text: annotation.text,
+            html: zoteroNoteClipboardHTML(markdown, sourceRange, { chromeRanges }),
+        }
+        : null;
 }
 
 function normalizeLineBreaks(value) {

@@ -151,6 +151,7 @@ import {
     createEvidenceSnippet,
     formatEvidenceMarkdown,
 } from './markdown/markdown-evidence.js';
+import { zoteroNoteMarkdownHTML } from './markdown/zotero-note-clipboard.js';
 import { selectExportMarkdown } from './markdown/export-markdown-selector.js';
 import {
     resolveMarkdownReadingPosition,
@@ -617,6 +618,16 @@ globalThis.startup = async function startup({ id, rootURI }) {
             runtime.savedMarkdownStore?.isSavedMarkdownNote?.(item)
             ?? isSavedMarkdownNote(item?.getNote?.() || '')
         ),
+        // The hosted note editor cannot see text/html Mktero just copied.
+        readClipboardHTML: () => {
+            try {
+                return runtime.clipboard?.readHTML?.() || '';
+            }
+            catch (error) {
+                logMkteroError(error);
+                return '';
+            }
+        },
     });
     const pendingTasks = createZoteroMinerUPendingTaskStore({
         zotero: Zotero,
@@ -3876,6 +3887,13 @@ async function copySourcedMarkdown(itemID, target) {
             reference,
             runtimeTranslate
         );
+        // The quote as a Zotero note shows it: its formulas typeset, its
+        // escaped punctuation as text, and its source as a link.
+        const html = zoteroNoteMarkdownHTML(markdown);
+        if (html && typeof runtime.clipboard.writeRich === 'function') {
+            await runtime.clipboard.writeRich({ text: markdown, html });
+            return;
+        }
         await runtime.clipboard.writeText(markdown);
     }
     catch (error) {

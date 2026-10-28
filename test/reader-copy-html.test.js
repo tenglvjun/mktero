@@ -7,9 +7,12 @@ import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor
 import {
     MAX_NOTE_CLIPBOARD_FORMULAS,
     MAX_NOTE_CLIPBOARD_SOURCE_LENGTH,
+    noteMathClipboardHTML,
     zoteroNoteClipboardHTML,
+    zoteroNoteMarkdownHTML,
     zoteroNoteTableClipboardHTML,
 } from '../src/markdown/zotero-note-clipboard.js';
+import { readerPassageCopy } from '../src/editor/reader-copy-html.js';
 import { tableElementToGFM } from '../src/markdown/markdown-table-export.js';
 import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
 
@@ -107,6 +110,21 @@ test('note HTML is empty for bad ranges, huge copies, and stays escaped', () => 
     );
 });
 
+test('a hosted note paste accepts only note math markup', () => {
+    const formula = '<pre class="math">$$\\hat{G}_t$$</pre>';
+    assert.equal(noteMathClipboardHTML(formula), formula);
+    assert.equal(noteMathClipboardHTML('  <span class="math">$\\mu$</span>  '), '<span class="math">$\\mu$</span>');
+    assert.equal(noteMathClipboardHTML('<p>Plain words</p>'), '');
+    assert.equal(
+        noteMathClipboardHTML('<pre class="math">$$x$$</pre><script>alert(1)</script>'),
+        ''
+    );
+    assert.equal(
+        noteMathClipboardHTML('<span class="math" onclick="alert(1)">$x$</span>'),
+        ''
+    );
+});
+
 test('note HTML is left out without a formula or a table, or with too many formulas', () => {
     const plain = 'Plain **bold** words with a [link](https://example.org).';
     assert.equal(zoteroNoteClipboardHTML(plain, { from: 0, to: plain.length }), '');
@@ -135,6 +153,68 @@ test('a keyboard copy of a passage adds its note HTML beside the Markdown', asyn
         assert.equal(data.get('text/plain'), PASSAGE);
         assert.match(data.get('text/html'), /<span class="math">\$i\$<\/span>/u);
         assert.match(data.get('text/html'), /<span class="math">\$\\mu\$<\/span>/u);
+    }
+    finally {
+        reader.editor.destroy();
+        reader.dom.window.close();
+    }
+});
+
+test('a keyboard copy is standard Markdown: reader TeX, no page chrome', () => {
+    const header = 'Journal Running Header';
+    const markdown = [
+        String.raw`Estimate $\hat {G} _ {t}$ first.`,
+        '<!-- zotero-page: 2 -->',
+        header,
+        '',
+        '$$',
+        String.raw`\int_ {0} ^ {1} f \tag{1}`,
+        '$$',
+    ].join('\n');
+    const from = markdown.indexOf(header);
+    const reader = createEditor(markdown, {
+        documentOptions: {
+            chromeRanges: [{ from, to: from + header.length + 1 }],
+        },
+    });
+    try {
+        const line = reader.document.querySelector('.cm-line');
+        selectNodeContents(reader.window, line);
+        reader.view.dispatch({ selection: { anchor: 0, head: markdown.length } });
+        const { event, data } = dispatchCopy(reader.window, reader.view.contentDOM);
+
+        assert.equal(event.defaultPrevented, true);
+        assert.equal(data.get('text/plain'), [
+            String.raw`Estimate $\hat{G} _{t}$ first.`,
+            '',
+            '$$',
+            String.raw`\int_{0} ^{1} f \tag{1}`,
+            '$$',
+        ].join('\n'));
+        assert.match(data.get('text/html'), /<span class="math">\$\\hat\{G\} _\{t\}\$<\/span>/u);
+        assert.match(data.get('text/html'), /<pre class="math">\$\$\\int_\{0\} \^\{1\} f \\tag\{1\}\$\$<\/pre>/u);
+        assert.doesNotMatch(data.get('text/html'), /Running Header/u);
+    }
+    finally {
+        reader.editor.destroy();
+        reader.dom.window.close();
+    }
+});
+
+test('a keyboard copy writes an HTML table as a GFM table with its formulas', () => {
+    const markdown = 'Intro.\n\n<table><tr><th>Norm</th></tr><tr><td>$a|b$</td></tr></table>\n\nEnd.';
+    const reader = createEditor(markdown);
+    try {
+        const line = reader.document.querySelector('.cm-line');
+        selectNodeContents(reader.window, line);
+        reader.view.dispatch({ selection: { anchor: 0, head: markdown.length } });
+        const { data } = dispatchCopy(reader.window, reader.view.contentDOM);
+
+        assert.equal(
+            data.get('text/plain'),
+            'Intro.\n\n| Norm |\n| --- |\n| $a\\vert b$ |\n\nEnd.'
+        );
+        assert.match(data.get('text/html'), /<table>/u);
     }
     finally {
         reader.editor.destroy();
@@ -272,4 +352,33 @@ test('Copy as Markdown of an OCR table keeps formulas with bars as TeX', () => {
     finally {
         dom.window.close();
     }
+});
+
+test('a reader passage copy has both flavors, and a cell copy reads as its text', () => {
+    const passage = String.raw`Mean $\mu _ {i}$ here.`;
+    assert.deepEqual(readerPassageCopy(passage, { from: 0, to: passage.length }), {
+        text: String.raw`Mean $\mu _{i}$ here.`,
+        html: String.raw`<p>Mean <span class="math">$\mu _{i}$</span> here.</p>`,
+    });
+
+    const table = '<table><tr><td>Norm $x _ {2}$</td></tr></table>';
+    const from = table.indexOf('Norm');
+    const copy = readerPassageCopy(table, { from, to: table.indexOf('</td>') });
+    assert.equal(copy.text, 'Norm $x _{2}$');
+    assert.equal(readerPassageCopy(passage, { from: 3, to: 1 }), null);
+});
+
+test('a sourced quote gets note HTML with its formulas and source link', () => {
+    const html = zoteroNoteMarkdownHTML([
+        String.raw`> Estimate $\hat{G}_t$ \<b\>here\</b\>\.`,
+        '',
+        'Source: [Paper, p. 3](zotero://open-pdf/library/items/ABC123?page=3)',
+    ].join('\n'));
+
+    assert.match(html, /<blockquote>/u);
+    assert.match(html, /<span class="math">\$\\hat\{G\}_t\$<\/span>/u);
+    assert.match(html, /&lt;b&gt;here&lt;\/b&gt;\./u);
+    assert.match(html, /<a href="zotero:\/\/open-pdf\/library\/items\/ABC123\?page=3"/u);
+    assert.equal(zoteroNoteMarkdownHTML('   '), '');
+    assert.equal(zoteroNoteMarkdownHTML('x'.repeat(MAX_NOTE_CLIPBOARD_SOURCE_LENGTH + 1)), '');
 });

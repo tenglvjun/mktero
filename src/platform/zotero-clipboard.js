@@ -45,28 +45,13 @@ export function createZoteroClipboard(components, { onRichWriteError } = {}) {
         // Reads the system clipboard's plain text, or null when it holds none.
         // Throws when the clipboard cannot be reached at all.
         async readText() {
-            const interfaces = components?.interfaces;
-            const clipboard = components?.classes?.[CLIPBOARD_CONTRACT]
-                ?.getService?.(interfaces?.nsIClipboard);
-            const transferable = components?.classes?.[TRANSFERABLE_CONTRACT]
-                ?.createInstance?.(interfaces?.nsITransferable);
-            if (typeof clipboard?.getData !== 'function'
-                || typeof transferable?.addDataFlavor !== 'function') {
-                throw new Error('System clipboard is unavailable');
-            }
-            transferable.init?.(null);
-            transferable.addDataFlavor(TEXT_FLAVOR);
-            clipboard.getData(transferable, clipboard.kGlobalClipboard);
-            const data = {};
-            try {
-                transferable.getTransferData(TEXT_FLAVOR, data);
-            }
-            catch {
-                return null;
-            }
-            const value = data.value?.QueryInterface?.(interfaces.nsISupportsString)
-                ?.data;
-            return typeof value === 'string' ? value : null;
+            return readClipboardFlavor(components, TEXT_FLAVOR);
+        },
+        // A paste into the note editor's content iframe has been seen to
+        // miss the text/html this process just wrote. A hosted editor reads
+        // it here and inserts the formula itself.
+        readHTML() {
+            return readClipboardFlavor(components, HTML_FLAVOR);
         },
     };
 }
@@ -79,6 +64,31 @@ function reportRichWriteError(onRichWriteError, error) {
     catch {
         // A failing logger must not cost the user the plain-text copy.
     }
+}
+
+function readClipboardFlavor(components, flavor) {
+    const interfaces = components?.interfaces;
+    const clipboard = components?.classes?.[CLIPBOARD_CONTRACT]
+        ?.getService?.(interfaces?.nsIClipboard);
+    const transferable = components?.classes?.[TRANSFERABLE_CONTRACT]
+        ?.createInstance?.(interfaces?.nsITransferable);
+    if (typeof clipboard?.getData !== 'function'
+        || typeof transferable?.addDataFlavor !== 'function') {
+        throw new Error('System clipboard is unavailable');
+    }
+    transferable.init?.(null);
+    transferable.addDataFlavor(flavor);
+    clipboard.getData(transferable, clipboard.kGlobalClipboard);
+    const data = {};
+    try {
+        transferable.getTransferData(flavor, data);
+    }
+    catch {
+        return null;
+    }
+    const value = data.value?.QueryInterface?.(interfaces.nsISupportsString)
+        ?.data;
+    return typeof value === 'string' ? value : null;
 }
 
 function writeRichClipboard(components, text, html) {
