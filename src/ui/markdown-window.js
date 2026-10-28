@@ -99,6 +99,7 @@ import {
 import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
+    imageDescriptionSource,
     legacyMathEmphasisVisibleTextForRanges,
     noteMathSegmentsForRanges,
 } from '../markdown/markdown-visible-text.js';
@@ -7650,7 +7651,10 @@ class MarkdownTabView {
             markdown,
             range
         );
-        return markdown.slice(completeRange.from, completeRange.to);
+        // A figure caption lives in an image description, which doubles
+        // backslashes. The quote has to hand KaTeX the same TeX the caption
+        // shows, or `\\hat` is drawn as the word "hat".
+        return imageDescriptionSource(markdown, completeRange);
     }
 
     noteButtonAttributes(annotation, offset) {

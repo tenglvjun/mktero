@@ -1,5 +1,6 @@
 import { renderZoteroNoteHTML } from './zotero-note-html-renderer.js';
 import { findDisplayMathMatches, findInlineMathMatches } from './markdown-html.js';
+import { imageDescriptionSource } from './markdown-visible-text.js';
 
 // A copy is rendered while the copy event is dispatched, on Zotero's main
 // thread. Past these the clipboard keeps the plain Markdown only, so a
@@ -45,7 +46,9 @@ export function zoteroNoteClipboardHTML(
         return '';
     }
     try {
-        return stripPageMarkers(renderZoteroNoteHTML(slice)).trim();
+        return stripPageMarkers(renderZoteroNoteHTML(
+            imageDescriptionSource(source, range, slice)
+        )).trim();
     }
     catch {
         return '';

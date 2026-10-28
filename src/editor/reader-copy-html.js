@@ -11,7 +11,7 @@
 import { selectedMarkdownAnnotation } from './inline-rendering.js';
 import { rootSelectionFor } from './root-selection.js';
 import { tableElementToGFM } from '../markdown/markdown-table-export.js';
-import { htmlTableBlocksInRange } from '../markdown/markdown-visible-text.js';
+import { htmlTableBlocksInRange, imageDescriptionSource } from '../markdown/markdown-visible-text.js';
 import {
     portableHTMLTableRangeText,
     portableMarkdownForRange,
@@ -25,12 +25,16 @@ import {
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 const TABLE_SECTION_TAGS = new Set(['thead', 'tbody', 'tfoot']);
-// The rendered blocks the browser would copy as glyphs: formulas and tables.
+// The rendered blocks the browser would copy as glyphs: formulas, tables,
+// and a figure caption. Caption math is KaTeX inside the image widget, not a
+// CodeMirror math widget, so a drag there would otherwise copy `G^`.
 const RENDERED_COPY_BLOCKS = [
     '.cm-mktero-math',
     '.cm-mktero-math-display',
     '.cm-mktero-table',
     '.cm-mktero-html-table',
+    'figcaption',
+    '.mktero-figure-panel-label',
 ].join(', ');
 
 /**
@@ -116,19 +120,20 @@ export function readerPassageCopy(
         analyses,
     });
     if (!text?.trim()) return null;
+    // A caption range is the image description, whose extra backslash the
+    // reader has already undone. The clipboard flavors have to agree with that.
     return {
-        text: text.trim(),
+        text: imageDescriptionSource(source, range, text).trim(),
         html: zoteroNoteClipboardHTML(source, range, { chromeRanges }),
     };
 }
 
 /**
  * Both flavors of a copy CodeMirror leaves to the browser: a selection that
- * starts or ends inside a rendered formula or table, which the browser would
- * copy as its rendered glyphs. Returns `{ text, html }` with the passage's
- * Markdown source and note HTML, or null when the selection touches no
- * rendered formula or table, or does not map to the source, so the browser
- * copies it.
+ * starts or ends inside a rendered formula, table, or figure caption, which
+ * the browser would copy as its rendered glyphs. Returns `{ text, html }`
+ * with the passage's Markdown source and note HTML, or null when the
+ * selection does not map to the source, so the browser copies it.
  */
 export function renderedSelectionCopy(
     view,
