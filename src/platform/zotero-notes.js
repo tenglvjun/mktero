@@ -7,6 +7,15 @@ import {
     NOTES_UNAVAILABLE,
     summarizeNoteHTML,
 } from '../core/zotero-note-bridge.js';
+import {
+    noteMathPlaceholder,
+    replaceNoteMathPlaceholders,
+    rewriteNoteHighlightMath,
+} from '../core/zotero-note-math.js';
+import {
+    noteMathSegmentsText,
+    noteSegmentTextKey,
+} from '../markdown/markdown-visible-text.js';
 
 const MAX_LISTED_NOTES = 500;
 const MAX_NOTE_ANNOTATIONS = 5_000;
@@ -22,9 +31,19 @@ const EDITOR_INSTANCE_POLL_MS = 25;
 // `getCurrentInstance()`, `EditorInstance.insertAnnotations()`,
 // `EditorInstance.createNoteFromAnnotations()`, `Annotations.toJSON()`, and
 // `ZoteroPane.openNoteWindow()`.
+//
+// A highlight with formulas is inserted the way `insertAnnotations()` itself
+// inserts one: `serializeAnnotations()`, then the editor's `insertHTML`
+// message. Those two steps are not public API, so each is checked and a
+// missing one keeps the plain `insertAnnotations()`.
 export function createZoteroNotes(zotero, {
     getMainWindow = () => zotero?.getMainWindow?.() || null,
     isSnapshotNote = () => false,
+    parseHTML = html => {
+        const DOMParser = getMainWindow()?.DOMParser;
+        if (typeof DOMParser !== 'function') return null;
+        return new DOMParser().parseFromString(html, 'text/html');
+    },
     setTimeout = (callback, delay) => globalThis.setTimeout(callback, delay),
     clearTimeout = timer => globalThis.clearTimeout(timer),
     delay = milliseconds => new Promise(resolve => (
@@ -221,7 +240,9 @@ export function createZoteroNotes(zotero, {
                         || (parentID !== null && current.parentID !== parentID);
                 },
                 editable,
-                async insertAnnotations(annotations) {
+                // `segmentsFor(annotation, index)` may give the text and
+                // formulas of an annotation, so the note shows its formulas.
+                async insertAnnotations(annotations, { segmentsFor = null } = {}) {
                     if (!editable) {
                         throw noteBridgeError(
                             NOTE_EDITOR_UNAVAILABLE,
@@ -230,7 +251,13 @@ export function createZoteroNotes(zotero, {
                     }
                     const editorInstance = await instance();
                     editorInstance.focus?.();
-                    await editorInstance.insertAnnotations(annotations);
+                    const inserted = await insertAnnotationsWithMath(
+                        zotero,
+                        editorInstance,
+                        annotations,
+                        { segmentsFor, parseHTML }
+                    );
+                    if (!inserted) await editorInstance.insertAnnotations(annotations);
                 },
                 focus() {
                     return editor.focus?.();
@@ -297,7 +324,9 @@ export function createZoteroNotes(zotero, {
 
         // A new child note with every non-ink annotation of the PDF, the
         // same note Zotero's "Add Note from Annotations" creates.
-        async createFromAnnotations(attachmentID) {
+        // `segmentsFor(key)` may give an annotation's text and formulas; the
+        // note is then saved once more with the formulas in its highlights.
+        async createFromAnnotations(attachmentID, { segmentsFor = null } = {}) {
             const attachment = attachmentFor(attachmentID);
             const parent = parentFor(attachment);
             if (!parent) {
@@ -322,6 +351,9 @@ export function createZoteroNotes(zotero, {
                 annotations,
                 { parentID: parent.id }
             );
+            if (note && typeof segmentsFor === 'function') {
+                await rewriteSavedNoteMath(zotero, note, segmentsFor, parseHTML);
+            }
             return { noteID: note?.id ?? null };
         },
 
@@ -492,4 +524,116 @@ async function waitForEditorInstance(editor, { delay, isDestroyed }) {
         NOTE_EDITOR_UNAVAILABLE,
         'The Zotero note editor is not ready'
     );
+}
+
+// The segments `segmentsFor` gives an annotation, when their text is the
+// annotation's: a passage the reader matched loosely keeps Zotero's text.
+function verifiedSegments(segments, text) {
+    if (!Array.isArray(segments) || !segments.some(item => item?.type === 'math')) {
+        return null;
+    }
+    const expected = noteSegmentTextKey(text);
+    return expected && expected === noteSegmentTextKey(noteMathSegmentsText(segments))
+        ? segments
+        : null;
+}
+
+// Inserts `annotations` with their formulas, the way
+// `EditorInstance.insertAnnotations()` inserts them without. Returns false
+// before changing the note when the formulas cannot be inserted, so the
+// caller inserts the annotations as before.
+async function insertAnnotationsWithMath(
+    zotero,
+    editorInstance,
+    annotations,
+    { segmentsFor, parseHTML }
+) {
+    if (typeof segmentsFor !== 'function' || !Array.isArray(annotations)) {
+        return false;
+    }
+    const serialize = zotero?.EditorInstanceUtilities?.serializeAnnotations;
+    if (typeof serialize !== 'function'
+        || typeof editorInstance?._postMessage !== 'function'
+        || typeof editorInstance._ensureNoteCreated !== 'function') {
+        return false;
+    }
+    // An image is imported into the note first; leave those to Zotero.
+    if (annotations.some(annotation => annotation?.image || annotation?.type === 'image')) {
+        return false;
+    }
+    const segmentsByIndex = new Map();
+    const prepared = annotations.map((annotation, index) => {
+        let segments = null;
+        try {
+            segments = verifiedSegments(
+                segmentsFor(annotation, index),
+                annotation?.text
+            );
+        }
+        catch (error) {
+            zotero?.logError?.(error);
+        }
+        if (!segments) return annotation;
+        segmentsByIndex.set(index, segments);
+        return { ...annotation, text: noteMathPlaceholder(index) };
+    });
+    if (!segmentsByIndex.size) return false;
+    let html;
+    try {
+        const serialized = serialize.call(
+            zotero.EditorInstanceUtilities,
+            prepared
+        );
+        html = replaceNoteMathPlaceholders(
+            typeof serialized === 'string' ? serialized : String(serialized?.html || ''),
+            segmentsByIndex,
+            { parseHTML }
+        );
+    }
+    catch (error) {
+        zotero?.logError?.(error);
+        return false;
+    }
+    if (!html) return false;
+    await editorInstance._ensureNoteCreated();
+    editorInstance._postMessage({ action: 'insertHTML', pos: null, html });
+    return true;
+}
+
+// Puts formulas into the highlights of a note Zotero just created. A failure
+// leaves the note as Zotero wrote it, in memory as in the database.
+async function rewriteSavedNoteMath(zotero, note, segmentsFor, parseHTML) {
+    let original = null;
+    let changed = false;
+    try {
+        const html = String(note.getNote?.() || '');
+        if (!html) return;
+        original = html;
+        const rewritten = rewriteNoteHighlightMath(
+            html,
+            key => {
+                const segments = segmentsFor(key);
+                return Array.isArray(segments)
+                    && segments.some(item => item?.type === 'math')
+                    ? segments
+                    : null;
+            },
+            { parseHTML }
+        );
+        if (!rewritten || rewritten === html) return;
+        note.setNote(rewritten);
+        changed = true;
+        await note.saveTx();
+    }
+    catch (error) {
+        zotero?.logError?.(error);
+        if (changed && original !== null) {
+            try {
+                note.setNote(original);
+            }
+            catch (restoreError) {
+                zotero?.logError?.(restoreError);
+            }
+        }
+    }
 }

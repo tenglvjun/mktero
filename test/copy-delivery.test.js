@@ -47,14 +47,16 @@ function createDelivery({
 } = {}) {
     const timers = createTimers();
     const written = [];
+    const options = [];
     const delivery = createCopyDelivery({
         readText: async () => {
             const next = reads.shift();
             if (next instanceof Error) throw next;
             return next === undefined ? null : next;
         },
-        writeText: async text => {
+        writeText: async (text, ...rest) => {
             written.push(text);
+            options.push(rest);
             const next = writes.shift();
             if (next instanceof Error) throw next;
         },
@@ -63,7 +65,7 @@ function createDelivery({
         isActive,
         verifyDelays,
     });
-    return { delivery, timers, written };
+    return { delivery, timers, written, options };
 }
 
 test('accepts a clipboard that already holds the copied text', async () => {
@@ -100,6 +102,31 @@ test('writes again when the clipboard still holds the previous copy', async () =
     await flush(timers, 2);
     assert.equal(await result, 'repaired');
     assert.deepEqual(written, ['Copied text']);
+});
+
+test('writes the note HTML again beside the text it rewrites', async () => {
+    const { delivery, timers, written, options } = createDelivery({
+        reads: ['old copy', 'Copied $i$'],
+        verifyDelays: [40, 120],
+    });
+
+    const result = delivery.deliver({
+        text: 'Copied $i$',
+        html: '<p>Copied <span class="math">$i$</span></p>',
+        exact: true,
+    });
+    await flush(timers, 2);
+    assert.equal(await result, 'repaired');
+    assert.deepEqual(written, ['Copied $i$']);
+    assert.deepEqual(options, [[{
+        html: '<p>Copied <span class="math">$i$</span></p>',
+    }]]);
+
+    const plain = createDelivery({ reads: ['old copy', 'Plain'], verifyDelays: [40, 120] });
+    const plainResult = plain.delivery.deliver({ text: 'Plain', html: '   ' });
+    await flush(plain.timers, 2);
+    assert.equal(await plainResult, 'repaired');
+    assert.deepEqual(plain.options, [[]]);
 });
 
 test('writes before the first check when the copy event never happened', async () => {

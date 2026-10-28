@@ -297,7 +297,16 @@ function linkMarkup(node) {
 
 function mathSource(annotation) {
     const text = String(annotation.textContent || '').trim();
-    return text ? `$${text}$` : '';
+    return text ? `$${gfmCellMathSource(text)}$` : '';
+}
+
+// A `|` in a formula would end the GFM cell, and the `\|` GFM reads as an
+// escaped pipe is TeX's double bar. Their named forms typeset the same.
+function gfmCellMathSource(tex) {
+    return tex.replace(/\\\\|\\\||\|/gu, match => {
+        if (match === '\\\\') return match;
+        return match === '|' ? '\\vert ' : '\\Vert ';
+    });
 }
 
 function escapeCellText(value) {

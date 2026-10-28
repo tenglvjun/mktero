@@ -75,9 +75,12 @@ export function createCopyDelivery({
         }
     };
 
-    const write = async text => {
+    // `html` rides along when the copy carried a text/html flavor, so a
+    // rewrite puts both back; only the text is read back and compared.
+    const write = async (text, html) => {
         try {
-            await writeText(text);
+            if (html) await writeText(text, { html });
+            else await writeText(text);
             return true;
         }
         catch {
@@ -88,15 +91,16 @@ export function createCopyDelivery({
     // `exact` is true when the copy handler supplied the text itself, so the
     // clipboard must hold exactly that. Text Firefox serialized from a DOM
     // selection is compared with collapsed whitespace instead.
-    const deliver = async ({ text, exact = false, writeFirst = false } = {}) => {
+    const deliver = async ({ text, html = '', exact = false, writeFirst = false } = {}) => {
         cancel();
         if (typeof text !== 'string' || !text.trim()) return COPY_SKIPPED;
+        const richHTML = typeof html === 'string' && html.trim() ? html : '';
         const current = generation;
         const stale = () => current !== generation || !isActive();
         let rewritten = false;
         if (writeFirst) {
             if (stale()) return COPY_CANCELLED;
-            rewritten = await write(text);
+            rewritten = await write(text, richHTML);
         }
         for (let index = 0; index < verifyDelays.length; index += 1) {
             await wait(verifyDelays[index]);
@@ -109,7 +113,7 @@ export function createCopyDelivery({
             }
             const last = index === verifyDelays.length - 1;
             if (observed === UNREADABLE || last) continue;
-            rewritten = await write(text) || rewritten;
+            rewritten = await write(text, richHTML) || rewritten;
         }
         return COPY_FAILED;
     };

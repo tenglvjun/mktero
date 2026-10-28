@@ -9428,6 +9428,145 @@ test('adds a PDF annotation to the open note and refuses one that cannot', async
     }
 });
 
+test('hands a PDF annotation\'s formulas to the note it is added to', async () => {
+    const markdown = 'Mean $\\mu$ at locus $i$ here.';
+    const insertedOptions = [];
+    const createdOptions = [];
+    const model = readyNotesModel([
+        noteAnnotation({
+            id: 'HIGH0001',
+            text: 'Mean \\mu at locus i here.',
+            color: '#ffd400',
+            ranges: [{ from: 0, to: markdown.length }],
+        }),
+    ], {
+        markdown,
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 1,
+                    notes: [{ id: 4, title: 'Note' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return {
+                    noteID,
+                    editable: true,
+                    async insertAnnotations(_annotations, options) {
+                        insertedOptions.push(options);
+                    },
+                    destroy() {},
+                };
+            },
+            async annotationsForNote(ids) {
+                return [{ id: ids[0], type: 'highlight', text: 'Mean \\mu at locus i here.' }];
+            },
+            async createFromAnnotations(options) {
+                createdOptions.push(options);
+                return { noteID: null };
+            },
+        }),
+    });
+    const { view, shadow } = createView(model, {}, {
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        await flushView();
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+        shadow.querySelector(
+            '.markdown-note-add-to-note[data-annotation-id="HIGH0001"]'
+        ).click();
+        await flushView();
+
+        assert.equal(insertedOptions.length, 1);
+        const segments = insertedOptions[0].segmentsFor({ id: 'HIGH0001' });
+        assert.deepEqual(
+            segments.filter(segment => segment.type === 'math').map(segment => segment.tex),
+            ['\\mu', 'i']
+        );
+        assert.equal(insertedOptions[0].segmentsFor({ id: 'OTHER' }), null);
+
+        await view.createNoteFromAnnotations();
+        assert.equal(createdOptions.length, 1);
+        assert.equal(
+            createdOptions[0].segmentsFor('HIGH0001')
+                .filter(segment => segment.type === 'math').length,
+            2
+        );
+        assert.equal(createdOptions[0].segmentsFor('missing'), null);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('hands a selection\'s formulas to the note, unless it spans pages', async () => {
+    const markdown = 'Mean $\\mu$ at locus $i$ here.';
+    const insertedOptions = [];
+    let parts = 1;
+    const model = readyNotesModel([], {
+        markdown,
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return {
+                    status: 'ready',
+                    editable: true,
+                    annotationCount: 0,
+                    notes: [{ id: 4, title: 'Note' }],
+                };
+            },
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return {
+                    noteID,
+                    editable: true,
+                    async insertAnnotations(_annotations, options) {
+                        insertedOptions.push(options);
+                    },
+                    destroy() {},
+                };
+            },
+            async selectionForNote(draft) {
+                return Array.from({ length: parts }, () => ({
+                    type: 'highlight',
+                    text: draft.text,
+                }));
+            },
+        }),
+    });
+    const { view, shadow } = createView(model, {}, {
+        configureWindow: wideReaderWindow,
+    });
+
+    try {
+        await flushView();
+        shadow.querySelector('.mktero-zotero-note-link').click();
+        await flushView();
+        const selection = {
+            text: 'Mean \\mu at locus i here.',
+            ranges: [{ from: 0, to: markdown.length }],
+        };
+        await view.addSelectionToNote(selection, { side: 'source' });
+        const segments = insertedOptions[0].segmentsFor();
+        assert.deepEqual(
+            segments.filter(segment => segment.type === 'math').map(segment => segment.tex),
+            ['\\mu', 'i']
+        );
+
+        parts = 2;
+        await view.addSelectionToNote(selection, { side: 'source' });
+        assert.equal(insertedOptions[1].segmentsFor(), null);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('creates a note from annotations and opens it in the notes column', async () => {
     const hidden = createView(createModel({
         status: 'ready',

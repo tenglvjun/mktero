@@ -402,7 +402,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.sourceNavigation = createZoteroSourceNavigation(Zotero);
     runtime.clipboard = createZoteroClipboard(
-        typeof Components === 'undefined' ? null : Components
+        typeof Components === 'undefined' ? null : Components,
+        { onRichWriteError: error => logMkteroError(error) }
     );
     runtime.evidenceReference = createZoteroEvidenceReference(
         Zotero,
@@ -2231,8 +2232,8 @@ function createTabNotesBridge(getAttachmentID) {
             ...options,
             attachmentID: attachmentID(),
         })),
-        createFromAnnotations: logged(() => (
-            notes.createFromAnnotations(attachmentID())
+        createFromAnnotations: logged((options = {}) => (
+            notes.createFromAnnotations(attachmentID(), options)
         )),
         showInLibrary: logged(options => notes.showInLibrary(options)),
         moveToTrash: logged(options => notes.moveToTrash(options)),
@@ -3919,9 +3920,14 @@ function readerCopyDeliveryHooks() {
             }
             return runtime.clipboard.readText();
         },
-        onWriteClipboard: text => {
+        onWriteClipboard: (text, { html = '' } = {}) => {
             if (typeof runtime.clipboard?.writeText !== 'function') {
                 throw new Error('Clipboard write is unavailable');
+            }
+            // A rewrite keeps the note HTML the copy had, so a paste into a
+            // Zotero note still renders its formulas.
+            if (html && typeof runtime.clipboard.writeRich === 'function') {
+                return runtime.clipboard.writeRich({ text, html });
             }
             return runtime.clipboard.writeText(text);
         },

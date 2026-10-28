@@ -67,7 +67,8 @@ conversions for the same PDF and parser profile.
   figures, and tables, and find text in the body with `Cmd/Ctrl+F`.
 - Copy a display formula's LaTeX, a code block's text, or a table as Markdown
   or CSV without leaving the reader. These actions read the rendered document
-  and never change the cached Markdown.
+  and never change the cached Markdown. A copy from the reader, by keyboard or
+  by these actions, pastes into a Zotero note with its formulas rendered.
 - Rebuild figures from the local PDF when layout evidence, page coordinates,
   and Markdown ranges agree. Restoration runs in a background worker and
   replaces placeholders in place, so slow figures never block reading.
@@ -76,7 +77,8 @@ conversions for the same PDF and parser profile.
 
 - Display Zotero PDF highlights and underlines in Markdown, and create,
   recolor, comment on, or delete annotations. Add a passage to a Zotero note,
-  or add the paper's annotations to a new note.
+  or add the paper's annotations to a new note; the note shows the passage's
+  formulas as formulas.
 - Correct recognition errors in existing paragraphs, headings, and GFM table
   cells without modifying the immutable OCR result.
 - Translate a complete article through a configured Vercel AI SDK provider and

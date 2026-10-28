@@ -65,6 +65,12 @@
   the PDF, or a selection the local PDF index cannot locate (not found, or
   ambiguous), is refused with the reason. Mktero does not insert it without a
   source.
+- In a note, a formula added with `Add to Note` sits outside the highlight
+  beside it, so it has no highlight color and no link back to the page. A
+  passage split across pages, a formula in a table the paper carries as HTML,
+  and an annotation Mktero cannot place in the Markdown keep Zotero's plain
+  text. A `$$…$$` written inside a table cell is not typeset in the reader,
+  so it is copied as written.
 - A citation in a note opens Zotero's PDF reader, not Mktero.
 - A standalone PDF without a parent item has no child notes.
 - The note editor inside a Mktero tab is Zotero's note editor. If it cannot be

@@ -325,6 +325,39 @@ test('falls back to plain text when the rich clipboard is unavailable', async ()
     );
 });
 
+test('reports why a rich copy fell back to plain text', async () => {
+    const failure = new Error('NS_ERROR_FAILURE');
+    const throwingData = richClipboardComponents({
+        setData() {
+            throw failure;
+        },
+    });
+    const reported = [];
+    await createZoteroClipboard(throwingData.components, {
+        onRichWriteError: error => reported.push(error),
+    }).writeRich({ text: 'Evidence', html: '<p>Evidence</p>' });
+    assert.deepEqual(reported, [failure]);
+    assert.deepEqual(throwingData.copied, ['Evidence']);
+
+    const loggerFails = richClipboardComponents({
+        setData() {
+            throw failure;
+        },
+    });
+    await createZoteroClipboard(loggerFails.components, {
+        onRichWriteError() {
+            throw new Error('logger down');
+        },
+    }).writeRich({ text: 'Still copied', html: '<p>Still copied</p>' });
+    assert.deepEqual(loggerFails.copied, ['Still copied']);
+
+    const healthy = richClipboardComponents();
+    await createZoteroClipboard(healthy.components, {
+        onRichWriteError: error => reported.push(error),
+    }).writeRich({ text: 'Evidence', html: '<p>Evidence</p>' });
+    assert.equal(reported.length, 1);
+});
+
 test('falls back to plain text when a rich clipboard step throws', async () => {
     const throwingData = richClipboardComponents({
         setData() {

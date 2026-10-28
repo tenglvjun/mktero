@@ -4,7 +4,7 @@ import {
     tableElementToCSV,
     tableElementToGFM,
 } from '../markdown/markdown-table-export.js';
-import { renderZoteroNoteHTML } from '../markdown/zotero-note-html-renderer.js';
+import { zoteroNoteTableClipboardHTML } from '../markdown/zotero-note-clipboard.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
@@ -138,13 +138,7 @@ function createCopyButton(toolbar, {
 // The note renderer is the sanitizer. A throw, or HTML with no table, keeps
 // the Markdown text and omits the HTML flavor.
 function zoteroNoteTableHTML(markdown) {
-    try {
-        const html = renderZoteroNoteHTML(markdown);
-        return typeof html === 'string' && /<table\b/i.test(html) ? html : '';
-    }
-    catch {
-        return '';
-    }
+    return zoteroNoteTableClipboardHTML(markdown);
 }
 
 function resetCopyButton(button, translate, labelKey) {
