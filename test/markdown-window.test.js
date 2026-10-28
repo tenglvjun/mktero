@@ -5,6 +5,7 @@ import { parseHTML } from 'linkedom';
 import { createLocalization } from '../src/i18n/localization.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
 import { createEvidenceSnippet } from '../src/markdown/markdown-evidence.js';
+import { renderInlineMathTextHTML } from '../src/markdown/markdown-html.js';
 import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
 import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.js';
 import {
@@ -8477,6 +8478,38 @@ test('annotationQuoteText falls back to saved text when markdown is empty', () =
     const { view } = createView();
     const quoteText = view.annotationQuoteText(annotation, 0, '');
     assert.equal(quoteText, 'saved text');
+});
+
+test('annotationQuoteText typesets a caption formula the way the reader does', () => {
+    const markdown = String.raw`![Figure 1. point $\\hat{G}$ and the deviation $P - \\hat{G}$ isolates.](figures/fig.png)`;
+    const from = markdown.indexOf('point');
+    const to = markdown.indexOf('isolates.') + 'isolates'.length;
+    const { view } = createView();
+    const quoteText = view.annotationQuoteText({
+        text: String.raw`point \\hat{G} and the deviation P - \\hat{G} isolates`,
+        ranges: [{ from, to }],
+    }, markdown.length, markdown);
+    const html = renderInlineMathTextHTML(quoteText);
+
+    assert.equal(
+        quoteText,
+        String.raw`point $\hat{G}$ and the deviation $P - \hat{G}$ isolates`
+    );
+    assert.match(html, /application\/x-tex">\\hat\{G\}<\/annotation>/u);
+    assert.match(html, /application\/x-tex">P - \\hat\{G\}<\/annotation>/u);
+    assert.doesNotMatch(html, /application\/x-tex">hat\{G\}<\/annotation>/u);
+});
+
+test('annotationQuoteText keeps a TeX row break that is not image escaping', () => {
+    const markdown = String.raw`Rows $a \\ b$ stay.`;
+    const { view } = createView();
+    assert.equal(
+        view.annotationQuoteText({
+            text: 'ignored',
+            ranges: [{ from: 0, to: markdown.length }],
+        }, markdown.length, markdown),
+        markdown
+    );
 });
 
 function createAnnotationWindow(changes = {}, options = {}) {

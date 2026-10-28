@@ -121,6 +121,7 @@ function highlightAnnotationKey(span) {
 // inserted are the ones the reader shows now.
 function highlightAffixes(spanText, segments) {
     return affixesForExpected(spanText, noteMathSegmentsText(segments))
+        || affixesForExpected(spanText, segments?.readerSavedText)
         || affixesForExpected(spanText, segments?.legacySavedText);
 }
 

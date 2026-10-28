@@ -304,9 +304,16 @@ export function noteMathSegmentsForRanges(
         let cursor = range.from;
         for (const formula of index.formulasInRange(range.from, range.to)) {
             // Every formula checked counts, typeset or not, so a passage of
-            // broken TeX cannot run KaTeX without end.
+            // broken TeX cannot run KaTeX without end. An image description
+            // doubles every backslash; the reader typesets the undone form.
+            // `source` stays doubled so a highlight saved from the alt still
+            // matches. Feeding the doubled form to KaTeX makes a leading
+            // doubled backslash a row break and drops the command.
+            const readerTex = index.insideImage(formula.from, formula.to)
+                ? unescapeImageMathText(formula.tex)
+                : formula.tex;
             const tex = formulaCount++ < MAX_NOTE_FORMULAS
-                ? zoteroNoteMathSource(formula.tex, formula.display)
+                ? zoteroNoteMathSource(readerTex, formula.display)
                 : null;
             if (cursor < formula.from) {
                 parts.push({ type: 'text', range: { from: cursor, to: formula.from } });
@@ -355,7 +362,13 @@ export function noteMathSegmentsForRanges(
         previous = range;
     }
     if (!segments.some(segment => segment.type === 'math')) return null;
-    return trimNoteSegments(segments);
+    const trimmed = trimNoteSegments(segments);
+    // A caption selection saves the undone TeX. Keep it beside the doubled
+    // source so either saved text still names this passage.
+    const raw = noteMathSegmentsText(trimmed);
+    const reader = unescapeImageMathText(raw);
+    if (reader !== raw) trimmed.readerSavedText = reader;
+    return trimmed;
 }
 
 // The text a reader saw for `segments`: each formula as the TeX the source
@@ -646,6 +659,26 @@ function visibleRangeText(source, index, range) {
 // The reader collapses the escaping an image description gives a formula.
 export function unescapeImageMathText(value) {
     return String(value).replace(/\\\\/gu, '\\');
+}
+
+// The source of `range` as the reader typesets it. An image description
+// stores a doubled backslash for each TeX backslash; undoing that here is
+// what the caption renderer does before KaTeX. A real TeX row break outside
+// an image is left alone. `text` is the slice when page chrome has already
+// been removed from it.
+export function imageDescriptionSource(markdown, range, text = null) {
+    const source = String(markdown || '');
+    const slice = text == null
+        ? validSourceRange(range, source.length)
+            ? source.slice(range.from, range.to)
+            : ''
+        : String(text);
+    if (!slice.includes('\\\\') || !validSourceRange(range, source.length)) {
+        return slice;
+    }
+    return visibleIndexFor(source).insideImage(range.from, range.to)
+        ? unescapeImageMathText(slice)
+        : slice;
 }
 
 function visibleTextForMarkdownSlice(source) {

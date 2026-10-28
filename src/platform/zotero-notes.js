@@ -754,12 +754,18 @@ function verifiedSegments(segments, text) {
     }
     const saved = noteSegmentTextKey(text);
     if (!saved) return null;
-    const current = noteSegmentTextKey(noteMathSegmentsText(segments));
-    if (saved === current) return segments;
-    // `legacySavedText` is the text this passage was saved as while a formula
-    // subscript was hidden as emphasis. It is not derived by deleting every `_`.
-    const legacy = noteSegmentTextKey(segments.legacySavedText);
-    return legacy && saved === legacy ? segments : null;
+    // `readerSavedText` is the same passage after an image description's
+    // doubled backslash is undone, which is what a caption selection saves.
+    // `legacySavedText` is the text saved while a formula subscript was
+    // hidden as emphasis. Neither is derived by deleting every `_` or `\`.
+    const accepted = [
+        noteMathSegmentsText(segments),
+        segments.readerSavedText,
+        segments.legacySavedText,
+    ];
+    return accepted.some(value => noteSegmentTextKey(value) === saved)
+        ? segments
+        : null;
 }
 
 // Inserts `annotations` with their formulas, the way

@@ -57,6 +57,17 @@ function selectNodeContents(window, node) {
     return range;
 }
 
+test('note HTML of a figure caption typesets the formula the reader shows', () => {
+    const markdown = String.raw`![Figure 1. point $\\hat{G}$ and $P - \\hat{G}$ isolates.](figures/fig.png)`;
+    const from = markdown.indexOf('point');
+    const to = markdown.indexOf('isolates.') + 'isolates'.length;
+    const html = zoteroNoteClipboardHTML(markdown, { from, to });
+
+    assert.match(html, /<span class="math">\$\\hat\{G\}\$<\/span>/u);
+    assert.match(html, /<span class="math">\$P - \\hat\{G\}\$<\/span>/u);
+    assert.doesNotMatch(html, />\$hat\{G\}\$</u);
+});
+
 test('note HTML of a passage keeps every formula, single letters included', () => {
     const markdown = `# Title\n\n${PASSAGE}\n`;
     const from = markdown.indexOf('where');

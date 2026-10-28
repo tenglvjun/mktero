@@ -55,6 +55,41 @@ test('splits a passage into its text and the formulas the reader typesets', () =
     );
 });
 
+test('typesets a figure-caption formula as the reader shows it', () => {
+    const markdown = String.raw`![Figure 1. point $\\hat{G}$ and the deviation $P - \\hat{G}$ isolates.](figures/fig.png)`;
+    const from = markdown.indexOf('point');
+    const to = markdown.indexOf('isolates.') + 'isolates'.length;
+    const segments = noteMathSegmentsForRanges(markdown, [{ from, to }]);
+    const formulas = segments.filter(segment => segment.type === 'math');
+
+    assert.deepEqual(formulas.map(segment => segment.tex), [
+        String.raw`\hat{G}`,
+        String.raw`P - \hat{G}`,
+    ]);
+    assert.deepEqual(formulas.map(segment => segment.source), [
+        String.raw`\\hat{G}`,
+        String.raw`P - \\hat{G}`,
+    ]);
+    assert.equal(
+        noteSegmentTextKey(noteMathSegmentsText(segments)),
+        noteSegmentTextKey(String.raw`point \\hat{G} and the deviation P - \\hat{G} isolates`)
+    );
+    assert.equal(
+        noteSegmentTextKey(segments.readerSavedText),
+        noteSegmentTextKey(String.raw`point \hat{G} and the deviation P - \hat{G} isolates`)
+    );
+
+    const html = replaceNoteMathPlaceholders(
+        `<p><span class="highlight" data-annotation="${ANNOTATION}">`
+            + `${noteMathPlaceholder(0)}</span></p>`,
+        new Map([[0, segments]]),
+        { parseHTML }
+    );
+    assert.match(html, /<span class="math">\$\\hat\{G\}\$<\/span>/u);
+    assert.match(html, /<span class="math">\$P - \\hat\{G\}\$<\/span>/u);
+    assert.doesNotMatch(html, />\$hat\{G\}\$</u);
+});
+
 test('keeps a display formula as a block segment, ending at its closing $$', () => {
     const formula = '$$\n\\hat{G} = \\mu + \\sum_{i = 1}^{n} \\beta_{i} g_{i} \\tag{2}\n$$';
     const markdown = `Before.\n\n${formula}\n\nAfter.`;
