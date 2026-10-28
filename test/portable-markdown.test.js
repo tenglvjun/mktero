@@ -169,10 +169,11 @@ test('a selection inside an HTML table reads as its cell text with formulas', ()
 });
 
 test('inline formulas in plain text are rewritten and the text around them escaped', () => {
+    // The escape is the caller's; this one is a Markdown writer's, which
+    // escapes a backslash as well as the character behind it.
+    const escapeText = value => value.replace(/[\\*]/gu, character => `\\${character}`);
     assert.equal(
-        portableInlineFormulas('Error *of* $\\alpha _ {t}$!', {
-            escapeText: value => value.replace(/\*/gu, '\\*'),
-        }),
+        portableInlineFormulas('Error *of* $\\alpha _ {t}$!', { escapeText }),
         'Error \\*of\\* $\\alpha _{t}$!'
     );
     assert.equal(portableInlineFormulas('No math.'), 'No math.');
