@@ -105,6 +105,7 @@ export function analyzeMarkdownCitations(markdown) {
     return {
         references,
         affiliations: frontMatter.affiliations,
+        affiliationMarkers: frontMatter.affiliationMarkers,
         citations: removeOverlappingCitations(citations),
     };
 }
@@ -128,6 +129,7 @@ function analyzeFrontMatter(markdown, bodyEnd) {
         );
         return {
             affiliations: [],
+            affiliationMarkers: [],
             citations: [],
             bodyFrom: inferredBodyFrom ?? detectedBodyFrom ?? 0,
         };
@@ -157,6 +159,7 @@ function analyzeFrontMatter(markdown, bodyEnd) {
     // prose.
     return {
         affiliations: definition.affiliations,
+        affiliationMarkers: definition.affiliationMarkers,
         citations,
         bodyFrom: Math.min(detectedBodyFrom ?? Infinity, definition.affiliationAreaEnd),
     };
@@ -378,6 +381,10 @@ function parseAffiliations(markdown, frontMatterEnd) {
     ).values()];
     return {
         affiliations: unique,
+        // Every definition, including repeats of the same marker. A bilingual
+        // view lists the affiliations twice (source, then translation); the
+        // repeat must still have its superscript markup rendered.
+        affiliationMarkers: affiliations,
         authorAreaEnd: definitionRanges.length
             ? Math.min(...definitionRanges.map(range => range.from))
             : frontMatterEnd,

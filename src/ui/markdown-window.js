@@ -7196,7 +7196,9 @@ class MarkdownTabView {
         this.renderNoteListChrome(view);
         const list = this.elements.notesList;
         list.replaceChildren();
-        const markdown = this.model?.markdown || '';
+        // The overlay's ranges are in the displayed document's coordinates:
+        // the bilingual view maps them into the comparison Markdown.
+        const markdown = this.renderedMarkdown || '';
         if (!view.totalCount) {
             list.appendChild(this.createNotesEmpty('none'));
         }

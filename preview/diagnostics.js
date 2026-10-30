@@ -251,6 +251,26 @@ export function createSelfTest(context) {
             if (model().markdown !== markdown) throw new Error('Restore did not return the original Markdown');
             return { markerShown: true, annotationsAfterCorrection: matched };
         }],
+        ['close-tab', async () => {
+            const rendered = key => {
+                const tab = window.document.querySelector(`.window-tab[data-tab="${key}"]`);
+                return Boolean(tab) && tab.getClientRects().length > 0;
+            };
+            shell.activate('reader');
+            const close = window.document.querySelector('[data-close="pdf"]');
+            if (!close) throw new Error('PDF tab has no close button');
+            close.click();
+            await delay(window, 60);
+            const closedShown = rendered('pdf');
+            const readerShown = rendered('reader');
+            shell.activate('pdf');
+            shell.activate('reader');
+            await delay(window, 120);
+            if (closedShown) throw new Error('Closed PDF tab is still in the tab bar');
+            if (!readerShown) throw new Error('Reader tab disappeared after closing the PDF tab');
+            if (!rendered('pdf')) throw new Error('PDF tab did not come back after reopening');
+            return { closedTabHidden: true };
+        }],
     ];
 
     return async function selfTest({ only = null } = {}) {

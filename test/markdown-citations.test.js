@@ -1159,6 +1159,41 @@ test('maps author superscripts to affiliations without stealing body references'
     );
 });
 
+test('keeps the markers of an affiliation list that is repeated by a bilingual view', () => {
+    const markdown = [
+        '# Learning Reading Order',
+        '',
+        '# 学习阅读顺序',
+        '',
+        'Maren Lindqvist<sup>1</sup>, Daniel Okafor<sup>1,2</sup>',
+        '',
+        '<sup>1</sup> Department of Computer Science  <sup>2</sup> Institute for Document Intelligence',
+        '',
+        '<sup>1</sup> 计算机科学系  <sup>2</sup> 文档智能研究所',
+        '',
+        '## Abstract',
+        '',
+        'Body text.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => affiliation.id),
+        ['affiliation:1', 'affiliation:2']
+    );
+    const sourceLine = markdown.indexOf('<sup>1</sup> Department');
+    const translatedLine = markdown.indexOf('<sup>1</sup> 计算机');
+    assert.deepEqual(
+        result.affiliationMarkers.map(marker => [
+            marker.label,
+            marker.markerMarkup.wrapperFrom < translatedLine ? 'source' : 'translation',
+        ]),
+        [['1', 'source'], ['2', 'source'], ['1', 'translation'], ['2', 'translation']]
+    );
+    assert.equal(result.affiliationMarkers[0].markerMarkup.wrapperFrom, sourceLine);
+});
+
 test('keeps citations of prose that opens before the first section heading', () => {
     const markdown = [
         '# Modelling cycle length in athletes',

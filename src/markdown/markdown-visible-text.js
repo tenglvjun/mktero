@@ -1255,7 +1255,8 @@ function appendHTMLSuperscriptWrappers(
         ]);
     const markups = [
         ...citations.citations.map(citation => citation.superscriptMarkup),
-        ...citations.affiliations.map(affiliation => affiliation.markerMarkup),
+        ...citations.affiliationMarkers
+            .map(affiliation => affiliation.markerMarkup),
     ];
     for (const markup of markups) {
         if (!markup?.raiseContent

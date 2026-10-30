@@ -1906,7 +1906,7 @@ function decorateCitations(state, decorations, context) {
     const footnoteRanges = context.footnoteOwnedRanges;
     const hiddenSuperscriptMarkup = new Set();
     const superscriptContent = new Map();
-    for (const affiliation of result.affiliations) {
+    for (const affiliation of result.affiliationMarkers) {
         const markup = affiliation.markerMarkup;
         if (!markup
             || rangesOverlapEditing(affiliation, context)
@@ -3877,7 +3877,8 @@ function authorNoteLatexClassName(state, context, from, to) {
     const result = citationAnalysis(state, context);
     const markups = [
         ...result.citations.map(citation => citation.superscriptMarkup),
-        ...result.affiliations.map(affiliation => affiliation.markerMarkup),
+        ...result.affiliationMarkers
+            .map(affiliation => affiliation.markerMarkup),
     ].filter(Boolean);
     for (const markup of markups) {
         if (!markup.raiseContent) continue;
@@ -3896,7 +3897,7 @@ function hasSuperscriptCitationMarkup(state, context, from, to) {
     return result.citations.some(citation => (
         citation.superscriptMarkup?.wrapperFrom === from
             && citation.superscriptMarkup.wrapperTo === to
-    )) || result.affiliations.some(affiliation => (
+    )) || result.affiliationMarkers.some(affiliation => (
         affiliation.markerMarkup?.wrapperFrom === from
             && affiliation.markerMarkup.wrapperTo === to
     ));
