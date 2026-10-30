@@ -5866,6 +5866,72 @@ test('renders inline math in outline headings and note quotes', () => {
     }
 });
 
+test('quotes the highlighted source text in the bilingual view', () => {
+    const markdown = 'First paragraph.\n\nSecond paragraph with a highlight.';
+    const highlight = 'a highlight';
+    const from = markdown.indexOf(highlight);
+    const comparisonMarkdown = [
+        'First paragraph.',
+        '第一段。',
+        'Second paragraph with a highlight.',
+        '第二段，带高亮。',
+    ].join('\n\n');
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+        annotationOverlay: {
+            matched: [{
+                id: 'note-compare',
+                source: 'pdf',
+                type: 'highlight',
+                text: highlight,
+                comment: '',
+                color: '#ffd400',
+                ranges: [{ from, to: from + highlight.length }],
+            }],
+            unmatched: [],
+        },
+        translationStatus: 'ready',
+        translationView: 'original',
+        translationTargetLanguage: 'zh-CN',
+        translatedMarkdown: '第一段。\n\n第二段，带高亮。',
+        comparisonMarkdown,
+        translationBlockRanges: [{
+            id: 'first',
+            sourceFrom: 0,
+            sourceTo: 16,
+            translatedFrom: 0,
+            translatedTo: 4,
+            comparisonSourceFrom: 0,
+            comparisonSourceTo: 16,
+            comparisonTranslationFrom: 18,
+            comparisonTranslationTo: 22,
+        }, {
+            id: 'second',
+            sourceFrom: 18,
+            sourceTo: markdown.length,
+            translatedFrom: 6,
+            translatedTo: 14,
+            comparisonSourceFrom: 24,
+            comparisonSourceTo: 24 + markdown.length - 18,
+            comparisonTranslationFrom: 26 + markdown.length - 18,
+            comparisonTranslationTo: comparisonMarkdown.length,
+        }],
+    });
+    const { view, shadow } = createView(model);
+    try {
+        const quote = () => shadow.querySelector('.markdown-note-quote')?.textContent;
+        assert.equal(quote(), highlight);
+        view.render({ ...model, translationView: 'compare' });
+        assert.equal(quote(), highlight);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('keeps outline headings and quotes without math as plain text', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',
