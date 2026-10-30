@@ -6363,6 +6363,43 @@ test('shows author affiliations instead of references for front-matter superscri
     dom.window.close();
 });
 
+test('renders the superscripts of both affiliation lines in a bilingual view', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Learning Reading Order',
+        '',
+        '# 学习阅读顺序',
+        '',
+        'Maren Lindqvist<sup>1</sup>, Daniel Okafor<sup>1,2</sup>',
+        '',
+        '<sup>1</sup> Department of Computer Science  <sup>2</sup> Institute for Document Intelligence',
+        '',
+        '<sup>1</sup> 计算机科学系  <sup>2</sup> 文档智能研究所',
+        '',
+        '## Abstract',
+        '',
+        'Body text.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+
+    const markers = [...document.querySelectorAll('.cm-mktero-affiliation-marker')];
+    assert.deepEqual(markers.map(marker => marker.textContent), ['1', '2', '1', '2']);
+    assert.doesNotMatch(
+        document.querySelector('.cm-content')?.textContent || '',
+        /<\/?sup>/
+    );
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('does not offer reference import for author affiliation popups', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
