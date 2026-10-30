@@ -24,6 +24,13 @@
     --shadow: 0 18px 48px rgb(15 23 42 / 22%), 0 2px 8px rgb(15 23 42 / 12%);
 }
 
+/* A display rule on a class (.window-tab is flex) would otherwise override
+   [hidden], so a closed tab stayed in the tab bar. ui/markdown.css does the
+   same inside the reader. */
+[hidden] {
+    display: none !important;
+}
+
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
         color-scheme: dark;
