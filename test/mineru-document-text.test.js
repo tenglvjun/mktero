@@ -32,6 +32,17 @@ test('escapes Markdown syntax in OCR text', () => {
     assert.equal(escapeMarkdownText('~~a~~ ~5'), '\\~~a\\~~ ~5');
 });
 
+test('does not escape legal URL underscores in OCR text', () => {
+    assert.equal(
+        escapeMarkdownText('https://reverie.herokuapp.com/UIST_Demo/'),
+        'https://reverie.herokuapp.com/UIST_Demo/'
+    );
+    assert.equal(
+        escapeMarkdownText('github.com/joonspk-research/generative_agents'),
+        'github.com/joonspk-research/generative_agents'
+    );
+    assert.equal(escapeMarkdownText('ordinary a_b text'), 'ordinary a\\_b text');
+});
 test('escapes block syntax only at the start of a paragraph', () => {
     assert.equal(escapeLineStart('# 1'), '\\# 1');
     assert.equal(escapeLineStart('> quote'), '\\> quote');

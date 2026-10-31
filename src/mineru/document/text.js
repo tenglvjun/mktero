@@ -1,4 +1,5 @@
 import { spansText } from './ir.js';
+import { normalizeMarkdownLinkURL } from '../../markdown/markdown-links.js';
 
 const WORD = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu;
 const TRAILING_HYPHEN_WORD = /([\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)-$/u;
@@ -90,6 +91,10 @@ const STANDALONE_ADDRESS = new RegExp(
     `^(?:www\\.${HOST_LABEL}+[a-z]{2,}(?:${URL_PATH})?|${HOST_LABEL}+[a-z]{2,}${URL_PATH})$`,
     'iu'
 );
+const URL_TEXT = new RegExp(
+    `(?:https?:\\/\\/|www\\.)[^\\s<>"'()[\\]]+|${HOST_LABEL}+[a-z]{2,}\\/[^\\s<>"'()[\\]]+`,
+    'giu'
+);
 const NO_SPACE_BEFORE = /^[.,;:!?%)\]}’”»，。；：！？、）】]/u;
 const NO_SPACE_AFTER = /[([{‘“«（【]$/u;
 
@@ -111,8 +116,9 @@ export function normalizeOCRText(text) {
 
 // Escapes text so Markdown reads it literally. Math is never passed here.
 // Brackets stay as written except where they would form a link or image,
-// so numeric citations such as "[12]" keep their source form.
-export function escapeMarkdownText(text) {
+// so numeric citations such as "[12]" keep their source form. URL tokens are
+// handled separately because Markdown escapes must not enter their href.
+function escapeMarkdownTextSegment(text) {
     let output = '';
     const source = String(text || '');
     for (let index = 0; index < source.length; index++) {
@@ -133,6 +139,27 @@ export function escapeMarkdownText(text) {
         else output += character;
     }
     return output;
+}
+
+function escapeMarkdownURL(text) {
+    // URL data is not Markdown prose. Normalize older escaped output first,
+    // then keep legal URL punctuation such as '_' out of the Markdown escape
+    // path so it cannot leak into the href. Other syntax characters remain
+    // escaped to keep URL-like text such as `/$x$` out of inline math.
+    return escapeMarkdownTextSegment(normalizeMarkdownLinkURL(text))
+        .replaceAll('\\_', '_');
+}
+
+export function escapeMarkdownText(text) {
+    const source = String(text || '');
+    let output = '';
+    let cursor = 0;
+    for (const match of source.matchAll(URL_TEXT)) {
+        output += escapeMarkdownTextSegment(source.slice(cursor, match.index));
+        output += escapeMarkdownURL(match[0]);
+        cursor = match.index + match[0].length;
+    }
+    return output + escapeMarkdownTextSegment(source.slice(cursor));
 }
 
 // Escapes what would start a Markdown block at the beginning of a line:

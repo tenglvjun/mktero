@@ -5,6 +5,7 @@ import {
     findInlineMathMatches,
     renderInlineMathTextHTML,
     renderMarkdownHTML,
+    safeMarkdownLinkURL,
 } from '../src/markdown/markdown-html.js';
 import { parseFigureLayoutMarker } from '../src/markdown/markdown-figures.js';
 
@@ -522,6 +523,14 @@ test('renders code blocks whose content contains a shorter fence', () => {
     );
 });
 
+test('normalizes Markdown escapes in legacy URL destinations', () => {
+    const legacy = 'https://reverie.herokuapp.com/UIST\\_Demo/';
+    assert.equal(safeMarkdownLinkURL(legacy), 'https://reverie.herokuapp.com/UIST_Demo/');
+    assert.match(
+        renderMarkdownHTML(`[demo](${legacy})`),
+        /href="https:\/\/reverie\.herokuapp\.com\/UIST_Demo\/"/u
+    );
+});
 test('preserves query parameters in safe links', () => {
     assert.equal(
         renderMarkdownHTML('[search](https://example.com/?a=1&b=2)'),
