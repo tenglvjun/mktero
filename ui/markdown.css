@@ -5072,6 +5072,8 @@ blockquote.mktero-note,
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-display {
     display: flow-root;
+    width: 100%;
+    box-sizing: border-box;
     overflow-x: auto;
     padding: 16px 14px;
     border-radius: var(--radius-md);
@@ -5183,6 +5185,31 @@ blockquote.mktero-note,
     margin: 24px 0;
 }
 
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged {
+    position: relative;
+    width: 100%;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math {
+    width: 100%;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable {
+    width: 100%;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable > mtr > mtd:last-child {
+    display: none;
+}
+
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged .math-display-equation-number {
+    position: absolute;
+    top: 50%;
+    inset-inline-end: 0;
+    transform: translateY(-50%);
+    white-space: nowrap;
+}
+
 .markdown-editor-host > .cm-editor .cm-mktero-math math {
     font-size: 1em;
 }
@@ -5195,7 +5222,9 @@ blockquote.mktero-note,
 }
 
 .markdown-editor-host > .cm-editor .cm-mktero-math-display > .cm-mktero-pdf-annotation {
-    display: inline-block;
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
     max-width: 100%;
     padding: 0.2em 0.75em;
     border-radius: 6px;
