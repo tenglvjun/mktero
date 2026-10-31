@@ -33,7 +33,7 @@ function environment(overrides = {}) {
             },
             parser: {
                 figurePipeline: 'figure-region-v17',
-                documentPipeline: 'mineru-document-ir-v10',
+                documentPipeline: 'mineru-document-ir-v11',
                 profileSha256: '0123456789ab',
             },
         },

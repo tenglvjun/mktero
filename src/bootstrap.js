@@ -697,14 +697,16 @@ globalThis.startup = async function startup({ id, rootURI }) {
     // fonts. It is the annotation locator's index, so it is built once per
     // PDF; when it cannot be built the document keeps block geometry.
     const readPDFText = async context => {
-        if (!context?.fileData || !runtime.pdfAnnotationLocator?.indexFileData) return null;
+        if (!context?.fileData || !runtime.pdfAnnotationLocator?.indexFileData) {
+            return { pages: [], linkAnnotationsComplete: false };
+        }
         try {
             return await runtime.pdfAnnotationLocator.indexFileData(context.fileData, { signal: context.signal });
         }
         catch (error) {
             if (error?.name === 'AbortError' || context.signal?.aborted) throw error;
             debugMktero(`Mktero: PDF text geometry unavailable (${error?.name || 'Error'})`);
-            return null;
+            return { pages: [], linkAnnotationsComplete: false };
         }
     };
     // Only the MinerU decoder reads the conversion context.

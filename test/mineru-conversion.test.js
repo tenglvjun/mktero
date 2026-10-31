@@ -22,6 +22,7 @@ import {
 import { MinerUPendingTaskStore } from '../src/mineru/pending-task-store.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_DOCUMENT_IR_V10_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID,
@@ -656,6 +657,38 @@ test('reuses a user-edited cache entry even when reuse is disabled', async () =>
     assert.equal(result.result, cached);
 });
 
+test('reparses an incomplete-link cache entry rather than returning it', async () => {
+    let submissions = 0;
+    let cacheWrites = 0;
+    const conversion = new MinerUConversion({
+        client: {
+            async submit() {
+                submissions++;
+                return { batchID: 'batch-retry-links', dataID: 'mktero-retry-links', fileName: 'paper.pdf' };
+            },
+            async collect() { return { markdown: '# Reparsed result' }; },
+        },
+        pendingTasks: createMemoryPendingTasks(),
+        cache: {
+            async get() { return { markdown: '# Incomplete cached result', pdfLinksIncomplete: true }; },
+            async put() { cacheWrites++; },
+        },
+        createDataID: () => 'mktero-retry-links',
+        now: () => 1_700_000_000_000,
+    });
+
+    const result = await conversion.convert({
+        key: CONVERSION_KEY,
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+
+    assert.equal(result.result.markdown, '# Reparsed result');
+    assert.equal(submissions, 1);
+    assert.equal(cacheWrites, 1);
+});
 test('returns a successful result with a warning when cache writing fails', async () => {
     const cacheError = new Error('disk full');
     const reported = [];
@@ -1220,12 +1253,13 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
     assert.deepEqual(JSON.parse(MINERU_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
         file: { is_ocr: true },
-        document: 'mineru-document-ir-v10',
+        document: 'mineru-document-ir-v11',
         figureStructure: 'figure-region-v17',
     });
     assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v17/);
     assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, []);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V10_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID), true);
     assert.equal(JSON.parse(MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID).sourceMap.figureStructure, 'figure-region-v17');
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID), true);

@@ -37,6 +37,39 @@ test('persists PDF text indexes and reports their local cache usage', async t =>
     });
 });
 
+test('persists safe native links and rejects unsafe link cache records', async t => {
+    const fixture = await createCacheFixture(t);
+    const key = '9'.repeat(64);
+    const index = createIndex('Selected text');
+    index.pages[0].links = [{ url: 'https://example.org/paper_v2', rects: [[100, 100, 400, 300]] }];
+
+    await fixture.cache.put(key, index);
+    assert.deepEqual((await fixture.cache.get(key)).pages[0].links, index.pages[0].links);
+    assert.throws(
+        () => fixture.cache.put('7'.repeat(64), {
+            ...createIndex('Selected text'),
+            profile: 'pdfjs-test|text-v12',
+        }),
+        /Invalid PDF link annotations/
+    );
+    assert.throws(
+        () => fixture.cache.put('8'.repeat(64), {
+            ...index,
+            pages: [{ ...index.pages[0], links: [{ url: 'javascript:alert(1)', rects: [[100, 100, 400, 300]] }] }],
+        }),
+        /Invalid PDF link annotations/
+    );
+    const incomplete = {
+        ...createIndex('Selected text'),
+        profile: 'pdfjs-test|text-v12',
+        linkAnnotationsComplete: false,
+    };
+    assert.throws(
+        () => fixture.cache.put('6'.repeat(64), incomplete),
+        /Incomplete PDF link annotations/
+    );
+});
+
 test('removes a corrupted PDF text index instead of returning it', async t => {
     const fixture = await createCacheFixture(t);
     const cacheKey = 'b'.repeat(64);

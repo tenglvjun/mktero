@@ -67,6 +67,31 @@ test('stores a fresh local result and does not keep figure layout', async () => 
     assert.equal(stored[0].result.figureMap, undefined);
 });
 
+test('reparses a local incomplete-link cache entry instead of reusing it', async () => {
+    let parses = 0;
+    const conversion = new MinerULocalConversion({
+        client: {
+            async parse() {
+                parses++;
+                return { markdown: '# Reparsed local result' };
+            },
+        },
+        cache: {
+            async get() { return { markdown: '# Incomplete local result', pdfLinksIncomplete: true }; },
+            async put() {},
+        },
+    });
+
+    const result = await conversion.convert({
+        key: 'd'.repeat(64),
+        apiBase: 'http://127.0.0.1:8000',
+        fileData: new Uint8Array([1]),
+        cacheEnabled: true,
+    });
+
+    assert.equal(result.result.markdown, '# Reparsed local result');
+    assert.equal(parses, 1);
+});
 test('readCached returns null without parsing when the local cache has no entry', async () => {
     const calls = { submit: 0, parse: 0, collect: 0 };
     const conversion = new MinerULocalConversion({
@@ -133,6 +158,7 @@ test('the local parser profile records its document pipeline and keeps the shipp
     assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).document, MINERU_DOCUMENT_PIPELINE);
     assert.deepEqual(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
         [
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v10"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v9"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v8"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-markdown-v1"}',

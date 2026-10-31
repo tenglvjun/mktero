@@ -44,6 +44,10 @@ export function safeMinerULinkURL(value) {
     return /[\s"'<>]/u.test(raw) ? parsed.href : raw;
 }
 
+export function safePDFLinkURL(value) {
+    return safeMinerULinkURL(value);
+}
+
 export function escapeMarkdownLinkDestination(value) {
     const url = safeMarkdownLinkURL(value);
     return url ? escapeLinkDestination(url) : null;

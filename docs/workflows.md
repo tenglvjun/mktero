@@ -8,8 +8,9 @@ OCR content mappings connect Markdown blocks to physical PDF pages and
 regions. Source links and source-aware copy use those mappings when they are
 reliable; Mktero does not guess a location when a match is ambiguous. Selecting
 PDF text offers `Open in Markdown` when that PDF already has a readable cache.
-MinerU-provided safe HTTP(S) hyperlinks keep their original destinations,
-including underscores in URLs; missing or unsafe targets remain ordinary text.
+PDF-native safe HTTP(S) link annotations and MinerU-provided hyperlinks keep
+their original destinations, including underscores in URLs; missing or unsafe
+targets remain ordinary text.
 A unique source region focuses the Markdown paragraph. If no region overlaps
 the selection, a passage that occurs in exactly one cached paragraph still opens.
 A complete translation

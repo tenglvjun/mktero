@@ -1,6 +1,10 @@
 import {
     createDehyphenatedPdfAnnotationTextIndex,
 } from '../markdown/pdf-annotation-text.js';
+import {
+    PDF_LINK_ANNOTATION_LIMITS,
+    validatePDFLink,
+} from '../pdf/pdf-link-annotations.js';
 import { validatePdfOutline } from '../pdf/pdf-outline.js';
 
 const CACHE_SCHEMA_VERSION = 1;
@@ -291,10 +295,15 @@ export function validatePDFTextIndex(index) {
     if (typeof index?.profile !== 'string'
         || !index.profile
         || index.profile.length > 256
+        || index.linkAnnotationsComplete !== undefined
+            && typeof index.linkAnnotationsComplete !== 'boolean'
         || !Array.isArray(index.pages)
         || !index.pages.length
         || index.pages.length > MAX_PAGES) {
         throw new Error('Invalid PDF text index');
+    }
+    if (index.linkAnnotationsComplete === false) {
+        throw new Error('Incomplete PDF link annotations');
     }
     let totalTextLength = 0;
     let totalItems = 0;
@@ -321,6 +330,12 @@ export function validatePDFTextIndex(index) {
             throw new Error('PDF text index exceeds the safety limit');
         }
         for (const item of page.items) validateTextItem(item, page.rawText);
+        if ((index.profile.endsWith('|text-v12') && !Array.isArray(page.links))
+            || page.links !== undefined && (!Array.isArray(page.links)
+                || page.links.length > PDF_LINK_ANNOTATION_LIMITS.maxLinksPerPage
+                || !page.links.every(validatePDFLink))) {
+            throw new Error('Invalid PDF link annotations');
+        }
         for (const style of Object.values(page.styles)) validateStyle(style);
     }
     validatePdfOutline(index.outline);

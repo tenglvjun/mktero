@@ -52,7 +52,13 @@ export function ingestMinerULayout(layout, { assets = [], assetBasePath = '' } =
     const pages = [];
     for (const page of layout.pages) {
         const [width, height] = page.pageSize;
-        pages.push({ pageIndex: page.pageIndex, width, height, geometry: 'block' });
+        pages.push({
+            pageIndex: page.pageIndex,
+            width,
+            height,
+            geometry: 'block',
+            pageSizeKnown: page.pageSizeKnown !== false,
+        });
         for (const [ordinal, raw] of page.blocks.entries()) {
             if (raw.linesDeleted && !raw.lines?.length) continue;
             if (isMergedTableContinuation(raw)) {
@@ -253,7 +259,7 @@ function recoverFragments(raw, block, context) {
             }
         }
         const pageSize = context.pageSizes.get(current.pageIndex);
-        const spans = convertSpans(line.spans);
+        const spans = convertSpans(line.spans, pageSize);
         if (!spans.length) continue;
         current.lines.push({ bbox: normalizePageBBox(line.bbox, pageSize), spans });
     }
@@ -273,7 +279,7 @@ function simpleFragments(raw, pageIndex, context) {
     const pageSize = context.pageSizes.get(pageIndex);
     const lines = [];
     for (const line of raw.lines || []) {
-        const spans = convertSpans(line.spans);
+        const spans = convertSpans(line.spans, pageSize);
         if (spans.length) lines.push({ bbox: normalizePageBBox(line.bbox, pageSize), spans });
     }
     if (!lines.length) return [];
@@ -366,17 +372,19 @@ function codeText(child) {
     return lines.join('\n').replace(/\s+$/u, '');
 }
 
-function convertSpans(spans) {
+function convertSpans(spans, pageSize) {
     const output = [];
     for (const span of spans || []) {
         if (typeof span.content !== 'string') continue;
         if (!span.content.trim() && !span.exactSpacing) continue;
         const linkURL = safeMinerULinkURL(span.linkURL);
+        const bbox = normalizePageBBox(span.bbox, pageSize);
         if (span.type === 'text' || span.type === 'hyperlink') {
             output.push({
                 type: 'text',
                 content: span.content,
                 ...(linkURL ? { linkURL } : {}),
+                ...(bbox ? { bbox } : {}),
                 ...(span.exactSpacing ? { exactSpacing: true } : {}),
             });
         }
@@ -385,6 +393,7 @@ function convertSpans(spans) {
                 type: 'math',
                 content: span.content.trim(),
                 ...(linkURL ? { linkURL } : {}),
+                ...(bbox ? { bbox } : {}),
                 ...(span.exactSpacing ? { exactSpacing: true } : {}),
             });
         }

@@ -106,6 +106,8 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
         blocks,
         contentList: [],
         providerState: { mineruDocument: { ir } },
+        ...(ir.diagnostics?.pdfLinks?.incomplete === true
+            ? { pdfLinksIncomplete: true } : {}),
         extractedPages: bundle.extractedPages,
         totalPages: bundle.totalPages,
         warnings: Array.isArray(bundle.warnings) ? [...bundle.warnings] : [],
