@@ -1,3 +1,4 @@
+import { normalizeMarkdownLinkURL } from './markdown-links.js';
 import {
     normalizeArxivID,
     normalizeDOI,
@@ -11,6 +12,7 @@ const DOI_TOKEN_PATTERN = /(?:^|[\s(<\[])(?:doi\s*:\s*|https?:\/\/(?:dx\.)?doi\.
 const ARXIV_TOKEN_PATTERN = /(?:^|[\s(<\[])(?:arxiv(?:\s+id)?\s*:\s*|https?:\/\/(?:www\.)?arxiv\.org\/(?:abs|pdf)\/)([^\s)\]>},;]+)/igu;
 const PMID_TOKEN_PATTERN = /\b(?:pmid|pubmed\s+id|medline)\s*[:#]?\s*(\d{1,12})\b/iu;
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/igu;
+const MARKDOWN_LINK_PATTERN = /\[((?:\\.|[^\]\n])*)\]\(((?:\\.|[^)\n])*)\)/gu;
 
 /**
  * Extract bounded, normalized identity hints from a bibliographic reference.
@@ -60,9 +62,13 @@ function normalizePMID(value) {
 }
 
 function findPDFURL(source) {
-    for (const match of source.matchAll(URL_PATTERN)) {
+    const searchable = source.replace(MARKDOWN_LINK_PATTERN, (match, label, destination) => (
+        `${label} ${normalizeMarkdownLinkURL(destination)}`
+    ));
+    for (const match of searchable.matchAll(URL_PATTERN)) {
+        if (match[0].length > MAX_PDF_URL_LENGTH) continue;
         const candidate = stripTrailingPunctuation(
-            boundedString(match[0], MAX_PDF_URL_LENGTH)
+            normalizeMarkdownLinkURL(match[0])
         );
         if (!isHTTPURL(candidate)) continue;
         let url;

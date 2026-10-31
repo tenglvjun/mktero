@@ -1,8 +1,12 @@
+import {
+    escapeMarkdownLinkDestination,
+    normalizeMarkdownLinkURL,
+} from '../../markdown/markdown-links.js';
 import { escapeImageDescription, parseAcademicFigureCaption } from '../../markdown/markdown-figures.js';
 import { planFigureLayouts } from '../../markdown/figure-layout-normalizer.js';
 import { noteDirective, SECTION_CLOSE_DIRECTIVE, sectionOpenDirective } from '../../markdown/markdown-directives.js';
 import { NOTE_KIND } from './notes.js';
-import { BLOCK_KIND, BLOCK_ROLE, fragmentText, unionBBox } from './ir.js';
+import { BLOCK_KIND, BLOCK_ROLE, fragmentText, spansText, unionBBox } from './ir.js';
 import {
     createHyphenationVocabulary,
     escapeLineStart,
@@ -11,6 +15,8 @@ import {
     normalizeOCRText,
     renderInlineSpans,
     sanitizeTableHTML,
+    escapeMarkdownText,
+    escapeMarkdownLinkLabel,
 } from './text.js';
 
 export const DOCUMENT_STRUCTURE = 'mineru-ir-v1';
@@ -152,14 +158,28 @@ function inlineText(block, vocabulary) {
     return { text, ranges };
 }
 
+function stripTrailingAddressPunctuation(address) {
+    return String(address).replace(/[.,;:!?]+$/u, '');
+}
+
 function textUnits(block, vocabulary) {
     const { text, ranges } = inlineText(block, vocabulary);
     if (!text) return [];
     const part = block.role === BLOCK_ROLE.REFERENCE ? 'reference'
         : block.role === BLOCK_ROLE.FLOAT_NOTE ? 'note' : 'text';
     if (block.role === BLOCK_ROLE.BODY && block.fragments.length === 1 && isStandaloneAddress(text)) {
-        const address = text.trim();
-        const output = `[${address}](https://${address})`;
+        const address = normalizeOCRText(block.fragments[0].lines
+            .map(line => spansText(line.spans))
+            .filter(Boolean)
+            .join(' ')).trim();
+        const linkedAddress = stripTrailingAddressPunctuation(address);
+        const suffix = address.slice(linkedAddress.length);
+        const plainAddress = normalizeMarkdownLinkURL(linkedAddress);
+        const target = /^https?:\/\//iu.test(plainAddress) ? plainAddress : `https://${plainAddress}`;
+        const destination = escapeMarkdownLinkDestination(target);
+        if (!destination) return [withPieces({ block, kind: 'text', type: 'text', text: escapeLineStart(text), fragments: wholeFragments(block, text) },
+            [ownPiece(block, `${block.id}#f0`, part, text, text)])];
+        const output = `[${escapeMarkdownLinkLabel(plainAddress)}](${destination})${escapeMarkdownText(suffix)}`;
         return [withPieces({ block, kind: 'text', type: 'text', text: output, fragments: wholeFragments(block, output) },
             [ownPiece(block, `${block.id}#f0`, part, output, address)])];
     }

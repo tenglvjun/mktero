@@ -6,6 +6,7 @@ const MAX_TYPE_LENGTH = 64;
 const MAX_META_LENGTH = 64;
 const MAX_PATH_LENGTH = 1024;
 const MAX_CONTENT_LENGTH = 512 * 1024;
+const MAX_URL_LENGTH = 4096;
 const MAX_CHILD_DEPTH = 3;
 const MAX_INDEX = 1_000_000;
 
@@ -135,6 +136,7 @@ function projectSpan(raw, diagnostics) {
     assignString(span, 'content', raw.content, MAX_CONTENT_LENGTH, diagnostics);
     assignString(span, 'html', raw.html, MAX_CONTENT_LENGTH, diagnostics);
     assignString(span, 'imagePath', raw.image_path, MAX_PATH_LENGTH, diagnostics);
+    assignURL(span, 'linkURL', raw.url, MAX_URL_LENGTH, diagnostics);
     assignBBox(span, raw.bbox, diagnostics);
     if (raw.score !== undefined) {
         if (Number.isFinite(raw.score)) span.score = raw.score;
@@ -142,6 +144,15 @@ function projectSpan(raw, diagnostics) {
     }
     if (raw.cross_page === true) span.crossPage = true;
     return span;
+}
+
+function assignURL(target, key, value, maxLength, diagnostics) {
+    if (value === undefined || value === null) return;
+    if (typeof value !== 'string' || value.length > maxLength) {
+        diagnostics.droppedFields++;
+        return;
+    }
+    target[key] = value;
 }
 
 function assignString(target, key, value, maxLength, diagnostics) {

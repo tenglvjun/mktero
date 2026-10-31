@@ -135,12 +135,49 @@ test('renders an HTTPS URL with an underscore as a working link', () => {
     const prepared = prepareMinerUDocument(bundle([page(0, [
         text([100, 100, 900, 140], 'https://reverie.herokuapp.com/UIST_Demo/'),
     ])]));
-    assert.equal(prepared.markdown, 'https://reverie.herokuapp.com/UIST_Demo/');
+    assert.equal(prepared.markdown, '[https://reverie.herokuapp.com/UIST_Demo/](https://reverie.herokuapp.com/UIST_Demo/)');
     assert.match(
         renderMarkdownHTML(prepared.markdown),
         /href="https:\/\/reverie\.herokuapp\.com\/UIST_Demo\/"/u
     );
 });
+test('serializes a 3.x hyperlink span with its original target', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        text([100, 100, 900, 140], { type: 'hyperlink', content: 'paper_v2', url: 'https://example.org/paper_v2' }),
+    ])]));
+    assert.equal(prepared.markdown, '[paper_v2](https://example.org/paper_v2)');
+});
+test('serializes MinerU hyperlink targets instead of guessing from visible text', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        text([100, 100, 900, 140], [
+            { type: 'text', content: 'Read ' },
+            { type: 'hyperlink', content: 'paper', url: 'https://example.org/paper_v2' },
+            { type: 'text', content: ' here.' },
+        ]),
+    ])]));
+    assert.equal(prepared.markdown, 'Read [paper](https://example.org/paper_v2) here.');
+    assert.match(
+        renderMarkdownHTML(prepared.markdown),
+        /href="https:\/\/example\.org\/paper_v2"/u
+    );
+});
+
+test('falls back to ordinary text for an unsafe 3.x hyperlink target', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        text([100, 100, 900, 140], { type: 'hyperlink', content: 'unsafe', url: 'javascript:alert(1)' }),
+    ])]));
+    assert.equal(prepared.markdown, 'unsafe');
+});
+
+test('encodes unsafe Markdown destination characters from a MinerU URL', () => {
+    const prepared = prepareMinerUDocument(bundle([page(0, [
+        text([100, 100, 900, 140], { type: 'hyperlink', content: 'paper', url: 'https://example.org/a b?q="x"' }),
+    ])]));
+    assert.equal(prepared.markdown, '[paper](https://example.org/a%20b?q=%22x%22)');
+    assert.match(renderMarkdownHTML(prepared.markdown), /href="https:\/\/example\.org\/a%20b\?q=%22x%22"/u);
+});
+
+
 test('records an exact, valid source map with per-page ranges', () => {
     const prepared = prepareMinerUDocument(sampleBundle());
     const { markdown, sourceMap } = prepared;

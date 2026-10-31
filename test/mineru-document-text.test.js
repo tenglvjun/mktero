@@ -70,10 +70,33 @@ test('renders spans with inline math and tight punctuation', () => {
 
 test('recognizes standalone web addresses', () => {
     assert.equal(isStandaloneAddress('www.example.org/path'), true);
+    assert.equal(isStandaloneAddress('https://reverie.herokuapp.com/UIST_Demo/'), true);
     assert.equal(isStandaloneAddress('github.com/microsoft/nni/'), true);
     assert.equal(isStandaloneAddress('example.org'), false);
     assert.equal(isStandaloneAddress('see www.example.org'), false);
 });
+
+test('preserves literal link-label punctuation without enabling Markdown emphasis', () => {
+    assert.equal(
+        renderInlineSpans([{ type: 'text', content: '__init__.py', linkURL: 'https://example.org/__init__.py' }]),
+        '[\\_\\_init\\_\\_.py](https://example.org/__init__.py)'
+    );
+    assert.equal(
+        renderInlineSpans([{ type: 'text', content: 'paper_v2', linkURL: 'https://example.org/paper_v2' }]),
+        '[paper_v2](https://example.org/paper_v2)'
+    );
+});
+
+test('keeps punctuation after a standalone URL outside its target', async () => {
+    const { prepareMinerUDocument } = await import('../src/mineru/document/prepare.js');
+    const { projectMinerULayout } = await import('../src/mineru/document/result-bundle.js');
+    const layout = projectMinerULayout({ pdf_info: [{ page_idx: 0, page_size: [1000, 1000], para_blocks: [
+        { type: 'text', bbox: [100, 100, 900, 140], lines: [{ bbox: [100, 100, 900, 140], spans: [{ type: 'text', content: 'https://example.org/paper.' }] }] },
+    ], discarded_blocks: [] }] });
+    assert.equal(prepareMinerUDocument({ markdown: '', assets: [], contentList: [], layout }).markdown,
+        '[https://example.org/paper](https://example.org/paper).');
+});
+
 
 test('cleans MinerU table HTML for one Markdown block', () => {
     assert.equal(

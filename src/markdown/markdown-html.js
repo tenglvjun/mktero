@@ -17,7 +17,9 @@ import {
 } from './markdown-figures.js';
 import { parseMarkdownDirective, SECTION_LABEL_KEYS } from './markdown-directives.js';
 import { isNumericCitationContent } from './text-normalization.js';
-import { normalizeMarkdownLinkURL } from './markdown-links.js';
+import { safeMarkdownLinkURL } from './markdown-links.js';
+
+export { safeMarkdownLinkURL };
 
 const MAX_MATH_EXPRESSIONS = 1000;
 const MAX_MATH_OUTPUT_LENGTH = 250_000;
@@ -1550,14 +1552,6 @@ function wrapMathFallback(source, displayMode, target) {
 
 function renderMathFallback(source) {
     return `<code class="math-fallback">${escapeHTML(source)}</code>`;
-}
-
-export function safeMarkdownLinkURL(value) {
-    const url = normalizeMarkdownLinkURL(value);
-    if (/^https?:\/\//i.test(url) || /^zotero:\/\//i.test(url) || url.startsWith('#')) {
-        return url;
-    }
-    return null;
 }
 
 const MATH_COMMAND_IN_TEXT = /\\(?:mathcal|mathrm|mathbf|mathbb|mathsf|mathit|frac|left|right|begin|end)\b/;

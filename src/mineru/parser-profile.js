@@ -107,8 +107,14 @@ export const MINERU_FIGURE_REGION_V15_PARSER_PROFILE_ID = '{"batch":{"model_vers
 // profile is converted again, from the raw result store when it has one.
 export const MINERU_COMPATIBLE_CACHE_PROFILE_IDS = Object.freeze([]);
 
-// Earlier profiles, searched only for corrected revisions.
+// Shipped document-IR cache identities. Keep these literals so a profile bump
+// cannot make stored corrections or translations unreachable.
+export const MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v9","figureStructure":"figure-region-v17"}';
+export const MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v8","figureStructure":"figure-region-v17"}';
+
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V16_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V15_PARSER_PROFILE_ID,
@@ -131,7 +137,7 @@ export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
 
 // How Mktero reads a MinerU result into its reading document. Bump it with
 // any change to the document IR or its Markdown.
-export const MINERU_DOCUMENT_PIPELINE = 'mineru-document-ir-v9';
+export const MINERU_DOCUMENT_PIPELINE = 'mineru-document-ir-v10';
 
 export const MINERU_PARSER_PROFILE_ID = JSON.stringify({
     batch: MINERU_BATCH_OPTIONS,
@@ -169,6 +175,11 @@ export const MINERU_LOCAL_PARSER_PROFILE_ID = JSON.stringify({
 });
 
 // Shipped local profiles, kept as literals so their corrections still open.
+export const MINERU_LOCAL_DOCUMENT_IR_V9_PARSER_PROFILE_ID = '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v9"}';
+export const MINERU_LOCAL_DOCUMENT_IR_V8_PARSER_PROFILE_ID = '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v8"}';
+
 export const MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
-    JSON.stringify({ transport: 'local-v1', tier: 'standard', ocrMode: 'auto', output: 'zip-markdown-v1' }),
+    MINERU_LOCAL_DOCUMENT_IR_V9_PARSER_PROFILE_ID,
+    MINERU_LOCAL_DOCUMENT_IR_V8_PARSER_PROFILE_ID,
+    '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-markdown-v1"}',
 ]);

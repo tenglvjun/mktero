@@ -73,6 +73,27 @@ test('attaches normalized identifiers to analyzed reference targets', () => {
     });
 });
 
+test('extracts a PDF URL from a Markdown reference link and cleans its label', () => {
+    const markdown = [
+        'Evidence [1].',
+        '',
+        '## References',
+        '',
+        '[1] Paper title. [PDF](https://e.org/report_\\(final\\).pdf). 2024.',
+    ].join('\n');
+    const [reference] = analyzeMarkdownCitations(markdown).references;
+    assert.equal(reference.text, 'Paper title. PDF. 2024.');
+    assert.equal(reference.identifiers.pdfURL, 'https://e.org/report_(final).pdf');
+});
+
+test('unescapes brackets in a linked reference label', () => {
+    const markdown = [
+        'Evidence [1].', '', '## References', '',
+        '[1] Paper. [\\[PDF\\]](https://e.org/report.pdf). 2024.',
+    ].join('\n');
+    const [reference] = analyzeMarkdownCitations(markdown).references;
+    assert.equal(reference.text, 'Paper. [PDF]. 2024.');
+});
 test('keeps identifiers when a PDF reference wraps a DOI across lines', () => {
     const markdown = [
         'Evidence [1].',

@@ -1,4 +1,5 @@
 import { FIGURE_LIMITS } from '../../figures/figure-limits.js';
+import { safeMinerULinkURL } from '../../markdown/markdown-links.js';
 import { MINERU_LAYOUT_SCHEMA } from './result-bundle.js';
 
 // MinerU 4.0 (self-hosted V1 API) writes `middle_json.json` in the DocVortex
@@ -37,6 +38,7 @@ export const MINERU_MIDDLE_SCHEMA_VERSION = '2.0';
 const MAX_TYPE_LENGTH = 64;
 const MAX_META_LENGTH = 64;
 const MAX_PATH_LENGTH = 1024;
+const MAX_URL_LENGTH = 4096;
 const MAX_CONTENT_LENGTH = 512 * 1024;
 const MAX_NESTING = 8;
 const MAX_SCRIPT_LENGTH = 12;
@@ -307,7 +309,11 @@ function algorithmLines(content, context) {
         }
         span.content.split('\n').forEach((part, index) => {
             if (index) lines.push({ spans: [] });
-            if (part) lines.at(-1).spans.push({ type: 'text', content: part });
+            if (part) {
+                const split = { ...span, type: 'text', content: part };
+                if (span.exactSpacing) withExactSpacing(split);
+                lines.at(-1).spans.push(split);
+            }
         });
     }
     return lines.filter(line => line.spans.length);
@@ -328,13 +334,16 @@ function inlineSpans(content, context, depth = 0) {
     const output = [];
     for (const span of rawSpans(content, context, depth)) {
         const last = output.at(-1);
-        if (span.type === 'text' && last?.type === 'text') last.content += span.content;
+        if (span.type === 'text' && last?.type === 'text'
+            && (span.linkURL === last.linkURL || !String(span.content).trim())) {
+            last.content += span.content;
+        }
         else output.push(span);
     }
     return output;
 }
 
-function rawSpans(content, context, depth) {
+function rawSpans(content, context, depth, inheritedLinkURL = null) {
     const output = [];
     if (!Array.isArray(content) || depth > 1) return output;
     for (const raw of content) {
@@ -342,8 +351,14 @@ function rawSpans(content, context, depth) {
             context.diagnostics.droppedFields++;
             continue;
         }
+        const hasOwnLinkURL = Object.prototype.hasOwnProperty.call(raw, 'url');
+        let ownLinkURL = inheritedLinkURL;
+        if (hasOwnLinkURL) {
+            const rawLinkURL = boundedURL(raw.url, MAX_URL_LENGTH, context);
+            ownLinkURL = rawLinkURL ? safeMinerULinkURL(rawLinkURL) : null;
+        }
         if (raw.type === 'hyperlink') {
-            output.push(...rawSpans(raw.content, context, depth + 1));
+            output.push(...rawSpans(raw.content, context, depth + 1, ownLinkURL));
             continue;
         }
         const value = boundedString(raw.content, MAX_CONTENT_LENGTH, context);
@@ -351,13 +366,21 @@ function rawSpans(content, context, depth) {
             if (raw.content !== undefined && typeof raw.content !== 'string') context.diagnostics.droppedFields++;
             continue;
         }
-        if (raw.type === 'equation_inline') output.push({ type: 'inline_equation', content: value });
-        else if (raw.type === 'text') output.push(textSpan(value, raw.styles));
+        if (raw.type === 'equation_inline') {
+            output.push({ type: 'inline_equation', content: value,
+                ...(ownLinkURL ? { linkURL: ownLinkURL } : {}) });
+        }
+        else if (raw.type === 'text') {
+            const span = withExactSpacing(textSpan(value, raw.styles));
+            if (ownLinkURL) span.linkURL = ownLinkURL;
+            output.push(span);
+        }
         else {
             // Inline code, and inline content of a kind this reader does not
             // know, keep their text.
             if (raw.type !== 'code_inline') context.diagnostics.droppedFields++;
-            output.push({ type: 'text', content: value });
+            output.push(withExactSpacing({ type: 'text', content: value,
+                ...(ownLinkURL ? { linkURL: ownLinkURL } : {}) }));
         }
     }
     return output;
@@ -381,6 +404,11 @@ function escapeTeX(text) {
     return text.replace(/[\\#%&_{}$^~]/gu, character => (
         character === '\\' ? '\\backslash{}' : character === '^' || character === '~' ? `\\${character}{}` : `\\${character}`
     ));
+}
+
+function withExactSpacing(span) {
+    Object.defineProperty(span, 'exactSpacing', { value: true, enumerable: false });
+    return span;
 }
 
 function blockType(raw, context) {
@@ -434,6 +462,19 @@ function dropBlock(context) {
 
 function integer(value, min, max) {
     return Number.isSafeInteger(value) && value >= min && value <= max ? value : null;
+}
+
+function boundedURL(value, maxLength, context) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'string') {
+        context.diagnostics.droppedFields++;
+        return null;
+    }
+    if (value.length > maxLength) {
+        context.diagnostics.droppedFields++;
+        return null;
+    }
+    return value;
 }
 
 function boundedString(value, maxLength, context) {
