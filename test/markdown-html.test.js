@@ -77,6 +77,20 @@ test('renders display LaTeX fractions as block MathML', () => {
     assert.match(html, /<annotation encoding="application\/x-tex">\\frac/);
 });
 
+test('marks tagged display formulas so the equation number can align independently', () => {
+    const tagged = renderMarkdownHTML([
+        '$$',
+        'x^2 + y^2 = z^2, \\tag{5}',
+        '$$',
+    ].join('\n'));
+    assert.match(tagged, /class="math math-display math-display-tagged"/);
+    assert.match(tagged, /<mtext>\(5\)<\/mtext>/);
+    assert.match(tagged, /class="math-display-equation-number">\(5\)<\/span>/);
+
+    const untagged = renderMarkdownHTML('$$\nx^2 + y^2 = z^2\n$$');
+    assert.doesNotMatch(untagged, /math-display-tagged/);
+});
+
 test('splits display LaTeX from following Markdown without a blank line', () => {
     const html = renderMarkdownHTML([
         '$$',

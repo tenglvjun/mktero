@@ -374,6 +374,8 @@ test('keeps rendered display math spacing inside the CodeMirror block widget', (
         '.markdown-editor-host > .cm-editor .cm-mktero-math-display'
     );
     assert.match(displayMath, /display:\s*flow-root/);
+    assert.match(displayMath, /width:\s*100%/);
+    assert.match(displayMath, /box-sizing:\s*border-box/);
     assert.doesNotMatch(displayMath, /margin:/);
     assert.match(displayMath, /-moz-user-select:\s*text/);
     assert.match(displayMath, /user-select:\s*text/);
@@ -390,6 +392,35 @@ test('keeps rendered display math spacing inside the CodeMirror block widget', (
     assert.match(math, /-moz-user-select:\s*text/);
     assert.match(math, /user-select:\s*text/);
 
+    const taggedMath = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged'
+    );
+    assert.match(taggedMath, /position:\s*relative/);
+    assert.match(taggedMath, /width:\s*100%/);
+
+    const taggedMathML = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math'
+    );
+    assert.match(taggedMathML, /width:\s*100%/);
+
+    const taggedTable = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable'
+    );
+    assert.match(taggedTable, /width:\s*100%/);
+
+    const equationNumber = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable > mtr > mtd:last-child'
+    );
+    assert.match(equationNumber, /display:\s*none/);
+
+    const equationNumberMarkup = ruleBody(
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged .math-display-equation-number'
+    );
+    assert.match(equationNumberMarkup, /position:\s*absolute/);
+    assert.match(equationNumberMarkup, /inset-inline-end:\s*0/);
+    assert.match(equationNumberMarkup, /top:\s*50%/);
+    assert.match(equationNumberMarkup, /transform:\s*translateY\(-50%\)/);
+
     const annotation = ruleBody([
         '.markdown-editor-host > .cm-editor .cm-mktero-math annotation,',
         '.markdown-editor-host > .cm-editor .cm-mktero-math-display annotation',
@@ -399,7 +430,10 @@ test('keeps rendered display math spacing inside the CodeMirror block widget', (
     const mathHighlight = ruleBody(
         '.markdown-editor-host > .cm-editor .cm-mktero-math-display > .cm-mktero-pdf-annotation'
     );
-    assert.match(mathHighlight, /display:\s*inline-block/);
+    assert.match(mathHighlight, /display:\s*block/);
+    assert.match(mathHighlight, /width:\s*100%/);
+    assert.match(mathHighlight, /box-sizing:\s*border-box/);
+    assert.match(mathHighlight, /max-width:\s*100%/);
     assert.match(mathHighlight, /padding:\s*0\.2em 0\.75em/);
 });
 

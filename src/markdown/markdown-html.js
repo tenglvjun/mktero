@@ -1437,7 +1437,8 @@ function renderMath(source, displayMode, mathBudget, target = 'mktero') {
             ? renderZoteroNoteMath(normalizedSource, displayMode)
             : wrapMkteroMath(
                 renderMathML(normalizedSource, displayMode),
-                displayMode
+                displayMode,
+                displayMode && /\\tag\*?\s*\{/.test(normalizedSource)
             );
         return rendered && mathBudget.claimOutput(rendered)
             ? rendered
@@ -1520,10 +1521,23 @@ export function portableMathSource(source) {
     return normalizedSource;
 }
 
-function wrapMkteroMath(rendered, displayMode) {
-    return displayMode
-        ? `<div class="math math-display">${rendered}</div>`
-        : `<span class="math-inline">${rendered}</span>`;
+function wrapMkteroMath(rendered, displayMode, hasEquationTag = false) {
+    if (!displayMode) return `<span class="math-inline">${rendered}</span>`;
+
+    const equationNumber = hasEquationTag
+        ? renderedEquationNumberMarkup(rendered)
+        : '';
+    const tagClass = equationNumber ? ' math-display-tagged' : '';
+    return `<div class="math math-display${tagClass}">${rendered}${equationNumber}</div>`;
+}
+
+function renderedEquationNumberMarkup(rendered) {
+    const matches = [
+        ...rendered.matchAll(/<mtext(?:\s[^>]*)?>([^<]*)<\/mtext>/g),
+    ];
+    const match = matches.at(-1);
+    if (!match) return '';
+    return `<span class="math-display-equation-number">${match[1]}</span>`;
 }
 
 function wrapMathFallback(source, displayMode, target) {
