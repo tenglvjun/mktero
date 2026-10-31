@@ -110,6 +110,15 @@ test('projects MinerU 4.0 middle JSON to the layout the document pipeline reads'
         ['title', 'title', 'text', 'interline_equation', 'text', 'text', 'table', 'text']);
     assert.deepEqual(layout.pages[0].discarded.map(block => block.type), ['header', 'page_footnote', 'page_number']);
     assert.deepEqual(layout.pages[0].blocks[2].bbox, [60, 120, 540, 240]);
+    assert.deepEqual(layout.pages[0].blocks[2].lines[0].spans, [
+        { type: 'text', content: 'Things matter' },
+        { type: 'inline_equation', content: '^{1}' },
+        { type: 'text', content: ' and cost ' },
+        { type: 'inline_equation', content: 'x^2' },
+        { type: 'text', content: ' units, as ' },
+        { type: 'text', content: 'shown here', linkURL: 'https://example.org' },
+        { type: 'text', content: '.' },
+    ]);
     assert.equal(layout.diagnostics.continuations, 1);
 });
 
@@ -118,7 +127,7 @@ test('reads a MinerU 4.0 paper as continuous Markdown', () => {
     const blocks = markdown.split('\n\n');
     assert.equal(blocks[0], '# A Study of Things');
     assert.equal(blocks[1], '## 1. Introduction');
-    assert.equal(blocks[2], 'Things matter $^{1}$ and cost $x^2$ units, as shown here.');
+    assert.equal(blocks[2], 'Things matter $^{1}$ and cost $x^2$ units, as [shown here](https://example.org).');
     assert.match(markdown, /\$\$\nE = mc\^2\n\$\$/u);
     assert.match(markdown, /- first point of the list\n- second point of the list/u);
     // The table continued on the next page is one table.
@@ -244,11 +253,31 @@ test('text split by style reads as printed, and nothing with text is dropped', (
         ] },
         { type: 'sidebar_box', bbox: box(100, 400, 900, 450), content: [text('An unknown block keeps its text.')] },
     ]));
-    assert.match(markdown, /An international study of f\(\) by Smith's group, 10 \$\^\{−3\}\$ and the 4th run\. Kept text\./u);
+    assert.match(markdown, /An international study of f\(\) by \[Smith\]\(https:\/\/example\.org\)'s group, 10 \$\^\{−3\}\$ and the 4th run\. Kept text\./u);
     assert.match(markdown, /\$\$\nx\+y\n\$\$/u);
     assert.match(markdown, /An unknown block keeps its text\./u);
 });
 
+test('keeps unsafe MinerU hyperlink targets as ordinary text', () => {
+    const markdown = markdownOf(page([
+        { type: 'text', bbox: box(100, 100, 900, 150), content: [
+            { type: 'hyperlink', url: 'javascript:alert(1)', content: [text('unsafe')] },
+            text(' and '),
+            { type: 'hyperlink', url: 'https://example.org/safe_target', content: [text('safe')] },
+        ] },
+    ]));
+    assert.equal(markdown, 'unsafe and [safe](https://example.org/safe_target)');
+});
+test('keeps spaces between adjacent MinerU hyperlinks', () => {
+    const markdown = markdownOf(page([
+        { type: 'text', bbox: box(100, 100, 900, 150), content: [
+            { type: 'hyperlink', url: 'https://example.org/a', content: [text('GitHub')] },
+            text(' '),
+            { type: 'hyperlink', url: 'https://example.org/b', content: [text('Project')] },
+        ] },
+    ]));
+    assert.equal(markdown, '[GitHub](https://example.org/a) [Project](https://example.org/b)');
+});
 test('a table MinerU marks as continued joins the previous one below a heading line', () => {
     const markdown = markdownOf(middle([
         [{ type: 'table', bbox: box(100, 500, 900, 900), content: [

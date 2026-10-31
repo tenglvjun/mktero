@@ -59,6 +59,17 @@ test('rejects non-PDF and unsafe URL candidates', () => {
     );
 });
 
+test('does not confuse a Markdown link destination with a PDF reference URL', () => {
+    assert.equal(
+        extractReferenceIdentifiers('[https://e.org/report.pdf](https://e.org/report.pdf)').pdfURL,
+        'https://e.org/report.pdf'
+    );
+});
+
+test('does not truncate an oversized PDF URL into a different target', () => {
+    const url = `https://e.org/${'x'.repeat(2_040)}.pdfzzz`;
+    assert.equal(extractReferenceIdentifiers(url).pdfURL, '');
+});
 test('bounds input and returns stable empty fields', () => {
     assert.deepEqual(extractReferenceIdentifiers('x'.repeat(20_000)), {
         doi: '',

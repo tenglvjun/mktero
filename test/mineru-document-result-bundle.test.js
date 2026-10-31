@@ -28,7 +28,7 @@ function layoutFixture() {
                         lines: [line([50, 50, 560, 80], 'A Paper')] },
                     { type: 'text', bbox: [50, 700, 300, 760], index: 2, merge_prev: false,
                         lines: [
-                            line([50, 700, 300, 760], 'The first half'),
+                            line([50, 700, 300, 760], 'The first half', { url: 'https://example.com/source_(demo)' }),
                             line([50, 60, 300, 100], 'continues here', { cross_page: true }),
                         ] },
                     { type: 'code', sub_type: 'code', guess_lang: 'python', bbox: [50, 300, 560, 400],
@@ -69,6 +69,7 @@ test('projects every field the document pipeline reads', () => {
     assert.equal(layout.pages.length, 2);
     const [title, text, code] = layout.pages[0].blocks;
     assert.deepEqual([title.index, title.level, title.angle], [1, 1, 0]);
+    assert.equal(text.lines[0].spans[0].linkURL, 'https://example.com/source_(demo)');
     assert.equal(text.lines[1].spans[0].crossPage, true);
     assert.equal(text.mergePrev, undefined);
     assert.deepEqual([code.subType, code.guessLang], ['code', 'python']);
@@ -122,6 +123,13 @@ test('rejects layouts with unordered or malformed pages', () => {
     assert.equal(validateMinerULayout({ ...layout, pages: [{ pageIndex: 0, pageSize: [1, 1] }] }), false);
 });
 
+test('drops an oversized link target instead of truncating it into a valid-looking URL', () => {
+    const raw = layoutFixture();
+    raw.pdf_info[0].para_blocks[0].lines[0].spans[0].url = 'https://example.org/' + 'x'.repeat(4096);
+    const layout = projectMinerULayout(raw);
+    assert.equal(layout.pages[0].blocks[0].lines[0].spans[0].linkURL, undefined);
+    assert.equal(layout.diagnostics.droppedFields, 1);
+});
 test('extracts the projected layout from a ZIP', () => {
     const archive = zipSync({
         'result/full.md': strToU8('# A Paper'),

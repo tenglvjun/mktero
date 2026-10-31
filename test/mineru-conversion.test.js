@@ -22,6 +22,8 @@ import {
 import { MinerUPendingTaskStore } from '../src/mineru/pending-task-store.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
+    MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID,
     MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
@@ -1218,13 +1220,15 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
     assert.deepEqual(JSON.parse(MINERU_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
         file: { is_ocr: true },
-        document: 'mineru-document-ir-v9',
+        document: 'mineru-document-ir-v10',
         figureStructure: 'figure-region-v17',
     });
     assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v17/);
     assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, []);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID), true);
     assert.equal(JSON.parse(MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID).sourceMap.figureStructure, 'figure-region-v17');
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID), true);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
     assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0].includes('figure-region-v16'), true);
     assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[2].includes('figure-region-v14'), true);

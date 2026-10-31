@@ -132,7 +132,11 @@ test('the local parser profile records its document pipeline and keeps the shipp
     const { MINERU_DOCUMENT_PIPELINE, MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS, MINERU_LOCAL_REQUEST_PROFILE_ID } = await import('../src/mineru/parser-profile.js');
     assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).document, MINERU_DOCUMENT_PIPELINE);
     assert.deepEqual(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
-        ['{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-markdown-v1"}']);
+        [
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v9"}',
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v8"}',
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-markdown-v1"}',
+        ]);
     assert.ok(!MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_LOCAL_PARSER_PROFILE_ID));
     assert.equal(JSON.parse(MINERU_LOCAL_REQUEST_PROFILE_ID).document, undefined);
 });

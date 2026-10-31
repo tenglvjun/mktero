@@ -637,6 +637,7 @@ function parseReferences(markdown, section) {
                 id: `number:${number}`,
                 number,
                 text: plainReferenceText(markdown.slice(contentFrom, to)),
+                source: markdown.slice(contentFrom, to),
                 from,
                 to,
             });
@@ -654,6 +655,7 @@ function parseReferences(markdown, section) {
             id: `reference:${index + 1}`,
             number: null,
             text: plainReferenceText(markdown.slice(from, to)),
+            source: markdown.slice(from, to),
             from,
             to,
         }))
@@ -682,6 +684,7 @@ function parseBareNumberedReferences(markdown, section) {
             entry.contentFrom,
             entry.to
         )),
+        source: markdown.slice(entry.contentFrom, entry.to),
         from: entry.from,
         to: entry.to,
     })).filter(reference => reference.text);
@@ -750,7 +753,7 @@ function paragraphRanges(markdown, section) {
     return ranges;
 }
 
-function createReference({ id, number, text, from, to }) {
+function createReference({ id, number, text, source, from, to }) {
     const year = extractYear(text);
     return {
         id,
@@ -760,7 +763,7 @@ function createReference({ id, number, text, from, to }) {
         to,
         year,
         authorSearchText: normalizeSearchText(referenceAuthorText(text, year)),
-        identifiers: extractReferenceIdentifiers(text),
+        identifiers: extractReferenceIdentifiers(source || text),
     };
 }
 
@@ -1414,13 +1417,14 @@ function trimRangeEnd(markdown, from, to) {
     return to;
 }
 
+const MARKDOWN_LINK_PATTERN = /!?\[((?:\\[^\n]|[^\\\]\n])*)\]\(((?:\\[^\n]|[^)\\\n])*)\)/g;
+
 function plainReferenceText(source) {
     return String(source)
-        .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(MARKDOWN_LINK_PATTERN, '$1')
         .replace(/<((?:https?:\/\/|doi:)[^>]+)>/gi, '$1')
         .replace(/<[^>]+>/g, ' ')
-        .replace(/[`*_~]+/g, '')
+        .replace(/\\([\\`*_\[\]{}()#+.!|>~-])/g, '$1')
         .replace(/\s+/g, ' ')
         .trim();
 }

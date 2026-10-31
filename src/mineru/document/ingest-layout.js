@@ -1,4 +1,5 @@
 import { normalizeFigureAssetPath } from '../../figures/figure-model.js';
+import { safeMinerULinkURL } from '../../markdown/markdown-links.js';
 import { validateMinerULayout } from './result-bundle.js';
 import {
     BLOCK_KIND,
@@ -368,10 +369,24 @@ function codeText(child) {
 function convertSpans(spans) {
     const output = [];
     for (const span of spans || []) {
-        if (typeof span.content !== 'string' || !span.content.trim()) continue;
-        if (span.type === 'text') output.push({ type: 'text', content: span.content });
+        if (typeof span.content !== 'string') continue;
+        if (!span.content.trim() && !span.exactSpacing) continue;
+        const linkURL = safeMinerULinkURL(span.linkURL);
+        if (span.type === 'text' || span.type === 'hyperlink') {
+            output.push({
+                type: 'text',
+                content: span.content,
+                ...(linkURL ? { linkURL } : {}),
+                ...(span.exactSpacing ? { exactSpacing: true } : {}),
+            });
+        }
         else if (span.type === 'inline_equation' || span.type === 'interline_equation') {
-            output.push({ type: 'math', content: span.content.trim() });
+            output.push({
+                type: 'math',
+                content: span.content.trim(),
+                ...(linkURL ? { linkURL } : {}),
+                ...(span.exactSpacing ? { exactSpacing: true } : {}),
+            });
         }
     }
     return output;

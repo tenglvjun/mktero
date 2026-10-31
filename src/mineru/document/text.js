@@ -1,5 +1,9 @@
 import { spansText } from './ir.js';
-import { normalizeMarkdownLinkURL } from '../../markdown/markdown-links.js';
+import {
+    escapeMinerULinkDestination,
+    normalizeMarkdownLinkURL,
+    safeMarkdownLinkURL,
+} from '../../markdown/markdown-links.js';
 
 const WORD = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu;
 const TRAILING_HYPHEN_WORD = /([\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)-$/u;
@@ -87,8 +91,10 @@ const SPACING_MARK = /(\p{L})?(\s?)([¨´ˆ˜¸ˇ])(\s?)(\p{L})/gu;
 const LINE_START_ESCAPE = /^(?:(#{1,6})(?=\s|$)|(>)|([-+*])(?=\s)|(\d{1,9})([.)])(?=\s)|(=+|-{2,}|\*{3,}|_{3,})(?=\s*$)|(`{3,}|~{3,}))/u;
 const HOST_LABEL = '(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)';
 const URL_PATH = '\\/[^\\s()\\[\\]<>"\']*';
+const HTTP_SCHEME = 'https?:\\/\\/';
+const HOST = `${HOST_LABEL}+[a-z]{2,}`;
 const STANDALONE_ADDRESS = new RegExp(
-    `^(?:www\\.${HOST_LABEL}+[a-z]{2,}(?:${URL_PATH})?|${HOST_LABEL}+[a-z]{2,}${URL_PATH})$`,
+    `^(?:(?:${HTTP_SCHEME})?www\\.${HOST}(?:${URL_PATH})?|${HTTP_SCHEME}${HOST}(?:${URL_PATH})?|${HOST}${URL_PATH})$`,
     'iu'
 );
 const URL_TEXT = new RegExp(
@@ -114,18 +120,18 @@ export function normalizeOCRText(text) {
     return output;
 }
 
-// Escapes text so Markdown reads it literally. Math is never passed here.
-// Brackets stay as written except where they would form a link or image,
-// so numeric citations such as "[12]" keep their source form. URL tokens are
-// handled separately because Markdown escapes must not enter their href.
-function escapeMarkdownTextSegment(text) {
+// Brackets stay as written in ordinary prose except where they would form a
+// link or image. Link labels escape them unconditionally because the label is
+// inside Markdown link syntax.
+function escapeMarkdownTextSegment(text, { linkLabel = false } = {}) {
     let output = '';
     const source = String(text || '');
     for (let index = 0; index < source.length; index++) {
         const character = source[index];
         const next = source[index + 1] || '';
-        if (character === '\\' || character === '`' || character === '*' || character === '_'
-            || character === '$') {
+        if (character === '\\' || character === '`' || character === '*' || character === '$'
+            || linkLabel && (character === '[' || character === ']')
+            || character === '_' && (!linkLabel || !isLiteralUnderscoreRun(source, index))) {
             output += `\\${character}`;
         }
         else if (character === '~' && next === '~') output += '\\~';
@@ -139,6 +145,22 @@ function escapeMarkdownTextSegment(text) {
         else output += character;
     }
     return output;
+}
+
+function isLiteralUnderscoreRun(source, index) {
+    let start = index;
+    while (start > 0 && source[start - 1] === '_') start--;
+    let end = index + 1;
+    while (end < source.length && source[end] === '_') end++;
+    return isWordCharacter(source[start - 1]) && isWordCharacter(source[end]);
+}
+
+function isWordCharacter(value) {
+    return Boolean(value) && /[\p{L}\p{N}]/u.test(value);
+}
+
+export function escapeMarkdownLinkLabel(text) {
+    return escapeMarkdownTextSegment(text, { linkLabel: true });
 }
 
 function escapeMarkdownURL(text) {
@@ -178,24 +200,60 @@ export function isStandaloneAddress(text) {
 
 // Inline Markdown for one line of spans: escaped text and `$…$` math, with
 // no space before closing punctuation or after an opening bracket.
+function renderMarkdownLinkLabel(label, url) {
+    const destination = escapeMinerULinkDestination(url);
+    return destination ? { label, linkURL: destination } : { label, linkURL: null };
+}
+
 export function renderInlineSpans(spans) {
-    let output = '';
+    const segments = [];
     for (const span of spans || []) {
-        let piece = '';
-        if (span.type === 'math') piece = renderInlineMath(span.content);
+        let label = '';
+        let rawContent = '';
+        if (span.type === 'math') label = renderInlineMath(span.content);
         else if (span.type === 'text') {
-            const content = normalizeOCRText(span.content).replace(/\s+/gu, ' ').trim();
-            if (content) piece = escapeMarkdownText(content);
+            rawContent = normalizeOCRText(span.content).replace(/\s+/gu, ' ');
+            const content = rawContent.trim();
+            if (content) {
+                label = safeMarkdownLinkURL(span.linkURL)
+                    ? escapeMarkdownLinkLabel(content)
+                    : span.linkURL
+                        ? escapeMarkdownTextSegment(content)
+                        : escapeMarkdownText(content);
+            }
         }
-        if (!piece) continue;
-        if (!output) output = piece;
-        else if (NO_SPACE_BEFORE.test(piece) || NO_SPACE_AFTER.test(output)
-            || isCJKCharacter(output.at(-1)) && isCJKCharacter(piece[0])) {
-            output += piece;
+        if (!label) {
+            if (span.type === 'text' && span.exactSpacing && rawContent && segments.length) {
+                segments.at(-1).rawContent += rawContent;
+            }
+            continue;
         }
-        else output += ` ${piece}`;
+        const link = span.linkURL
+            ? renderMarkdownLinkLabel(label, span.linkURL)
+            : { label, linkURL: null };
+        const exactSpacing = Boolean(span.exactSpacing);
+        const previous = segments.at(-1);
+        const exactBoundary = Boolean(span.type === 'text' && previous?.type === 'text'
+            && span.exactSpacing && previous.exactSpacing);
+        const separator = !previous ? ''
+            : exactBoundary
+                ? /\s$/u.test(previous.rawContent) || /^\s/u.test(rawContent) ? ' ' : ''
+                : NO_SPACE_BEFORE.test(label) || NO_SPACE_AFTER.test(previous.label)
+                    || isCJKCharacter(previous.label.at(-1)) && isCJKCharacter(label[0])
+                    ? '' : ' ';
+        if (previous && previous.linkURL === link.linkURL && previous.type === span.type) {
+            previous.label += separator + label;
+            previous.rawContent += rawContent;
+            previous.exactSpacing ||= exactSpacing;
+        }
+        else {
+            segments.push({ label, linkURL: link.linkURL, separator, rawContent, exactSpacing,
+                type: span.type });
+        }
     }
-    return output;
+    return segments.map(segment => `${segment.separator}${segment.linkURL
+        ? `[${segment.label}](${segment.linkURL})`
+        : segment.label}`).join('');
 }
 
 const MATH_ABBREVIATION = /^\\(?:mathrm|text|textrm)\s*\{\s*(i\s*\.\s*e|e\s*\.\s*g|etc)\s*\.\s*\}$/u;
