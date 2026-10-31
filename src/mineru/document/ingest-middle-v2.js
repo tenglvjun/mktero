@@ -89,7 +89,7 @@ export function projectMinerUMiddleJSON(parsed, {
             pageSize = [1000, 1000];
             diagnostics.unsizedPages++;
         }
-        pages.push({ pageIndex, pageSize, blocks: [], discarded: [], raw: raw.blocks });
+        pages.push({ pageIndex, pageSize, pageSizeKnown: sizes.has(pageIndex), blocks: [], discarded: [], raw: raw.blocks });
     }
     pages.sort((left, right) => left.pageIndex - right.pageIndex);
     for (const page of pages) {
@@ -311,6 +311,7 @@ function algorithmLines(content, context) {
             if (index) lines.push({ spans: [] });
             if (part) {
                 const split = { ...span, type: 'text', content: part };
+                delete split.bbox;
                 if (span.exactSpacing) withExactSpacing(split);
                 lines.at(-1).spans.push(split);
             }
@@ -337,13 +338,22 @@ function inlineSpans(content, context, depth = 0) {
         if (span.type === 'text' && last?.type === 'text'
             && (span.linkURL === last.linkURL || !String(span.content).trim())) {
             last.content += span.content;
+            if (String(span.content).trim()) {
+                const lastBBox = spanBBoxOrNull(last);
+                const spanBBox = spanBBoxOrNull(span);
+                const bbox = lastBBox && spanBBox
+                    ? unionSpanBBoxes(lastBBox, spanBBox)
+                    : lastBBox || spanBBox;
+                if (bbox) last.bbox = bbox;
+                else delete last.bbox;
+            }
         }
         else output.push(span);
     }
     return output;
 }
 
-function rawSpans(content, context, depth, inheritedLinkURL = null) {
+function rawSpans(content, context, depth, inheritedLinkURL = null, inheritedBBox = null) {
     const output = [];
     if (!Array.isArray(content) || depth > 1) return output;
     for (const raw of content) {
@@ -357,8 +367,13 @@ function rawSpans(content, context, depth, inheritedLinkURL = null) {
             const rawLinkURL = boundedURL(raw.url, MAX_URL_LENGTH, context);
             ownLinkURL = rawLinkURL ? safeMinerULinkURL(rawLinkURL) : null;
         }
+        const declaredBBox = pageBox(raw.bbox, context);
+        const ownBBox = declaredBBox || inheritedBBox;
         if (raw.type === 'hyperlink') {
-            output.push(...rawSpans(raw.content, context, depth + 1, ownLinkURL));
+            const nestedLinkURL = ownLinkURL;
+            const nestedBBox = declaredBBox
+                || (hasOwnLinkURL && ownLinkURL !== inheritedLinkURL ? null : inheritedBBox);
+            output.push(...rawSpans(raw.content, context, depth + 1, nestedLinkURL, nestedBBox));
             continue;
         }
         const value = boundedString(raw.content, MAX_CONTENT_LENGTH, context);
@@ -367,12 +382,15 @@ function rawSpans(content, context, depth, inheritedLinkURL = null) {
             continue;
         }
         if (raw.type === 'equation_inline') {
-            output.push({ type: 'inline_equation', content: value,
-                ...(ownLinkURL ? { linkURL: ownLinkURL } : {}) });
+            const span = { type: 'inline_equation', content: value,
+                ...(ownLinkURL ? { linkURL: ownLinkURL } : {}),
+                ...(ownBBox ? { bbox: ownBBox } : {}) };
+            output.push(span);
         }
         else if (raw.type === 'text') {
             const span = withExactSpacing(textSpan(value, raw.styles));
             if (ownLinkURL) span.linkURL = ownLinkURL;
+            if (ownBBox) span.bbox = ownBBox;
             output.push(span);
         }
         else {
@@ -380,7 +398,8 @@ function rawSpans(content, context, depth, inheritedLinkURL = null) {
             // know, keep their text.
             if (raw.type !== 'code_inline') context.diagnostics.droppedFields++;
             output.push(withExactSpacing({ type: 'text', content: value,
-                ...(ownLinkURL ? { linkURL: ownLinkURL } : {}) }));
+                ...(ownLinkURL ? { linkURL: ownLinkURL } : {}),
+                ...(ownBBox ? { bbox: ownBBox } : {}) }));
         }
     }
     return output;
@@ -406,6 +425,24 @@ function escapeTeX(text) {
     ));
 }
 
+function unionSpanBBoxes(left, right) {
+    if (!validSpanBBox(left) || !validSpanBBox(right)) return null;
+    return [
+        Math.min(left[0], right[0]),
+        Math.min(left[1], right[1]),
+        Math.max(left[2], right[2]),
+        Math.max(left[3], right[3]),
+    ];
+}
+
+function validSpanBBox(box) {
+    return Array.isArray(box) && box.length === 4 && box.every(Number.isFinite)
+        && box[0] < box[2] && box[1] < box[3];
+}
+
+function spanBBoxOrNull(span) {
+    return validSpanBBox(span.bbox) ? span.bbox : null;
+}
 function withExactSpacing(span) {
     Object.defineProperty(span, 'exactSpacing', { value: true, enumerable: false });
     return span;

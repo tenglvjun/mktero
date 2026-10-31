@@ -2,7 +2,7 @@ import { spansText } from './ir.js';
 import {
     escapeMinerULinkDestination,
     normalizeMarkdownLinkURL,
-    safeMarkdownLinkURL,
+    safeMinerULinkURL,
 } from '../../markdown/markdown-links.js';
 
 const WORD = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu;
@@ -214,10 +214,11 @@ export function renderInlineSpans(spans) {
         else if (span.type === 'text') {
             rawContent = normalizeOCRText(span.content).replace(/\s+/gu, ' ');
             const content = rawContent.trim();
+            const linkURL = span.nativeLinkURL || span.linkURL;
             if (content) {
-                label = safeMarkdownLinkURL(span.linkURL)
-                    ? escapeMarkdownLinkLabel(content)
-                    : span.linkURL
+                label = safeMinerULinkURL(linkURL)
+                    ? content
+                    : linkURL
                         ? escapeMarkdownTextSegment(content)
                         : escapeMarkdownText(content);
             }
@@ -228,32 +229,45 @@ export function renderInlineSpans(spans) {
             }
             continue;
         }
-        const link = span.linkURL
-            ? renderMarkdownLinkLabel(label, span.linkURL)
+        const linkURL = span.nativeLinkURL || span.linkURL;
+        const link = linkURL && span.type !== 'math'
+            ? renderMarkdownLinkLabel(label, linkURL)
             : { label, linkURL: null };
+        const linkLabel = Boolean(link.linkURL && span.type === 'text');
         const exactSpacing = Boolean(span.exactSpacing);
         const previous = segments.at(-1);
         const exactBoundary = Boolean(span.type === 'text' && previous?.type === 'text'
             && span.exactSpacing && previous.exactSpacing);
+        const sameLinkLabelContinuation = Boolean(linkLabel
+            && previous?.linkLabel
+            && previous.linkURL === link.linkURL
+            && !/\s$/u.test(previous.rawContent)
+            && !/^\s/u.test(rawContent)
+            && /^_/u.test(label));
         const separator = !previous ? ''
-            : exactBoundary
-                ? /\s$/u.test(previous.rawContent) || /^\s/u.test(rawContent) ? ' ' : ''
-                : NO_SPACE_BEFORE.test(label) || NO_SPACE_AFTER.test(previous.label)
-                    || isCJKCharacter(previous.label.at(-1)) && isCJKCharacter(label[0])
-                    ? '' : ' ';
+            : sameLinkLabelContinuation ? ''
+                : exactBoundary
+                    ? /\s$/u.test(previous.rawContent) || /^\s/u.test(rawContent) ? ' ' : ''
+                    : NO_SPACE_BEFORE.test(label) || NO_SPACE_AFTER.test(previous.label)
+                        || isCJKCharacter(previous.label.at(-1)) && isCJKCharacter(label[0])
+                        ? '' : ' ';
         if (previous && previous.linkURL === link.linkURL && previous.type === span.type) {
             previous.label += separator + label;
             previous.rawContent += rawContent;
             previous.exactSpacing ||= exactSpacing;
+            previous.linkLabel ||= linkLabel;
         }
         else {
-            segments.push({ label, linkURL: link.linkURL, separator, rawContent, exactSpacing,
+            segments.push({ label, linkURL: link.linkURL, linkLabel, separator, rawContent, exactSpacing,
                 type: span.type });
         }
     }
-    return segments.map(segment => `${segment.separator}${segment.linkURL
-        ? `[${segment.label}](${segment.linkURL})`
-        : segment.label}`).join('');
+    return segments.map(segment => {
+        const label = segment.linkLabel ? escapeMarkdownLinkLabel(segment.label) : segment.label;
+        return `${segment.separator}${segment.linkURL
+            ? `[${label}](${segment.linkURL})`
+            : label}`;
+    }).join('');
 }
 
 const MATH_ABBREVIATION = /^\\(?:mathrm|text|textrm)\s*\{\s*(i\s*\.\s*e|e\s*\.\s*g|etc)\s*\.\s*\}$/u;

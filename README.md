@@ -50,9 +50,10 @@ conversions for the same PDF and parser profile.
 ### Reading
 
 - Reflow OCR output, multi-column text, formulas, tables, figures, lists, and
-  code into a continuous academic reading document. MinerU hyperlinks retain
-  their original safe HTTP(S) destinations, including URLs containing
-  underscores, rather than guessing a target from the visible text.
+  code into a continuous academic reading document. For MinerU documents,
+  PDF-native safe HTTP(S) link annotations and MinerU hyperlinks retain their
+  original destinations, including URLs containing underscores, rather than
+  guessing a target from the visible text.
 - Hide publisher mastheads, first-page copyright notices, repeated headers and
   footers, and page numbers, and keep reliable page/region mappings so text,
   formulas, tables, and figures can jump back to their PDF source. A PDF text

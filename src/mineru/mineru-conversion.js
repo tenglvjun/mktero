@@ -319,6 +319,20 @@ export class MinerUConversion {
         let cached = await this.#readCache(key, cacheEnabled, reportedWarnings);
         throwIfAborted(signal);
         let migrated = false;
+        if (cached?.pdfLinksIncomplete === true) {
+            if (!cacheEnabled || !resultKey) return null;
+            const stored = await this.#readStoredResult(resultKey, signal);
+            if (stored) {
+                const result = await this.#prepareStoredResult(stored, {
+                    fileData, signal, onProgress, onProgressiveFigures,
+                });
+                if (result.pdfLinksIncomplete !== true) {
+                    await this.#putCache(key, result, signal, reportedWarnings, fileData);
+                }
+                return { result, origin: 'cache', warnings: reportedWarnings };
+            }
+            cached = null;
+        }
         if (!cached && cacheEnabled && resultKey) {
             const stored = await this.#readStoredResult(resultKey, signal);
             if (stored) {
@@ -337,6 +351,10 @@ export class MinerUConversion {
                     if (!previousKey || previousKey === key) continue;
                     cached = await this.#readCache(previousKey, cacheEnabled, reportedWarnings);
                     throwIfAborted(signal);
+                    if (cached?.pdfLinksIncomplete === true) {
+                        cached = null;
+                        continue;
+                    }
                     migrated = Boolean(cached);
                     if (cached) break;
                 }
@@ -389,7 +407,7 @@ export class MinerUConversion {
     // `fileData` is passed when the entry is new for this profile, so the
     // translations of the same PDF under an earlier profile carry over.
     async #putCache(key, result, signal, warnings, fileData = null) {
-        if (!this.cache) return;
+        if (!this.cache || !result || result.pdfLinksIncomplete === true) return;
         try { await this.cache.put(key, result, { signal }); }
         catch (error) {
             throwIfAborted(signal);
@@ -503,7 +521,7 @@ export class MinerUConversion {
             if (this.#currentTask(key)?.batchID !== selected.task.batchID) {
                 return;
             }
-            if (this.cache && cacheEnabled) {
+            if (this.cache && cacheEnabled && result.pdfLinksIncomplete !== true) {
                 try {
                     await this.cache.put(key, result, { signal });
                     await this.#copyEarlierTranslations(key, fileData, signal);

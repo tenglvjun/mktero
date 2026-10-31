@@ -30,7 +30,7 @@ export function ingestMinerUContentList(contentList, { assets = [], assetBasePat
         else diagnostics.droppedBlocks++;
     }
     const pages = [...ordinals.keys()].sort((left, right) => left - right)
-        .map(pageIndex => ({ pageIndex, width: 1000, height: 1000, geometry: 'block' }));
+        .map(pageIndex => ({ pageIndex, width: 1000, height: 1000, geometry: 'block', pageSizeKnown: false }));
     return {
         schema: DOCUMENT_IR_SCHEMA,
         source: { origin: 'content-list', backend: null, version: null, effort: null, ocrEnabled: null },

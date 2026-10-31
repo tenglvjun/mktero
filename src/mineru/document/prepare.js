@@ -16,6 +16,7 @@ import { assignHeadingLevels, levelHeadingsByStyle } from './headings.js';
 import { groupSections } from './sections.js';
 import { stitchParagraphs } from './stitch.js';
 import { validateDocumentIR } from './ir.js';
+import { applyPDFLinkAnnotations } from '../../pdf/pdf-link-annotations.js';
 import { attachPDFGeometry } from './pdf-geometry.js';
 import { checkTextAgainstPDF } from './pdf-text-check.js';
 import { createHyphenationVocabulary } from './text.js';
@@ -43,6 +44,7 @@ export function buildMinerUDocumentIR(bundle, { pdfText = null } = {}) {
         ir = ingestMinerUContentList(bundle.contentList, options);
     }
     if (!ir) return null;
+    applyPDFLinkAnnotations(ir, pdfText);
     attachPDFGeometry(ir, pdfText);
     checkTextAgainstPDF(ir, pdfText);
     classifyBlocks(ir);
@@ -92,6 +94,9 @@ export function prepareMinerUDocument(bundle, {
     });
     return {
         ...prepared,
+        ...(pdfText?.linkAnnotationsComplete === false
+            || ir.diagnostics?.pdfLinks?.incomplete === true
+            ? { pdfLinksIncomplete: true } : {}),
         markdown: serialized.markdown,
         sourceMap: serialized.sourceMap,
         chromeRanges: [],

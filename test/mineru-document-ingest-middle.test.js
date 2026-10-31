@@ -258,6 +258,39 @@ test('text split by style reads as printed, and nothing with text is dropped', (
     assert.match(markdown, /An unknown block keeps its text\./u);
 });
 
+test('limits an inherited hyperlink box to its linked text group', () => {
+    const layout = projectMinerUMiddleJSON(middle([[
+        { type: 'text', bbox: box(100, 100, 900, 150), content: [
+            { type: 'hyperlink', url: 'https://example.org', bbox: box(100, 100, 450, 150),
+                content: [
+                    { ...text('shown'), bbox: box(100, 100, 250, 150) },
+                    { ...text(' here'), bbox: box(250, 100, 450, 150) },
+                ] },
+            text(' and ordinary text'),
+        ] },
+    ]]));
+    const ir = buildMinerUDocumentIR({ layout, assets: [] });
+    const spans = ir.blocks[0].fragments[0].lines[0].spans;
+
+    assert.equal(spans.length, 2);
+    assert.deepEqual(spans[0].bbox, [100, 100, 450, 150]);
+    assert.equal(spans[0].linkURL, 'https://example.org');
+    assert.equal(spans[1].bbox, undefined);
+    assert.equal(spans[1].linkURL, undefined);
+});
+
+test('keeps known span geometry when adjacent Middle JSON text omits a bbox', () => {
+    const layout = projectMinerUMiddleJSON(middle([[
+        { type: 'text', bbox: box(100, 100, 900, 150), content: [
+            { ...text('known'), bbox: box(100, 100, 350, 150) },
+            text(' unavailable'),
+        ] },
+    ]]));
+    const spans = layout.pages[0].blocks[0].lines[0].spans;
+
+    assert.equal(spans.length, 1);
+    assert.deepEqual(spans[0].bbox, [60, 80, 210, 120]);
+});
 test('keeps unsafe MinerU hyperlink targets as ordinary text', () => {
     const markdown = markdownOf(page([
         { type: 'text', bbox: box(100, 100, 900, 150), content: [

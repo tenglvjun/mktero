@@ -11,6 +11,7 @@ import {
     createDehyphenatedPdfAnnotationTextIndex,
 } from '../markdown/pdf-annotation-text.js';
 import { normalizePdfOutline } from './pdf-outline.js';
+import { normalizePDFLinkAnnotations } from './pdf-link-annotations.js';
 import {
     isLikelyNumericSuperscriptExponent,
     isNumericCitationContent,
@@ -22,10 +23,10 @@ const MAX_PAGE_TEXT_LENGTH = 1_000_000;
 const MAX_TOTAL_TEXT_LENGTH = 10_000_000;
 const MAX_TEXT_ITEMS = 250_000;
 
-// text-v11 folds math accents, numeric exponents, and relation spacing.
-// A text-v10 index stored those characters, so its offsets would no longer
-// address the raw PDF text.
-export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v11`;
+// text-v12 adds normalized, safe external Link annotations to the index.
+// The text portion still folds math accents, numeric exponents, and relation
+// spacing; older indexes therefore cannot provide link matches safely.
+export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v12`;
 
 // Zotero's DOM-free plugin sandbox cannot dynamically import the packaged
 // worker URL when PDF.js falls back to its in-process worker implementation.
@@ -120,6 +121,7 @@ export function createPDFJSTextEngine({
                 const pages = [];
                 let totalTextLength = 0;
                 let totalItems = 0;
+                let linkAnnotationsComplete = true;
                 for (let pageIndex = 0;
                     pageIndex < document.numPages;
                     pageIndex++) {
@@ -144,17 +146,36 @@ export function createPDFJSTextEngine({
                         || totalItems > MAX_TEXT_ITEMS) {
                         throw new Error('PDF text index exceeds the safety limit');
                     }
+                    const normalizedViewport = normalizeViewport(viewport);
+                    let links = null;
+                    try {
+                        if (typeof page.getAnnotations !== 'function') {
+                            throw new Error('PDF link annotations are unavailable');
+                        }
+                        const annotations = await page.getAnnotations({ intent: 'display' });
+                        if (!Array.isArray(annotations)) {
+                            throw new Error('PDF link annotations are unavailable');
+                        }
+                        links = normalizePDFLinkAnnotations(annotations, normalizedViewport);
+                    }
+                    catch (error) {
+                        throwIfAborted(signal);
+                        linkAnnotationsComplete = false;
+                        // A broken annotation must not discard the PDF text index;
+                        // omit links so the v12 cache validator will request a retry.
+                    }
                     pages.push({
                         pageIndex,
                         pageLabel: normalizePageLabel(
                             pageLabels?.[pageIndex],
                             pageIndex
                         ),
-                        viewport: normalizeViewport(viewport),
+                        viewport: normalizedViewport,
                         rawText: indexed.rawText,
                         normalizedText: indexed.normalizedText,
                         items: indexed.items,
                         styles: normalizeStyles(content.styles),
+                        ...(Array.isArray(links) ? { links } : {}),
                     });
                     page.cleanup?.();
                 }
@@ -167,6 +188,7 @@ export function createPDFJSTextEngine({
                 }
                 return {
                     profile: PDF_TEXT_INDEX_PROFILE,
+                    linkAnnotationsComplete,
                     pages,
                     outline,
                 };

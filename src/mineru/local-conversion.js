@@ -60,10 +60,12 @@ export class MinerULocalConversion {
     }) {
         throwIfAborted(signal);
         const warnings = [];
+        const resultKey = cacheEnabled ? await this.#resultKey(fileData, signal) : null;
         if (!forceRefresh) {
             const cached = await this.readCached({
                 key,
                 fileData,
+                resultKey,
                 cacheEnabled,
                 signal,
                 onProgress,
@@ -76,7 +78,6 @@ export class MinerULocalConversion {
         }
 
         throwIfAborted(signal);
-        const resultKey = cacheEnabled ? await this.#resultKey(fileData, signal) : null;
         // A result the service produced before is read again from the store.
         const stored = forceRefresh ? null : await this.#readStoredResult(resultKey, signal);
         let raw = stored;
@@ -98,7 +99,7 @@ export class MinerULocalConversion {
             await this.prepareResult(raw, { fileData, signal, onProgress }),
             this.parserProfile
         );
-        if (this.cache && cacheEnabled && key) {
+        if (this.cache && cacheEnabled && key && prepared.pdfLinksIncomplete !== true) {
             try {
                 await this.cache.put(key, prepared, { signal });
                 await this.#copyEarlierTranslations(key, fileData, signal);
@@ -176,8 +177,11 @@ export class MinerULocalConversion {
 
     async readCached({
         key,
+        fileData,
+        resultKey = null,
         cacheEnabled = false,
         signal,
+        onProgress = () => {},
         warnings,
     } = {}) {
         const reportedWarnings = Array.isArray(warnings) ? warnings : [];
@@ -187,6 +191,19 @@ export class MinerULocalConversion {
             const cached = await this.cache.get(key);
             throwIfAborted(signal);
             if (!cached) return null;
+            if (cached?.pdfLinksIncomplete === true) {
+                if (!resultKey) return null;
+                const stored = await this.#readStoredResult(resultKey, signal);
+                if (!stored) return null;
+                const prepared = withIdentity(
+                    await this.prepareResult(stored, { fileData, signal, onProgress }),
+                    this.parserProfile
+                );
+                if (this.cache && cacheEnabled && prepared.pdfLinksIncomplete !== true) {
+                    await this.cache.put(key, prepared, { signal });
+                }
+                return { result: prepared, origin: 'cache', warnings: reportedWarnings };
+            }
             return {
                 result: withIdentity(cached, this.parserProfile),
                 origin: 'cache',
@@ -231,7 +248,7 @@ export function prepareLocalMinerUResult(result, { pdfText = null } = {}) {
         markdown: result?.markdown,
         assets: result?.assets || [],
         assetBasePath: result?.assetBasePath || '',
-        contentList: [],
+        ...(pdfText?.linkAnnotationsComplete === false ? { pdfLinksIncomplete: true } : {}),
         extractedPages: result?.extractedPages ?? null,
         totalPages: result?.totalPages ?? null,
     };
