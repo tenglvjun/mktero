@@ -1417,7 +1417,7 @@ function trimRangeEnd(markdown, from, to) {
     return to;
 }
 
-const MARKDOWN_LINK_PATTERN = /!?\[((?:\\.|[^\]\n])*)\]\(((?:\\.|[^)\n])*)\)/g;
+const MARKDOWN_LINK_PATTERN = /!?\[((?:\\[^\n]|[^\\\]\n])*)\]\(((?:\\[^\n]|[^)\\\n])*)\)/g;
 
 function plainReferenceText(source) {
     return String(source)

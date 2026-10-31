@@ -12,7 +12,7 @@ const DOI_TOKEN_PATTERN = /(?:^|[\s(<\[])(?:doi\s*:\s*|https?:\/\/(?:dx\.)?doi\.
 const ARXIV_TOKEN_PATTERN = /(?:^|[\s(<\[])(?:arxiv(?:\s+id)?\s*:\s*|https?:\/\/(?:www\.)?arxiv\.org\/(?:abs|pdf)\/)([^\s)\]>},;]+)/igu;
 const PMID_TOKEN_PATTERN = /\b(?:pmid|pubmed\s+id|medline)\s*[:#]?\s*(\d{1,12})\b/iu;
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/igu;
-const MARKDOWN_LINK_PATTERN = /\[((?:\\.|[^\]\n])*)\]\(((?:\\.|[^)\n])*)\)/gu;
+const MARKDOWN_LINK_PATTERN = /\[((?:\\[^\n]|[^\\\]\n])*)\]\(((?:\\[^\n]|[^)\\\n])*)\)/gu;
 
 /**
  * Extract bounded, normalized identity hints from a bibliographic reference.
