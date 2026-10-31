@@ -5600,6 +5600,33 @@ test('does not open an unsafe inline Markdown link', () => {
     dom.window.close();
 });
 
+test('normalizes Markdown escapes before opening a legacy URL', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: 'https://example.com/UIST\\_Demo/',
+        resolveImageURL: () => null,
+        openLink: url => opened.push(url),
+    });
+
+    document.querySelector('.cm-mktero-link').dispatchEvent(
+        new dom.window.MouseEvent('mousedown', {
+            bubbles: true,
+            cancelable: true,
+            ctrlKey: true,
+            button: 0,
+        })
+    );
+    assert.deepEqual(opened, ['https://example.com/UIST_Demo/']);
+
+    editor.destroy();
+    dom.window.close();
+});
 test('opens all reference, autolink, and bare URL Markdown links', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

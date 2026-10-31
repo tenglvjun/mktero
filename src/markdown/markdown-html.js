@@ -17,6 +17,7 @@ import {
 } from './markdown-figures.js';
 import { parseMarkdownDirective, SECTION_LABEL_KEYS } from './markdown-directives.js';
 import { isNumericCitationContent } from './text-normalization.js';
+import { normalizeMarkdownLinkURL } from './markdown-links.js';
 
 const MAX_MATH_EXPRESSIONS = 1000;
 const MAX_MATH_OUTPUT_LENGTH = 250_000;
@@ -1552,9 +1553,9 @@ function renderMathFallback(source) {
 }
 
 export function safeMarkdownLinkURL(value) {
-    const url = String(value || '').trim();
+    const url = normalizeMarkdownLinkURL(value);
     if (/^https?:\/\//i.test(url) || /^zotero:\/\//i.test(url) || url.startsWith('#')) {
-        return url.replace(/[\u0000-\u001F\u007F]/g, '');
+        return url;
     }
     return null;
 }
