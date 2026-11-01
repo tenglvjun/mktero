@@ -2,8 +2,11 @@ import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     ACCOUNT_REFRESH_LOCK_PREF,
+    CLIENT_HEARTBEAT_INTERVAL_MS,
     ensureAccountAccessToken,
     MkteroSignInRequiredError,
+    reportAccountClientHeartbeat,
+    startAccountClientHeartbeat,
     REFRESH_LOCK_TTL_MS,
     REFRESH_REQUEST_TIMEOUT_MS,
 } from '../src/account/account-session.js';
@@ -66,6 +69,118 @@ function refreshedSessionResponse(extra = {}) {
     });
 }
 
+test('reports the authenticated client version through the heartbeat endpoint', async () => {
+    const zotero = signedInZotero({
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+        accessToken: 'access-current',
+    });
+    const calls = [];
+    const result = await reportAccountClientHeartbeat(zotero, {
+        now: () => NOW,
+        fetchImpl: async (url, options) => {
+            calls.push({ url, options });
+            return jsonResponse(204, null);
+        },
+    });
+
+    assert.deepEqual(result, { reported: true });
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /\/api\/v1\/me\/client-version$/u);
+    assert.equal(calls[0].options.method, 'POST');
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer access-current');
+    assert.equal(calls[0].options.headers['X-Mktero-Version'], 'dev');
+});
+
+test('refreshes the access token after a heartbeat is rejected once', async () => {
+    const zotero = signedInZotero({
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+        accessToken: 'access-stale',
+    });
+    const calls = [];
+    const result = await reportAccountClientHeartbeat(zotero, {
+        now: () => NOW,
+        fetchImpl: async (url, options) => {
+            calls.push({ url, options });
+            if (calls.length === 1) return jsonResponse(401, {});
+            if (String(url).endsWith('/auth/refresh')) return refreshedSessionResponse();
+            return jsonResponse(204, null);
+        },
+    });
+
+    assert.deepEqual(result, { reported: true, refreshed: true });
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer access-stale');
+    assert.equal(calls[2].options.headers.Authorization, 'Bearer access-new');
+    assert.equal(getAccountSession(zotero).accessToken, 'access-new');
+});
+
+test('treats a pre-heartbeat server as an optional capability', async () => {
+    const zotero = signedInZotero({
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+    });
+    const result = await reportAccountClientHeartbeat(zotero, {
+        now: () => NOW,
+        fetchImpl: async () => jsonResponse(404, { error: { code: 'not_found' } }),
+    });
+
+    assert.deepEqual(result, { reported: false, unsupported: true });
+    assert.ok(getAccountSession(zotero).refreshToken);
+});
+
+test('coalesces concurrent client heartbeat requests', async () => {
+    const zotero = signedInZotero({
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+    });
+    let calls = 0;
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const fetchImpl = async () => {
+        calls += 1;
+        await pending;
+        return jsonResponse(204, null);
+    };
+    const first = reportAccountClientHeartbeat(zotero, {
+        now: () => NOW,
+        fetchImpl,
+    });
+    const second = reportAccountClientHeartbeat(zotero, {
+        now: () => NOW,
+        fetchImpl,
+    });
+    await Promise.resolve();
+    assert.equal(first, second);
+    assert.equal(calls, 1);
+    release();
+    assert.deepEqual(await first, { reported: true });
+});
+
+// A scheduler starts with an immediate report and can be disposed before its
+// next interval, which is the lifecycle contract used by bootstrap shutdown.
+test('starts and disposes the client heartbeat scheduler', async () => {
+    const zotero = signedInZotero({
+        accessExpiresAt: NOW + 60 * 60 * 1000,
+    });
+    const timers = [];
+    let calls = 0;
+    const scheduler = startAccountClientHeartbeat(zotero, {
+        now: () => NOW,
+        fetchImpl: async () => {
+            calls += 1;
+            return jsonResponse(204, null);
+        },
+        setTimeoutImpl: (callback, delay) => {
+            const handle = { callback, delay, cleared: false };
+            timers.push(handle);
+            return handle;
+        },
+        clearTimeoutImpl: handle => { handle.cleared = true; },
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 1);
+    assert.equal(timers[0].delay, CLIENT_HEARTBEAT_INTERVAL_MS);
+    scheduler.dispose();
+    assert.equal(timers[0].cleared, true);
+});
 test('returns the stored access token without refreshing when it is still valid', async () => {
     let calls = 0;
     const zotero = signedInZotero({ accessExpiresAt: NOW + 60 * 60 * 1000 });

@@ -78,8 +78,13 @@ import {
 import {
     clearAccountSession,
     getAccountApiBase,
+    getAccountSession,
+    isAccountSignedIn,
 } from './config/account-preferences.js';
-import { ensureAccountAccessToken as ensureMkteroAccessToken } from './account/account-session.js';
+import {
+    ensureAccountAccessToken as ensureMkteroAccessToken,
+    startAccountClientHeartbeat,
+} from './account/account-session.js';
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import {
@@ -370,6 +375,7 @@ const runtime = {
     disposeReferenceObserver: null,
     disposeCacheObserver: null,
     disposeAITargetLanguageObserver: null,
+    disposeClientHeartbeat: null,
     annotationOverlayRefresher: null,
     localAnnotations: null,
     annotationGroups: null,
@@ -997,6 +1003,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
         return;
     }
     runtime.preferencePaneID = preferencePaneID;
+    const accountWindow = () => liveZoteroWindow();
+    const accountTimers = createWindowTimers(accountWindow);
+    const accountFetch = createWindowFetch(accountWindow, {
+        fallback: globalThis.fetch?.bind(globalThis),
+    });
+    if (isAccountSignedIn(getAccountSession(Zotero))) {
+        runtime.disposeClientHeartbeat = startAccountClientHeartbeat(Zotero, {
+            fetchImpl: accountFetch,
+            setTimeoutImpl: (callback, delay) => accountTimers.setTimer(callback, delay),
+            clearTimeoutImpl: handle => accountTimers.clearTimer(handle),
+            onError: error => logMkteroError(error),
+        }).dispose;
+    }
     registerReaderToolbarAction();
     registerMainWindowContextMenu(Zotero.getMainWindow?.());
     registerDiagnosticMenu(Zotero.getMainWindow?.());
@@ -1137,6 +1156,7 @@ globalThis.shutdown = function shutdown() {
     abortAllTranslations();
     runtime.reasoningCatalogStore?.dispose();
     runtime.disposeReasoningCatalogHost?.();
+    runtime.disposeClientHeartbeat?.();
     runtime.disposeAnnotationObserver?.();
     runtime.disposeReferenceObserver?.();
     runtime.referenceImportService?.dispose?.();
@@ -1222,6 +1242,7 @@ globalThis.shutdown = function shutdown() {
     runtime.preferencePaneID = null;
     runtime.reasoningCatalogStore = null;
     runtime.disposeReasoningCatalogHost = null;
+    runtime.disposeClientHeartbeat = null;
     runtime.id = null;
     // Zotero waits for a promise returned by shutdown before it closes the
     // database or replaces the extension, so the corrections saved by the

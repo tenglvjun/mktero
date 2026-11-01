@@ -145,6 +145,21 @@ export async function getMkteroConversionStats({
     };
 }
 
+// reportMkteroClientVersion sends the authenticated extension heartbeat. The
+// version remains in X-Mktero-Version, so callers cannot accidentally report a
+// different value in the JSON body.
+export async function reportMkteroClientVersion({
+    apiBase,
+    accessToken,
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 0,
+} = {}) {
+    await postJSON(fetchImpl, apiBase, '/api/v1/me/client-version', {}, {
+        token: accessToken,
+        timeoutMs,
+    });
+}
+
 // updateMkteroNickname replaces the display nickname of the signed-in account.
 export async function updateMkteroNickname({
     apiBase,
@@ -160,8 +175,8 @@ export async function updateMkteroNickname({
     return { nickname: String(body?.nickname || '').trim() };
 }
 
-async function postJSON(fetchImpl, apiBase, path, payload) {
-    return requestJSON(fetchImpl, apiBase, path, { payload });
+async function postJSON(fetchImpl, apiBase, path, payload, options = {}) {
+    return requestJSON(fetchImpl, apiBase, path, { payload, ...options });
 }
 
 async function requestJSON(fetchImpl, apiBase, path, {

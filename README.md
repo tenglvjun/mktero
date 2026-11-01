@@ -215,9 +215,9 @@ See [Configuration](./docs/configuration.md) for every setting and
   the extension uses that token to request your profile and your
   conversion-activity counts from the service you selected, and shows them as
   the account card's counters.
-- The extension reports its own version to the Mktero service when you sign in
-  and when it refreshes your token, so the operator can see which builds are
-  still in use. That report carries no device fingerprint and no hardware,
+- The extension reports its own version to the Mktero service when you sign in,
+  refresh your token, or send a background heartbeat, so the operator can see
+  which builds are still in use. That report carries no device fingerprint and no hardware,
   operating-system, or IP-derived identifier, runs no third-party analytics, is
   never attached to a request that goes to a converter or provider you
   configure, and is not part of your account profile.

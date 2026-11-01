@@ -10,7 +10,7 @@
 | Email and password when signing in or registering, and the registration verification code | The Mktero service you select; the password and code are not saved | Not by Mktero |
 | Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
 | Your account profile and conversion-activity counts, requested with the access token while the account pane is open | The Mktero service you select | Not by Mktero |
-| Mktero extension version, sent with requests to the Mktero service and recorded when you sign in or refresh your token, so the operator can see which builds are still in use | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
+| Mktero extension version, sent with requests to the Mktero service and recorded when you sign in, refresh your token, or send a background heartbeat, so the operator can see which builds are still in use | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
 | Research invitation email, the token link, the answers you submit, and the research-email opt-out | The Mktero service you select; the link token is not saved by the website | Not by Mktero |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Stored MinerU results from Mktero, MinerU cloud, or a local MinerU service (the result's Markdown, content list, layout or middle JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted | No |
@@ -59,7 +59,8 @@ code of its last failed conversion, conversion job ids, your description, and
 redacted log lines. It never includes API keys, account tokens, your account
 email, PDF bytes, or file paths. The log is discarded when Zotero quits.
 
-The version report carries only the extension's own build number. That report
+The version report carries only the extension's own build number. It is sent to the
+Mktero service on sign-in, token refresh, and background heartbeat. That report
 collects no device fingerprint, no hardware, operating-system, or IP-derived
 identifier, and Mktero runs no third-party analytics. The version is sent only to the
 Mktero service: it is never attached to a request that goes to object storage,
