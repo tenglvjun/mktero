@@ -143,7 +143,9 @@
     align-items: center;
     gap: 32px;
     width: 100%;
+    max-width: none;
     min-width: 0;
+    justify-self: stretch;
     min-height: 64px;
     padding: 14px 24px;
 }
@@ -280,6 +282,8 @@
 }
 
 .mktero-switch-row {
+    width: 100%;
+    max-width: none;
     cursor: pointer;
 }
 
@@ -288,7 +292,8 @@
     box-sizing: border-box;
     width: 36px;
     height: 20px;
-    margin-inline-start: auto;
+    justify-self: end;
+    margin-inline-start: 0;
 }
 
 .mktero-switch-input {
@@ -466,7 +471,8 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 3px;
-    max-width: 420px;
+    width: 100%;
+    max-width: none;
     padding: 3px;
     border-radius: 8px;
     background: var(--mktero-muted);
@@ -502,7 +508,7 @@
     display: grid;
     gap: 14px;
     width: 100%;
-    max-width: 420px;
+    max-width: none;
 }
 
 .mktero-form-field {

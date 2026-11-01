@@ -378,6 +378,14 @@ test('keeps right-side preference controls aligned at one width without native s
         /\.mktero-field-control\.mktero-provider-control\s*\{[\s\S]*?display:\s*flex[\s\S]*?align-items:\s*center/s
     );
     assert.match(
+        styles,
+        /\.mktero-switch-row\s*\{[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/s
+    );
+    assert.match(
+        styles,
+        /\.mktero-switch-control\s*\{[\s\S]*?justify-self:\s*end[\s\S]*?margin-inline-start:\s*0/s
+    );
+    assert.match(
         pane,
         /id="mktero-ai-test"[\s\S]*?id="mktero-ai-provider"/
     );
@@ -502,11 +510,11 @@ test('presents the account card with website-style tabs and an identity block', 
     assert.match(settingsRow, /padding:\s*14px\s+24px/);
     assert.match(
         styles,
-        /\.mktero-auth-tabs\s*\{[\s\S]*?max-width:\s*420px/s
+        /\.mktero-auth-tabs\s*\{[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/s
     );
     assert.match(
         styles,
-        /\.mktero-auth-form\s*\{[\s\S]*?max-width:\s*420px/s
+        /\.mktero-auth-form\s*\{[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/s
     );
 
     // Refresh and sign out remain in the account action area; More stays below stats.
