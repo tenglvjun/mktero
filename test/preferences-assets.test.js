@@ -139,14 +139,15 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(pane, /preference="extensions\.mktero\.aiModel"/);
     assert.match(pane, /id="mktero-ai-request-timeout"/);
     assert.match(pane, /id="mktero-ai-settings"/);
-    assert.doesNotMatch(pane, /id="mktero-ai-advanced"/);
+    assert.match(pane, /id="mktero-ai-advanced-toggle"[\s\S]*aria-expanded="false"[\s\S]*aria-controls="mktero-ai-advanced"/);
+    assert.match(pane, /id="mktero-ai-advanced"[\s\S]*hidden="hidden"/);
     assert.doesNotMatch(pane, /id="mktero-ai-test-status"/);
     assert.match(
         pane,
         /id="mktero-ai-provider"[\s\S]*?id="mktero-ai-streaming"/
     );
     assert.match(pane, /class="mktero-field-control mktero-provider-control"/);
-    assert.match(pane, /class="mktero-ai-test-icon"/);
+    assert.match(pane, /class="[^"]*mktero-ai-test-icon[^"]*"/);
     assert.match(pane, /id="mktero-ai-moonshot-endpoint-row"/);
     assert.match(pane, /id="mktero-ai-moonshot-endpoint"/);
     assert.match(pane, /id="mktero-ai-minimax-endpoint-row"/);
@@ -172,8 +173,20 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(pane, /<html:option value="es-ES" data-i18n="preferences\.ai\.language\.esES"><\/html:option>/);
     assert.match(pane, /<html:option value="fr-FR" data-i18n="preferences\.ai\.language\.frFR"><\/html:option>/);
     assert.match(pane, /<html:option value="pt-BR" data-i18n="preferences\.ai\.language\.ptBR"><\/html:option>/);
+    assert.match(pane, /data-i18n="preferences\.ai\.targetLanguageHelp"/);
+    assert.match(pane, /id="mktero-reader-font-size-help"[\s\S]*data-i18n="preferences\.reader\.fontSizeHelp"/);
+    assert.match(pane, /id="mktero-reader-font-size"[\s\S]*aria-describedby="mktero-reader-font-size-help mktero-reader-font-size-value"/);
+    assert.match(pane, /id="mktero-reader-font-family-help"[\s\S]*data-i18n="preferences\.reader\.fontFamilyHelp"/);
+    assert.match(pane, /id="mktero-reader-font-family"[\s\S]*aria-describedby="mktero-reader-font-family-help"/);
+    assert.match(pane, /id="mktero-reader-line-height-help"[\s\S]*data-i18n="preferences\.reader\.lineHeightHelp"/);
+    assert.match(pane, /id="mktero-reader-line-height"[\s\S]*aria-describedby="mktero-reader-line-height-help"/);
+    assert.match(pane, /id="mktero-reader-width-help"[\s\S]*data-i18n="preferences\.reader\.widthHelp"/);
+    assert.match(pane, /id="mktero-reader-width"[\s\S]*aria-describedby="mktero-reader-width-help"/);
+    assert.match(pane, /id="mktero-reader-alignment-help"[\s\S]*data-i18n="preferences\.reader\.alignmentHelp"/);
+    assert.match(pane, /id="mktero-reader-alignment"[\s\S]*aria-describedby="mktero-reader-alignment-help"/);
+    assert.match(pane, /class="mktero-visually-hidden"/);
+    assert.doesNotMatch(pane, /preference="extensions\.mktero\.language"/);
     assert.match(pane, /id="mktero-ai-test"/);
-    assert.match(pane, /id="mktero-reader-font-family"/);
     assert.match(pane, /id="mktero-reader-font-size-value"/);
     assert.match(pane, /id="mktero-clear-cache"/);
     assert.doesNotMatch(pane, /onload=/);
@@ -236,8 +249,13 @@ test('ships responsive settings cards and a cache switch', async () => {
     assert.match(styles, /\.mktero-switch::before/);
     assert.match(
         styles,
-        /#mktero-ai-moonshot-endpoint-row\[hidden\][\s\S]*#mktero-ai-minimax-endpoint-row\[hidden\][\s\S]*#mktero-ai-alibaba-endpoint-row\[hidden\][\s\S]*#mktero-mineru-local-base-row\[hidden\][\s\S]*#mktero-api-key-row\[hidden\]\s*\{[\s\S]*display:\s*none/
+        /#mktero-ai-advanced\[hidden\][\s\S]*display:\s*none/
     );
+    assert.match(styles, /#mktero-ai-moonshot-endpoint-row\[hidden\]/);
+    assert.match(styles, /#mktero-ai-minimax-endpoint-row\[hidden\]/);
+    assert.match(styles, /#mktero-ai-alibaba-endpoint-row\[hidden\]/);
+    assert.match(styles, /#mktero-mineru-local-base-row\[hidden\]/);
+    assert.match(styles, /#mktero-api-key-row\[hidden\]/);
     assert.doesNotMatch(
         styles,
         /#mktero-semantic-scholar-api-key\s*\{[\s\S]*?font-variant-ligatures:\s*none/s
@@ -250,31 +268,28 @@ test('ships responsive settings cards and a cache switch', async () => {
 });
 
 test('keeps preference inputs visibly distinct from the settings card', async () => {
-    const styles = await readFile(
-        new URL('../ui/preferences.css', import.meta.url),
-        'utf8'
-    );
+    const [pane, styles] = await Promise.all([
+        readFile(new URL('../ui/preferences.xhtml', import.meta.url), 'utf8'),
+        readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
+    ]);
 
     assert.match(
         styles,
-        /\.mktero-field-control input,[\s\S]*?background-color:\s*color-mix\(/s
+        /\.mktero-field-control input,[\s\S]*?background:\s*var\(--mktero-input\)/s
     );
     assert.match(
         styles,
-        /\.mktero-field-control input,[\s\S]*?color:\s*CanvasText/s
+        /\.mktero-field-control input,[\s\S]*?color:\s*var\(--mktero-foreground\)/s
     );
     assert.match(
         styles,
-        /\.mktero-field-control input,[\s\S]*?border:\s*1px\s+solid\s+color-mix\(/s
+        /\.mktero-field-control input,[\s\S]*?border:\s*1px\s+solid\s+var\(--mktero-border\)/s
     );
     assert.match(
         styles,
         /\.mktero-field-control input,[\s\S]*?opacity:\s*1/s
     );
-    assert.match(
-        styles,
-        /#mktero-clear-cache\s*\{[\s\S]*?-moz-appearance:\s*none[\s\S]*?min-height:\s*36px[\s\S]*?border-radius:\s*8px/s
-    );
+    assert.match(pane, /id="mktero-clear-cache"[\s\S]*class="mktero-button mktero-button-outline"/);
 });
 
 test('does not add a second native arrow to preference selects', async () => {
@@ -283,14 +298,14 @@ test('does not add a second native arrow to preference selects', async () => {
         'utf8'
     );
     const fieldRule = styles.match(
-        /\.mktero-field-control input,\s*\.mktero-field-control select\s*\{([\s\S]*?)\}/
+        /\.mktero-field-control input,[\s\S]*?\.mktero-field-control select,[\s\S]*?\{([\s\S]*?)\}/
     )?.[1] || '';
 
     assert.ok(fieldRule);
     assert.doesNotMatch(fieldRule, /appearance:\s*auto/);
 });
 
-test('keeps preference fields in an aligned responsive flex layout', async () => {
+test('keeps preference fields in an aligned responsive grid layout', async () => {
     const [pane, styles] = await Promise.all([
         readFile(new URL('../ui/preferences.xhtml', import.meta.url), 'utf8'),
         readFile(new URL('../ui/preferences.css', import.meta.url), 'utf8'),
@@ -298,23 +313,19 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
 
     assert.match(
         styles,
-        /#mktero-preferences-pane\s*\{[\s\S]*?padding:\s*8px\s+20px\s+36px/s
+        /\.mktero-setting-row\s*\{[\s\S]*?display:\s*grid[\s\S]*?align-items:\s*center/s
     );
     assert.match(
         styles,
-        /\.mktero-field-row\s*\{[\s\S]*?align-items:\s*center/s
+        /\.mktero-setting-row\s*\{[\s\S]*?display:\s*grid[\s\S]*?align-items:\s*center/s
     );
     assert.match(
         styles,
-        /\.mktero-reader-font-row\s*\{[\s\S]*?align-items:\s*center/s
+        /\.mktero-setting-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--mktero-control-width\)/s
     );
     assert.match(
         styles,
-        /\.mktero-field-control\s*\{[\s\S]*?flex:\s*0\s+1\s+200px[\s\S]*?width:\s*200px[\s\S]*?max-width:\s*42%/s
-    );
-    assert.match(
-        styles,
-        /\.mktero-field-row\s*>\s*\.mktero-setting-copy[\s\S]*?min-width:\s*0/s
+        /\.mktero-field-control,\s*\.mktero-reader-font-control\s*\{[\s\S]*?width:\s*var\(--mktero-control-width\)/s
     );
     assert.match(
         styles,
@@ -322,15 +333,11 @@ test('keeps preference fields in an aligned responsive flex layout', async () =>
     );
     assert.match(
         styles,
-        /\.mktero-reader-font-control input,[\s\S]*?min-width:\s*0/s
+        /\.mktero-reader-font-control input\[type='range'\][\s\S]*?min-width:\s*0/s
     );
     assert.match(
         styles,
-        /@media\s*\(max-width:\s*700px\)[\s\S]*?\.mktero-field-row,[\s\S]*?flex-direction:\s*column/s
-    );
-    assert.doesNotMatch(
-        styles,
-        /\.mktero-field-row,[\s\S]*?display:\s*grid/s
+        /@media\s*\(max-width:\s*700px\)[\s\S]*?\.mktero-setting-row[\s\S]*?grid-template-columns:\s*1fr/s
     );
     assert.equal(
         (pane.match(
@@ -364,11 +371,19 @@ test('keeps right-side preference controls aligned at one width without native s
     );
     assert.match(
         styles,
-        /\.mktero-field-control-compact,\s*\.mktero-field-control-numeric\s*\{[\s\S]*?flex-basis:\s*200px[\s\S]*?width:\s*200px[\s\S]*?max-width:\s*42%/s
+        /\.mktero-field-control-compact,\s*\.mktero-field-control-numeric\s*\{[\s\S]*?width:\s*var\(--mktero-control-width\)/s
     );
     assert.match(
         styles,
-        /\.mktero-field-control\.mktero-provider-control\s*\{[\s\S]*?flex:\s*0\s+1\s+200px[\s\S]*?width:\s*200px[\s\S]*?max-width:\s*42%/s
+        /\.mktero-field-control\.mktero-provider-control\s*\{[\s\S]*?display:\s*flex[\s\S]*?align-items:\s*center/s
+    );
+    assert.match(
+        styles,
+        /\.mktero-switch-row\s*\{[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/s
+    );
+    assert.match(
+        styles,
+        /\.mktero-switch-control\s*\{[\s\S]*?justify-self:\s*end[\s\S]*?margin-inline-start:\s*0/s
     );
     assert.match(
         pane,
@@ -384,7 +399,7 @@ test('keeps right-side preference controls aligned at one width without native s
     );
     assert.match(
         styles,
-        /@media\s*\(max-width:\s*700px\)[\s\S]*?\.mktero-field-control-compact[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*100%/s
+        /@media\s*\(max-width:\s*700px\)[\s\S]*?\.mktero-field-control,\s*\.mktero-field-control-compact,[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/s
     );
 });
 
@@ -473,8 +488,7 @@ test('presents the account card with website-style tabs and an identity block', 
     assert.match(pane, /id="mktero-account-register-nickname"[\s\S]*?maxlength="32"/);
     assert.match(pane, /id="mktero-account-nickname"[\s\S]*?maxlength="32"/);
 
-    // The account card shares the settings-card background: no own fill, no
-    // own border, and no second rounded surface inside the card.
+    // The account content shares the parent card surface: one border, no nested card.
     const authCard = styles.match(/\.mktero-auth-card\s*\{([^}]*)\}/)?.[1] || '';
     assert.ok(authCard, '.mktero-auth-card rule is missing');
     assert.match(authCard, /background:\s*transparent/);
@@ -485,28 +499,25 @@ test('presents the account card with website-style tabs and an identity block', 
     assert.match(styles, /\.mktero-auth-tab\[aria-selected='true'\]/);
     assert.match(styles, /\.mktero-account-avatar\s*\{[\s\S]*?border-radius:\s*50%/s);
 
-    // The signed-in block spans the settings-row content width so its left and
-    // right edges line up with the conversion-provider row above it. The row is
-    // padded 16px 28px, so the account block must use the same 28px and must not
-    // re-cap the card narrower than the row.
     const accountInline = styles.match(/\.mktero-account-inline\s*\{([^}]*)\}/)?.[1] || '';
     assert.ok(accountInline, '.mktero-account-inline rule is missing');
-    assert.match(accountInline, /padding:\s*24px\s+28px\s+28px/);
+    assert.match(accountInline, /padding:\s*20px\s+24px\s+24px/);
+    assert.match(accountInline, /border-top:\s*1px/);
     assert.doesNotMatch(accountInline, /justify-content:\s*center/);
     assert.doesNotMatch(authCard, /max-width:/);
     const settingsRow = styles.match(/\.mktero-setting-row\s*\{([^}]*)\}/)?.[1] || '';
-    assert.match(settingsRow, /padding:\s*16px\s+28px/);
-    // Only the signed-out sign-in column keeps the website's narrow width.
+    assert.match(settingsRow, /grid-template-columns:/);
+    assert.match(settingsRow, /padding:\s*14px\s+24px/);
     assert.match(
         styles,
-        /\.mktero-auth-tabs\s*\{[\s\S]*?max-width:\s*452px/s
+        /\.mktero-auth-tabs\s*\{[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/s
     );
     assert.match(
         styles,
-        /\.mktero-auth-form\s*\{[\s\S]*?max-width:\s*452px/s
+        /\.mktero-auth-form\s*\{[\s\S]*?width:\s*100%[\s\S]*?max-width:\s*none/s
     );
 
-    // Refresh sits above sign out. More stays alone under the counters.
+    // Refresh and sign out remain in the account action area; More stays below stats.
     assert.match(
         pane,
         /id="mktero-account-refresh"[\s\S]*?id="mktero-account-logout"/
@@ -519,21 +530,11 @@ test('presents the account card with website-style tabs and an identity block', 
     const accountTop = styles.match(/\.mktero-account-top\s*\{([^}]*)\}/)?.[1] || '';
     assert.ok(accountTop, '.mktero-account-top rule is missing');
     assert.match(accountTop, /grid-template-columns:/);
-    // The sign-out pill keeps its intrinsic width instead of stretching.
-    assert.match(
-        styles,
-        /\.mktero-auth-card \.mktero-auth-submit:not\(\.mktero-button-primary\)\s*\{[\s\S]*?flex:\s*0\s+0\s+auto/s
-    );
+    assert.match(styles, /\.mktero-button-destructive\s*\{[\s\S]*?color:\s*#b42318/s);
     assert.match(
         styles,
         /\.mktero-account-stats\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s
     );
-    // The rename modal uses a hand-rolled backdrop: no <dialog> in the runtime.
-    assert.match(
-        styles,
-        /\.mktero-account-dialog-backdrop\s*\{[\s\S]*?position:\s*fixed[\s\S]*?inset:\s*0/s
-    );
-    assert.match(styles, /\.mktero-account-dialog-backdrop::backdrop|rgba\(17, 17, 17, 0\.46\)/);
 });
 
 test('hides the account card rows that are not in use', async () => {
@@ -542,23 +543,13 @@ test('hides the account card rows that are not in use', async () => {
         'utf8'
     );
 
-    // A stray trailing comma previously folded .mktero-card-note into this
-    // hidden list, which forced the hidden account rows back to display: block.
-    assert.match(
-        styles,
-        /#mktero-account-register-nickname-row\[hidden\],[\s\S]*?#mktero-ai-account-status\[hidden\]\s*\{\s*display:\s*none;/s
-    );
-    // The hidden list must close before .mktero-card-note starts, otherwise the
-    // card-note rule would apply to the hidden account rows instead.
-    const hiddenList = styles.match(
-        /#mktero-account-api-base-row\[hidden\][\s\S]*?\n\}/s
-    )?.[0] || '';
-    assert.match(hiddenList, /#mktero-ai-account-status\[hidden\]\s*\{\s*display:\s*none;/);
-    assert.doesNotMatch(hiddenList, /\.mktero-card-note/);
+    assert.match(styles, /#mktero-account-register-nickname-row\[hidden\]/);
+    assert.match(styles, /#mktero-ai-account-status\[hidden\]/);
+    assert.match(styles, /#mktero-account-api-base-row\[hidden\][\s\S]*display:\s*none;/s);
     assert.doesNotMatch(styles, /#mktero-account-switch\[hidden\]/);
 });
 
-test('matches the website account card controls', async () => {
+test('uses the shared native component styles for account controls', async () => {
     const styles = await readFile(
         new URL('../ui/preferences.css', import.meta.url),
         'utf8'
@@ -568,62 +559,44 @@ test('matches the website account card controls', async () => {
         new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}')
     )?.[1] || '';
 
-    // The website card: white inputs, 12px radius, 44px tall, dark pill button.
-    const input = rule('.mktero-auth-card .mktero-form-field input');
-    assert.ok(input, 'the account input rule is missing');
-    assert.match(input, /min-height:\s*44px/);
-    assert.match(input, /border-radius:\s*12px/);
-    assert.match(input, /background:\s*Canvas/);
-    assert.match(input, /padding:\s*0\s+13px/);
+    const inputRule = styles.match(
+        /\.mktero-field-control input,[\s\S]*?\.mktero-account-dialog-card input\s*\{([\s\S]*?)\}/
+    )?.[1] || '';
+    assert.ok(inputRule, 'the shared input rule is missing');
+    assert.match(inputRule, /min-height:\s*var\(--mktero-control-height\)/);
+    assert.match(inputRule, /border-radius:\s*var\(--mktero-radius\)/);
+    assert.match(inputRule, /background:\s*var\(--mktero-input\)/);
 
-    const primary = rule('.mktero-auth-card .mktero-button-primary');
-    assert.ok(primary, 'the primary button rule is missing');
-    assert.match(primary, /min-height:\s*46px/);
-    assert.match(primary, /border-radius:\s*999px/);
-    assert.match(primary, /background:\s*#111111/);
-    assert.match(primary, /color:\s*#ffffff/);
+    const primary = rule('.mktero-button');
+    assert.ok(primary, 'the shared button rule is missing');
+    assert.match(primary, /min-height:\s*var\(--mktero-control-height\)/);
+    assert.match(primary, /background:\s*var\(--mktero-input\)/);
+    assert.match(primary, /color:\s*var\(--mktero-foreground\)/);
 
-    // The inline send-code button is a 12px-radius outlined control.
-    const inline = rule('.mktero-auth-card .mktero-input-action .mktero-button');
-    assert.ok(inline, 'the inline button rule is missing');
-    assert.match(inline, /border-radius:\s*12px/);
-    assert.match(inline, /min-height:\s*44px/);
+    assert.match(styles, /\.mktero-button\s*\{[\s\S]*?min-height:\s*var\(--mktero-control-height\)/);
+    assert.match(styles, /\.mktero-button-primary\s*\{[\s\S]*?background:\s*var\(--mktero-primary\)/);
+    assert.match(styles, /\.mktero-button-primary\s*\{[\s\S]*?color:\s*var\(--mktero-primary-foreground\)/);
 
-    // The tab row is a pill with a 38px selected tab.
     const tab = rule('.mktero-auth-tab');
-    assert.match(tab, /min-height:\s*38px/);
-    assert.match(tab, /border-radius:\s*999px/);
-    assert.match(rule('.mktero-auth-tabs'), /border-radius:\s*999px/);
+    assert.match(tab, /min-height:\s*34px/);
+    assert.match(tab, /border-radius:\s*6px/);
+    assert.match(rule('.mktero-auth-tabs'), /border-radius:\s*8px/);
 
-    // "Forgot password?" uses the website blue, not the theme accent.
-    assert.match(
-        rule('.mktero-auth-card .mktero-auth-inline-link'),
-        /color:\s*#3b82f6/
-    );
-
-    // Sign out is a plain red text action: no border, no fill, so it reads as
-    // the destructive choice rather than a second primary button.
-    const secondary = rule('.mktero-auth-card .mktero-auth-submit:not(.mktero-button-primary)');
-    assert.ok(secondary, 'the sign-out rule is missing');
-    assert.match(secondary, /border:\s*0/);
-    assert.match(secondary, /background:\s*transparent/);
-    assert.match(secondary, /color:\s*#b42318/);
-    assert.doesNotMatch(secondary, /border-radius:\s*999px/);
-    assert.doesNotMatch(secondary, /min-height:\s*4[46]px/);
-
-    // The rename pencil is square and exactly as tall as the nickname line box
-    // (1.05rem font x 1.3 line-height).
-    const icon = rule('.mktero-account-icon-button');
-    assert.ok(icon, 'the account icon button rule is missing');
-    assert.match(icon, /border:\s*0/);
-    assert.doesNotMatch(icon, /width:\s*30px/);
     assert.match(
         styles,
-        /\.mktero-account-name-row \.mktero-account-icon-button\s*\{[\s\S]*?width:\s*1\.365rem[\s\S]*?height:\s*1\.365rem/s
+        /\.mktero-auth-inline-link\s*\{[\s\S]*?color:\s*var\(--mktero-primary\)/
     );
     assert.match(
         styles,
-        /\.mktero-account-identity-copy strong\s*\{[\s\S]*?font-size:\s*1\.05rem[\s\S]*?line-height:\s*1\.3/s
+        /\.mktero-button-destructive\s*\{[\s\S]*?color:\s*#b42318/
+    );
+    assert.match(
+        styles,
+        /\.mktero-account-name-row \.mktero-account-icon-button\s*\{[\s\S]*?width:\s*24px[\s\S]*?height:\s*24px/s
+    );
+    assert.match(
+        styles,
+        /\.mktero-account-identity-copy strong\s*\{[\s\S]*?font-size:\s*1rem[\s\S]*?line-height:\s*1\.3/s
     );
 });
 

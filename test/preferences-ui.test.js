@@ -689,6 +689,50 @@ test('switches preference sections with the tab list', async () => {
     controller.destroy();
 });
 
+test('toggles the AI advanced settings disclosure', async () => {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <button id="mktero-ai-advanced-toggle"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="mktero-ai-advanced">Advanced</button>
+            <div id="mktero-ai-advanced" hidden></div>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const { document } = dom.window;
+    const controller = createPreferencesController({
+        document,
+        zotero: {
+            Prefs: { get: () => undefined },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+
+    await controller.init();
+    const toggle = document.getElementById('mktero-ai-advanced-toggle');
+    const panel = document.getElementById('mktero-ai-advanced');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(panel.hidden, true);
+
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(panel.hidden, false);
+
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(panel.hidden, true);
+
+    controller.destroy();
+    toggle.click();
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+});
+
 test('isolates AI connection settings per provider and restores the previous slot', async () => {
     const values = new Map([
         ['extensions.mktero.aiProvider', 'openai'],

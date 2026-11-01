@@ -307,6 +307,10 @@ export function createPreferencesController({
     const aiRequestTimeoutInput = document.getElementById(
         'mktero-ai-request-timeout'
     );
+    const aiAdvancedToggle = document.getElementById(
+        'mktero-ai-advanced-toggle'
+    );
+    const aiAdvancedPanel = document.getElementById('mktero-ai-advanced');
     const tabList = document.getElementById('mktero-pref-tablist');
     const t = (key, variables) => localization.t(key, variables);
     let initialized = false;
@@ -1269,6 +1273,20 @@ export function createPreferencesController({
         );
     }
 
+    function toggleAIAdvancedSettings() {
+        if (!aiAdvancedToggle || !aiAdvancedPanel) return;
+        const expanded = aiAdvancedToggle.getAttribute('aria-expanded') === 'true';
+        aiAdvancedToggle.setAttribute('aria-expanded', String(!expanded));
+        aiAdvancedPanel.hidden = expanded;
+    }
+
+    function initializeAIAdvancedSettings() {
+        if (!aiAdvancedToggle || !aiAdvancedPanel) return;
+        aiAdvancedToggle.setAttribute('aria-expanded', 'false');
+        aiAdvancedPanel.hidden = true;
+        aiAdvancedToggle.addEventListener('click', toggleAIAdvancedSettings);
+    }
+
     function updateAIProtocolOptions({ persist = true } = {}) {
         if (!aiProviderInput || !aiProtocolInput) return;
         const protocols = getAIProtocolsForProvider(aiProviderInput.value);
@@ -1541,6 +1559,7 @@ export function createPreferencesController({
         initializeConversionProvider();
         initializeAIProvider();
         initializeAIRequestTimeout();
+        initializeAIAdvancedSettings();
         initializeReaderFont();
         initializeReaderFontSize();
         initializeReaderLineHeight();
@@ -1689,6 +1708,10 @@ export function createPreferencesController({
             aiRequestTimeoutInput?.removeEventListener(
                 'change',
                 saveAIRequestTimeout
+            );
+            aiAdvancedToggle?.removeEventListener(
+                'click',
+                toggleAIAdvancedSettings
             );
             conversionProviderInput?.removeEventListener(
                 'change',
