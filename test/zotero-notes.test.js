@@ -52,6 +52,11 @@ function createFakeZotero(items = []) {
                 )) || null;
             },
             async loadDataTypes() {},
+            getAll(libraryID) {
+                return items.filter(item => (
+                    String(item?.libraryID) === String(libraryID)
+                ));
+            },
         },
         Libraries: {
             get: id => libraries.get(id) || { editable: true },
@@ -134,6 +139,12 @@ function noteItem(overrides = {}) {
     };
 }
 
+function standaloneNoteItem(overrides = {}) {
+    return noteItem({
+        parentID: null,
+        ...overrides,
+    });
+}
 function createEditorWindow({ registered = true, iframe = null } = {}) {
     const editors = [];
     const window = {
@@ -258,6 +269,48 @@ function createTimers() {
     };
 }
 
+test('lists current item notes and same-library standalone notes without other item notes', async () => {
+    const child = noteItem({ id: 1, dateModified: '2024-01-01 00:00:00' });
+    const standalone = standaloneNoteItem({
+        id: 2,
+        key: 'STANDALONE',
+        dateModified: '2024-03-01 00:00:00',
+        getNote: () => '<p>Literature review</p><p>Across papers</p>',
+    });
+    const otherItemNote = noteItem({
+        id: 3,
+        key: 'OTHER-ITEM',
+        parentID: 99,
+        dateModified: '2024-04-01 00:00:00',
+    });
+    const otherLibraryStandalone = standaloneNoteItem({
+        id: 4,
+        key: 'OTHER-LIBRARY',
+        libraryID: 8,
+        dateModified: '2024-05-01 00:00:00',
+    });
+    const parent = parentItem({ getNotes: () => [1] });
+    const attachment = pdfAttachment();
+    const zotero = createFakeZotero([
+        attachment,
+        parent,
+        child,
+        standalone,
+        otherItemNote,
+        otherLibraryStandalone,
+    ]);
+    const notes = createZoteroNotes(zotero);
+
+    const result = await notes.list(42);
+
+    assert.equal(result.status, 'ready');
+    assert.deepEqual(result.notes.map(note => [note.id, note.kind]), [
+        [1, 'item'],
+        [2, 'standalone'],
+    ]);
+    assert.equal(result.canCreateItemNote, true);
+    assert.equal(result.canCreateStandaloneNote, true);
+});
 test('reports notes unavailable when the item is missing or not a PDF', async () => {
     const regular = {
         id: 5,
@@ -270,6 +323,8 @@ test('reports notes unavailable when the item is missing or not a PDF', async ()
         status: 'unavailable',
         notes: [],
         editable: false,
+        canCreateItemNote: false,
+        canCreateStandaloneNote: false,
         annotationCount: 0,
     };
 
@@ -297,6 +352,8 @@ test('reports a standalone PDF as having no parent and skips ink annotations', a
         status: 'no-parent',
         notes: [],
         editable: false,
+        canCreateItemNote: false,
+        canCreateStandaloneNote: true,
         annotationCount: 2,
     });
     assert.deepEqual(seen, [false]);
@@ -380,10 +437,12 @@ test('lists child notes newest first and drops deleted and snapshot notes', asyn
     assert.deepEqual(result.notes[0], {
         id: 2,
         key: 'NEWEST',
+        kind: 'item',
         title: 'August title',
         preview: 'summer',
         dateModified: '2024-08-09 12:30:00',
         dateLabel: 'friendly:2024-08-09 12:30:00',
+        editable: true,
     });
     assert.equal(result.notes[1].title, 'March');
     assert.equal(result.notes[1].preview, 'middle preview');
@@ -597,6 +656,22 @@ test('mounts an editable note-editor for a new child note', async () => {
     assert.equal(handle.noteID, 15);
 });
 
+test('mounts an editable editor for a new standalone note', async () => {
+    const attachment = pdfAttachment({ id: 42, libraryID: 3, parentID: null });
+    const zotero = createFakeZotero([attachment]);
+    const window = createEditorWindow();
+    const notes = createZoteroNotes(zotero, { getMainWindow: () => window });
+
+    const handle = await notes.mountEditor(createContainer(), {
+        attachmentID: 42,
+        noteKind: 'standalone',
+    });
+    const editor = window.editors[0];
+
+    assert.equal(handle.editable, true);
+    assert.equal(editor.item.libraryID, 3);
+    assert.equal(editor.item.parentID, null);
+});
 test('mounts a read-only note in view mode and refuses insertion', async () => {
     const note = noteItem({ id: 8, libraryID: 3, key: 'RO' });
     const parent = parentItem({ id: 9, libraryID: 3 });

@@ -2208,9 +2208,10 @@ function createSavedMarkdownActions(noteID, sourceItem) {
     };
 }
 
-// The notes column of one Mktero tab: the Zotero child notes of the PDF the
-// tab shows, through runtime.zoteroNotes. `getAttachmentID` is read on every
-// call because a saved snapshot learns its source PDF after it opens.
+// The notes column of one Mktero tab: the current paper's child notes and
+// same-library standalone notes, through runtime.zoteroNotes. `getAttachmentID`
+// is read on every call because a saved snapshot learns its source PDF after
+// it opens.
 function createTabNotesBridge(getAttachmentID) {
     const notes = runtime.zoteroNotes;
     if (!notes) return null;
@@ -2232,7 +2233,14 @@ function createTabNotesBridge(getAttachmentID) {
         async list() {
             const id = getAttachmentID();
             if (!id) {
-                return { status: 'unavailable', notes: [], editable: false, annotationCount: 0 };
+                return {
+                    status: 'unavailable',
+                    notes: [],
+                    editable: false,
+                    canCreateItemNote: false,
+                    canCreateStandaloneNote: false,
+                    annotationCount: 0,
+                };
             }
             return notes.list(id);
         },

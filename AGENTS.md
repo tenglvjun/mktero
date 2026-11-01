@@ -126,9 +126,11 @@ documentation-only. Report any command that could not be run.
   footnote (`脚注`) for a paper's footnote. Internal i18n keys and CSS classes
   such as `viewer.notes*` and `.markdown-note-*` keep their historical names.
 - The reader's left column has the Headings, Figures, and Annotations
-  segments. The right column lists and edits the paper's Zotero child notes.
+  segments. The right column lists and edits the current paper's child notes
+  plus standalone notes from the same Zotero library.
 - Mktero stores no notes. Notes are Zotero note items edited with Zotero's own
   `note-editor`; do not add a note store, a rich-text editor, or a note cache.
+  The reader does not mix in other libraries or other papers' child notes.
 - Do not patch Zotero's context pane (`_hasContextPaneTypes` in 8.0 to 10.0,
   the hardcoded `'reader'` check in 7.0). The Mktero tab hosts its own
   `note-editor`, hides the leftover context pane while selected, and falls
