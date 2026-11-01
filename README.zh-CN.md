@@ -188,7 +188,7 @@ QQ 是用户群：可以扫码，也可以在 QQ 中搜索群号 `616518076`。
 如果 Mktero 让你阅读论文更轻松，欢迎请我喝杯咖啡。
 你的支持将用于项目的持续开发、维护和托管费用。
 
-[☕ 请我喝杯咖啡 · Ko-fi](https://ko-fi.com/tenglvjun)
+[![通过 Ko-fi 支持 Mktero](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/tenglvjun)
 
 ## License
 
