@@ -1122,6 +1122,67 @@ main {
     opacity: 0.45;
 }
 
+.mktero-zotero-notes-tabs {
+    display: flex;
+    min-width: 0;
+    padding: 0 9px 8px;
+}
+
+.mktero-zotero-notes-tab {
+    display: inline-flex;
+    min-width: 0;
+    height: 26px;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    color: var(--muted);
+    background: var(--surface-raised);
+    cursor: pointer;
+    font: 12px/1 var(--ui-font);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mktero-zotero-notes-tab + .mktero-zotero-notes-tab {
+    margin-left: -1px;
+}
+
+.mktero-zotero-notes-tab:first-child {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.mktero-zotero-notes-tab:last-child {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.mktero-zotero-notes-tab:hover {
+    position: relative;
+    z-index: 1;
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+}
+
+.mktero-zotero-notes-tab:focus-visible {
+    position: relative;
+    z-index: 2;
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 1px;
+}
+
+.mktero-zotero-notes-tab[aria-selected='true'] {
+    position: relative;
+    z-index: 1;
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+    font-weight: 650;
+}
+
 .mktero-zotero-notes-search {
     flex: 0 0 auto;
     padding: 0 10px 8px;
@@ -1150,36 +1211,6 @@ main {
     color: var(--muted);
     font-size: 12px;
     line-height: 1.45;
-}
-
-.mktero-zotero-notes-group {
-    margin: 12px 0 18px;
-}
-
-.mktero-zotero-notes-group:first-child {
-    margin-top: 4px;
-}
-
-.mktero-zotero-notes-group-title {
-    margin: 0;
-    padding: 0 8px 4px;
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-}
-
-.mktero-zotero-notes-group-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.mktero-zotero-notes-group-empty {
-    padding: 4px 8px;
-    color: var(--muted);
-    font-size: 12px;
 }
 
 .mktero-zotero-notes-list {

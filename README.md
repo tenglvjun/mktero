@@ -83,10 +83,9 @@ conversions for the same PDF and parser profile.
 - Display Zotero PDF highlights and underlines in Markdown, and create, recolor,
   comment on, or delete annotations. The reader's Notes column shows the
   current item's child notes and standalone notes from the same Zotero library
-  in separate sections; other papers' child notes are not shown. Edit either
-  kind with Zotero's native note editor, create either kind from the plus menu,
-  and add the current paper's passages and citations to an open standalone
-  note. Note formulas remain rendered as formulas.
+  in separate tabs; other papers' child notes are not shown. Edit either kind
+  with Zotero's native note editor, create either kind from the plus menu, and
+  add the current paper's passages and citations to an open standalone note.
 - Correct recognition errors in existing paragraphs, headings, and GFM table
   cells without modifying the immutable OCR result.
 - Translate a complete article through a configured Vercel AI SDK provider and

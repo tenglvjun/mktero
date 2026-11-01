@@ -175,7 +175,7 @@ test('an observation refreshes the note list', async () => {
     assert.equal(listener, null);
 });
 
-test('groups and searches item and standalone notes', async () => {
+test('uses note tabs and searches only the active scope', async () => {
     const { aside, panel } = createPanel();
     panel.setAdapter({
         async list() {
@@ -189,11 +189,27 @@ test('groups and searches item and standalone notes', async () => {
     await flush();
 
     assert.deepEqual(
-        [...aside.querySelectorAll('.mktero-zotero-notes-group-title')]
+        [...aside.querySelectorAll('.mktero-zotero-notes-tab')]
             .map(node => node.textContent),
-        ['Current item notes', 'Standalone notes']
+        ['Item notes', 'Standalone notes']
     );
-    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 2);
+    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 1);
+    assert.equal(
+        aside.querySelector('.mktero-zotero-note-title').textContent,
+        'Paper method'
+    );
+
+    aside.querySelector('[data-note-scope="standalone"]').click();
+    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 1);
+    assert.equal(
+        aside.querySelector('.mktero-zotero-note-title').textContent,
+        'Literature review'
+    );
+    assert.equal(
+        aside.querySelector('.mktero-zotero-notes-tab[aria-selected="true"]')
+            .textContent,
+        'Standalone notes'
+    );
 
     const input = aside.querySelector('.mktero-zotero-notes-search-input');
     input.value = 'literature';
@@ -202,10 +218,11 @@ test('groups and searches item and standalone notes', async () => {
     }));
 
     assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 1);
-    assert.equal(
-        aside.querySelector('.mktero-zotero-note-title').textContent,
-        'Literature review'
-    );
+    input.value = 'paper method';
+    input.dispatchEvent(new aside.ownerDocument.defaultView.Event('input', {
+        bubbles: true,
+    }));
+    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 0);
     panel.destroy();
 });
 

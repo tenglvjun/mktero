@@ -7,6 +7,16 @@ import { createNativeContextMenu } from './native-context-menu.js';
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 export const NOTE_EDITOR_SLOT = 'mktero-note-editor';
 
+const NOTE_SCOPES = Object.freeze(['item', 'standalone']);
+const NOTE_SCOPE_LABEL_KEYS = Object.freeze({
+    item: 'notes.itemNotes',
+    standalone: 'notes.standalone',
+});
+const NOTE_SCOPE_EMPTY_KEYS = Object.freeze({
+    item: 'notes.itemEmpty',
+    standalone: 'notes.standaloneEmpty',
+});
+
 // The right column of a Mktero tab: the current paper's child notes and the
 // standalone notes of the paper's Zotero library. The list lives in the
 // reader's shadow tree. Zotero's `note-editor` cannot: it needs the chrome
@@ -56,6 +66,7 @@ class ZoteroNotesPanel {
             annotationCount: 0,
         };
         this.noteQuery = '';
+        this.noteScope = 'item';
         this.mode = 'list';
         this.handle = null;
         this.openingNote = false;
@@ -111,6 +122,7 @@ class ZoteroNotesPanel {
             annotationCount: 0,
         };
         this.noteQuery = '';
+        this.noteScope = 'item';
         if (this.elements?.searchInput) this.elements.searchInput.value = '';
         this.render();
         if (this.adapter) void this.refresh();
@@ -196,6 +208,36 @@ class ZoteroNotesPanel {
         await this.showEditor({ noteID: null, noteKind });
     }
 
+    setNoteScope(scope) {
+        if (!NOTE_SCOPES.includes(scope) || this.noteScope === scope) return;
+        this.noteScope = scope;
+        this.noteQuery = '';
+        if (this.elements?.searchInput) this.elements.searchInput.value = '';
+        this.syncNoteScopeButtons();
+        this.render();
+    }
+
+    scopeNotes() {
+        return this.state.notes.filter(note => (
+            (note.kind || 'item') === this.noteScope
+        ));
+    }
+
+    syncNoteScopeButtons() {
+        for (const button of this.elements.noteScopeButtons) {
+            const selected = button.getAttribute('data-note-scope') === this.noteScope;
+            button.setAttribute('aria-selected', selected ? 'true' : 'false');
+            button.textContent = this.t(
+                NOTE_SCOPE_LABEL_KEYS[button.getAttribute('data-note-scope')]
+            );
+        }
+        this.elements.noteScopes.setAttribute('aria-label', this.t('notes.scopes'));
+        this.elements.list.setAttribute(
+            'aria-labelledby',
+            `mktero-zotero-notes-tab-${this.noteScope}`
+        );
+    }
+
     // `options.segmentsFor` passes each annotation's text and formulas on to
     // the note, so the note shows the formulas the reader shows.
     async createFromAnnotations(options = undefined) {
@@ -242,6 +284,12 @@ class ZoteroNotesPanel {
         elements.titleLabel.textContent = this.t('viewer.notesTitle');
         this.aside.setAttribute('aria-label', this.t('viewer.notes'));
         setLabel(elements.newButton, this.t('notes.newNote'));
+        for (const button of elements.noteScopeButtons) {
+            button.textContent = this.t(
+                NOTE_SCOPE_LABEL_KEYS[button.getAttribute('data-note-scope')]
+            );
+        }
+        elements.noteScopes.setAttribute('aria-label', this.t('notes.scopes'));
         elements.searchInput.setAttribute('aria-label', this.t('notes.search'));
         elements.searchInput.setAttribute('placeholder', this.t('notes.searchPlaceholder'));
         setLabel(elements.backButton, this.t('notes.backToList'));
@@ -450,14 +498,16 @@ class ZoteroNotesPanel {
         const { elements, state } = this;
         const editing = this.mode === 'editor';
         const listed = state.status === 'ready' || state.status === 'no-parent';
+        const scopeNotes = this.scopeNotes();
         const visibleNotes = this.filteredNotes();
         elements.listView.hidden = editing;
         elements.editorView.hidden = !editing;
-        elements.count.hidden = editing || !listed || !state.notes.length;
-        elements.count.textContent = visibleNotes.length === state.notes.length
-            ? String(state.notes.length)
-            : `${visibleNotes.length}/${state.notes.length}`;
-        elements.search.hidden = editing || !listed || !state.notes.length;
+        elements.count.hidden = editing || !listed || !scopeNotes.length;
+        elements.count.textContent = visibleNotes.length === scopeNotes.length
+            ? String(scopeNotes.length)
+            : `${visibleNotes.length}/${scopeNotes.length}`;
+        elements.search.hidden = editing || !listed || !scopeNotes.length;
+        elements.noteScopes.hidden = editing || !listed;
         elements.newButton.hidden = editing
             || !listed
             || (state.status === 'no-parent'
@@ -472,24 +522,21 @@ class ZoteroNotesPanel {
     }
 
     renderStatus() {
-        const { status, notes } = this.state;
+        const { status } = this.state;
+        const scopeNotes = this.scopeNotes();
         const filtered = this.filteredNotes();
         let key = {
             loading: 'notes.loading',
             unavailable: 'notes.unavailable',
         }[status];
-        if (!key && this.noteQuery.trim() && notes.length && !filtered.length) {
+        if (!key && this.noteQuery.trim() && scopeNotes.length && !filtered.length) {
             key = 'notes.noSearchMatches';
         }
-        if (!key && status === 'no-parent') {
-            key = notes.length
-                ? 'notes.noParentStandaloneOnly'
-                : 'notes.noParent';
+        if (!key && status === 'no-parent' && this.noteScope === 'item') {
+            key = 'notes.noParent';
         }
-        if (!key && !notes.length
-            && status !== 'ready'
-            && status !== 'no-parent') {
-            key = 'notes.empty';
+        if (!key && !scopeNotes.length && (status === 'ready' || status === 'no-parent')) {
+            key = NOTE_SCOPE_EMPTY_KEYS[this.noteScope];
         }
         this.elements.status.hidden = !key;
         this.elements.status.textContent = key ? this.t(key) : '';
@@ -500,8 +547,8 @@ class ZoteroNotesPanel {
             .toLowerCase()
             .replace(/\s+/gu, ' ')
             .trim();
-        if (!query) return this.state.notes;
-        return this.state.notes.filter(note => (
+        if (!query) return this.scopeNotes();
+        return this.scopeNotes().filter(note => (
             `${note.title || ''} ${note.preview || ''}`
                 .toLowerCase()
                 .replace(/\s+/gu, ' ')
@@ -513,33 +560,8 @@ class ZoteroNotesPanel {
         const list = this.elements.list;
         list.replaceChildren();
         if (this.state.status !== 'ready' && this.state.status !== 'no-parent') return;
-        const visible = this.filteredNotes();
-        for (const group of [
-            {
-                kind: 'item',
-                titleKey: 'notes.currentItem',
-                emptyKey: 'notes.itemEmpty',
-            },
-            {
-                kind: 'standalone',
-                titleKey: 'notes.standalone',
-                emptyKey: 'notes.standaloneEmpty',
-            },
-        ]) {
-            const entries = visible.filter(note => (note.kind || 'item') === group.kind);
-            const groupItem = this.element('li', 'mktero-zotero-notes-group');
-            const heading = this.element('h3', 'mktero-zotero-notes-group-title');
-            heading.textContent = this.t(group.titleKey);
-            groupItem.appendChild(heading);
-            const groupList = this.element('ul', 'mktero-zotero-notes-group-list');
-            if (!entries.length) {
-                const empty = this.element('li', 'mktero-zotero-notes-group-empty');
-                empty.textContent = this.t(group.emptyKey);
-                groupList.appendChild(empty);
-            }
-            for (const note of entries) groupList.appendChild(this.renderNote(note));
-            groupItem.appendChild(groupList);
-            list.appendChild(groupItem);
+        for (const note of this.filteredNotes()) {
+            list.appendChild(this.renderNote(note));
         }
     }
 
@@ -599,7 +621,25 @@ class ZoteroNotesPanel {
         titleRow.append(title, actions);
         header.appendChild(titleRow);
 
+        const noteScopes = this.element('div', 'mktero-zotero-notes-tabs');
+        noteScopes.setAttribute('role', 'tablist');
+        noteScopes.setAttribute('aria-label', this.t('notes.scopes'));
+        const noteScopeButtons = NOTE_SCOPES.map(scope => {
+            const button = this.element('button', 'mktero-zotero-notes-tab');
+            button.type = 'button';
+            button.setAttribute('role', 'tab');
+            button.setAttribute('id', `mktero-zotero-notes-tab-${scope}`);
+            button.setAttribute('data-note-scope', scope);
+            button.setAttribute('aria-selected', scope === this.noteScope ? 'true' : 'false');
+            button.setAttribute('aria-controls', 'mktero-zotero-notes-list');
+            button.textContent = this.t(NOTE_SCOPE_LABEL_KEYS[scope]);
+            button.addEventListener('click', () => this.setNoteScope(scope));
+            noteScopes.appendChild(button);
+            return button;
+        });
+
         const search = this.element('div', 'mktero-zotero-notes-search');
+        header.appendChild(noteScopes);
         const searchInput = this.element('input', 'mktero-zotero-notes-search-input');
         searchInput.type = 'search';
         searchInput.setAttribute('aria-label', this.t('notes.search'));
@@ -614,6 +654,9 @@ class ZoteroNotesPanel {
         const status = this.element('p', 'mktero-zotero-notes-status');
         status.setAttribute('role', 'status');
         const list = this.element('ul', 'mktero-zotero-notes-list');
+        list.setAttribute('id', 'mktero-zotero-notes-list');
+        list.setAttribute('role', 'tabpanel');
+        list.setAttribute('aria-labelledby', 'mktero-zotero-notes-tab-item');
         listView.append(header, search, status, list);
 
         const editorView = this.element('div', 'mktero-zotero-notes-editor-view');
@@ -649,6 +692,8 @@ class ZoteroNotesPanel {
             titleLabel,
             count,
             newButton,
+            noteScopes,
+            noteScopeButtons,
             search,
             searchInput,
             status,

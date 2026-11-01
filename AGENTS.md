@@ -127,7 +127,7 @@ documentation-only. Report any command that could not be run.
   such as `viewer.notes*` and `.markdown-note-*` keep their historical names.
 - The reader's left column has the Headings, Figures, and Annotations
   segments. The right column lists and edits the current paper's child notes
-  plus standalone notes from the same Zotero library.
+  plus standalone notes from the same Zotero library in separate tabs.
 - Mktero stores no notes. Notes are Zotero note items edited with Zotero's own
   `note-editor`; do not add a note store, a rich-text editor, or a note cache.
   The reader does not mix in other libraries or other papers' child notes.

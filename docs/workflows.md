@@ -205,12 +205,13 @@ The `Annotations` segment lists the paper's annotations, with search, a color
 filter, a jump to the Markdown position, `View in PDF`, delete, retry sync for
 a local highlight, and `Add to Note`.
 
-The right column is `Notes` with two sections. `Current item notes` lists the
-Zotero child notes attached to the paper being read, newest first. `Standalone
-notes` lists top-level notes from the same Zotero library, newest first. Child
-notes belonging to other papers are not shown. Use the plus menu to create a
-child note for the current item or a standalone note. Both kinds are normal
-Zotero note items and use Zotero's own note editor, so Mktero stores no notes.
+The right column is `Notes` with two tabs: `Item notes` and `Standalone
+notes`. `Item notes` lists the Zotero child notes attached to the paper being
+read, newest first. `Standalone notes` lists top-level notes from the same
+Zotero library, newest first. Child notes belonging to other papers are not
+shown. Use the plus menu to create a child note for the current item or a
+standalone note. Both kinds are normal Zotero note items and use Zotero's own
+note editor, so Mktero stores no notes.
 
 Clicking a note edits it in Zotero's own note editor inside the Mktero tab.
 `Back to notes` returns to the list. `Edit in a Separate Window` opens
