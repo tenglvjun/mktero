@@ -544,6 +544,7 @@ test('hides the account card rows that are not in use', async () => {
     );
 
     assert.match(styles, /#mktero-account-register-nickname-row\[hidden\]/);
+    assert.match(styles, /#mktero-account-tabs\[hidden\][\s\S]*?display:\s*none;/s);
     assert.match(styles, /#mktero-ai-account-status\[hidden\]/);
     assert.match(styles, /#mktero-account-api-base-row\[hidden\][\s\S]*display:\s*none;/s);
     assert.doesNotMatch(styles, /#mktero-account-switch\[hidden\]/);
