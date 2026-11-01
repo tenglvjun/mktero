@@ -294,7 +294,7 @@ group, WeChat, Discord, issues, pull requests, and logs.
 If Mktero makes reading papers easier for you, consider buying me a coffee.
 Your support helps with ongoing development, maintenance, and hosting costs.
 
-[☕ Buy me a coffee on Ko-fi](https://ko-fi.com/tenglvjun)
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/tenglvjun)
 
 ## License
 
