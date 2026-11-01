@@ -75,7 +75,7 @@ import {
     sendSignupCode,
     updateMkteroNickname,
 } from '../account/account-client.js';
-import { ensureAccountAccessToken } from '../account/account-session.js';
+import { ensureAccountAccessToken, reportAccountClientHeartbeat } from '../account/account-session.js';
 import {
     accessTokenNeedsRefresh,
     clearAccountSession,
@@ -1029,6 +1029,7 @@ export function createPreferencesController({
                 return;
             }
             saveAccountSession(zotero, session);
+            reportClientHeartbeatInBackground();
             if (accountPasswordInput) accountPasswordInput.value = '';
             if (accountConfirmInput) accountConfirmInput.value = '';
             if (accountNicknameInput) accountNicknameInput.value = '';
@@ -1148,6 +1149,13 @@ export function createPreferencesController({
         accountBusy = false;
         if (accountLogoutButton) accountLogoutButton.disabled = false;
         renderAccount();
+    }
+
+    function reportClientHeartbeatInBackground() {
+        void reportAccountClientHeartbeat(zotero, { fetchImpl: accountFetch })
+            .catch(() => {
+                // Version telemetry is best-effort and must not affect account UI.
+            });
     }
 
     async function refreshAccountIfNeeded() {

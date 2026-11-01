@@ -1,6 +1,7 @@
 import {
     isAccountSessionInvalid,
     refreshMkteroAccount,
+    reportMkteroClientVersion,
 } from './account-client.js';
 import {
     accessTokenNeedsRefresh,
@@ -17,6 +18,9 @@ export const REFRESH_LOCK_TTL_MS = 60 * 1000;
 // Shorter than the lock, so a hung request ends before the lock can expire and
 // let another caller present the same refresh token.
 export const REFRESH_REQUEST_TIMEOUT_MS = 20 * 1000;
+export const CLIENT_HEARTBEAT_INTERVAL_MS = 6 * 60 * 60 * 1000;
+export const CLIENT_HEARTBEAT_RETRY_DELAY_MS = 60 * 1000;
+export const CLIENT_HEARTBEAT_REQUEST_TIMEOUT_MS = 20 * 1000;
 const PEER_POLL_MS = 25;
 const MAX_PEER_POLLS = 2400;
 
@@ -24,7 +28,151 @@ const MAX_PEER_POLLS = 2400;
 // bundles, so this map only collapses callers that share a bundle. The prefs
 // lock below covers the other bundle.
 const refreshInFlight = new WeakMap();
+const heartbeatInFlight = new WeakMap();
+const heartbeatSchedulers = new WeakMap();
 let refreshLockSerial = 0;
+
+export function reportAccountClientHeartbeat(zotero, {
+    fetchImpl,
+    now = Date.now,
+    sleep = delay,
+    secureRandom = globalThis.crypto,
+} = {}) {
+    return joinClientHeartbeat(zotero, async () => {
+        const request = accessToken => reportMkteroClientVersion({
+            apiBase: getAccountApiBase(zotero),
+            accessToken,
+            fetchImpl,
+            timeoutMs: CLIENT_HEARTBEAT_REQUEST_TIMEOUT_MS,
+        });
+        const accessToken = await ensureAccountAccessToken(zotero, {
+            fetchImpl,
+            now,
+            sleep,
+            secureRandom,
+        });
+        try {
+            await request(accessToken);
+            return { reported: true };
+        }
+        catch (error) {
+            // A deployed server may predate the heartbeat endpoint. Keep the
+            // extension usable and try again on the next scheduled cycle.
+            if (isClientHeartbeatUnsupported(error)) {
+                return { reported: false, unsupported: true };
+            }
+            if (error?.status !== 401) throw error;
+            const refreshed = await ensureAccountAccessToken(zotero, {
+                fetchImpl,
+                now,
+                sleep,
+                secureRandom,
+                forceRefresh: true,
+            });
+            try {
+                await request(refreshed);
+                return { reported: true, refreshed: true };
+            }
+            catch (retryError) {
+                if (isClientHeartbeatUnsupported(retryError)) {
+                    return { reported: false, unsupported: true };
+                }
+                throw retryError;
+            }
+        }
+    });
+}
+
+// startAccountClientHeartbeat starts one non-blocking initial report and then
+// keeps the signed-in account fresh. A failed request is retried shortly, while
+// a successful report waits for the server's six-hour write throttle window.
+export function startAccountClientHeartbeat(zotero, {
+    fetchImpl,
+    now = Date.now,
+    sleep = delay,
+    secureRandom = globalThis.crypto,
+    setTimeoutImpl = globalThis.setTimeout?.bind(globalThis),
+    clearTimeoutImpl = globalThis.clearTimeout?.bind(globalThis),
+    intervalMs = CLIENT_HEARTBEAT_INTERVAL_MS,
+    retryDelayMs = CLIENT_HEARTBEAT_RETRY_DELAY_MS,
+    onError = () => {},
+} = {}) {
+    if (!zotero) throw new TypeError('A Zotero runtime is required');
+    const existing = heartbeatSchedulers.get(zotero);
+    if (existing) return existing;
+    if (typeof setTimeoutImpl !== 'function' || typeof clearTimeoutImpl !== 'function') {
+        throw new TypeError('Timer functions are required');
+    }
+
+    let disposed = false;
+    let timer = null;
+    const schedule = delayMs => {
+        if (disposed) return;
+        timer = setTimeoutImpl(() => {
+            timer = null;
+            void run();
+        }, delayMs);
+    };
+    const run = async () => {
+        if (disposed) return;
+        try {
+            await reportAccountClientHeartbeat(zotero, {
+                fetchImpl,
+                now,
+                sleep,
+                secureRandom,
+            });
+            schedule(intervalMs);
+        }
+        catch (error) {
+            if (!isExpectedHeartbeatError(error)) {
+                try {
+                    onError(error);
+                }
+                catch {
+                    // Reporting diagnostics must never stop the scheduler.
+                }
+            }
+            schedule(isExpectedHeartbeatError(error) ? intervalMs : retryDelayMs);
+        }
+    };
+    const handle = {
+        dispose() {
+            if (disposed) return;
+            disposed = true;
+            if (timer !== null) clearTimeoutImpl(timer);
+            timer = null;
+            if (heartbeatSchedulers.get(zotero) === handle) {
+                heartbeatSchedulers.delete(zotero);
+            }
+        },
+    };
+    heartbeatSchedulers.set(zotero, handle);
+    void run();
+    return handle;
+}
+
+function joinClientHeartbeat(zotero, start) {
+    const existing = heartbeatInFlight.get(zotero);
+    if (existing) return existing;
+    const promise = start().finally(() => {
+        if (heartbeatInFlight.get(zotero) === promise) {
+            heartbeatInFlight.delete(zotero);
+        }
+    });
+    heartbeatInFlight.set(zotero, promise);
+    return promise;
+}
+
+function isClientHeartbeatUnsupported(error) {
+    return error?.status === 404 || error?.status === 405;
+}
+
+function isExpectedHeartbeatError(error) {
+    return error?.code === 'MKTERO_SIGN_IN_REQUIRED'
+        || error?.code === 'MKTERO_ACCOUNT_DISABLED'
+        || isClientHeartbeatUnsupported(error);
+}
 
 export class MkteroSignInRequiredError extends Error {
     constructor() {

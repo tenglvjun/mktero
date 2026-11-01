@@ -8,6 +8,7 @@ import {
     logoutMkteroAccount,
     refreshMkteroAccount,
     registerMkteroAccount,
+    reportMkteroClientVersion,
     requestPasswordReset,
     sendSignupCode,
     updateMkteroNickname,
@@ -167,6 +168,21 @@ test('every Mktero account request reports the extension version', async () => {
             );
         }
     }
+});
+
+test('the account client reports a version heartbeat with the access token', async () => {
+    const { calls, fetchImpl } = headerRecorder(jsonResponse(204, null));
+    await reportMkteroClientVersion({
+        apiBase: API_BASE,
+        accessToken: 'access',
+        fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `${API_BASE}/api/v1/me/client-version`);
+    assert.equal(calls[0].options.method, 'POST');
+    assert.equal(calls[0].options.headers[VERSION_HEADER], mkteroVersion());
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer access');
+    assert.equal(calls[0].options.body, '{}');
 });
 
 // The account client has no third-party code path, so an assertion that the
