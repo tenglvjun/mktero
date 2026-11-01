@@ -7,10 +7,21 @@ import { createNativeContextMenu } from './native-context-menu.js';
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 export const NOTE_EDITOR_SLOT = 'mktero-note-editor';
 
-// The right column of a Mktero tab: the Zotero child notes of the paper.
-// The list lives in the reader's shadow tree. Zotero's `note-editor` cannot:
-// it needs the chrome document's styles and l10n, so it is mounted in a
-// light-DOM container on the shadow host and slotted into the column.
+const NOTE_SCOPES = Object.freeze(['item', 'standalone']);
+const NOTE_SCOPE_LABEL_KEYS = Object.freeze({
+    item: 'notes.itemNotes',
+    standalone: 'notes.standalone',
+});
+const NOTE_SCOPE_EMPTY_KEYS = Object.freeze({
+    item: 'notes.itemEmpty',
+    standalone: 'notes.standaloneEmpty',
+});
+
+// The right column of a Mktero tab: the current paper's child notes and the
+// standalone notes of the paper's Zotero library. The list lives in the
+// reader's shadow tree. Zotero's `note-editor` cannot: it needs the chrome
+// document's styles and l10n, so it is mounted in a light-DOM container on the
+// shadow host and slotted into the column.
 //
 // `adapter` is the tab's notes bridge (see `createTabNotesBridge` in
 // bootstrap): list, canHostEditor, mountEditor, openInWindow,
@@ -50,8 +61,12 @@ class ZoteroNotesPanel {
             status: 'unavailable',
             notes: [],
             editable: false,
+            canCreateItemNote: false,
+            canCreateStandaloneNote: false,
             annotationCount: 0,
         };
+        this.noteQuery = '';
+        this.noteScope = 'item';
         this.mode = 'list';
         this.handle = null;
         this.openingNote = false;
@@ -102,8 +117,13 @@ class ZoteroNotesPanel {
             status: this.adapter ? 'loading' : 'unavailable',
             notes: [],
             editable: false,
+            canCreateItemNote: false,
+            canCreateStandaloneNote: false,
             annotationCount: 0,
         };
+        this.noteQuery = '';
+        this.noteScope = 'item';
+        if (this.elements?.searchInput) this.elements.searchInput.value = '';
         this.render();
         if (this.adapter) void this.refresh();
     }
@@ -123,7 +143,14 @@ class ZoteroNotesPanel {
                 return;
             }
             this.onError(error);
-            state = { status: 'unavailable', notes: [], editable: false, annotationCount: 0 };
+            state = {
+                status: 'unavailable',
+                notes: [],
+                editable: false,
+                canCreateItemNote: false,
+                canCreateStandaloneNote: false,
+                annotationCount: 0,
+            };
         }
         if (this.destroyed
             || generation !== this.generation
@@ -134,6 +161,12 @@ class ZoteroNotesPanel {
             status: state?.status || 'unavailable',
             notes: Array.isArray(state?.notes) ? state.notes : [],
             editable: state?.editable === true,
+            canCreateItemNote: state?.canCreateItemNote === undefined
+                ? state?.editable === true
+                : state.canCreateItemNote === true,
+            canCreateStandaloneNote: state?.canCreateStandaloneNote === undefined
+                ? state?.editable === true
+                : state.canCreateStandaloneNote === true,
             annotationCount: Number.isSafeInteger(state?.annotationCount)
                 ? state.annotationCount
                 : 0,
@@ -159,13 +192,50 @@ class ZoteroNotesPanel {
         await this.showEditor({ noteID });
     }
 
-    async createNote() {
+    async createNote(noteKind = 'item') {
         if (!this.adapter || this.openingNote) return;
+        const canCreate = noteKind === 'standalone'
+            ? this.state.canCreateStandaloneNote
+            : this.state.canCreateItemNote;
+        if (!canCreate) return;
         if (!this.adapter.canHostEditor?.(this.hostContext())) {
-            await this.runAction(() => this.adapter.openInWindow(this.hostContext()));
+            await this.runAction(() => this.adapter.openInWindow({
+                noteKind,
+                ...this.hostContext(),
+            }));
             return;
         }
-        await this.showEditor({ noteID: null });
+        await this.showEditor({ noteID: null, noteKind });
+    }
+
+    setNoteScope(scope) {
+        if (!NOTE_SCOPES.includes(scope) || this.noteScope === scope) return;
+        this.noteScope = scope;
+        this.noteQuery = '';
+        if (this.elements?.searchInput) this.elements.searchInput.value = '';
+        this.syncNoteScopeButtons();
+        this.render();
+    }
+
+    scopeNotes() {
+        return this.state.notes.filter(note => (
+            (note.kind || 'item') === this.noteScope
+        ));
+    }
+
+    syncNoteScopeButtons() {
+        for (const button of this.elements.noteScopeButtons) {
+            const selected = button.getAttribute('data-note-scope') === this.noteScope;
+            button.setAttribute('aria-selected', selected ? 'true' : 'false');
+            button.textContent = this.t(
+                NOTE_SCOPE_LABEL_KEYS[button.getAttribute('data-note-scope')]
+            );
+        }
+        this.elements.noteScopes.setAttribute('aria-label', this.t('notes.scopes'));
+        this.elements.list.setAttribute(
+            'aria-labelledby',
+            `mktero-zotero-notes-tab-${this.noteScope}`
+        );
     }
 
     // `options.segmentsFor` passes each annotation's text and formulas on to
@@ -214,6 +284,14 @@ class ZoteroNotesPanel {
         elements.titleLabel.textContent = this.t('viewer.notesTitle');
         this.aside.setAttribute('aria-label', this.t('viewer.notes'));
         setLabel(elements.newButton, this.t('notes.newNote'));
+        for (const button of elements.noteScopeButtons) {
+            button.textContent = this.t(
+                NOTE_SCOPE_LABEL_KEYS[button.getAttribute('data-note-scope')]
+            );
+        }
+        elements.noteScopes.setAttribute('aria-label', this.t('notes.scopes'));
+        elements.searchInput.setAttribute('aria-label', this.t('notes.search'));
+        elements.searchInput.setAttribute('placeholder', this.t('notes.searchPlaceholder'));
         setLabel(elements.backButton, this.t('notes.backToList'));
         setLabel(elements.windowButton, this.t('notes.openInWindow'));
         this.render();
@@ -236,6 +314,7 @@ class ZoteroNotesPanel {
     openNoteMenu(noteID, { screenX, screenY, anchor } = {}) {
         if (!this.contextMenu || !this.adapter || this.destroyed) return false;
         const adapter = this.adapter;
+        const note = this.state.notes.find(item => item.id === noteID);
         const action = run => () => {
             void this.runAction(run);
         };
@@ -262,7 +341,8 @@ class ZoteroNotesPanel {
                 { separator: true },
                 {
                     label: this.t('notes.moveToTrash'),
-                    disabled: !this.state.editable
+                    disabled: note?.editable === false
+                        || (note?.editable === undefined && !this.state.editable)
                         || typeof adapter.moveToTrash !== 'function',
                     command: action(() => this.moveToTrash(noteID)),
                 },
@@ -272,7 +352,10 @@ class ZoteroNotesPanel {
     }
 
     async moveToTrash(noteID) {
-        if (!this.adapter || !this.state.editable) return;
+        const note = this.state.notes.find(item => item.id === noteID);
+        const noteEditable = note?.editable !== false
+            && (note?.editable === true || this.state.editable);
+        if (!this.adapter || !noteEditable) return;
         const adapter = this.adapter;
         await adapter.moveToTrash({ noteID });
         if (adapter !== this.adapter || this.destroyed) return;
@@ -290,7 +373,30 @@ class ZoteroNotesPanel {
         return { window: this.document.defaultView || null };
     }
 
-    async showEditor({ noteID }) {
+    openCreateMenu({ anchor } = {}) {
+        if (!this.contextMenu || !this.adapter || this.destroyed) return false;
+        const action = run => () => {
+            void this.runAction(run);
+        };
+        this.contextMenu.open({
+            anchor,
+            items: [
+                {
+                    label: this.t('notes.newItemNote'),
+                    disabled: !this.state.canCreateItemNote,
+                    command: action(() => this.createNote('item')),
+                },
+                {
+                    label: this.t('notes.newStandaloneNote'),
+                    disabled: !this.state.canCreateStandaloneNote,
+                    command: action(() => this.createNote('standalone')),
+                },
+            ],
+        });
+        return true;
+    }
+
+    async showEditor({ noteID, noteKind = 'item' }) {
         this.openingNote = true;
         this.closeEditor();
         const token = this.editorToken;
@@ -302,6 +408,7 @@ class ZoteroNotesPanel {
         try {
             handle = await adapter.mountEditor(container, {
                 noteID,
+                noteKind,
                 ...this.hostContext(),
             });
         }
@@ -313,6 +420,7 @@ class ZoteroNotesPanel {
             if (error?.code === NOTE_EDITOR_UNAVAILABLE && noteID) {
                 await this.runAction(() => adapter.openInWindow({
                     noteID,
+                    noteKind,
                     ...this.hostContext(),
                 }));
             }
@@ -389,14 +497,24 @@ class ZoteroNotesPanel {
         if (this.destroyed) return;
         const { elements, state } = this;
         const editing = this.mode === 'editor';
+        const listed = state.status === 'ready' || state.status === 'no-parent';
+        const scopeNotes = this.scopeNotes();
+        const visibleNotes = this.filteredNotes();
         elements.listView.hidden = editing;
         elements.editorView.hidden = !editing;
-        elements.count.hidden = editing || state.status !== 'ready' || !state.notes.length;
-        elements.count.textContent = state.notes.length
-            ? String(state.notes.length)
-            : '';
-        elements.newButton.hidden = state.status !== 'ready';
-        elements.newButton.disabled = !state.editable;
+        elements.count.hidden = editing || !listed || !scopeNotes.length;
+        elements.count.textContent = visibleNotes.length === scopeNotes.length
+            ? String(scopeNotes.length)
+            : `${visibleNotes.length}/${scopeNotes.length}`;
+        elements.search.hidden = editing || !listed || !scopeNotes.length;
+        elements.noteScopes.hidden = editing || !listed;
+        elements.newButton.hidden = editing
+            || !listed
+            || (state.status === 'no-parent'
+                && !state.canCreateItemNote
+                && !state.canCreateStandaloneNote);
+        elements.newButton.disabled = !state.canCreateItemNote
+            && !state.canCreateStandaloneNote;
         elements.windowButton.hidden = !this.handle?.noteID;
         this.renderStatus();
         this.renderList();
@@ -404,54 +522,82 @@ class ZoteroNotesPanel {
     }
 
     renderStatus() {
-        const { status, notes } = this.state;
-        const key = {
+        const { status } = this.state;
+        const scopeNotes = this.scopeNotes();
+        const filtered = this.filteredNotes();
+        let key = {
             loading: 'notes.loading',
-            'no-parent': 'notes.noParent',
             unavailable: 'notes.unavailable',
-        }[status] || (notes.length ? '' : 'notes.empty');
+        }[status];
+        if (!key && this.noteQuery.trim() && scopeNotes.length && !filtered.length) {
+            key = 'notes.noSearchMatches';
+        }
+        if (!key && status === 'no-parent' && this.noteScope === 'item') {
+            key = 'notes.noParent';
+        }
+        if (!key && !scopeNotes.length && (status === 'ready' || status === 'no-parent')) {
+            key = NOTE_SCOPE_EMPTY_KEYS[this.noteScope];
+        }
         this.elements.status.hidden = !key;
         this.elements.status.textContent = key ? this.t(key) : '';
+    }
+
+    filteredNotes() {
+        const query = String(this.noteQuery || '')
+            .toLowerCase()
+            .replace(/\s+/gu, ' ')
+            .trim();
+        if (!query) return this.scopeNotes();
+        return this.scopeNotes().filter(note => (
+            `${note.title || ''} ${note.preview || ''}`
+                .toLowerCase()
+                .replace(/\s+/gu, ' ')
+                .includes(query)
+        ));
     }
 
     renderList() {
         const list = this.elements.list;
         list.replaceChildren();
-        if (this.state.status !== 'ready') return;
-        for (const note of this.state.notes) {
-            const item = this.element('li', 'mktero-zotero-note-item');
-            const button = this.element('button', 'mktero-zotero-note-link');
-            button.type = 'button';
-            button.setAttribute('data-note-id', String(note.id));
-            const title = this.element('span', 'mktero-zotero-note-title');
-            title.textContent = note.title || this.t('notes.untitled');
-            button.appendChild(title);
-            if (note.preview) {
-                const preview = this.element('span', 'mktero-zotero-note-preview');
-                preview.textContent = note.preview;
-                button.appendChild(preview);
-            }
-            if (note.dateLabel) {
-                const date = this.element('span', 'mktero-zotero-note-date');
-                date.textContent = note.dateLabel;
-                button.appendChild(date);
-            }
-            button.addEventListener('click', () => {
-                void this.openNote(note.id);
-            });
-            button.addEventListener('contextmenu', event => {
-                if (this.openNoteMenu(note.id, {
-                    screenX: event.screenX,
-                    screenY: event.screenY,
-                    anchor: button,
-                })) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-            });
-            item.appendChild(button);
-            list.appendChild(item);
+        if (this.state.status !== 'ready' && this.state.status !== 'no-parent') return;
+        for (const note of this.filteredNotes()) {
+            list.appendChild(this.renderNote(note));
         }
+    }
+
+    renderNote(note) {
+        const item = this.element('li', 'mktero-zotero-note-item');
+        const button = this.element('button', 'mktero-zotero-note-link');
+        button.type = 'button';
+        button.setAttribute('data-note-id', String(note.id));
+        const title = this.element('span', 'mktero-zotero-note-title');
+        title.textContent = note.title || this.t('notes.untitled');
+        button.appendChild(title);
+        if (note.preview) {
+            const preview = this.element('span', 'mktero-zotero-note-preview');
+            preview.textContent = note.preview;
+            button.appendChild(preview);
+        }
+        if (note.dateLabel) {
+            const date = this.element('span', 'mktero-zotero-note-date');
+            date.textContent = note.dateLabel;
+            button.appendChild(date);
+        }
+        button.addEventListener('click', () => {
+            void this.openNote(note.id);
+        });
+        button.addEventListener('contextmenu', event => {
+            if (this.openNoteMenu(note.id, {
+                screenX: event.screenX,
+                screenY: event.screenY,
+                anchor: button,
+            })) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        });
+        item.appendChild(button);
+        return item;
     }
 
     createContent() {
@@ -475,11 +621,43 @@ class ZoteroNotesPanel {
         titleRow.append(title, actions);
         header.appendChild(titleRow);
 
+        const noteScopes = this.element('div', 'mktero-zotero-notes-tabs');
+        noteScopes.setAttribute('role', 'tablist');
+        noteScopes.setAttribute('aria-label', this.t('notes.scopes'));
+        const noteScopeButtons = NOTE_SCOPES.map(scope => {
+            const button = this.element('button', 'mktero-zotero-notes-tab');
+            button.type = 'button';
+            button.setAttribute('role', 'tab');
+            button.setAttribute('id', `mktero-zotero-notes-tab-${scope}`);
+            button.setAttribute('data-note-scope', scope);
+            button.setAttribute('aria-selected', scope === this.noteScope ? 'true' : 'false');
+            button.setAttribute('aria-controls', 'mktero-zotero-notes-list');
+            button.textContent = this.t(NOTE_SCOPE_LABEL_KEYS[scope]);
+            button.addEventListener('click', () => this.setNoteScope(scope));
+            noteScopes.appendChild(button);
+            return button;
+        });
+
+        const search = this.element('div', 'mktero-zotero-notes-search');
+        header.appendChild(noteScopes);
+        const searchInput = this.element('input', 'mktero-zotero-notes-search-input');
+        searchInput.type = 'search';
+        searchInput.setAttribute('aria-label', this.t('notes.search'));
+        searchInput.setAttribute('placeholder', this.t('notes.searchPlaceholder'));
+        searchInput.addEventListener('input', () => {
+            this.noteQuery = searchInput.value;
+            this.render();
+        });
+        search.appendChild(searchInput);
+
         const listView = this.element('div', 'mktero-zotero-notes-list-view');
         const status = this.element('p', 'mktero-zotero-notes-status');
         status.setAttribute('role', 'status');
         const list = this.element('ul', 'mktero-zotero-notes-list');
-        listView.append(header, status, list);
+        list.setAttribute('id', 'mktero-zotero-notes-list');
+        list.setAttribute('role', 'tabpanel');
+        list.setAttribute('aria-labelledby', 'mktero-zotero-notes-tab-item');
+        listView.append(header, search, status, list);
 
         const editorView = this.element('div', 'mktero-zotero-notes-editor-view');
         const editorBar = this.element('div', 'mktero-zotero-notes-editor-bar');
@@ -501,7 +679,8 @@ class ZoteroNotesPanel {
 
         this.aside.replaceChildren(listView, editorView);
         newButton.addEventListener('click', () => {
-            void this.createNote();
+            if (this.openCreateMenu({ anchor: newButton })) return;
+            void this.createNote('item');
         });
         backButton.addEventListener('click', () => this.back());
         windowButton.addEventListener('click', () => {
@@ -513,6 +692,10 @@ class ZoteroNotesPanel {
             titleLabel,
             count,
             newButton,
+            noteScopes,
+            noteScopeButtons,
+            search,
+            searchInput,
             status,
             list,
             backButton,

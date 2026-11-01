@@ -28,9 +28,10 @@ const EDITOR_INSTANCE_POLL_MS = 25;
 // left where the editor put it.
 const NOTE_CARET_WAIT_MS = 2_000;
 
-// Zotero notes of the paper a Mktero tab shows. The notes are ordinary
-// Zotero note items under the PDF's parent item, edited with Zotero's own
-// `note-editor`. Mktero stores nothing about them.
+// Zotero notes shown beside the paper a Mktero tab displays. The list has
+// two scopes: notes attached to the current paper, and standalone notes in
+// the same Zotero library. Notes remain ordinary Zotero note items edited
+// with Zotero's own `note-editor`; Mktero stores nothing about them.
 //
 // Everything used here exists in Zotero 7.0 through 10.0: `note-editor`,
 // `getCurrentInstance()`, `EditorInstance.insertAnnotations()`,
@@ -133,50 +134,54 @@ export function createZoteroNotes(zotero, {
 
     return {
         // Resolves the column's state for one PDF attachment:
-        // { status: 'ready', notes, editable, annotationCount }, or a
-        // status of 'no-parent' (a standalone PDF) or 'unavailable'.
+        // { status, notes, editable, canCreateItemNote,
+        //   canCreateStandaloneNote, annotationCount }.
+        // A standalone PDF has status 'no-parent' for the existing status
+        // message, but can still list and create standalone notes.
         async list(attachmentID) {
             const attachment = attachmentFor(attachmentID);
             if (!attachment) {
-                return { status: 'unavailable', notes: [], editable: false, annotationCount: 0 };
+                return {
+                    status: 'unavailable',
+                    notes: [],
+                    editable: false,
+                    canCreateItemNote: false,
+                    canCreateStandaloneNote: false,
+                    annotationCount: 0,
+                };
             }
             const annotationCount = await countNoteAnnotations(zotero, attachment);
             const parent = parentFor(attachment);
-            if (!parent) {
-                return { status: 'no-parent', notes: [], editable: false, annotationCount };
-            }
-            await zotero.Items.loadDataTypes?.([parent], ['childItems']);
-            // Newest first, then the limit: Zotero returns child notes in
-            // its own order, so cutting first could drop the note being
-            // written.
-            const items = (parent.getNotes?.(false) || [])
-                .map(id => zotero.Items.get(id))
-                .filter(item => item?.isNote?.() && !item.deleted)
-                .sort((left, right) => (
-                    String(right.dateModified || '').localeCompare(
-                        String(left.dateModified || '')
-                    )
-                ))
-                .slice(0, MAX_LISTED_NOTES);
-            await zotero.Items.loadDataTypes?.(items, ['note']);
-            const notes = items
-                .filter(item => {
-                    // A note that cannot be checked might be a snapshot,
-                    // and a snapshot must never be listed or edited here.
-                    try {
-                        return !isSnapshotNote(item);
-                    }
-                    catch {
-                        return false;
-                    }
-                })
-                .map(item => noteEntry(zotero, item));
+            const libraryID = attachment.libraryID;
+            const itemNotes = parent
+                ? await childNotes(zotero, parent)
+                : [];
+            const standaloneNotes = await standaloneNotesInLibrary(
+                zotero,
+                libraryID
+            );
+            const allItems = [...itemNotes, ...standaloneNotes];
+            await zotero.Items.loadDataTypes?.(allItems, ['note']);
+            const visibleItemNotes = itemNotes
+                .filter(item => visibleNote(item, isSnapshotNote))
+                .map(item => noteEntry(zotero, item, 'item'));
+            const visibleStandaloneNotes = standaloneNotes
+                .filter(item => visibleNote(item, isSnapshotNote))
+                .map(item => noteEntry(zotero, item, 'standalone'));
+            const canCreateStandaloneNote = libraryID !== null
+                && libraryID !== undefined
+                && libraryEditable(libraryID)
+                && !attachment.deleted;
+            const canCreateItemNote = Boolean(parent)
+                && libraryEditable(parent.libraryID)
+                && !parent.deleted
+                && !attachment.deleted;
             return {
-                status: 'ready',
-                notes,
-                editable: libraryEditable(parent.libraryID)
-                    && !parent.deleted
-                    && !attachment.deleted,
+                status: parent ? 'ready' : 'no-parent',
+                notes: [...visibleItemNotes, ...visibleStandaloneNotes],
+                editable: canCreateItemNote,
+                canCreateItemNote,
+                canCreateStandaloneNote,
                 annotationCount,
             };
         },
@@ -186,11 +191,12 @@ export function createZoteroNotes(zotero, {
         },
 
         // Mounts Zotero's note editor in `container` for an existing note
-        // (`noteID`) or a new child note of the PDF's parent item. A new note
-        // is saved by the editor on the first edit, as in Zotero's own panes.
+        // (`noteID`) or a new item/standalone note. A new note is saved by
+        // the editor on the first edit, as in Zotero's own panes.
         async mountEditor(container, {
             attachmentID,
             noteID = null,
+            noteKind = 'item',
             focus = true,
             window = null,
         } = {}) {
@@ -206,9 +212,15 @@ export function createZoteroNotes(zotero, {
                     'The Zotero note editor cannot be shown here'
                 );
             }
+            const attachment = attachmentFor(attachmentID);
+            const parent = parentFor(attachment);
             const item = noteID
                 ? zotero.Items.get(noteID)
-                : newChildNote(zotero, parentFor(attachmentFor(attachmentID)));
+                : newNote(zotero, {
+                    attachment,
+                    parent,
+                    kind: noteKind,
+                });
             if (!item?.isNote?.()) throw new Error('The note is unavailable');
             if (noteID) await zotero.Items.loadDataTypes?.([item], ['note']);
             const editable = noteEditable(zotero, item);
@@ -314,10 +326,20 @@ export function createZoteroNotes(zotero, {
 
         // Fallback when the editor cannot be hosted: Zotero's note window.
         // A new note is saved first because the window opens an item id.
-        async openInWindow({ attachmentID, noteID = null, window = null } = {}) {
+        async openInWindow({
+            attachmentID,
+            noteID = null,
+            noteKind = 'item',
+            window = null,
+        } = {}) {
             let id = noteID;
             if (!id) {
-                const note = newChildNote(zotero, parentFor(attachmentFor(attachmentID)));
+                const attachment = attachmentFor(attachmentID);
+                const note = newNote(zotero, {
+                    attachment,
+                    parent: parentFor(attachment),
+                    kind: noteKind,
+                });
                 await note.saveTx();
                 id = note.id;
             }
@@ -448,20 +470,87 @@ export function createZoteroNotes(zotero, {
     };
 }
 
-function newChildNote(zotero, parent) {
-    if (!parent) {
+function newNote(zotero, { attachment, parent, kind = 'item' } = {}) {
+    if (kind !== 'item' && kind !== 'standalone') {
+        throw new TypeError('Unknown Zotero note kind');
+    }
+    if (!attachment?.isPDFAttachment?.()) {
+        throw new Error('A PDF attachment is required');
+    }
+    if (kind === 'item' && !parent) {
         throw noteBridgeError(
             NOTE_NO_PARENT_ITEM,
             'A standalone PDF cannot have child notes'
         );
     }
-    if (zotero?.Libraries?.get?.(parent.libraryID)?.editable === false) {
+    if (attachment.deleted || (kind === 'item' && parent.deleted)) {
+        throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The item is unavailable');
+    }
+    const libraryID = kind === 'item' ? parent.libraryID : attachment.libraryID;
+    if (libraryID === null || libraryID === undefined) {
+        throw new Error('The Zotero library is unavailable');
+    }
+    if (zotero?.Libraries?.get?.(libraryID)?.editable === false) {
         throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The library is read-only');
     }
     const note = new zotero.Item('note');
-    note.libraryID = parent.libraryID;
-    note.parentID = parent.id;
+    note.libraryID = libraryID;
+    if (kind === 'item') note.parentID = parent.id;
     return note;
+}
+
+async function childNotes(zotero, parent) {
+    await zotero.Items.loadDataTypes?.([parent], ['childItems']);
+    return (parent.getNotes?.(false) || [])
+        .map(id => zotero.Items.get(id))
+        .filter(item => item?.isNote?.() && !item.deleted)
+        .sort(compareNotes)
+        .slice(0, MAX_LISTED_NOTES);
+}
+
+async function standaloneNotesInLibrary(zotero, libraryID) {
+    if (libraryID === null || libraryID === undefined
+        || typeof zotero?.Items?.getAll !== 'function') {
+        return [];
+    }
+    const values = await Promise.resolve(
+        zotero.Items.getAll(libraryID, false, false, false)
+    );
+    const items = [];
+    for (const value of values || []) {
+        const item = await resolveItem(zotero, value);
+        if (item) items.push(item);
+    }
+    return items
+        .filter(item => item.isNote?.()
+            && !item.parentID
+            && !item.deleted
+            && String(item.libraryID) === String(libraryID))
+        .sort(compareNotes)
+        .slice(0, MAX_LISTED_NOTES);
+}
+
+async function resolveItem(zotero, value) {
+    if (value && typeof value === 'object') return value;
+    if (value === null || value === undefined) return null;
+    const asyncItem = await zotero?.Items?.getAsync?.(value);
+    return asyncItem || zotero?.Items?.get?.(value) || null;
+}
+
+function compareNotes(left, right) {
+    return String(right?.dateModified || '').localeCompare(
+        String(left?.dateModified || '')
+    );
+}
+
+function visibleNote(item, isSnapshotNote) {
+    if (!item?.isNote?.() || item.deleted) return false;
+    try {
+        return !isSnapshotNote(item);
+    }
+    catch {
+        return false;
+    }
 }
 
 function noteEditable(zotero, item) {
@@ -472,7 +561,7 @@ function noteEditable(zotero, item) {
     return item.isEditable?.() !== false;
 }
 
-function noteEntry(zotero, item) {
+function noteEntry(zotero, item, kind) {
     let html = '';
     try {
         html = String(item.getNote?.() || '');
@@ -492,10 +581,12 @@ function noteEntry(zotero, item) {
     return {
         id: item.id,
         key: String(item.key || ''),
+        kind,
         title: summary.title,
         preview: summary.preview,
         dateModified,
         dateLabel: friendlyDate(zotero, dateModified),
+        editable: noteEditable(zotero, item),
     };
 }
 

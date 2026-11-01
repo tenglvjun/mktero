@@ -205,20 +205,27 @@ The `Annotations` segment lists the paper's annotations, with search, a color
 filter, a jump to the Markdown position, `View in PDF`, delete, retry sync for
 a local highlight, and `Add to Note`.
 
-The right column is `Notes`. It lists the Zotero child notes of the PDF's
-parent item, newest first. `New note` creates a child note. Clicking a note
-edits it in Zotero's own note editor inside the Mktero tab. `Back to notes`
-returns to the list. `Edit in a Separate Window` opens Zotero's note window.
-Right-clicking a note in the list opens the menu Zotero's notes pane shows:
-`Show in Library` selects the note in the library tab, `Edit in a Separate
-Window` opens it in Zotero's note window, and `Move to Trash` moves it to the
-Zotero trash, where it can be restored. In a read-only library `Move to Trash`
-is unavailable.
-`Mktero Markdown Snapshot` notes are not listed. A standalone PDF without a
-parent item has no child notes, and the column says so. In a read-only
-library, notes open read-only and `New note` is unavailable. If Zotero cannot
-show its note editor inside the tab, the note opens in Zotero's note window
-instead. Mktero stores no notes. These are Zotero note items.
+The right column is `Notes` with two tabs: `Item notes` and `Standalone
+notes`. `Item notes` lists the Zotero child notes attached to the paper being
+read, newest first. `Standalone notes` lists top-level notes from the same
+Zotero library, newest first. Child notes belonging to other papers are not
+shown. Use the plus menu to create a child note for the current item or a
+standalone note. Both kinds are normal Zotero note items and use Zotero's own
+note editor, so Mktero stores no notes.
+
+Clicking a note edits it in Zotero's own note editor inside the Mktero tab.
+`Back to notes` returns to the list. `Edit in a Separate Window` opens
+Zotero's note window. Right-clicking a note in the list opens the menu Zotero's
+notes pane shows: `Show in Library` selects the note in the library tab,
+`Edit in a Separate Window` opens it in Zotero's note window, and `Move to Trash`
+moves it to the Zotero trash, where it can be restored. These actions respect
+each note's library permissions. `Mktero Markdown Snapshot` notes are not
+listed. The Notes column can search note titles and previews.
+
+A standalone PDF without a parent item can still show and create standalone
+notes, but cannot have a child note. In a read-only library, notes open
+read-only and creation or deletion is unavailable. If Zotero cannot show its
+note editor inside the tab, the note opens in Zotero's note window instead.
 
 `Add to Note` is in the text-selection popup, in an annotation's popup, and on
 each item in the `Annotations` segment. It inserts the passage into the note

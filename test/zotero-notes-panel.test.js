@@ -175,6 +175,95 @@ test('an observation refreshes the note list', async () => {
     assert.equal(listener, null);
 });
 
+test('uses note tabs and searches only the active scope', async () => {
+    const { aside, panel } = createPanel();
+    panel.setAdapter({
+        async list() {
+            return readyState([
+                { id: 1, kind: 'item', title: 'Paper method', preview: 'sample' },
+                { id: 2, kind: 'standalone', title: 'Literature review', preview: 'cross paper' },
+            ]);
+        },
+        observe: () => () => {},
+    });
+    await flush();
+
+    assert.deepEqual(
+        [...aside.querySelectorAll('.mktero-zotero-notes-tab')]
+            .map(node => node.textContent),
+        ['Item notes', 'Standalone notes']
+    );
+    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 1);
+    assert.equal(
+        aside.querySelector('.mktero-zotero-note-title').textContent,
+        'Paper method'
+    );
+
+    aside.querySelector('[data-note-scope="standalone"]').click();
+    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 1);
+    assert.equal(
+        aside.querySelector('.mktero-zotero-note-title').textContent,
+        'Literature review'
+    );
+    assert.equal(
+        aside.querySelector('.mktero-zotero-notes-tab[aria-selected="true"]')
+            .textContent,
+        'Standalone notes'
+    );
+
+    const input = aside.querySelector('.mktero-zotero-notes-search-input');
+    input.value = 'literature';
+    input.dispatchEvent(new aside.ownerDocument.defaultView.Event('input', {
+        bubbles: true,
+    }));
+
+    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 1);
+    input.value = 'paper method';
+    input.dispatchEvent(new aside.ownerDocument.defaultView.Event('input', {
+        bubbles: true,
+    }));
+    assert.equal(aside.querySelectorAll('.mktero-zotero-note-link').length, 0);
+    panel.destroy();
+});
+
+test('new note menu distinguishes item and standalone notes', async () => {
+    const menu = recordingMenu();
+    const { aside, panel } = createPanel({ createContextMenu: () => menu });
+    const mounted = [];
+    panel.setAdapter({
+        async list() {
+            return readyState([], {
+                canCreateItemNote: true,
+                canCreateStandaloneNote: true,
+            });
+        },
+        canHostEditor: () => true,
+        async mountEditor(_container, options) {
+            mounted.push(options.noteKind);
+            return {
+                noteID: null,
+                editable: true,
+                isGone: () => false,
+                insertAnnotations() {},
+                destroy() {},
+            };
+        },
+        observe: () => () => {},
+    });
+    await flush();
+
+    aside.querySelector('.mktero-zotero-note-new').click();
+    assert.deepEqual(
+        menu.opened.at(-1).items.map(item => item.label),
+        ['New note for this item', 'New standalone note']
+    );
+    menu.opened.at(-1).items[0].command();
+    await flush();
+    menu.opened.at(-1).items[1].command();
+    await flush();
+    assert.deepEqual(mounted, ['item', 'standalone']);
+    panel.destroy();
+});
 test('a note deleted elsewhere closes the open editor on refresh', async () => {
     const { aside, panel } = createPanel();
     const destroyed = [];
