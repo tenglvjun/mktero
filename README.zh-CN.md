@@ -17,7 +17,8 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命
 [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest) ·
 [产品介绍页](https://mktero.com/) ·
 [文档](#文档) ·
-[社区](#社区)
+[社区](#社区) ·
+[支持 Mktero](#支持-mktero)
 
 > [!IMPORTANT]
 > Mktero 目前处于 Beta 阶段。使用默认转换时，缓存未命中会把完整 PDF 发送到你账号所使用的 Mktero 服务。
@@ -35,6 +36,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命
 - [开发](#开发)
 - [社区](#社区)
 - [贡献](#贡献)
+- [支持 Mktero](#支持-mktero)
 - [License](#license)
 
 ## 核心能力
@@ -180,6 +182,13 @@ QQ 是用户群：可以扫码，也可以在 QQ 中搜索群号 `616518076`。
 - 确认且可复现的问题：[GitHub Issues](https://github.com/tenglvjun/mktero/issues)
 
 请勿在 QQ 群、微信、Discord、Issue、Pull Request 或日志中提交凭据、私密 PDF 或其他敏感信息。
+
+## 支持 Mktero
+
+如果 Mktero 让你阅读论文更轻松，欢迎请我喝杯咖啡。
+你的支持将用于项目的持续开发、维护和托管费用。
+
+[☕ 请我喝杯咖啡 · Ko-fi](https://ko-fi.com/tenglvjun)
 
 ## License
 

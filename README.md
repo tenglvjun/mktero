@@ -21,7 +21,8 @@ conversions for the same PDF and parser profile.
 [Download](https://github.com/tenglvjun/mktero/releases/latest) ·
 [Product page](https://mktero.com/) ·
 [Documentation](#documentation) ·
-[Community](#community)
+[Community](#community) ·
+[Support Mktero](#support-mktero)
 
 > [!IMPORTANT]
 > Mktero is in beta. With the default converter, a cache miss sends the complete
@@ -43,6 +44,7 @@ conversions for the same PDF and parser profile.
 - [Development](#development)
 - [Community](#community)
 - [Contributing](#contributing)
+- [Support Mktero](#support-mktero)
 - [License](#license)
 
 ## Features
@@ -286,6 +288,13 @@ verification commands above and include tests for the affected behavior.
 
 Please keep credentials, private PDFs, and other sensitive data out of the QQ
 group, WeChat, Discord, issues, pull requests, and logs.
+
+## Support Mktero
+
+If Mktero makes reading papers easier for you, consider buying me a coffee.
+Your support helps with ongoing development, maintenance, and hosting costs.
+
+[☕ Buy me a coffee on Ko-fi](https://ko-fi.com/tenglvjun)
 
 ## License
 
