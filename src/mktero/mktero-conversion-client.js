@@ -6,6 +6,7 @@ import { CONVERSION_PROGRESS } from '../core/conversion-progress.js';
 import { sha256Hex } from '../core/sha256.js';
 import { mkteroVersion } from '../config/runtime-config.js';
 import { notifyDiagnosticJob } from '../diagnostics/diagnostic-log.js';
+import { parseConversionQuota } from '../account/conversion-quota.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 600;
@@ -49,6 +50,10 @@ const STATUS_SUCCEEDED = 'succeeded';
 const STATUS_FAILED = 'failed';
 
 const TERMINAL_STATUSES = new Set([STATUS_SUCCEEDED, STATUS_FAILED]);
+const IN_FLIGHT_STATUSES = new Set([
+    STATUS_QUEUED, STATUS_WAITING_FOR_SHARED_PARSE, STATUS_SUBMITTING,
+    STATUS_PROCESSING, STATUS_DOWNLOADING,
+]);
 
 // Which leg of a conversion a failed request belongs to. The upload and
 // download legs talk to the object store through a presigned URL rather than to
@@ -119,11 +124,23 @@ export class MkteroConversionClient {
         metadata = null,
         onProgress = () => {},
         includeArchive = false,
+        assertScope = () => {},
+        beforeCreate = () => {},
         signal,
     }) {
         if (typeof getAccessToken !== 'function') {
             throw new TypeError('An access token provider is required');
         }
+        const tokenProvider = getAccessToken;
+        getAccessToken = async options => {
+            assertScope();
+            const token = await tokenProvider(options);
+            assertScope();
+            return token;
+        };
+        // #send checks again after awaiting this provider, just before fetch.
+        getAccessToken.assertScope = assertScope;
+        getAccessToken.beforeCreate = beforeCreate;
         const bytes = toUint8Array(fileData, 'PDF file data');
         throwIfAborted(signal);
 
@@ -152,7 +169,7 @@ export class MkteroConversionClient {
             let finished = job;
             if (job.status === STATUS_SUCCEEDED && !job.upload_url) {
                 notifyProgress(onProgress, CONVERSION_PROGRESS.DOWNLOADING);
-            } else if (!job.upload_url && job.status === STATUS_WAITING_FOR_SHARED_PARSE) {
+            } else if (IN_FLIGHT_STATUSES.has(job.status) || job.status === STATUS_FAILED) {
                 finished = await this.#waitForResult({
                     apiBase,
                     getAccessToken,
@@ -244,8 +261,10 @@ export class MkteroConversionClient {
             signal,
             timeoutMs: this.requestTimeoutMs,
             label: 'conversion job',
+            idempotencyKey: createIdempotencyKey(),
         });
-        if (!job?.job_id || (!job.upload_url && job.status !== STATUS_SUCCEEDED && job.status !== STATUS_WAITING_FOR_SHARED_PARSE)) {
+        if (!job?.job_id || (!job.upload_url
+            && !TERMINAL_STATUSES.has(job.status) && !IN_FLIGHT_STATUSES.has(job.status))) {
             throw codedError(
                 'The Mktero service did not return an upload URL',
                 'MKTERO_INVALID_RESPONSE'
@@ -475,11 +494,14 @@ export class MkteroConversionClient {
         label,
         replayUnauthorized = true,
         forceTokenRefresh = false,
+        idempotencyKey = '',
     }) {
         const response = await this.#send({
             url: joinURL(apiBase, path),
             method,
-            headers: API_HEADERS,
+            headers: idempotencyKey
+                ? { ...API_HEADERS, 'Idempotency-Key': idempotencyKey }
+                : API_HEADERS,
             body: body == null ? null : JSON.stringify(body),
             signal,
             timeoutMs,
@@ -498,6 +520,7 @@ export class MkteroConversionClient {
                     status: response.status,
                     stage: STAGE_API,
                     errorCode: payload?.error?.code || '',
+                    quota: parseConversionQuota(payload?.error?.quota),
                 }
             );
             // A 401 is an expired access token, not a dead login. Refresh once
@@ -514,6 +537,7 @@ export class MkteroConversionClient {
                     label,
                     replayUnauthorized: false,
                     forceTokenRefresh: true,
+                    idempotencyKey,
                 });
             }
             throw error;
@@ -571,6 +595,10 @@ export class MkteroConversionClient {
                     timedOut = true;
                     controller.abort();
                 }, timeoutMs);
+            }
+            if (authorize) {
+                getAccessToken.assertScope?.();
+                if (label === 'conversion job') getAccessToken.beforeCreate?.();
             }
             return await this.fetch(url, {
                 method,
@@ -642,6 +670,15 @@ function reportJobProgress(onProgress, status, progress) {
 
 function errorCodeForStatus(status, payload) {
     const code = String(payload?.error?.code || '').trim();
+    if (status === 429 && code === 'conversion_daily_limit_exceeded') {
+        return 'MKTERO_DAILY_LIMIT_EXCEEDED';
+    }
+    if (status === 429 && code === 'conversion_daily_slots_reserved') {
+        return 'MKTERO_DAILY_SLOTS_RESERVED';
+    }
+    if (status === 503 && code === 'conversion_quota_unavailable') {
+        return 'MKTERO_QUOTA_UNAVAILABLE';
+    }
     if (code === 'account_disabled') return 'MKTERO_ACCOUNT_DISABLED';
     if (code === 'invalid_token' || code === 'user_not_found') {
         return 'MKTERO_SIGN_IN_REQUIRED';
@@ -664,6 +701,15 @@ function errorCodeForStatus(status, payload) {
     if (status === 404) return 'MKTERO_JOB_NOT_FOUND';
     if (status === 408 || status === 429 || status >= 500) return 'MKTERO_UNAVAILABLE';
     return 'MKTERO_HTTP_ERROR';
+}
+
+function createIdempotencyKey() {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+        return globalThis.crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function readBoundedJSON(response, signal) {

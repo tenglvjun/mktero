@@ -1,5 +1,6 @@
 import { translateEnglish } from '../i18n/localization.js';
 import { MKTERO_REQUEST_STAGES } from '../mktero/mktero-conversion-client.js';
+import { formatQuotaReset, parseConversionQuota } from '../account/conversion-quota.js';
 import {
     HOSTED_MINERU_MAX_PAGES,
     PDF_PAGE_LIMIT_ERROR_CODE,
@@ -64,6 +65,9 @@ const ERROR_CODE_KEYS = new Map([
     ['MKTERO_CONVERSION_FAILED', 'error.mkteroConversionFailed'],
     ['MKTERO_JOB_NOT_FOUND', 'error.mkteroJobUnavailable'],
     ['MKTERO_UNAVAILABLE', 'error.mkteroUnavailable'],
+    ['MKTERO_QUOTA_UNAVAILABLE', 'error.mkteroQuotaUnavailable'],
+    ['MKTERO_QUOTA_ACCOUNT_CHANGED', 'error.mkteroQuotaAccountChanged'],
+    ['MKTERO_QUOTA_PAUSED', 'batch.quotaPaused'],
     ['MKTERO_UPLOAD_FAILED', 'error.mkteroUploadFailed'],
     ['MKTERO_DOWNLOAD_FAILED', 'error.mkteroDownloadFailed'],
     ['MKTERO_REQUEST_TIMEOUT', 'error.requestTimedOut'],
@@ -222,6 +226,31 @@ export function localizeConversionError(error, translate = translateEnglish) {
 
     const pageLimit = pageLimitMessage(error, translate);
     if (pageLimit) return pageLimit;
+
+    if (error?.code === 'MKTERO_DAILY_LIMIT_EXCEEDED'
+        || error?.code === 'MKTERO_DAILY_SLOTS_RESERVED') {
+        const quota = parseConversionQuota({
+            ...error.quota,
+            reset_at: error.quota?.resetAt,
+            server_time: error.quota?.serverTime,
+        });
+        if (!quota || quota.mode !== 'enforce') return translate('error.mkteroQuotaBlocked');
+        if (error.code === 'MKTERO_DAILY_SLOTS_RESERVED') {
+            return translate('error.mkteroQuotaReserved', {
+                used: quota.used,
+                limit: quota.limit,
+                reserved: quota.reserved,
+            });
+        }
+        const reset = new Date(quota.resetAt).getTime() > new Date(quota.serverTime).getTime()
+            ? formatQuotaReset(quota.resetAt, translate('error.quotaDateLocale'))
+            : '';
+        return reset
+            ? translate('error.mkteroQuotaExceeded', {
+                used: quota.used, limit: quota.limit, reset,
+            })
+            : translate('error.mkteroQuotaBlocked');
+    }
 
     const messageKey = ERROR_MESSAGE_KEYS.get(message);
     if (messageKey) return translate(messageKey);

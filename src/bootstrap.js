@@ -78,6 +78,8 @@ import { resolvePDFCandidates } from './ui/pdf-item-targets.js';
 import { ConversionProviderRouter } from './core/conversion-provider.js';
 import { createPDFPageLimitGuard } from './core/pdf-page-limit.js';
 import { MkteroConversionClient } from './mktero/mktero-conversion-client.js';
+import { getMkteroConversionQuota } from './account/account-client.js';
+import { notifyConversionQuotaChanged } from './account/conversion-quota.js';
 import {
     MkteroDocumentExtractor,
     MkteroSignInRequiredError,
@@ -897,6 +899,9 @@ globalThis.startup = async function startup({ id, rootURI }) {
             onJob: recordDiagnosticJob,
         }),
         getApiBase: () => getAccountApiBase(Zotero),
+        onConversionSettled: () => notifyConversionQuotaChanged(
+            typeof Services === 'undefined' ? null : Services
+        ),
         getAccessToken: options => ensureAccountAccessToken(options),
         readFile: path => IOUtils.read(path),
         preparePDFIndex: (itemID, options) => preparePDFIndexForItem(
@@ -985,6 +990,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         isReady: candidate => itemHasReadableMarkdown(candidate.itemID),
         isActive: candidate => runtime.conversionRuns.isActive(candidate.itemID),
         isBlockedError: conversionNeedsSettings,
+        getScope: currentConversionScope,
         convert: convertBatchItem,
         onEvent: handleBatchEvent,
         createController: createZoteroAbortController,
@@ -1755,6 +1761,14 @@ async function executeItemConversion(itemID, {
     onProgress,
     onProgressiveFigures,
 }) {
+    const scope = currentConversionScope();
+    const assertScope = () => {
+        if (scope !== currentConversionScope()) {
+            throw Object.assign(new Error('The conversion account or provider changed'), {
+                code: 'MKTERO_QUOTA_ACCOUNT_CHANGED',
+            });
+        }
+    };
     runtime.pdfIndexOperations.start(itemID, controller);
     conversionFailures.delete(itemID);
     let lastLoggedProgress = null;
@@ -1768,6 +1782,12 @@ async function executeItemConversion(itemID, {
             : null;
         const result = await runtime.service.convert(itemID, {
             signal,
+            assertScope,
+            beforeCreate() {
+                assertScope();
+                const blocked = runtime.conversionBatch?.pausedScope(scope);
+                if (blocked) throw blocked;
+            },
             forceRefresh,
             localOnly: localOnly || Boolean(imported),
             onProgress(progress, state) {
@@ -1812,6 +1832,9 @@ async function executeItemConversion(itemID, {
         return result;
     }
     catch (error) {
+        runtime.conversionBatch?.blockScope(error, scope, {
+            itemID, title: conversionItemTitle(itemID),
+        });
         rememberConversionFailure(itemID, error);
         throw error;
     }
@@ -1916,7 +1939,9 @@ function prepareSelectedMarkdown(targets) {
     for (const target of targets || []) cancelledPreparations.delete(target.itemID);
     ensureConversionProgress();
     const summary = runtime.conversionBatch.enqueue(targets);
-    runtime.conversionProgress?.setStatus(batchStatusMessage(summary));
+    const paused = runtime.conversionBatch.pausedScope();
+    runtime.conversionProgress?.setPaused(Boolean(paused));
+    runtime.conversionProgress?.setStatus(paused ? userFacingError(paused) : batchStatusMessage(summary));
     if (summary.accepted.length
         || summary.skippedReady.length
         || summary.skippedActive.length
@@ -1926,12 +1951,53 @@ function prepareSelectedMarkdown(targets) {
     refreshMarkdownReadinessColumn(Zotero);
 }
 
+function cancelQuotaRemaining() {
+    const cancelled = runtime.conversionBatch?.cancelRemaining() || [];
+    cancelPreparation(cancelled);
+    runtime.conversionProgress?.setPaused(false);
+    runtime.conversionProgress?.setStatus(runtimeTranslate('batch.quotaCancelled'));
+}
+
+async function resumeQuotaBatch() {
+    const scope = currentConversionScope();
+    if (!scope.startsWith('mktero:') || !runtime.conversionBatch?.pausedScope(scope)) return;
+    try {
+        const accessToken = await ensureAccountAccessToken();
+        if (scope !== currentConversionScope()) return;
+        const quota = await getMkteroConversionQuota({
+            apiBase: getAccountApiBase(Zotero),
+            accessToken,
+            fetchImpl: createWindowFetch(() => liveZoteroWindow(), {
+                fallback: globalThis.fetch?.bind(globalThis),
+            }),
+        });
+        if (scope !== currentConversionScope()) return;
+        if (!quota || (quota.mode === 'enforce' && quota.remaining === 0)) {
+            runtime.conversionProgress?.setStatus(
+                quota ? userFacingError(runtime.conversionBatch.pausedScope(scope))
+                    : runtimeTranslate('error.mkteroQuotaUnavailable')
+            );
+            return;
+        }
+        const count = runtime.conversionBatch.resume(scope);
+        runtime.conversionProgress?.setPaused(Boolean(runtime.conversionBatch.pausedScope(scope)));
+        runtime.conversionProgress?.setStatus(runtimeTranslate('batch.quotaResumed', { count }));
+    }
+    catch {
+        runtime.conversionProgress?.setStatus(runtimeTranslate('error.mkteroQuotaUnavailable'));
+    }
+}
+
 function ensureConversionProgress() {
     if (runtime.conversionProgress || !runtime.conversionBatch) return;
     runtime.conversionProgress = createZoteroConversionProgress({
         zotero: Zotero,
         services: typeof Services === 'undefined' ? null : Services,
         title: runtimeTranslate('batch.windowTitle'),
+        resumeLabel: runtimeTranslate('batch.quotaResume'),
+        cancelRemainingLabel: runtimeTranslate('batch.quotaCancelRemaining'),
+        onResume: () => void resumeQuotaBatch(),
+        onCancelRemaining: () => cancelQuotaRemaining(),
         onCancel: () => {
             cancelPreparation(runtime.conversionBatch?.cancel() || []);
             cancelBackgroundContinuations();
@@ -2025,6 +2091,11 @@ function abortObsidianExport() {
 }
 
 async function convertBatchItem(item, { signal, onProgress }) {
+    if (item.scope !== currentConversionScope()) {
+        const error = new Error('The conversion account or provider changed');
+        error.code = 'MKTERO_QUOTA_ACCOUNT_CHANGED';
+        throw error;
+    }
     const begun = runtime.conversionRuns.begin({
         itemID: item.itemID,
         owner: 'batch',
@@ -2050,6 +2121,9 @@ async function convertBatchItem(item, { signal, onProgress }) {
 
 function handleBatchEvent(event) {
     const item = event.item;
+    if (event.type === 'quota-blocked' && event.scope !== currentConversionScope()) return;
+    if (event.type === 'quota-blocked'
+        || ((event.type === 'paused' || event.type === 'blocked') && item)) ensureConversionProgress();
     const progress = runtime.conversionProgress;
     if (event.type === 'queued') {
         markConversionActivity(item.itemID, { refresh: false });
@@ -2100,6 +2174,26 @@ function handleBatchEvent(event) {
         if (conversionNeedsSettings(event.error)) {
             openMinerUPreferences(Zotero);
         }
+    }
+    else if (event.type === 'quota-blocked') {
+        progress?.setPaused(true);
+        progress?.setStatus(userFacingError(event.error));
+        progress?.open();
+    }
+    else if ((event.type === 'paused' || event.type === 'blocked') && item) {
+        progress?.add(item.itemID, item.title);
+        if (event.type === 'blocked'
+            && (event.error?.code === 'MKTERO_DAILY_LIMIT_EXCEEDED'
+                || event.error?.code === 'MKTERO_DAILY_SLOTS_RESERVED')) {
+            progress?.setPaused(true);
+            progress?.setStatus(userFacingError(event.error));
+            progress?.open();
+        }
+        updateProgressRow(progress, item.itemID, 'queued', runtimeTranslate('batch.quotaPaused'));
+        clearConversionActivity(item.itemID);
+    }
+    else if (event.type === 'blocked' && !item && conversionNeedsSettings(event.error)) {
+        openMinerUPreferences(Zotero);
     }
     else if (event.type === 'cancelled' || event.type === 'released') {
         clearConversionActivity(item.itemID);
@@ -3429,6 +3523,19 @@ function currentConversionParserProfile() {
         : currentMinerUParserProfile();
 }
 
+const conversionScopes = new Map();
+
+function currentConversionScope() {
+    const provider = getConversionProvider(Zotero);
+    if (provider !== CONVERSION_PROVIDER_MKTERO) return `provider:${provider}`;
+    const account = getAccountSession(Zotero);
+    const identity = JSON.stringify([
+        getAccountApiBase(Zotero), String(account.email || '').trim().toLowerCase(),
+    ]);
+    if (!conversionScopes.has(identity)) conversionScopes.set(identity, `mktero:${conversionScopes.size + 1}`);
+    return conversionScopes.get(identity);
+}
+
 function isMkteroProvider() {
     return getConversionProvider(Zotero) === CONVERSION_PROVIDER_MKTERO;
 }
@@ -4142,6 +4249,7 @@ function abortAllConversions() {
         refreshMarkdownReadinessColumn(Zotero);
     }
     runtime.conversionProgress?.cancel();
+    runtime.conversionProgress?.dispose();
     disposeProgressButtons();
 }
 

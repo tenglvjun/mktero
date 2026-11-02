@@ -6,6 +6,9 @@ export function createConversionBatch({
     isReady = () => false,
     isActive = () => false,
     isBlockedError = () => false,
+    isQuotaError = error => error?.code === 'MKTERO_DAILY_LIMIT_EXCEEDED'
+        || error?.code === 'MKTERO_DAILY_SLOTS_RESERVED',
+    getScope = () => '',
     convert,
     onEvent = () => {},
     createController = () => new AbortController(),
@@ -23,6 +26,7 @@ export function createConversionBatch({
     const queue = [];
     const items = new Map();
     const waiters = new Map();
+    const pausedScopes = new Map();
     let running = 0;
     let stopped = false;
 
@@ -40,10 +44,16 @@ export function createConversionBatch({
                 const item = normalizeCandidate(candidate);
                 if (!item || seen.has(item.itemID)) continue;
                 seen.add(item.itemID);
+                const scope = String(getScope() || '');
                 const existing = items.get(item.itemID);
                 if (existing && isOpenStatus(existing.status)) {
-                    summary.skippedQueued.push(item);
-                    continue;
+                    if (existing.scope === scope || existing.status === 'running') {
+                        summary.skippedQueued.push(item);
+                        continue;
+                    }
+                    const oldPosition = queue.indexOf(item.itemID);
+                    if (oldPosition >= 0) queue.splice(oldPosition, 1);
+                    finish(item.itemID, 'released');
                 }
                 if (safeCheck(isActive, item)) {
                     summary.skippedActive.push(item);
@@ -55,15 +65,20 @@ export function createConversionBatch({
                 }
                 const record = {
                     ...item,
+                    scope,
                     status: 'queued',
                     result: null,
                     error: null,
                     controller: null,
                 };
                 items.set(item.itemID, record);
-                queue.push(item.itemID);
+                if (record.scope && pausedScopes.has(record.scope)) {
+                    pauseRecord(record, pausedScopes.get(record.scope), false);
+                } else {
+                    queue.push(item.itemID);
+                }
                 summary.accepted.push(item);
-                emit({
+                if (record.status === 'queued') emit({
                     type: 'queued',
                     item,
                     ahead: queue.length - 1,
@@ -79,12 +94,18 @@ export function createConversionBatch({
             const pending = queue.splice(0);
             const running = [];
             for (const itemID of pending) finish(itemID, 'cancelled');
+            const paused = [];
             for (const record of items.values()) {
+                if (record.status === 'paused' || record.status === 'blocked') {
+                    paused.push(record.itemID);
+                    finish(record.itemID, 'cancelled');
+                }
                 if (record.status !== 'running') continue;
                 running.push(record.itemID);
                 record.controller?.abort();
             }
-            return [...pending, ...running];
+            // Cancelling work does not lift a server quota pause for new submissions.
+            return [...pending, ...paused, ...running];
         },
 
         cancelItem(itemID) {
@@ -96,16 +117,25 @@ export function createConversionBatch({
                 return;
             }
             const record = items.get(itemID);
+            if (record?.status === 'paused' || record?.status === 'blocked') {
+                finish(itemID, 'cancelled');
+                return;
+            }
             if (record?.status === 'running') record.controller?.abort();
         },
 
         isPreparing(itemID) {
-            return isOpenStatus(items.get(itemID)?.status);
+            const record = items.get(itemID);
+            return Boolean(record && record.scope === getScope()
+                && isOpenStatus(record.status) && !safeCheck(isReady, record));
         },
 
         position(itemID) {
             const record = items.get(itemID);
             if (!record || !isOpenStatus(record.status)) return null;
+            if (record.status === 'paused' || record.status === 'blocked') {
+                return { status: record.status, ahead: 0 };
+            }
             if (record.status === 'running') {
                 return { status: 'running', ahead: 0 };
             }
@@ -118,16 +148,68 @@ export function createConversionBatch({
 
         wait(itemID) {
             const record = items.get(itemID);
+            if (record?.status === 'paused' || record?.status === 'blocked') {
+                return Promise.reject(pausedError(record.error));
+            }
             if (record?.status === 'succeeded') {
                 return Promise.resolve(record.result);
             }
             if (record?.status === 'failed') return Promise.reject(record.error);
-            if (record && !isOpenStatus(record.status)) {
+            if (!record || !isOpenStatus(record.status)) {
                 return Promise.reject(cancelledError());
             }
             return waiterFor(itemID).promise;
         },
+
+        pausedScope(scope = getScope()) {
+            return pausedScopes.get(scope) || null;
+        },
+
+        blockScope(error, scope = getScope(), candidate = null) {
+            blockScope(error, scope, candidate);
+        },
+
+        resume(scope = getScope()) {
+            if (!scope || scope !== getScope() || !pausedScopes.has(scope)) return 0;
+            stopped = false;
+            pausedScopes.delete(scope);
+            let count = 0;
+            for (const record of items.values()) {
+                if (record.scope !== scope
+                    || (record.status !== 'paused' && record.status !== 'blocked')) continue;
+                if (safeCheck(isReady, record) || safeCheck(isActive, record)) {
+                    finish(record.itemID, 'released');
+                    continue;
+                }
+                record.status = 'queued';
+                record.error = null;
+                queue.push(record.itemID);
+                emit({ type: 'queued', item: publicItem(record), ahead: queue.length - 1 });
+                count += 1;
+            }
+            emitPositions();
+            pump();
+            return count;
+        },
+
+        cancelRemaining(scope = getScope()) {
+            const cancelled = [];
+            for (const record of items.values()) {
+                if (record.scope !== scope
+                    || (record.status !== 'paused' && record.status !== 'blocked')) continue;
+                cancelled.push(record.itemID);
+                finish(record.itemID, 'cancelled');
+            }
+            return cancelled;
+        },
     };
+
+    function pauseRecord(record, error, blocked) {
+        record.status = blocked ? 'blocked' : 'paused';
+        record.error = error;
+        emit({ type: record.status, item: publicItem(record), error });
+        settleWaiter(record.itemID, waiter => waiter.reject(pausedError(error)));
+    }
 
     function pump() {
         if (stopped) return;
@@ -135,6 +217,18 @@ export function createConversionBatch({
             const itemID = queue.shift();
             const record = items.get(itemID);
             if (!record || record.status !== 'queued') continue;
+            if (record.scope !== getScope()) {
+                if (!record.scope.startsWith('mktero:')) {
+                    finish(record.itemID, 'released');
+                    continue;
+                }
+                const error = Object.assign(new Error('Conversion account or provider changed'), {
+                    code: 'MKTERO_QUOTA_ACCOUNT_CHANGED',
+                });
+                pausedScopes.set(record.scope, error);
+                pauseRecord(record, error, false);
+                continue;
+            }
             record.status = 'running';
             record.controller = createController();
             running += 1;
@@ -182,6 +276,11 @@ export function createConversionBatch({
                     : 'cancelled');
                 return;
             }
+            if (isQuotaError(error) && record.scope) {
+                pauseRecord(record, error, true);
+                blockScope(error, record.scope);
+                return;
+            }
             record.status = 'failed';
             record.error = error;
             emit({
@@ -197,6 +296,25 @@ export function createConversionBatch({
                 emit({ type: 'blocked', error });
             }
         }
+    }
+
+    function blockScope(error, scope, candidate = null) {
+        if (!scope || !isQuotaError(error)) return;
+        const item = normalizeCandidate(candidate);
+        if (item && !isOpenStatus(items.get(item.itemID)?.status)) {
+            const record = { ...item, scope, result: null, error, controller: null };
+            items.set(item.itemID, record);
+            pauseRecord(record, error, true);
+        }
+        const first = !pausedScopes.has(scope);
+        pausedScopes.set(scope, error);
+        for (const itemID of queue.splice(0)) {
+            const pending = items.get(itemID);
+            if (pending?.scope === scope) pauseRecord(pending, error, false);
+            else queue.push(itemID);
+        }
+        emitPositions();
+        if (first) emit({ type: 'quota-blocked', error, scope });
     }
 
     function finish(itemID, status) {
@@ -268,11 +386,12 @@ function cleanTitle(value) {
 }
 
 function publicItem(record) {
-    return { itemID: record.itemID, title: record.title };
+    return { itemID: record.itemID, title: record.title, scope: record.scope };
 }
 
 function isOpenStatus(status) {
-    return status === 'queued' || status === 'running';
+    return status === 'queued' || status === 'running'
+        || status === 'paused' || status === 'blocked';
 }
 
 function safeCheck(check, value) {
@@ -292,6 +411,13 @@ function isCancellation(error) {
 
 function replacement(error) {
     return error?.code === 'MKTERO_CONVERSION_REPLACED';
+}
+
+function pausedError(cause) {
+    const error = new Error('Conversion paused until quota is available');
+    error.code = 'MKTERO_QUOTA_PAUSED';
+    error.quota = cause?.quota || null;
+    return error;
 }
 
 function cancelledError() {

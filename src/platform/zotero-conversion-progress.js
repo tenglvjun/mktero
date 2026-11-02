@@ -6,12 +6,17 @@ const CLAIM_RETRY_MS = 50;
 const CLAIM_ATTEMPTS = 40;
 const cancelListeners = new Map();
 const appliedTitles = new WeakMap();
+const quotaActionControllers = new Map();
 
 export function createZoteroConversionProgress({
     zotero,
     services = globalThis.Services,
     title = 'Preparing Markdown',
     onCancel = null,
+    onResume = null,
+    onCancelRemaining = null,
+    resumeLabel = 'Check quota and continue',
+    cancelRemainingLabel = 'Cancel remaining',
     schedule = defaultSchedule,
     queueID = DEFAULT_QUEUE_ID,
 } = {}) {
@@ -35,7 +40,47 @@ export function createZoteroConversionProgress({
     bindCancelListener(queue, onCancel);
 
     const dialog = queue.getDialog?.();
+    let paused = false;
+    const actionButtons = new Set();
+    const quotaActions = () => {
+        if (queueID !== DEFAULT_QUEUE_ID) return;
+        for (const { win, root } of listProgressWindows(services)) {
+            if (progressWindowOwner(win, root) !== queueID && progressWindowOwner(win, root)) continue;
+            if (typeof root?.appendChild !== 'function') continue;
+            const ensureButton = (id, label, callback) => {
+                let button = win.document.getElementById?.(id);
+                if (!button) {
+                    button = win.document.createXULElement?.('button')
+                        || win.document.createElement?.('button');
+                    if (!button) return;
+                    button.id = id;
+                    button.setAttribute('label', label);
+                    button.addEventListener('command', callback);
+                    actionButtons.add(button);
+                    root.appendChild(button);
+                }
+                button.hidden = !paused;
+            };
+            ensureButton('mktero-quota-resume', resumeLabel, () => onResume?.());
+            ensureButton('mktero-quota-cancel-remaining', cancelRemainingLabel, () => onCancelRemaining?.());
+        }
+    };
+    const disposeActions = () => {
+        for (const button of actionButtons) button.remove();
+        actionButtons.clear();
+        if (quotaActionControllers.get(queueID)?.render === quotaActions) {
+            quotaActionControllers.delete(queueID);
+        }
+    };
+    if (onResume || onCancelRemaining) {
+        quotaActionControllers.get(queueID)?.dispose();
+        quotaActionControllers.set(queueID, { render: quotaActions, dispose: disposeActions });
+    }
     return {
+        dispose() {
+            disposeActions();
+            bindCancelListener(queue, null);
+        },
         statuses: {
             queued: statuses.ROW_QUEUED,
             processing: statuses.ROW_PROCESSING,
@@ -54,6 +99,10 @@ export function createZoteroConversionProgress({
         remove(itemID) {
             queue.deleteRow?.(itemID);
         },
+        setPaused(value) {
+            paused = Boolean(value);
+            quotaActions();
+        },
         setStatus(message) {
             dialog?.setStatus?.(message || '');
         },
@@ -65,6 +114,7 @@ export function createZoteroConversionProgress({
                 title,
                 schedule,
             });
+            quotaActions();
         },
         cancel() {
             try {
@@ -215,6 +265,7 @@ function bindQueueWindow(state) {
     reconcileProgressMarks(state.services);
     markOwnedProgressWindows(state.services, state.queueID);
     retitle(state.services, state.title, state.queueID);
+    quotaActionControllers.get(state.queueID)?.render();
     const claimed = state.queueID === DEFAULT_QUEUE_ID
         || hasConfirmedQueueWindow(state.services, state.queueID);
     const next = nextClaimAttempt(state, attempt, claimed);
@@ -224,6 +275,13 @@ function bindQueueWindow(state) {
 
 function nextClaimAttempt(state, attempt, claimed) {
     if (state.queueID === DEFAULT_QUEUE_ID) {
+        if (quotaActionControllers.has(state.queueID)
+            && !listProgressWindows(state.services).some(({ win, root }) => (
+                !progressWindowOwner(win, root) || progressWindowOwner(win, root) === state.queueID
+            ))) {
+            return attempt >= CLAIM_ATTEMPTS - 1 ? null
+                : { ...state, attempt: attempt + 1, delay: CLAIM_RETRY_MS };
+        }
         if (attempt >= 1) return null;
         return { ...state, attempt: attempt + 1, delay: STYLE_RETRY_MS };
     }

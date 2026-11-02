@@ -152,6 +152,14 @@ cloud accept at most 200 pages per PDF. Before such a PDF is sent, Mktero
 counts its pages locally and stops with a message when it has more; a local
 MinerU service and Mistral are not checked.
 
+When enabled by the service, a daily account quota applies to new hosted
+conversion results. Settings shows the current limit, used and reserved slots,
+and the reset time in your local time zone; the service counts UTC calendar
+days. A quota block pauses pending hosted work in the preparation window while
+submitted jobs continue. Use `Check quota and continue` or `Cancel remaining`;
+there is no automatic next-day restart. Reading local results, corrections,
+export, your own converters, and AI translation are unaffected.
+
 ### Install
 
 1. Download the latest `mktero-<version>.xpi` from
@@ -255,7 +263,11 @@ themselves start a conversion.
   and refresh token stay in the same profile. While the account pane is open,
   the extension uses that token to request your profile and your
   conversion-activity counts from the service you selected, and shows them as
-  the account card's counters.
+  the account card's counters. The pane also reads daily quota balances when
+  supported, and refreshes them after hosted requests finish. The service keeps
+  account-linked admissions, usage, page counts, reuse and quota-block aggregates
+  for service operation and capacity planning; pending local batch lists are
+  not uploaded.
 - The extension reports its own version to the Mktero service when you sign in,
   refresh your token, or send a background heartbeat, so the operator can see
   which builds are still in use. That report carries no device fingerprint and no hardware,

@@ -79,6 +79,7 @@ export class ConversionProviderRouter {
 
     async #readProvider(method, itemID, options, selection) {
         throwIfAborted(options?.signal);
+        options?.assertScope?.();
         const result = await this.#extractor()[method](itemID, options);
         throwIfAborted(options?.signal);
         if (selection && isUsableMarkdown(result)) {
