@@ -51,7 +51,11 @@
   printed `††` the OCR text does not carry) has no link. Collapsed article
   information, author biography, and reporting summary sections are recognized
   from the page layout and wording, so unusual front matter can stay in the
-  reading text.
+  reading text. Publisher-cover cleanup requires multiple distinct platform
+  controls, citation/link metadata, and a matching title followed by an
+  abstract or introduction on the next page. Ambiguous pages and images
+  without a clear association with a control stay visible; small size alone
+  never identifies an image as decoration.
 - MinerU cloud results locate text by OCR block, not by line, so a Markdown
   paragraph jumps to its whole block in the PDF. A paragraph joined across a
   page, column, or figure keeps one location for each part.

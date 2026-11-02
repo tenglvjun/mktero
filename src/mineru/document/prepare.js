@@ -2,6 +2,7 @@ import { validateMinerULayout } from './result-bundle.js';
 import { ingestMinerULayout } from './ingest-layout.js';
 import { ingestMinerUContentList } from './ingest-content-list.js';
 import { classifyBlocks } from './classify.js';
+import { classifyPublisherCover } from './front-matter.js';
 import {
     attachFloatNotes,
     groupAdjacentTables,
@@ -48,6 +49,7 @@ export function buildMinerUDocumentIR(bundle, { pdfText = null } = {}) {
     attachPDFGeometry(ir, pdfText);
     checkTextAgainstPDF(ir, pdfText);
     classifyBlocks(ir);
+    classifyPublisherCover(ir);
     attachFloatNotes(ir);
     reassignFloatCaptions(ir);
     releaseStrayCaptions(ir);

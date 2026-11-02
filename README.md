@@ -65,7 +65,10 @@ another upload.
 - In MinerU results, show page footnotes as notes after the paragraph that
   cites them, and fold article metadata, author biographies, and reporting
   summaries into collapsed sections, so the first screen shows the title,
-  authors, and abstract. The PDF's own text layer, read locally, also rejoins a
+  authors, and abstract. Long article titles keep their heading style;
+  confirmed publisher covers lose their platform controls and duplicate
+  title/byline while useful publication fields stay in article information.
+  The PDF's own text layer, read locally, also rejoins a
   paragraph a page or column break splits at a full stop, levels the
   headings of a paper without section numbers by their type, and, in a
   typeset PDF, restores single words the OCR model "corrected" (a name, an

@@ -87,6 +87,44 @@ test('promotes only capitalized lines that continue the section numbering', () =
     assert.equal(blocks[4].role, 'body');
 });
 
+test('protects long article titles before demoting long section prose', () => {
+    for (const words of [20, 21, 40]) {
+        const name = Array.from({ length: words }, (_, index) => `Word${index}`).join(' ');
+        const blocks = [
+            heading(name, { mineruLevel: 1, bbox: [100, 70, 900, 170] }),
+            heading('ABSTRACT'),
+            heading('Introduction'),
+            heading('This sentence was incorrectly marked as a level one title despite being part of the introduction and explaining the experimental procedure in detail', {
+                mineruLevel: 1, bbox: [100, 400, 900, 600],
+            }),
+        ];
+        assert.deepEqual(levels(blocks), [1, 2, 2]);
+        assert.equal(blocks[0].documentTitle, true);
+        assert.equal(blocks[3].demotedHeading, true);
+    }
+});
+
+test('keeps an article title beginning with Introduction distinct from the Introduction section', () => {
+    const blocks = [
+        heading('Introduction to individually guided training prescriptions using heart rate variability and self reported measures of stress tolerance in recreational endurance runners', { mineruLevel: 1 }),
+        heading('ABSTRACT'),
+        heading('Introduction'),
+    ];
+    assert.deepEqual(levels(blocks), [1, 2, 2]);
+    assert.equal(blocks[0].documentTitle, true);
+});
+
+test('does not protect a figure caption as the document title', () => {
+    const blocks = [
+        heading('Figure 1. A very long caption describing experimental conditions across several distinct groups and reporting the measurements collected throughout the study.', {
+            mineruLevel: 1, bbox: [100, 50, 900, 200],
+        }),
+        heading('Introduction'),
+    ];
+    assert.deepEqual(levels(blocks), [2]);
+    assert.equal(blocks[0].role, 'body');
+});
+
 test('parses and sequences heading numbers', () => {
     assert.deepEqual(parseHeadingNumber('VIII. BIOGRAPHY'), { kind: 'roman', parts: [8] });
     assert.deepEqual(parseHeadingNumber('A.2 Setup'), { kind: 'letter', parts: [1, 2] });

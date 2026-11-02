@@ -92,6 +92,14 @@ section label in bold followed by its content. Markdown and Obsidian exports
 keep the content as ordinary text; the section markers are HTML comments and
 do not show in Obsidian.
 
+For a confirmed publisher cover followed by the same article title and an
+abstract or introduction, MinerU reading uses the article page's title and
+authors. Submission prompts, view counts, related-article controls, and their
+associated icons are omitted. Citation, DOI, and publication-date fields stay
+in `Article information`, together with metadata from the actual article
+page. Long article titles retain their heading style. PDF page numbers and
+source locations stay unchanged.
+
 Mktero recognizes these parts from the layout and the wording of the page.
 A note can land after a different paragraph when its mark is printed in an
 unusual way, and metadata that does not look like metadata stays in the text.
