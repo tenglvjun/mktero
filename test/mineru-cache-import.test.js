@@ -40,7 +40,6 @@ function fixture(overrides = {}) {
         countPages: async () => 1,
         isCacheEnabled: () => true,
         prepareResult: async () => document,
-        confirm: async () => true,
         ...overrides,
     };
     return { events, options, attachment, service: new MinerUCacheImportService(options),
@@ -118,23 +117,26 @@ test('figure coverage follows original assets through composed figures rather th
 
 test('publishes a self-contained local import only after both stores are readable', async () => {
     const f = fixture();
-    const result = await f.service.importConfirmed(1);
+    const result = await f.service.importLocal(1);
     assert.equal(result.provider, 'llm-for-zotero');
     assert.equal(result.markdown, content);
     assert.deepEqual(f.events, ['verify', 'raw', 'derived', 'verify', 'publish']);
     assert.match(result.cacheKey, /^[a-f0-9]{64}$/);
 });
 
-test('rejecting confirmation does not write either store or publish a selection', async () => {
-    const f = fixture({ confirm: async () => false });
-    await assert.rejects(f.service.importConfirmed(1), { name: 'AbortError' });
-    assert.deepEqual(f.events, []);
+test('imports directly without a confirmation adapter', async () => {
+    const f = fixture();
+    assert.equal('confirm' in f.options, false);
+    const result = await f.service.importLocal(1);
+    assert.equal(result.markdown, content);
+    assert.equal(f.selection.binding, 'user-confirmed');
+    assert.deepEqual(f.events, ['verify', 'raw', 'derived', 'verify', 'publish']);
 });
 
 test('cancellation during local processing never publishes a selection', async () => {
     const controller = new AbortController();
     const f = fixture({ prepareResult: async () => { controller.abort(); return document; } });
-    await assert.rejects(f.service.importConfirmed(1, { signal: controller.signal }), { name: 'AbortError' });
+    await assert.rejects(f.service.importLocal(1, { signal: controller.signal }), { name: 'AbortError' });
     assert.deepEqual(f.events, []);
 });
 
@@ -148,7 +150,6 @@ test('ordinary local adapter errors retain their cause and cannot publish', asyn
         ['source capture', f => f.options.source, 'capture'],
         ['PDF page count', f => f.service, 'countPages'],
         ['source inspection', f => f.service, 'inspect'],
-        ['confirmation', f => f.service, 'confirm'],
         ['asset adaptation', f => f.service, 'adaptAssets'],
         ['document preparation', f => f.service, 'prepareResult'],
         ['figure recovery', f => f.service, 'recoverFigures'],
@@ -164,7 +165,7 @@ test('ordinary local adapter errors retain their cause and cannot publish', asyn
             const cause = Object.assign(new Error('local adapter failed'), { code: 'EIO' });
             const f = fixture();
             target(f)[method] = () => { throw cause; };
-            await assert.rejects(f.service.importConfirmed(1), error => {
+            await assert.rejects(f.service.importLocal(1), error => {
                 assert.ok(error instanceof LLMCacheError);
                 assert.equal(error.code, 'LLM_CACHE_IMPORT_FAILED');
                 assert.equal(error.cause, cause);
@@ -181,7 +182,7 @@ test('ordinary image decoder and local PDF renderer errors remain local import f
             const cause = new Error('local image I/O failed');
             const f = fixture({ [adapter]: async () => { throw cause; } });
             f.options.source.capture = async () => ({ entries: figureEntries(adapter === 'decodeImage') });
-            await assert.rejects(f.service.importConfirmed(1), error => {
+            await assert.rejects(f.service.importLocal(1), error => {
                 assert.ok(error instanceof LLMCacheError);
                 assert.equal(error.code, 'LLM_CACHE_IMPORT_FAILED');
                 assert.equal(error.cause, cause);
@@ -203,7 +204,7 @@ test('publication-time PDF reads and preference failures remain local import fai
                 if (++calls === 2) throw cause;
                 return original(...args);
             };
-            await assert.rejects(f.service.importConfirmed(1), error => {
+            await assert.rejects(f.service.importLocal(1), error => {
                 assert.ok(error instanceof LLMCacheError);
                 assert.equal(error.code, 'LLM_CACHE_IMPORT_FAILED');
                 assert.equal(error.cause, cause);
@@ -222,7 +223,7 @@ test('disk-full writes and source changes preserve the previous selection and al
     ]) {
         await t.test(name, async () => {
             const f = fixture();
-            await f.service.importConfirmed(1);
+            await f.service.importLocal(1);
             const previous = f.selection;
             f.events.length = 0;
             f.options.source.capture = async () => ({ entries: [
@@ -231,7 +232,7 @@ test('disk-full writes and source changes preserve the previous selection and al
             const cause = new Error(store === 'source' ? 'source changed' : 'disk full');
             const original = f.options[store][method];
             f.options[store][method] = async () => { throw cause; };
-            await assert.rejects(f.service.importConfirmed(1), error => {
+            await assert.rejects(f.service.importLocal(1), error => {
                 assert.ok(error instanceof LLMCacheError);
                 assert.equal(error.code, 'LLM_CACHE_IMPORT_FAILED');
                 assert.equal(error.cause, cause);
@@ -240,7 +241,7 @@ test('disk-full writes and source changes preserve the previous selection and al
             assert.equal(f.events.includes('publish'), false);
             assert.equal(f.selection, previous);
             f.options[store][method] = original;
-            await f.service.importConfirmed(1);
+            await f.service.importLocal(1);
             assert.notEqual(f.selection.snapshotHash, previous.snapshotHash);
         });
     }
@@ -256,7 +257,7 @@ test('existing local error codes and cancellation reasons are propagated unchang
         await t.test(original.code || original.name, async () => {
             const f = fixture();
             f.options.source.capture = async () => { throw original; };
-            await assert.rejects(f.service.importConfirmed(1), error => error === original);
+            await assert.rejects(f.service.importLocal(1), error => error === original);
             assert.deepEqual(f.events, []);
         });
     }
@@ -264,7 +265,7 @@ test('existing local error codes and cancellation reasons are propagated unchang
         const controller = new AbortController();
         const reason = new Error('Owner closed');
         const f = fixture({ prepareResult: async () => { controller.abort(reason); return document; } });
-        await assert.rejects(f.service.importConfirmed(1, { signal: controller.signal }), error => error === reason);
+        await assert.rejects(f.service.importLocal(1, { signal: controller.signal }), error => error === reason);
         assert.deepEqual(f.events, []);
     });
 });
@@ -278,7 +279,7 @@ test('figures lost during preparation or final recovery cannot publish', async t
                 [stage]: async () => document,
             });
             f.options.source.capture = async () => ({ entries: figureEntries() });
-            await assert.rejects(f.service.importConfirmed(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
+            await assert.rejects(f.service.importLocal(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
             assert.deepEqual(f.events, []);
         });
     }
@@ -288,7 +289,7 @@ test('final figure coverage accepts retained input figures', async () => {
     const f = fixture({ prepareResult: async raw => ({ ...document,
         markdown: `${content}\n\n![](images/figure.png)`, assets: raw.assets }) });
     f.options.source.capture = async () => ({ entries: figureEntries() });
-    const result = await f.service.importConfirmed(1);
+    const result = await f.service.importLocal(1);
     assert.match(result.markdown, /!\[\]\(images\/figure\.png\)/u);
     assert.equal(result.assets[0].path, 'images/figure.png');
     assert.equal(f.events.at(-1), 'publish');
@@ -304,7 +305,7 @@ test('real figure preparation cannot lose layout-only or image-only table inputs
         for (const stage of ['prepareResult', 'recoverFigures']) {
             await t.test(`${name}: ${stage}`, async () => {
                 const f = fixture({ prepareResult: prepareRealFigures });
-                await f.service.importConfirmed(1);
+                await f.service.importLocal(1);
                 const previous = f.selection;
                 f.events.length = 0;
                 f.options.source.capture = async () => ({ entries: sourceEntries });
@@ -313,7 +314,7 @@ test('real figure preparation cannot lose layout-only or image-only table inputs
                     f.service.prepareResult = async (raw, context) => dropImages(await prepareRealFigures(raw, context));
                 }
                 else f.service.recoverFigures = async result => dropImages(result);
-                await assert.rejects(f.service.importConfirmed(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
+                await assert.rejects(f.service.importLocal(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
                 assert.deepEqual(f.events, []);
                 assert.equal(f.selection, previous);
             });
@@ -326,7 +327,7 @@ test('real standalone import pipeline retains content-list and layout-only figur
         await t.test(name, async () => {
             const f = fixture({ prepareResult: prepareRealFigures });
             f.options.source.capture = async () => ({ entries: sourceEntries });
-            const result = await f.service.importConfirmed(1);
+            const result = await f.service.importLocal(1);
             assert.ok(collectFigureImageNodes(result.markdown).length > 0);
             assert.equal(result.documentStructure, 'mineru-ir-v1');
             if (name === 'layout-only') {
@@ -363,7 +364,7 @@ test('real standalone import permits redundant textual previews and shared panel
         await t.test(`${name}: textual equivalents`, async () => {
             const f = fixture({ prepareResult: prepareRealFigures });
             f.options.source.capture = async () => ({ entries: sourceEntries });
-            const result = await f.service.importConfirmed(1);
+            const result = await f.service.importLocal(1);
             assert.equal(collectFigureImageNodes(result.markdown).length, 0);
             assert.match(result.markdown, /<table>/u);
             assert.match(result.markdown, /E=mc\^2/u);
@@ -377,7 +378,7 @@ test('real standalone import permits redundant textual previews and shared panel
         sourceEntries[1] = { path: 'content_list.json', data: encode(JSON.stringify(blocks)) };
         const f = fixture({ prepareResult: prepareRealFigures });
         f.options.source.capture = async () => ({ entries: sourceEntries });
-        const result = await f.service.importConfirmed(1);
+        const result = await f.service.importLocal(1);
         assert.equal(result.assets.length, 1);
         assert.equal(collectFigureImageNodes(result.markdown).length, 2);
         assert.equal(f.events.at(-1), 'publish');
@@ -386,12 +387,12 @@ test('real standalone import permits redundant textual previews and shared panel
 
 test('a readable cache copy that loses a required figure cannot replace the previous selection', async () => {
     const f = fixture({ prepareResult: prepareRealFigures });
-    await f.service.importConfirmed(1);
+    await f.service.importLocal(1);
     const previous = f.selection;
     f.events.length = 0;
     f.options.source.capture = async () => ({ entries: layoutEntries() });
     f.options.cache.get = async () => document;
-    await assert.rejects(f.service.importConfirmed(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
+    await assert.rejects(f.service.importLocal(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
     assert.equal(f.events.includes('publish'), false);
     assert.equal(f.selection, previous);
 });
@@ -399,15 +400,15 @@ test('a readable cache copy that loses a required figure cannot replace the prev
 test('PDF replacement before publication is rejected', async () => {
     let reads = 0;
     const f = fixture({ readFile: async () => ++reads === 1 ? fileData : encode('new PDF') });
-    await assert.rejects(f.service.importConfirmed(1), { code: 'LLM_CACHE_CHANGED' });
+    await assert.rejects(f.service.importLocal(1), { code: 'LLM_CACHE_CHANGED' });
     assert.equal(f.events.includes('publish'), false);
 });
 
 test('disabled caches and invalid final image references cannot publish', async () => {
     const disabled = fixture({ isCacheEnabled: () => false });
-    await assert.rejects(disabled.service.importConfirmed(1), { code: 'LLM_CACHE_DISABLED' });
+    await assert.rejects(disabled.service.importLocal(1), { code: 'LLM_CACHE_DISABLED' });
     const broken = fixture({ prepareResult: async () => ({ ...document, markdown: `${content}\n\n![](images/missing.png)` }) });
-    await assert.rejects(broken.service.importConfirmed(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
+    await assert.rejects(broken.service.importLocal(1), { code: 'LLM_CACHE_MISSING_IMAGE' });
     assert.deepEqual(disabled.events, []);
     assert.deepEqual(broken.events, []);
 });

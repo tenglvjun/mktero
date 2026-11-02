@@ -938,7 +938,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         zotero: Zotero, index: importIndex, cache, resultStore: mineruResultStore,
         readFile: readLocalImportPDF,
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
-        readRevision: options => readRevisionSnapshot(options),
+        readRevision: options => readRevisionSnapshot({ ...options, throwOnReadError: true }),
         prepareResult: prepareImportedResult, recoverFigures,
         preparePDFIndex: (itemID, options) => preparePDFIndexForItem(itemID, options, pdfAnnotationLocator),
     });
@@ -959,7 +959,6 @@ globalThis.startup = async function startup({ id, rootURI }) {
         prepareResult: prepareImportedResult, recoverFigures,
         openPDF: (fileData, options) => figureRegionRenderer.open(fileData, options),
         decodeImage: figureCanvasEnvironment.decodeImage,
-        confirm: confirmLLMCacheImport,
     });
     const extractor = new ConversionProviderRouter({
         getProvider: () => getConversionProvider(Zotero),
@@ -1765,7 +1764,7 @@ async function executeItemConversion(itemID, {
     );
     try {
         const imported = operation === 'import-llm-cache'
-            ? await runtime.importService.importConfirmed(itemID, { signal, onProgress })
+            ? await runtime.importService.importLocal(itemID, { signal, onProgress })
             : null;
         const result = await runtime.service.convert(itemID, {
             signal,
@@ -2463,7 +2462,7 @@ async function exportObsidianForDocument(documentID, options) {
     );
 }
 
-async function readRevisionSnapshot({ itemID, cacheKey, signal }) {
+async function readRevisionSnapshot({ itemID, cacheKey, signal, throwOnReadError = false }) {
     if (!runtime.revisionStore) return null;
     throwIfRevisionAborted(signal);
     try {
@@ -2477,7 +2476,7 @@ async function readRevisionSnapshot({ itemID, cacheKey, signal }) {
         return { ...entry.session.snapshot(), itemID };
     }
     catch (error) {
-        if (signal?.aborted || error?.name === 'AbortError') throw error;
+        if (signal?.aborted || error?.name === 'AbortError' || throwOnReadError) throw error;
         // Unreadable corrections must not block the OCR result. The revision
         // session reports them when the document attaches its corrections.
         if (!isInvalidMarkdownRevisionError(error)) logMkteroError(error);
@@ -4352,20 +4351,6 @@ async function readLocalImportPDF(filePath) {
         throw new LLMCacheError('LLM_CACHE_RESOURCE_LIMIT', 'The local PDF exceeds the import limit');
     }
     return IOUtils.read(filePath, { maxBytes: LLM_CACHE_LIMITS.maxPDFBytes + 1 });
-}
-
-function confirmLLMCacheImport({ attachment, sourceFormat, signal }) {
-    if (signal?.aborted) return false;
-    const services = typeof Services === 'undefined' ? null : Services;
-    const sourceHint = sourceFormat === 'missing'
-        ? runtimeTranslate('importLLM.confirmSourceMissing')
-        : sourceFormat === 'legacy' ? runtimeTranslate('importLLM.confirmSourceLegacy') : '';
-    const message = [runtimeTranslate('importLLM.confirmMessage', {
-        fileName: attachment.attachmentFilename || attachment.getDisplayTitle?.() || 'PDF',
-    }), sourceHint].filter(Boolean).join('\n\n');
-    return services?.prompt?.confirm?.(
-        Zotero.getMainWindow(), runtimeTranslate('importLLM.confirmTitle'), message
-    ) === true;
 }
 
 function confirmLocalImportReparse() {

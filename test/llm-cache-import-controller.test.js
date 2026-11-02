@@ -480,7 +480,7 @@ test('contains probe failures in menu discovery and reports command failures wit
     assert.deepEqual(errors, [failure]);
 });
 
-test('localizes import menus and confirmation messages in English and Simplified Chinese', async () => {
+test('localizes import menus and recovery messages in English and Simplified Chinese', async () => {
     for (const language of ['en-US', 'zh-CN']) {
         const t = (key, variables) => translateMessage(language, key, variables);
         const h = harness([pdf(42)]);
@@ -488,9 +488,8 @@ test('localizes import menus and confirmation messages in English and Simplified
         h.show();
         await tick();
         assert.equal(h.direct().getAttribute('label'), t('menu.importLLMCache'));
-        for (const key of ['confirmTitle', 'confirmMessage', 'cacheRequired', 'unavailable', 'busy', 'failed', 'working', 'reparse']) {
-            assert.notEqual(t(`importLLM.${key}`, { fileName: 'example.pdf' }), `importLLM.${key}`);
+        for (const key of ['cacheRequired', 'unavailable', 'busy', 'failed', 'working', 'reparse', 'reparseConfirm']) {
+            assert.notEqual(t(`importLLM.${key}`), `importLLM.${key}`);
         }
-        assert.match(t('importLLM.confirmMessage', { fileName: 'example.pdf' }), /example\.pdf/u);
     }
 });

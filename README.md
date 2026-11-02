@@ -177,13 +177,19 @@ See [Configuration](./docs/configuration.md) for every setting and
 In Zotero's library, right-click one PDF attachment or its parent item. When a
 local llm-for-zotero result is found, choose `Import parsed result from
 llm-for-zotero…`; if several PDFs have results, choose the intended attachment
-from the submenu. Confirm that the result belongs to the named PDF. Mktero
-validates and copies it into its own cache, then opens that PDF in the normal
+from the submenu. Selecting the menu item starts the import: Mktero validates
+and copies the result into its own cache, then opens that PDF in the normal
 Mktero tab. A failed import does not start a remote conversion.
 
 Only supported local results can be imported; see [Workflows](./docs/workflows.md#import-a-local-llm-for-zotero-result)
 for the format requirements and how to reimport or explicitly reparse. Cached
-copies can expire or be evicted under the cache settings.
+copies can expire or be evicted under the cache settings. Deleting the
+llm-for-zotero source does not affect reading while Mktero's copy remains;
+a retained raw result can also rebuild the reading document offline. If all
+local content for the selected import is missing, opening it later with
+`Read as Markdown with Mktero` uses the current converter and may upload the
+PDF. Import failure, corrupt content, read errors, or cancellation do not by
+themselves start a conversion.
 
 ### Open a PDF
 
@@ -230,9 +236,12 @@ copies can expire or be evicted under the cache settings.
   PDF is sent there instead, and not to Mktero.
 - Explicit imports of supported local llm-for-zotero results read the source
   cache without changing it and save a separate, unencrypted local copy and
-  import selection. Import and local reopening do not upload the PDF or results.
-  Failure or cache expiry does not automatically switch to remote conversion;
-  explicitly choosing to reparse uses the current converter.
+  import selection. Import and local reopening do not upload the PDF or results,
+  even if the source cache has been deleted. Retained raw results can rebuild
+  the document offline. If all local content for a selected import is missing,
+  a later `Read as Markdown with Mktero` uses the current converter and may
+  upload the PDF, as does an explicit reparse. Import failure, corrupt content,
+  read errors, or cancellation do not themselves trigger conversion.
 - Credentials, cached Markdown and figures, stored MinerU results (without the
   PDF copy), corrections, translations, reading positions, local highlights not
   yet in the PDF, and the Zotero annotation keys that tie a cross-page

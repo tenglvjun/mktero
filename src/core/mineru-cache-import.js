@@ -12,10 +12,10 @@ import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 export class MinerUCacheImportService {
     constructor({ zotero, source, index, cache, resultStore, readFile,
         countPages, isCacheEnabled, prepareResult, recoverFigures = async result => result,
-        openPDF = null, decodeImage = null, confirm = async () => false,
+        openPDF = null, decodeImage = null,
         inspect = inspectLLMCacheEntries, adaptAssets = adaptLLMCacheAssets,
         now = Date.now, hash = sha256Hex } = {}) {
-        for (const [name, value] of Object.entries({ readFile, countPages, isCacheEnabled, prepareResult, confirm })) {
+        for (const [name, value] of Object.entries({ readFile, countPages, isCacheEnabled, prepareResult })) {
             if (typeof value !== 'function') throw new TypeError(`An import ${name} adapter is required`);
         }
         if (!zotero || !source?.capture || !source?.verify || !index?.publish
@@ -24,7 +24,7 @@ export class MinerUCacheImportService {
         }
         Object.assign(this, { zotero, source, index, cache, resultStore, readFile,
             countPages, isCacheEnabled, prepareResult, recoverFigures, openPDF,
-            decodeImage, confirm, inspect, adaptAssets, now, hash });
+            decodeImage, inspect, adaptAssets, now, hash });
         this.active = new Set();
     }
 
@@ -32,7 +32,7 @@ export class MinerUCacheImportService {
         return this.source.probeCandidate(attachment, options);
     }
 
-    async importConfirmed(itemID, { signal, onProgress = () => {} } = {}) {
+    async importLocal(itemID, { signal, onProgress = () => {} } = {}) {
         if (this.active.has(itemID)) throw new LLMCacheError('LLM_CACHE_BUSY', 'The PDF already has an active import');
         this.active.add(itemID);
         try {
@@ -58,10 +58,6 @@ export class MinerUCacheImportService {
                 attachment, pdfPageCount: totalPages, sourceRoot: snapshot.sourceRoot,
             });
             throwIfFigureAborted(signal);
-            const accepted = await this.confirm({ attachment, sourceFormat: input.sourceFormat,
-                totalPages, signal });
-            throwIfFigureAborted(signal);
-            if (!accepted) throw cancelled();
             onProgress(10, { operation: 'import-llm-cache' });
             const adapted = await this.adaptAssets(input, {
                 fileData, openPDF: this.openPDF, decodeImage: this.decodeImage, signal,
@@ -102,6 +98,7 @@ export class MinerUCacheImportService {
             }
             throwIfFigureAborted(signal);
             if (!this.isCacheEnabled()) throw new LLMCacheError('LLM_CACHE_DISABLED', 'Local caching was disabled while importing');
+            // The explicit menu command binds this source; keep the existing index format.
             await this.index.publish({
                 libraryID: expected.libraryID, attachmentKey: expected.key,
                 sourceHash, snapshotHash, rawKey: identity.rawKey,
@@ -173,10 +170,4 @@ function identityOf(attachment) {
         throw new LLMCacheError('LLM_CACHE_INVALID_ATTACHMENT', 'A current PDF attachment is required');
     }
     return { id: attachment.id, key: attachment.key, libraryID: attachment.libraryID };
-}
-
-function cancelled() {
-    const error = new Error('The import was cancelled');
-    error.name = 'AbortError';
-    return error;
 }

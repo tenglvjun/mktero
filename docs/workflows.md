@@ -28,12 +28,10 @@ references remain previewable in cached documents.
    locally with llm-for-zotero first; Mktero does not import that ZIP directly.
 2. In the Zotero library, right-click one PDF attachment or its parent item.
    `Import parsed result from llm-for-zotero…` appears when a local candidate is
-   found. For a parent item with several candidates, choose the PDF from the
-   submenu. The menu check only finds candidates; full validation follows.
-3. Confirm that the cached result belongs to the PDF named in the prompt.
-   Attachment metadata cannot prove that an old parse was made from the PDF's
-   current contents, so check the source even when the attachment matches.
-4. Mktero validates the local result, saves its own copy, and opens that PDF in
+   found. Choose it to start importing; for a parent item with several
+   candidates, choose the PDF from the submenu. The menu check only finds
+   candidates; full validation follows the click.
+3. Mktero validates the local result, saves its own copy, and opens that PDF in
    the normal Mktero tab. The import itself works offline without an account
    or API key, and does not upload the PDF or result or modify the source cache.
    Cancelling or failing the import leaves the previous selection in place.
@@ -48,13 +46,19 @@ without bounding boxes are not supported. The menu can find such a candidate,
 but the import then explains why it cannot be used.
 
 After a successful import, reading uses Mktero's copy and no longer needs the
-source cache. The copy remains subject to cache expiry, size limits, and manual
-clearing. An unavailable selected import prompts you to import again or
-explicitly reparse; it does not silently start remote conversion. To replace
-it with a new result, repeat the import. A new snapshot has separate correction,
-translation, and reading-position identities. Explicitly choosing to reparse
-uses the current converter and may upload the PDF; only a successful reparse
-replaces this attachment's imported selection.
+source cache: deleting only the llm-for-zotero source still allows offline
+reading. The copy remains subject to cache expiry, size limits, and manual
+clearing. Mktero first uses saved corrections or a prepared reading document;
+if only the retained raw result remains, it rebuilds the document offline.
+If all local content for the selected import is missing, a later ordinary
+`Read as Markdown with Mktero` uses the current converter and may upload the
+PDF. The import action itself stays local; a failed import, corrupt content,
+read errors, or cancellation do not trigger conversion.
+
+To replace an import with a new result, repeat the import. A new snapshot has
+separate correction, translation, and reading-position identities. Explicitly
+choosing to reparse uses the current converter and may upload the PDF; only a
+successful reparse replaces this attachment's imported selection.
 
 Importing one PDF does not choose a different PDF for the parent's existing
 `Read as Markdown with Mktero` action, which still opens its first PDF. Use the
@@ -431,8 +435,8 @@ items, not items that belong only to a subcollection. Right-clicking one paper
 still opens it for reading. Already cached or already preparing items
 are skipped, including readable imported results for the specific PDF. An
 imported result for one attachment does not make other PDFs of that parent
-item ready. An unavailable selected import reports an error instead of
-uploading that PDF. Zotero's progress window
+item ready. A selection record without readable content is not skipped as
+ready. Zotero's progress window
 shows each item; minimizing it continues the queue, and Cancel stops items
 that have not finished. Opening one of those PDFs joins the existing
 preparation instead of uploading it again. Closing a tab during conversion

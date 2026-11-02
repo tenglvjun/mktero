@@ -25,8 +25,8 @@ export class ImportedMinerUReadError extends Error {
     }
 }
 
-// This adapter has no conversion or authentication client. A selected import
-// must remain a local read even when all of its retained content has expired.
+// This adapter only reads retained local content. The router decides whether a
+// missing copy may fall back to the configured conversion provider.
 export class ImportedMinerUDocumentExtractor {
     constructor({
         zotero,
@@ -217,14 +217,17 @@ export class ImportedMinerUDocumentExtractor {
     async #readStored(record, identity, signal) {
         let stored;
         try {
-            stored = this.resultStore?.get ? await this.resultStore.get(record.rawKey, { signal }) : null;
+            stored = this.resultStore?.get ? await this.resultStore.get(record.rawKey, { signal, throwOnReadError: true }) : null;
         }
         catch (error) {
             throwIfFigureAborted(signal);
+            if (error?.name === 'AbortError') throw error;
             throw new ImportedMinerUReadError('stored-input-unavailable', error);
         }
         throwIfFigureAborted(signal);
-        if (!stored) throw new ImportedMinerUReadError('content-missing');
+        if (!stored) {
+            throw Object.assign(new ImportedMinerUReadError('content-missing'), { selection: record });
+        }
         try {
             if (stored.provider !== LLM_CACHE_PROVIDER) throw new ImportedMinerUReadError('identity-mismatch');
             const entries = readCanonicalLLMArchiveEntries(stored.archive, { signal });
@@ -247,12 +250,13 @@ export class ImportedMinerUDocumentExtractor {
     async #readCached(cacheKey, signal) {
         if (!this.cache?.get) return null;
         try {
-            const cached = await this.cache.get(cacheKey);
+            const cached = await this.cache.get(cacheKey, { throwOnReadError: true });
             throwIfFigureAborted(signal);
             return cached;
         }
         catch (error) {
             throwIfFigureAborted(signal);
+            if (error?.name === 'AbortError') throw error;
             throw new ImportedMinerUReadError('cache-read-failed', error);
         }
     }

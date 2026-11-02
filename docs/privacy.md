@@ -41,11 +41,16 @@ independent copy of the adapted result and figures, without the PDF copy, full
 source metadata, or upstream absolute paths. The local import-selection index
 records which snapshot this attachment uses; it contains no source paths.
 These copies are not synced by Mktero and remain subject to the cache's expiry,
-size limits, and manual clearing. Import failure or an unavailable saved copy
-does not automatically start remote conversion. Explicitly choosing to reparse
-uses the current converter and may send the complete PDF there. Optional
-translation and reference actions keep their separate data flows described
-below.
+size limits, and manual clearing. Deleting only the llm-for-zotero source cache
+does not affect offline reading from Mktero's copy. Saved corrections and
+prepared reading documents are used first; a retained raw result can rebuild
+the document offline. If all local content for the selected import is missing,
+a later ordinary `Read as Markdown with Mktero` uses the current converter
+and may send the complete PDF there. Import failure, corrupt content, read
+errors, or cancellation do not trigger conversion; the import action itself
+stays local. Explicitly choosing to reparse also uses the current converter
+and may send the PDF there. Optional translation and reference actions keep
+their separate data flows described below.
 
 Mktero does not send PDF annotations, local PDF.js indexes, Zotero notes,
 complete item records, local paths, or cached Markdown to reference/PDF

@@ -111,10 +111,37 @@ test('rebuilds derived content offline from the retained adapted package after e
     assert.equal(f.counts().remoteCalls, 0);
 });
 
+test('missing retained content reports the exact old selection without rereading PDF bytes', async () => {
+    const f = await fixture();
+    const previous = { ...f.selection() };
+    // A new selection can arrive while the old raw package is being looked up.
+    f.extractor.resultStore.get = async () => {
+        f.select({ ...previous, importedAt: previous.importedAt + 1 });
+        return null;
+    };
+    let missing;
+    await assert.rejects(f.extractor.extract(42), error => {
+        assert.equal(error.code, 'LLM_CACHE_IMPORT_UNAVAILABLE');
+        assert.equal(error.reason, 'content-missing');
+        assert.deepEqual(error.selection, previous);
+        missing = error;
+        return true;
+    });
+    assert.equal(f.counts().fileReads, 1);
+    assert.equal(await f.extractor.forgetSelection(missing.selection), false);
+    assert.equal(f.selection().importedAt, previous.importedAt + 1);
+    assert.equal(f.counts().fileReads, 1);
+});
+
 test('retains a selected unavailable source and reports a typed error instead of a cache miss', async () => {
     const f = await fixture();
     for (const method of ['extract', 'readCached']) {
-        await assert.rejects(f.extractor[method](42), error => error.code === 'LLM_CACHE_IMPORT_UNAVAILABLE' && error.reason === 'content-missing');
+        await assert.rejects(f.extractor[method](42), error => {
+            assert.equal(error.code, 'LLM_CACHE_IMPORT_UNAVAILABLE');
+            assert.equal(error.reason, 'content-missing');
+            assert.deepEqual(error.selection, f.selection());
+            return true;
+        });
     }
     assert.ok(f.selection());
     assert.equal(f.counts().remoteCalls, 0);

@@ -89,6 +89,81 @@ test('removes a corrupted stored archive instead of returning it', async t => {
     assert.equal(await fixture.ioUtils.exists(entryPath), false);
 });
 
+test('strict raw reads retain damaged entries while default reads still self-heal', async t => {
+    for (const failure of ['metadata', 'size', 'read', 'stat']) {
+        await t.test(failure, async t => {
+            const f = await createStoreFixture(t);
+            await f.store.put(KEY, { archive: new Uint8Array([1, 2, 3, 4]), provider: 'mineru' });
+            const entryPath = path.join(f.rootPath, 'entries', KEY);
+            const metadataPath = path.join(entryPath, 'entry.json');
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+            const archivePath = path.join(entryPath, metadata.archiveFile);
+            const ioError = Object.assign(new Error('Raw storage read failed'), { code: 'EIO' });
+            if (failure === 'metadata') await writeFile(metadataPath, '{');
+            else if (failure === 'size') await writeFile(archivePath, new Uint8Array([1]));
+            else {
+                const original = f.ioUtils[failure];
+                f.ioUtils[failure] = async filePath => {
+                    if (filePath === archivePath) throw ioError;
+                    return original(filePath);
+                };
+            }
+            const before = await Promise.all([readFile(metadataPath), readFile(archivePath)]);
+            for (let attempt = 0; attempt < 2; attempt++) {
+                await assert.rejects(f.store.get(KEY, { throwOnReadError: true }), error => {
+                    if (['read', 'stat'].includes(failure)) assert.equal(error, ioError);
+                    else if (failure === 'metadata') assert.ok(error instanceof SyntaxError);
+                    else assert.match(error.message, /size/);
+                    return true;
+                });
+                assert.deepEqual(await Promise.all([readFile(metadataPath), readFile(archivePath)]), before);
+            }
+            assert.equal(await f.store.get(KEY), null);
+            assert.equal(await f.ioUtils.exists(entryPath), false);
+        });
+    }
+});
+
+test('strict raw reads still return null for missing and expired entries', async t => {
+    let timestamp = 1_000;
+    const f = await createStoreFixture(t, { now: () => timestamp, maxAgeMs: 100 });
+    assert.equal(await f.store.get(KEY, { throwOnReadError: true }), null);
+    await f.store.put(KEY, { archive: new Uint8Array([1]), provider: 'mineru' });
+    timestamp += 101;
+    assert.equal(await f.store.get(KEY, { throwOnReadError: true }), null);
+    assert.deepEqual(await f.store.getStats(), { entries: 0, sizeBytes: 0 });
+});
+
+test('raw reads propagate AbortError without removing the entry', async t => {
+    for (const throwOnReadError of [false, true]) {
+        for (const failure of ['read', 'touch', 'cleanup']) {
+            if (throwOnReadError && failure === 'cleanup') continue;
+            await t.test(`${failure}, strict=${throwOnReadError}`, async t => {
+                const f = await createStoreFixture(t);
+                await f.store.put(KEY, { archive: new Uint8Array([1, 2]), provider: 'mineru' });
+                const entryPath = path.join(f.rootPath, 'entries', KEY);
+                const metadataPath = path.join(entryPath, 'entry.json');
+                const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+                const archivePath = path.join(entryPath, metadata.archiveFile);
+                const targetPath = failure === 'cleanup' ? entryPath : failure === 'read' ? archivePath : metadataPath;
+                const ioMethod = failure === 'cleanup' ? 'remove' : failure === 'read' ? 'read' : 'writeUTF8';
+                if (failure === 'cleanup') await writeFile(metadataPath, '{');
+                const original = f.ioUtils[ioMethod];
+                const error = Object.assign(new Error('Read cancelled'), { name: 'AbortError' });
+                f.ioUtils[ioMethod] = async (filePath, ...args) => {
+                    if (filePath === targetPath) throw error;
+                    return original(filePath, ...args);
+                };
+                await assert.rejects(f.store.get(KEY, { throwOnReadError }), value => value === error);
+                assert.deepEqual(new Uint8Array(await readFile(archivePath)), new Uint8Array([1, 2]));
+                f.ioUtils[ioMethod] = original;
+                if (failure === 'cleanup') await writeFile(metadataPath, JSON.stringify(metadata));
+                assert.ok(await f.store.get(KEY));
+            });
+        }
+    }
+});
+
 test('expires stored archives and enforces entry and byte limits', async t => {
     let timestamp = 1_000;
     const fixture = await createStoreFixture(t, { now: () => timestamp, maxEntries: 1, maxAgeMs: 1_000 });

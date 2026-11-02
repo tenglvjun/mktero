@@ -22,15 +22,21 @@
   recoverable; ambiguous crop associations or unsupported page geometry can
   prevent import. The local PDF limit is 256 MiB, with the existing document
   and image resource limits also applying.
-- A PDF's attachment metadata does not prove that an old parse matches its
-  current contents. Import requires you to confirm the PDF/result pairing.
-  The menu only detects a local candidate; full validation happens after the
-  click. A parent item can have several PDFs, so choose the intended attachment.
+- Attachment metadata and cache source records cannot prove that an old parse
+  matches the PDF's current contents. The menu only detects a local candidate;
+  choosing the import action validates and copies the result, then opens it.
+  For a parent item with several candidate PDFs, choose the intended attachment
+  from the submenu.
 - Imported copies use Mktero's local cache, which can expire or be evicted.
-  Keep the original result if you need to import it again. A failed import or
-  unavailable selected copy does not automatically call a converter. Only
-  explicitly choosing to reparse uses the current service and may upload the
-  PDF. Source recognition and display errors can remain in imported text.
+  Deleting only the llm-for-zotero source does not affect a retained Mktero
+  copy; a retained raw result can rebuild the document offline. Keep the
+  original result if you need to import it again. If all local content for the
+  selected import is missing, a later ordinary `Read as Markdown with Mktero`
+  uses the current converter and may upload the PDF. Import failure, corrupt
+  content, read errors, or cancellation do not trigger conversion, and the
+  import action itself stays local. An explicit reparse also uses the current
+  service and may upload the PDF. Source recognition and display errors can
+  remain in imported text.
 - The hosted Mktero conversion and MinerU cloud accept at most 200 pages per
   PDF. A longer PDF stops before upload with a message to split it or choose
   another provider. Cached Markdown and corrections still open. The page
