@@ -34,7 +34,7 @@ const AUTHOR_YEAR_ENTRY = /^\p{Lu}[\p{L}'’-]+,\s*(?:\p{Lu}\.\s*){1,3}(?:,|and|
 // Page footnotes MinerU discarded are sorted into article metadata, notes
 // the reader needs, and page decoration. Each keeps the mark it opens with,
 // so a note can be placed after the paragraph that cites it.
-export function classifyPageNote(block) {
+export function classifyPageNote(block, { articleStartPage = 0 } = {}) {
     const text = blockPlainText(block).trim();
     const marker = noteMarker(block);
     if (marker) block.noteMarker = marker;
@@ -42,12 +42,12 @@ export function classifyPageNote(block) {
     if (STRONG_FRONT_MATTER.test(text) || !marker && CONTACT.test(text)) return (block.noteKind = NOTE_KIND.FRONT_MATTER);
     if (COPYRIGHT_OR_DOI.test(text) || isPublisherCopyrightParagraph(text)) return (block.noteKind = NOTE_KIND.CHROME);
     if (!marker && AUTHOR_YEAR_ENTRY.test(text)) block.referenceCandidate = true;
-    if (FRONT_MATTER.test(text) && (block.pageIndex === 0 || !marker)) {
+    if (FRONT_MATTER.test(text) && (block.pageIndex === articleStartPage || !marker)) {
         return (block.noteKind = NOTE_KIND.FRONT_MATTER);
     }
     // The first page carries article metadata; a marked note there that is
     // not metadata is a footnote of the text.
-    if (block.pageIndex === 0 && !marker && !block.referenceCandidate) return (block.noteKind = NOTE_KIND.FRONT_MATTER);
+    if (block.pageIndex === articleStartPage && !marker && !block.referenceCandidate) return (block.noteKind = NOTE_KIND.FRONT_MATTER);
     return (block.noteKind = NOTE_KIND.CONTENT);
 }
 

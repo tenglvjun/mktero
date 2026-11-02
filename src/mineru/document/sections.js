@@ -18,6 +18,7 @@ const METADATA_LINE = new RegExp([
     '^(?:\\*\\s*)?(?:edited by|reviewed by|\\*?correspondence|corresponding author|citation|specialty section)\\b',
     '|^(?:academic editor|editor|received|accepted|revised|published|copyright|data availability|funding',
     '|competing interests|peer review history|article history)\\s*[:：]',
+    '|^article history\\s+(?:received|accepted|revised)\\b',
     '|^(?:received|accepted|revised|published)\\s+(?:\\d{1,2}\\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)',
     '|^©\\s*(?:19|20)\\d{2}\\b|^(?:check for updates|open access)$|^published in final edited form as\\b',
 ].join(''), 'iu');
@@ -60,7 +61,7 @@ export function groupSections(ir) {
     const sections = [];
     const claimed = new Set();
     for (const find of [reportingSummary, authorBiographies, articleInfo]) {
-        const section = find(ir.blocks, claimed);
+        const section = find(ir.blocks, claimed, ir.articleStartPage ?? 0);
         if (!section?.blocks.length) continue;
         for (const block of section.blocks) claimed.add(block);
         sections.push(section);
@@ -81,25 +82,27 @@ export function groupSections(ir) {
 // --- Article information -------------------------------------------------
 
 // Front-matter page notes, and first-page metadata lines and sidebar labels,
-// gathered under the title and author line, before the abstract.
-function articleInfo(blocks, claimed) {
+// gathered under the title and author line, before the abstract. The article
+// page follows a confirmed publisher cover; PDF page indices stay intact.
+function articleInfo(blocks, claimed, articleStartPage) {
     keepKeywordsVisible(blocks);
     const members = new Set();
     for (const block of blocks) {
         if (claimed.has(block)) continue;
-        if (block.role === BLOCK_ROLE.PAGE_NOTE && block.noteKind === NOTE_KIND.FRONT_MATTER) members.add(block);
-        else if (isFirstPageMetadata(block)) members.add(block);
+        if (block.publisherMetadata) members.add(block);
+        else if (block.role === BLOCK_ROLE.PAGE_NOTE && block.noteKind === NOTE_KIND.FRONT_MATTER) members.add(block);
+        else if (isFirstPageMetadata(block, articleStartPage)) members.add(block);
     }
-    addSidebarValues(blocks, members, claimed);
-    fillBetweenMembers(blocks, members, claimed);
-    addBadges(blocks, members, claimed);
+    addSidebarValues(blocks, members, claimed, articleStartPage);
+    fillBetweenMembers(blocks, members, claimed, articleStartPage);
+    addBadges(blocks, members, claimed, articleStartPage);
     // A note whose mark only the title or the author line cites is about the
     // authors: it goes with the metadata, not under the author line.
     let rest = blocks.filter(block => !members.has(block));
-    let at = articleInfoPosition(rest);
-    const head = new Set(rest.slice(0, at).filter(block => onPage(block, 0)).map(block => block.id));
+    let at = articleInfoPosition(rest, articleStartPage);
+    const head = new Set(rest.slice(0, at).filter(block => onPage(block, articleStartPage)).map(block => block.id));
     for (const block of rest) {
-        if (block.role === BLOCK_ROLE.PAGE_NOTE && block.noteKind === NOTE_KIND.CONTENT && block.pageIndex === 0
+        if (block.role === BLOCK_ROLE.PAGE_NOTE && block.noteKind === NOTE_KIND.CONTENT && block.pageIndex === articleStartPage
             && block.anchorId && head.has(block.anchorId) && !claimed.has(block)) {
             block.noteKind = NOTE_KIND.FRONT_MATTER;
             block.authorNote = true;
@@ -108,7 +111,7 @@ function articleInfo(blocks, claimed) {
     }
     if (![...members].some(isWritten)) return null;
     rest = blocks.filter(block => !members.has(block));
-    at = articleInfoPosition(rest);
+    at = articleInfoPosition(rest, articleStartPage);
     // The first page's metadata lines, then its footnotes, as printed.
     const inOrder = blocks.filter(block => members.has(block));
     const isNote = block => block.role === BLOCK_ROLE.PAGE_NOTE || block.keywordsNote;
@@ -117,8 +120,8 @@ function articleInfo(blocks, claimed) {
     return { kind: SECTION_KIND.ARTICLE_INFO, blocks: ordered, anchor: rest[at]?.id || null };
 }
 
-function isFirstPageMetadata(block) {
-    if (!onlyOnPage(block, 0)) return false;
+function isFirstPageMetadata(block, articleStartPage) {
+    if (!onlyOnPage(block, articleStartPage)) return false;
     const text = blockPlainText(block).trim();
     if (!text) return false;
     if (block.role === BLOCK_ROLE.HEADING) return !block.documentTitle && SIDEBAR_HEADING.test(text);
@@ -170,11 +173,11 @@ function directlyBelow(upper, lower) {
 
 // The "Check for updates" badge: its text, and the uncaptioned first-page
 // image it is printed on, go with the metadata.
-function addBadges(blocks, members, claimed) {
+function addBadges(blocks, members, claimed, articleStartPage) {
     for (const block of blocks) {
-        if (claimed.has(block) || block.pageIndex !== 0 || !/^check for updates$/iu.test(blockPlainText(block).trim())) continue;
+        if (claimed.has(block) || block.pageIndex !== articleStartPage || !/^check for updates$/iu.test(blockPlainText(block).trim())) continue;
         members.add(block);
-        const image = blocks.find(item => !claimed.has(item) && isPhoto(item) && item.pageIndex === 0
+        const image = blocks.find(item => !claimed.has(item) && isPhoto(item) && item.pageIndex === articleStartPage
             && (item.id === block.attachedTo || intersects(item.bbox, block.bbox)));
         if (image) members.add(image);
     }
@@ -188,11 +191,11 @@ function intersects(left, right) {
 // ("CITATION", "EDITED BY") is that value, whether or not the text repeats
 // the label. Prose below a label is the article's text.
 const VALUE_LABEL = /^(?:citation|copyright|edited by|reviewed by|\*?correspondence|specialty section|received|accepted|published)$/iu;
-function addSidebarValues(blocks, members, claimed) {
+function addSidebarValues(blocks, members, claimed, articleStartPage) {
     for (const label of [...members]) {
         if (label.role !== BLOCK_ROLE.HEADING || !label.bbox || !VALUE_LABEL.test(blockPlainText(label).trim())) continue;
         const value = blocks
-            .filter(block => !members.has(block) && !claimed.has(block) && onlyOnPage(block, 0)
+            .filter(block => !members.has(block) && !claimed.has(block) && onlyOnPage(block, articleStartPage)
                 && block.role === BLOCK_ROLE.BODY && block.kind === BLOCK_KIND.TEXT && block.bbox
                 && directlyBelow(label.bbox, block.bbox))
             .sort((left, right) => left.bbox[1] - right.bbox[1])[0];
@@ -203,8 +206,8 @@ function addSidebarValues(blocks, members, claimed) {
 
 // A short first-page line between two metadata lines (the second line of an
 // address) belongs with them.
-function fillBetweenMembers(blocks, members, claimed) {
-    const flow = blocks.filter(block => onlyOnPage(block, 0) && block.role !== BLOCK_ROLE.CHROME && block.kind !== BLOCK_KIND.DISCARDED);
+function fillBetweenMembers(blocks, members, claimed, articleStartPage) {
+    const flow = blocks.filter(block => onlyOnPage(block, articleStartPage) && block.role !== BLOCK_ROLE.CHROME && block.kind !== BLOCK_KIND.DISCARDED);
     for (let index = 1; index < flow.length - 1; index++) {
         const block = flow[index];
         if (members.has(block) || claimed.has(block) || block.role !== BLOCK_ROLE.BODY) continue;
@@ -216,17 +219,17 @@ function fillBetweenMembers(blocks, members, claimed) {
 
 // After the title and the lines below it (authors, affiliations), before
 // the first section heading, float, or paragraph of prose on the first page.
-function articleInfoPosition(rest) {
-    const first = rest.findIndex(block => onPage(block, 0) && isWritten(block));
+function articleInfoPosition(rest, articleStartPage) {
+    const first = rest.findIndex(block => onPage(block, articleStartPage) && isWritten(block));
     if (first < 0) return 0;
-    const titleAt = rest.findIndex(block => block.documentTitle && block.pageIndex === 0);
+    const titleAt = rest.findIndex(block => block.documentTitle && block.pageIndex === articleStartPage);
     let index = titleAt >= 0 ? titleAt + 1 : first;
     for (; index < rest.length; index++) {
         const block = rest[index];
         if (!isWritten(block)) continue;
         // An uncaptioned image above the abstract is a logo or a badge.
         if (isPhoto(block)) continue;
-        if (!onPage(block, 0) || block.role === BLOCK_ROLE.HEADING || isFloatBlock(block)) break;
+        if (!onPage(block, articleStartPage) || block.role === BLOCK_ROLE.HEADING || isFloatBlock(block)) break;
         const text = blockPlainText(block).trim();
         if (SECTION_START.test(text) || isProse(text)) break;
     }

@@ -24,15 +24,18 @@ const BACK_MATTER = /^(?:references?(?: and notes)?|bibliography|works cited|lit
 
 // Heading depth comes from the section number, because MinerU reports only
 // two title levels. The paper title is the tallest level-1 title on the
-// first page that has one; numbered sections nest by their number; other
+// first page that has one, before the article's sections. Select it before
+// rejecting long headings: an article title can legitimately exceed the
+// word limit used to reject body sentences. Numbered sections nest by their number; other
 // headings are top-level sections. A body line that continues the section
 // numbering in capitals ("VIII. BIOGRAPHY SECTION" after "VII.") is promoted,
 // and a "heading" that is a figure caption or a whole sentence is demoted.
 export function assignHeadingLevels(ir) {
+    const title = findTitle(ir.blocks.filter(block => block.role === BLOCK_ROLE.HEADING));
     for (const block of ir.blocks) {
         if (block.role !== BLOCK_ROLE.HEADING) continue;
         const text = blockPlainText(block).trim();
-        if (!text || wordCount(text) > MAX_HEADING_WORDS
+        if (!text || block !== title && wordCount(text) > MAX_HEADING_WORDS
             || CAPTION_START.test(text) && parseAcademicFigureCaption(text)) {
             block.role = BLOCK_ROLE.BODY;
             block.kind = BLOCK_KIND.TEXT;
@@ -41,7 +44,6 @@ export function assignHeadingLevels(ir) {
     }
     if (promoteNumberedLines(ir.blocks)) markReferenceSections(ir);
     const headings = ir.blocks.filter(block => block.role === BLOCK_ROLE.HEADING);
-    const title = findTitle(headings);
     const scheme = outlineNumberingScheme(headings.map(block => blockPlainText(block)));
     for (const block of headings) {
         if (block === title) {
@@ -129,7 +131,13 @@ function headingStyle(block) {
 }
 
 function findTitle(headings) {
-    const candidates = headings.filter(block => block.mineruLevel === 1 && block.pageIndex <= MAX_TITLE_PAGE);
+    const opening = headings.findIndex(block => /^(?:abstract|summary|introduction)\s*[:.]?$/iu.test(blockPlainText(block).trim())
+        || parseHeadingNumber(blockPlainText(block)) || BACK_MATTER.test(blockPlainText(block).trim()));
+    const candidates = (opening < 0 ? headings : headings.slice(0, opening)).filter(block => {
+        const text = blockPlainText(block).trim();
+        return block.mineruLevel === 1 && block.pageIndex <= MAX_TITLE_PAGE && text
+            && !(CAPTION_START.test(text) && parseAcademicFigureCaption(text));
+    });
     if (!candidates.length) return null;
     const page = Math.min(...candidates.map(block => block.pageIndex));
     return candidates
