@@ -80,6 +80,7 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
     };
     const attachment = {
         id: 42,
+        key: 'PDFKEY42',
         libraryID: 1,
         parentItem: parent,
         attachmentFilename: 'paper.pdf',
@@ -319,6 +320,8 @@ test('aborts live AI SDK requests across bootstrap translation lifecycles', {
     const mainWindow = createMainWindow(AbortController, []);
     const item = {
         id: 42,
+        key: 'PDFKEY42',
+        libraryID: 1,
         attachmentFilename: 'paper.pdf',
         parentItem: null,
         isPDFAttachment: () => true,
@@ -346,6 +349,7 @@ test('aborts live AI SDK requests across bootstrap translation lifecycles', {
         Session: { state: { windows: [] } },
         Prefs: { get: key => preferences.get(key) ?? '' },
         Items: {
+            get: () => item,
             getAsync: async () => item,
             loadDataTypes: async () => {},
         },
@@ -558,6 +562,8 @@ test('translates in a main window opened after the startup window closed', {
     let currentWindow = firstWindow;
     const item = {
         id: 42,
+        key: 'PDFKEY42',
+        libraryID: 1,
         attachmentFilename: 'paper.pdf',
         parentItem: null,
         isPDFAttachment: () => true,
@@ -745,6 +751,8 @@ test('uses the language menu without changing the default translation language',
         Items: {
             getAsync: async itemID => ({
                 id: itemID,
+                key: `PDFKEY${itemID}`,
+                libraryID: 1,
                 attachmentFilename: 'paper.pdf',
                 parentItem: null,
                 isPDFAttachment: () => true,
@@ -1197,6 +1205,8 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
         Items: {
             getAsync: async () => ({
                 id: 42,
+                key: 'PDFKEY42',
+                libraryID: 1,
                 attachmentFilename: 'paper.pdf',
                 parentItem: null,
                 isPDFAttachment: () => true,

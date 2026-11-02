@@ -14,6 +14,8 @@
 | Research invitation email, the token link, the answers you submit, and the research-email opt-out | The Mktero service you select; the link token is not saved by the website | Not by Mktero |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |
 | Stored MinerU results from Mktero, MinerU cloud, or a local MinerU service (the result's Markdown, content list, layout or middle JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted | No |
+| Explicitly imported llm-for-zotero results: text, structure, original or supported cropped figures, and locally restored figures; no PDF copy | A separate copy in the active Zotero profile, unencrypted | No |
+| Import selection index: library ID, attachment key, PDF and imported-result hashes, cache keys, adapter version, import time, source-format category, and confirmation state; no source paths | Active Zotero profile, unencrypted, in `mktero-imports/v1` | No |
 | Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and expiry time | Active Zotero profile, unencrypted | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
@@ -30,6 +32,20 @@
 | Exported Markdown and figures | User-selected local path, including an Obsidian vault. Mktero does not sync that copy. | No |
 | Obsidian export index: library ID, item key, note folder name, and content hash; the vault path preference | Active Zotero profile, unencrypted | No |
 | Imported reference metadata and PDF attachments | Active Zotero profile, unencrypted | According to Zotero settings |
+
+Explicitly importing a supported local llm-for-zotero result reads the source
+cache and the current PDF on this computer without changing that source cache.
+The import itself and reopening its saved copy work offline without an account
+or converter key, and upload neither the PDF nor the result. Mktero saves an
+independent copy of the adapted result and figures, without the PDF copy, full
+source metadata, or upstream absolute paths. The local import-selection index
+records which snapshot this attachment uses; it contains no source paths.
+These copies are not synced by Mktero and remain subject to the cache's expiry,
+size limits, and manual clearing. Import failure or an unavailable saved copy
+does not automatically start remote conversion. Explicitly choosing to reparse
+uses the current converter and may send the complete PDF there. Optional
+translation and reference actions keep their separate data flows described
+below.
 
 Mktero does not send PDF annotations, local PDF.js indexes, Zotero notes,
 complete item records, local paths, or cached Markdown to reference/PDF
@@ -74,8 +90,9 @@ the website account page, or with the link in an invitation sent after that
 control was added. Turning them off does not affect verification codes,
 password resets, or conversion, and does not delete answers already submitted.
 
-With the default converter, a cache miss sends the complete PDF to the Mktero
-service for your account. Review that service's data handling, and the privacy
+When you request an uncached conversion with the default converter, the
+complete PDF is sent to the Mktero service for your account. Review that
+service's data handling, and the privacy
 policy of MinerU, Mistral, and any AI or citation provider you choose instead.
 Do not process confidential PDFs unless those data-handling terms are suitable
 for your use case.

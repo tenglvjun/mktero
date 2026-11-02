@@ -14,7 +14,7 @@ const SUPPORTED_PROVIDERS = new Set([
  * service and its lifecycle remain independent of any provider implementation.
  */
 export class ConversionProviderRouter {
-    constructor({ getProvider, providers } = {}) {
+    constructor({ getProvider, providers, imported = null } = {}) {
         if (typeof getProvider !== 'function') {
             throw new TypeError('A conversion provider getter is required');
         }
@@ -37,13 +37,30 @@ export class ConversionProviderRouter {
         }
         this.getProvider = getProvider;
         this.providers = providers;
+        this.imported = imported;
     }
 
-    extract(itemID, options) {
+    async extract(itemID, options) {
+        if (options?.forceRefresh) {
+            const selection = await this.imported?.lookup?.(itemID, options);
+            const result = await this.#extractor().extract(itemID, options);
+            if (selection) await this.imported.forgetSelection(selection, options);
+            return result;
+        }
+        const imported = await this.imported?.extract(itemID, options);
+        if (imported) return imported;
+        if (options?.localOnly) {
+            throw Object.assign(new Error('The selected local import is unavailable'), {
+                code: 'LLM_CACHE_UNAVAILABLE',
+            });
+        }
         return this.#extractor().extract(itemID, options);
     }
 
-    readCached(itemID, options) {
+    async readCached(itemID, options) {
+        const imported = await this.imported?.readCached(itemID, options);
+        if (imported) return imported;
+        if (options?.localOnly) return null;
         return this.#extractor().readCached(itemID, options);
     }
 

@@ -9,10 +9,10 @@
 
 **在 Zotero 中以带来源链接的 Markdown 阅读 PDF。**
 
-Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命中时，默认转换会把这份本地 PDF
+Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。主动请求新的转换且没有可用缓存时，默认转换会把这份本地 PDF
 经你的 Mktero 账号发送出去，不需要 MinerU 或 Mistral 密钥。如果不想把 PDF 交给 Mktero，仍可以改用
 [MinerU](https://mineru.net/) 或 [Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1)。
-结果会在临时的阅读优先 Zotero 标签页中打开，包括 Markdown、公式、表格、图片、引用和注释。内容寻址的本地缓存会按 PDF 内容和解析配置复用转换结果，避免重复处理。
+结果会在临时的阅读优先 Zotero 标签页中打开，包括 Markdown、公式、表格、图片、引用和注释。内容寻址的本地缓存会按 PDF 内容和解析配置复用转换结果，避免重复处理。也可以显式导入受支持的 llm-for-zotero 本地 MinerU 结果，无需账号、API 密钥或再次上传。
 
 [下载最新版本](https://github.com/tenglvjun/mktero/releases/latest) ·
 [产品介绍页](https://mktero.com/) ·
@@ -21,7 +21,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命
 [支持 Mktero](#支持-mktero)
 
 > [!IMPORTANT]
-> Mktero 目前处于 Beta 阶段。使用默认转换时，缓存未命中会把完整 PDF 发送到你账号所使用的 Mktero 服务。
+> Mktero 目前处于 Beta 阶段。主动请求未缓存的转换且使用默认转换服务时，完整 PDF 会发送到你账号所使用的 Mktero 服务。
 > 在 `设置 -> Mktero` 登录即可，不需要另外的 OCR 密钥。若改用 MinerU 或 Mistral，PDF 改发到那里，不再发到 Mktero。
 > 可选的 AI 翻译会把受保护的 Markdown 批次发送给你配置的 Provider。处理敏感文档前，请阅读[数据与隐私](./docs/privacy.zh-CN.md)。
 
@@ -58,10 +58,11 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命
 
 ### 文库与导出
 
+- 从 PDF 或其父条目的右键菜单，显式导入受支持的 llm-for-zotero 本地 MinerU 结果。Mktero 只读原缓存，保存独立的本地副本，并在正常阅读器中打开。
 - 在 Markdown 引用弹窗中检查文献是否存在于可访问的 Zotero 文库，复制其他文库中的文献，并导入缺失的元数据和公开 PDF。
 - 只在当前 Zotero 文库内展示可匹配的直接引用关系，并在支持时使用 Semantic Scholar、OpenCitations 和 OpenAlex 刷新数据。
 - 保存便携 Zotero 快照，或将修正后的原文 Markdown 和提取图片导出到本地文件夹或 Obsidian 库。也可以把已经转换好的 Markdown 批量写入 Obsidian 库。
-- 在文献列表中显示 Markdown 列。只有这台电脑、当前转换设置下仍有可阅读的缓存时才会点亮。排队或转换期间，这一列会显示仅在本次会话有效的加载动画。完成标记保存在 Zotero 配置文件中，不修改条目，也不会同步。
+- 在文献列表中显示 Markdown 列。只有这台电脑、当前转换设置或该 PDF 选定的导入结果仍有可阅读的缓存时才会点亮。排队或转换期间，这一列会显示仅在本次会话有效的加载动画。完成标记保存在 Zotero 配置文件中，不修改条目，也不会同步。
 
 界面跟随 Zotero 的英文或简体中文显示语言，其他语言回退为英文。
 
@@ -76,7 +77,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展。缓存未命
 - **PDF。** 已下载并可在本机访问的附件。
 - **账号。** 默认的托管转换使用 Mktero 账号。登录不需要 MinerU 或 Mistral 密钥。
 - **自备转换，可选。** 不想把 PDF 交给 Mktero 时，改用 MinerU 云端、自部署的 MinerU 4.0 服务，或 [Mistral](https://console.mistral.ai/api-keys/)。MinerU 云端和 Mistral 需要你自己的 API key。本地 MinerU 的 API key 可选。
-- **网络。** 能够访问 Mktero 服务，或能够访问你改选的转换服务。
+- **网络。** 新的转换需要能够访问 Mktero 服务，或能够访问你改选的转换服务。导入受支持的 llm-for-zotero 本地结果及重新打开已保存副本可以离线进行，无需账号或转换服务密钥，但需启用本地缓存。
 
 文件大小、页数、额度和服务可用性由当前所选的转换服务决定。改用 MinerU 或 Mistral 时，以
 [MinerU API 文档](https://mineru.net/apiManage/docs)或
@@ -98,6 +99,12 @@ Mktero 账号托管转换和 MinerU 云端每个 PDF 最多 200 页。发送前 
 安装后打开 `设置 -> Mktero`。默认转换服务是 Mktero：在这里登录或注册。不想把 PDF 交给 Mktero 服务时，改选 MinerU 或 Mistral 并填写该服务的 API key。AI 功能和阅读选项都是可选的，每个 AI 厂商各自保存模型、密钥和相关设置。凭据会作为普通的未加密首选项存储在当前的 Zotero 配置文件中。
 
 所有设置项见[配置](./docs/configuration.zh-CN.md)，发送与存储位置见[数据与隐私](./docs/privacy.zh-CN.md)。
+
+### 导入已有的 llm-for-zotero 结果
+
+在 Zotero 文库中右键一个 PDF 附件或它的父条目。发现本地 llm-for-zotero 结果后，会出现`从 llm-for-zotero 导入解析结果…`；多个 PDF 有结果时，从子菜单选择目标附件。确认结果属于提示中的 PDF 后，Mktero 会校验并复制到自己的缓存，再在正常 Mktero 标签页中打开该 PDF。导入失败不会发起远程转换。
+
+仅支持特定本地格式，要求和重新导入、显式重新解析的方式见[工作流](./docs/workflows.zh-CN.md#导入-llm-for-zotero-本地结果)。缓存副本可能按缓存设置过期或被淘汰。
 
 ### 打开 PDF
 
@@ -127,8 +134,9 @@ Mktero 账号托管转换和 MinerU 云端每个 PDF 最多 200 页。发送前 
 
 ## 数据与隐私
 
-- 使用默认转换时，缓存未命中会把完整 PDF 发送到你账号所使用的 Mktero 服务。
+- 主动请求未缓存的转换且使用默认转换服务时，完整 PDF 会发送到你账号所使用的 Mktero 服务。
 - 若改选 MinerU 云端、本地 MinerU 服务或 Mistral，完整 PDF 改发到那里，不再发到 Mktero。
+- 显式导入受支持的 llm-for-zotero 本地结果时，只读原缓存，并另存未加密的本地副本和导入选择。导入及本地重开不上传 PDF 或结果；失败或缓存过期不会自动改用远程转换。主动选择重新解析时才会使用当前转换服务。
 - 凭据、缓存的 Markdown 和图片、保存的 MinerU 结果（不含 PDF 副本）、校对、译文、阅读位置、尚未同步到 PDF 的本地高亮，以及把跨页高亮各分段关联起来的 Zotero 注释 key，会以未加密形式存储在当前 Zotero 配置文件中，Mktero 不会同步这些数据。
 - 为默认转换登录时，只会在点击登录时发送邮箱和密码。注册会另外向邮箱发送验证码。访问令牌和刷新令牌同样只保存在当前配置文件中。账号面板打开时，扩展会使用该令牌向你选择的服务请求账号资料和转换活跃度计数，并以账号卡片上的统计展示。
 - 扩展会在登录、刷新令牌以及后台心跳时向 Mktero 服务上报自身版本号，便于运营方了解仍有哪些版本在使用。该上报不包含设备指纹，不包含硬件、操作系统或由 IP 推导的标识，不接入第三方统计，不会附加到发往你所选转换服务或 Provider 的请求上，也不属于账号资料。

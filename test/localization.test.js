@@ -115,6 +115,31 @@ test('creates a fixed localization from the Zotero locale', () => {
     );
 });
 
+test('explains that closing a local import tab cancels unfinished work in both languages', () => {
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const chinese = createLocalization({ zoteroLocale: 'zh-CN' });
+
+    assert.equal(english.t('importLLM.working'), 'Importing local parsed result…');
+    assert.equal(chinese.t('importLLM.working'), '正在导入本地解析结果…');
+    assert.equal(
+        english.t('importLLM.hint'),
+        'All processing takes place on this computer. Closing this tab cancels an unfinished import.'
+    );
+    assert.equal(
+        chinese.t('importLLM.hint'),
+        '所有处理都在本机完成。关闭此标签页将取消尚未完成的导入。'
+    );
+});
+
+test('explains the possible full PDF upload before reparsing an imported result', () => {
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const chinese = createLocalization({ zoteroLocale: 'zh-CN' });
+    assert.match(english.t('importLLM.reparseConfirm'), /currently selected conversion provider.*may upload the complete PDF.*replace the imported result/);
+    assert.match(chinese.t('importLLM.reparseConfirm'), /当前选择的转换服务.*可能会将完整 PDF 上传.*替换.*导入结果/);
+    assert.match(english.t('importLLM.reparse'), /may upload PDF/);
+    assert.match(chinese.t('importLLM.reparse'), /可能上传 PDF/);
+});
+
 test('localizes Markdown annotation synchronization status', () => {
     const english = createLocalization({ zoteroLocale: 'en-US' });
     const chinese = createLocalization({ zoteroLocale: 'zh-CN' });

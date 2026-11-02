@@ -68,6 +68,13 @@ import {
     TranslationRequestTracker,
 } from './ai/translation-request-tracker.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
+import { createZoteroMinerUImportIndex } from './cache/mineru-import-index.js';
+import { createImportedMinerUReadiness } from './cache/imported-mineru-readiness.js';
+import { LLM_CACHE_LIMITS, LLMCacheError } from './mineru/llm-cache-bundle.js';
+import { createZoteroLLMCacheSource } from './platform/zotero-llm-cache-source.js';
+import { ImportedMinerUDocumentExtractor } from './extractors/imported-mineru-extractor.js';
+import { MinerUCacheImportService } from './core/mineru-cache-import.js';
+import { resolvePDFCandidates } from './ui/pdf-item-targets.js';
 import { ConversionProviderRouter } from './core/conversion-provider.js';
 import { createPDFPageLimitGuard } from './core/pdf-page-limit.js';
 import { MkteroConversionClient } from './mktero/mktero-conversion-client.js';
@@ -360,6 +367,10 @@ const runtime = {
     markdownExporter: null,
     obsidianExporter: null,
     extractor: null,
+    importedExtractor: null,
+    importService: null,
+    importIndex: null,
+    importReadiness: null,
     obsidianExportProgress: null,
     rootURI: null,
     preferencePaneID: null,
@@ -914,8 +925,45 @@ globalThis.startup = async function startup({ id, rootURI }) {
         }),
         assertPageLimit: assertHostedPageLimit,
     });
+    const importIndex = createZoteroMinerUImportIndex({
+        zotero: Zotero, ioUtils: IOUtils, pathUtils: PathUtils,
+    });
+    runtime.importIndex = importIndex;
+    // A malformed selection index remains an error on read, never a network miss.
+    await importIndex.load().catch(error => logMkteroError(error));
+    const prepareImportedResult = prepareWithFigures(
+        withPDFText(createMinerUFigureInput), prepareMinerUResult
+    );
+    const importedExtractor = new ImportedMinerUDocumentExtractor({
+        zotero: Zotero, index: importIndex, cache, resultStore: mineruResultStore,
+        readFile: readLocalImportPDF,
+        isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
+        readRevision: options => readRevisionSnapshot(options),
+        prepareResult: prepareImportedResult, recoverFigures,
+        preparePDFIndex: (itemID, options) => preparePDFIndexForItem(itemID, options, pdfAnnotationLocator),
+    });
+    runtime.importedExtractor = importedExtractor;
+    runtime.importReadiness = createImportedMinerUReadiness({
+        index: importIndex, extractor: importedExtractor, readiness: runtime.readiness,
+        getFileStamp: importedPDFStamp,
+        onChange: () => refreshMarkdownReadinessColumn(Zotero),
+        onError: logMkteroError,
+    });
+    runtime.importService = new MinerUCacheImportService({
+        zotero: Zotero,
+        source: createZoteroLLMCacheSource({ zotero: Zotero, io: IOUtils, path: PathUtils }),
+        index: importIndex, cache, resultStore: mineruResultStore,
+        readFile: readLocalImportPDF,
+        countPages: (fileData, options) => pdfTextEngine.countPages(fileData, options),
+        isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
+        prepareResult: prepareImportedResult, recoverFigures,
+        openPDF: (fileData, options) => figureRegionRenderer.open(fileData, options),
+        decodeImage: figureCanvasEnvironment.decodeImage,
+        confirm: confirmLLMCacheImport,
+    });
     const extractor = new ConversionProviderRouter({
         getProvider: () => getConversionProvider(Zotero),
+        imported: importedExtractor,
         providers: {
             mineru: mineruExtractor,
             mistral: mistralExtractor,
@@ -1199,6 +1247,11 @@ globalThis.shutdown = function shutdown() {
     runtime.referenceImportService = null;
     runtime.service = null;
     runtime.conversionRuns = null;
+    runtime.importReadiness?.dispose();
+    runtime.importReadiness = null;
+    runtime.importedExtractor = null;
+    runtime.importService = null;
+    runtime.importIndex = null;
     runtime.conversionBatch = null;
     runtime.conversionActivity = null;
     runtime.conversionProgress = null;
@@ -1303,7 +1356,13 @@ async function openCitationPaperWithMktero(node) {
 async function openItemAsMarkdown(itemID, {
     forceRefresh = false,
     entryPoint = 'item-menu',
+    operation = 'convert',
+    localOnly = false,
 } = {}) {
+    const importing = operation === 'import-llm-cache';
+    if (importing && isItemPreparing(itemID)) {
+        throw Object.assign(new Error('The PDF already has an active operation'), { code: 'LLM_CACHE_BUSY' });
+    }
     const presentation = runtime.presenter.open(itemID, {
         sourceItemID: itemID,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
@@ -1399,29 +1458,38 @@ async function openItemAsMarkdown(itemID, {
             entryPoint,
         });
     }
-    if (!forceRefresh
+    if (!importing && !forceRefresh
         && !presentation.created
         && presentation.model.status === 'loading') return;
-    if (!forceRefresh && isItemPreparing(itemID)) {
+    if (!importing && !forceRefresh && isItemPreparing(itemID)) {
         await adoptPreparedConversion(presentation, itemID);
         return;
     }
-    if (!presentation.created
+    if (!importing && !presentation.created
         && presentation.model.status !== 'error'
         && !forceRefresh) return;
 
-    const previousResult = forceRefresh
+    if (importing && !presentation.created) {
+        const saved = await presentation.view?.flushPendingCorrection?.();
+        if (saved === false || presentation.closed) return;
+    }
+    const previousResult = forceRefresh || importing
         ? snapshotReadyResult(presentation.model)
         : null;
-    if (forceRefresh) markConversionActivity(itemID);
+    if (forceRefresh || importing) markConversionActivity(itemID);
     const begun = runtime.conversionRuns.begin({
         itemID,
         owner: 'tab',
         forceRefresh,
+        operation,
+        localOnly: localOnly || importing,
     });
     runtime.presenter.update(
         presentation,
-        createConversionLoadingChanges(previousResult, runtimeTranslate)
+        {
+            ...createConversionLoadingChanges(previousResult, runtimeTranslate), operation,
+            ...(importing ? { title: runtimeTranslate('importLLM.working') } : {}),
+        }
     );
     const unsubscribe = subscribeTabConversion(presentation, itemID, {
         batchOwned: false,
@@ -1436,8 +1504,18 @@ async function openItemAsMarkdown(itemID, {
         );
     }
     catch (error) {
-        if (begun.run.signal.aborted || presentation.closed) return;
-        publishConversionFailure(presentation, itemID, error, previousResult);
+        if (presentation.closed) return;
+        if (importing && isCancellation(error)) {
+            if (previousResult) {
+                runtime.presenter.update(presentation, createConversionReadyChanges(previousResult));
+            }
+            else {
+                runtime.presenter.closeForSourceItem(itemID);
+            }
+            return;
+        }
+        if (begun.run.signal.aborted) return;
+        publishConversionFailure(presentation, itemID, error, previousResult, { importing });
     }
     finally {
         unsubscribe();
@@ -1446,6 +1524,10 @@ async function openItemAsMarkdown(itemID, {
 }
 
 function releaseTabConversion(itemID, reason) {
+    if (runtime.conversionRuns?.get(itemID)?.operation === 'import-llm-cache') {
+        runtime.conversionRuns.release(itemID, 'tab');
+        return;
+    }
     if (reason !== MARKDOWN_TAB_CLOSE_REASONS.SHUTDOWN
         && runtime.conversionRuns?.isActive(itemID)) {
         continueConversionInBackground(itemID);
@@ -1669,6 +1751,8 @@ async function executeItemConversion(itemID, {
     controller,
     signal,
     forceRefresh,
+    operation = 'convert',
+    localOnly = false,
     onProgress,
     onProgressiveFigures,
 }) {
@@ -1680,9 +1764,13 @@ async function executeItemConversion(itemID, {
         + `(force refresh: ${forceRefresh})`
     );
     try {
+        const imported = operation === 'import-llm-cache'
+            ? await runtime.importService.importConfirmed(itemID, { signal, onProgress })
+            : null;
         const result = await runtime.service.convert(itemID, {
             signal,
             forceRefresh,
+            localOnly: localOnly || Boolean(imported),
             onProgress(progress, state) {
                 const normalizedProgress = normalizeConversionProgress(progress);
                 if (normalizedProgress !== lastLoggedProgress) {
@@ -1712,6 +1800,9 @@ async function executeItemConversion(itemID, {
                 onProgressiveFigures(event);
             },
         });
+        if (imported) result.warnings = uniqueWarnings([
+            ...(result.warnings || []), ...(imported.warnings || []),
+        ]);
         debugMktero(
             result.cacheHit
                 ? `Mktero: item ${itemID}: completed from local cache`
@@ -1780,7 +1871,8 @@ async function publishConversionResult(presentation, itemID, result, signal) {
     );
 }
 
-function publishConversionFailure(presentation, itemID, error, previousResult) {
+function publishConversionFailure(presentation, itemID, error, previousResult, { importing = false } = {}) {
+    const localImport = importing || String(error?.code || '').startsWith('LLM_CACHE_');
     if (error?.code === 'MKTERO_ACCOUNT_DISABLED') {
         clearAccountSession(Zotero);
     }
@@ -1799,9 +1891,11 @@ function publishConversionFailure(presentation, itemID, error, previousResult) {
             previousResult,
             runtimeTranslate,
             {
-                errorAction: conversionNeedsSettings(error)
-                    ? 'open-settings'
-                    : null,
+                errorAction: localImport
+                    ? 'local-import'
+                    : conversionNeedsSettings(error)
+                        ? 'open-settings'
+                        : null,
             }
         )
     );
@@ -2044,11 +2138,24 @@ function itemHasReadableMarkdown(itemID) {
     return itemHasReadableMarkdownItem(Zotero.Items?.get?.(itemID));
 }
 
-function itemHasReadableMarkdownItem(item) {
-    return runtime.readiness?.isReady(
-        item,
-        currentConversionParserProfile()
-    ) === true;
+function importedPDFStamp(item) {
+    const filePath = item?.getFilePath?.();
+    if (typeof filePath !== 'string' || !filePath) return null;
+    const file = Zotero.File?.pathToFile?.(filePath);
+    if (!file?.exists?.() || !file.isFile()) return null;
+    return `${filePath}:${file.fileSize}:${file.lastModifiedTime}`;
+}
+
+function itemHasReadableMarkdownItem(item, { verify = false } = {}) {
+    if (!getMinerUCacheEnabled(Zotero)) return false;
+    const targets = item?.isRegularItem?.()
+        ? resolvePDFCandidates(Zotero, [item]).map(target => target.item)
+        : [item];
+    return targets.some(target => {
+        const importedKey = runtime.importReadiness?.cacheKeyFor(target, { verify });
+        if (importedKey !== undefined) return Boolean(importedKey);
+        return runtime.readiness?.isReady(target, currentConversionParserProfile()) === true;
+    });
 }
 
 function markConversionActivity(itemID, { refresh = true } = {}) {
@@ -2965,10 +3072,18 @@ function resetOpenDocumentTranslations() {
 }
 
 async function requestItemReparse(itemID, entryPoint) {
+    const presentation = runtime.presenter?.get(itemID);
+    const item = Zotero.Items?.get?.(itemID);
+    const hasImport = presentation?.model?.errorAction === 'local-import'
+        || presentation?.model?.warningAction === 'local-import'
+        || Boolean(runtime.importIndex?.peekForAttachment({
+        libraryID: item?.libraryID, attachmentKey: item?.key,
+    }));
+    if (hasImport && !confirmLocalImportReparse()) return false;
     const entry = runtime.revisionSessions?.get(itemID)
         || await loadRevisionSessionForItem(itemID);
     const correctionCount = entry?.session.snapshot().correctionCount || 0;
-    if (correctionCount) {
+    if (correctionCount && !hasImport) {
         if (runtime.presenter?.get(itemID)) {
             await restoreAllCorrections(itemID);
         }
@@ -2976,7 +3091,7 @@ async function requestItemReparse(itemID, entryPoint) {
             await entry.session.restoreAll();
         }
     }
-    else if (entry?.session.hasUnreadableStoredRevision?.()) {
+    else if (!hasImport && entry?.session.hasUnreadableStoredRevision?.()) {
         // Reparsing starts over, so unreadable corrections are cleared now
         // instead of warning again when the new result opens.
         await runtime.revisionStore?.delete(entry.cacheKey);
@@ -3338,10 +3453,7 @@ function initializeMarkdownReadiness(cache, pluginID, rootURI) {
             zotero: Zotero,
             pluginID,
             rootURI,
-            isReady: item => runtime.readiness?.isReady(
-                item,
-                currentConversionParserProfile()
-            ) === true,
+            isReady: item => itemHasReadableMarkdownItem(item, { verify: true }),
             isPreparing: item => runtime.conversionActivity?.isActive(item) === true,
             translate: runtimeTranslate,
             onError: error => logMkteroError(error),
@@ -3362,7 +3474,6 @@ async function rememberMarkdownReadiness(itemID, result) {
     if (cancelledPreparations.has(itemID)) return;
     if (!runtime.readiness || !runtime.cache || !result?.cacheKey) return;
     const parserProfile = result.parserProfile || currentConversionParserProfile();
-    if (parserProfile !== currentConversionParserProfile()) return;
     try {
         const readable = await runtime.cache.hasReadable(result.cacheKey);
         if (!readable) {
@@ -4069,6 +4180,10 @@ function registerMainWindowContextMenu(window) {
         window,
         rootURI: runtime.rootURI,
         onOpen: openItemAsMarkdown,
+        probeLLMCache: (attachment, options) => runtime.importService?.probe(attachment, options),
+        onImportLLMCache: itemID => openItemAsMarkdown(itemID, {
+            operation: 'import-llm-cache', localOnly: true, entryPoint: 'llm-cache-import',
+        }),
         onPrepare: prepareSelectedMarkdown,
         onExportObsidian: exportSelectedObsidian,
         onOpenSavedNote: openSavedMarkdownNote,
@@ -4230,7 +4345,39 @@ async function buildDiagnosticPackage(input, { source, context, failure }) {
     };
 }
 
+async function readLocalImportPDF(filePath) {
+    const info = await IOUtils.stat(filePath);
+    if (info.type !== 'regular' || !Number.isSafeInteger(info.size)
+        || info.size < 1 || info.size > LLM_CACHE_LIMITS.maxPDFBytes) {
+        throw new LLMCacheError('LLM_CACHE_RESOURCE_LIMIT', 'The local PDF exceeds the import limit');
+    }
+    return IOUtils.read(filePath, { maxBytes: LLM_CACHE_LIMITS.maxPDFBytes + 1 });
+}
+
+function confirmLLMCacheImport({ attachment, sourceFormat, signal }) {
+    if (signal?.aborted) return false;
+    const services = typeof Services === 'undefined' ? null : Services;
+    const sourceHint = sourceFormat === 'missing'
+        ? runtimeTranslate('importLLM.confirmSourceMissing')
+        : sourceFormat === 'legacy' ? runtimeTranslate('importLLM.confirmSourceLegacy') : '';
+    const message = [runtimeTranslate('importLLM.confirmMessage', {
+        fileName: attachment.attachmentFilename || attachment.getDisplayTitle?.() || 'PDF',
+    }), sourceHint].filter(Boolean).join('\n\n');
+    return services?.prompt?.confirm?.(
+        Zotero.getMainWindow(), runtimeTranslate('importLLM.confirmTitle'), message
+    ) === true;
+}
+
+function confirmLocalImportReparse() {
+    const services = typeof Services === 'undefined' ? null : Services;
+    return services?.prompt?.confirm?.(
+        Zotero.getMainWindow(), runtimeTranslate('importLLM.reparse'),
+        runtimeTranslate('importLLM.reparseConfirm')
+    ) === true;
+}
+
 function handleOpenError(error) {
+    if (isCancellation(error)) return;
     logMkteroError(error);
     const owner = Zotero.getMainWindow?.();
     owner?.alert?.(`Mktero: ${userFacingError(error)}`);
@@ -4428,13 +4575,12 @@ async function loadSelectionSource(itemID) {
         }
         return loadSelectionSource(itemID);
     }
-    if (!itemHasReadableMarkdown(itemID) || !runtime.cache || !runtime.revisionStore) {
-        return null;
-    }
+    if (!getMinerUCacheEnabled(Zotero) || !runtime.cache || !runtime.revisionStore) return null;
     const item = Zotero.Items?.get?.(itemID) || await Zotero.Items?.getAsync?.(itemID);
-    const cacheKey = runtime.readiness?.cacheKeyFor?.(
-        readinessItem(item),
-        currentConversionParserProfile()
+    const imported = runtime.importReadiness
+        ? await runtime.importReadiness.validate(item) : { selected: false };
+    const cacheKey = imported.selected ? imported.cacheKey : runtime.readiness?.cacheKeyFor?.(
+        readinessItem(item), currentConversionParserProfile()
     );
     if (typeof cacheKey !== 'string') return null;
     const cached = await runtime.cache.get(cacheKey);

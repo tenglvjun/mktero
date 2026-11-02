@@ -84,6 +84,7 @@ export function createConversionLoadingChanges(
             warningAction: null,
             preserveContent: true,
             resumingTask: false,
+            operation: null,
             ...createEmptyTranslationState(),
         };
     }
@@ -113,6 +114,7 @@ export function createConversionLoadingChanges(
         warningAction: null,
         preserveContent: false,
         resumingTask: false,
+        operation: null,
     };
 }
 
@@ -121,6 +123,7 @@ export function createConversionProgressChanges(progress, state = {}) {
         status: 'loading',
         progress,
         resumingTask: Boolean(state?.resumingTask),
+        operation: state?.operation ?? null,
     };
 }
 
@@ -189,6 +192,7 @@ export function createConversionReadyChanges(result) {
         progress: 100,
         preserveContent: false,
         resumingTask: false,
+        operation: null,
         errorAction: null,
         warningAction: null,
     };
@@ -216,13 +220,16 @@ export function createConversionFailureChanges(
             progress: 100,
             warnings: [
                 ...(previousResult.warnings || []),
-                translate('tab.reparseFailed', { message }),
+                translate(errorAction === 'local-import'
+                    ? 'importLLM.failureDetail'
+                    : 'tab.reparseFailed', { message }),
             ],
             error: '',
             errorAction: null,
             warningAction: errorAction,
             preserveContent: false,
             resumingTask: false,
+            operation: null,
             ...createEmptyTranslationState(),
         };
     }
@@ -233,6 +240,7 @@ export function createConversionFailureChanges(
         warningAction: null,
         preserveContent: false,
         resumingTask: false,
+        operation: null,
     };
 }
 

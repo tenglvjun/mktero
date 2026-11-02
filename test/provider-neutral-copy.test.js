@@ -152,6 +152,113 @@ test('localizes Mistral conversion errors without exposing provider details', ()
     );
 });
 
+test('localizes every local cache import failure with a specific cause in both languages', async t => {
+    const cases = [
+        [['LLM_CACHE_DISABLED'], /Enable.*Reuse conversion results/, /启用“复用转换结果”/],
+        [['LLM_CACHE_BUSY', 'LLM_CACHE_IMPORT_BUSY'], /already processing this PDF/, /正在处理此 PDF/],
+        [['LLM_CACHE_CHANGED'], /PDF or source cache changed/, /PDF 或来源缓存发生了变化/],
+        [['LLM_CACHE_WRITING'], /still writing this result/, /仍在写入此结果/],
+        [['LLM_CACHE_UNSAFE_PATH'], /unsafe file path or symbolic link/, /不安全的文件路径或符号链接/],
+        [['LLM_CACHE_RESOURCE_LIMIT'], /file size, image size, or file count limits/, /文件大小、图片尺寸或文件数量限制/],
+        [['LLM_CACHE_UNSUPPORTED_BBOX'], /no supported bounding boxes.*V1/, /缺少受支持的边界框.*V1/],
+        [['LLM_CACHE_UNSUPPORTED_FORMAT'], /content list with bounding boxes or a supported layout/, /带有边界框的内容列表或受支持的布局/],
+        [['LLM_CACHE_UNSUPPORTED_GEOMETRY'], /PDF coordinates are uncertain/, /PDF 坐标无法确定/],
+        [['LLM_CACHE_MISSING_IMAGE'], /image is missing.*could not be restored/, /缺少必需的图片.*无法从 PDF 恢复/],
+        [['LLM_CACHE_INVALID_IMAGE'], /image is invalid.*dimensions/, /缓存图片无效.*图片尺寸/],
+        [['LLM_CACHE_AMBIGUOUS_FIGURE'], /Multiple cached crops match the same figure/, /多个缓存裁图对应同一图表/],
+        [['LLM_CACHE_INVALID_CROP'], /crop coordinates are invalid/, /裁剪坐标无效/],
+        [['LLM_CACHE_INVALID_SOURCE'], /source record is invalid or incomplete/, /来源记录无效或不完整/],
+        [['LLM_CACHE_UNSUPPORTED_SOURCE'], /source record uses an unsupported format/, /不支持此缓存来源记录的格式/],
+        [['LLM_CACHE_ATTACHMENT_MISMATCH'], /different PDF attachment/, /属于其他 PDF 附件/],
+        [['LLM_CACHE_PAGE_MISMATCH'], /different page counts/, /页数不一致/],
+        [['LLM_CACHE_IMPORT_INDEX_INVALID'], /import index.*damaged or invalid/, /导入索引已损坏或无效/],
+        [['LLM_CACHE_IMPORT_INDEX_UNSUPPORTED'], /index.*unsupported version/, /索引由不受支持的.*版本创建/],
+        [['LLM_CACHE_IMPORT_INDEX_FULL'], /index has reached its storage limit/, /导入索引已达到存储上限/],
+        [['LLM_CACHE_STORAGE_FAILED', 'LLM_CACHE_IMPORT_INDEX_WRITE_FAILED'], /save or read back.*disk space/, /保存或重新读取.*磁盘空间/],
+        [['LLM_CACHE_NO_DATA_DIRECTORY'], /Zotero data directory is unavailable/, /Zotero 数据目录不可用/],
+        [['LLM_CACHE_NOT_FOUND'], /local parsed result is unavailable/, /本地解析结果不可用/],
+        [['LLM_CACHE_UNAVAILABLE'], /local PDF or selected imported result is unavailable/, /本地 PDF 或已选的导入结果不可用/],
+        [['LLM_CACHE_IMPORT_UNAVAILABLE'], /previously imported local result is unavailable/, /之前导入的本地结果已不可用/],
+        [['LLM_CACHE_INVALID_ATTACHMENT'], /attachment is unavailable or has been deleted/, /附件不可用或已删除/],
+        [['LLM_CACHE_INVALID_DOCUMENT'], /no usable mapping to the PDF/, /缺少可用的 PDF 来源映射/],
+        [['LLM_CACHE_INVALID_JSON'], /damaged or invalid JSON file/, /损坏或无效的 JSON 文件/],
+        [['LLM_CACHE_INVALID_FILE'], /cached file.*valid file data/, /缓存文件.*有效的文件数据/],
+        [['LLM_CACHE_INVALID_MANIFEST'], /cache manifest is invalid/, /缓存清单无效/],
+        [['LLM_CACHE_INVALID_MARKDOWN'], /Markdown is not valid UTF-8/, /Markdown 不是有效的 UTF-8/],
+        [['LLM_CACHE_MISSING_MARKDOWN'], /missing a supported full\.md/, /缺少受支持的 full\.md/],
+        [['LLM_CACHE_EMPTY'], /cached Markdown is empty/, /缓存 Markdown 为空/],
+        [['LLM_CACHE_AMBIGUOUS_STRUCTURE'], /multiple document structures/, /包含多份文档结构/],
+        [['LLM_CACHE_INVALID_STRUCTURE'], /document structure or page information is invalid or incomplete/, /文档结构或页码信息无效或不完整/],
+    ];
+    for (const [codes, english, chinese] of cases) {
+        for (const code of codes) {
+            await t.test(code, () => {
+                // A typed failure takes precedence over untrusted diagnostic text.
+                const error = Object.assign(new Error('no extractable text: /private/source token=secret'), { code });
+                for (const [locale, expected] of [['en-US', english], ['zh-CN', chinese]]) {
+                    const localization = createLocalization({ zoteroLocale: locale });
+                    const message = localizeConversionError(error, localization.t.bind(localization));
+                    assert.match(message, expected);
+                    assert.doesNotMatch(message, /private\/source|secret|LLM_CACHE_|^importLLM\./);
+                    assert.notEqual(message, localization.t('error.conversionFailed'));
+                    assert.notEqual(message, localization.t('importLLM.failed'));
+                }
+            });
+        }
+    }
+});
+
+test('keeps unknown import errors local without exposing internal messages', () => {
+    for (const locale of ['en-US', 'zh-CN']) {
+        const localization = createLocalization({ zoteroLocale: locale });
+        assert.equal(localizeConversionError({
+            code: 'LLM_CACHE_FUTURE_ERROR', message: '/private/source token=secret',
+        }, localization.t.bind(localization)), localization.t('importLLM.failed'));
+    }
+});
+
+test('preserves the meaning of all local import warnings in both languages', () => {
+    const warnings = [
+        'LLM_CACHE_SOURCE_MISSING',
+        'LLM_CACHE_SOURCE_LEGACY',
+        'LLM_CACHE_SOURCE_INCOMPLETE',
+        'LLM_CACHE_CROPS_STALE',
+        'LLM_CACHE_IMPORTED_CROPS',
+        'LLM_CACHE_LOCAL_CROPS',
+    ];
+    const expectedByLocale = {
+        'en-US': [
+            'The imported cache has no source record. Check that its content matches this PDF.',
+            'The imported cache uses an older source record. Check that its content matches this PDF.',
+            'The imported cache source record has incomplete attachment information. Check that its content matches this PDF.',
+            'Cached figure crops were out of date and were skipped. Required images were recovered from other local sources.',
+            'Some figures use cropped images from the imported local cache.',
+            'Some missing figures were restored by cropping the local PDF.',
+        ],
+        'zh-CN': [
+            '导入的缓存缺少来源记录，请核对其内容是否与此 PDF 一致。',
+            '导入的缓存使用旧版来源记录，请核对其内容是否与此 PDF 一致。',
+            '导入缓存的来源记录中附件信息不完整，请核对其内容是否与此 PDF 一致。',
+            '已跳过过期的缓存裁图，所需图片已从其他本地来源恢复。',
+            '部分图表使用了导入缓存中的本地裁图。',
+            '部分缺失图表已通过裁剪本地 PDF 恢复。',
+        ],
+    };
+    for (const [locale, expected] of Object.entries(expectedByLocale)) {
+        const localization = createLocalization({ zoteroLocale: locale });
+        const result = localizeConversionResult({
+            title: 'Paper', provider: 'llm-for-zotero', warnings,
+        }, localization.t.bind(localization));
+        assert.deepEqual(result.warnings, expected);
+        assert.equal(new Set(result.warnings).size, 6);
+        assert.equal(result.provider, 'llm-for-zotero');
+        assert.deepEqual(warnings, [
+            'LLM_CACHE_SOURCE_MISSING', 'LLM_CACHE_SOURCE_LEGACY', 'LLM_CACHE_SOURCE_INCOMPLETE',
+            'LLM_CACHE_CROPS_STALE', 'LLM_CACHE_IMPORTED_CROPS', 'LLM_CACHE_LOCAL_CROPS',
+        ]);
+    }
+});
+
 test('localizes fallback titles and conversion warnings', () => {
     const localization = createLocalization({ zoteroLocale: 'zh-CN' });
     const result = localizeConversionResult({

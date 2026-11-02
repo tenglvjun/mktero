@@ -51,7 +51,7 @@ test('preserves a restored figure through bootstrap correction save and reopen',
         Profile: { dir: profilePath }, Session: { state: { windows: [] } },
         Prefs: { get: key => key === 'extensions.mktero.cacheEnabled' ? true : '' },
         Items: {
-            getAsync: async id => ({ id, attachmentFilename: 'paper.pdf', parentItem: null,
+            getAsync: async id => ({ id, libraryID: 1, key: 'PAPERKEY', attachmentFilename: 'paper.pdf', parentItem: null,
                 isPDFAttachment: () => true, getDisplayTitle: () => 'Paper',
                 getFilePathAsync: async () => pdfPath, getAnnotations: () => [] }),
             loadDataTypes: async () => {},

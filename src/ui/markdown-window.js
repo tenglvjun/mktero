@@ -4241,7 +4241,7 @@ class MarkdownTabView {
         const correctionCount = this.model.hasCorrections
             ? this.model.correctionCount || 0
             : 0;
-        if (correctionCount) {
+        if (correctionCount && !hasLocalImportReparseConfirmation(this.model)) {
             const confirmed = await this.confirmationDialog.confirm({
                 title: this.t('revision.reparseDialogTitle'),
                 message: this.t('revision.reparseConfirm', {
@@ -4372,18 +4372,22 @@ class MarkdownTabView {
         }
         catch (error) {
             this.zotero?.logError?.(error);
-            return;
+            return false;
         }
-        if (!correction
-            || typeof this.model.onCommitCorrection !== 'function') {
-            return;
-        }
+        if (!correction) return true;
         try {
-            Promise.resolve(this.model.onCommitCorrection(correction))
-                .catch(error => this.zotero?.logError?.(error));
+            if (typeof this.model.onCommitCorrection !== 'function') {
+                throw new Error('Markdown correction saving is unavailable');
+            }
+            return Promise.resolve(this.model.onCommitCorrection(correction))
+                .then(() => true, error => {
+                    this.zotero?.logError?.(error);
+                    return false;
+                });
         }
         catch (error) {
             this.zotero?.logError?.(error);
+            return false;
         }
     }
 
@@ -5880,16 +5884,6 @@ class MarkdownTabView {
         this.elements.restoreCorrectionsLabel.textContent = this.t(
             'revision.restoreAll'
         );
-        this.elements.errorRetry.setAttribute(
-            'aria-label',
-            this.t('viewer.retryConversion')
-        );
-        this.elements.errorRetry.setAttribute(
-            'title',
-            this.t('viewer.retryConversion')
-        );
-        this.elements.errorRetry.querySelector('.message-action-label')
-            .replaceChildren(this.t('viewer.retryConversion'));
         this.elements.errorSettings.textContent = this.t('viewer.openSettings');
         this.elements.errorSettings.setAttribute(
             'aria-label',
@@ -6487,6 +6481,13 @@ class MarkdownTabView {
     }
 
     syncErrorActions(model) {
+        const retryLabel = this.t(model.errorAction === 'local-import'
+            ? 'importLLM.reparse'
+            : 'viewer.retryConversion');
+        this.elements.errorRetry.setAttribute('aria-label', retryLabel);
+        this.elements.errorRetry.setAttribute('title', retryLabel);
+        this.elements.errorRetry.querySelector('.message-action-label')
+            .textContent = retryLabel;
         const errorVisible = model.status === 'error';
         const retryAvailable = errorVisible
             && typeof model.onReparse === 'function';
@@ -7992,6 +7993,19 @@ class MarkdownTabView {
         return this.assetURLs.get(
             resolveZipPath(this.model.assetBasePath || '', decodedPath)
         ) || null;
+    }
+}
+
+function hasLocalImportReparseConfirmation(model) {
+    if (model.errorAction === 'local-import'
+        || model.warningAction === 'local-import') {
+        return true;
+    }
+    try {
+        return JSON.parse(model.parserProfile)?.source === 'llm-for-zotero';
+    }
+    catch {
+        return false;
     }
 }
 
