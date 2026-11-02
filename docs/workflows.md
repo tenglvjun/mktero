@@ -450,6 +450,32 @@ that have not finished. Opening one of those PDFs joins the existing
 preparation instead of uploading it again. Closing a tab during conversion
 does not cancel it; the PDF continues in the background queue.
 
+## Hosted daily quota
+
+When the service enables it, new hosted conversion results consume an account's
+UTC daily document quota. A request reserves a slot; success consumes it and a
+server-confirmed final failure or cancellation releases it. Client timeouts or
+closing a tab do not refund a server job still running. A job completing after
+midnight remains attributed to the UTC day it was admitted. Reusing an existing
+authorized result does not consume another slot; a first shared result for
+another account counts for that account. These rules do not guarantee unlimited
+future regeneration of expired results.
+
+The account pane reads the limit from the service and shows used, in-progress,
+available and the full reset date/time in your local time zone. Observation mode
+shows usage without claiming that a limit is being enforced. Older servers
+without the quota endpoint keep working.
+
+A quota response keeps the blocked item and pending items in the preparation
+window. Already submitted jobs continue. `Check quota and continue` queries the
+current quota and explicitly resumes the pending work, rechecking local readiness;
+`Cancel remaining` discards pending items without aborting the in-flight work.
+New items for that account remain paused until explicitly resumed. The list lasts
+only for this Zotero session and never restarts automatically at midnight.
+Switching accounts does not transfer the old list. To process the same PDF with
+another account or your own converter, explicitly select it again. Local cached
+reading, corrections, export, your own converters and AI translation are unaffected.
+
 ## Export Markdown
 
 `Export Markdown` opens the system folder picker. If the selected folder is `A`

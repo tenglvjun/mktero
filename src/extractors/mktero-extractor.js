@@ -36,6 +36,7 @@ export class MkteroDocumentExtractor {
         createResultKey = null,
         extractStoredResult = extractMinerUResultFromZip,
         assertPageLimit = null,
+        onConversionSettled = () => {},
         onCacheError = error => zotero.logError?.(error),
         onPDFIndexError = error => zotero.logError?.(error),
     }) {
@@ -70,11 +71,14 @@ export class MkteroDocumentExtractor {
             throw new TypeError('A PDF page limit check must be a function');
         }
         this.assertPageLimit = assertPageLimit;
+        this.onConversionSettled = onConversionSettled;
         this.onCacheError = onCacheError;
         this.onPDFIndexError = onPDFIndexError;
     }
 
-    async extract(itemID, { onProgress, signal, forceRefresh = false } = {}) {
+    async extract(itemID, {
+        onProgress, signal, forceRefresh = false, assertScope = () => {}, beforeCreate = () => {},
+    } = {}) {
         const opened = await this.#openPDF(itemID, signal);
         this.#preparePDFIndex(itemID, opened.fileData, signal);
         const prepared = await this.#prepareCachedRead(opened, {
@@ -101,7 +105,10 @@ export class MkteroDocumentExtractor {
                 throwIfAborted(signal);
             }
             try {
+                assertScope();
                 converted = await this.conversion.convert({
+                    assertScope,
+                    beforeCreate,
                     apiBase: this.getApiBase(),
                     getAccessToken: this.getAccessToken,
                     fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
@@ -116,6 +123,10 @@ export class MkteroDocumentExtractor {
                     throw new MkteroSignInRequiredError();
                 }
                 throw error;
+            }
+            finally {
+                try { this.onConversionSettled(); }
+                catch { /* Informational refresh must not affect conversion. */ }
             }
             converted = await this.#keepResultArchive(resultKey, converted, signal);
         }

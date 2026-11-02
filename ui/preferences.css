@@ -695,6 +695,14 @@
     font-size: 0.76rem;
 }
 
+.mktero-account-quota {
+    margin: 0;
+    color: var(--mktero-muted-foreground);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
 .mktero-account-more-row {
     display: flex;
     justify-content: flex-end;

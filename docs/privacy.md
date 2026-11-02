@@ -9,7 +9,9 @@
 | MinerU cloud token, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
 | Email and password when signing in or registering, and the registration verification code | The Mktero service you select; the password and code are not saved | Not by Mktero |
 | Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
-| Your account profile and conversion-activity counts, requested with the access token while the account pane is open | The Mktero service you select | Not by Mktero |
+| Your account profile, conversion-activity counts and daily quota balance, requested with the access token while the account pane is open; quota also refreshes after hosted requests settle or when you manually resume | The Mktero service you select | Not by Mktero |
+| Account-linked hosted conversion admissions, successful documents, pages, result reuse and quota-block aggregates | The Mktero service; used for quota enforcement, service operation and capacity planning | Not by Mktero |
+| Pending/blocked preparation list and account/provider scope | Memory only in the current Zotero session; the pending list is not uploaded or restored after restart | No |
 | Mktero extension version, sent with requests to the Mktero service and recorded when you sign in, refresh your token, or send a background heartbeat, so the operator can see which builds are still in use | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
 | Research invitation email, the token link, the answers you submit, and the research-email opt-out | The Mktero service you select; the link token is not saved by the website | Not by Mktero |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted | No |

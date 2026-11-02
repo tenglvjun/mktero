@@ -1,5 +1,6 @@
 import { mkteroVersion } from '../config/runtime-config.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
+import { parseConversionQuota } from './conversion-quota.js';
 
 const JSON_HEADERS = Object.freeze({
     Accept: 'application/json',
@@ -143,6 +144,17 @@ export async function getMkteroConversionStats({
         month: toCount(body?.month),
         today: toCount(body?.today),
     };
+}
+
+export async function getMkteroConversionQuota({
+    apiBase,
+    accessToken,
+    fetchImpl = globalThis.fetch,
+} = {}) {
+    const body = await requestJSON(fetchImpl, apiBase, '/api/v1/me/conversion-quota', {
+        method: 'GET', token: accessToken, timeoutMs: 30_000,
+    });
+    return parseConversionQuota(body);
 }
 
 // reportMkteroClientVersion sends the authenticated extension heartbeat. The

@@ -69,6 +69,7 @@ import {
 import {
     getMkteroAccount,
     getMkteroConversionStats,
+    getMkteroConversionQuota,
     loginMkteroAccount,
     logoutMkteroAccount,
     registerMkteroAccount,
@@ -115,6 +116,7 @@ import {
     formatActivityPeriodLabels,
     formatMemberSince,
 } from './account-activity.js';
+import { formatQuotaReset, observeConversionQuotaChanged } from '../account/conversion-quota.js';
 import {
     createLucideIcon,
     LUCIDE_ICONS,
@@ -241,6 +243,15 @@ export function createPreferencesController({
     const accountStatTotal = document.getElementById('mktero-stat-total');
     const accountStatMonth = document.getElementById('mktero-stat-month');
     const accountStatToday = document.getElementById('mktero-stat-today');
+    const accountQuota = document.getElementById('mktero-account-quota');
+    let accountQuotaValue = null;
+    let accountQuotaRequested = false;
+    let quotaLoading = false;
+    let quotaDirty = false;
+    let quotaRefreshTimer = null;
+    let disposeQuotaObserver = null;
+    let quotaRequestSequence = 0;
+    let quotaUnsupported = false;
     // The account activity request runs once per pane load; a failed request
     // leaves the counters at zero instead of retrying on every render.
     let accountStats = null;
@@ -744,6 +755,7 @@ export function createPreferencesController({
         }
         if (!signedIn) setAccountMode(accountMode);
         renderAccountActivity();
+        renderAccountQuota();
         if (apiBaseRow) apiBaseRow.hidden = !isDebugBuild();
         if (accountApiBaseInput && !accountApiBaseInput.value) {
             accountApiBaseInput.value = getAccountApiBase(zotero);
@@ -754,6 +766,12 @@ export function createPreferencesController({
     function resetAccountActivity() {
         accountStats = null;
         accountStatsRequested = false;
+        accountQuotaValue = null;
+        accountQuotaRequested = false;
+        quotaUnsupported = false;
+        quotaDirty = quotaLoading;
+        quotaRequestSequence += 1;
+        renderAccountQuota();
     }
 
     // renderAccountActivity paints the three counters from the last loaded
@@ -798,6 +816,70 @@ export function createPreferencesController({
         }
         if (!paneIsCurrent(generation)) return;
         renderAccountActivity();
+    }
+
+    function renderAccountQuota() {
+        if (!accountQuota) return;
+        const quota = accountQuotaValue;
+        accountQuota.hidden = !quota || quota.mode === 'off';
+        if (!quota || quota.mode === 'off') return;
+        const reset = formatQuotaReset(quota.resetAt, localization.language);
+        const key = quota.mode === 'shadow'
+            ? 'preferences.account.quotaShadow'
+            : 'preferences.account.quota';
+        accountQuota.textContent = t(key, {
+            used: quota.used,
+            limit: quota.limit,
+            reserved: quota.reserved,
+            remaining: quota.remaining,
+            reset,
+        });
+    }
+
+    function scheduleAccountQuotaRefresh() {
+        if (!initialized || quotaUnsupported) return;
+        quotaDirty = true;
+        if (quotaRefreshTimer !== null || quotaLoading) return;
+        quotaRefreshTimer = setTimeout(() => {
+            quotaRefreshTimer = null;
+            if (!initialized) return;
+            quotaDirty = false;
+            accountQuotaRequested = false;
+            void loadAccountQuota();
+        }, 150);
+    }
+
+    async function loadAccountQuota() {
+        if (accountQuotaRequested || quotaLoading) return;
+        const session = getAccountSession(zotero);
+        if (!isAccountSignedIn(session) || !session.accessToken) return;
+        const generation = paneGeneration;
+        const apiBase = getAccountApiBase(zotero);
+        const sequence = ++quotaRequestSequence;
+        accountQuotaRequested = true;
+        quotaLoading = true;
+        let quota = null;
+        let unsupported = false;
+        try {
+            quota = await getMkteroConversionQuota({
+                apiBase,
+                accessToken: session.accessToken,
+                fetchImpl: accountFetch,
+            });
+        }
+        catch (error) {
+            unsupported = error?.status === 404;
+        }
+        finally {
+            quotaLoading = false;
+            if (quotaDirty) scheduleAccountQuotaRefresh();
+        }
+        if (!paneIsCurrent(generation) || sequence !== quotaRequestSequence
+            || getAccountApiBase(zotero) !== apiBase
+            || getAccountSession(zotero).email !== session.email) return;
+        quotaUnsupported = unsupported;
+        accountQuotaValue = quota;
+        renderAccountQuota();
     }
 
     // loadAccountProfile refreshes the stored nickname, email, and registration
@@ -986,7 +1068,7 @@ export function createPreferencesController({
         try {
             await refreshAccountIfNeeded();
             resetAccountActivity();
-            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+            await Promise.all([loadAccountProfile(), loadAccountStats(), loadAccountQuota()]);
         }
         finally {
             setAccountBusy(false);
@@ -1038,7 +1120,7 @@ export function createPreferencesController({
             // then fill the date and the real counts.
             resetAccountActivity();
             renderAccount();
-            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+            await Promise.all([loadAccountProfile(), loadAccountStats(), loadAccountQuota()]);
         }
         catch (error) {
             setAccountStatus(accountErrorKey(error));
@@ -1547,7 +1629,7 @@ export function createPreferencesController({
             await refreshAccountIfNeeded();
             if (!paneIsCurrent(generation)) return;
             renderAccount();
-            await Promise.all([loadAccountProfile(), loadAccountStats()]);
+            await Promise.all([loadAccountProfile(), loadAccountStats(), loadAccountQuota()]);
             if (!paneIsCurrent(generation)) return;
             await refresh();
         }
@@ -1664,6 +1746,7 @@ export function createPreferencesController({
             if (initialized) return deferredRefresh;
             initialized = true;
             paneGeneration += 1;
+            disposeQuotaObserver = observeConversionQuotaChanged(services, scheduleAccountQuotaRefresh);
             mountPreferences();
             deferredRefresh = refreshDeferred();
             return deferredRefresh;
@@ -1676,6 +1759,11 @@ export function createPreferencesController({
             initialized = false;
             paneGeneration += 1;
             deferredRefresh = null;
+            disposeQuotaObserver?.();
+            disposeQuotaObserver = null;
+            clearTimeout(quotaRefreshTimer);
+            quotaRefreshTimer = null;
+            quotaDirty = false;
             unsubscribeReasoningCatalog?.();
             unsubscribeReasoningCatalog = null;
             if (reasoningOptionsTimer != null) {
