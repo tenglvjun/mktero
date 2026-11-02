@@ -23,6 +23,7 @@ function createMenuHarness(selectedItems = []) {
         document,
         window: {
             document,
+            AbortController,
             ZoteroPane: { getSelectedItems: () => selected },
         },
         select(items) {
@@ -314,6 +315,57 @@ test('does not add a citation graph action to the item context menu', () => {
         null
     );
 
+    dispose();
+});
+
+test('connects local cache discovery and import through the existing item menu registration', async () => {
+    const parent = regularItem(10, [42, 43]);
+    const first = { ...pdfItem(42), libraryID: 1, key: 'PDF00042' };
+    const second = { ...pdfItem(43), libraryID: 1, key: 'PDF00043' };
+    const harness = createMenuHarness([parent]);
+    const opened = [];
+    const imported = [];
+    const probed = [];
+    const dispose = registerItemContextMenu({
+        zotero: { Items: { get: id => ({ 10: parent, 42: first, 43: second })[id] } },
+        window: harness.window,
+        onOpen: itemID => opened.push(itemID),
+        probeLLMCache: async attachment => {
+            probed.push(attachment.id);
+            return attachment.id === 43;
+        },
+        onImportLLMCache: (itemID, identity) => imported.push({ itemID, ...identity }),
+        onError: assert.fail,
+    });
+    showMenu(harness.document);
+    await new Promise(resolve => setImmediate(resolve));
+    const importItem = harness.document.querySelector('#mktero-import-llm-cache');
+    assert.equal(importItem.hidden, false);
+    assert.deepEqual(probed, [42, 43]);
+    importItem.dispatchEvent(new harness.document.defaultView.Event('command'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(imported, [{ itemID: 43, libraryID: 1, attachmentKey: 'PDF00043' }]);
+    assert.deepEqual(probed, [42, 43, 43]);
+    harness.document.querySelector('#mktero-read-as-markdown').dispatchEvent(
+        new harness.document.defaultView.Event('command')
+    );
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(opened, [42]);
+    dispose();
+    assert.equal(harness.document.querySelector('#mktero-import-llm-cache'), null);
+    assert.equal(harness.document.querySelector('#mktero-import-llm-cache-options'), null);
+});
+
+test('omits import menus when import callbacks are not configured', () => {
+    const harness = createMenuHarness([pdfItem(42)]);
+    const dispose = registerItemContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: harness.window,
+        onOpen: () => {},
+    });
+    showMenu(harness.document);
+    assert.equal(harness.document.querySelector('#mktero-import-llm-cache'), null);
+    assert.equal(harness.document.querySelector('#mktero-import-llm-cache-options'), null);
     dispose();
 });
 

@@ -1128,6 +1128,108 @@ test('treats a corrupted cache entry as a miss and removes it', async t => {
     assert.deepEqual(await cache.getStats(), { entries: 0, sizeBytes: 0 });
 });
 
+test('strict reads retain damaged Markdown entries while default reads still self-heal', async t => {
+    for (const failure of ['metadata', 'size', 'read']) {
+        await t.test(failure, async t => {
+            const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+            t.after(() => rm(rootPath, { recursive: true, force: true }));
+            const io = createNodeIOUtils();
+            const cache = new MarkdownCache({ rootPath, ioUtils: io,
+                pathUtils: { join: path.join, filename: path.basename } });
+            await cache.put(CACHE_KEY, { markdown: '# Paper' });
+            const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+            const metadataPath = path.join(entryPath, 'entry.json');
+            const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+            const markdownPath = path.join(entryPath, metadata.markdownFile);
+            const ioError = Object.assign(new Error('Disk read failed'), { code: 'EIO' });
+            if (failure === 'metadata') await writeFile(metadataPath, '{');
+            else if (failure === 'size') await writeFile(markdownPath, '# Changed');
+            else {
+                const read = io.readUTF8;
+                io.readUTF8 = async filePath => {
+                    if (filePath === markdownPath) throw ioError;
+                    return read(filePath);
+                };
+            }
+            const before = await Promise.all([readFile(metadataPath), readFile(markdownPath)]);
+            for (let attempt = 0; attempt < 2; attempt++) {
+                await assert.rejects(cache.get(CACHE_KEY, { throwOnReadError: true }), error => {
+                    if (failure === 'read') assert.equal(error, ioError);
+                    else if (failure === 'metadata') assert.ok(error instanceof SyntaxError);
+                    else assert.match(error.message, /size/);
+                    return true;
+                });
+                assert.deepEqual(await Promise.all([readFile(metadataPath), readFile(markdownPath)]), before);
+            }
+            assert.equal(await cache.get(CACHE_KEY), null);
+            assert.equal(await io.exists(entryPath), false);
+        });
+    }
+});
+
+test('strict Markdown reads still return null for missing and expired entries', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    let timestamp = 1_000;
+    const cache = new MarkdownCache({ rootPath, ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, filename: path.basename }, now: () => timestamp, maxAgeMs: 100 });
+    assert.equal(await cache.get(CACHE_KEY, { throwOnReadError: true }), null);
+    await cache.put(CACHE_KEY, { markdown: '# Paper' });
+    timestamp += 101;
+    assert.equal(await cache.get(CACHE_KEY, { throwOnReadError: true }), null);
+    assert.deepEqual(await cache.getStats(), { entries: 0, sizeBytes: 0 });
+});
+
+test('Markdown reads propagate AbortError without removing the entry', async t => {
+    for (const throwOnReadError of [false, true]) {
+        for (const failure of ['metadata', 'markdown', 'chrome-ranges', 'figure-map', 'restoration', 'legacy-translation', 'touch', 'cleanup']) {
+            if (throwOnReadError && failure === 'cleanup') continue;
+            await t.test(`${failure}, strict=${throwOnReadError}`, async t => {
+                const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+                t.after(() => rm(rootPath, { recursive: true, force: true }));
+                const io = createNodeIOUtils();
+                const cache = new MarkdownCache({ rootPath, ioUtils: io,
+                    pathUtils: { join: path.join, filename: path.basename } });
+                await cache.put(CACHE_KEY, { markdown: '# Paper' });
+                const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+                const metadataPath = path.join(entryPath, 'entry.json');
+                const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+                let targetPath = metadataPath;
+                if (failure === 'cleanup') {
+                    await writeFile(metadataPath, '{');
+                    targetPath = entryPath;
+                }
+                else if (failure === 'markdown') targetPath = path.join(entryPath, metadata.markdownFile);
+                else if (!['metadata', 'touch'].includes(failure)) {
+                    const sidecar = `${failure === 'legacy-translation' ? 'translation' : failure}-test.json`;
+                    targetPath = path.join(entryPath, sidecar);
+                    await writeFile(targetPath, '{}');
+                    if (failure === 'chrome-ranges') Object.assign(metadata, { chromeRangesFile: sidecar, chromeRangesBytes: 2 });
+                    else if (failure === 'figure-map') Object.assign(metadata, { figureMapFile: sidecar, figureMapBytes: 2 });
+                    else if (failure === 'restoration') metadata.figureRestoration = {
+                        status: 'pending', inputFile: sidecar, inputBytes: 2,
+                    };
+                    else Object.assign(metadata, {
+                        translationFile: sidecar, translationBytes: 2, translationKey: SECOND_CACHE_KEY,
+                    });
+                    metadata.sizeBytes += 2;
+                    await writeFile(metadataPath, JSON.stringify(metadata));
+                }
+                const error = Object.assign(new Error('Read cancelled'), { name: 'AbortError' });
+                const ioMethod = failure === 'cleanup' ? 'remove' : failure === 'touch' ? 'writeUTF8' : 'readUTF8';
+                const original = io[ioMethod];
+                io[ioMethod] = async (filePath, ...args) => {
+                    if (filePath === targetPath) throw error;
+                    return original(filePath, ...args);
+                };
+                await assert.rejects(cache.get(CACHE_KEY, { throwOnReadError }), value => value === error);
+                assert.equal(await io.exists(path.join(entryPath, metadata.markdownFile)), true);
+                io[ioMethod] = original;
+            });
+        }
+    }
+});
+
 test('keeps the previous result when replacing a cache entry fails', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));

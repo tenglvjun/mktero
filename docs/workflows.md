@@ -21,6 +21,49 @@ Academic figure captions are recognized in common publisher formats, including
 `Figure N | ...` captions that follow an empty OCR image, so prose figure
 references remain previewable in cached documents.
 
+## Import a local llm-for-zotero result
+
+1. Make the PDF available locally and finish parsing it in llm-for-zotero.
+   Enable Mktero's local cache. If you only have a synced result ZIP, restore it
+   locally with llm-for-zotero first; Mktero does not import that ZIP directly.
+2. In the Zotero library, right-click one PDF attachment or its parent item.
+   `Import parsed result from llm-for-zotero…` appears when a local candidate is
+   found. Choose it to start importing; for a parent item with several
+   candidates, choose the PDF from the submenu. The menu check only finds
+   candidates; full validation follows the click.
+3. Mktero validates the local result, saves its own copy, and opens that PDF in
+   the normal Mktero tab. The import itself works offline without an account
+   or API key, and does not upload the PDF or result or modify the source cache.
+   Cancelling or failing the import leaves the previous selection in place.
+
+Supported input has `full.md` and a standard content list with valid page
+numbers and bounding boxes, or a supported layout. Required figures must be
+available as original images, supported llm-for-zotero crops, or regions that
+Mktero can safely recover from the local PDF. Original images removed after
+llm-for-zotero creates its crops do not by themselves make a cache invalid.
+Plain Markdown, older loose Markdown files, and local MinerU V1 content lists
+without bounding boxes are not supported. The menu can find such a candidate,
+but the import then explains why it cannot be used.
+
+After a successful import, reading uses Mktero's copy and no longer needs the
+source cache: deleting only the llm-for-zotero source still allows offline
+reading. The copy remains subject to cache expiry, size limits, and manual
+clearing. Mktero first uses saved corrections or a prepared reading document;
+if only the retained raw result remains, it rebuilds the document offline.
+If all local content for the selected import is missing, a later ordinary
+`Read as Markdown with Mktero` uses the current converter and may upload the
+PDF. The import action itself stays local; a failed import, corrupt content,
+read errors, or cancellation do not trigger conversion.
+
+To replace an import with a new result, repeat the import. A new snapshot has
+separate correction, translation, and reading-position identities. Explicitly
+choosing to reparse uses the current converter and may upload the PDF; only a
+successful reparse replaces this attachment's imported selection.
+
+Importing one PDF does not choose a different PDF for the parent's existing
+`Read as Markdown with Mktero` action, which still opens its first PDF. Use the
+chosen PDF's own reading action to reopen another attachment's imported result.
+
 ## Footnotes and article information
 
 In a MinerU result, a footnote at the foot of a PDF page appears as a small,
@@ -134,7 +177,8 @@ edit that is still open; press `Escape` or Cancel to discard it.
 Existing paragraphs and headings can also be
 deleted and restored from `Manage corrections`. Corrections are stored
 separately from the conversion cache and are tied to the PDF content and the
-selected provider's parser profile. If saved corrections can no longer be
+selected source's parser profile; imported results also identify the particular
+imported snapshot. If saved corrections can no longer be
 read, the document opens with the original recognition result and a warning;
 the next saved correction or a reparse replaces the unreadable data. They cannot insert or reorder blocks, add images, or add raw
 HTML. Saving a correction preserves the reading position and keeps the full
@@ -374,12 +418,14 @@ standalone PDF without a parent library item cannot save a snapshot.
 ## See which items already have Markdown
 
 The item list has a Markdown column. A mark means this computer can open that
-PDF's cached Markdown with the current conversion settings. A spinner means
-the PDF is queued or converting in this session; it is not stored. Clearing
-the cache, letting a result expire, or switching provider or MinerU service
-turns the ready mark off. It does not sync, and it does not change the Zotero
-item. You can hide the column from the item-list column picker; that choice is
-remembered.
+PDF's cached Markdown with the current conversion settings or its selected
+imported result. A spinner means the PDF is queued or converting in this
+session; it is not stored. Clearing the cache or letting a result expire turns
+the ready mark off. Changing provider or MinerU service changes which converted
+cache is ready; a selected imported result keeps its own identity. The import
+selection alone, without readable content, is not a ready mark. It does not
+sync, and it does not change the Zotero item. You can hide the column from the
+item-list column picker; that choice is remembered.
 
 Select several library items or PDF attachments and choose `Prepare selected
 Markdown`, or right-click one collection and choose `Prepare collection
@@ -387,7 +433,10 @@ Markdown`. Both actions queue every selected PDF and do not
 open a reader tab. A collection action includes only that collection's own
 items, not items that belong only to a subcollection. Right-clicking one paper
 still opens it for reading. Already cached or already preparing items
-are skipped. Zotero's progress window
+are skipped, including readable imported results for the specific PDF. An
+imported result for one attachment does not make other PDFs of that parent
+item ready. A selection record without readable content is not skipped as
+ready. Zotero's progress window
 shows each item; minimizing it continues the queue, and Cancel stops items
 that have not finished. Opening one of those PDFs joins the existing
 preparation instead of uploading it again. Closing a tab during conversion

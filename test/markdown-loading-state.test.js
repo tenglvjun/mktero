@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translateMessage } from '../src/i18n/localization.js';
-import { createLoadingPresentation } from '../src/ui/markdown-loading-state.js';
+import {
+    conversionStageDetail,
+    createLoadingPresentation,
+} from '../src/ui/markdown-loading-state.js';
 
 test('describes provider-neutral loading stages', () => {
     assert.deepEqual(createLoadingPresentation({
@@ -104,6 +107,71 @@ test('hides the loading presentation outside conversion and clamps invalid progr
         createLoadingPresentation({ status: 'loading', progress: Number.NaN }).progress,
         0
     );
+});
+
+test('describes each local import stage without conversion service copy', () => {
+    const stages = [
+        [0, 'Checking the local PDF and cached result.'],
+        [5, 'Reading and checking the local cached files.'],
+        [10, 'Preparing Markdown and figures from the local result.'],
+        [95, 'Preparing Markdown and figures from the local result.'],
+        [97, 'Restoring figures from the local PDF and cached images.'],
+        [100, 'The local import is complete.'],
+    ];
+    for (const [progress, detail] of stages) {
+        const state = {
+            status: 'loading',
+            progress,
+            operation: 'import-llm-cache',
+            resumingTask: true,
+            batchOwned: true,
+            queueAhead: 3,
+        };
+        const presentation = createLoadingPresentation(state);
+        assert.equal(presentation.title, 'Importing local parsed result…');
+        assert.equal(presentation.detail, detail);
+        assert.equal(presentation.progressLabel, `${progress}%`);
+        assert.equal(presentation.preserveContent, false);
+        assert.equal(presentation.hint, 'All processing takes place on this computer. Closing this tab cancels an unfinished import.');
+        assert.equal(conversionStageDetail(progress, state), detail);
+    }
+    for (const [locale, title, hint] of [
+        ['en-US', 'Importing local parsed result…', 'All processing takes place on this computer. Closing this tab cancels an unfinished import.'],
+        ['zh-CN', '正在导入本地解析结果…', '所有处理都在本机完成。关闭此标签页将取消尚未完成的导入。'],
+    ]) {
+        const translate = (key, variables) => translateMessage(locale, key, variables);
+        for (let progress = 0; progress <= 100; progress++) {
+            const presentation = createLoadingPresentation({
+                status: 'loading', progress, operation: 'import-llm-cache',
+            }, translate);
+            assert.equal(presentation.title, title);
+            assert.equal(presentation.hint, hint);
+            assert.doesNotMatch(JSON.stringify(presentation), /upload|download|conversion service|上传|下载|转换服务|解析服务/i);
+        }
+    }
+});
+
+test('localizes imports while keeping previous content locked', () => {
+    const translate = (key, variables) => translateMessage('zh-CN', key, variables);
+    const presentation = createLoadingPresentation({
+        status: 'loading',
+        operation: 'import-llm-cache',
+        progress: 42,
+        preserveContent: true,
+        resumingTask: true,
+    }, translate);
+    assert.deepEqual(presentation, {
+        visible: true,
+        preserveContent: true,
+        progress: 42,
+        progressLabel: '42%',
+        title: '正在导入本地解析结果…',
+        detail: '正在从本地结果准备 Markdown 和图表。',
+        hint: '正在本机处理。导入结果准备完成前，此标签页会保持锁定。',
+    });
+    assert.equal(createLoadingPresentation({
+        status: 'ready', operation: 'import-llm-cache',
+    }, translate).visible, false);
 });
 
 test('localizes conversion progress', () => {

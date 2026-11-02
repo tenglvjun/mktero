@@ -3,14 +3,40 @@
 [English](./limitations.md) · [简体中文](./limitations.zh-CN.md) · [Back to README](../README.md)
 
 - The item-list Markdown column appears only after Mktero has confirmed a live
-  local cache for that PDF under the current conversion settings. A preparing
-  spinner is session-only and disappears on shutdown. The column does not
-  scan the library, modify the item, or sync. Clearing the cache, expiry, or a
-  different parser profile turns the ready mark off. Items converted before the
+  local cache for that PDF under the current conversion settings or its
+  selected imported result. A preparing spinner is session-only and disappears
+  on shutdown. The column does not scan the library, modify the item, or sync.
+  Clearing the cache or expiry turns the ready mark off; changing parser
+  profiles changes the converted cache used. An import selection without
+  readable content is not marked ready. Items converted before the
   column existed stay unmarked until that cache is opened or written again.
   Batch preparation queues every selected PDF after skipping duplicates, and converts three at a time.
 - Only local PDF attachments are supported. A scanned PDF may convert through
   OCR but still lacks the text layer needed for precise Zotero highlights.
+- Import from llm-for-zotero supports one PDF at a time from its local cache,
+  with `full.md` and a standard content list with valid page numbers and bounding
+  boxes, or a supported layout. Plain Markdown, older loose Markdown files,
+  unrestored synced ZIPs, and local MinerU V1 content lists without bounding
+  boxes are not supported. Compatibility follows the result format, not the
+  plugin version alone. Required figures must be available or safely
+  recoverable; ambiguous crop associations or unsupported page geometry can
+  prevent import. The local PDF limit is 256 MiB, with the existing document
+  and image resource limits also applying.
+- Attachment metadata and cache source records cannot prove that an old parse
+  matches the PDF's current contents. The menu only detects a local candidate;
+  choosing the import action validates and copies the result, then opens it.
+  For a parent item with several candidate PDFs, choose the intended attachment
+  from the submenu.
+- Imported copies use Mktero's local cache, which can expire or be evicted.
+  Deleting only the llm-for-zotero source does not affect a retained Mktero
+  copy; a retained raw result can rebuild the document offline. Keep the
+  original result if you need to import it again. If all local content for the
+  selected import is missing, a later ordinary `Read as Markdown with Mktero`
+  uses the current converter and may upload the PDF. Import failure, corrupt
+  content, read errors, or cancellation do not trigger conversion, and the
+  import action itself stays local. An explicit reparse also uses the current
+  service and may upload the PDF. Source recognition and display errors can
+  remain in imported text.
 - The hosted Mktero conversion and MinerU cloud accept at most 200 pages per
   PDF. A longer PDF stops before upload with a message to split it or choose
   another provider. Cached Markdown and corrections still open. The page

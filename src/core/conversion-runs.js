@@ -16,10 +16,19 @@ export function createConversionRunRegistry({
     const pendingListeners = new Map();
 
     return {
-        begin({ itemID, owner, forceRefresh = false } = {}) {
+        begin({ itemID, owner, forceRefresh = false, operation = 'convert', localOnly = false } = {}) {
             validateItemID(itemID);
+            if (!['convert', 'import-llm-cache'].includes(operation)) {
+                throw new TypeError('An explicit conversion operation is required');
+            }
             if (!owner) throw new TypeError('A conversion owner is required');
             const existing = runs.get(itemID);
+            if (existing && !existing.settled && !existing.controller.signal.aborted
+                && existing.operation !== operation) {
+                throw Object.assign(new Error('The PDF already has an active operation'), {
+                    code: 'LLM_CACHE_BUSY',
+                });
+            }
             if (existing
                 && !existing.settled
                 && !existing.controller.signal.aborted
@@ -33,6 +42,7 @@ export function createConversionRunRegistry({
             validateController(controller);
             const entry = {
                 itemID,
+                operation,
                 controller,
                 owners: new Set([owner]),
                 listeners: new Set(pendingListeners.get(itemID) || []),
@@ -49,6 +59,8 @@ export function createConversionRunRegistry({
                     controller,
                     signal: controller.signal,
                     forceRefresh,
+                    operation,
+                    localOnly,
                     onProgress(progress, state) {
                         if (entry.settled || entry.controller.signal.aborted) return;
                         const nextState = state || {};
@@ -232,6 +244,7 @@ function emit(entry, event) {
 
 function expose(entry) {
     return {
+        operation: entry.operation,
         get promise() {
             return entry.promise;
         },

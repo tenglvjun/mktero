@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
 import { createLocalization } from '../src/i18n/localization.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
+import { createConversionProgressChanges } from '../src/ui/markdown-tab-state.js';
 import { createEvidenceSnippet } from '../src/markdown/markdown-evidence.js';
 import { renderInlineMathTextHTML } from '../src/markdown/markdown-html.js';
 import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
@@ -2467,6 +2468,146 @@ test('confirms inside Mktero before reparsing a document with corrections',
         }
     });
 
+test('delegates corrected local imports to a single reparse callback without a generic dialog',
+    async t => {
+        for (const [label, changes] of [
+            ['imported parser profile', {
+                parserProfile: JSON.stringify({
+                    source: 'llm-for-zotero',
+                    adapter: 'llm-cache-v1',
+                    snapshotHash: 'a'.repeat(64),
+                    document: 'mineru-document-ir-v11',
+                    figureStructure: FIGURE_PIPELINE_PROFILE,
+                }),
+            }],
+            ['local import error action', {
+                parserProfile: 'unknown-profile',
+                errorAction: 'local-import',
+            }],
+            ['local import warning action', {
+                parserProfile: null,
+                warningAction: 'local-import',
+            }],
+        ]) {
+            await t.test(label, async () => {
+                const calls = [];
+                let finishUploadConfirmation;
+                const model = createModel({
+                    status: 'ready',
+                    progress: 100,
+                    markdown: '# Corrected imported paper',
+                    sourceKind: 'markdown',
+                    hasCorrections: true,
+                    correctionCount: 2,
+                    onReparse: () => {
+                        calls.push('reparse');
+                        return new Promise(resolve => {
+                            finishUploadConfirmation = resolve;
+                        });
+                    },
+                    onRestoreAllCorrections: () => calls.push('restore'),
+                    onTranslateDocument: () => calls.push('translate'),
+                    ...changes,
+                });
+                const { view, shadow } = createView(model);
+
+                try {
+                    const reparse = shadow.querySelector('#mktero-reparse');
+                    assert.deepEqual(calls, []);
+                    assert.equal(
+                        shadow.querySelector('.mktero-confirmation-dialog'),
+                        null
+                    );
+                    reparse.click();
+                    assert.deepEqual(calls, ['reparse']);
+                    assert.equal(
+                        shadow.querySelector('.mktero-confirmation-dialog'),
+                        null
+                    );
+                    assert.equal(reparse.disabled, true);
+                    reparse.click();
+                    assert.deepEqual(calls, ['reparse']);
+                    assert.equal(view.model.status, 'ready');
+
+                    finishUploadConfirmation(false);
+                    await new Promise(resolve => setImmediate(resolve));
+                    assert.deepEqual(calls, ['reparse']);
+                    assert.equal(reparse.disabled, false);
+                    assert.equal(view.model.status, 'ready');
+                    assert.equal(view.model.hasCorrections, true);
+                    assert.equal(view.model.correctionCount, 2);
+                    assert.equal(
+                        shadow.querySelector('.cm-content').textContent,
+                        '# Corrected imported paper'
+                    );
+                    assert.equal(
+                        shadow.querySelector('.mktero-confirmation-dialog'),
+                        null
+                    );
+                }
+                finally {
+                    finishUploadConfirmation?.(false);
+                    view.destroy();
+                }
+            });
+        }
+    });
+
+test('keeps correction confirmation for provider and unknown parser profiles',
+    async t => {
+        for (const [label, parserProfile] of [
+            ['ordinary provider', JSON.stringify({ source: 'mineru' })],
+            ['unknown provider', JSON.stringify({
+                source: 'unknown',
+                label: 'llm-for-zotero',
+            })],
+            ['unrecognized profile', 'unknown-profile'],
+            ['malformed imported profile', '{"source":"llm-for-zotero"'],
+            ['null profile', 'null'],
+            ['array profile', JSON.stringify([{ source: 'llm-for-zotero' }])],
+        ]) {
+            await t.test(label, async () => {
+                let reparseCalls = 0;
+                const { view, shadow } = createView(createModel({
+                    status: 'ready',
+                    progress: 100,
+                    markdown: '# Corrected paper',
+                    sourceKind: 'markdown',
+                    hasCorrections: true,
+                    correctionCount: 2,
+                    parserProfile,
+                    onReparse: () => { reparseCalls++; },
+                }));
+
+                try {
+                    shadow.querySelector('#mktero-reparse').click();
+                    await new Promise(resolve => setImmediate(resolve));
+                    assert.equal(reparseCalls, 0);
+                    const confirmation = shadow.querySelector(
+                        '.mktero-confirmation-dialog'
+                    );
+                    assert.ok(confirmation);
+                    assert.equal(
+                        confirmation.querySelector(
+                            '.mktero-confirmation-message'
+                        ).textContent,
+                        'Reparsing will permanently delete 2 saved corrections. Continue?'
+                    );
+                    confirmation.querySelector(
+                        '[data-confirmation-action="cancel"]'
+                    ).click();
+                    await new Promise(resolve => setImmediate(resolve));
+                    assert.equal(reparseCalls, 0);
+                    assert.equal(view.model.status, 'ready');
+                    assert.equal(view.model.hasCorrections, true);
+                }
+                finally {
+                    view.destroy();
+                }
+            });
+        }
+    });
+
 test('keeps conversion recovery actions visible when the first conversion fails', async () => {
     const calls = [];
     const model = createModel({
@@ -2498,6 +2639,52 @@ test('keeps conversion recovery actions visible when the first conversion fails'
     assert.deepEqual(calls, ['retry', 'settings']);
 
     view.destroy();
+});
+
+test('labels local import recovery as an explicit reparse that may upload the PDF', async () => {
+    for (const [locale, expected] of [
+        ['en-US', 'Parse again with the current provider (may upload PDF)'],
+        ['zh-CN', '使用当前服务重新解析（可能上传 PDF）'],
+    ]) {
+        let reparseCalls = 0;
+        let finishReparse;
+        const model = createModel({
+            status: 'error',
+            error: 'Local import failed.',
+            errorAction: 'local-import',
+            onReparse: () => {
+                reparseCalls++;
+                return new Promise(resolve => { finishReparse = resolve; });
+            },
+        });
+        const localization = createLocalization({ zoteroLocale: locale });
+        const { view, shadow } = createView(model, {}, { localization });
+        try {
+            const retry = shadow.querySelector('#mktero-error-retry');
+            assert.equal(retry.hidden, false);
+            assert.equal(retry.textContent, expected);
+            assert.equal(retry.getAttribute('aria-label'), expected);
+            assert.equal(retry.getAttribute('title'), expected);
+            assert.equal(retry.querySelector('svg')?.getAttribute('data-lucide'), 'refresh-cw');
+            retry.click();
+            assert.equal(reparseCalls, 1);
+            assert.equal(retry.disabled, true);
+            retry.click();
+            assert.equal(reparseCalls, 1);
+            finishReparse();
+            await new Promise(resolve => setImmediate(resolve));
+            view.render({ ...model, errorAction: null });
+            assert.equal(retry.disabled, false);
+            assert.equal(retry.textContent, localization.t('viewer.retryConversion'));
+            assert.equal(retry.getAttribute('title'), localization.t('viewer.retryConversion'));
+            assert.equal(retry.getAttribute('aria-label'), localization.t('viewer.retryConversion'));
+            view.render(model);
+            assert.equal(retry.textContent, expected);
+        }
+        finally {
+            view.destroy();
+        }
+    }
 });
 
 test('offers a problem report beside the retry action on a failed conversion', () => {
@@ -6265,6 +6452,70 @@ test('updates conversion progress directly in the inline view', () => {
     assert.equal(shadow.querySelector('#mktero-loading-progress-label').textContent, '10%');
 });
 
+test('shows local import copy from the initial render through progress updates in both languages', () => {
+    for (const locale of ['en-US', 'zh-CN']) {
+        const localization = createLocalization({ zoteroLocale: locale });
+        const operation = 'import-llm-cache';
+        const { view, shadow } = createView(createModel({ operation }), {}, { localization });
+        try {
+            for (const progress of [0, 5, 10, 42, 95, 97, 100]) {
+                if (progress > 0) {
+                    view.render({
+                        ...view.model,
+                        ...createConversionProgressChanges(progress, { operation }),
+                    });
+                }
+                assert.equal(shadow.querySelector('#mktero-loading-title').textContent, localization.t('importLLM.working'));
+                assert.equal(shadow.querySelector('#mktero-loading-hint').textContent, localization.t('importLLM.hint'));
+                assert.equal(shadow.querySelector('#mktero-loading-progress').value, progress);
+                assert.doesNotMatch(shadow.querySelector('#mktero-loading-detail').textContent, /upload|download|conversion service|上传|下载|转换服务|解析服务/i);
+            }
+            view.render(createModel());
+            assert.equal(shadow.querySelector('#mktero-loading-title').textContent, localization.t('loading.convertingTitle'));
+            assert.equal(shadow.querySelector('#mktero-loading-hint').textContent, localization.t('loading.defaultHint'));
+            assert.equal(shadow.querySelector('#mktero-loading-detail').textContent, localization.t('loading.preparing'));
+        }
+        finally {
+            view.destroy();
+        }
+    }
+});
+
+test('renders local import progress in both languages and releases the preserved workspace', () => {
+    for (const locale of ['en-US', 'zh-CN']) {
+        const localization = createLocalization({ zoteroLocale: locale });
+        const { view, shadow } = createView(createModel({
+            status: 'ready', progress: 100, markdown: '# Previous', sourceKind: 'markdown',
+        }), {}, { localization });
+        try {
+            for (const progress of [0, 5, 10, 95, 97, 100]) {
+                view.render({
+                    ...view.model,
+                    status: 'loading',
+                    operation: 'import-llm-cache',
+                    progress,
+                    preserveContent: true,
+                    resumingTask: true,
+                });
+                assert.equal(shadow.querySelector('#mktero-loading-title').textContent, localization.t('importLLM.working'));
+                assert.doesNotMatch(shadow.querySelector('#mktero-loading-detail').textContent, /upload|download|conversion service|上传|下载|转换服务|解析服务/i);
+                assert.equal(shadow.querySelector('#mktero-loading-hint').textContent, localization.t('importLLM.lockedHint'));
+                assert.equal(shadow.querySelector('.cm-content').textContent, '# Previous');
+                assert.equal(shadow.querySelector('.markdown-workspace').inert, true);
+                assert.equal(shadow.querySelector('#mktero-loading-progress').value, progress);
+            }
+            view.render({ ...view.model, status: 'ready', operation: null, preserveContent: false });
+            assert.equal(shadow.querySelector('.markdown-workspace').inert, false);
+            assert.equal(shadow.querySelector('#mktero-loading').hidden, true);
+            view.render(createModel({ progress: 5 }));
+            assert.equal(shadow.querySelector('#mktero-loading-detail').textContent, localization.t('loading.uploading'));
+        }
+        finally {
+            view.destroy();
+        }
+    }
+});
+
 test('locks the workspace behind a modal loader while reparsing', () => {
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -8181,6 +8432,130 @@ test('landmark keys do nothing while a note outside the markdown view is focused
     }
     finally {
         view.destroy();
+    }
+});
+
+test('flushing succeeds immediately when there is no pending correction', () => {
+    const commits = [];
+    const { view } = createView(createModel({
+        status: 'ready',
+        markdown: 'Original text.',
+        onCommitCorrection: correction => commits.push(correction),
+    }));
+
+    try {
+        assert.equal(view.flushPendingCorrection(), true);
+        view.editor.getPendingCorrection = () => null;
+        assert.equal(view.flushPendingCorrection(), true);
+        assert.deepEqual(commits, []);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('flushing waits for the pending correction write without offering translation', async () => {
+    const pending = {
+        blockID: 'paragraph-1',
+        replacementMarkdown: 'Corrected text.',
+    };
+    const commits = [];
+    let finishCommit;
+    let saved = false;
+    let settled = false;
+    let translationOffers = 0;
+    const { view } = createView(createModel({
+        status: 'ready',
+        markdown: 'Original text.',
+        onCommitCorrection(correction) {
+            commits.push(correction);
+            return new Promise(resolve => {
+                finishCommit = () => {
+                    saved = true;
+                    resolve({
+                        translationRefresh: {
+                            blockIDs: ['paragraph-1'],
+                            targetLanguage: 'zh-CN',
+                            translationView: 'compare',
+                        },
+                    });
+                };
+            });
+        },
+    }));
+    view.editor.getPendingCorrection = () => pending;
+    view.offerChangedBlockTranslation = () => {
+        translationOffers += 1;
+    };
+
+    try {
+        const result = view.flushPendingCorrection();
+        assert.ok(result instanceof Promise);
+        assert.deepEqual(commits, [pending]);
+        void result.then(() => { settled = true; });
+        await Promise.resolve();
+        assert.equal(saved, false);
+        assert.equal(settled, false);
+
+        finishCommit();
+        assert.equal(await result, true);
+        assert.equal(saved, true);
+        assert.equal(translationOffers, 0);
+    }
+    finally {
+        view.editor.getPendingCorrection = () => null;
+        finishCommit?.();
+        view.destroy();
+    }
+});
+
+test('flushing reports pending correction failures without rejecting', async t => {
+    for (const failure of ['read', 'sync-commit', 'async-commit', 'unavailable']) {
+        await t.test(failure, async () => {
+            const error = new Error(`${failure} failed`);
+            const errors = [];
+            const pending = {
+                blockID: 'paragraph-1',
+                replacementMarkdown: 'Corrected text.',
+            };
+            let commits = 0;
+            const { view } = createView(createModel({
+                status: 'ready',
+                markdown: 'Original text.',
+                onCommitCorrection: failure === 'unavailable' ? null : () => {
+                    commits += 1;
+                    if (failure === 'sync-commit') throw error;
+                    return Promise.reject(error);
+                },
+            }), { logError: logged => errors.push(logged) });
+            view.editor.getPendingCorrection = () => {
+                if (failure === 'read') throw error;
+                return pending;
+            };
+
+            try {
+                const result = view.flushPendingCorrection();
+                if (failure === 'async-commit') {
+                    assert.ok(result instanceof Promise);
+                }
+                else {
+                    assert.equal(result, false);
+                }
+                assert.equal(await result, false);
+                assert.equal(commits, failure.endsWith('-commit') ? 1 : 0);
+                if (failure === 'unavailable') {
+                    assert.equal(errors.length, 1);
+                    assert.match(errors[0].message, /correction saving is unavailable/);
+                }
+                else {
+                    assert.deepEqual(errors, [error]);
+                }
+            }
+            finally {
+                view.editor.getPendingCorrection = () => null;
+                view.destroy();
+            }
+        });
     }
 });
 

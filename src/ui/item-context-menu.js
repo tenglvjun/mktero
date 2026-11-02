@@ -1,5 +1,7 @@
 import { translateEnglish } from '../i18n/localization.js';
 import { isSavedMarkdownNote as isMarkedSavedMarkdownNote } from '../core/saved-markdown-note-format.js';
+import { resolvePDFCandidates } from './pdf-item-targets.js';
+import { registerLLMCacheImportMenu } from './llm-cache-import-controller.js';
 
 const ITEM_MENU_ID = 'zotero-itemmenu';
 const COLLECTION_MENU_ID = 'zotero-collectionmenu';
@@ -17,6 +19,8 @@ export function registerItemContextMenu({
     onPrepare = null,
     onExportObsidian = null,
     onOpenSavedNote = null,
+    probeLLMCache = null,
+    onImportLLMCache = null,
     isSavedMarkdownNote = defaultIsSavedMarkdownNote,
     isPreparing = () => false,
     hasMarkdown = () => false,
@@ -105,11 +109,21 @@ export function registerItemContextMenu({
     menuItem.addEventListener('command', handleCommand);
     exportItem.addEventListener('command', handleExportCommand);
     menu.append(menuItem, exportItem);
+    const disposeImportMenu = registerLLMCacheImportMenu({
+        zotero,
+        window,
+        probeCandidate: probeLLMCache,
+        onImport: onImportLLMCache,
+        isPreparing,
+        onError,
+        translate,
+    });
 
     let active = true;
     return () => {
         if (!active) return;
         active = false;
+        disposeImportMenu?.();
         menu.removeEventListener('popupshowing', handlePopupShowing);
         menu.removeEventListener('popupshowing', handleExportPopupShowing);
         menuItem.removeEventListener('command', handleCommand);
@@ -123,7 +137,7 @@ function exportPDFTargets(zotero, window, onExportObsidian, hasMarkdown) {
     if (typeof onExportObsidian !== 'function') return null;
     const selectedItems = window?.ZoteroPane?.getSelectedItems?.();
     if (!Array.isArray(selectedItems) || !selectedItems.length) return null;
-    const targets = resolvePDFRecords(zotero, selectedItems);
+    const targets = resolvePDFCandidates(zotero, selectedItems);
     if (!targets.length || !targets.some(target => (
         safeHasMarkdown(hasMarkdown, target.item)
     ))) {
@@ -173,59 +187,10 @@ function resolveMenuAction({
 }
 
 function resolvePDFTargets(zotero, items) {
-    return resolvePDFRecords(zotero, items).map(target => ({
+    return resolvePDFCandidates(zotero, items).map(target => ({
         itemID: target.itemID,
         title: target.title,
     }));
-}
-
-function resolvePDFRecords(zotero, items) {
-    const targets = [];
-    const seen = new Set();
-    for (const item of items) {
-        const pdfs = item?.isPDFAttachment?.()
-            ? [item]
-            : item?.isRegularItem?.()
-                ? pdfAttachments(zotero, item)
-                : [];
-        for (const pdf of pdfs) {
-            if (!Number.isSafeInteger(pdf?.id) || pdf.id <= 0 || seen.has(pdf.id)) {
-                continue;
-            }
-            seen.add(pdf.id);
-            targets.push({
-                itemID: pdf.id,
-                title: targetTitle(pdf, zotero),
-                item: pdf,
-            });
-        }
-    }
-    return targets;
-}
-
-function pdfAttachments(zotero, item) {
-    const attachments = [];
-    for (const attachmentID of item.getAttachments?.() || []) {
-        const attachment = zotero?.Items?.get?.(attachmentID);
-        if (attachment?.isPDFAttachment?.()) attachments.push(attachment);
-    }
-    return attachments;
-}
-
-function targetTitle(item, zotero) {
-    const parentID = item.parentItemID || item.parentID;
-    const parent = item.parentItem
-        || (parentID ? zotero?.Items?.get?.(parentID) : null);
-    return cleanTitle(parent?.getDisplayTitle?.() || item.getDisplayTitle?.());
-}
-
-function cleanTitle(value) {
-    const text = String(value || '')
-        .replace(/[\u0000-\u001F\u007F]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    if (!text) return 'PDF';
-    return text.length > 300 ? `${text.slice(0, 299)}…` : text;
 }
 
 function safePreparing(isPreparing, itemID) {
@@ -241,9 +206,7 @@ function resolveSelectedItem(zotero, item, isSavedMarkdownNote) {
     if (isSavedMarkdownNote(item)) {
         return { kind: 'saved-markdown-note', item };
     }
-    if (item?.isPDFAttachment?.()) return { kind: 'pdf', item };
-    if (!item?.isRegularItem?.()) return null;
-    const attachment = pdfAttachments(zotero, item)[0];
+    const attachment = resolvePDFCandidates(zotero, [item])[0]?.item;
     return attachment ? { kind: 'pdf', item: attachment } : null;
 }
 
@@ -369,7 +332,7 @@ function collectionPDFTargets(zotero, window) {
 }
 
 function collectionPDFRecords(zotero, window) {
-    return resolvePDFRecords(zotero, collectionChildItems(window));
+    return resolvePDFCandidates(zotero, collectionChildItems(window));
 }
 
 function collectionChildItems(window) {

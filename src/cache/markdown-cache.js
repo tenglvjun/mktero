@@ -108,12 +108,12 @@ export class MarkdownCache {
         this.onStoreChange = typeof listener === 'function' ? listener : null;
     }
 
-    async get(cacheKey) {
+    async get(cacheKey, { throwOnReadError = false } = {}) {
         validateCacheKey(cacheKey);
-        return this.#withOperation(() => this.#get(cacheKey));
+        return this.#withOperation(() => this.#get(cacheKey, throwOnReadError));
     }
 
-    async #get(cacheKey) {
+    async #get(cacheKey, throwOnReadError) {
         const entryPath = this.#entryPath(cacheKey);
         const metadataPath = this.path.join(entryPath, METADATA_FILE);
         if (!(await this.io.exists(metadataPath))) return null;
@@ -197,7 +197,9 @@ export class MarkdownCache {
             const restoration = await this.#readFigureRestoration(entryPath, metadata, {
                 markdown, assets, assetBasePath: metadata.assetBasePath,
             });
-            await this.#writeMetadata(metadataPath, metadata).catch(() => {});
+            await this.#writeMetadata(metadataPath, metadata).catch(error => {
+                if (error?.name === 'AbortError') throw error;
+            });
 
             return {
                 markdown,
@@ -216,9 +218,12 @@ export class MarkdownCache {
                 ...(metadata.documentStructure ? { documentStructure: metadata.documentStructure } : {}),
             };
         }
-        catch {
+        catch (error) {
+            if (throwOnReadError || error?.name === 'AbortError') throw error;
             await this.io.remove(entryPath, { recursive: true, ignoreAbsent: true })
-                .catch(() => {});
+                .catch(cleanupError => {
+                    if (cleanupError?.name === 'AbortError') throw cleanupError;
+                });
             this.#notifyStoreChange({ type: 'removed', cacheKeys: [cacheKey] });
             return null;
         }
@@ -882,7 +887,8 @@ export class MarkdownCache {
             if (new TextEncoder().encode(json).length !== metadata.figureMapBytes) return null;
             return await parseFigureMapJSON(json, document, { hash: this.hash, maxBytes: this.maxFigureMapBytes });
         }
-        catch {
+        catch (error) {
+            if (error?.name === 'AbortError') throw error;
             return null;
         }
     }
@@ -914,7 +920,8 @@ export class MarkdownCache {
             });
             return { state: normalized, input };
         }
-        catch {
+        catch (error) {
+            if (error?.name === 'AbortError') throw error;
             return { state: normalized, input: null };
         }
     }
@@ -941,7 +948,8 @@ export class MarkdownCache {
             }
             return await this.io.readUTF8(filePath);
         }
-        catch {
+        catch (error) {
+            if (error?.name === 'AbortError') throw error;
             return null;
         }
     }
@@ -1010,7 +1018,8 @@ export class MarkdownCache {
                         targetLanguage: record.targetLanguage,
                     };
                 }
-                catch {
+                catch (error) {
+                    if (error?.name === 'AbortError') throw error;
                     descriptor = null;
                 }
             }
@@ -1043,7 +1052,9 @@ export class MarkdownCache {
         await Promise.all([...rejectedFiles].map(file => this.io.remove(
             this.path.join(entryPath, file),
             { ignoreAbsent: true }
-        ).catch(() => {})));
+        ).catch(error => {
+            if (error?.name === 'AbortError') throw error;
+        })));
         return nextMetadata;
     }
 

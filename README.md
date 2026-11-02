@@ -9,14 +9,16 @@
 
 **Read Zotero PDFs as source-linked Markdown.**
 
-Mktero is a restartless Zotero extension for Zotero 7, 8, 9, and 10. On a
-cache miss, the default conversion sends that local PDF through your Mktero
-account. No MinerU or Mistral key is required. [MinerU](https://mineru.net/)
+Mktero is a restartless Zotero extension for Zotero 7, 8, 9, and 10. When you
+request a new conversion without a usable cache, the default converter sends
+that local PDF through your Mktero account. No MinerU or Mistral key is required. [MinerU](https://mineru.net/)
 and [Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1) remain available
 if you do not want the PDF sent to Mktero. The result opens as Markdown,
 formulas, tables, figures, citations, and annotations in a temporary,
 reading-first Zotero tab. A content-addressed local cache avoids repeating
-conversions for the same PDF and parser profile.
+conversions for the same PDF and parser profile. You can also explicitly import
+supported local llm-for-zotero MinerU results without an account, API key, or
+another upload.
 
 [Download](https://github.com/tenglvjun/mktero/releases/latest) ·
 [Product page](https://mktero.com/) ·
@@ -25,8 +27,8 @@ conversions for the same PDF and parser profile.
 [Support Mktero](#support-mktero)
 
 > [!IMPORTANT]
-> Mktero is in beta. With the default converter, a cache miss sends the complete
-> PDF to the Mktero service for your account. Sign in from `Settings -> Mktero`;
+> Mktero is in beta. Requesting an uncached conversion with the default converter
+> sends the complete PDF to the Mktero service for your account. Sign in from `Settings -> Mktero`;
 > no separate OCR key is required. If you switch to MinerU or Mistral, the PDF
 > goes to that service instead and is not sent to Mktero. Optional AI translation
 > sends protected Markdown batches to the provider configured by you. Review
@@ -96,6 +98,9 @@ conversions for the same PDF and parser profile.
 
 ### Library and export
 
+- Explicitly import a supported local llm-for-zotero MinerU result from a PDF
+  or its parent item's context menu. Mktero reads the source cache without
+  changing it, saves its own local copy, and opens the normal reader.
 - Check whether each Markdown reference already exists in any accessible
   Zotero library, copy a reference from another library, and import missing
   metadata with an optional public PDF attachment.
@@ -106,7 +111,8 @@ conversions for the same PDF and parser profile.
   extracted figures to a local folder or an Obsidian vault. Optionally write
   already converted Markdown to an Obsidian vault in a batch.
 - Show a Markdown column in the item list when this computer still has a
-  readable cached conversion for the current settings. While a PDF is queued
+  readable cached conversion for the current settings or the PDF's selected
+  imported result. While a PDF is queued
   or converting, that column shows a session-only spinner. The ready marker
   stays in the Zotero profile, does not modify the item, and does not sync.
 
@@ -129,7 +135,10 @@ Other locales fall back to English.
   service, or [Mistral](https://console.mistral.ai/api-keys/) if you do not want
   the PDF sent to Mktero. MinerU cloud and Mistral need your own API key. A
   local MinerU key is optional.
-- **Network.** Access to the Mktero service, or to the converter you selected.
+- **Network.** Access to the Mktero service, or to the converter you selected,
+  for a new conversion. Importing supported local llm-for-zotero results and
+  reopening their saved copy work offline without an account or converter key;
+  local caching must be enabled.
 
 The selected converter controls file-size, page-count, quota, and
 service-availability limits. When you choose MinerU or Mistral, see the
@@ -162,6 +171,25 @@ Zotero profile.
 
 See [Configuration](./docs/configuration.md) for every setting and
 [Privacy and data handling](./docs/privacy.md) for what is sent where.
+
+### Import an existing llm-for-zotero result
+
+In Zotero's library, right-click one PDF attachment or its parent item. When a
+local llm-for-zotero result is found, choose `Import parsed result from
+llm-for-zotero…`; if several PDFs have results, choose the intended attachment
+from the submenu. Selecting the menu item starts the import: Mktero validates
+and copies the result into its own cache, then opens that PDF in the normal
+Mktero tab. A failed import does not start a remote conversion.
+
+Only supported local results can be imported; see [Workflows](./docs/workflows.md#import-a-local-llm-for-zotero-result)
+for the format requirements and how to reimport or explicitly reparse. Cached
+copies can expire or be evicted under the cache settings. Deleting the
+llm-for-zotero source does not affect reading while Mktero's copy remains;
+a retained raw result can also rebuild the reading document offline. If all
+local content for the selected import is missing, opening it later with
+`Read as Markdown with Mktero` uses the current converter and may upload the
+PDF. Import failure, corrupt content, read errors, or cancellation do not by
+themselves start a conversion.
 
 ### Open a PDF
 
@@ -202,10 +230,18 @@ See [Configuration](./docs/configuration.md) for every setting and
 
 ## Privacy
 
-- On a cache miss, the default converter sends the complete PDF to the Mktero
-  service for your account.
+- Requesting an uncached conversion with the default converter sends the
+  complete PDF to the Mktero service for your account.
 - If you select MinerU cloud, a local MinerU service, or Mistral, the complete
   PDF is sent there instead, and not to Mktero.
+- Explicit imports of supported local llm-for-zotero results read the source
+  cache without changing it and save a separate, unencrypted local copy and
+  import selection. Import and local reopening do not upload the PDF or results,
+  even if the source cache has been deleted. Retained raw results can rebuild
+  the document offline. If all local content for a selected import is missing,
+  a later `Read as Markdown with Mktero` uses the current converter and may
+  upload the PDF, as does an explicit reparse. Import failure, corrupt content,
+  read errors, or cancellation do not themselves trigger conversion.
 - Credentials, cached Markdown and figures, stored MinerU results (without the
   PDF copy), corrections, translations, reading positions, local highlights not
   yet in the PDF, and the Zotero annotation keys that tie a cross-page

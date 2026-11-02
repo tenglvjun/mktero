@@ -72,6 +72,43 @@ const ERROR_CODE_KEYS = new Map([
     ['MKTERO_HTTP_ERROR', 'error.mkteroRequestFailed'],
     ['MKTERO_INVALID_RESPONSE', 'error.invalidResponse'],
     ['MKTERO_ARCHIVE_TOO_LARGE', 'error.resultTooLarge'],
+    ['LLM_CACHE_DISABLED', 'importLLM.cacheRequired'],
+    ['LLM_CACHE_BUSY', 'importLLM.busy'],
+    ['LLM_CACHE_IMPORT_BUSY', 'importLLM.busy'],
+    ['LLM_CACHE_CHANGED', 'importLLM.changed'],
+    ['LLM_CACHE_WRITING', 'importLLM.writing'],
+    ['LLM_CACHE_UNSAFE_PATH', 'importLLM.unsafePath'],
+    ['LLM_CACHE_RESOURCE_LIMIT', 'importLLM.resourceLimit'],
+    ['LLM_CACHE_UNSUPPORTED_BBOX', 'importLLM.unsupportedBBox'],
+    ['LLM_CACHE_UNSUPPORTED_FORMAT', 'importLLM.unsupportedFormat'],
+    ['LLM_CACHE_UNSUPPORTED_GEOMETRY', 'importLLM.unsupportedGeometry'],
+    ['LLM_CACHE_MISSING_IMAGE', 'importLLM.missingImage'],
+    ['LLM_CACHE_INVALID_IMAGE', 'importLLM.invalidImage'],
+    ['LLM_CACHE_AMBIGUOUS_FIGURE', 'importLLM.ambiguousFigure'],
+    ['LLM_CACHE_INVALID_CROP', 'importLLM.invalidCrop'],
+    ['LLM_CACHE_INVALID_SOURCE', 'importLLM.invalidSource'],
+    ['LLM_CACHE_UNSUPPORTED_SOURCE', 'importLLM.unsupportedSource'],
+    ['LLM_CACHE_ATTACHMENT_MISMATCH', 'importLLM.attachmentMismatch'],
+    ['LLM_CACHE_PAGE_MISMATCH', 'importLLM.pageMismatch'],
+    ['LLM_CACHE_IMPORT_INDEX_INVALID', 'importLLM.indexInvalid'],
+    ['LLM_CACHE_IMPORT_INDEX_UNSUPPORTED', 'importLLM.indexUnsupported'],
+    ['LLM_CACHE_IMPORT_INDEX_FULL', 'importLLM.indexFull'],
+    ['LLM_CACHE_IMPORT_INDEX_WRITE_FAILED', 'importLLM.storageFailed'],
+    ['LLM_CACHE_STORAGE_FAILED', 'importLLM.storageFailed'],
+    ['LLM_CACHE_NO_DATA_DIRECTORY', 'importLLM.dataDirectoryUnavailable'],
+    ['LLM_CACHE_NOT_FOUND', 'importLLM.unavailable'],
+    ['LLM_CACHE_UNAVAILABLE', 'importLLM.localUnavailable'],
+    ['LLM_CACHE_IMPORT_UNAVAILABLE', 'importLLM.importUnavailable'],
+    ['LLM_CACHE_INVALID_ATTACHMENT', 'importLLM.invalidAttachment'],
+    ['LLM_CACHE_INVALID_DOCUMENT', 'importLLM.invalidDocument'],
+    ['LLM_CACHE_INVALID_JSON', 'importLLM.invalidJSON'],
+    ['LLM_CACHE_INVALID_FILE', 'importLLM.invalidFile'],
+    ['LLM_CACHE_INVALID_MANIFEST', 'importLLM.invalidManifest'],
+    ['LLM_CACHE_INVALID_MARKDOWN', 'importLLM.invalidMarkdown'],
+    ['LLM_CACHE_MISSING_MARKDOWN', 'importLLM.missingMarkdown'],
+    ['LLM_CACHE_EMPTY', 'importLLM.empty'],
+    ['LLM_CACHE_AMBIGUOUS_STRUCTURE', 'importLLM.ambiguousStructure'],
+    ['LLM_CACHE_INVALID_STRUCTURE', 'importLLM.invalidStructure'],
 ]);
 
 export const MARKDOWN_REVISION_WARNINGS = Object.freeze({
@@ -80,6 +117,12 @@ export const MARKDOWN_REVISION_WARNINGS = Object.freeze({
 });
 
 const WARNING_MESSAGE_KEYS = new Map([
+    ['LLM_CACHE_SOURCE_MISSING', 'importLLM.warningSourceMissing'],
+    ['LLM_CACHE_SOURCE_LEGACY', 'importLLM.warningSourceLegacy'],
+    ['LLM_CACHE_SOURCE_INCOMPLETE', 'importLLM.warningSourceIncomplete'],
+    ['LLM_CACHE_CROPS_STALE', 'importLLM.warningCropsStale'],
+    ['LLM_CACHE_IMPORTED_CROPS', 'importLLM.warningImportedCrops'],
+    ['LLM_CACHE_LOCAL_CROPS', 'importLLM.warningLocalCrops'],
     [MARKDOWN_REVISION_WARNINGS.discarded, 'warning.correctionsDiscarded'],
     [MARKDOWN_REVISION_WARNINGS.unavailable, 'warning.correctionsUnavailable'],
     [
@@ -169,6 +212,9 @@ function positiveInteger(value) {
 }
 
 export function localizeConversionError(error, translate = translateEnglish) {
+    if (typeof error?.code === 'string' && error.code.startsWith('LLM_CACHE_')) {
+        return translate(ERROR_CODE_KEYS.get(error.code) || 'importLLM.failed');
+    }
     const message = error instanceof Error ? error.message : String(error || '');
     if (/no extractable text/i.test(message)) {
         return translate('error.noExtractableText');

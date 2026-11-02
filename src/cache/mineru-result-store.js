@@ -78,9 +78,9 @@ export class MinerUResultStore {
         this.operationTail = Promise.resolve();
     }
 
-    get(key, { signal } = {}) {
+    get(key, { signal, throwOnReadError = false } = {}) {
         validateKey(key);
-        return this.#withOperation(() => this.#get(key, signal));
+        return this.#withOperation(() => this.#get(key, signal, throwOnReadError));
     }
 
     put(key, record, { signal } = {}) {
@@ -117,7 +117,7 @@ export class MinerUResultStore {
         });
     }
 
-    async #get(key, signal) {
+    async #get(key, signal, throwOnReadError) {
         throwIfAborted(signal);
         const entryPath = this.#entryPath(key);
         const metadataPath = this.path.join(entryPath, METADATA_FILE);
@@ -136,7 +136,9 @@ export class MinerUResultStore {
             if (archive.length !== metadata.archiveBytes) throw new Error('Stored MinerU archive size is invalid');
             throwIfAborted(signal);
             metadata.lastAccessedAt = this.now();
-            await this.#writeMetadata(metadataPath, metadata).catch(() => {});
+            await this.#writeMetadata(metadataPath, metadata).catch(error => {
+                if (error?.name === 'AbortError') throw error;
+            });
             return {
                 archive,
                 provider: metadata.provider,
@@ -145,8 +147,10 @@ export class MinerUResultStore {
             };
         }
         catch (error) {
-            if (error?.name === 'AbortError') throw error;
-            await this.#remove(entryPath).catch(() => {});
+            if (throwOnReadError || error?.name === 'AbortError') throw error;
+            await this.#remove(entryPath).catch(cleanupError => {
+                if (cleanupError?.name === 'AbortError') throw cleanupError;
+            });
             return null;
         }
     }

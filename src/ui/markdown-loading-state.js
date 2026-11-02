@@ -11,6 +11,19 @@ export function createLoadingPresentation(model = {}, translate = translateEngli
     const preserveContent = Boolean(model.preserveContent);
     const resumingTask = Boolean(model.resumingTask);
     const batchOwned = Boolean(model.batchOwned);
+    if (model.operation === 'import-llm-cache') {
+        return {
+            visible: true,
+            preserveContent,
+            progress,
+            progressLabel: `${progress}%`,
+            title: translate('importLLM.working'),
+            detail: conversionStageDetail(progress, model, translate),
+            hint: translate(preserveContent
+                ? 'importLLM.lockedHint'
+                : 'importLLM.hint'),
+        };
+    }
     const queueAhead = Number.isInteger(model.queueAhead) && model.queueAhead >= 0
         ? model.queueAhead
         : null;
@@ -44,10 +57,25 @@ export function createLoadingPresentation(model = {}, translate = translateEngli
 
 export function conversionStageDetail(progress, state = {}, translate = translateEnglish) {
     const normalized = normalizeConversionProgress(progress);
+    if (state?.operation === 'import-llm-cache') {
+        return localImportDetail(normalized, translate);
+    }
     if (state?.resumingTask && normalized < CONVERSION_PROGRESS.DOWNLOADING) {
         return translate('loading.resuming');
     }
     return progressDetail(normalized, translate);
+}
+
+function localImportDetail(progress, translate) {
+    if (progress >= CONVERSION_PROGRESS.COMPLETE) {
+        return translate('importLLM.progress.complete');
+    }
+    if (progress >= CONVERSION_PROGRESS.RESTORING_FIGURES) {
+        return translate('importLLM.progress.restoringFigures');
+    }
+    if (progress >= 10) return translate('importLLM.progress.preparingDocument');
+    if (progress >= 5) return translate('importLLM.progress.reading');
+    return translate('importLLM.progress.preparing');
 }
 
 function queueDetail(queueAhead, translate) {

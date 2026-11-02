@@ -78,11 +78,13 @@ test('tracks whether loading progress belongs to a resumed task', () => {
         status: 'loading',
         progress: 42,
         resumingTask: true,
+        operation: null,
     });
     assert.deepEqual(createConversionProgressChanges(5), {
         status: 'loading',
         progress: 5,
         resumingTask: false,
+        operation: null,
     });
 });
 
@@ -216,6 +218,7 @@ test('uses the normal empty and error states without a previous result', () => {
         warningAction: null,
         preserveContent: false,
         resumingTask: false,
+        operation: null,
     });
     assert.deepEqual(createConversionFailureChanges('Conversion failed', null), {
         status: 'error',
@@ -224,6 +227,7 @@ test('uses the normal empty and error states without a previous result', () => {
         warningAction: null,
         preserveContent: false,
         resumingTask: false,
+        operation: null,
     });
 });
 
@@ -277,9 +281,58 @@ test('clears figures when a successful reparse has no assets', () => {
         progress: 100,
         preserveContent: false,
         resumingTask: false,
+        operation: null,
         errorAction: null,
         warningAction: null,
     });
+});
+
+test('keeps import progress local and clears the operation after success or failure', () => {
+    const operation = 'import-llm-cache';
+    const previousResult = {
+        status: 'ready', title: 'Paper', markdown: '# Previous', warnings: [], operation,
+    };
+    assert.deepEqual(createConversionProgressChanges(42, { operation }), {
+        status: 'loading', progress: 42, resumingTask: false, operation,
+    });
+    assert.equal(createConversionProgressChanges(5, { operation: 'convert' }).operation, 'convert');
+    assert.equal(snapshotReadyResult(previousResult).operation, undefined);
+    for (const changes of [
+        createConversionLoadingChanges(previousResult),
+        createConversionReadyChanges(previousResult),
+        createConversionFailureChanges('Failed', previousResult),
+        createConversionFailureChanges('Failed', null),
+    ]) {
+        assert.equal(changes.operation, null);
+        assert.equal({ ...previousResult, ...changes }.operation, null);
+    }
+});
+
+test('describes a failed import while restoring previous Markdown', () => {
+    for (const [locale, expected] of [
+        ['en-US', 'Local import failed: Broken cache'],
+        ['zh-CN', '本地导入失败：Broken cache'],
+    ]) {
+        const translate = (key, variables) => translateMessage(locale, key, variables);
+        const previousResult = snapshotReadyResult({
+            status: 'ready', markdown: '# Previous', warnings: ['Existing warning.'],
+        });
+        const changes = createConversionFailureChanges(
+            'Broken cache', previousResult, translate, { errorAction: 'local-import' }
+        );
+        assert.equal(changes.status, 'ready');
+        assert.equal(changes.markdown, '# Previous');
+        assert.equal(changes.operation, null);
+        assert.deepEqual(changes.warnings, ['Existing warning.', expected]);
+        assert.equal(changes.errorAction, null);
+        assert.equal(changes.warningAction, 'local-import');
+        const failure = createConversionFailureChanges(
+            'Broken cache', null, translate, { errorAction: 'local-import' }
+        );
+        assert.equal(failure.status, 'error');
+        assert.equal(failure.errorAction, 'local-import');
+        assert.equal(failure.operation, null);
+    }
 });
 
 test('localizes reparse loading and failure states', () => {
