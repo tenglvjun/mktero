@@ -207,7 +207,7 @@ function isTextEquivalent(block) {
     if (block.type !== 'table' || !/<table\b[\s>]/iu.test(html)
         || !/<\/table\s*>/iu.test(html) || !/<t[dh]\b[\s>]/iu.test(html)
         || /<(?:img|svg|canvas)\b/iu.test(html)
-        || !html.replace(/<[^>]*>/gu, '').replace(/&(?:nbsp|#160);/giu, '').trim()) return false;
+        || !markupComparisonText(html).replace(/&(?:nbsp|#160);/giu, '').trim()) return false;
     return !captionsFor(block).some(caption => parseLabel(caption)?.kind === 'figure');
 }
 
@@ -217,8 +217,29 @@ function captionsFor(block) {
     return (Array.isArray(value) ? value : typeof value === 'string' ? [value] : []).filter(value => typeof value === 'string');
 }
 
+// Comparison text only; the original markup still goes through the renderer.
+// Consume nested and unfinished tags without leaving tag fragments in the text.
+function markupComparisonText(value) {
+    let output = '';
+    let depth = 0;
+    let quote = '';
+    for (const character of String(value || '')) {
+        if (!depth) {
+            if (character === '<') depth = 1;
+            else output += character;
+        }
+        else if (quote) {
+            if (character === quote) quote = '';
+        }
+        else if (character === '"' || character === "'") quote = character;
+        else if (character === '<') depth++;
+        else if (character === '>') depth--;
+    }
+    return output;
+}
+
 function parseLabel(value) {
-    const match = String(value || '').replace(/<[^>]*>/gu, '').trim()
+    const match = markupComparisonText(value).trim()
         .match(/^(supplement(?:ary|al)\s+)?(fig(?:ure)?\.?|table)\s*([sS]?\d+)([a-z])?\b/iu);
     if (!match) return null;
     const kind = /^table/iu.test(match[2]) ? 'table' : 'figure';

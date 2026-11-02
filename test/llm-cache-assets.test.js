@@ -144,6 +144,80 @@ test('treats real table HTML as equivalent but does not discard a figure classif
     await assert.rejects(adaptLLMCacheAssets(f.input, options), code('LLM_CACHE_MISSING_IMAGE'));
 });
 
+for (const [kind, fragment] of [['nested', '<scr<script>ipt>'], ['unfinished', '<scr<b>ipt'],
+    ['nested with only whitespace', '<scr<b>ipt>&nbsp;&#160;']]) {
+    test(`${kind} tag fragments cannot prove that a table preview is text-equivalent`, async () => {
+        const table = { ...image, type: 'table', table_caption: ['Table 1'],
+            table_body: `<table><tr><td>${fragment}</td></tr></table>` };
+        const { input } = fixture({ blocks: [body, table] });
+        input.geometry = null;
+        await assert.rejects(adaptLLMCacheAssets(input, options), code('LLM_CACHE_MISSING_IMAGE'), fragment);
+        const withImage = fixture({ blocks: [body, table], files: [entry(image.img_path, createTestPNG())] });
+        const adapted = await adaptLLMCacheAssets(withImage.input, options);
+        assert.equal(adapted.coverage[0].required, true, fragment);
+        assert.equal(adapted.contentList[1].table_body, table.table_body);
+    });
+}
+
+test('a trailing truncated script tag cannot make an empty table text-equivalent', async () => {
+    const table = { ...image, type: 'table', table_caption: ['Table 1'],
+        table_body: '<table><tr><td></td></tr></table><script' };
+    const { input } = fixture({ blocks: [body, table] });
+    input.geometry = null;
+    await assert.rejects(adaptLLMCacheAssets(input, options), code('LLM_CACHE_MISSING_IMAGE'));
+    const withImage = fixture({ blocks: [body, table], files: [entry(image.img_path, createTestPNG())] });
+    const adapted = await adaptLLMCacheAssets(withImage.input, options);
+    assert.equal(adapted.coverage[0].required, true);
+    assert.equal(adapted.contentList[1].table_body, table.table_body);
+});
+
+test('text equivalence keeps formatted table text and quoted tag attributes without rewriting the HTML', async () => {
+    for (const cell of ['Val<b>ue</b>', '<span title="x < y">Value</span>', "<span title='x > y'>Value</span>"]) {
+        const table = { ...image, type: 'table', table_caption: ['<b>Table</b> 1. Values.'],
+            table_body: `<table><tr><td>${cell}</td></tr></table>` };
+        const { input } = fixture({ blocks: [body, table] });
+        const adapted = await adaptLLMCacheAssets(input, options);
+        assert.equal(adapted.counts.equivalent, 1, cell);
+        assert.equal(adapted.coverage[0].required, false, cell);
+        assert.equal(adapted.contentList[1].img_path, undefined);
+        assert.equal(adapted.contentList[1].table_body, table.table_body);
+        assert.deepEqual(adapted.contentList[1].table_caption, table.table_caption);
+    }
+    const { input } = fixture({ blocks: [body, { ...image, type: 'table', table_caption: ['Table 1'],
+        table_body: '<table><tr><td><b> </b>&nbsp;&#160;</td></tr></table>' }] });
+    await assert.rejects(adaptLLMCacheAssets(input, options), code('LLM_CACHE_MISSING_IMAGE'));
+});
+
+test('formatted and nested figure labels keep misclassified table previews required', async () => {
+    for (const caption of ['Fi<b>gure</b> 1. Forest plot.', '<scr<script>ipt>Figure 1. Forest plot.',
+        'Fi<scr<b>ipt>gure 1. Forest plot.', '<span title="x < y">Figure 1. Forest plot.</span>']) {
+        const table = { ...image, type: 'table', table_caption: [caption],
+            table_body: '<table><tr><td>Study</td></tr></table>' };
+        const { input } = fixture({ blocks: [body, table] });
+        input.geometry = null;
+        await assert.rejects(adaptLLMCacheAssets(input, options), code('LLM_CACHE_MISSING_IMAGE'), caption);
+        const withImage = fixture({ blocks: [body, table], files: [entry(image.img_path, createTestPNG())] });
+        const adapted = await adaptLLMCacheAssets(withImage.input, options);
+        assert.equal(adapted.coverage[0].required, true, caption);
+        assert.deepEqual(adapted.contentList[1].table_caption, [caption]);
+    }
+});
+
+test('crop matching uses normalized caption text while preserving the original caption', async () => {
+    const manifest = { figureBlocks: [{ imagePaths: [image.img_path], labelHints: [], captionHints: [] }], allFigures: [] };
+    for (const caption of ['Fi<b>gure</b> 1.', '<scr<script>ipt>Figure 1.', '<span title="x < y">Figure 1.</span>']) {
+        const { input } = fixture({ blocks: [body, { ...image, image_caption: [caption] }], manifest,
+            files: [entry('figure_crops/crops/fig1.png', createTestPNG())] });
+        const adapted = await adaptLLMCacheAssets(input, options);
+        assert.equal(adapted.counts.importedCrops, 1, caption);
+        assert.deepEqual(adapted.contentList[1].image_caption, [caption]);
+        assert.equal(adapted.contentList[1].img_path, 'images/imported-crop-0.png');
+    }
+    const { input } = fixture({ blocks: [body, { ...image, image_caption: ['Fi<scr<b>iptgure 1.'] }], manifest,
+        files: [entry('figure_crops/crops/fig1.png', createTestPNG())] });
+    await assert.rejects(adaptLLMCacheAssets(input, options), code('LLM_CACHE_MISSING_IMAGE'));
+});
+
 test('locally restores missing original blocks using unchanged normalized coordinates and closes the PDF', async () => {
     const f = fixture();
     const r = renderer();
@@ -275,6 +349,20 @@ test('layout may omit equivalent previews but never an image-only table or equat
             { type: 'interline_equation', image_path: 'images/equation.png' },
         ] }] }]) {
         await assert.rejects(adaptLLMCacheAssets(layoutInput([block]), options), code('LLM_CACHE_MISSING_IMAGE'));
+    }
+});
+
+test('layout-only table coverage rejects residual tags as proof of text equivalence', async () => {
+    for (const markup of [{ html: '<table><tr><td><scr<script>ipt></td></tr></table>' },
+        { html: '<table><tr><td><scr<b>ipt</td></tr></table>' },
+        { html: '<table><tr><td>Study</td></tr></table>', caption: '<scr<script>ipt>Figure 1.' }]) {
+        const block = layoutBlock('table', 'images/table.png', markup);
+        await assert.rejects(adaptLLMCacheAssets(layoutInput([block]), options), code('LLM_CACHE_MISSING_IMAGE'));
+        const input = layoutInput([block], [entry('images/table.png', createTestPNG())]);
+        const adapted = await adaptLLMCacheAssets(input, options);
+        assert.equal(adapted.coverage[0].required, true);
+        assert.deepEqual(JSON.parse(new TextDecoder().decode(adapted.entries.find(file => file.path === 'layout.json').data)),
+            input.layout);
     }
 });
 

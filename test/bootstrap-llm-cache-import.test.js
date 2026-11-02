@@ -35,6 +35,7 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
     const confirmations = [];
     const requests = [];
     const controllers = [];
+    const conversionStarts = [];
     class ObservedAbortController extends AbortController {
         constructor() {
             super();
@@ -153,7 +154,14 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
         PreferencePanes: { register: async options => options.id, unregister() {} },
         Reader: { registerEventListener() {}, unregisterEventListener() {} },
         getMainWindow: () => owner,
-        debug() {}, logError: error => errors.push(error),
+        debug(message) {
+            const started = /^Mktero: conversion started for item (\d+) /u.exec(message);
+            if (!started) return;
+            // The registry creates the controller and logs this start synchronously,
+            // before the import awaits IO or PDF.js can create unrelated controllers.
+            conversionStarts.push({ itemID: Number(started[1]), controller: controllers.at(-1) });
+        },
+        logError: error => errors.push(error),
     };
     const globals = {
         Zotero: zotero, IOUtils: ioUtils, PathUtils: pathUtils, fetch,
@@ -217,15 +225,23 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
         `readiness ${JSON.stringify(expected)} for ${target.key}`);
     const openMenu = () => menu.dispatchEvent(new window.Event('popupshowing', { bubbles: true }));
     const closeMenu = () => menu.dispatchEvent(new window.Event('popuphidden', { bubbles: true }));
-    const importFromParent = async (target = parent) => {
+    const waitForImportCommand = async (target = parent) => {
         selectedItem = target;
         openMenu();
-        const command = await waitFor(() => {
-            const element = window.document.getElementById('mktero-import-llm-cache');
-            return element && !element.hidden && !element.disabled ? element : null;
-        }, 'the parent item import command');
-        assert.equal(window.document.getElementById('mktero-import-llm-cache-options').hidden, true);
-        closeMenu();
+        try {
+            const command = await waitFor(() => {
+                const element = window.document.getElementById('mktero-import-llm-cache');
+                return element && !element.hidden && !element.disabled ? element : null;
+            }, 'the parent item import command');
+            assert.equal(window.document.getElementById('mktero-import-llm-cache-options').hidden, true);
+            return command;
+        }
+        finally {
+            closeMenu();
+        }
+    };
+    const importFromParent = async (target = parent) => {
+        const command = await waitForImportCommand(target);
         command.dispatchEvent(new window.Event('command', { bubbles: true }));
     };
     const reopenFromParent = async (target = parent) => {
@@ -543,7 +559,16 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
         assert.equal(await revisionStore.load(identity.cacheKey), null, 'editing alone must leave a genuine unsaved draft');
         await writeSourceCache(target.sourcePath, target.attachment, 'Replacement that the user will decline.');
         const gate = gateIO(ioUtils, 'writeUTF8', file => file === metadataPath);
-        t.after(() => { gate.restore(); confirmImport = true; });
+        t.after(async () => {
+            try {
+                closeTab();
+                await gate.restore();
+                await waitForImportCommand(target.parent);
+            }
+            finally {
+                confirmImport = true;
+            }
+        });
         confirmImport = false;
         await importFromParent(target.parent);
         await waitFor(() => gate.entered, 'the pending correction metadata write');
@@ -612,53 +637,89 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
 
     for (const stage of ['read', 'write']) {
         for (const closing of ['tab', 'owner']) {
-            await t.test(`aborts an import paused during ${stage} when its ${closing} closes without publishing a new selection`, async t => {
+            await t.test(`aborts an import paused during ${stage} when its ${closing} closes without publishing a new selection`, async () => {
                 const id = 50 + (stage === 'write' ? 4 : 0) + (closing === 'owner' ? 2 : 0);
                 const target = await newRegressionPDF(id, `Original ${stage} ${closing} article before cancellation.`);
-                await importReadyRegressionPDF(target);
-                const selection = await readSelection(target.attachment);
-                const previousIndex = await fs.readFile(indexPath, 'utf8');
-                const errorCount = errors.length;
-                const controllerStart = controllers.length;
-                const replacement = `Changed ${stage} ${closing} article that must never be selected.`;
-                await writeSourceCache(target.sourcePath, target.attachment, replacement);
-                const gate = stage === 'read'
-                    ? gateIO(ioUtils, 'read', file => file === path.join(target.sourcePath, 'full.md'))
-                    : gateIO(ioUtils, 'writeUTF8', file => file === `${indexPath}.staging`);
-                t.after(() => gate.restore());
-                await importFromParent(target.parent);
-                await waitFor(() => gate.entered, `the import ${stage} gate`);
-                const controller = controllers.slice(controllerStart).find(value => !value.signal.aborted);
-                assert.ok(controller, 'the import must own a live native AbortController');
-                assert.equal(currentShadow().querySelector('#mktero-content').getAttribute('aria-busy'), 'true');
-                if (closing === 'owner') {
-                    globalThis.onMainWindowUnload({ window: owner });
-                    assert.equal(tabs.size, 1, 'window unload must release ownership even before Zotero closes its tabs');
+                let gate;
+                let backgroundPDF;
+                try {
+                    await importReadyRegressionPDF(target);
+                    const selection = await readSelection(target.attachment);
+                    const previousIndex = await fs.readFile(indexPath, 'utf8');
+                    const errorCount = errors.length;
+                    const controllerStart = controllers.length;
+                    // A real PDF.js task deterministically interleaves unrelated live
+                    // controllers before the import, as background PDF work can in CI.
+                    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+                    backgroundPDF = getDocument({ data: pdfData.slice(), verbosity: 0 });
+                    await backgroundPDF.promise;
+                    const unrelatedController = controllers.slice(controllerStart).find(value => !value.signal.aborted);
+                    assert.ok(unrelatedController, 'the background PDF must contribute an unrelated live controller');
+                    const replacement = `Changed ${stage} ${closing} article that must never be selected.`;
+                    await writeSourceCache(target.sourcePath, target.attachment, replacement);
+                    const runStart = conversionStarts.length;
+                    const targetRun = () => conversionStarts.slice(runStart).find(run => run.itemID === id);
+                    gate = stage === 'read'
+                        ? gateIO(ioUtils, 'read', file => file === path.join(target.sourcePath, 'full.md') && targetRun())
+                        : gateIO(ioUtils, 'writeUTF8', (file, data) => file === `${indexPath}.staging` && targetRun()
+                            && JSON.parse(data).records.some(record => record.attachmentKey === target.attachment.key
+                                && record.libraryID === target.attachment.libraryID && record.snapshotHash !== selection.snapshotHash));
+                    await importFromParent(target.parent);
+                    const { controller } = await waitFor(targetRun, `the conversion start for attachment ${id}`);
+                    await waitFor(() => gate.entered, `the import ${stage} gate`);
+                    assert.ok(controller, 'the import must own a live native AbortController');
+                    assert.equal(controller.signal.aborted, false);
+                    assert.notEqual(controller, unrelatedController, 'the import signal must come from its own conversion start');
+                    assert.equal(controllers.slice(controllerStart).find(value => !value.signal.aborted), unrelatedController,
+                        'selecting the first live controller would observe the background PDF instead of the import');
+                    assert.equal(tabs.size, 1);
+                    assert.equal([...tabs.values()][0].options.data.mkteroSourceItemID, id,
+                        'the closing tab must belong to the attachment being imported');
+                    assert.equal(zotero.getMainWindow(), owner);
+                    assert.equal(currentShadow().querySelector('#mktero-content').getAttribute('aria-busy'), 'true');
+                    if (closing === 'owner') {
+                        globalThis.onMainWindowUnload({ window: owner });
+                        assert.equal(tabs.size, 1, 'window unload must release ownership even before Zotero closes its tabs');
+                    }
+                    else {
+                        closeTab();
+                    }
+                    assert.equal(controller.signal.aborted, true, 'closing the owner must abort instead of continuing the import in the background');
+                    assert.equal(unrelatedController.signal.aborted, false, 'closing the import must leave unrelated PDF work alive');
+                    if (closing === 'owner') {
+                        closeTab();
+                        globalThis.onMainWindowLoad({ window: owner });
+                    }
+                    gate.release();
+                    await gate.finished;
+                    await waitForImportCommand(target.parent);
+                    assert.equal(tabs.size, 0, 'a cancelled import must not reopen its closed tab');
+                    assert.deepEqual(await readSelection(target.attachment), selection);
+                    assert.equal(await fs.readFile(indexPath, 'utf8'), previousIndex);
+                    const reopened = await reopenFromParent(target.parent);
+                    await readyText(reopened, target.text);
+                    assert.equal(reopened.querySelector('.cm-content').textContent.includes(replacement), false);
+                    assert.deepEqual(errors.slice(errorCount), []);
                 }
-                else {
-                    closeTab();
+                finally {
+                    try {
+                        closeMenu();
+                        closeTab();
+                    }
+                    finally {
+                        // Restore the window even if the owner-close assertion fails,
+                        // then drain the import before the next scenario changes IO.
+                        const drained = gate?.restore();
+                        globalThis.onMainWindowLoad({ window: owner });
+                        try {
+                            await drained;
+                            await waitForImportCommand(target.parent);
+                        }
+                        finally {
+                            await backgroundPDF?.destroy();
+                        }
+                    }
                 }
-                assert.equal(controller.signal.aborted, true, 'closing the owner must abort instead of continuing the import in the background');
-                if (closing === 'owner') {
-                    closeTab();
-                    globalThis.onMainWindowLoad({ window: owner });
-                }
-                gate.release();
-                await gate.finished;
-                selectedItem = target.parent;
-                openMenu();
-                await waitFor(() => {
-                    const command = window.document.getElementById('mktero-import-llm-cache');
-                    return command && !command.hidden && !command.disabled;
-                }, 'the cancelled import to finish and release the attachment');
-                closeMenu();
-                assert.equal(tabs.size, 0, 'a cancelled import must not reopen its closed tab');
-                assert.deepEqual(await readSelection(target.attachment), selection);
-                assert.equal(await fs.readFile(indexPath, 'utf8'), previousIndex);
-                const reopened = await reopenFromParent(target.parent);
-                await readyText(reopened, target.text);
-                assert.equal(reopened.querySelector('.cm-content').textContent.includes(replacement), false);
-                assert.deepEqual(errors.slice(errorCount), []);
             });
         }
     }
@@ -754,6 +815,7 @@ function gateIO(io, method, matches) {
         restore() {
             io[method] = original;
             released.resolve();
+            return gate.entered ? finished.promise : Promise.resolve();
         },
     };
     io[method] = async (...args) => {
