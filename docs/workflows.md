@@ -47,13 +47,16 @@ but the import then explains why it cannot be used.
 
 After a successful import, reading uses Mktero's copy and no longer needs the
 source cache: deleting only the llm-for-zotero source still allows offline
-reading. The copy remains subject to cache expiry, size limits, and manual
-clearing. Mktero first uses saved corrections or a prepared reading document;
-if only the retained raw result remains, it rebuilds the document offline.
-If all local content for the selected import is missing, a later ordinary
-`Read as Markdown with Mktero` uses the current converter and may upload the
-PDF. The import action itself stays local; a failed import, corrupt content,
-read errors, or cancellation do not trigger conversion.
+reading. Mktero does not automatically evict its Markdown or raw MinerU cache
+by entry count, total size, or inactivity. The copy remains available unless
+you clear it, a damaged entry is removed during self-healing, or the profile
+filesystem is unavailable; individual archive and document resource limits
+still apply. Mktero first uses saved corrections or a prepared reading
+document; if only the retained raw result remains, it rebuilds the document
+offline. If all local content for the selected import is missing, a later
+ordinary `Read as Markdown with Mktero` uses the current converter and may
+upload the PDF. The import action itself stays local; a failed import, corrupt
+content, read errors, or cancellation do not trigger conversion.
 
 To replace an import with a new result, repeat the import. A new snapshot has
 separate correction, translation, and reading-position identities. Explicitly
@@ -428,9 +431,8 @@ standalone PDF without a parent library item cannot save a snapshot.
 The item list has a Markdown column. A mark means this computer can open that
 PDF's cached Markdown with the current conversion settings or its selected
 imported result. A spinner means the PDF is queued or converting in this
-session; it is not stored. Clearing the cache or letting a result expire turns
-the ready mark off. Changing provider or MinerU service changes which converted
-cache is ready; a selected imported result keeps its own identity. The import
+session; it is not stored. Clearing the cache turns the ready mark off.
+Changing provider or MinerU service changes which converted cache is ready; a selected imported result keeps its own identity. The import
 selection alone, without readable content, is not a ready mark. It does not
 sync, and it does not change the Zotero item. You can hide the column from the
 item-list column picker; that choice is remembered.

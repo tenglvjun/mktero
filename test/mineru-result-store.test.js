@@ -124,14 +124,13 @@ test('strict raw reads retain damaged entries while default reads still self-hea
     }
 });
 
-test('strict raw reads still return null for missing and expired entries', async t => {
+test('strict raw reads still return null for missing entries and retain old entries', async t => {
     let timestamp = 1_000;
-    const f = await createStoreFixture(t, { now: () => timestamp, maxAgeMs: 100 });
+    const f = await createStoreFixture(t, { now: () => timestamp });
     assert.equal(await f.store.get(KEY, { throwOnReadError: true }), null);
     await f.store.put(KEY, { archive: new Uint8Array([1]), provider: 'mineru' });
     timestamp += 101;
-    assert.equal(await f.store.get(KEY, { throwOnReadError: true }), null);
-    assert.deepEqual(await f.store.getStats(), { entries: 0, sizeBytes: 0 });
+    assert.deepEqual([...((await f.store.get(KEY, { throwOnReadError: true })).archive)], [1]);
 });
 
 test('raw reads propagate AbortError without removing the entry', async t => {
@@ -164,23 +163,26 @@ test('raw reads propagate AbortError without removing the entry', async t => {
     }
 });
 
-test('expires stored archives and enforces entry and byte limits', async t => {
+test('retains stored archives beyond the former age and entry limits', async t => {
     let timestamp = 1_000;
-    const fixture = await createStoreFixture(t, { now: () => timestamp, maxEntries: 1, maxAgeMs: 1_000 });
+    const fixture = await createStoreFixture(t, { now: () => timestamp });
     await fixture.store.put(KEY, { archive: new Uint8Array([1]), provider: 'mineru' });
     timestamp = 1_500;
     await fixture.store.put('c'.repeat(64), { archive: new Uint8Array([2]), provider: 'mineru' });
-    assert.equal(await fixture.store.get(KEY), null);
-    assert.ok(await fixture.store.get('c'.repeat(64)));
+    assert.deepEqual([...((await fixture.store.get(KEY)).archive)], [1]);
+    assert.deepEqual([...((await fixture.store.get('c'.repeat(64))).archive)], [2]);
     timestamp = 3_000;
-    assert.equal(await fixture.store.get('c'.repeat(64)), null);
+    assert.deepEqual([...((await fixture.store.get('c'.repeat(64))).archive)], [2]);
 
-    const small = await createStoreFixture(t, { maxBytes: 3 });
-    await small.store.put(KEY, { archive: new Uint8Array([1, 2]), provider: 'mineru' });
-    await small.store.put('d'.repeat(64), { archive: new Uint8Array([1, 2]), provider: 'mineru' });
-    assert.deepEqual(await small.store.getStats(), { entries: 1, sizeBytes: 2 });
-    assert.throws(() => small.store.put(KEY, { archive: new Uint8Array(0) }), /store limit/);
-    assert.throws(() => small.store.get('bad'), /SHA-256/);
+    const bounded = await createStoreFixture(t, { maxArchiveBytes: 3 });
+    await bounded.store.put(KEY, { archive: new Uint8Array([1, 2]), provider: 'mineru' });
+    await bounded.store.put('d'.repeat(64), { archive: new Uint8Array([1, 2]), provider: 'mineru' });
+    assert.deepEqual(await bounded.store.getStats(), { entries: 2, sizeBytes: 4 });
+    assert.throws(
+        () => bounded.store.put(KEY, { archive: new Uint8Array(4), provider: 'mineru' }),
+        /store limit/
+    );
+    assert.throws(() => bounded.store.get('bad'), /SHA-256/);
 });
 
 test('honors an aborted signal before touching the store', async t => {

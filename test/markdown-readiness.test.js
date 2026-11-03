@@ -18,11 +18,12 @@ import {
     createMarkdownReadinessController,
 } from '../src/cache/markdown-readiness-controller.js';
 import {
+    createMarkdownReadinessIndex,
+    parseMarkdownReadinessRecords,
     resolveMarkdownReadinessIdentity,
 } from '../src/cache/markdown-readiness-index.js';
 import {
     MarkdownCache,
-    MARKDOWN_CACHE_MAX_AGE_MS,
 } from '../src/cache/markdown-cache.js';
 import {
     MarkdownReadinessStore,
@@ -56,13 +57,12 @@ test('marks the parent paper and its PDF when the current cache is readable', as
     assert.equal(harness.changes, 1);
 });
 
-test('turns the marker off when the cache expires, is removed, or is cleared', async () => {
+test('keeps the marker when the cache remains readable, and clears it when removed', async () => {
     const harness = createHarness();
     await harness.controller.remember(record());
-    harness.indexNow = NOW + MARKDOWN_CACHE_MAX_AGE_MS + 1;
-    assert.equal(harness.controller.isReady(parentItem(), PROFILE), false);
+    harness.indexNow = NOW + 10 * 365 * 24 * 60 * 60 * 1_000;
+    assert.equal(harness.controller.isReady(parentItem(), PROFILE), true);
 
-    harness.indexNow = NOW;
     await harness.controller.forgetCacheKeys([CACHE_KEY]);
     assert.equal(harness.controller.isReady(parentItem(), PROFILE), false);
 
@@ -100,7 +100,7 @@ test('drops index records whose cache entries are no longer readable', async () 
 
     await harness.controller.retainLiveEntries([{
         cacheKey: OTHER_CACHE_KEY,
-        expiresAt: NOW + 10,
+        expiresAt: null,
     }]);
 
     assert.equal(harness.controller.isReady(attachmentItem(), PROFILE), false);
@@ -110,6 +110,27 @@ test('drops index records whose cache entries are no longer readable', async () 
     }, PROFILE), true);
 });
 
+test('migrates finite readiness expiry records to permanent records', () => {
+    const legacy = record({ expiresAt: NOW - 1 });
+    const records = parseMarkdownReadinessRecords({ schemaVersion: 1, records: [legacy] });
+    assert.equal(records[0].expiresAt, null);
+
+    const index = createMarkdownReadinessIndex({ now: () => NOW + 10 * 365 * 24 * 60 * 60 * 1_000 });
+    index.replace(records);
+    assert.equal(index.isReady(parentItem(), PROFILE), true);
+});
+
+test('does not cap readiness records at the former fixed maximum', () => {
+    const index = createMarkdownReadinessIndex({ now: () => NOW });
+    for (let number = 0; number < 501; number++) {
+        index.remember(record({
+            itemKey: `P${number.toString(36).padStart(6, '0')}`,
+            attachmentKey: `A${number.toString(36).padStart(6, '0')}`,
+            cacheKey: number.toString(16).padStart(64, '0'),
+        }));
+    }
+    assert.equal(index.snapshot().length, 501);
+});
 test('resolves a PDF attachment to its parent paper without writing the item', () => {
     const item = attachmentItem();
     item.addTag = () => { throw new Error('must not tag'); };
@@ -155,6 +176,62 @@ test('persists readiness only in the profile index', async t => {
     assert.equal(savedPath.startsWith(rootPath), true);
     await first.clear();
     assert.deepEqual(await first.load(), []);
+});
+
+test('migrates finite readiness expiries in the persisted index', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-readiness-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    await writeFile(path.join(rootPath, 'index.json'), JSON.stringify({
+        schemaVersion: 1,
+        records: [record({ expiresAt: NOW - 1 })],
+    }));
+    const store = new MarkdownReadinessStore({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, parent: path.dirname },
+    });
+
+    assert.deepEqual(await store.load(), [record({ expiresAt: null })]);
+    const persisted = JSON.parse(await readFile(path.join(rootPath, 'index.json'), 'utf8'));
+    assert.equal(persisted.records[0].expiresAt, null);
+});
+
+test('keeps legacy readiness records if the best-effort migration write fails', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-readiness-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const indexPath = path.join(rootPath, 'index.json');
+    const legacy = JSON.stringify({ schemaVersion: 1, records: [record()] });
+    await writeFile(indexPath, legacy);
+    const ioUtils = createNodeIOUtils();
+    ioUtils.writeUTF8 = async () => { throw new Error('migration write failed'); };
+    const store = new MarkdownReadinessStore({
+        rootPath,
+        ioUtils,
+        pathUtils: { join: path.join, parent: path.dirname },
+    });
+
+    assert.deepEqual(await store.load(), [record({ expiresAt: null })]);
+    assert.equal(await readFile(indexPath, 'utf8'), legacy);
+});
+
+test('persists readiness indexes larger than the former byte cap', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-readiness-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const store = new MarkdownReadinessStore({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: { join: path.join, parent: path.dirname },
+    });
+    const records = Array.from({ length: 800 }, (_, number) => record({
+        itemKey: `P${number.toString(36).padStart(6, '0')}`,
+        attachmentKey: `A${number.toString(36).padStart(6, '0')}`,
+        cacheKey: number.toString(16).padStart(64, '0'),
+        parserProfile: `profile-${number}-${'p'.repeat(1_500)}`,
+    }));
+
+    await store.save(records);
+    assert.ok((await stat(path.join(rootPath, 'index.json'))).size > 1024 * 1024);
+    assert.equal((await store.load()).length, 800);
 });
 
 test('registers a narrow local column and does not require a color tag', () => {
@@ -282,7 +359,7 @@ function assertEmptyReadinessCell(cell) {
     assert.equal(cell.childNodes.length, 0);
 }
 
-test('notifies readiness when a cache entry is written, expires, or cleared', async t => {
+test('notifies readiness when a cache entry is written or cleared', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-readiness-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
     const events = [];
@@ -296,7 +373,6 @@ test('notifies readiness when a cache entry is written, expires, or cleared', as
             filename: path.basename,
         },
         now: () => now,
-        maxAgeMs: 1_000,
     });
     cache.setStoreChangeListener(event => events.push(event));
 
@@ -304,22 +380,19 @@ test('notifies readiness when a cache entry is written, expires, or cleared', as
     await flushMicrotasks();
     const readable = await cache.hasReadable(CACHE_KEY);
     assert.equal(readable.cacheKey, CACHE_KEY);
-    assert.equal(readable.expiresAt, NOW + 1_000);
+    assert.equal(readable.expiresAt, null);
     assert.deepEqual(await cache.listReadableEntries(), [readable]);
 
     now = NOW + 1_001;
-    assert.equal(await cache.hasReadable(CACHE_KEY), null);
-    assert.equal(await cache.get(CACHE_KEY), null);
-    await flushMicrotasks();
+    assert.equal((await cache.hasReadable(CACHE_KEY)).expiresAt, null);
+    assert.equal((await cache.get(CACHE_KEY)).markdown, '# Paper');
     await cache.clear();
     await flushMicrotasks();
 
     assert.deepEqual(events.map(event => event.type), [
         'written',
-        'removed',
         'cleared',
     ]);
-    assert.deepEqual(events[1].cacheKeys, [CACHE_KEY]);
 });
 
 function createHarness() {
@@ -356,7 +429,7 @@ function record(overrides = {}) {
         attachmentKey: 'ATTACH01',
         cacheKey: CACHE_KEY,
         parserProfile: PROFILE,
-        expiresAt: NOW + MARKDOWN_CACHE_MAX_AGE_MS,
+        expiresAt: null,
         ...overrides,
     };
 }

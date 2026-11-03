@@ -5,7 +5,6 @@ import {
 
 const STORE_SCHEMA_VERSION = 1;
 const INDEX_FILE = 'index.json';
-const MAX_INDEX_BYTES = 1024 * 1024;
 
 export function createZoteroMarkdownReadinessStore({
     zotero,
@@ -57,14 +56,16 @@ export class MarkdownReadinessStore {
         if (!(await this.io.exists(filePath))) return [];
         try {
             const serialized = await this.io.readUTF8(filePath);
-            if (new TextEncoder().encode(serialized).length > MAX_INDEX_BYTES) {
-                throw new Error('Markdown readiness index exceeds the size limit');
-            }
             const parsed = JSON.parse(serialized);
             if (parsed?.schemaVersion !== STORE_SCHEMA_VERSION) {
                 throw new Error('Unsupported Markdown readiness index');
             }
-            return parseMarkdownReadinessRecords(parsed);
+            const records = parseMarkdownReadinessRecords(parsed);
+            if (Array.isArray(parsed.records)
+                && parsed.records.some(record => Number.isFinite(record?.expiresAt))) {
+                await this.#save(records).catch(() => {});
+            }
+            return records;
         }
         catch {
             await this.io.remove(filePath, { ignoreAbsent: true }).catch(() => {});
@@ -75,9 +76,6 @@ export class MarkdownReadinessStore {
     async #save(records) {
         const payload = serializeMarkdownReadinessRecords(records);
         const serialized = JSON.stringify(payload);
-        if (new TextEncoder().encode(serialized).length > MAX_INDEX_BYTES) {
-            throw new Error('Markdown readiness index exceeds the size limit');
-        }
         await this.#ensureRoot();
         const filePath = this.#filePath();
         await this.io.writeUTF8(filePath, serialized, {

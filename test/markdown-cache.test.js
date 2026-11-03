@@ -395,7 +395,7 @@ test('retains prior source translations for the same language', async t => {
     );
 });
 
-test('bounds cached translation variants and removes evicted translation files', async t => {
+test('retains all cached translation variants and removes replaced files', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
     const cache = new MarkdownCache({
@@ -432,14 +432,15 @@ test('bounds cached translation variants and removes evicted translation files',
         /^translation-.*\.json$/.test(file)
     ));
 
-    assert.equal(metadata.translations.length, 32);
-    assert.equal(translationFiles.length, 32, JSON.stringify({
+    assert.equal(metadata.translations.length, 33);
+    assert.equal(translationFiles.length, 33, JSON.stringify({
         referenced: metadata.translations.map(value => value.translationFile),
         translationFiles,
     }));
     assert.equal(
-        await cache.getTranslation(CACHE_KEY, '1'.padStart(64, '0')),
-        null
+        (await cache.getTranslation(CACHE_KEY, '1'.padStart(64, '0')))
+            .targetLanguage,
+        'language-0'
     );
     assert.equal(
         (await cache.getTranslation(CACHE_KEY, '21'.padStart(64, '0')))
@@ -448,7 +449,7 @@ test('bounds cached translation variants and removes evicted translation files',
     );
 });
 
-test('repairs excess translation metadata and removes its files', async t => {
+test('repairs duplicate translation metadata and removes its files', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
     const cache = new MarkdownCache({
@@ -483,7 +484,7 @@ test('repairs excess translation metadata and removes its files', async t => {
     await writeFile(path.join(entryPath, excessFile), '{}');
     metadata.translations.push({
         translationFile: excessFile,
-        translationKey: 'f'.repeat(64),
+        translationKey: '1'.padStart(64, '0'),
         translationBytes: 2,
         targetLanguage: 'excess-language',
     });
@@ -1030,7 +1031,7 @@ test('checks a cached source-map file size before reading it', async t => {
     assert.equal(sourceMapReads, 0);
 });
 
-test('prunes the oldest entry when the cache exceeds its entry limit', async t => {
+test('keeps entries when the cache grows beyond the former entry limit', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
     let timestamp = 1_700_000_000_000;
@@ -1039,14 +1040,13 @@ test('prunes the oldest entry when the cache exceeds its entry limit', async t =
         ioUtils: createNodeIOUtils(),
         pathUtils: { join: path.join, filename: path.basename },
         now: () => timestamp,
-        maxEntries: 1,
     });
 
     await cache.put(CACHE_KEY, { markdown: '# First' });
     timestamp++;
     await cache.put(SECOND_CACHE_KEY, { markdown: '# Second' });
 
-    assert.equal(await cache.get(CACHE_KEY), null);
+    assert.equal((await cache.get(CACHE_KEY)).markdown, '# First');
     assert.equal((await cache.get(SECOND_CACHE_KEY)).markdown, '# Second');
 });
 
@@ -1167,17 +1167,17 @@ test('strict reads retain damaged Markdown entries while default reads still sel
     }
 });
 
-test('strict Markdown reads still return null for missing and expired entries', async t => {
+test('strict Markdown reads still return null for missing entries and retain old entries', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
     let timestamp = 1_000;
     const cache = new MarkdownCache({ rootPath, ioUtils: createNodeIOUtils(),
-        pathUtils: { join: path.join, filename: path.basename }, now: () => timestamp, maxAgeMs: 100 });
+        pathUtils: { join: path.join, filename: path.basename }, now: () => timestamp });
     assert.equal(await cache.get(CACHE_KEY, { throwOnReadError: true }), null);
     await cache.put(CACHE_KEY, { markdown: '# Paper' });
     timestamp += 101;
-    assert.equal(await cache.get(CACHE_KEY, { throwOnReadError: true }), null);
-    assert.deepEqual(await cache.getStats(), { entries: 0, sizeBytes: 0 });
+    assert.equal((await cache.get(CACHE_KEY, { throwOnReadError: true })).markdown, '# Paper');
+    assert.deepEqual(await cache.getStats(), { entries: 1, sizeBytes: 7 });
 });
 
 test('Markdown reads propagate AbortError without removing the entry', async t => {
@@ -1317,7 +1317,7 @@ test('serializes reads with replacement writes for the same PDF', async t => {
     assert.equal((await cache.get(CACHE_KEY)).markdown, '# Replacement result');
 });
 
-test('treats an entry past its inactivity limit as a cache miss', async t => {
+test('retains an entry beyond the former inactivity limit', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
     let timestamp = 1_700_000_000_000;
@@ -1326,14 +1326,13 @@ test('treats an entry past its inactivity limit as a cache miss', async t => {
         ioUtils: createNodeIOUtils(),
         pathUtils: { join: path.join, filename: path.basename },
         now: () => timestamp,
-        maxAgeMs: 1000,
     });
     await cache.put(CACHE_KEY, { markdown: '# Expired result' });
 
     timestamp += 1001;
 
-    assert.equal(await cache.get(CACHE_KEY), null);
-    assert.deepEqual(await cache.getStats(), { entries: 0, sizeBytes: 0 });
+    assert.equal((await cache.get(CACHE_KEY)).markdown, '# Expired result');
+    assert.deepEqual(await cache.getStats(), { entries: 1, sizeBytes: 16 });
 });
 
 test('does not prune an entry while another cache operation is writing it', async t => {

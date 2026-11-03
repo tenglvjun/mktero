@@ -21,7 +21,6 @@ import {
     createMarkdownCacheKey,
     createMinerUCacheKey,
     createZoteroMarkdownCache,
-    MARKDOWN_CACHE_MAX_AGE_MS,
 } from './cache/markdown-cache.js';
 import { createMarkdownReadinessController } from './cache/markdown-readiness-controller.js';
 import { resolveMarkdownReadinessIdentity } from './cache/markdown-readiness-index.js';
@@ -3598,7 +3597,7 @@ async function rememberMarkdownReadiness(itemID, result) {
             ...identity,
             cacheKey: result.cacheKey,
             parserProfile,
-            expiresAt: readable.expiresAt || (Date.now() + MARKDOWN_CACHE_MAX_AGE_MS),
+            expiresAt: readable.expiresAt,
         });
     }
     catch (error) {

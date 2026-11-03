@@ -1,4 +1,3 @@
-const MAX_RECORDS = 500;
 const MAX_PARSER_PROFILE_LENGTH = 8_192;
 const ITEM_KEY = /^[A-Za-z0-9]{1,32}$/;
 const CACHE_KEY = /^[a-f0-9]{64}$/;
@@ -20,7 +19,7 @@ export function createMarkdownReadinessIndex({
             && record.parserProfile === parserProfile
             && (record.itemKey === itemKey || record.attachmentKey === itemKey)
             && liveCacheKeys.has(record.cacheKey)
-            && record.expiresAt > timestamp
+            && (record.expiresAt === null || record.expiresAt > timestamp)
         ))?.cacheKey || null;
     }
 
@@ -29,7 +28,7 @@ export function createMarkdownReadinessIndex({
             records = normalizeRecords(nextRecords);
             liveCacheKeys.clear();
             for (const record of records) {
-                if (record.expiresAt > now()) liveCacheKeys.add(record.cacheKey);
+                if (record.expiresAt === null || record.expiresAt > now()) liveCacheKeys.add(record.cacheKey);
             }
         },
 
@@ -42,7 +41,6 @@ export function createMarkdownReadinessIndex({
             ));
             records.push(normalized);
             liveCacheKeys.add(normalized.cacheKey);
-            records = capRecords(records, liveCacheKeys);
             return true;
         },
 
@@ -75,8 +73,8 @@ export function createMarkdownReadinessIndex({
             const live = new Map();
             for (const entry of entries || []) {
                 if (!CACHE_KEY.test(String(entry?.cacheKey || ''))) continue;
-                if (!Number.isFinite(entry.expiresAt)) continue;
-                live.set(entry.cacheKey, entry.expiresAt);
+                if (entry.expiresAt !== null && !Number.isFinite(entry.expiresAt)) continue;
+                live.set(entry.cacheKey, null);
             }
             liveCacheKeys.clear();
             for (const cacheKey of live.keys()) liveCacheKeys.add(cacheKey);
@@ -86,7 +84,6 @@ export function createMarkdownReadinessIndex({
                     ...record,
                     expiresAt: live.get(record.cacheKey),
                 }));
-            records = capRecords(records, liveCacheKeys);
         },
 
         isReady(item, parserProfile) {
@@ -138,7 +135,7 @@ function normalizeRecords(records) {
         if (!normalized) continue;
         byIdentity.set(recordIdentity(normalized), normalized);
     }
-    return capRecords([...byIdentity.values()], null);
+    return [...byIdentity.values()];
 }
 
 function normalizeRecord(record) {
@@ -151,6 +148,7 @@ function normalizeRecord(record) {
     const parserProfile = typeof record?.parserProfile === 'string'
         ? record.parserProfile
         : '';
+    const expiresAt = record?.expiresAt;
     if (libraryID === null
         || !ITEM_KEY.test(itemKey)
         || !ITEM_KEY.test(attachmentKey)
@@ -158,7 +156,7 @@ function normalizeRecord(record) {
         || !parserProfile
         || parserProfile.length > MAX_PARSER_PROFILE_LENGTH
         || parserProfile.includes('\u0000')
-        || !Number.isFinite(record?.expiresAt)) {
+        || (expiresAt !== null && !Number.isFinite(expiresAt))) {
         return null;
     }
     return {
@@ -167,7 +165,7 @@ function normalizeRecord(record) {
         attachmentKey,
         cacheKey,
         parserProfile,
-        expiresAt: record.expiresAt,
+        expiresAt: null,
     };
 }
 
@@ -184,19 +182,4 @@ function sameAttachmentProfile(left, right) {
 
 function recordIdentity(record) {
     return `${record.libraryID}\0${record.attachmentKey}\0${record.parserProfile}`;
-}
-
-function capRecords(records, liveCacheKeys) {
-    if (records.length <= MAX_RECORDS) return records;
-    const kept = records
-        .slice()
-        .sort((left, right) => right.expiresAt - left.expiresAt)
-        .slice(0, MAX_RECORDS);
-    if (liveCacheKeys) {
-        const keptKeys = new Set(kept.map(record => record.cacheKey));
-        for (const cacheKey of [...liveCacheKeys]) {
-            if (!keptKeys.has(cacheKey)) liveCacheKeys.delete(cacheKey);
-        }
-    }
-    return kept;
 }

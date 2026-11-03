@@ -21,11 +21,6 @@ const CACHE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'entry.json';
 const MARKDOWN_FILE = 'document.md';
 const TRANSLATION_SCHEMA_VERSION = 1;
-const MAX_TRANSLATION_VARIANTS = 32;
-const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
-const DEFAULT_MAX_ENTRIES = 100;
-const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-export const MARKDOWN_CACHE_MAX_AGE_MS = DEFAULT_MAX_AGE_MS;
 export const DEFAULT_MAX_SOURCE_MAP_BYTES = 20 * 1024 * 1024;
 export const DEFAULT_MAX_SOURCE_LOCATIONS = 100_000;
 export const DEFAULT_MAX_TRANSLATION_BYTES = 16 * 1024 * 1024;
@@ -72,9 +67,6 @@ export class MarkdownCache {
         ioUtils,
         pathUtils,
         now = Date.now,
-        maxBytes = DEFAULT_MAX_BYTES,
-        maxEntries = DEFAULT_MAX_ENTRIES,
-        maxAgeMs = DEFAULT_MAX_AGE_MS,
         maxSourceMapBytes = DEFAULT_MAX_SOURCE_MAP_BYTES,
         maxSourceLocations = DEFAULT_MAX_SOURCE_LOCATIONS,
         maxTranslationBytes = DEFAULT_MAX_TRANSLATION_BYTES,
@@ -90,9 +82,6 @@ export class MarkdownCache {
         this.io = ioUtils;
         this.path = pathUtils;
         this.now = now;
-        this.maxBytes = maxBytes;
-        this.maxEntries = maxEntries;
-        this.maxAgeMs = maxAgeMs;
         this.maxSourceMapBytes = maxSourceMapBytes;
         this.maxSourceLocations = maxSourceLocations;
         this.maxTranslationBytes = maxTranslationBytes;
@@ -132,11 +121,6 @@ export class MarkdownCache {
                 metadataPath,
                 metadata
             );
-            if (this.#isExpired(metadata)) {
-                await this.io.remove(entryPath, { recursive: true, ignoreAbsent: true });
-                this.#notifyStoreChange({ type: 'removed', cacheKeys: [cacheKey] });
-                return null;
-            }
             const markdownFile = metadata.markdownFile || MARKDOWN_FILE;
             const [markdown, assets, sourceMapJSON, chromeRangesJSON] = await Promise.all([
                 this.io.readUTF8(this.path.join(entryPath, markdownFile)),
@@ -385,7 +369,7 @@ export class MarkdownCache {
         if (!target || target.translations?.length) return 0;
         const fromPath = this.#entryPath(fromCacheKey);
         const source = await this.#readMetadata(fromPath, this.path.join(fromPath, METADATA_FILE), fromCacheKey);
-        const descriptors = (source?.translations || []).slice(-MAX_TRANSLATION_VARIANTS);
+        const descriptors = source?.translations || [];
         let copied = 0;
         for (const descriptor of descriptors) {
             let record;
@@ -454,8 +438,7 @@ export class MarkdownCache {
             });
             const previousTranslations = metadata.translations || [];
             const retainedTranslations = previousTranslations
-                .filter(descriptor => descriptor.translationKey !== translationKey)
-                .slice(-(MAX_TRANSLATION_VARIANTS - 1));
+                .filter(descriptor => descriptor.translationKey !== translationKey);
             const translations = [
                 ...retainedTranslations,
                 {
@@ -493,7 +476,7 @@ export class MarkdownCache {
             )));
             throw error;
         }
-        await this.#scan({ removeInvalid: true, enforceLimits: true });
+        await this.#scan({ removeInvalid: true });
     }
 
     async #put(cacheKey, result, signal, figureRestoration) {
@@ -678,7 +661,7 @@ export class MarkdownCache {
             )));
             throw error;
         }
-        await this.#scan({ removeInvalid: true, enforceLimits: true });
+        await this.#scan({ removeInvalid: true });
         this.#notifyStoreChange({ type: 'written', cacheKey });
     }
 
@@ -692,19 +675,15 @@ export class MarkdownCache {
     }
 
     prune() {
-        return this.#withOperation(() => this.#scan({
-            removeInvalid: true,
-            enforceLimits: true,
-        }));
+        return this.#withOperation(() => this.#scan({ removeInvalid: true }));
     }
 
-    async #scan({ removeInvalid, enforceLimits }) {
+    async #scan({ removeInvalid }) {
         const entriesPath = this.path.join(this.rootPath, 'entries');
         if (!(await this.io.exists(entriesPath))) {
             return { entries: 0, sizeBytes: 0 };
         }
 
-        const now = this.now();
         const entries = [];
         const removedKeys = [];
         for (const entryPath of await this.io.getChildren(entriesPath)) {
@@ -728,12 +707,6 @@ export class MarkdownCache {
                     metadata,
                     { persist: removeInvalid }
                 );
-                if (this.#isExpired(repairedMetadata, now)) {
-                    if (removeInvalid) {
-                        await this.#removeEntry(entryPath, cacheKey, removedKeys);
-                    }
-                    continue;
-                }
                 entries.push({
                     path: entryPath,
                     cacheKey,
@@ -748,14 +721,7 @@ export class MarkdownCache {
             }
         }
 
-        entries.sort((left, right) => left.lastAccessedAt - right.lastAccessedAt);
-        let sizeBytes = entries.reduce((total, entry) => total + entry.sizeBytes, 0);
-        while (enforceLimits
-            && (entries.length > this.maxEntries || sizeBytes > this.maxBytes)) {
-            const entry = entries.shift();
-            await this.#removeEntry(entry.path, entry.cacheKey, removedKeys);
-            sizeBytes -= entry.sizeBytes;
-        }
+        const sizeBytes = entries.reduce((total, entry) => total + entry.sizeBytes, 0);
         if (removedKeys.length) {
             this.#notifyStoreChange({ type: 'removed', cacheKeys: removedKeys });
         }
@@ -765,7 +731,6 @@ export class MarkdownCache {
     getStats() {
         return this.#withOperation(() => this.#scan({
             removeInvalid: false,
-            enforceLimits: false,
         }));
     }
 
@@ -782,7 +747,7 @@ export class MarkdownCache {
     async #hasReadable(cacheKey) {
         const metadata = await this.#readReadableMetadata(cacheKey);
         return metadata
-            ? { cacheKey, expiresAt: metadata.lastAccessedAt + this.maxAgeMs }
+            ? { cacheKey, expiresAt: null }
             : null;
     }
 
@@ -798,7 +763,7 @@ export class MarkdownCache {
                 if (!metadata) continue;
                 readable.push({
                     cacheKey,
-                    expiresAt: metadata.lastAccessedAt + this.maxAgeMs,
+                    expiresAt: null,
                 });
             }
             catch {
@@ -820,7 +785,6 @@ export class MarkdownCache {
                 this.maxChromeRangesBytes,
                 this.maxFigureRestorationBytes
             );
-            if (this.#isExpired(metadata)) return null;
             return metadata;
         }
         catch {
@@ -986,7 +950,7 @@ export class MarkdownCache {
             ? metadata.translations
             : null;
         const candidates = storedTranslations
-            ? storedTranslations.slice(0, MAX_TRANSLATION_VARIANTS)
+            ? storedTranslations
             : legacyTranslationDescriptor(metadata)
                 ? [legacyTranslationDescriptor(metadata)]
                 : [];
@@ -994,12 +958,6 @@ export class MarkdownCache {
             && hasLegacyTranslationMetadata(metadata);
         const translations = [];
         const rejectedFiles = new Set();
-        for (let index = MAX_TRANSLATION_VARIANTS;
-            index < (storedTranslations?.length || 0);
-            index++) {
-            const file = storedTranslations[index]?.translationFile;
-            if (isSafeTranslationFile(file)) rejectedFiles.add(file);
-        }
         const acceptedFiles = new Set();
         const acceptedKeys = new Set();
         for (const candidate of candidates) {
@@ -1139,10 +1097,6 @@ export class MarkdownCache {
         await Promise.all(files.map(filePath => this.io.remove(filePath, {
             ignoreAbsent: true,
         }).catch(() => {})));
-    }
-
-    #isExpired(metadata, timestamp = this.now()) {
-        return timestamp - metadata.lastAccessedAt > this.maxAgeMs;
     }
 
     async #withOperation(operation) {
