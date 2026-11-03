@@ -4,14 +4,9 @@ import { toUint8Array } from '../mineru/binary.js';
 const STORE_SCHEMA_VERSION = 1;
 const KEY_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'entry.json';
-const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
-const DEFAULT_MAX_ENTRIES = 100;
-const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const MAX_PROVIDER_LENGTH = 32;
 const MAX_PROFILE_LENGTH = 4096;
-
-export const MINERU_RESULT_STORE_MAX_AGE_MS = DEFAULT_MAX_AGE_MS;
 
 export function createZoteroMinerUResultStore({ zotero, ioUtils, pathUtils }) {
     const profilePath = zotero?.Profile?.dir;
@@ -59,9 +54,6 @@ export class MinerUResultStore {
         ioUtils,
         pathUtils,
         now = Date.now,
-        maxBytes = DEFAULT_MAX_BYTES,
-        maxEntries = DEFAULT_MAX_ENTRIES,
-        maxAgeMs = DEFAULT_MAX_AGE_MS,
         maxArchiveBytes = DEFAULT_MAX_ARCHIVE_BYTES,
     }) {
         if (!rootPath) throw new TypeError('A MinerU result store root path is required');
@@ -71,9 +63,6 @@ export class MinerUResultStore {
         this.io = ioUtils;
         this.path = pathUtils;
         this.now = now;
-        this.maxBytes = maxBytes;
-        this.maxEntries = maxEntries;
-        this.maxAgeMs = maxAgeMs;
         this.maxArchiveBytes = maxArchiveBytes;
         this.operationTail = Promise.resolve();
     }
@@ -103,11 +92,11 @@ export class MinerUResultStore {
     }
 
     prune() {
-        return this.#withOperation(() => this.#scan({ removeInvalid: true, enforceLimits: true }));
+        return this.#withOperation(() => this.#scan({ removeInvalid: true }));
     }
 
     getStats() {
-        return this.#withOperation(() => this.#scan({ removeInvalid: false, enforceLimits: false }));
+        return this.#withOperation(() => this.#scan({ removeInvalid: false }));
     }
 
     clear() {
@@ -125,10 +114,6 @@ export class MinerUResultStore {
         try {
             const metadata = JSON.parse(await this.io.readUTF8(metadataPath));
             validateMetadata(metadata, key, this.maxArchiveBytes);
-            if (this.#isExpired(metadata)) {
-                await this.#remove(entryPath);
-                return null;
-            }
             const archivePath = this.path.join(entryPath, metadata.archiveFile);
             const info = await this.io.stat(archivePath);
             if (info?.size !== metadata.archiveBytes) throw new Error('Stored MinerU archive size is invalid');
@@ -191,14 +176,13 @@ export class MinerUResultStore {
             await this.io.remove(this.path.join(entryPath, previous.archiveFile), { ignoreAbsent: true })
                 .catch(() => {});
         }
-        await this.#scan({ removeInvalid: true, enforceLimits: true });
+        await this.#scan({ removeInvalid: true });
     }
 
-    async #scan({ removeInvalid, enforceLimits }) {
+    async #scan({ removeInvalid }) {
         const entriesPath = this.path.join(this.rootPath, 'entries');
         if (!(await this.io.exists(entriesPath))) return { entries: 0, sizeBytes: 0 };
         const entries = [];
-        const timestamp = this.now();
         for (const entryPath of await this.io.getChildren(entriesPath)) {
             try {
                 if ((await this.io.stat(entryPath)).type !== 'directory') continue;
@@ -206,24 +190,13 @@ export class MinerUResultStore {
                 validateKey(key);
                 const metadata = JSON.parse(await this.io.readUTF8(this.path.join(entryPath, METADATA_FILE)));
                 validateMetadata(metadata, key, this.maxArchiveBytes);
-                if (this.#isExpired(metadata, timestamp)) {
-                    if (removeInvalid) await this.#remove(entryPath);
-                    continue;
-                }
                 entries.push({ path: entryPath, lastAccessedAt: metadata.lastAccessedAt, sizeBytes: metadata.archiveBytes });
             }
             catch {
                 if (removeInvalid) await this.#remove(entryPath).catch(() => {});
             }
         }
-        entries.sort((left, right) => left.lastAccessedAt - right.lastAccessedAt);
-        let sizeBytes = entries.reduce((sum, entry) => sum + entry.sizeBytes, 0);
-        while (enforceLimits && entries.length
-            && (entries.length > this.maxEntries || sizeBytes > this.maxBytes)) {
-            const entry = entries.shift();
-            await this.#remove(entry.path);
-            sizeBytes -= entry.sizeBytes;
-        }
+        const sizeBytes = entries.reduce((sum, entry) => sum + entry.sizeBytes, 0);
         return { entries: entries.length, sizeBytes };
     }
 
@@ -256,10 +229,6 @@ export class MinerUResultStore {
 
     #remove(entryPath) {
         return this.io.remove(entryPath, { recursive: true, ignoreAbsent: true });
-    }
-
-    #isExpired(metadata, timestamp = this.now()) {
-        return timestamp - metadata.lastAccessedAt > this.maxAgeMs;
     }
 
     async #withOperation(operation) {

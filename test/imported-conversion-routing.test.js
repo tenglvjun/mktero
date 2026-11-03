@@ -420,25 +420,21 @@ test('real derived store corruption and I/O failures never become provider cache
     }
 });
 
-test('real stores still allow fallback when imported copies are missing or expired', async t => {
-    for (const state of ['missing', 'expired']) {
-        for (const method of ['extract', 'readCached']) {
-            await t.test(`${state}: ${method}`, async t => {
-                let timestamp = 1_000;
-                const f = await realStoreFixture(t, {
-                    raw: state === 'expired', derived: state === 'expired',
-                    now: () => timestamp, maxAgeMs: 100,
-                });
-                timestamp += 101;
-                f.handlers.readCached = async () => f.converted;
-                assert.equal(await f.router[method](42), f.converted);
-                assert.deepEqual(f.calls.map(call => call.method), [method]);
-                assert.equal(await f.index.get(f.selection), null);
-                assert.deepEqual(f.diskSelections(), []);
-                assert.equal(await f.io.exists(f.rawPath), false);
-                assert.equal(await f.io.exists(f.derivedPath), false);
+test('real stores still allow fallback when imported copies are missing', async t => {
+    for (const method of ['extract', 'readCached']) {
+        await t.test(`missing: ${method}`, async t => {
+            const f = await realStoreFixture(t, {
+                raw: false,
+                derived: false,
             });
-        }
+            f.handlers.readCached = async () => f.converted;
+            assert.equal(await f.router[method](42), f.converted);
+            assert.deepEqual(f.calls.map(call => call.method), [method]);
+            assert.equal(await f.index.get(f.selection), null);
+            assert.deepEqual(f.diskSelections(), []);
+            assert.equal(await f.io.exists(f.rawPath), false);
+            assert.equal(await f.io.exists(f.derivedPath), false);
+        });
     }
 });
 

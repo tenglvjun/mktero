@@ -6,10 +6,10 @@
   local cache for that PDF under the current conversion settings or its
   selected imported result. A preparing spinner is session-only and disappears
   on shutdown. The column does not scan the library, modify the item, or sync.
-  Clearing the cache or expiry turns the ready mark off; changing parser
-  profiles changes the converted cache used. An import selection without
-  readable content is not marked ready. Items converted before the
-  column existed stay unmarked until that cache is opened or written again.
+  Clearing the cache turns the ready mark off; changing parser profiles changes
+  the converted cache used. An import selection without readable content is not
+  marked ready. Items converted before the column existed stay unmarked until
+  that cache is opened or written again.
   Batch preparation queues every selected PDF after skipping duplicates, and converts three at a time.
 - Only local PDF attachments are supported. A scanned PDF may convert through
   OCR but still lacks the text layer needed for precise Zotero highlights.
@@ -27,7 +27,9 @@
   choosing the import action validates and copies the result, then opens it.
   For a parent item with several candidate PDFs, choose the intended attachment
   from the submenu.
-- Imported copies use Mktero's local cache, which can expire or be evicted.
+- Imported copies use Mktero's local cache, which is retained unless you clear
+  it, a damaged entry is removed during self-healing, or the profile filesystem
+  is unavailable. Individual archive and document resource limits still apply.
   Deleting only the llm-for-zotero source does not affect a retained Mktero
   copy; a retained raw result can rebuild the document offline. Keep the
   original result if you need to import it again. If all local content for the
