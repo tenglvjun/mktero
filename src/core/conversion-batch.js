@@ -169,6 +169,10 @@ export function createConversionBatch({
             blockScope(error, scope, candidate);
         },
 
+        // Resuming lifts the account pause so every pending item is tried once.
+        // The server is the only authority on whether an item is chargeable: a
+        // document this account already converted is admitted without quota,
+        // and a new document is refused and re-pauses the scope.
         resume(scope = getScope()) {
             if (!scope || scope !== getScope() || !pausedScopes.has(scope)) return 0;
             stopped = false;

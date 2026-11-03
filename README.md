@@ -157,8 +157,11 @@ conversion results. Settings shows the current limit, used and reserved slots,
 and the reset time in your local time zone; the service counts UTC calendar
 days. A quota block pauses pending hosted work in the preparation window while
 submitted jobs continue. Use `Check quota and continue` or `Cancel remaining`;
-there is no automatic next-day restart. Reading local results, corrections,
-export, your own converters, and AI translation are unaffected.
+there is no automatic next-day restart. Continuing is allowed even at zero
+remaining capacity: the service admits a document this account already
+converted without consuming quota and refuses a new document again. Reading
+local results, corrections, export, your own converters, and AI translation are
+unaffected.
 
 ### Install
 

@@ -336,3 +336,78 @@ test('progress dialog exposes pause actions after delayed opening and removes th
     assert.equal(win.document.getElementById('mktero-quota-resume'), null);
     dom.window.close();
 });
+
+// A zero remaining balance blocks new documents only. Resuming must still lift
+// the account pause, because an item this account already converted is admitted
+// without consuming quota. The server re-pauses the scope on a real refusal.
+test('resume lifts the account pause even when the remaining balance is zero', async () => {
+    const source = await readFile(new URL('../src/bootstrap.js', import.meta.url), 'utf8');
+    const resumeSource = source.slice(source.indexOf('async function resumeQuotaBatch()'),
+        source.indexOf('\nfunction ensureConversionProgress',
+            source.indexOf('async function resumeQuotaBatch()')));
+    const calls = [];
+    const quota = { mode: 'enforce', limit: 1, used: 1, reserved: 0, remaining: 0 };
+    // Mirrors the real batch: resume() clears the scope, so pausedScope() then
+    // returns null and the progress row is unpaused.
+    let paused = quotaError();
+    const context = vm.createContext({
+        runtime: {
+            conversionProgress: {
+                setPaused: value => calls.push(['pause', value]),
+                setStatus: value => calls.push(['status', value]),
+            },
+            conversionBatch: {
+                pausedScope: () => paused,
+                resume: () => { calls.push(['resume']); paused = null; return 2; },
+            },
+        },
+        currentConversionScope: () => 'mktero:1',
+        runtimeTranslate: (key, params) => `${key}:${params?.count ?? ''}`,
+        ensureAccountAccessToken: async () => 'token',
+        getAccountApiBase: () => 'https://api.example',
+        getMkteroConversionQuota: async () => quota,
+        createWindowFetch: () => async () => new Response('{}'),
+        liveZoteroWindow: () => null,
+        Zotero: {},
+        userFacingError: () => 'quota-error',
+    });
+    vm.runInContext(`${resumeSource}\nthis.resume = resumeQuotaBatch`, context);
+    await context.resume();
+    assert.deepEqual(calls, [
+        ['resume'],
+        ['pause', false],
+        ['status', 'batch.quotaResumeWithoutCapacity:2'],
+    ]);
+});
+
+test('resume refuses to lift the pause when the quota snapshot is unavailable', async () => {
+    const source = await readFile(new URL('../src/bootstrap.js', import.meta.url), 'utf8');
+    const resumeSource = source.slice(source.indexOf('async function resumeQuotaBatch()'),
+        source.indexOf('\nfunction ensureConversionProgress',
+            source.indexOf('async function resumeQuotaBatch()')));
+    const calls = [];
+    const context = vm.createContext({
+        runtime: {
+            conversionProgress: {
+                setPaused: value => calls.push(['pause', value]),
+                setStatus: value => calls.push(['status', value]),
+            },
+            conversionBatch: {
+                pausedScope: () => quotaError(),
+                resume: () => { calls.push(['resume']); return 0; },
+            },
+        },
+        currentConversionScope: () => 'mktero:1',
+        runtimeTranslate: key => key,
+        ensureAccountAccessToken: async () => 'token',
+        getAccountApiBase: () => 'https://api.example',
+        getMkteroConversionQuota: async () => null,
+        createWindowFetch: () => async () => new Response('{}'),
+        liveZoteroWindow: () => null,
+        Zotero: {},
+        userFacingError: () => 'quota-error',
+    });
+    vm.runInContext(`${resumeSource}\nthis.resume = resumeQuotaBatch`, context);
+    await context.resume();
+    assert.deepEqual(calls, [['status', 'error.mkteroQuotaUnavailable']]);
+});

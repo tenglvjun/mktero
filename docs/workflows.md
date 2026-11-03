@@ -470,7 +470,10 @@ A quota response keeps the blocked item and pending items in the preparation
 window. Already submitted jobs continue. `Check quota and continue` queries the
 current quota and explicitly resumes the pending work, rechecking local readiness;
 `Cancel remaining` discards pending items without aborting the in-flight work.
-New items for that account remain paused until explicitly resumed. The list lasts
+Resuming is allowed even when the remaining balance is zero: the service admits a
+document this account already converted without consuming quota, and refuses a new
+document again, which pauses the account once more. New items for that account
+remain paused until explicitly resumed. The list lasts
 only for this Zotero session and never restarts automatically at midnight.
 Switching accounts does not transfer the old list. To process the same PDF with
 another account or your own converter, explicitly select it again. Local cached
