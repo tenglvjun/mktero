@@ -1972,16 +1972,20 @@ async function resumeQuotaBatch() {
             }),
         });
         if (scope !== currentConversionScope()) return;
-        if (!quota || (quota.mode === 'enforce' && quota.remaining === 0)) {
-            runtime.conversionProgress?.setStatus(
-                quota ? userFacingError(runtime.conversionBatch.pausedScope(scope))
-                    : runtimeTranslate('error.mkteroQuotaUnavailable')
-            );
+        // A zero remaining balance only blocks new documents. An item this
+        // account already converted is admitted without consuming quota, so
+        // refusing to resume here would strand work the service still serves.
+        // Resume anyway: the server re-pauses the scope when a new document is
+        // actually refused.
+        if (!quota) {
+            runtime.conversionProgress?.setStatus(runtimeTranslate('error.mkteroQuotaUnavailable'));
             return;
         }
         const count = runtime.conversionBatch.resume(scope);
         runtime.conversionProgress?.setPaused(Boolean(runtime.conversionBatch.pausedScope(scope)));
-        runtime.conversionProgress?.setStatus(runtimeTranslate('batch.quotaResumed', { count }));
+        runtime.conversionProgress?.setStatus(quota.mode === 'enforce' && quota.remaining === 0
+            ? runtimeTranslate('batch.quotaResumeWithoutCapacity', { count })
+            : runtimeTranslate('batch.quotaResumed', { count }));
     }
     catch {
         runtime.conversionProgress?.setStatus(runtimeTranslate('error.mkteroQuotaUnavailable'));
