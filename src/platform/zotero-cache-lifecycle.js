@@ -393,7 +393,9 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
                     }
                     if (event !== 'delete' || type !== 'item') return;
                     for (const id of ids || []) if (Number.isSafeInteger(Number(id))) pendingIDs.add(Number(id));
-                    if (!pendingIDs.size) fullRequested = true;
+                    // Deleting a parent may remove child PDFs without listing their IDs.
+                    // Reconcile every orphan so cascade deletions are not deferred hourly.
+                    fullRequested = true;
                     schedule(CACHE_DELETE_DELAY_MS);
                 },
             }, ['item', 'file', 'collection-item', 'group', 'trash'], 'mktero-cache-ownership');

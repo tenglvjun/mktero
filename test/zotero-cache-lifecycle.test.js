@@ -268,6 +268,78 @@ test('delete events coalesce for five seconds and clean real files in the first 
     assert.equal(f.observers.size, 0);
 });
 
+test('parent deletion cleans a permanently removed child PDF when the notification names only the parent', async t => {
+    const f = await runtimeFixture(t);
+    const parent = { id: 99, libraryID: 1, key: 'PARENT01' };
+    const attachment = { ...f.item, isPDFAttachment: () => true };
+    f.items.push(parent, attachment);
+    f.items.splice(f.items.indexOf(parent), 2);
+
+    f.notify('delete', 'item', [parent.id]);
+    assert.equal(f.nextDelay(), CACHE_DELETE_DELAY_MS);
+    await f.run();
+
+    assert.equal(await f.stores.markdown.get(f.key), null);
+    assert.equal(await f.io.exists(path.join(f.dir, 'mktero-annotations/v1/item-1.json')), false);
+    assert.equal(await f.io.exists(path.join(f.dir, 'mktero-annotations/groups-v1/item-1.json')), false);
+    assert.deepEqual(await f.ownership.read(), []);
+    assert.equal(f.summaries.at(-1).removed, 1);
+});
+
+test('full parent-deletion reconciliation preserves trash and cross-library shared PDF caches', async t => {
+    const f = await runtimeFixture(t);
+    const secondData = Uint8Array.of(9, 8, 7, 6);
+    const second = { id: 2, libraryID: 1, key: 'PDF2' };
+    await f.adapter.rememberPDF(second, secondData);
+    const secondKey = await createMarkdownCacheKey(secondData);
+    await f.stores.markdown.put(secondKey, { markdown: 'Second', assets: [] });
+
+    const trashFile = path.join(f.dir, 'trash-copy.pdf');
+    const sharedFile = path.join(f.dir, 'shared-copy.pdf');
+    await fs.writeFile(trashFile, DATA);
+    await fs.writeFile(sharedFile, secondData);
+    f.zotero.Libraries.getAll = () => [{ libraryID: 1 }, { libraryID: 2 }];
+    f.items.push({ id: 10, libraryID: 1, key: 'TRASH001', deleted: true,
+        isPDFAttachment: () => true, getFilePathAsync: async () => trashFile });
+    f.items.push({ id: 20, libraryID: 2, key: 'SHARED01',
+        isPDFAttachment: () => true, getFilePathAsync: async () => sharedFile });
+
+    f.notify('delete', 'item', [99]);
+    await f.run();
+
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.ok(await f.stores.markdown.get(secondKey));
+    assert.equal(f.summaries.at(-1).referenced, 2);
+    assert.equal(f.summaries.at(-1).removed, 0);
+    assert.equal((await f.ownership.read()).length, 2);
+});
+
+test('full parent-deletion reconciliation defers a leased cache and retries when use ends', async t => {
+    const f = await runtimeFixture(t);
+    const parent = { id: 99, libraryID: 1, key: 'PARENT01' };
+    const attachment = { ...f.item, isPDFAttachment: () => true };
+    f.items.push(parent, attachment);
+    f.items.splice(f.items.indexOf(parent), 2);
+
+    let release;
+    const active = f.adapter.use(() => new Promise(resolve => { release = resolve; }), { itemID: f.item.id });
+    f.notify('delete', 'item', [parent.id]);
+    await f.run();
+
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.equal(f.summaries.at(-1).busy, 1);
+    assert.equal((await f.ownership.read()).length, 1);
+
+    release();
+    await active;
+    assert.equal(f.nextDelay(), CACHE_DELETE_DELAY_MS);
+    await f.run();
+
+    assert.equal(await f.stores.markdown.get(f.key), null);
+    assert.deepEqual(await f.ownership.read(), []);
+    assert.equal(f.summaries.at(-1).removed, 1);
+});
+
 test('startup reconciles missed deletions and old future-dated tombstones without waiting', async t => {
     const f = await runtimeFixture(t);
     const records = await f.ownership.read();
