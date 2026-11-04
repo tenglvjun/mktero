@@ -199,8 +199,11 @@ Only supported local results can be imported; see [Workflows](./docs/workflows.m
 for the format requirements and how to reimport or explicitly reparse. Mktero's
 Markdown and raw MinerU caches do not automatically evict entries by count,
 total size, or inactivity. After a PDF attachment is permanently deleted,
-registered orphaned data can be removed after a 30-day grace period; trash and
-shared PDFs remain protected. See [Local cache cleanup](./docs/workflows.md#local-cache-cleanup).
+background checks can remove registered orphaned data with no extra retention
+period once absence and lack of shared references are confirmed. Trash and
+shared PDFs remain protected. Only use of the affected attachment or cache
+delays cleanup; unrelated reading does not. Uncertain ownership is retained,
+and failed deletions are retried. See [Local cache cleanup](./docs/workflows.md#local-cache-cleanup).
 Manual clearing, self-healing of invalid entries, and profile filesystem loss
 can also remove cached data; individual archive, document, image, and parsing
 resource limits still apply. Deleting the llm-for-zotero source does not affect

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createCacheOwnershipStorage, createCacheLibrarySnapshot, createZoteroCacheLifecycle } from '../src/platform/zotero-cache-lifecycle.js';
-import { ORPHAN_CACHE_GRACE_MS } from '../src/cache/cache-lifecycle.js';
+import { createCacheOwnershipStorage, createCacheLibrarySnapshot, createZoteroCacheLifecycle,
+    CACHE_DELETE_DELAY_MS, CACHE_STARTUP_DELAY_MS, CACHE_SWEEP_INTERVAL_MS } from '../src/platform/zotero-cache-lifecycle.js';
 import { createZoteroMarkdownCache, createMarkdownCacheKey, createMarkdownCacheKeyFromHash } from '../src/cache/markdown-cache.js';
 import { createZoteroMinerUResultStore } from '../src/cache/mineru-result-store.js';
 import { createZoteroPDFTextIndexCache } from '../src/cache/pdf-text-index-cache.js';
@@ -192,7 +192,7 @@ test('per-attachment import and readiness cleanup retains other attachments shar
     assert.equal(readiness.isReady({ libraryID: 1, key: 'PDF2' }, imported.parserProfile), true);
 });
 
-test('runtime registration, notifications, hourly retry and shutdown clean actual files without touching PDFs', async t => {
+async function runtimeFixture(t, { isBusy = () => false } = {}) {
     const f = await fixture(t);
     const stores = { markdown: createZoteroMarkdownCache(f.options), raw: createZoteroMinerUResultStore(f.options),
         revisions: createZoteroMarkdownRevisionStore(f.options), pdfIndex: createZoteroPDFTextIndexCache(f.options),
@@ -202,12 +202,14 @@ test('runtime registration, notifications, hourly retry and shutdown clean actua
     const importIndex = createZoteroMinerUImportIndex(f.options);
     const timers = new Map();
     const errors = [];
+    const summaries = [];
     let timestamp = 100;
     let serial = 0;
     const adapter = createZoteroCacheLifecycle({ ...f.options, pdfIndexProfile: 'test-profile', stores, annotations, groups,
-        importIndex, readiness: { forgetAttachment: async () => {} }, isBusy: () => false, now: () => timestamp,
-        timers: { setTimer(callback, delay) { timers.set(++serial, { callback, delay }); return serial; }, clearTimer: id => timers.delete(id) },
-        onError: error => errors.push(error),
+        importIndex, readiness: { forgetAttachment: async () => {} }, isBusy, now: () => timestamp,
+        timers: { setTimer(callback, delay) { timers.set(++serial, { callback, delay, at: timestamp + delay }); return serial; },
+            clearTimer: id => timers.delete(id) },
+        onError: error => errors.push(error), onSummary: summary => summaries.push(summary),
     });
     t.after(() => adapter.dispose());
     const item = { id: 1, libraryID: 1, key: 'PDF1' };
@@ -218,33 +220,203 @@ test('runtime registration, notifications, hourly retry and shutdown clean actua
     await groups.put(1, []);
     await stores.readingPosition.save(HASH, { cacheKey: key, anchor: { offset: 1 } });
     adapter.start();
-    adapter.start();
-    assert.equal(f.observers.size, 1);
-    assert.equal(timers.size, 1);
-    const notification = f.observers.get('mktero-cache-ownership');
-    notification.observer.notify('delete', 'item', [1], {});
-    assert.equal(timers.size, 1);
+    const notify = (event = 'delete', type = 'item', ids = [1]) => (
+        f.observers.get('mktero-cache-ownership').observer.notify(event, type, ids, {})
+    );
     const run = async () => {
-        const [id, timer] = timers.entries().next().value;
+        const [id, timer] = [...timers.entries()].sort((a, b) => a[1].at - b[1].at)[0];
         timers.delete(id);
+        timestamp = timer.at;
         await timer.callback();
     };
-    await run();
-    const ownership = createCacheOwnershipStorage(f.options);
-    assert.equal((await ownership.read())[0].orphanedAt, 100);
-    timestamp += ORPHAN_CACHE_GRACE_MS;
+    return { ...f, stores, annotations, groups, importIndex, adapter, timers, errors, summaries, item, key, notify, run,
+        ownership: createCacheOwnershipStorage(f.options), now: () => timestamp,
+        nextDelay: () => Math.min(...[...timers.values()].map(timer => timer.at - timestamp)) };
+}
+
+test('delete events coalesce for five seconds and clean real files in the first check', async t => {
+    const f = await runtimeFixture(t);
+    f.adapter.start();
+    assert.equal(f.observers.size, 1);
+    assert.equal(f.nextDelay(), CACHE_STARTUP_DELAY_MS);
+    f.notify();
+    f.notify();
+    assert.equal(f.timers.size, 1);
+    assert.equal(f.nextDelay(), CACHE_DELETE_DELAY_MS);
     const pdf = path.join(f.dir, 'unrelated.pdf');
     await fs.writeFile(pdf, DATA);
-    await run();
-    assert.equal(await stores.markdown.get(key), null);
+    await f.run();
+    assert.equal(await f.stores.markdown.get(f.key), null);
     assert.equal(await f.io.exists(path.join(f.dir, 'mktero-annotations/v1/item-1.json')), false);
-    assert.equal(await stores.readingPosition.load(HASH, key), null);
-    assert.deepEqual(await ownership.read(), []);
+    assert.equal(await f.io.exists(path.join(f.dir, 'mktero-annotations/groups-v1/item-1.json')), false);
+    assert.equal(await f.stores.readingPosition.load(HASH, f.key), null);
+    assert.deepEqual(await f.ownership.read(), []);
     assert.deepEqual(await fs.readFile(pdf), Buffer.from(DATA));
-    assert.deepEqual(errors, []);
-    adapter.resume();
-    assert.equal(timers.size, 1);
-    await adapter.dispose();
-    assert.equal(timers.size, 0);
+    assert.equal(f.summaries[0].removed, 1);
+    assert.deepEqual(f.errors, []);
+    await f.adapter.dispose();
+    assert.equal(f.timers.size, 0);
     assert.equal(f.observers.size, 0);
+});
+
+test('startup reconciles missed deletions and old future-dated tombstones without waiting', async t => {
+    const f = await runtimeFixture(t);
+    const records = await f.ownership.read();
+    records[0].orphanedAt = Date.now() + 90 * 86400_000;
+    await f.ownership.write(records);
+    await f.run();
+    assert.equal(f.now(), 100 + CACHE_STARTUP_DELAY_MS);
+    assert.deepEqual(await f.ownership.read(), []);
+    assert.equal(await f.stores.markdown.get(f.key), null);
+    assert.equal(f.nextDelay(), CACHE_SWEEP_INTERVAL_MS);
+});
+
+test('hourly fallback catches deletion when the notification was missed', async t => {
+    const f = await runtimeFixture(t);
+    f.items.push({ ...f.item, isPDFAttachment: () => true });
+    await f.run();
+    assert.equal((await f.ownership.read())[0].orphanedAt, null);
+    f.items.length = 0;
+    assert.equal(f.nextDelay(), CACHE_SWEEP_INTERVAL_MS);
+    await f.run();
+    assert.equal(await f.stores.markdown.get(f.key), null);
+});
+
+test('trash, collection removal and restoration never delete a live attachment', async t => {
+    const f = await runtimeFixture(t);
+    f.items.push({ ...f.item, deleted: true, isPDFAttachment: () => true });
+    f.notify('trash');
+    f.notify('remove', 'collection-item');
+    assert.equal(f.nextDelay(), CACHE_STARTUP_DELAY_MS);
+    await f.run();
+    assert.ok(await f.stores.markdown.get(f.key));
+    f.items.length = 0;
+    f.notify();
+    f.items.push({ ...f.item, deleted: false, isPDFAttachment: () => true });
+    f.notify('add');
+    await f.run();
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.equal((await f.ownership.read())[0].orphanedAt, null);
+});
+
+test('unrelated readers do not block cleanup and releasing the affected reader retries promptly', async t => {
+    let busyID = 2;
+    const f = await runtimeFixture(t, { isBusy: record => record.itemID === busyID });
+    f.notify();
+    await f.run();
+    assert.equal(await f.stores.markdown.get(f.key), null);
+    await f.adapter.rememberPDF(f.item, DATA);
+    await f.stores.markdown.put(f.key, { markdown: 'Again', assets: [] });
+    busyID = 1;
+    f.notify();
+    await f.run();
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.equal(f.summaries.at(-1).busy, 1);
+    busyID = null;
+    f.adapter.retry();
+    assert.equal(f.nextDelay(), CACHE_DELETE_DELAY_MS);
+    await f.run();
+    assert.equal(await f.stores.markdown.get(f.key), null);
+});
+
+test('a resource lease release schedules retry without requiring a Zotero notification', async t => {
+    const f = await runtimeFixture(t);
+    let release;
+    const active = f.adapter.use(() => new Promise(resolve => { release = resolve; }), { itemID: 1 });
+    f.notify();
+    await f.run();
+    assert.ok(await f.stores.markdown.get(f.key));
+    release();
+    await active;
+    assert.equal(f.nextDelay(), CACHE_DELETE_DELAY_MS);
+    await f.run();
+    assert.equal(await f.stores.markdown.get(f.key), null);
+});
+
+test('hash batches retain progress and protect a duplicate found in a later batch', async t => {
+    const f = await runtimeFixture(t);
+    const file = path.join(f.dir, 'duplicate.pdf');
+    await fs.writeFile(file, DATA);
+    for (let i = 0; i < 101; i++) f.items.push({ id: i + 10, libraryID: 1, key: `ITEM${i}`, isPDFAttachment: () => false });
+    f.items.push({ id: 200, libraryID: 1, key: 'DUP', deleted: true,
+        isPDFAttachment: () => true, getFilePathAsync: async () => file });
+    f.notify();
+    await f.run();
+    assert.equal(f.summaries.at(-1).continuation, true);
+    assert.equal(f.nextDelay(), 250);
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.equal(await f.io.exists(path.join(f.dir, 'mktero-annotations/v1/item-1.json')), false);
+    await f.run();
+    assert.equal(f.summaries.at(-1).referenced, 1);
+    assert.ok(await f.stores.markdown.get(f.key));
+    f.items.pop();
+    f.notify('delete', 'item', [200]);
+    await f.run();
+    await f.run();
+    assert.equal(await f.stores.markdown.get(f.key), null);
+    assert.deepEqual(await f.ownership.read(), []);
+});
+
+test('resumable hashing reads each PDF once and invalidates its cursor on library changes', async t => {
+    const f = await fixture(t);
+    const file = path.join(f.dir, 'duplicate.pdf');
+    await fs.writeFile(file, DATA);
+    for (let i = 1; i <= 5; i++) f.items.push({ id: i, libraryID: 1, key: `PDF${i}`,
+        isPDFAttachment: () => true, getFilePathAsync: async () => file });
+    let reads = 0;
+    const read = f.io.read;
+    f.io.read = async value => { reads++; return read(value); };
+    const scan = createCacheLibrarySnapshot({ ...f.options, batchItems: 2 });
+    assert.equal((await scan({ hashes: true, generation: 1 })).continuation, true);
+    assert.equal(reads, 2);
+    await scan({ hashes: false, generation: 1 });
+    assert.equal((await scan({ hashes: true, generation: 1 })).continuation, true);
+    let complete;
+    for (let i = 0; i < 10; i++) {
+        complete = await scan({ hashes: true, generation: 1 });
+        if (complete.complete) break;
+        assert.equal(complete.continuation, true);
+    }
+    assert.equal(complete.complete, true);
+    assert.equal(reads, 5);
+    assert.ok(complete.sources.has(HASH));
+    await scan({ hashes: true, generation: 2 });
+    assert.equal(reads, 7);
+    await scan({ hashes: true, generation: 3 });
+    assert.equal(reads, 9);
+});
+
+for (const initial of [Uint8Array.of(9, 9, 9), Uint8Array.of(9, 9, 9, 9)]) {
+    test(`resumed scans recheck a changed ${initial.length === DATA.length ? 'hashed' : 'size-skipped'} PDF without a notification`, async t => {
+        const f = await fixture(t);
+        const file = path.join(f.dir, 'changed.pdf');
+        await fs.writeFile(file, initial);
+        await fs.utimes(file, 1, 1);
+        f.items.push({ id: 2, libraryID: 1, key: 'SURVIVOR',
+            isPDFAttachment: () => true, getFilePathAsync: async () => file });
+        const scan = createCacheLibrarySnapshot({ ...f.options, batchItems: 1 });
+        const options = { hashes: true, sourceSizes: [DATA.length], generation: 1 };
+        const first = await scan(options);
+        assert.equal(first.continuation, true);
+        assert.equal(first.sources.has(HASH), false);
+        await fs.writeFile(file, DATA);
+        await fs.utimes(file, 2, 2);
+        let result;
+        for (let i = 0; i < 10; i++) {
+            result = await scan(options);
+            if (result.complete) break;
+            assert.equal(result.continuation, true);
+        }
+        assert.equal(result.complete, true);
+        assert.equal(result.sources.has(HASH), true);
+    });
+}
+
+test('membership enumeration yields even when no PDFs need hashing', async t => {
+    const f = await fixture(t);
+    for (let i = 1; i <= 250; i++) f.items.push({ id: i, libraryID: 1, isPDFAttachment: () => false });
+    let yields = 0;
+    const scan = createCacheLibrarySnapshot({ ...f.options, yieldControl: async () => { yields++; } });
+    assert.equal((await scan({ hashes: false })).complete, true);
+    assert.equal(yields, 2);
 });

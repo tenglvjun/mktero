@@ -4,9 +4,13 @@ import { sha256Hex } from '../core/sha256.js';
 
 const MAX_INDEX_BYTES = 32 * 1024 * 1024;
 const MAX_PDF_BYTES = 256 * 1024 * 1024;
-const MAX_SCAN_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_SCAN_ITEMS = 50_000;
-const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+const HASH_BATCH_BYTES = 32 * 1024 * 1024;
+const SCAN_BATCH_ITEMS = 100;
+export const CACHE_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+export const CACHE_DELETE_DELAY_MS = 5_000;
+export const CACHE_STARTUP_DELAY_MS = 60_000;
+const CONTINUE_DELAY_MS = 250;
 
 export function createCacheOwnershipStorage({ zotero, ioUtils: io, pathUtils: path }) {
     const root = path.join(zotero.Profile.dir, 'mktero-cache-owners', 'v1');
@@ -30,68 +34,136 @@ export function createCacheOwnershipStorage({ zotero, ioUtils: io, pathUtils: pa
     };
 }
 
-// getAll(..., false, true) includes child attachments AND trashed items. A
-// missing local file never causes a download and cannot establish orphanhood.
-export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl = async () => {}, cancelled = () => false }) {
-    return async ({ hashes, sourceSizes = null }) => {
-        const sizes = sourceSizes ? new Set(sourceSizes) : null;
-        const result = { complete: false, owners: new Set(), libraries: new Set(), itemIDs: new Set(), sources: new Set() };
-        if (typeof zotero.Libraries?.getAll !== 'function' || typeof zotero.Items?.getAll !== 'function') return result;
+// getAll(..., false, true) includes child attachments AND trashed items. Hashing
+// resumes across bounded batches; a library notification invalidates the cursor.
+export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl = async () => {},
+    cancelled = () => false, batchItems = SCAN_BATCH_ITEMS, batchBytes = HASH_BATCH_BYTES }) {
+    let cursor = null;
+    const empty = () => ({ complete: false, owners: new Set(), libraries: new Set(), itemIDs: new Set(), sources: new Set() });
+    async function* walk(result) {
+        if (typeof zotero.Libraries?.getAll !== 'function' || typeof zotero.Items?.getAll !== 'function') return;
         const libraries = zotero.Libraries.getAll();
-        if (!Array.isArray(libraries) || !libraries.length) return result;
-        let bytes = 0;
+        if (!Array.isArray(libraries) || !libraries.length) return;
         let count = 0;
         for (const library of libraries) {
-            if (cancelled() || !Number.isSafeInteger(library.libraryID)) return result;
+            if (cancelled() || !Number.isSafeInteger(library.libraryID)) return;
             result.libraries.add(library.libraryID);
             const items = await zotero.Items.getAll(library.libraryID, false, true);
-            if (!Array.isArray(items)) return result;
+            if (!Array.isArray(items)) return;
             for (const item of items) {
-                if (cancelled() || ++count > MAX_SCAN_ITEMS || !Number.isSafeInteger(item?.id)) return result;
+                if (cancelled() || ++count > MAX_SCAN_ITEMS || !Number.isSafeInteger(item?.id)) return;
                 result.itemIDs.add(item.id);
-                if (!item.isPDFAttachment?.()) continue;
-                result.owners.add(attachmentIdentity({ libraryID: item.libraryID, attachmentKey: item.key }));
-                if (!hashes) continue;
-                const file = await item.getFilePathAsync();
-                if (!file) return result;
-                const before = await io.stat(file);
-                if (before.type !== 'regular' || !Number.isSafeInteger(before.size) || before.size < 0
-                    || !Number.isFinite(before.lastModified)) return result;
-                if (sizes && !sizes.has(before.size)) continue;
-                if (!before.size || before.size > MAX_PDF_BYTES) return result;
-                bytes += before.size;
-                if (bytes > MAX_SCAN_BYTES) return result;
-                const data = await io.read(file);
-                if (data.byteLength !== before.size) return result;
-                const hash = await sha256Hex(data);
-                const after = await io.stat(file);
-                if (after.size !== before.size || after.lastModified !== before.lastModified) return result;
-                result.sources.add(hash);
-                await yieldControl();
+                if (item.isPDFAttachment?.()) result.owners.add(attachmentIdentity({ libraryID: item.libraryID, attachmentKey: item.key }));
+                yield item;
             }
         }
         result.complete = !cancelled();
-        return result;
+    }
+    return async ({ hashes, sourceSizes = null, generation = 0 }) => {
+        if (!hashes) {
+            const result = empty();
+            let count = 0;
+            for await (const _item of walk(result)) {
+                if (++count % SCAN_BATCH_ITEMS === 0) await yieldControl();
+            }
+            return result;
+        }
+        const signature = JSON.stringify([generation, sourceSizes?.slice().sort((a, b) => a - b) ?? null]);
+        if (!cursor || cursor.signature !== signature) {
+            const result = empty();
+            cursor = { signature, result, iterator: walk(result),
+                fingerprints: new Map(), verification: null };
+        }
+        const current = cursor;
+        const sizes = sourceSizes ? new Set(sourceSizes) : null;
+        let bytes = 0;
+        let count = 0;
+        try {
+            while (!cancelled()) {
+                if (count >= batchItems || bytes >= batchBytes) {
+                    return { ...current.result, complete: false, continuation: true };
+                }
+                if (current.verification) {
+                    const step = current.verification.next();
+                    if (step.done) { cursor = null; return current.result; }
+                    const [file, before] = step.value;
+                    const after = await io.stat(file);
+                    if (after.type !== 'regular' || after.size !== before.size || after.lastModified !== before.lastModified) {
+                        cursor = null;
+                        return { ...current.result, complete: false, continuation: true };
+                    }
+                    count++;
+                    continue;
+                }
+                const step = await current.iterator.next();
+                if (step.done) {
+                    if (!current.result.complete) { cursor = null; return current.result; }
+                    // A file checked in an earlier batch may have changed on
+                    // disk without a Zotero notification, including size skips.
+                    current.verification = current.fingerprints.entries();
+                    continue;
+                }
+                count++;
+                const item = step.value;
+                if (!item.isPDFAttachment?.()) continue;
+                const file = await item.getFilePathAsync();
+                if (!file) break;
+                const before = await io.stat(file);
+                if (before.type !== 'regular' || !Number.isSafeInteger(before.size) || before.size < 0
+                    || !Number.isFinite(before.lastModified)) break;
+                const previous = current.fingerprints.get(file);
+                if (previous && (previous.size !== before.size || previous.lastModified !== before.lastModified)) {
+                    cursor = null;
+                    return { ...current.result, complete: false, continuation: true };
+                }
+                current.fingerprints.set(file, { size: before.size, lastModified: before.lastModified });
+                if (sizes && !sizes.has(before.size)) continue;
+                if (!before.size || before.size > MAX_PDF_BYTES) break;
+                const data = await io.read(file);
+                if (data.byteLength !== before.size) break;
+                const hash = await sha256Hex(data);
+                const after = await io.stat(file);
+                if (after.size !== before.size || after.lastModified !== before.lastModified) break;
+                current.result.sources.add(hash);
+                bytes += before.size;
+                await yieldControl();
+            }
+            cursor = null;
+            return { ...current.result, complete: false };
+        }
+        catch (error) { cursor = null; throw error; }
     };
 }
 
 export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfIndexProfile,
-    stores, annotations, groups, importIndex, readiness, isBusy, timers,
-    onError = () => {}, now = Date.now }) {
+    stores, annotations, groups, importIndex, readiness, isBusy = () => false, timers,
+    onError = () => {}, onSummary = () => {}, now = Date.now }) {
     let stopped = false;
     let observerID = null;
     let timer = null;
     let nextRun = Infinity;
+    let nextFullRun = Infinity;
+    let fullRequested = false;
+    let running = false;
+    const pendingIDs = new Set();
+    const originals = [];
     const removers = Object.fromEntries(Object.entries(stores).map(([name, store]) => [name, store.delete.bind(store)]));
     const removeAnnotations = annotations.delete.bind(annotations);
     const removeGroups = groups.delete.bind(groups);
     const forgetImports = importIndex.forgetAttachment.bind(importIndex);
+    const yieldControl = () => zotero.Promise?.delay?.(0) ?? Promise.resolve();
+    const report = () => {
+        try { onError(new Error('Local cache ownership maintenance deferred')); }
+        catch { /* Diagnostics are optional. */ }
+    };
+    const retry = () => {
+        if (!lifecycle.deferred.size) return;
+        fullRequested = true;
+        schedule(CACHE_DELETE_DELAY_MS);
+    };
     const lifecycle = new CacheLifecycle({
         storage: createCacheOwnershipStorage({ zotero, ioUtils, pathUtils }),
-        snapshot: createCacheLibrarySnapshot({ zotero, ioUtils,
-            cancelled: () => stopped || isBusy() || lifecycle.users > 0,
-            yieldControl: () => zotero.Promise?.delay?.(0) ?? Promise.resolve(),
-        }),
+        snapshot: createCacheLibrarySnapshot({ zotero, ioUtils, cancelled: () => stopped, yieldControl }),
         remove: ({ store, key }) => removers[store](key),
         removeOwner: async record => {
             await removeAnnotations(record.itemID);
@@ -99,80 +171,112 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             await forgetImports(record);
             await readiness?.forgetAttachment(record);
         },
-        isBusy, onError: () => report(), now,
+        isBusy, onError: report, now, onIdle: retry, yieldControl,
     });
 
-    // Capture removers first: GC bypasses these leases while ordinary writes
-    // wait for its critical section. New activity also invalidates its scan.
-    for (const store of [...Object.values(stores), annotations, groups, importIndex]) {
-        for (const method of ['get', 'put', 'load', 'save', 'delete', 'getTranslation', 'putTranslation',
-            'copyTranslations', 'deleteTranslation', 'clear', 'prune', 'setAside', 'publish', 'forget', 'forgetAttachment']) {
+    // GC uses the original removers. Ordinary operations hold only their own
+    // resource keys, except explicit store-wide maintenance (clear/prune).
+    const wrap = (store, methods, scopeFor) => {
+        for (const method of methods) {
             if (typeof store[method] !== 'function') continue;
-            const original = store[method].bind(store);
-            store[method] = (...args) => lifecycle.use(() => original(...args));
+            const original = store[method];
+            originals.push(() => { store[method] = original; });
+            store[method] = (...args) => lifecycle.use(() => original.apply(store, args), scopeFor(method, args));
         }
-    }
-
-    const report = () => {
-        // Do not log paths, file contents, or errors from user-controlled files.
-        try { onError(new Error('Local cache ownership maintenance deferred')); }
-        catch { /* Diagnostics are optional. */ }
     };
+    for (const [name, store] of Object.entries(stores)) {
+        wrap(store, ['get', 'put', 'load', 'save', 'delete', 'hasReadable', 'getTranslation',
+            'getTranslationByLanguage', 'putTranslation', 'copyTranslations', 'deleteTranslation', 'clear', 'prune', 'setAside'],
+        (method, args) => ['clear', 'prune'].includes(method) ? null : {
+            artifacts: (method === 'copyTranslations' ? args.slice(0, 2) : args.slice(0, 1))
+                .map(key => ({ store: name, key })),
+        });
+    }
+    for (const store of [annotations, groups]) {
+        wrap(store, ['get', 'put', 'load', 'save', 'delete', 'setAside', 'clear', 'prune'],
+            (method, args) => ['clear', 'prune'].includes(method) ? null : { itemID: args[0] });
+    }
+    wrap(importIndex, ['get', 'publish', 'forget', 'forgetAttachment', 'selectionsForAttachment', 'clear'],
+        (method, args) => method === 'clear' ? null : args[0]);
+
     const schedule = delay => {
         if (stopped || !timers?.setTimer || nextRun <= now() + delay) return;
         if (timer !== null) timers.clearTimer(timer);
         nextRun = now() + delay;
-        timer = timers.setTimer(() => {
+        timer = timers.setTimer(async () => {
             timer = null;
             nextRun = Infinity;
-            return lifecycle.sweep().catch(report).finally(() => schedule(SWEEP_INTERVAL_MS));
+            if (stopped) return;
+            if (running) { schedule(CACHE_DELETE_DELAY_MS); return; }
+            running = true;
+            const full = fullRequested || now() >= nextFullRun || !pendingIDs.size;
+            const itemIDs = full ? null : new Set(pendingIDs);
+            fullRequested = false;
+            pendingIDs.clear();
+            if (full) nextFullRun = now() + CACHE_SWEEP_INTERVAL_MS;
+            try {
+                const summary = await lifecycle.sweep({ itemIDs });
+                try { onSummary(summary); } catch { /* Diagnostics are optional. */ }
+                if (summary.continuation || summary.interrupted) {
+                    if (full) fullRequested = true;
+                    else for (const id of itemIDs) pendingIDs.add(id);
+                    schedule(summary.continuation ? CONTINUE_DELAY_MS : CACHE_DELETE_DELAY_MS);
+                }
+            }
+            catch { report(); }
+            finally {
+                running = false;
+                schedule(Math.max(0, Math.min(CACHE_SWEEP_INTERVAL_MS, nextFullRun - now())));
+            }
         }, delay);
         if (timer === null) nextRun = Infinity;
     };
     return {
-        use: operation => lifecycle.use(operation),
-        // Called with the bytes actually read by the extractor, before writes.
-        // Registration failure never prevents reading/conversion; the failed
-        // registry remains unreadable to GC as well.
+        use: (operation, scope) => lifecycle.use(operation, scope),
+        retry,
         async rememberPDF(item, fileData, importedIdentity = null) {
             try {
+                const identity = { itemID: item.id, libraryID: item.libraryID, attachmentKey: item.key };
                 await lifecycle.use(async () => {
                     const sourceHash = await sha256Hex(fileData);
-                    const identity = { libraryID: item.libraryID, attachmentKey: item.key };
-                    const imports = await importIndex.selectionsForAttachment(identity);
-                    if (importedIdentity) imports.push(importedIdentity);
-                    const artifacts = await ownedCacheResources(sourceHash, { pdfIndexProfile, imports });
-                    await lifecycle.remember({ ...identity, itemID: item.id, sourceHash,
-                        sourceBytes: fileData.byteLength, artifacts });
-                });
+                    await lifecycle.use(async () => {
+                        const imports = await importIndex.selectionsForAttachment(identity);
+                        if (importedIdentity) imports.push(importedIdentity);
+                        const artifacts = await ownedCacheResources(sourceHash, { pdfIndexProfile, imports });
+                        await lifecycle.remember({ ...identity, sourceHash, sourceBytes: fileData.byteLength, artifacts });
+                    }, { ...identity, sourceHash });
+                }, identity);
             }
             catch { report(); }
         },
         resume() {
             if (observerID === null || stopped) return;
-            if (timer !== null) timers.clearTimer(timer);
-            timer = null;
-            nextRun = Infinity;
-            schedule(60_000);
+            nextFullRun = Math.min(nextFullRun, now() + CACHE_STARTUP_DELAY_MS);
+            schedule(CACHE_STARTUP_DELAY_MS);
         },
         start() {
             if (observerID !== null || stopped) return;
             if (typeof zotero.Notifier?.registerObserver !== 'function'
                 || typeof zotero.Libraries?.getAll !== 'function' || typeof zotero.Items?.getAll !== 'function') return;
             observerID = zotero.Notifier.registerObserver({
-                notify(_event, type) {
+                notify(event, type, ids) {
                     if (stopped || !['item', 'file', 'collection-item', 'group', 'trash'].includes(type)) return;
                     lifecycle.invalidate();
-                    schedule(30_000);
+                    if (event !== 'delete' || type !== 'item') return;
+                    for (const id of ids || []) if (Number.isSafeInteger(Number(id))) pendingIDs.add(Number(id));
+                    if (!pendingIDs.size) fullRequested = true;
+                    schedule(CACHE_DELETE_DELAY_MS);
                 },
             }, ['item', 'file', 'collection-item', 'group', 'trash'], 'mktero-cache-ownership');
-            schedule(60_000);
+            nextFullRun = now() + CACHE_STARTUP_DELAY_MS;
+            schedule(CACHE_STARTUP_DELAY_MS);
         },
         async dispose() {
             stopped = true;
             if (timer !== null) timers.clearTimer(timer);
             if (observerID !== null) zotero.Notifier.unregisterObserver(observerID);
             await lifecycle.dispose();
+            for (const restore of originals) restore();
         },
     };
 }

@@ -27,11 +27,19 @@
   choosing the import action validates and copies the result, then opens it.
   For a parent item with several candidate PDFs, choose the intended attachment
   from the submenu.
-- Orphan cleanup is conservative. It examines at most 50,000 library items
-  and hashes at most 2 GiB of PDFs per pass, with a 256 MiB per-file limit;
-  different-size PDFs need no hashing. Missing local PDFs, inaccessible
-  libraries, incomplete scans or unknown historical ownership postpone
-  cleanup. Data can therefore remain longer than the 30-day grace period.
+- Orphan cleanup has no extra retention period after confirmed permanent
+  attachment deletion, but remains conservative. Library enumeration is capped
+  at 50,000 items. Verification processes at most 100 items per batch or yields
+  once cumulative PDF reads reach 32 MiB, then continues from the saved position
+  after 250 ms rather than restarting. A single PDF may take a batch above
+  32 MiB, but cannot exceed 256 MiB; different-size PDFs need no hashing. Trash and valid shared
+  references protect data. Use of the affected attachment or cache postpones
+  its cleanup; unrelated reading does not block it. Missing local PDFs,
+  inaccessible libraries, incomplete scans, unknown ownership or uncertain
+  shared references retain the affected data; failed deletions are retried.
+  Cleanup timing therefore depends on completing these checks, not just the
+  short notification delay. Previously recorded permanent deletions follow
+  the same policy; historical data with unknown ownership remains on disk.
 - Imported copies use Mktero's local cache, subject to manual clearing,
   [orphan cleanup](./workflows.md#local-cache-cleanup) after permanent attachment
   deletion, self-healing of damaged entries, and profile filesystem availability. Individual archive and document resource limits still apply.

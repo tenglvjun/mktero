@@ -976,10 +976,22 @@ globalThis.startup = async function startup({ id, rootURI }) {
             pdfIndex: pdfTextIndexCache, readingPosition: runtime.readingPositions },
         annotations: annotationStore, groups: annotationGroupStore,
         importIndex, readiness: runtime.readiness,
-        isBusy: () => Boolean(runtime.presenter?.list?.().length
-            || backgroundFigureRestorations.size || backgroundContinuations.size),
+        isBusy: record => Boolean(
+            runtime.presenter?.list?.().some(presentation => (
+                presentation.model?.sourceItemID === record.itemID
+                || presentation.model?.sourceHash === record.sourceHash
+                || record.artifacts.some(artifact => artifact.key === presentation.model?.cacheKey)
+            )) || backgroundFigureRestorations.has(record.itemID)
+            || backgroundContinuations.has(record.itemID)
+            || runtime.conversionRuns?.isActive(record.itemID)
+        ),
         timers: createWindowTimers(() => liveZoteroWindow()),
         onError: error => logMkteroError(error),
+        onSummary: summary => {
+            if (Object.values(summary).some(Boolean)) {
+                debugMktero(`Mktero: local cache cleanup ${JSON.stringify(summary)}`);
+            }
+        },
     });
     runtime.cacheLifecycle = cacheLifecycle;
     for (const target of [mineruExtractor, mistralExtractor, mkteroExtractor,
@@ -987,7 +999,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         for (const method of ['extract', 'readCached', 'importLocal']) {
             if (typeof target[method] !== 'function') continue;
             const original = target[method].bind(target);
-            target[method] = (...args) => cacheLifecycle.use(() => original(...args));
+            target[method] = (...args) => cacheLifecycle.use(() => original(...args), { itemID: args[0] });
         }
     }
     cacheLifecycle.start();
@@ -1405,7 +1417,7 @@ async function openItemAsMarkdown(itemID, {
             void runtime.sourcePeekRenderer?.dispose(itemID);
             abortDocumentTranslations(itemID);
             runtime.citationPresenter?.closeForItem(itemID);
-            void closeRevisionSession(itemID);
+            void closeRevisionSession(itemID).finally(() => runtime.cacheLifecycle?.retry());
             void runtime.actionsTags?.closeMarkdownSession({
                 sessionID: itemID,
                 sourceItemID: itemID,
@@ -1633,6 +1645,7 @@ function continueConversionInBackground(itemID) {
         runtime.conversionRuns?.release(itemID, 'background', {
             abortIfLast: false,
         });
+        runtime.cacheLifecycle?.retry();
     });
 }
 
@@ -1870,6 +1883,7 @@ async function executeItemConversion(itemID, {
     finally {
         backgroundFigureRestorations.delete(itemID);
         runtime.pdfIndexOperations.finish(itemID, controller);
+        runtime.cacheLifecycle?.retry();
     }
 }
 
@@ -2340,6 +2354,7 @@ async function openSavedMarkdownNote(noteID) {
         onClose: () => {
             abortDocumentTranslations(noteID);
             runtime.citationPresenter?.closeForItem(sourceItem?.id);
+            runtime.cacheLifecycle?.retry();
         },
         onReportProblem: reportProblemForItem(sourceItem?.id ?? null),
         ...createSavedMarkdownActions(noteID, sourceItem),
@@ -4292,12 +4307,10 @@ function trackPDFIndexTask(tracker, itemID, options, locator) {
 }
 
 function preparePDFIndexForItem(itemID, options, locator) {
-    const task = trackPDFIndexTask(
-        runtime.pdfIndexOperations,
-        itemID,
-        options,
-        locator
-    );
+    const prepare = () => trackPDFIndexTask(runtime.pdfIndexOperations, itemID, options, locator);
+    const task = runtime.cacheLifecycle
+        ? runtime.cacheLifecycle.use(prepare, { itemID })
+        : prepare();
     void Promise.resolve(task).then(index => {
         applyPdfOutlineToOpenMarkdown(itemID, index?.outline);
     }).catch(() => {});

@@ -70,12 +70,14 @@ chosen PDF's own reading action to reopen another attachment's imported result.
 ## Local cache cleanup
 
 Moving an item or PDF attachment to Zotero trash, or removing it from a
-collection, does not delete its Mktero data. After Mktero first confirms that
-a registered PDF attachment is permanently absent, it starts a 30-day grace
-period. Restoring the attachment cancels that timer. The timer also survives
-Zotero restarts; missed notifications are reconciled at startup.
+collection, does not delete its Mktero data. Once background checks confirm
+that a registered PDF attachment is permanently absent and its cache has no
+remaining references, Mktero can clean it with no extra retention period.
+Restoring the attachment before cleanup protects its data. Already recorded
+permanent deletions follow the same policy; startup checks also reconcile
+missed notifications.
 
-After the grace period, idle background checks can remove registered Markdown
+Background checks can remove registered Markdown
 and its figures and translations, raw MinerU results, matching saved
 corrections, PDF text indexes and reading positions, plus the deleted
 attachment's local highlights, highlight-group records, import selections and
@@ -84,13 +86,19 @@ attachments in other libraries or trash that were never opened in Mktero,
 protect shared data. Zotero PDF files, notes, annotations, saved snapshots,
 exported files and llm-for-zotero source caches are not deleted by this cleanup.
 
-Checks run after startup, relevant Zotero notifications, and hourly while
-Zotero is running. They defer during Mktero reading/conversion or incomplete
-library/file scans. Matching file sizes are checked locally before hashing;
-no attachment is downloaded or uploaded. Missing local PDFs (including files
-not yet synced), inaccessible libraries, damaged ownership records, or scan
-resource limits can postpone cleanup. Failed deletions are retried. This is
-not a promise that files disappear exactly 30 days after deletion.
+Permanent deletion notifications are combined for about 5 seconds before a
+background check. Checks also run about 60 seconds after startup and hourly
+while Zotero is running. Use of the affected attachment or cache, such as its
+reading session, conversion or pending writes, defers that cleanup; reading
+an unrelated paper does not block it. Cleanup is checked again when the
+relevant use ends, without waiting for the next hourly check.
+
+Matching file sizes are checked locally before hashing; no attachment is
+downloaded or uploaded. Uncertain ownership or shared references, missing
+local PDFs (including files not yet synced), inaccessible libraries, damaged
+ownership records, or incomplete scans keep the affected data. Scan resource
+limits can also postpone cleanup. Failed deletions are retried, so the short
+notification delay does not guarantee that files disappear within 5 seconds.
 
 Ownership is registered when Mktero next reads or imports a PDF. Recognizable
 older parser variants are adopted then; historical data whose ownership

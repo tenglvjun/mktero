@@ -19,7 +19,7 @@
 | Explicitly imported llm-for-zotero results: text, structure, original or supported cropped figures, and locally restored figures; no PDF copy | A separate copy in the active Zotero profile, unencrypted | No |
 | Import selection index: library ID, attachment key, PDF and imported-result hashes, cache keys, adapter version, import time, source-format category, and confirmation state; no source paths | Active Zotero profile, unencrypted, in `mktero-imports/v1` | No |
 | Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and a non-expiring readiness marker | Active Zotero profile, unencrypted | No |
-| Cache ownership index: library ID, local attachment ID/key, PDF hash and byte length, resource keys, and first-confirmed-absence time; no titles, paths, PDF bytes or OCR text | Active Zotero profile, unencrypted, in `mktero-cache-owners/v1`; not sent to any service | No |
+| Cache ownership index: library ID, local attachment ID/key, PDF hash and byte length, resource keys, first-confirmed-absence time and whether attachment-private resources were cleaned; no titles, paths, PDF bytes or OCR text | Active Zotero profile, unencrypted, in `mktero-cache-owners/v1`; not sent to any service | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
@@ -37,17 +37,22 @@
 | Imported reference metadata and PDF attachments | Active Zotero profile, unencrypted | According to Zotero settings |
 
 Markdown and raw MinerU results are not evicted by count, total size or
-inactivity. After a registered PDF attachment is confirmed permanently absent
-for at least 30 days, idle local checks can remove its orphaned results,
-matching corrections, PDF index, reading position, local highlights, highlight
-groups, import selections and availability markers. Trash and other attachments
-with identical PDF bytes protect shared data. These checks read only local
-files and never download or upload PDFs. Uncertain ownership, missing local
-PDFs and incomplete scans postpone deletion; failures are retried. Previously
-unregistered data is adopted only when its PDF is read again and its cache
-identity can be established. Other historical data is retained. PDF index,
-citation and legacy translation caches also retain their existing expiry/size
-rules. See [Local cache cleanup](./workflows.md#local-cache-cleanup).
+inactivity. Once a registered PDF attachment is confirmed permanently absent
+and its cache has no remaining references, background local checks can remove
+its orphaned results, matching corrections, PDF index, reading position, local
+highlights, highlight groups, import selections and availability markers with
+no extra retention period. Permanent deletion notifications are combined for
+about 5 seconds before checking; checks also run about 60 seconds after startup
+and hourly while Zotero is running. Trash and other attachments with identical
+PDF bytes protect shared data. Only use of the affected attachment or cache
+defers its cleanup; unrelated reading does not block it. These checks read
+only local files and never download or upload PDFs. Uncertain ownership or
+shared references, missing local PDFs and incomplete scans retain the affected
+data; failures are retried. Already recorded permanent deletions follow the
+same policy. Previously unregistered data is adopted only when its PDF is read
+again and its cache identity can be established. Other historical data is
+retained. PDF index, citation and legacy translation caches also retain their
+existing expiry/size rules. See [Local cache cleanup](./workflows.md#local-cache-cleanup).
 
 Explicitly importing a supported local llm-for-zotero result reads the source
 cache and the current PDF on this computer without changing that source cache.

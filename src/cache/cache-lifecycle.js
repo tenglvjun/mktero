@@ -3,7 +3,6 @@ const ITEM_KEY = /^[A-Za-z0-9]{1,32}$/;
 const STORES = new Set(['markdown', 'raw', 'revisions', 'pdfIndex', 'readingPosition']);
 const MAX_RECORDS = 10_000;
 const MAX_ARTIFACTS = 256;
-export const ORPHAN_CACHE_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function attachmentIdentity({ libraryID, attachmentKey }) {
     if (!Number.isSafeInteger(libraryID) || libraryID < 0 || !ITEM_KEY.test(attachmentKey || '')) {
@@ -12,16 +11,35 @@ export function attachmentIdentity({ libraryID, attachmentKey }) {
     return `${libraryID}:${attachmentKey}`;
 }
 
+// A scope identifies resources, not a whole store. Unscoped maintenance such as
+// clear/prune is exclusive; ordinary reads of another paper do not stop GC.
+function scopeKeys(scope) {
+    if (!scope) return new Set(['*']);
+    const keys = new Set();
+    if (Number.isSafeInteger(scope.itemID)) keys.add(`item:${scope.itemID}`);
+    if (scope.attachmentKey) keys.add(`owner:${attachmentIdentity(scope)}`);
+    if (scope.sourceHash) keys.add(`source:${scope.sourceHash}`);
+    for (const artifact of scope.artifacts || []) keys.add(artifactIdentity(artifact));
+    return keys.size ? keys : new Set(['*']);
+}
+
+function overlaps(a, b) {
+    return a.has('*') || b.has('*') || [...a].some(key => b.has(key));
+}
+
 // Only registered resources are candidates. Missing/corrupt ownership data can
 // leak disk space, but must never be interpreted as proof of zero references.
 export class CacheLifecycle {
     constructor({ storage, snapshot, remove, removeOwner, isBusy = () => false,
-        now = Date.now, graceMs = ORPHAN_CACHE_GRACE_MS, onError = () => {} }) {
-        Object.assign(this, { storage, snapshot, remove, removeOwner, isBusy, now, graceMs, onError });
+        now = Date.now, onError = () => {}, onIdle = () => {}, yieldControl = async () => {} }) {
+        Object.assign(this, { storage, snapshot, remove, removeOwner, isBusy, now, onError, onIdle, yieldControl });
         this.tail = Promise.resolve();
         this.sweeping = null;
         this.purging = null;
-        this.users = 0;
+        this.leases = new Set();
+        this.itemSources = new Map();
+        this.touched = new Set();
+        this.deferred = new Map();
         this.epoch = 0;
         this.stopped = false;
     }
@@ -30,13 +48,22 @@ export class CacheLifecycle {
         this.epoch++;
     }
 
-    async use(operation) {
-        this.invalidate();
+    async use(operation, scope = null) {
+        const keys = this.#expand(scopeKeys(scope));
+        if (this.sweeping) for (const key of keys) this.touched.add(key);
         const pending = this.purging;
-        if (pending) await pending;
-        this.users++;
+        if (pending && overlaps(keys, pending.keys)) {
+            pending.interrupted = true;
+            await pending.promise;
+        }
+        this.leases.add(keys);
         try { return await operation(); }
-        finally { this.users--; }
+        finally {
+            this.leases.delete(keys);
+            if ([...this.deferred.values()].some(value => overlaps(keys, value))) {
+                try { this.onIdle(); } catch (error) { this.#report(error); }
+            }
+        }
     }
 
     remember(record) {
@@ -49,7 +76,7 @@ export class CacheLifecycle {
             if (previous && previous.itemID !== incoming.itemID) {
                 throw new Error('Cache owner ID changed; cleanup requires reconciliation');
             }
-            const artifacts = new Map([...previous?.artifacts || [], ...incoming.artifacts]
+            const artifacts = new Map([...(previous?.artifacts || []), ...incoming.artifacts]
                 .map(artifact => [artifactIdentity(artifact), artifact]));
             const next = normalizeRecord({ ...incoming, artifacts: [...artifacts.values()] });
             if (JSON.stringify(previous) === JSON.stringify(next)) return;
@@ -57,9 +84,9 @@ export class CacheLifecycle {
         });
     }
 
-    sweep() {
+    sweep(options = {}) {
         if (this.sweeping) return this.sweeping;
-        const pending = this.#enqueue(() => this.#sweep());
+        const pending = this.#enqueue(() => this.#sweep(options));
         this.sweeping = pending;
         return pending.finally(() => { if (this.sweeping === pending) this.sweeping = null; });
     }
@@ -70,101 +97,179 @@ export class CacheLifecycle {
         await this.tail.catch(() => {});
     }
 
-    async #sweep() {
-        if (this.#busy()) return { removed: 0 };
+    async #sweep({ itemIDs = null } = {}) {
+        const summary = { removed: 0, ownersRemoved: 0, referenced: 0, busy: 0, unknown: 0,
+            errors: 0, interrupted: false, continuation: false };
+        this.touched.clear();
+        this.deferred.clear();
+        if (this.stopped) return summary;
         let records = await this.#read();
-        if (!records.length) return { removed: 0 };
+        if (!records.length) return summary;
         const epoch = this.epoch;
-        const membership = await this.snapshot({ hashes: false });
-        if (!membership.complete || !this.#valid(epoch)) return { removed: 0 };
-        const timestamp = this.now();
+        const membership = await this.snapshot({ hashes: false, generation: epoch });
+        if (!membership.complete || !this.#valid(epoch)) {
+            summary.unknown++;
+            summary.interrupted = !this.#valid(epoch);
+            return summary;
+        }
+        const pendingRecords = new Set(records.filter(record => record.orphanedAt !== null).map(recordIdentity));
         const reconciled = records.map(record => ({
             ...record,
+            // Kept for diagnostics and compatibility with the first ownership
+            // index. This timestamp is never an age/retention requirement.
             orphanedAt: membership.owners.has(attachmentIdentity(record))
                 ? null
                 : membership.libraries.has(record.libraryID)
-                    ? record.orphanedAt ?? timestamp : null,
+                    ? record.orphanedAt ?? this.now() : null,
         }));
         if (JSON.stringify(reconciled) !== JSON.stringify(records)) {
             await this.storage.write(reconciled);
             records = reconciled;
         }
-        const eligible = record => record.orphanedAt !== null
-            && timestamp >= record.orphanedAt + this.graceMs
-            && !membership.owners.has(attachmentIdentity(record))
-            && !membership.itemIDs.has(record.itemID)
-            && membership.libraries.has(record.libraryID);
-        if (!records.some(eligible) || !this.#valid(epoch)) return { removed: 0 };
+        const absent = (record, state) => !state.owners.has(attachmentIdentity(record))
+            && !state.itemIDs.has(record.itemID) && state.libraries.has(record.libraryID);
+        const selected = record => !itemIDs || itemIDs.has(record.itemID) || pendingRecords.has(recordIdentity(record));
+        const eligible = record => record.orphanedAt !== null && absent(record, membership);
+        const candidates = records.filter(record => eligible(record) && selected(record));
+        if (!candidates.length || !this.#valid(epoch)) {
+            summary.interrupted = !this.#valid(epoch);
+            return summary;
+        }
+        const defer = record => {
+            const keys = scopeKeys(record);
+            if (!this.deferred.has(recordIdentity(record))) summary.busy++;
+            this.deferred.set(recordIdentity(record), keys);
+            // The conflicting operation may already have finished before we
+            // noticed it. In that case there will be no future release signal.
+            if (!this.isBusy(record) && ![...this.leases].some(value => overlaps(keys, value))) {
+                summary.interrupted = true;
+            }
+        };
 
-        // Include even PDFs never opened in Mktero, in every accessible library
-        // and in the trash. Missing files make the scan incomplete, not orphaned.
-        const sourceSizes = [...new Set(records.filter(eligible).map(record => record.sourceBytes))];
-        const live = await this.snapshot({ hashes: true, sourceSizes });
-        if (!live.complete || !this.#valid(epoch)) return { removed: 0 };
+        // Attachment-private records can go even while another owner protects
+        // the content. Keep the resource ledger until shared files are released.
+        for (const record of candidates) {
+            if (!this.#valid(epoch)) { summary.interrupted = true; return summary; }
+            if (this.#busy(record)) { defer(record); continue; }
+            if (record.ownerCleaned) continue;
+            try {
+                let updated = null;
+                const cleaned = await this.#purge(record, epoch, async valid => {
+                    await this.removeOwner(record);
+                    if (!valid()) return;
+                    const next = { ...record, ownerCleaned: true };
+                    updated = records.map(value => recordIdentity(value) === recordIdentity(record) ? next : value);
+                    await this.storage.write(updated);
+                }, async () => { if (updated) await this.storage.write(records); });
+                if (!cleaned) { defer(record); continue; }
+                records = updated;
+                record.ownerCleaned = true;
+                summary.ownersRemoved++;
+            }
+            catch (error) { summary.errors++; this.#report(error); }
+            await this.yieldControl();
+        }
+        const available = candidates.filter(record => {
+            if (!record.ownerCleaned) return false;
+            if (this.#busy(record)) { defer(record); return false; }
+            return true;
+        });
+        if (!available.length || !this.#valid(epoch)) {
+            summary.interrupted ||= !this.#valid(epoch);
+            return summary;
+        }
+        const sourceSizes = [...new Set(available.map(record => record.sourceBytes))];
+        const live = await this.snapshot({ hashes: true, sourceSizes, generation: epoch });
+        if (!live.complete || !this.#valid(epoch)) {
+            summary.continuation = Boolean(live.continuation) && this.#valid(epoch);
+            summary.unknown += summary.continuation ? 0 : available.length;
+            summary.interrupted = !this.#valid(epoch);
+            return summary;
+        }
         const protectedSources = new Set(live.sources);
         const protectedArtifacts = new Set();
         for (const record of records) {
-            if (!eligible(record) || live.owners.has(attachmentIdentity(record))
-                || live.itemIDs.has(record.itemID) || !live.libraries.has(record.libraryID)) {
+            if (!absent(record, live)) {
                 protectedSources.add(record.sourceHash);
                 for (const artifact of record.artifacts) protectedArtifacts.add(artifactIdentity(artifact));
             }
         }
-        const candidates = records.filter(record => eligible(record)
-            && !protectedSources.has(record.sourceHash)
-            && !record.artifacts.some(artifact => protectedArtifacts.has(artifactIdentity(artifact))));
-        if (!candidates.length || !this.#valid(epoch)) return { removed: 0 };
-
-        let release;
-        this.purging = new Promise(resolve => { release = resolve; });
-        let removed = 0;
-        try {
-            for (const record of candidates) {
-                if (!this.#valid(epoch)) break;
-                try {
+        for (const record of available) {
+            if (!this.#valid(epoch)) { summary.interrupted = true; break; }
+            if (this.#busy(record)) { defer(record); continue; }
+            if (!absent(record, live) || protectedSources.has(record.sourceHash)
+                || record.artifacts.some(artifact => protectedArtifacts.has(artifactIdentity(artifact)))) {
+                summary.referenced++;
+                continue;
+            }
+            try {
+                let remaining = null;
+                const cleaned = await this.#purge(record, epoch, async valid => {
                     for (const artifact of record.artifacts) {
-                        if (!this.#valid(epoch)) return { removed };
+                        if (!valid()) return;
                         await this.remove(artifact);
                     }
-                    if (!this.#valid(epoch)) break;
-                    // Item-local annotations and import selections are not
-                    // shared. Cleanup is idempotent, including after a crash.
-                    await this.removeOwner(record);
-                    if (!this.#valid(epoch)) break;
-                    const remaining = records.filter(value => recordIdentity(value) !== recordIdentity(record));
+                    if (!valid()) return;
+                    remaining = records.filter(value => recordIdentity(value) !== recordIdentity(record));
                     await this.storage.write(remaining);
-                    records = remaining;
-                    removed++;
-                }
-                catch (error) {
-                    this.#report(error);
-                    // Keep the tombstone and exact resource keys for retry.
-                }
+                }, async () => { if (remaining) await this.storage.write(records); });
+                if (!cleaned) { defer(record); continue; }
+                records = remaining;
+                summary.removed++;
             }
+            catch (error) { summary.errors++; this.#report(error); }
+            await this.yieldControl();
         }
-        finally {
-            this.purging = null;
-            release();
-        }
-        return { removed };
+        return summary;
     }
 
-    #busy() {
-        return this.stopped || this.users > 0 || this.isBusy();
+    async #purge(record, epoch, operation, rollback = async () => {}) {
+        let release;
+        const pending = { keys: scopeKeys(record), interrupted: false,
+            promise: new Promise(resolve => { release = resolve; }) };
+        this.purging = pending;
+        const valid = () => this.#valid(epoch) && !pending.interrupted && !this.#busy(record);
+        try {
+            if (!valid()) return false;
+            try { await operation(valid); }
+            catch (error) { await rollback(); throw error; }
+            if (!valid()) { await rollback(); return false; }
+            // No await between this final decision and releasing the lease:
+            // a write arriving during commit must see the restored ledger.
+            return true;
+        }
+        finally { this.purging = null; release(); }
+    }
+
+    #busy(record) {
+        const keys = scopeKeys(record);
+        return this.isBusy(record) || overlaps(keys, this.touched)
+            || [...this.leases].some(value => overlaps(keys, value));
     }
 
     #valid(epoch) {
-        return epoch === this.epoch && !this.#busy();
+        return epoch === this.epoch && !this.stopped;
     }
 
     async #read() {
-        const records = await this.storage.read();
-        if (!Array.isArray(records) || records.length > MAX_RECORDS) throw new Error('Invalid cache ownership index');
-        const normalized = records.map(normalizeRecord);
-        if (new Set(normalized.map(recordIdentity)).size !== normalized.length) {
-            throw new Error('Duplicate cache ownership records');
+        const records = normalizeCacheOwnership(await this.storage.read());
+        this.itemSources.clear();
+        for (const record of records) {
+            const sources = this.itemSources.get(record.itemID) || new Set();
+            sources.add(record.sourceHash);
+            this.itemSources.set(record.itemID, sources);
         }
-        return normalized;
+        for (const keys of this.leases) this.#expand(keys);
+        this.#expand(this.touched);
+        return records;
+    }
+
+    #expand(keys) {
+        for (const key of keys) {
+            if (!key.startsWith('item:')) continue;
+            for (const hash of this.itemSources.get(Number(key.slice(5))) || []) keys.add(`source:${hash}`);
+        }
+        return keys;
     }
 
     #enqueue(operation) {
@@ -201,7 +306,8 @@ function normalizeRecord(record) {
         || !Number.isSafeInteger(record.sourceBytes) || record.sourceBytes < 1
         || record.sourceBytes > 256 * 1024 * 1024
         || !Array.isArray(record.artifacts) || record.artifacts.length > MAX_ARTIFACTS
-        || (record.orphanedAt !== null && (!Number.isSafeInteger(record.orphanedAt) || record.orphanedAt < 0))) {
+        || (record.orphanedAt !== null && (!Number.isSafeInteger(record.orphanedAt) || record.orphanedAt < 0))
+        || (record.ownerCleaned !== undefined && typeof record.ownerCleaned !== 'boolean')) {
         throw new TypeError('Invalid cache ownership record');
     }
     const artifacts = record.artifacts.map(({ store, key }) => {
@@ -213,5 +319,6 @@ function normalizeRecord(record) {
         itemID: record.itemID, sourceHash: record.sourceHash, sourceBytes: record.sourceBytes,
         artifacts: [...new Map(artifacts.map(value => [artifactIdentity(value), value])).values()],
         orphanedAt: record.orphanedAt,
+        ...(record.ownerCleaned ? { ownerCleaned: true } : {}),
     };
 }
