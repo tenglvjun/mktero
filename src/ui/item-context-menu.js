@@ -215,6 +215,7 @@ export function registerCollectionContextMenu({
     window,
     onPrepare = null,
     onExportObsidian = null,
+    confirm = async () => false,
     hasMarkdown = () => false,
     onError,
     translate = translateEnglish,
@@ -249,7 +250,8 @@ export function registerCollectionContextMenu({
         const targets = collectionPDFTargets(zotero, window);
         if (!targets.length) return;
         Promise.resolve()
-            .then(() => onPrepare(targets))
+            .then(() => confirm('prepare', { count: targets.length }))
+            .then(confirmed => confirmed ? onPrepare(targets) : undefined)
             .catch(onError);
     };
     const handleExportPopupShowing = event => {
@@ -274,8 +276,17 @@ export function registerCollectionContextMenu({
             hasMarkdown
         );
         if (!targets.length) return;
+        const readyCount = targets.filter(target => (
+            safeHasMarkdown(hasMarkdown, target.item)
+        )).length;
         Promise.resolve()
-            .then(() => onExportObsidian(exportTargets(targets)))
+            .then(() => confirm('export', {
+                count: targets.length,
+                readyCount,
+            }))
+            .then(confirmed => confirmed
+                ? onExportObsidian(exportTargets(targets))
+                : undefined)
             .catch(onError);
     };
     menu.addEventListener('popupshowing', handlePopupShowing);
@@ -328,21 +339,54 @@ function safeHasMarkdown(hasMarkdown, item) {
 }
 
 function collectionPDFTargets(zotero, window) {
-    return resolvePDFTargets(zotero, collectionChildItems(window));
+    return resolvePDFTargets(zotero, collectionChildItems(zotero, window));
 }
 
 function collectionPDFRecords(zotero, window) {
-    return resolvePDFCandidates(zotero, collectionChildItems(window));
+    return resolvePDFCandidates(zotero, collectionChildItems(zotero, window));
 }
 
-function collectionChildItems(window) {
-    const collections = window?.ZoteroPane?.getSelectedCollections?.();
-    if (!Array.isArray(collections) || !collections.length) return [];
+function collectionChildItems(zotero, window) {
+    const selected = window?.ZoteroPane?.getSelectedCollections?.();
+    if (!Array.isArray(selected) || !selected.length) return [];
+    const pending = [...selected];
+    const visited = new Set();
     const items = [];
-    for (const collection of collections) {
+    for (let index = 0; index < pending.length; index++) {
+        const collection = resolveCollection(zotero, pending[index]);
+        if (!collection) continue;
+        const identity = collection.id != null
+            ? `id:${collection.id}`
+            : collection.libraryID != null && collection.key
+                ? `key:${collection.libraryID}:${collection.key}`
+                : collection;
+        if (visited.has(identity)) continue;
+        visited.add(identity);
         items.push(...childItems(collection));
+        pending.push(...childCollections(collection));
     }
     return items;
+}
+
+function resolveCollection(zotero, value) {
+    if (value && typeof value === 'object') return value;
+    try {
+        return zotero?.Collections?.get?.(value) || null;
+    }
+    catch {
+        return null;
+    }
+}
+
+function childCollections(collection) {
+    if (typeof collection?.getChildCollections !== 'function') return [];
+    try {
+        const children = collection.getChildCollections();
+        return Array.isArray(children) ? children : [];
+    }
+    catch {
+        return [];
+    }
 }
 
 function childItems(collection) {

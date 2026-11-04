@@ -226,9 +226,10 @@ or cancellation do not by themselves start a conversion.
    - Right-click a PDF or library item and choose `Read as Markdown with Mktero`.
    - Select several items and choose `Prepare selected Markdown` to queue them
      without opening a tab for each one.
-   - Right-click a collection and choose `Prepare collection Markdown` to
-     prepare only that collection's own PDFs, not its subcollections. A single
-     item still uses `Read as Markdown with Mktero`.
+   - Right-click a collection and choose `Prepare collection tree Markdown` to
+     prepare PDFs in the collection and all its subcollections. Mktero confirms
+     the number of unique PDFs before preparing. A single item still uses
+     `Read as Markdown with Mktero`.
 
 2. Follow the upload, conversion, and download progress in the temporary Mktero
    tab. A valid cache entry skips the remote conversion. A batch uses Zotero's
