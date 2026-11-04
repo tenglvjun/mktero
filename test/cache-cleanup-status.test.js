@@ -32,6 +32,48 @@ function observerService() {
     } };
 }
 
+async function cleanupPane(t, locale, provider = {}) {
+    const dom = new JSDOM('<div id="mktero-cache-status"></div><button id="mktero-clear-cache"></button>'
+        + '<div id="mktero-cache-cleanup-status"></div><button id="mktero-cache-cleanup-retry"></button>');
+    t.after(() => dom.window.close());
+    const services = observerService();
+    const localization = createLocalization({ zoteroLocale: locale });
+    let statsCalls = 0;
+    t.after(registerCacheCleanupStatusProvider(services, {
+        getStatus: () => snapshot(),
+        retry: () => assert.fail('unexpected cleanup retry'),
+        ...provider,
+    }));
+    const controller = createPreferencesController({
+        document: dom.window.document, services, zotero: { logError: assert.fail }, localization,
+        cache: {
+            getStats: async () => { statsCalls++; return { entries: 2, sizeBytes: 200 }; },
+            clear: async () => assert.fail('checking again must not clear caches'),
+        },
+    });
+    t.after(() => controller.destroy());
+    await controller.init();
+    await tick();
+    return {
+        dom, services, localization, controller, statsCalls: () => statsCalls,
+        status: dom.window.document.getElementById('mktero-cache-cleanup-status'),
+        retry: dom.window.document.getElementById('mktero-cache-cleanup-retry'),
+    };
+}
+
+function observeCleanupMutations(t, pane) {
+    const records = [];
+    const observer = new pane.dom.window.MutationObserver(batch => records.push(...batch));
+    for (const node of [pane.status, pane.retry]) {
+        observer.observe(node, {
+            childList: true, characterData: true, characterDataOldValue: true,
+            attributes: true, subtree: true,
+        });
+    }
+    t.after(() => observer.disconnect());
+    return records;
+}
+
 test('cleanup events expose only bounded safe status fields and dispose observers', () => {
     const services = observerService();
     const values = [];
@@ -124,6 +166,168 @@ test('a failing cleanup provider reports a safe error without exception details'
 });
 
 for (const locale of ['en-US', 'zh-CN']) {
+    test(`preferences keep batched running cleanup text and DOM stable in ${locale}`, async t => {
+        const pane = await cleanupPane(t, locale);
+        const { status, retry, services } = pane;
+        assert.ok(status.textContent.includes('MISSING1'));
+        assert.equal(retry.disabled, false);
+        const initialStatsCalls = pane.statsCalls();
+        const runningText = locale === 'zh-CN'
+            ? '正在检查缓存归属及共享引用…' : 'Checking cache ownership and shared references…';
+        publishCacheCleanupStatus(services, snapshot({ state: 'running', nextRunAt: null }));
+        await tick();
+        assert.equal(status.textContent, runningText);
+        assert.equal(status.getAttribute('aria-busy'), 'true');
+        assert.equal(retry.disabled, true);
+        const records = observeCleanupMutations(t, pane);
+        for (let batch = 0; batch < 8; batch++) {
+            publishCacheCleanupStatus(services, snapshot({
+                state: 'running', checkedAt: 200 + batch,
+                nextRunAt: batch % 2 === 0 ? 60000 + batch * 250 : null,
+                removed: batch, ownersRemoved: batch + 1, referenced: batch + 2,
+                busy: batch + 3, unknown: batch + 4, errors: batch,
+                reasons: [{ code: 'missing-file', count: batch + 4 }],
+                blockers: [{ itemID: batch + 20, libraryID: 2,
+                    attachmentKey: `BATCH${String(batch).padStart(3, '0')}`, reason: 'missing-file' }],
+            }));
+            await tick();
+            assert.equal(status.textContent, runningText, `batch ${batch} must keep the running message`);
+            assert.equal(status.getAttribute('aria-busy'), 'true');
+            assert.equal(retry.disabled, true);
+            assert.deepEqual(records.map(record => ({
+                type: record.type, target: record.target.id, attribute: record.attributeName,
+            })), [], `batch ${batch} must not rewrite text or attributes`);
+        }
+        assert.equal(pane.statsCalls(), initialStatsCalls);
+    });
+
+    test(`preferences restore final cleanup reasons, next check, and retry after batches in ${locale}`, async t => {
+        const pane = await cleanupPane(t, locale);
+        const { status, retry, services, localization } = pane;
+        const translate = (key, variables) => localization.t(`preferences.cache.cleanup.${key}`, variables);
+        for (const nextRunAt of [null, 60250, null, 60750]) {
+            publishCacheCleanupStatus(services, snapshot({ state: 'running', nextRunAt }));
+            await tick();
+        }
+        const finalStatus = snapshot({
+            checkedAt: Date.UTC(2026, 0, 2, 15), nextRunAt: Date.UTC(2026, 0, 2, 15, 4),
+            removed: 2, ownersRemoved: 3, referenced: 4, busy: 5, unknown: 6, errors: 1,
+            reasons: [{ code: 'changed-file', count: 6 }],
+            blockers: [{ itemID: 11, libraryID: 2, attachmentKey: 'CHANGED1', reason: 'changed-file' }],
+        });
+        publishCacheCleanupStatus(services, finalStatus);
+        await tick();
+        const reason = translate('reason.changed-file');
+        const time = new Intl.DateTimeFormat(locale, {
+            dateStyle: 'medium', timeStyle: 'short',
+        }).format(new Date(finalStatus.nextRunAt));
+        for (const text of [
+            translate('blocked'), translate('removed', finalStatus),
+            translate('unknown', { count: 6 }), translate('referenced', { count: 4 }),
+            translate('busy', { count: 5 }), translate('errors', { count: 1 }),
+            translate('reasonCount', { reason, count: 6 }),
+            translate('blocker', { key: 'CHANGED1', library: 2, reason }),
+            translate('nextRun', { time }),
+        ]) assert.ok(status.textContent.includes(text), `final status must show ${text}`);
+        assert.equal(status.textContent.includes('MISSING1'), false);
+        assert.equal(status.textContent.includes(translate('reason.missing-file')), false);
+        assert.equal(status.getAttribute('aria-busy'), 'false');
+        assert.equal(retry.disabled, false);
+        const records = observeCleanupMutations(t, pane);
+        const statsCalls = pane.statsCalls();
+        publishCacheCleanupStatus(services, finalStatus);
+        await tick();
+        assert.equal(records.length, 0, 'repeated final status must not rewrite the DOM');
+        assert.equal(pane.statsCalls(), statsCalls);
+        publishCacheCleanupStatus(services, snapshot({
+            state: 'complete', checkedAt: finalStatus.checkedAt + 1000, nextRunAt: null,
+            removed: 7, ownersRemoved: 8, unknown: 0, reasons: [], blockers: [],
+        }));
+        await tick();
+        assert.equal(status.textContent, [
+            translate('complete'), translate('removed', { removed: 7, ownersRemoved: 8 }),
+        ].join(' '));
+        assert.equal(status.getAttribute('aria-busy'), 'false');
+        assert.equal(retry.disabled, false);
+    });
+
+    test(`preferences retry enters running without a transient waiting message in ${locale}`, async t => {
+        let current = snapshot();
+        let retries = 0;
+        let finishRetry;
+        const pendingRetry = new Promise(resolve => { finishRetry = resolve; });
+        t.after(() => finishRetry());
+        const pane = await cleanupPane(t, locale, {
+            getStatus: () => current,
+            retry: () => { retries++; return pendingRetry; },
+        });
+        const { status, retry, localization } = pane;
+        const runningText = localization.t('preferences.cache.cleanup.running');
+        const waitingText = localization.t('preferences.cache.cleanup.waiting');
+        const statsCalls = pane.statsCalls();
+        assert.ok(status.textContent.includes('MISSING1'));
+        assert.equal(retry.disabled, false);
+        const records = observeCleanupMutations(t, pane);
+        retry.click();
+        assert.equal(status.textContent, runningText);
+        assert.equal(status.getAttribute('aria-busy'), 'true');
+        assert.equal(retry.disabled, true);
+        await tick();
+        const messages = records.flatMap(record => {
+            // Keep intermediate text nodes: waiting can be replaced by running
+            // before MutationObserver delivers either mutation.
+            if (record.type === 'childList') return Array.from(record.addedNodes, node => node.textContent);
+            if (record.type === 'characterData') return [record.oldValue, record.target.textContent];
+            return [];
+        });
+        assert.ok(messages.length > 0, 'observe the transition from blocked to running');
+        assert.equal(messages.some(text => text?.includes(waitingText)), false,
+            'retry must never render waiting, even within one event turn');
+        retry.click();
+        await tick();
+        assert.equal(retries, 1);
+        assert.equal(pane.statsCalls(), statsCalls);
+        current = snapshot({
+            state: 'complete', checkedAt: 300, nextRunAt: null, removed: 1,
+            unknown: 0, reasons: [], blockers: [],
+        });
+        finishRetry();
+        await tick();
+        assert.ok(status.textContent.includes(localization.t('preferences.cache.cleanup.complete')));
+        assert.equal(status.getAttribute('aria-busy'), 'false');
+        assert.equal(retry.disabled, false);
+        assert.equal(pane.statsCalls(), statsCalls + 1);
+    });
+
+    test(`destroyed preferences ignore later cleanup batches and stale callbacks in ${locale}`, async t => {
+        let retries = 0;
+        const pane = await cleanupPane(t, locale, { retry: () => { retries++; } });
+        const { services, controller, status, retry } = pane;
+        const staleObservers = [...services.observers.get(CACHE_CLEANUP_STATUS_TOPIC)];
+        assert.equal(staleObservers.length, 1);
+        const beforeDestroy = { text: status.textContent, busy: status.getAttribute('aria-busy'), disabled: retry.disabled };
+        const statsCalls = pane.statsCalls();
+        controller.destroy();
+        const records = observeCleanupMutations(t, pane);
+        for (const state of ['running', 'running', 'blocked', 'complete']) {
+            const value = snapshot({ state, checkedAt: 400, nextRunAt: state === 'running' ? null : 90000 });
+            publishCacheCleanupStatus(services, value);
+            for (const observer of staleObservers) {
+                observer.observe(null, CACHE_CLEANUP_STATUS_TOPIC, JSON.stringify(value));
+            }
+            await tick();
+        }
+        retry.click();
+        await tick();
+        assert.deepEqual({
+            text: status.textContent, busy: status.getAttribute('aria-busy'), disabled: retry.disabled,
+        }, beforeDestroy);
+        assert.equal(records.length, 0);
+        assert.equal(pane.statsCalls(), statsCalls);
+        assert.equal(retries, 0);
+        assert.equal(services.observers.get(CACHE_CLEANUP_STATUS_TOPIC).size, 0);
+    });
+
     test(`preferences render cleanup reasons, refresh statistics, and retry safely in ${locale}`, async t => {
         const dom = new JSDOM('<div id="mktero-cache-status"></div><button id="mktero-clear-cache"></button>'
             + '<div id="mktero-cache-cleanup-status"></div><button id="mktero-cache-cleanup-retry"></button>');

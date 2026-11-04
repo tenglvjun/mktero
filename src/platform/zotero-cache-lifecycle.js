@@ -194,7 +194,8 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
     let totals = { removed: 0, ownersRemoved: 0, errors: 0 };
     let status = { state: 'waiting', checkedAt: null, nextRunAt: null, removed: 0, ownersRemoved: 0,
         referenced: 0, busy: 0, unknown: 0, errors: 0, reasons: [], blockers: [] };
-    const getStatus = () => ({ ...status, nextRunAt: Number.isFinite(nextRun) ? nextRun : null,
+    const getStatus = () => ({ ...status,
+        nextRunAt: status.state !== 'running' && Number.isFinite(nextRun) ? nextRun : null,
         reasons: status.reasons.map(value => ({ ...value })), blockers: status.blockers.map(value => ({ ...value })) });
     const publish = () => {
         if (stopped) return;
@@ -265,8 +266,9 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             if (running) { schedule(CACHE_DELETE_DELAY_MS); return; }
             running = true;
             if (!continuing) totals = { removed: 0, ownersRemoved: 0, errors: 0 };
+            const starting = status.state !== 'running';
             status = { ...status, state: 'running' };
-            publish();
+            if (starting) publish();
             const full = fullRequested || now() >= nextFullRun || !pendingIDs.size;
             const itemIDs = full ? null : new Set(pendingIDs);
             fullRequested = false;
@@ -311,7 +313,9 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             finally {
                 running = false;
                 schedule(Math.max(0, Math.min(CACHE_SWEEP_INTERVAL_MS, nextFullRun - now())));
-                publish();
+                // Continuation batches belong to one check. Publishing every
+                // short timer makes the preferences pane resize repeatedly.
+                if (!continuing) publish();
             }
         }, delay);
         if (timer === null) nextRun = Infinity;

@@ -363,6 +363,32 @@ test('hash batches retain progress and protect a duplicate found in a later batc
     assert.deepEqual(await f.ownership.read(), []);
 });
 
+test('a multi-batch manual check publishes only its start and final result to settings', async t => {
+    const f = await runtimeFixture(t);
+    for (let i = 0; i < 350; i++) f.items.push({ id: i + 10, libraryID: 1, isPDFAttachment: () => false });
+    assert.equal(f.statuses.at(-1).state, 'waiting');
+    f.statuses.length = 0;
+    f.adapter.requestCheck();
+    assert.equal(f.nextDelay(), 0);
+    assert.equal(f.statuses.length, 1);
+    assert.equal(f.statuses[0].state, 'running');
+    assert.equal(f.statuses[0].nextRunAt, null);
+    for (let i = 0; i < 3; i++) {
+        await f.run();
+        assert.equal(f.summaries.at(-1).continuation, true);
+        assert.equal(f.nextDelay(), 250);
+        assert.equal(f.adapter.getStatus().nextRunAt, null);
+        assert.equal(f.statuses.length, 1);
+    }
+    await f.run();
+    assert.deepEqual(f.statuses.map(value => value.state), ['running', 'complete']);
+    assert.equal(f.statuses[1].removed, 1);
+    assert.equal(f.statuses[1].ownersRemoved, 1);
+    assert.equal(f.statuses[1].nextRunAt, f.now() + f.nextDelay());
+    assert.ok(f.statuses[1].nextRunAt > f.now());
+    assert.equal(await f.stores.markdown.get(f.key), null);
+});
+
 test('resumable hashing reads each PDF once and invalidates its cursor on library changes', async t => {
     const f = await fixture(t);
     const file = path.join(f.dir, 'duplicate.pdf');

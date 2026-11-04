@@ -1618,7 +1618,9 @@ export function createPreferencesController({
         if (!cleanupStatus) return;
         const value = cleanupSnapshot;
         const lines = [t(`preferences.cache.cleanup.${value?.state || 'waiting'}`)];
-        if (value) {
+        // Batch counters and continuation timers are internal progress, not a
+        // new result. Keep this text stable until the complete check finishes.
+        if (value && value.state !== 'running') {
             if (value.state === 'complete' || value.removed || value.ownersRemoved) {
                 lines.push(t('preferences.cache.cleanup.removed', value));
             }
@@ -1638,15 +1640,18 @@ export function createPreferencesController({
                 }));
             }
             if (value.nextRunAt !== null) {
-                const time = new Intl.DateTimeFormat(localization.locale, {
+                const time = new Intl.DateTimeFormat(localization.language, {
                     dateStyle: 'medium', timeStyle: 'short',
                 }).format(new Date(value.nextRunAt));
                 lines.push(t('preferences.cache.cleanup.nextRun', { time }));
             }
         }
-        cleanupStatus.textContent = lines.join(' ');
-        cleanupStatus.setAttribute('aria-busy', String(value?.state === 'running'));
-        if (cleanupRetryButton) cleanupRetryButton.disabled = !value || value.state === 'running';
+        const text = lines.join(' ');
+        if (cleanupStatus.textContent !== text) cleanupStatus.textContent = text;
+        const busy = String(value?.state === 'running');
+        if (cleanupStatus.getAttribute('aria-busy') !== busy) cleanupStatus.setAttribute('aria-busy', busy);
+        const disabled = !value || value.state === 'running';
+        if (cleanupRetryButton && cleanupRetryButton.disabled !== disabled) cleanupRetryButton.disabled = disabled;
     }
 
     function initializeCleanupStatus() {
@@ -1674,7 +1679,7 @@ export function createPreferencesController({
 
     function retryCleanup() {
         if (!initialized || !cleanupSnapshot || cleanupRetryButton?.disabled) return;
-        cleanupSnapshot = null;
+        cleanupSnapshot = { ...cleanupSnapshot, state: 'running' };
         renderCleanupStatus();
         requestCacheCleanupRetry(services);
     }
