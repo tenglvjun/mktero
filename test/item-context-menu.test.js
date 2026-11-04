@@ -48,6 +48,14 @@ function regularItem(id, attachmentIDs = []) {
     };
 }
 
+function collection(id, items = [], children = []) {
+    return {
+        id,
+        getChildItems: () => items,
+        getChildCollections: () => children,
+    };
+}
+
 function showMenu(document) {
     document.querySelector('#zotero-itemmenu').dispatchEvent(
         new document.defaultView.Event('popupshowing', { bubbles: true })
@@ -436,7 +444,7 @@ test('prepares every selected PDF and changes the label while one is preparing',
     assert.deepEqual(opened, [2]);
 });
 
-test('prepares PDFs in the selected collection and ignores its subcollections', async () => {
+test('prepares unique PDFs recursively across selected collection trees', async () => {
     const direct = pdfItem(7);
     direct.getDisplayTitle = () => 'Direct';
     const parent = regularItem(8, [9]);
@@ -445,27 +453,33 @@ test('prepares PDFs in the selected collection and ignores its subcollections', 
     attachment.parentItemID = 8;
     const nested = pdfItem(10);
     nested.getDisplayTitle = () => 'Nested';
-    const selected = {
-        getChildItems: () => [direct, parent, { id: 11, deleted: true, isPDFAttachment: () => true }],
-        getChildCollections: () => [{ getChildItems: () => [nested] }],
-    };
+    const deep = pdfItem(12);
+    deep.getDisplayTitle = () => 'Deep';
+    const grandchild = collection(300, [deep]);
+    const child = collection(200, [direct, nested], [grandchild]);
+    const root = collection(100, [direct, parent], [child.id]);
     const { document } = parseHTML('<html><body><div id="zotero-collectionmenu"></div></body></html>');
     document.createXULElement = tagName => document.createElement(tagName);
     const prepared = [];
+    const confirmations = [];
     const dispose = registerCollectionContextMenu({
         zotero: {
             Items: {
-                get: id => ({
-                    8: parent,
-                    9: attachment,
-                })[id] || null,
+                get: id => ({ 8: parent, 9: attachment })[id] || null,
+            },
+            Collections: {
+                get: id => ({ 200: child, 300: grandchild })[id] || null,
             },
         },
         window: {
             document,
-            ZoteroPane: { getSelectedCollections: () => [selected] },
+            ZoteroPane: { getSelectedCollections: () => [root, child] },
         },
         onPrepare: targets => prepared.push(targets),
+        confirm: async (action, details) => {
+            confirmations.push({ action, details });
+            return true;
+        },
         onError: assert.fail,
     });
 
@@ -474,17 +488,24 @@ test('prepares PDFs in the selected collection and ignores its subcollections', 
     );
     const menuItem = document.querySelector('#mktero-prepare-collection-markdown');
     assert.equal(menuItem.hidden, false);
-    assert.equal(menuItem.getAttribute('label'), 'Prepare collection Markdown');
+    assert.equal(
+        menuItem.getAttribute('label'),
+        'Prepare collection tree Markdown'
+    );
     menuItem.dispatchEvent(new document.defaultView.Event('command'));
     await new Promise(resolve => setImmediate(resolve));
 
+    assert.deepEqual(confirmations, [{ action: 'prepare', details: { count: 4 } }]);
     assert.deepEqual(prepared, [[
         { itemID: 7, title: 'Direct' },
         { itemID: 9, title: 'Parent paper' },
+        { itemID: 10, title: 'Nested' },
+        { itemID: 12, title: 'Deep' },
     ]]);
     dispose();
     assert.equal(document.querySelector('#mktero-prepare-collection-markdown'), null);
 });
+
 
 test('shows Obsidian export for one item only when it has Markdown', async () => {
     const pdf = pdfItem(42);
@@ -609,7 +630,7 @@ test('hides Obsidian export when the callback is omitted', () => {
     assert.equal(exportItem.hidden, true);
 });
 
-test('exports collection PDFs to Obsidian with the same targets as prepare', async () => {
+test('exports unique PDFs recursively and confirms total and ready counts', async () => {
     const direct = pdfItem(7);
     direct.getDisplayTitle = () => 'Direct';
     const parent = regularItem(8, [9]);
@@ -618,36 +639,38 @@ test('exports collection PDFs to Obsidian with the same targets as prepare', asy
     attachment.parentItemID = 8;
     const nested = pdfItem(10);
     nested.getDisplayTitle = () => 'Nested';
-    const selected = {
-        getChildItems: () => [
-            direct,
-            parent,
-            { id: 11, deleted: true, isPDFAttachment: () => true },
-        ],
-        getChildCollections: () => [{ getChildItems: () => [nested] }],
-    };
+    const deep = pdfItem(12);
+    deep.getDisplayTitle = () => 'Deep';
+    const grandchild = collection(300, [deep]);
+    const child = collection(200, [direct, nested], [grandchild.id]);
+    const root = collection(100, [direct, parent], [child.id]);
     const { document } = parseHTML(
         '<html><body><div id="zotero-collectionmenu"></div></body></html>'
     );
     document.createXULElement = tagName => document.createElement(tagName);
     const prepared = [];
     const exported = [];
+    const confirmations = [];
     const dispose = registerCollectionContextMenu({
         zotero: {
             Items: {
-                get: id => ({
-                    8: parent,
-                    9: attachment,
-                })[id] || null,
+                get: id => ({ 8: parent, 9: attachment })[id] || null,
+            },
+            Collections: {
+                get: id => ({ 200: child, 300: grandchild })[id] || null,
             },
         },
         window: {
             document,
-            ZoteroPane: { getSelectedCollections: () => [selected] },
+            ZoteroPane: { getSelectedCollections: () => [root, child] },
         },
         onPrepare: targets => prepared.push(targets),
         onExportObsidian: targets => exported.push(targets),
-        hasMarkdown: item => item === direct,
+        confirm: async (action, details) => {
+            confirmations.push({ action, details });
+            return true;
+        },
+        hasMarkdown: item => item === direct || item === deep,
         onError: assert.fail,
     });
 
@@ -660,20 +683,67 @@ test('exports collection PDFs to Obsidian with the same targets as prepare', asy
     assert.equal(exportItem.hidden, false);
     assert.equal(
         exportItem.getAttribute('label'),
-        'Export collection Markdown to Obsidian'
+        'Export collection tree Markdown to Obsidian'
     );
 
     exportItem.dispatchEvent(new document.defaultView.Event('command'));
     await new Promise(resolve => setImmediate(resolve));
 
+    assert.deepEqual(confirmations, [{
+        action: 'export',
+        details: { count: 4, readyCount: 2 },
+    }]);
     assert.deepEqual(exported, [[
         { itemID: 7, title: 'Direct' },
         { itemID: 9, title: 'Parent paper' },
+        { itemID: 10, title: 'Nested' },
+        { itemID: 12, title: 'Deep' },
     ]]);
     assert.deepEqual(prepared, []);
     dispose();
     assert.equal(document.querySelector('#mktero-prepare-collection-markdown'), null);
     assert.equal(document.querySelector('#mktero-export-collection-obsidian'), null);
+});
+
+test('cancelling collection batch confirmation starts neither action', async () => {
+    const direct = pdfItem(7);
+    const selected = collection(100, [direct]);
+    const { document } = parseHTML(
+        '<html><body><div id="zotero-collectionmenu"></div></body></html>'
+    );
+    document.createXULElement = tagName => document.createElement(tagName);
+    const actions = [];
+    const prepared = [];
+    const exported = [];
+    registerCollectionContextMenu({
+        zotero: { Items: { get: () => null } },
+        window: {
+            document,
+            ZoteroPane: { getSelectedCollections: () => [selected] },
+        },
+        onPrepare: targets => prepared.push(targets),
+        onExportObsidian: targets => exported.push(targets),
+        confirm: async action => {
+            actions.push(action);
+            return false;
+        },
+        hasMarkdown: () => true,
+        onError: assert.fail,
+    });
+
+    const menu = document.querySelector('#zotero-collectionmenu');
+    menu.dispatchEvent(new document.defaultView.Event('popupshowing', { bubbles: true }));
+    document.querySelector('#mktero-prepare-collection-markdown').dispatchEvent(
+        new document.defaultView.Event('command')
+    );
+    document.querySelector('#mktero-export-collection-obsidian').dispatchEvent(
+        new document.defaultView.Event('command')
+    );
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.deepEqual(actions, ['prepare', 'export']);
+    assert.deepEqual(prepared, []);
+    assert.deepEqual(exported, []);
 });
 
 test('hides collection Obsidian export when no item has Markdown', () => {

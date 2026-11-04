@@ -209,11 +209,14 @@
             <html:div class="mktero-setting-row">
                 <html:div class="mktero-setting-copy">
                     <html:strong data-i18n="preferences.cache.cleanup.title"></html:strong>
-                    <html:small id="mktero-cache-cleanup-status"
-                                role="status"
-                                aria-live="polite"
-                                aria-busy="false"
-                                data-i18n="preferences.cache.cleanup.waiting"></html:small>
+                    <html:details id="mktero-cache-cleanup-details" class="mktero-cache-cleanup-details">
+                        <html:summary data-i18n="preferences.cache.cleanup.details"></html:summary>
+                        <html:small id="mktero-cache-cleanup-status"
+                                    role="status"
+                                    aria-live="polite"
+                                    aria-busy="false"
+                                    data-i18n="preferences.cache.cleanup.waiting"></html:small>
+                    </html:details>
                 </html:div>
                 <html:button id="mktero-cache-cleanup-retry"
                              class="mktero-button mktero-button-outline"

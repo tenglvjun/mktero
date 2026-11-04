@@ -3814,6 +3814,21 @@ function zoteroList(item, methodName) {
     }
 }
 
+function confirmCollectionAction(ownerWindow, action, details) {
+    const services = typeof Services === 'undefined' ? null : Services;
+    if (!services?.prompt?.confirm) return false;
+    const exportAction = action === 'export';
+    return services.prompt.confirm(
+        ownerWindow,
+        runtimeTranslate(exportAction
+            ? 'menu.exportCollectionConfirmTitle'
+            : 'menu.prepareCollectionConfirmTitle'),
+        runtimeTranslate(exportAction
+            ? 'menu.exportCollectionConfirmMessage'
+            : 'menu.prepareCollectionConfirmMessage', details)
+    );
+}
+
 function confirmObsidianOverwrite(ownerWindow, path) {
     const services = typeof Services === 'undefined' ? null : Services;
     if (!services?.prompt?.confirm) return false;
@@ -4363,6 +4378,7 @@ function registerMainWindowContextMenu(window) {
         window,
         onPrepare: prepareSelectedMarkdown,
         onExportObsidian: exportSelectedObsidian,
+        confirm: (action, details) => confirmCollectionAction(window, action, details),
         hasMarkdown: itemHasReadableMarkdownItem,
         onError: handleOpenError,
         translate: runtimeTranslate,

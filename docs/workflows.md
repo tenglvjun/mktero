@@ -503,11 +503,12 @@ sync, and it does not change the Zotero item. You can hide the column from the
 item-list column picker; that choice is remembered.
 
 Select several library items or PDF attachments and choose `Prepare selected
-Markdown`, or right-click one collection and choose `Prepare collection
+Markdown`, or right-click one collection and choose `Prepare collection tree
 Markdown`. Both actions queue every selected PDF and do not
-open a reader tab. A collection action includes only that collection's own
-items, not items that belong only to a subcollection. Right-clicking one paper
-still opens it for reading. Already cached or already preparing items
+open a reader tab. A collection action walks the selected collection and all
+its descendants. Before preparing, Mktero confirms the number of unique PDFs
+in that tree; cached or already preparing items are skipped by the queue.
+Right-clicking one paper still opens it for reading. Already cached or already preparing items
 are skipped, including readable imported results for the specific PDF. An
 imported result for one attachment does not make other PDFs of that parent
 item ready. A selection record without readable content is not skipped as
@@ -592,10 +593,12 @@ least one selected item already has converted Markdown, using the same check
 as the Markdown column. One selected item shows the export beside reading
 only when that item has Markdown; reading is not replaced. A selection with
 no converted Markdown does not show it. A collection shows `Export collection
-Markdown to Obsidian` only when at least one of that collection's own items
-has converted Markdown. It uses the same collection scope as `Prepare
-collection Markdown`: that collection's own items, not items that belong only
-to a subcollection.
+Markdown to Obsidian` only when at least one item in the collection tree has
+converted Markdown. It uses the same recursive collection-tree scope as
+`Prepare collection tree Markdown`. Before exporting, Mktero confirms the total
+number of unique PDFs and how many currently have Markdown; only ready Markdown
+is exported, and the batch report shows the status of other PDFs.
+Multiple PDFs for one Zotero item may be grouped into one note.
 
 Only Markdown that has already been converted is exported. A cache miss does
 not start OCR or conversion. One Zotero parent item becomes one note. If
