@@ -44,6 +44,14 @@ export async function createMarkdownCacheKey(fileData, {
         throw new TypeError('A parser profile is required');
     }
     const sourceHash = await sha256Hex(fileData, { crypto });
+    return createMarkdownCacheKeyFromHash(sourceHash, { crypto, parserProfile });
+}
+
+export async function createMarkdownCacheKeyFromHash(sourceHash, {
+    crypto = globalThis.crypto, parserProfile = DEFAULT_MINERU_PARSER_PROFILE,
+} = {}) {
+    validateCacheKey(sourceHash);
+    if (typeof parserProfile !== 'string' || !parserProfile) throw new TypeError('A parser profile is required');
     const descriptor = new TextEncoder().encode([
         `cache-schema:${CACHE_SCHEMA_VERSION}`,
         `parser-profile:${parserProfile}`,
@@ -732,6 +740,14 @@ export class MarkdownCache {
         return this.#withOperation(() => this.#scan({
             removeInvalid: false,
         }));
+    }
+
+    delete(cacheKey) {
+        validateCacheKey(cacheKey);
+        return this.#withOperation(async () => {
+            await this.io.remove(this.#entryPath(cacheKey), { recursive: true, ignoreAbsent: true });
+            this.#notifyStoreChange({ type: 'removed', cacheKeys: [cacheKey] });
+        });
     }
 
     clear() {

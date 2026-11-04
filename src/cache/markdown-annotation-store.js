@@ -56,6 +56,20 @@ export class MarkdownAnnotationStore {
         return this.#withOperation(() => this.#put(itemID, annotations));
     }
 
+    delete(itemID) {
+        validateItemID(itemID);
+        return this.#withOperation(async () => {
+            await this.io.remove(this.#filePath(itemID), { ignoreAbsent: true });
+            if (!(await this.io.exists(this.rootPath))) return;
+            const backup = new RegExp(`^item-${itemID}\\.corrupt-[0-9]+(?:-[0-9]+)?\\.json$`);
+            for (const filePath of await this.io.getChildren(this.rootPath)) {
+                if (backup.test(this.path.filename(filePath))) {
+                    await this.io.remove(filePath, { ignoreAbsent: true });
+                }
+            }
+        });
+    }
+
     // Keeps an unreadable file under a backup name so a later put cannot
     // overwrite it. Resolves false when there is no file to keep.
     setAside(itemID) {

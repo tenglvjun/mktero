@@ -12,7 +12,7 @@ import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 export class MinerUCacheImportService {
     constructor({ zotero, source, index, cache, resultStore, readFile,
         countPages, isCacheEnabled, prepareResult, recoverFigures = async result => result,
-        openPDF = null, decodeImage = null,
+        openPDF = null, decodeImage = null, onPDFRead = null,
         inspect = inspectLLMCacheEntries, adaptAssets = adaptLLMCacheAssets,
         now = Date.now, hash = sha256Hex } = {}) {
         for (const [name, value] of Object.entries({ readFile, countPages, isCacheEnabled, prepareResult })) {
@@ -24,7 +24,7 @@ export class MinerUCacheImportService {
         }
         Object.assign(this, { zotero, source, index, cache, resultStore, readFile,
             countPages, isCacheEnabled, prepareResult, recoverFigures, openPDF,
-            decodeImage, inspect, adaptAssets, now, hash });
+            decodeImage, inspect, adaptAssets, now, hash, onPDFRead });
         this.active = new Set();
     }
 
@@ -64,6 +64,8 @@ export class MinerUCacheImportService {
             });
             const snapshotHash = await hashCanonicalLLMEntries(adapted.entries, { signal });
             const identity = await createLLMCacheIdentity({ fileData, sourceHash, snapshotHash });
+            throwIfFigureAborted(signal);
+            await this.onPDFRead?.(attachment, fileData, identity);
             throwIfFigureAborted(signal);
             // The package contains only normalized local input, never provenance paths or the PDF.
             const archive = zipSync(Object.fromEntries(adapted.entries.map(entry => [entry.path, entry.data])), { level: 0 });

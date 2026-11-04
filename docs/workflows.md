@@ -48,9 +48,9 @@ but the import then explains why it cannot be used.
 After a successful import, reading uses Mktero's copy and no longer needs the
 source cache: deleting only the llm-for-zotero source still allows offline
 reading. Mktero does not automatically evict its Markdown or raw MinerU cache
-by entry count, total size, or inactivity. The copy remains available unless
-you clear it, a damaged entry is removed during self-healing, or the profile
-filesystem is unavailable; individual archive and document resource limits
+by entry count, total size, or inactivity. Copies are subject to the orphan
+cleanup described below after permanent attachment deletion, manual clearing,
+self-healing of damaged entries, and profile filesystem availability; individual archive and document resource limits
 still apply. Mktero first uses saved corrections or a prepared reading
 document; if only the retained raw result remains, it rebuilds the document
 offline. If all local content for the selected import is missing, a later
@@ -66,6 +66,37 @@ successful reparse replaces this attachment's imported selection.
 Importing one PDF does not choose a different PDF for the parent's existing
 `Read as Markdown with Mktero` action, which still opens its first PDF. Use the
 chosen PDF's own reading action to reopen another attachment's imported result.
+
+## Local cache cleanup
+
+Moving an item or PDF attachment to Zotero trash, or removing it from a
+collection, does not delete its Mktero data. After Mktero first confirms that
+a registered PDF attachment is permanently absent, it starts a 30-day grace
+period. Restoring the attachment cancels that timer. The timer also survives
+Zotero restarts; missed notifications are reconciled at startup.
+
+After the grace period, idle background checks can remove registered Markdown
+and its figures and translations, raw MinerU results, matching saved
+corrections, PDF text indexes and reading positions, plus the deleted
+attachment's local highlights, highlight-group records, import selections and
+readiness markers. Other attachments with the same PDF bytes, including
+attachments in other libraries or trash that were never opened in Mktero,
+protect shared data. Zotero PDF files, notes, annotations, saved snapshots,
+exported files and llm-for-zotero source caches are not deleted by this cleanup.
+
+Checks run after startup, relevant Zotero notifications, and hourly while
+Zotero is running. They defer during Mktero reading/conversion or incomplete
+library/file scans. Matching file sizes are checked locally before hashing;
+no attachment is downloaded or uploaded. Missing local PDFs (including files
+not yet synced), inaccessible libraries, damaged ownership records, or scan
+resource limits can postpone cleanup. Failed deletions are retried. This is
+not a promise that files disappear exactly 30 days after deletion.
+
+Ownership is registered when Mktero next reads or imports a PDF. Recognizable
+older parser variants are adopted then; historical data whose ownership
+cannot be established stays on disk. Citation caches and the legacy separate
+translation cache keep their existing expiry/size rules. The existing
+**Clear cache** action remains available in Mktero settings.
 
 ## Footnotes and article information
 

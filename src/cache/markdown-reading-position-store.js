@@ -59,6 +59,11 @@ export class MarkdownReadingPositionStore {
         ));
     }
 
+    delete(sourceHash) {
+        validateHash(sourceHash, 'source hash');
+        return this.#withOperation(() => this.io.remove(this.#filePath(sourceHash), { ignoreAbsent: true }));
+    }
+
     clear() {
         return this.#withOperation(() => this.#clear());
     }

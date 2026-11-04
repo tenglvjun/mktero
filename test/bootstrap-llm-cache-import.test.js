@@ -455,6 +455,12 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
         assert.equal(firstSelection.sourceFormat, 'v2');
         firstIdentity = await createLLMCacheIdentity({ fileData: pdfData, snapshotHash: firstSelection.snapshotHash });
         assert.equal(firstSelection.rawKey, firstIdentity.rawKey);
+        const ownership = JSON.parse(await fs.readFile(path.join(profilePath, 'mktero-cache-owners/v1/index.json'), 'utf8'));
+        const owner = ownership.records.find(record => record.attachmentKey === attachment.key
+            && record.sourceHash === firstIdentity.sourceHash);
+        assert.equal(owner.itemID, attachment.id);
+        assert.ok(owner.artifacts.some(resource => resource.store === 'raw' && resource.key === firstIdentity.rawKey));
+        assert.ok(owner.artifacts.some(resource => resource.store === 'markdown' && resource.key === firstIdentity.cacheKey));
         const stored = await resultStore.get(firstIdentity.rawKey);
         assert.equal(stored.provider, 'llm-for-zotero');
         assert.equal(stored.totalPages, 1);

@@ -42,6 +42,7 @@ export class ImportedMinerUDocumentExtractor {
         prepareResult = prepareMinerUResult,
         recoverFigures = async result => result,
         preparePDFIndex = null,
+        onPDFRead = null,
         onPDFIndexError = () => {},
     } = {}) {
         if (!zotero?.Items || typeof readFile !== 'function' || typeof index?.get !== 'function'
@@ -50,6 +51,7 @@ export class ImportedMinerUDocumentExtractor {
         }
         this.zotero = zotero;
         this.readFile = readFile;
+        this.onPDFRead = onPDFRead;
         this.index = index;
         this.cache = cache;
         this.resultStore = resultStore;
@@ -175,6 +177,8 @@ export class ImportedMinerUDocumentExtractor {
             || !fileData.byteLength || fileData.byteLength > FIGURE_LIMITS.maxPDFBytes) {
             throw new ImportedMinerUReadError('pdf-resource-limit');
         }
+        await this.onPDFRead?.(item, fileData);
+        throwIfFigureAborted(signal);
         const sourceHash = await this.createSourceHash(fileData);
         throwIfFigureAborted(signal);
         const selectionIdentity = { libraryID: item.libraryID, attachmentKey: item.key, sourceHash };

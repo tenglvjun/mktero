@@ -25,6 +25,7 @@ export class MkteroDocumentExtractor {
         getAccessToken,
         readFile,
         preparePDFIndex = null,
+        onPDFRead = null,
         createCacheKey = null,
         createSourceHash = null,
         readRevision = null,
@@ -56,6 +57,7 @@ export class MkteroDocumentExtractor {
         this.getApiBase = getApiBase;
         this.getAccessToken = getAccessToken;
         this.readFile = readFile;
+        this.onPDFRead = onPDFRead;
         this.preparePDFIndex = preparePDFIndex;
         this.createCacheKey = createCacheKey;
         this.createSourceHash = createSourceHash;
@@ -277,6 +279,8 @@ export class MkteroDocumentExtractor {
             throw new Error('The local PDF file is unavailable');
         }
         const fileData = await this.readFile(filePath);
+        throwIfAborted(signal);
+        await this.onPDFRead?.(item, fileData);
         throwIfAborted(signal);
         const title = item.parentItem?.getDisplayTitle?.()
             || item.getDisplayTitle?.()

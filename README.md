@@ -198,9 +198,11 @@ Mktero tab. A failed import does not start a remote conversion.
 Only supported local results can be imported; see [Workflows](./docs/workflows.md#import-a-local-llm-for-zotero-result)
 for the format requirements and how to reimport or explicitly reparse. Mktero's
 Markdown and raw MinerU caches do not automatically evict entries by count,
-total size, or inactivity. They remain available until you clear them, an
-invalid or corrupted entry is removed during self-healing, or the profile
-filesystem is unavailable; individual archive, document, image, and parsing
+total size, or inactivity. After a PDF attachment is permanently deleted,
+registered orphaned data can be removed after a 30-day grace period; trash and
+shared PDFs remain protected. See [Local cache cleanup](./docs/workflows.md#local-cache-cleanup).
+Manual clearing, self-healing of invalid entries, and profile filesystem loss
+can also remove cached data; individual archive, document, image, and parsing
 resource limits still apply. Deleting the llm-for-zotero source does not affect
 reading while Mktero's copy remains; a retained raw result can also rebuild the
 reading document offline. If all local content for the selected import is

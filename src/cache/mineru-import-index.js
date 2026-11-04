@@ -129,6 +129,18 @@ export class MinerUImportIndex {
         });
     }
 
+    forgetAttachment({ libraryID, attachmentKey }, { signal } = {}) {
+        validateAttachment(libraryID, attachmentKey);
+        return this.#withOperation(async () => {
+            await this.#ensureLoaded(signal);
+            const records = this.records.filter(record => record.libraryID !== libraryID
+                || record.attachmentKey !== attachmentKey);
+            if (records.length === this.records.length) return false;
+            await this.#save(records, signal);
+            return true;
+        });
+    }
+
     async #ensureLoaded(signal) {
         throwIfFigureAborted(signal);
         if (this.loadError) throw this.loadError;

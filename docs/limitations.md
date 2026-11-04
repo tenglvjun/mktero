@@ -27,9 +27,14 @@
   choosing the import action validates and copies the result, then opens it.
   For a parent item with several candidate PDFs, choose the intended attachment
   from the submenu.
-- Imported copies use Mktero's local cache, which is retained unless you clear
-  it, a damaged entry is removed during self-healing, or the profile filesystem
-  is unavailable. Individual archive and document resource limits still apply.
+- Orphan cleanup is conservative. It examines at most 50,000 library items
+  and hashes at most 2 GiB of PDFs per pass, with a 256 MiB per-file limit;
+  different-size PDFs need no hashing. Missing local PDFs, inaccessible
+  libraries, incomplete scans or unknown historical ownership postpone
+  cleanup. Data can therefore remain longer than the 30-day grace period.
+- Imported copies use Mktero's local cache, subject to manual clearing,
+  [orphan cleanup](./workflows.md#local-cache-cleanup) after permanent attachment
+  deletion, self-healing of damaged entries, and profile filesystem availability. Individual archive and document resource limits still apply.
   Deleting only the llm-for-zotero source does not affect a retained Mktero
   copy; a retained raw result can rebuild the document offline. Keep the
   original result if you need to import it again. If all local content for the
