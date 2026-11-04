@@ -48,9 +48,9 @@ but the import then explains why it cannot be used.
 After a successful import, reading uses Mktero's copy and no longer needs the
 source cache: deleting only the llm-for-zotero source still allows offline
 reading. Mktero does not automatically evict its Markdown or raw MinerU cache
-by entry count, total size, or inactivity. The copy remains available unless
-you clear it, a damaged entry is removed during self-healing, or the profile
-filesystem is unavailable; individual archive and document resource limits
+by entry count, total size, or inactivity. Copies are subject to the orphan
+cleanup described below after permanent attachment deletion, manual clearing,
+self-healing of damaged entries, and profile filesystem availability; individual archive and document resource limits
 still apply. Mktero first uses saved corrections or a prepared reading
 document; if only the retained raw result remains, it rebuilds the document
 offline. If all local content for the selected import is missing, a later
@@ -66,6 +66,71 @@ successful reparse replaces this attachment's imported selection.
 Importing one PDF does not choose a different PDF for the parent's existing
 `Read as Markdown with Mktero` action, which still opens its first PDF. Use the
 chosen PDF's own reading action to reopen another attachment's imported result.
+
+## Local cache cleanup
+
+Moving an item or PDF attachment to Zotero trash, or removing it from a
+collection, does not delete its Mktero data. Once background checks confirm
+that a registered PDF attachment is permanently absent and its cache has no
+remaining references, Mktero can clean it with no extra retention period.
+Restoring the attachment before cleanup protects its data. Already recorded
+permanent deletions follow the same policy; startup checks also reconcile
+missed notifications.
+
+Background checks can remove registered Markdown
+and its figures and translations, raw MinerU results, matching saved
+corrections, PDF text indexes and reading positions, plus the deleted
+attachment's local highlights, highlight-group records, import selections and
+readiness markers. Other attachments with the same PDF bytes, including
+attachments in other libraries or trash that were never opened in Mktero,
+protect shared data. Zotero PDF files, notes, annotations, saved snapshots,
+exported files and llm-for-zotero source caches are not deleted by this cleanup.
+
+Permanent deletion notifications are combined for about 5 seconds before a
+background check. Checks also run about 60 seconds after startup and hourly
+while Zotero is running. Use of the affected attachment or cache, such as its
+reading session, conversion or pending writes, defers that cleanup; reading
+an unrelated paper does not block it. Cleanup is checked again when the
+relevant use ends, without waiting for the next hourly check.
+
+Matching file sizes are checked locally before hashing; no attachment is
+downloaded or uploaded. Uncertain ownership or shared references, inaccessible
+libraries, damaged ownership records, or incomplete scans keep the affected
+data. Scan resource limits can also postpone cleanup. Failed deletions are
+retried, so the short notification delay does not guarantee that files
+disappear within 5 seconds.
+
+A missing or unreadable PDF no longer stops enumeration of the remaining
+attachments. Checks track uncertainty per candidate: a readable, rechecked
+file size can rule out different-size candidates even when its bytes cannot
+be read. Historical ownership hashes and Zotero's last-synced MD5 are never
+used to assume different content. Known shared sources remain protected,
+including trash and other libraries.
+
+A completely missing PDF is handled in two stages, because one absent file
+must not pin unrelated caches forever. Its derived caches (Markdown, raw
+conversion results and the PDF text index) can be rebuilt by converting again,
+so they are released once no readable PDF still shares them. The user's
+corrections and reading positions cannot be rebuilt, so they are kept while
+the attachment record itself still exists. A file that exists but cannot be
+verified, a PDF that changes during the check, or an incomplete library scan
+still retains everything.
+
+In **Settings → Mktero → Automatic cleanup**, the result shows retained-cache
+counts, released rebuildable cache sets, missing local PDFs, the reason, up to
+ten blocking attachment keys with library IDs, and the next check. Cache usage
+refreshes after a completed check. **Check again**
+runs the same safety checks; it does not bypass them or clear the whole cache.
+Uncertain checks and failed operations retry after about 1, 5, 15 and then
+60 minutes, subject to an earlier startup/hourly check. Relevant Zotero file
+or item notifications bring the retry forward. Restoring a missing local PDF
+allows the next check to establish whether it shares the cached content.
+
+Ownership is registered when Mktero next reads or imports a PDF. Recognizable
+older parser variants are adopted then; historical data whose ownership
+cannot be established stays on disk. Citation caches and the legacy separate
+translation cache keep their existing expiry/size rules. The existing
+**Clear cache** action remains available in Mktero settings.
 
 ## Footnotes and article information
 

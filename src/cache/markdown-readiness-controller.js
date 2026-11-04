@@ -30,6 +30,15 @@ export function createMarkdownReadinessController({
             });
         },
 
+        forgetAttachment(identity) {
+            return enqueue(async () => {
+                if (!index.forgetAttachment(identity)) return false;
+                await persist();
+                notify();
+                return true;
+            });
+        },
+
         forgetCacheKeys(cacheKeys) {
             return enqueue(async () => {
                 if (!index.forgetCacheKeys(cacheKeys)) return false;

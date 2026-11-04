@@ -175,6 +175,13 @@ export class PDFTextIndexCache {
         }));
     }
 
+    delete(cacheKey) {
+        validateCacheKey(cacheKey);
+        return this.#withOperation(() => this.io.remove(this.#entryPath(cacheKey), {
+            recursive: true, ignoreAbsent: true,
+        }));
+    }
+
     clear() {
         return this.#withOperation(async () => {
             await this.io.remove(this.rootPath, {

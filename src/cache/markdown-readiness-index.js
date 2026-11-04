@@ -44,6 +44,13 @@ export function createMarkdownReadinessIndex({
             return true;
         },
 
+        forgetAttachment({ libraryID, attachmentKey }) {
+            const before = records.length;
+            records = records.filter(record => record.libraryID !== libraryID
+                || record.attachmentKey !== attachmentKey);
+            return before !== records.length;
+        },
+
         forgetCacheKeys(cacheKeys) {
             const removed = new Set(
                 (Array.isArray(cacheKeys) ? cacheKeys : [cacheKeys])

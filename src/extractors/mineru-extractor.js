@@ -17,6 +17,7 @@ export class MinerUDocumentExtractor {
         getApiKey,
         readFile,
         preparePDFIndex = null,
+        onPDFRead = null,
         createCacheKey = null,
         createSourceHash = null,
         getParserProfile = () => MINERU_PARSER_PROFILE_ID,
@@ -40,6 +41,7 @@ export class MinerUDocumentExtractor {
         this.conversion = conversion;
         this.getApiKey = getApiKey;
         this.readFile = readFile;
+        this.onPDFRead = onPDFRead;
         this.preparePDFIndex = preparePDFIndex;
         this.createCacheKey = createCacheKey;
         this.createSourceHash = createSourceHash;
@@ -144,6 +146,8 @@ export class MinerUDocumentExtractor {
             throw new Error('The local PDF file is unavailable');
         }
         const fileData = await this.readFile(filePath);
+        throwIfAborted(signal);
+        await this.onPDFRead?.(item, fileData);
         throwIfAborted(signal);
         const title = item.parentItem?.getDisplayTitle?.()
             || item.getDisplayTitle?.()

@@ -28,7 +28,9 @@ import {
     createCitationCacheKey,
     createZoteroCitationGraphCache,
 } from './cache/citation-graph-cache.js';
-import { observeLocalCacheCleared } from './cache/cache-events.js';
+import { observeLocalCacheCleared, publishCacheCleanupStatus,
+    registerCacheCleanupStatusProvider } from './cache/cache-events.js';
+import { createZoteroCacheLifecycle } from './platform/zotero-cache-lifecycle.js';
 import {
     createZoteroPDFTextIndexCache,
 } from './cache/pdf-text-index-cache.js';
@@ -352,6 +354,7 @@ const runtime = {
     referenceLibrary: null,
     referenceImportService: null,
     cache: null,
+    cacheLifecycle: null,
     readiness: null,
     readinessColumn: null,
     disposeConversionProfileObserver: null,
@@ -386,6 +389,7 @@ const runtime = {
     disposeAnnotationObserver: null,
     disposeReferenceObserver: null,
     disposeCacheObserver: null,
+    disposeCacheCleanupStatus: null,
     disposeAITargetLanguageObserver: null,
     disposeClientHeartbeat: null,
     annotationOverlayRefresher: null,
@@ -466,6 +470,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         pathUtils: PathUtils,
     });
     runtime.cache = cache;
+    const rememberPDF = (...args) => runtime.cacheLifecycle?.rememberPDF(...args);
     runtime.conversionActivity = createConversionActivity();
     const readinessReady = initializeMarkdownReadiness(cache, id, rootURI);
     initializeCitationGraph(localization);
@@ -585,22 +590,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     // The page parts of a cross-page highlight, kept beside (not inside) the
     // local annotation files so an older Mktero reading those is unaffected.
+    const annotationGroupStore = createZoteroMarkdownAnnotationStore({
+        zotero: Zotero, ioUtils: IOUtils, pathUtils: PathUtils, directory: 'groups-v1',
+    });
+    const annotationStore = createZoteroMarkdownAnnotationStore({
+        zotero: Zotero, ioUtils: IOUtils, pathUtils: PathUtils,
+    });
     const annotationGroups = new PDFAnnotationGroups({
-        store: createZoteroMarkdownAnnotationStore({
-            zotero: Zotero,
-            ioUtils: IOUtils,
-            pathUtils: PathUtils,
-            directory: 'groups-v1',
-        }),
+        store: annotationGroupStore,
         onError: error => logMkteroError(error),
     });
     runtime.annotationGroups = annotationGroups;
     const localAnnotations = new MarkdownLocalAnnotations({
-        store: createZoteroMarkdownAnnotationStore({
-            zotero: Zotero,
-            ioUtils: IOUtils,
-            pathUtils: PathUtils,
-        }),
+        store: annotationStore,
         createPDFAnnotation: (itemID, draft, context) => (
             runtime.annotationActions.createFromText(itemID, draft, context)
         ),
@@ -830,6 +832,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     const mineruExtractor = new MinerUDocumentExtractor({
         zotero: Zotero,
+        onPDFRead: rememberPDF,
         conversion: mineruConversion,
         getApiKey: () => getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
             ? getMinerULocalApiKey(Zotero)
@@ -872,6 +875,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     const mistralExtractor = new MistralDocumentExtractor({
         zotero: Zotero,
+        onPDFRead: rememberPDF,
         conversion: mistralConversion,
         getApiKey: () => getMistralApiKey(Zotero),
         readFile: path => IOUtils.read(path),
@@ -893,6 +897,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     const mkteroExtractor = new MkteroDocumentExtractor({
         zotero: Zotero,
+        onPDFRead: rememberPDF,
         conversion: new MkteroConversionClient({
             createAbortController: createZoteroAbortController,
             onJob: recordDiagnosticJob,
@@ -940,6 +945,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     );
     const importedExtractor = new ImportedMinerUDocumentExtractor({
         zotero: Zotero, index: importIndex, cache, resultStore: mineruResultStore,
+        onPDFRead: rememberPDF,
         readFile: readLocalImportPDF,
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
         readRevision: options => readRevisionSnapshot({ ...options, throwOnReadError: true }),
@@ -955,6 +961,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.importService = new MinerUCacheImportService({
         zotero: Zotero,
+        onPDFRead: rememberPDF,
         source: createZoteroLLMCacheSource({ zotero: Zotero, io: IOUtils, path: PathUtils }),
         index: importIndex, cache, resultStore: mineruResultStore,
         readFile: readLocalImportPDF,
@@ -964,6 +971,46 @@ globalThis.startup = async function startup({ id, rootURI }) {
         openPDF: (fileData, options) => figureRegionRenderer.open(fileData, options),
         decodeImage: figureCanvasEnvironment.decodeImage,
     });
+    const cacheLifecycle = createZoteroCacheLifecycle({
+        zotero: Zotero, ioUtils: IOUtils, pathUtils: PathUtils,
+        pdfIndexProfile: pdfTextEngine.profile,
+        stores: { markdown: cache, raw: mineruResultStore, revisions: runtime.revisionStore,
+            pdfIndex: pdfTextIndexCache, readingPosition: runtime.readingPositions },
+        annotations: annotationStore, groups: annotationGroupStore,
+        importIndex, readiness: runtime.readiness,
+        isBusy: record => Boolean(
+            runtime.presenter?.list?.().some(presentation => (
+                presentation.model?.sourceItemID === record.itemID
+                || presentation.model?.sourceHash === record.sourceHash
+                || record.artifacts.some(artifact => artifact.key === presentation.model?.cacheKey)
+            )) || backgroundFigureRestorations.has(record.itemID)
+            || backgroundContinuations.has(record.itemID)
+            || runtime.conversionRuns?.isActive(record.itemID)
+        ),
+        timers: createWindowTimers(() => liveZoteroWindow()),
+        onError: error => logMkteroError(error),
+        onStatus: status => publishCacheCleanupStatus(typeof Services === 'undefined' ? null : Services, status),
+        onSummary: summary => {
+            const { reasons, blockers: _blockers, ...counts } = summary;
+            if (Object.values(counts).some(Boolean)) {
+                debugMktero(`Mktero: local cache cleanup ${JSON.stringify({ ...counts, reasons })}`);
+            }
+        },
+    });
+    runtime.cacheLifecycle = cacheLifecycle;
+    runtime.disposeCacheCleanupStatus = registerCacheCleanupStatusProvider(typeof Services === 'undefined' ? null : Services, {
+        getStatus: () => cacheLifecycle.getStatus(),
+        retry: () => cacheLifecycle.requestCheck(),
+    });
+    for (const target of [mineruExtractor, mistralExtractor, mkteroExtractor,
+        importedExtractor, runtime.importService]) {
+        for (const method of ['extract', 'readCached', 'importLocal']) {
+            if (typeof target[method] !== 'function') continue;
+            const original = target[method].bind(target);
+            target[method] = (...args) => cacheLifecycle.use(() => original(...args), { itemID: args[0] });
+        }
+    }
+    cacheLifecycle.start();
     const extractor = new ConversionProviderRouter({
         getProvider: () => getConversionProvider(Zotero),
         imported: importedExtractor,
@@ -1199,6 +1246,8 @@ async function loadFigureWorkerSource(rootURI) {
 }
 
 globalThis.shutdown = function shutdown() {
+    const cacheLifecycleDisposed = runtime.cacheLifecycle?.dispose();
+    runtime.cacheLifecycle = null;
     closeDiagnosticReportDialogs();
     disposeDiagnosticMenus();
     conversionFailures.clear();
@@ -1213,6 +1262,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeReferenceObserver?.();
     runtime.referenceImportService?.dispose?.();
     runtime.disposeCacheObserver?.();
+    runtime.disposeCacheCleanupStatus?.();
     runtime.disposeAITargetLanguageObserver?.();
     runtime.disposeConversionProfileObserver?.();
     runtime.cache?.setStoreChangeListener?.(null);
@@ -1291,6 +1341,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeAnnotationObserver = null;
     runtime.disposeReferenceObserver = null;
     runtime.disposeCacheObserver = null;
+    runtime.disposeCacheCleanupStatus = null;
     runtime.disposeAITargetLanguageObserver = null;
     runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
@@ -1304,11 +1355,12 @@ globalThis.shutdown = function shutdown() {
     // Zotero waits for a promise returned by shutdown before it closes the
     // database or replaces the extension, so the corrections saved by the
     // closing tabs reach the profile first.
-    return revisionSessionsDestroyed;
+    return Promise.all([revisionSessionsDestroyed, cacheLifecycleDisposed]);
 };
 
 globalThis.uninstall = async function uninstall() {};
 globalThis.onMainWindowLoad = function onMainWindowLoad({ window }) {
+    runtime.cacheLifecycle?.resume();
     registerMainWindowContextMenu(window);
     registerDiagnosticMenu(window);
     installProgressButton(window);
@@ -1375,7 +1427,7 @@ async function openItemAsMarkdown(itemID, {
             void runtime.sourcePeekRenderer?.dispose(itemID);
             abortDocumentTranslations(itemID);
             runtime.citationPresenter?.closeForItem(itemID);
-            void closeRevisionSession(itemID);
+            void closeRevisionSession(itemID).finally(() => runtime.cacheLifecycle?.retry());
             void runtime.actionsTags?.closeMarkdownSession({
                 sessionID: itemID,
                 sourceItemID: itemID,
@@ -1603,6 +1655,7 @@ function continueConversionInBackground(itemID) {
         runtime.conversionRuns?.release(itemID, 'background', {
             abortIfLast: false,
         });
+        runtime.cacheLifecycle?.retry();
     });
 }
 
@@ -1840,6 +1893,7 @@ async function executeItemConversion(itemID, {
     finally {
         backgroundFigureRestorations.delete(itemID);
         runtime.pdfIndexOperations.finish(itemID, controller);
+        runtime.cacheLifecycle?.retry();
     }
 }
 
@@ -2310,6 +2364,7 @@ async function openSavedMarkdownNote(noteID) {
         onClose: () => {
             abortDocumentTranslations(noteID);
             runtime.citationPresenter?.closeForItem(sourceItem?.id);
+            runtime.cacheLifecycle?.retry();
         },
         onReportProblem: reportProblemForItem(sourceItem?.id ?? null),
         ...createSavedMarkdownActions(noteID, sourceItem),
@@ -4262,12 +4317,10 @@ function trackPDFIndexTask(tracker, itemID, options, locator) {
 }
 
 function preparePDFIndexForItem(itemID, options, locator) {
-    const task = trackPDFIndexTask(
-        runtime.pdfIndexOperations,
-        itemID,
-        options,
-        locator
-    );
+    const prepare = () => trackPDFIndexTask(runtime.pdfIndexOperations, itemID, options, locator);
+    const task = runtime.cacheLifecycle
+        ? runtime.cacheLifecycle.use(prepare, { itemID })
+        : prepare();
     void Promise.resolve(task).then(index => {
         applyPdfOutlineToOpenMarkdown(itemID, index?.outline);
     }).catch(() => {});
