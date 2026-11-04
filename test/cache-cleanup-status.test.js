@@ -11,10 +11,11 @@ import {
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const snapshot = (overrides = {}) => ({
-    state: 'blocked', checkedAt: 100, nextRunAt: 60000, removed: 0, ownersRemoved: 1,
+    state: 'blocked', checkedAt: 100, nextRunAt: 60000, removed: 0, released: 0, ownersRemoved: 1,
     referenced: 0, busy: 0, unknown: 1, errors: 0,
     reasons: [{ code: 'missing-file', count: 1 }],
     blockers: [{ itemID: 9, libraryID: 1, attachmentKey: 'MISSING1', reason: 'missing-file' }],
+    unidentified: [],
     ...overrides,
 });
 function observerService() {
@@ -80,12 +81,23 @@ test('cleanup events expose only bounded safe status fields and dispose observer
     const dispose = observeCacheCleanupStatus(services, value => values.push(value));
     publishCacheCleanupStatus(services, snapshot({
         path: '/private/file.pdf', hash: 'secret', exception: 'secret',
+        released: 3,
         blockers: [...Array.from({ length: 12 }, (_, i) => ({
+            itemID: i + 1, libraryID: 1, attachmentKey: 'MISSING1', reason: 'missing-file', path: 'secret',
+        })), { itemID: 20, libraryID: 1, attachmentKey: '<img src=x>', reason: 'missing-file' }],
+        unidentified: [...Array.from({ length: 12 }, (_, i) => ({
             itemID: i + 1, libraryID: 1, attachmentKey: 'MISSING1', reason: 'missing-file', path: 'secret',
         })), { itemID: 20, libraryID: 1, attachmentKey: '<img src=x>', reason: 'missing-file' }],
     }));
     assert.equal(values.length, 1);
     assert.equal(values[0].blockers.length, 10);
+    assert.equal(values[0].unidentified.length, 10);
+    assert.equal(values[0].released, 3);
+    // A missing-file report is a warning, never a retained blocker, and carries
+    // no path or content identifier.
+    assert.deepEqual(values[0].unidentified[0], {
+        itemID: 1, libraryID: 1, attachmentKey: 'MISSING1', reason: 'missing-file',
+    });
     assert.equal(JSON.stringify(values).includes('secret'), false);
     assert.equal(JSON.stringify(values).includes('/private'), false);
     services.obs.notifyObservers(null, CACHE_CLEANUP_STATUS_TOPIC, '{broken');
@@ -247,6 +259,30 @@ for (const locale of ['en-US', 'zh-CN']) {
         assert.equal(status.textContent, [
             translate('complete'), translate('removed', { removed: 7, ownersRemoved: 8 }),
         ].join(' '));
+        assert.equal(status.getAttribute('aria-busy'), 'false');
+        assert.equal(retry.disabled, false);
+    });
+
+    test(`preferences report released rebuildable caches and unidentified missing PDFs in ${locale}`, async t => {
+        const pane = await cleanupPane(t, locale);
+        const { status, retry, services, localization } = pane;
+        const translate = (key, variables) => localization.t(`preferences.cache.cleanup.${key}`, variables);
+        publishCacheCleanupStatus(services, snapshot({
+            state: 'complete', checkedAt: 500, nextRunAt: null,
+            removed: 0, released: 2, ownersRemoved: 3, unknown: 0, referenced: 0, busy: 0, errors: 0,
+            reasons: [], blockers: [],
+            unidentified: [{ itemID: 42, libraryID: 4, attachmentKey: 'IGPWJHML', reason: 'missing-file' }],
+        }));
+        await tick();
+        assert.ok(status.textContent.includes(translate('released', { count: 2 })));
+        assert.ok(status.textContent.includes(translate('unidentified', {
+            key: 'IGPWJHML', library: 4,
+        })));
+        // A missing PDF is a warning, not a retained-cache blocker.
+        assert.equal(status.textContent.includes(translate('unknown', { count: 1 })), false);
+        assert.equal(status.textContent.includes(translate('blocker', {
+            key: 'IGPWJHML', library: 4, reason: translate('reason.missing-file'),
+        })), false);
         assert.equal(status.getAttribute('aria-busy'), 'false');
         assert.equal(retry.disabled, false);
     });

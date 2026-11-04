@@ -927,21 +927,53 @@ test('an uncertain source protects only its possible candidates and exposes boun
     assert.equal(f.snapshots[1].candidates.length, 2);
 });
 
-test('unknown missing content protects every possible shared candidate, including legacy records', async () => {
+test('completely missing content releases only rebuildable caches and keeps user data', async () => {
+    const f = fixture();
+    await f.lifecycle.remember(owner({ artifacts: [
+        { store: 'markdown', key: KEY },
+        { store: 'raw', key: 'c'.repeat(64) },
+        { store: 'pdfIndex', key: 'd'.repeat(64) },
+        { store: 'revisions', key: 'e'.repeat(64) },
+        { store: 'readingPosition', key: 'f'.repeat(64) },
+    ] }));
+    await f.lifecycle.remember(otherOwner());
+    const missing = { itemID: 9, libraryID: 1, attachmentKey: 'MISSING1', reason: 'missing-file' };
+    f.live.unidentified = [missing];
+    const result = await f.lifecycle.sweep();
+    assert.equal(result.unknown, 0, 'a completely missing PDF must not block unrelated caches');
+    assert.equal(result.released, 2);
+    assert.deepEqual(f.removed, [
+        { store: 'markdown', key: KEY }, { store: 'raw', key: 'c'.repeat(64) }, { store: 'pdfIndex', key: 'd'.repeat(64) },
+        ...otherOwner().artifacts,
+    ]);
+    // Corrections and reading progress cannot be rebuilt, so they survive.
+    assert.deepEqual(f.records()[0].artifacts, [
+        { store: 'revisions', key: 'e'.repeat(64) }, { store: 'readingPosition', key: 'f'.repeat(64) },
+    ]);
+    assert.equal(f.records()[0].resourcesCleared, true);
+    assert.deepEqual(result.unidentified, [missing]);
+    // Repeating the pass neither re-releases nor forgets the remaining data.
+    const repeated = await f.lifecycle.sweep();
+    assert.equal(repeated.released, 0);
+    assert.equal(f.records().length, 1);
+    // Once the PDF is restored, no uncertainty remains and nothing is shared.
+    f.live.unidentified = [];
+    assert.equal((await f.lifecycle.sweep()).removed, 1);
+    assert.deepEqual(f.records(), []);
+});
+
+test('a verified but unreadable file still retains every possible candidate', async () => {
     const f = fixture();
     await f.lifecycle.remember(owner());
     await f.lifecycle.remember(otherOwner());
-    const missing = { itemID: 9, libraryID: 1, attachmentKey: 'MISSING1', reason: 'missing-file' };
-    f.live.uncertainSources = new Map([['*', [missing]], [HASH, [{ ...missing, reason: 'changed-file' }]]]);
+    const blocker = { itemID: 9, libraryID: 1, attachmentKey: 'UNREADABLE', reason: 'unreadable-file' };
+    f.live.uncertainSources = new Map([['*', [blocker]]]);
     const result = await f.lifecycle.sweep();
-    assert.equal(result.removed, 0);
     assert.equal(result.unknown, 2);
-    assert.equal(result.reasons.find(value => value.code === 'missing-file').count, 2);
-    assert.equal(result.reasons.find(value => value.code === 'changed-file').count, 1);
+    assert.equal(result.released, 0);
+    assert.deepEqual(result.blockers, [blocker]);
     assert.deepEqual(f.removed, []);
     assert.equal(f.records().length, 2);
-    f.live.uncertainSources.clear();
-    assert.equal((await f.lifecycle.sweep()).removed, 2);
 });
 
 test('a confirmed shared source is reported as referenced even when another attachment is missing', async () => {

@@ -94,23 +94,32 @@ an unrelated paper does not block it. Cleanup is checked again when the
 relevant use ends, without waiting for the next hourly check.
 
 Matching file sizes are checked locally before hashing; no attachment is
-downloaded or uploaded. Uncertain ownership or shared references, missing
-local PDFs (including files not yet synced), inaccessible libraries, damaged
-ownership records, or incomplete scans keep the affected data. Scan resource
-limits can also postpone cleanup. Failed deletions are retried, so the short
-notification delay does not guarantee that files disappear within 5 seconds.
+downloaded or uploaded. Uncertain ownership or shared references, inaccessible
+libraries, damaged ownership records, or incomplete scans keep the affected
+data. Scan resource limits can also postpone cleanup. Failed deletions are
+retried, so the short notification delay does not guarantee that files
+disappear within 5 seconds.
 
 A missing or unreadable PDF no longer stops enumeration of the remaining
 attachments. Checks track uncertainty per candidate: a readable, rechecked
 file size can rule out different-size candidates even when its bytes cannot
-be read. A completely missing PDF without verifiable content identity may still
-share any candidate, so those candidates are retained. Historical ownership
-hashes and Zotero's last-synced MD5 are never used to assume different content.
-Known shared sources remain protected, including trash and other libraries.
+be read. Historical ownership hashes and Zotero's last-synced MD5 are never
+used to assume different content. Known shared sources remain protected,
+including trash and other libraries.
+
+A completely missing PDF is handled in two stages, because one absent file
+must not pin unrelated caches forever. Its derived caches (Markdown, raw
+conversion results and the PDF text index) can be rebuilt by converting again,
+so they are released once no readable PDF still shares them. The user's
+corrections and reading positions cannot be rebuilt, so they are kept while
+the attachment record itself still exists. A file that exists but cannot be
+verified, a PDF that changes during the check, or an incomplete library scan
+still retains everything.
 
 In **Settings → Mktero → Automatic cleanup**, the result shows retained-cache
-counts, the reason, up to ten blocking attachment keys with library IDs, and
-the next check. Cache usage refreshes after a completed check. **Check again**
+counts, released rebuildable cache sets, missing local PDFs, the reason, up to
+ten blocking attachment keys with library IDs, and the next check. Cache usage
+refreshes after a completed check. **Check again**
 runs the same safety checks; it does not bypass them or clear the whole cache.
 Uncertain checks and failed operations retry after about 1, 5, 15 and then
 60 minutes, subject to an earlier startup/hourly check. Relevant Zotero file

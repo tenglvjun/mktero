@@ -34,17 +34,21 @@
   after 250 ms rather than restarting. A single PDF may take a batch above
   32 MiB, but cannot exceed 256 MiB; different-size PDFs need no hashing. Trash and valid shared
   references protect data. Use of the affected attachment or cache postpones
-  its cleanup; unrelated reading does not block it. Missing local PDFs,
-  inaccessible libraries, incomplete scans, unknown ownership or uncertain
-  shared references retain the affected data; failed deletions are retried.
-  Enumeration continues past missing/unreadable PDFs. Uncertainty is scoped to
-  candidates that cannot be ruled out using verified local file information.
-  Completely missing PDFs with unknown content can still protect all possible
-  shared candidates; an old synchronized MD5 or historical owner hash cannot
-  safely exclude them. Settings explain the reason and offer **Check again**.
-  Cleanup timing therefore depends on completing these checks, not just the
-  short notification delay. Previously recorded permanent deletions follow
-  the same policy; historical data with unknown ownership remains on disk.
+  its cleanup; unrelated reading does not block it. Inaccessible libraries,
+  incomplete scans, unknown ownership or uncertain shared references retain
+  the affected data; failed deletions are retried. Enumeration continues past
+  missing/unreadable PDFs. Uncertainty is scoped to candidates that cannot be
+  ruled out using verified local file information. A completely missing PDF
+  does not pin unrelated caches: its derived Markdown, raw conversion results
+  and PDF text index are released because converting again rebuilds them,
+  while corrections and reading positions are kept. A file that exists but
+  cannot be verified, a PDF that changes during the check, or an incomplete
+  scan still retains everything; an old synchronized MD5 or historical owner
+  hash cannot safely exclude anything. Settings explain the reason, list
+  released and unidentified items, and offer **Check again**. Cleanup timing
+  therefore depends on completing these checks, not just the short
+  notification delay. Previously recorded permanent deletions follow the same
+  policy; historical data with unknown ownership remains on disk.
 - Imported copies use Mktero's local cache, subject to manual clearing,
   [orphan cleanup](./workflows.md#local-cache-cleanup) after permanent attachment
   deletion, self-healing of damaged entries, and profile filesystem availability. Individual archive and document resource limits still apply.

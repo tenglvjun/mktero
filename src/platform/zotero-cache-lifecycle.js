@@ -41,7 +41,7 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
     cancelled = () => false, batchItems = SCAN_BATCH_ITEMS, batchBytes = HASH_BATCH_BYTES }) {
     let cursor = null;
     const empty = () => ({ complete: false, owners: new Set(), libraries: new Set(), itemIDs: new Set(),
-        sources: new Set(), uncertainSources: new Map() });
+        sources: new Set(), uncertainSources: new Map(), unidentified: [] });
     async function* walk(result) {
         if (typeof zotero.Libraries?.getAll !== 'function' || typeof zotero.Items?.getAll !== 'function') return;
         const libraries = zotero.Libraries.getAll();
@@ -83,13 +83,27 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
         const current = cursor;
         const sizes = sourceSizes ? new Set(sourceSizes) : null;
         const uncertain = (item, reason, size = null) => {
+            const blocker = { itemID: item.id, libraryID: item.libraryID, attachmentKey: item.key, reason };
+            // An absent file with no observable size has no content identity at
+            // all: it cannot be shown to share a candidate, and it cannot be
+            // reading one right now. Protecting every candidate for it would
+            // retain unrelated caches forever, so report it separately and let
+            // the lifecycle release only rebuildable resources.
+            // A file whose size was observed before it vanished stays strong:
+            // it may be the very content of a same-size candidate.
+            if (reason === 'missing-file' && size === null) {
+                if (current.result.unidentified.length < 10
+                    && !current.result.unidentified.some(value => value.itemID === item.id)) {
+                    current.result.unidentified.push(blocker);
+                }
+                return;
+            }
             // Only an observed, rechecked file size can exclude a candidate.
             // A last-synced MD5 or a historical owner hash is not proof of a
             // missing file's current content: unsynced changes may be absent.
             const affected = candidates
                 ? candidates.filter(record => size === null || record.sourceBytes === size).map(record => record.sourceHash)
                 : ['*'];
-            const blocker = { itemID: item.id, libraryID: item.libraryID, attachmentKey: item.key, reason };
             for (const hash of new Set(affected)) {
                 const list = current.result.uncertainSources.get(hash) || [];
                 if (list.length < 10 && !list.some(value => value.itemID === item.id && value.reason === reason)) list.push(blocker);
@@ -110,8 +124,11 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
                     let after;
                     try { after = await io.stat(file); }
                     catch (error) {
+                        // The file was observed earlier and has since vanished.
+                        // Its size can no longer be trusted to describe what is
+                        // on disk now, so revoke every size-based exclusion.
                         uncertain(before.item, error?.name === 'NotFoundError' || error?.code === 'ENOENT'
-                            ? 'missing-file' : 'unreadable-file');
+                            ? 'changed-file' : 'unreadable-file');
                         count++;
                         continue;
                     }
@@ -140,6 +157,8 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
                 let before;
                 try { before = await io.stat(file); }
                 catch (error) {
+                    // A path that never resolved has no observed size, so it is a
+                    // weak signal rather than evidence of a same-size candidate.
                     uncertain(item, error?.name === 'NotFoundError' || error?.code === 'ENOENT'
                         ? 'missing-file' : 'unreadable-file');
                     continue;
@@ -191,12 +210,13 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
     let running = false;
     let blockedRetry = 0;
     let continuing = false;
-    let totals = { removed: 0, ownersRemoved: 0, errors: 0 };
-    let status = { state: 'waiting', checkedAt: null, nextRunAt: null, removed: 0, ownersRemoved: 0,
-        referenced: 0, busy: 0, unknown: 0, errors: 0, reasons: [], blockers: [] };
+    let totals = { removed: 0, released: 0, ownersRemoved: 0, errors: 0 };
+    let status = { state: 'waiting', checkedAt: null, nextRunAt: null, removed: 0, released: 0, ownersRemoved: 0,
+        referenced: 0, busy: 0, unknown: 0, errors: 0, reasons: [], blockers: [], unidentified: [] };
     const getStatus = () => ({ ...status,
         nextRunAt: status.state !== 'running' && Number.isFinite(nextRun) ? nextRun : null,
-        reasons: status.reasons.map(value => ({ ...value })), blockers: status.blockers.map(value => ({ ...value })) });
+        reasons: status.reasons.map(value => ({ ...value })), blockers: status.blockers.map(value => ({ ...value })),
+        unidentified: status.unidentified.map(value => ({ ...value })) });
     const publish = () => {
         if (stopped) return;
         try { onStatus(getStatus()); } catch { /* Diagnostics are optional. */ }
@@ -265,7 +285,7 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             if (stopped) return;
             if (running) { schedule(CACHE_DELETE_DELAY_MS); return; }
             running = true;
-            if (!continuing) totals = { removed: 0, ownersRemoved: 0, errors: 0 };
+            if (!continuing) totals = { removed: 0, released: 0, ownersRemoved: 0, errors: 0 };
             const starting = status.state !== 'running';
             status = { ...status, state: 'running' };
             if (starting) publish();
@@ -277,6 +297,7 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             try {
                 const summary = await lifecycle.sweep({ itemIDs });
                 totals.removed += summary.removed;
+                totals.released += summary.released;
                 totals.ownersRemoved += summary.ownersRemoved;
                 totals.errors += summary.errors;
                 continuing = summary.continuation || summary.interrupted;
@@ -286,6 +307,7 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
                 }
                 status = { ...status, ...totals, referenced: summary.referenced, busy: summary.busy,
                     unknown: summary.unknown, reasons, blockers: summary.blockers,
+                    unidentified: summary.unidentified,
                     checkedAt: continuing ? status.checkedAt : now(),
                     state: continuing ? 'running' : (summary.unknown || summary.busy || summary.referenced || totals.errors)
                         ? 'blocked' : 'complete' };
@@ -305,7 +327,7 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
                 continuing = false;
                 const code = error?.cleanupReason === 'index-unavailable' ? 'index-unavailable' : 'cleanup-failed';
                 status = { ...status, ...totals, state: 'error', checkedAt: now(), referenced: 0, busy: 0, unknown: 0, errors: 1,
-                    reasons: [{ code, count: 1 }], blockers: [] };
+                    reasons: [{ code, count: 1 }], blockers: [], unidentified: [] };
                 fullRequested = true;
                 schedule(BLOCKED_RETRY_DELAYS_MS[Math.min(blockedRetry++, BLOCKED_RETRY_DELAYS_MS.length - 1)]);
                 report();

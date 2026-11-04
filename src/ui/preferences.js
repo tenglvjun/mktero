@@ -1621,9 +1621,10 @@ export function createPreferencesController({
         // Batch counters and continuation timers are internal progress, not a
         // new result. Keep this text stable until the complete check finishes.
         if (value && value.state !== 'running') {
-            if (value.state === 'complete' || value.removed || value.ownersRemoved) {
+            if (value.state === 'complete' || value.removed || value.released || value.ownersRemoved) {
                 lines.push(t('preferences.cache.cleanup.removed', value));
             }
+            if (value.released) lines.push(t('preferences.cache.cleanup.released', { count: value.released }));
             if (value.unknown) lines.push(t('preferences.cache.cleanup.unknown', { count: value.unknown }));
             if (value.referenced) lines.push(t('preferences.cache.cleanup.referenced', { count: value.referenced }));
             if (value.busy) lines.push(t('preferences.cache.cleanup.busy', { count: value.busy }));
@@ -1637,6 +1638,11 @@ export function createPreferencesController({
                 lines.push(t('preferences.cache.cleanup.blocker', {
                     key: blocker.attachmentKey, library: blocker.libraryID,
                     reason: t(`preferences.cache.cleanup.reason.${blocker.reason}`),
+                }));
+            }
+            for (const item of value.unidentified) {
+                lines.push(t('preferences.cache.cleanup.unidentified', {
+                    key: item.attachmentKey, library: item.libraryID,
                 }));
             }
             if (value.nextRunAt !== null) {

@@ -1,6 +1,10 @@
 const HASH = /^[a-f0-9]{64}$/;
 const ITEM_KEY = /^[A-Za-z0-9]{1,32}$/;
 const STORES = new Set(['markdown', 'raw', 'revisions', 'pdfIndex', 'readingPosition']);
+// Derived from the PDF itself, so they can be rebuilt by converting again.
+// Revisions hold the user's corrections and reading positions hold progress:
+// neither can be reconstructed, so they are never released on weak evidence.
+const REGENERABLE_STORES = new Set(['markdown', 'raw', 'pdfIndex']);
 const MAX_RECORDS = 10_000;
 const MAX_ARTIFACTS = 256;
 
@@ -98,8 +102,8 @@ export class CacheLifecycle {
     }
 
     async #sweep({ itemIDs = null } = {}) {
-        const summary = { removed: 0, ownersRemoved: 0, referenced: 0, busy: 0, unknown: 0,
-            errors: 0, interrupted: false, continuation: false, reasons: [], blockers: [] };
+        const summary = { removed: 0, released: 0, ownersRemoved: 0, referenced: 0, busy: 0, unknown: 0,
+            errors: 0, interrupted: false, continuation: false, reasons: [], blockers: [], unidentified: [] };
         const reason = (code, count = 1) => {
             const entry = summary.reasons.find(value => value.code === code);
             if (entry) entry.count += count;
@@ -211,14 +215,57 @@ export class CacheLifecycle {
             }
             const blocked = [...(live.uncertainSources?.get(record.sourceHash) || []),
                 ...(live.uncertainSources?.get('*') || [])];
-            if (blocked.length) {
+            // Strong uncertainty still retains everything: a file that exists but
+            // cannot be verified may be this very content, including its user data.
+            const strong = blocked.filter(value => value.reason !== 'missing-file');
+            if (strong.length) {
                 summary.unknown++;
-                for (const code of new Set(blocked.map(value => value.reason))) reason(code);
-                for (const blocker of blocked) {
+                for (const code of new Set(strong.map(value => value.reason))) reason(code);
+                for (const blocker of strong) {
                     if (summary.blockers.length >= 10) break;
                     if (!summary.blockers.some(value => value.itemID === blocker.itemID && value.reason === blocker.reason)) {
                         summary.blockers.push(blocker);
                     }
+                }
+                continue;
+            }
+            // Weak uncertainty: the PDF is entirely absent, so it has no
+            // observable size or content and cannot be reading a cache right
+            // now. Retaining every candidate would keep unrelated caches
+            // forever, so release only what a re-conversion rebuilds and keep
+            // the user's corrections and reading progress.
+            const weak = [...(live.unidentified || []), ...blocked.filter(value => value.reason === 'missing-file')];
+            if (weak.length) {
+                for (const blocker of weak) {
+                    if (summary.unidentified.length >= 10) break;
+                    if (!summary.unidentified.some(value => value.itemID === blocker.itemID)) {
+                        summary.unidentified.push({ ...blocker, reason: 'missing-file' });
+                    }
+                }
+                const releasable = record.artifacts.filter(artifact => REGENERABLE_STORES.has(artifact.store));
+                if (releasable.length) {
+                    try {
+                        let remaining = null;
+                        const cleaned = await this.#purge(record, epoch, async valid => {
+                            for (const artifact of releasable) {
+                                if (!valid()) return;
+                                await this.remove(artifact);
+                            }
+                            if (!valid()) return;
+                            const kept = record.artifacts.filter(artifact => !REGENERABLE_STORES.has(artifact.store));
+                            // Nothing of the user's survives, so the record goes too.
+                            remaining = kept.length
+                                ? records.map(value => recordIdentity(value) === recordIdentity(record)
+                                    ? { ...record, resourcesCleared: true, artifacts: kept } : value)
+                                : records.filter(value => recordIdentity(value) !== recordIdentity(record));
+                            await this.storage.write(remaining);
+                        }, async () => { if (remaining) await this.storage.write(records); });
+                        if (!cleaned) { defer(record); continue; }
+                        records = remaining;
+                        summary.released++;
+                    }
+                    catch (error) { summary.errors++; reason('cleanup-failed'); this.#report(error); }
+                    await this.yieldControl();
                 }
                 continue;
             }
@@ -333,7 +380,8 @@ function normalizeRecord(record) {
         || record.sourceBytes > 256 * 1024 * 1024
         || !Array.isArray(record.artifacts) || record.artifacts.length > MAX_ARTIFACTS
         || (record.orphanedAt !== null && (!Number.isSafeInteger(record.orphanedAt) || record.orphanedAt < 0))
-        || (record.ownerCleaned !== undefined && typeof record.ownerCleaned !== 'boolean')) {
+        || (record.ownerCleaned !== undefined && typeof record.ownerCleaned !== 'boolean')
+        || (record.resourcesCleared !== undefined && typeof record.resourcesCleared !== 'boolean')) {
         throw new TypeError('Invalid cache ownership record');
     }
     const artifacts = record.artifacts.map(({ store, key }) => {
@@ -346,5 +394,6 @@ function normalizeRecord(record) {
         artifacts: [...new Map(artifacts.map(value => [artifactIdentity(value), value])).values()],
         orphanedAt: record.orphanedAt,
         ...(record.ownerCleaned ? { ownerCleaned: true } : {}),
+        ...(record.resourcesCleared ? { resourcesCleared: true } : {}),
     };
 }

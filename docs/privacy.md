@@ -46,11 +46,15 @@ about 5 seconds before checking; checks also run about 60 seconds after startup
 and hourly while Zotero is running. Trash and other attachments with identical
 PDF bytes protect shared data. Only use of the affected attachment or cache
 defers its cleanup; unrelated reading does not block it. These checks read
-only local files and never download or upload PDFs. Uncertain ownership or
-shared references, missing local PDFs and incomplete scans retain the affected
-data; failures are retried. A missing file does not stop enumeration, but without
-verifiable content identity its possible shared references remain protected.
-The settings pane shows cleanup reasons, at most ten blocking attachment keys
+only local files and never download or upload PDFs. Uncertain ownership,
+shared references and incomplete scans retain the affected data; failures are
+retried. A missing file does not stop enumeration. Because a completely missing
+PDF cannot be shown to share anything, its rebuildable caches (Markdown, raw
+conversion results and the PDF text index) are released, while corrections and
+reading positions are kept. A file that exists but cannot be verified still
+protects possible shared references.
+The settings pane shows cleanup reasons, released rebuildable caches, missing
+local PDFs, at most ten blocking attachment keys
 and library IDs, and the next check. This status stays in session memory and
 is not sent anywhere; it contains no PDF content, file paths or content hashes.
 Automatic retry and **Check again** use the same local-only safety checks.

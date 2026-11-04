@@ -44,11 +44,26 @@ function normalizeCleanupStatus(value) {
         });
         if (blockers.length === 10) break;
     }
+    const unidentified = [];
+    for (const item of Array.isArray(value.unidentified) ? value.unidentified : []) {
+        if (!Number.isSafeInteger(item?.itemID) || item.itemID <= 0
+            || !Number.isSafeInteger(item.libraryID) || item.libraryID < 0
+            || typeof item.attachmentKey !== 'string'
+            || !/^[A-Z0-9]{8}$/.test(item.attachmentKey)) continue;
+        unidentified.push({
+            itemID: item.itemID,
+            libraryID: item.libraryID,
+            attachmentKey: item.attachmentKey,
+            reason: 'missing-file',
+        });
+        if (unidentified.length === 10) break;
+    }
     return {
         state: value.state,
         checkedAt: cleanupInstant(value.checkedAt),
         nextRunAt: cleanupInstant(value.nextRunAt),
         removed: cleanupCount(value.removed),
+        released: cleanupCount(value.released),
         ownersRemoved: cleanupCount(value.ownersRemoved),
         referenced: cleanupCount(value.referenced),
         busy: cleanupCount(value.busy),
@@ -56,6 +71,7 @@ function normalizeCleanupStatus(value) {
         errors: cleanupCount(value.errors),
         reasons: [...reasons].map(([code, count]) => ({ code, count })),
         blockers,
+        unidentified,
     };
 }
 
