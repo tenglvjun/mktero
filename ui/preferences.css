@@ -82,6 +82,7 @@
 .mktero-pref-tab:focus-visible,
 .mktero-button:focus-visible,
 .mktero-disclosure:focus-visible,
+.mktero-cache-cleanup-details > summary:focus-visible,
 .mktero-auth-tab:focus-visible,
 .mktero-account-icon-button:focus-visible,
 .mktero-link-button:focus-visible {
@@ -164,6 +165,16 @@
     display: grid;
     gap: 4px;
     min-width: 0;
+}
+
+.mktero-cache-cleanup-details > summary {
+    color: var(--mktero-muted-foreground);
+    cursor: pointer;
+}
+
+.mktero-cache-cleanup-details > small {
+    display: block;
+    margin-top: 4px;
 }
 
 .mktero-setting-copy label,

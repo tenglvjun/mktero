@@ -140,6 +140,24 @@ test('explains the possible full PDF upload before reparsing an imported result'
     assert.match(chinese.t('importLLM.reparse'), /可能上传 PDF/);
 });
 
+test('keeps the cache note concise while retaining privacy and cleanup safeguards', () => {
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const chinese = createLocalization({ zoteroLocale: 'zh-CN' });
+    const en = english.t('preferences.cache.note');
+    const zh = chinese.t('preferences.cache.note');
+
+    assert.ok(en.length <= 190, en);
+    assert.ok(zh.length <= 90, zh);
+    for (const term of [
+        'unencrypted', 'this Zotero profile', 'not synced',
+        'permanent PDF deletion', 'orphan', 'trash', 'shared', 'in-use', 'uncertain',
+    ]) assert.ok(en.includes(term), `English cache note must retain: ${term}`);
+    for (const term of [
+        '未加密', '当前 Zotero 配置文件', '不会同步',
+        '永久删除', '孤立缓存', '回收站', '共享', '使用中', '待核实',
+    ]) assert.ok(zh.includes(term), `Chinese cache note must retain: ${term}`);
+});
+
 test('localizes Markdown annotation synchronization status', () => {
     const english = createLocalization({ zoteroLocale: 'en-US' });
     const chinese = createLocalization({ zoteroLocale: 'zh-CN' });

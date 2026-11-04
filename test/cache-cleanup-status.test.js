@@ -33,12 +33,13 @@ function observerService() {
     } };
 }
 
-async function cleanupPane(t, locale, provider = {}) {
+async function cleanupPane(t, locale, provider = {}, cacheStats = { entries: 2, sizeBytes: 200 }) {
+    const localization = createLocalization({ zoteroLocale: locale });
     const dom = new JSDOM('<div id="mktero-cache-status"></div><button id="mktero-clear-cache"></button>'
-        + '<div id="mktero-cache-cleanup-status"></div><button id="mktero-cache-cleanup-retry"></button>');
+        + `<details id="mktero-cache-cleanup-details"><summary>${localization.t('preferences.cache.cleanup.details')}</summary>`
+        + '<div id="mktero-cache-cleanup-status"></div></details><button id="mktero-cache-cleanup-retry"></button>');
     t.after(() => dom.window.close());
     const services = observerService();
-    const localization = createLocalization({ zoteroLocale: locale });
     let statsCalls = 0;
     t.after(registerCacheCleanupStatusProvider(services, {
         getStatus: () => snapshot(),
@@ -48,7 +49,7 @@ async function cleanupPane(t, locale, provider = {}) {
     const controller = createPreferencesController({
         document: dom.window.document, services, zotero: { logError: assert.fail }, localization,
         cache: {
-            getStats: async () => { statsCalls++; return { entries: 2, sizeBytes: 200 }; },
+            getStats: async () => { statsCalls++; return cacheStats; },
             clear: async () => assert.fail('checking again must not clear caches'),
         },
     });
@@ -58,6 +59,7 @@ async function cleanupPane(t, locale, provider = {}) {
     return {
         dom, services, localization, controller, statsCalls: () => statsCalls,
         status: dom.window.document.getElementById('mktero-cache-cleanup-status'),
+        details: dom.window.document.getElementById('mktero-cache-cleanup-details'),
         retry: dom.window.document.getElementById('mktero-cache-cleanup-retry'),
     };
 }
@@ -178,6 +180,40 @@ test('a failing cleanup provider reports a safe error without exception details'
 });
 
 for (const locale of ['en-US', 'zh-CN']) {
+    test(`distinguishes empty cache usage from ownership metadata in ${locale}`, async t => {
+        const pane = await cleanupPane(t, locale, {}, { entries: 0, sizeBytes: 0 });
+        const { status, services, localization, dom, details } = pane;
+        const nextRunAt = Date.UTC(2026, 10, 4, 13, 8);
+        publishCacheCleanupStatus(services, snapshot({
+            state: 'blocked', removed: 0, ownersRemoved: 0,
+            referenced: 1, busy: 0, unknown: 0, errors: 0,
+            reasons: [], blockers: [], nextRunAt,
+            unidentified: [{ itemID: 42, libraryID: 4, attachmentKey: 'IGPWJHML', reason: 'missing-file' }],
+        }));
+        await tick();
+        const translate = (key, variables) => localization.t(`preferences.cache.cleanup.${key}`, variables);
+        const time = new Intl.DateTimeFormat(locale, {
+            dateStyle: 'medium', timeStyle: 'short',
+        }).format(new Date(nextRunAt));
+        assert.equal(
+            dom.window.document.getElementById('mktero-cache-status').textContent,
+            localization.t('preferences.cache.stats.none')
+        );
+        assert.equal(details.open, false);
+        assert.equal(details.querySelector('summary').textContent,
+            localization.t('preferences.cache.cleanup.details'));
+        assert.equal(status.textContent, [
+            translate('blocked'),
+            translate('referenced', { count: 1 }),
+            translate('unidentified', { key: 'IGPWJHML', library: 4 }),
+            translate('nextRun', { time }),
+        ].join(' '));
+        assert.ok(status.textContent.includes(
+            locale === 'zh-CN' ? '非缓存条目' : 'not cache items'
+        ));
+        assert.ok(status.textContent.length <= 180, status.textContent);
+    });
+
     test(`preferences keep batched running cleanup text and DOM stable in ${locale}`, async t => {
         const pane = await cleanupPane(t, locale);
         const { status, retry, services } = pane;
@@ -185,7 +221,7 @@ for (const locale of ['en-US', 'zh-CN']) {
         assert.equal(retry.disabled, false);
         const initialStatsCalls = pane.statsCalls();
         const runningText = locale === 'zh-CN'
-            ? '正在检查缓存归属及共享引用…' : 'Checking cache ownership and shared references…';
+            ? '正在检查缓存…' : 'Checking caches…';
         publishCacheCleanupStatus(services, snapshot({ state: 'running', nextRunAt: null }));
         await tick();
         assert.equal(status.textContent, runningText);
@@ -261,6 +297,30 @@ for (const locale of ['en-US', 'zh-CN']) {
         ].join(' '));
         assert.equal(status.getAttribute('aria-busy'), 'false');
         assert.equal(retry.disabled, false);
+    });
+
+    test(`preferences keep a retained-cache summary concise without losing diagnostics in ${locale}`, async t => {
+        const pane = await cleanupPane(t, locale);
+        const { status, services, localization } = pane;
+        const nextRunAt = Date.UTC(2026, 10, 4, 13, 8);
+        publishCacheCleanupStatus(services, snapshot({
+            removed: 0, ownersRemoved: 0, unknown: 0, referenced: 1,
+            reasons: [], blockers: [], nextRunAt,
+            unidentified: [{ itemID: 42, libraryID: 4, attachmentKey: 'IGPWJHML', reason: 'missing-file' }],
+        }));
+        await tick();
+        const translate = (key, variables) => localization.t(`preferences.cache.cleanup.${key}`, variables);
+        const time = new Intl.DateTimeFormat(locale, {
+            dateStyle: 'medium', timeStyle: 'short',
+        }).format(new Date(nextRunAt));
+        assert.equal(status.textContent, [
+            translate('blocked'), translate('referenced', { count: 1 }),
+            translate('unidentified', { key: 'IGPWJHML', library: 4 }),
+            translate('nextRun', { time }),
+        ].join(' '));
+        assert.ok(status.textContent.length <= 160, status.textContent);
+        assert.equal(status.getAttribute('aria-busy'), 'false');
+        assert.equal(pane.retry.disabled, false);
     });
 
     test(`preferences report released rebuildable caches and unidentified missing PDFs in ${locale}`, async t => {
@@ -389,7 +449,7 @@ for (const locale of ['en-US', 'zh-CN']) {
         await controller.init();
         const status = dom.window.document.getElementById('mktero-cache-cleanup-status');
         const retry = dom.window.document.getElementById('mktero-cache-cleanup-retry');
-        const expected = locale === 'zh-CN' ? 'PDF 本地文件缺失' : 'A PDF is missing locally';
+        const expected = locale === 'zh-CN' ? '本地 PDF 缺失' : 'Local PDF missing';
         assert.ok(status.textContent.includes(expected));
         assert.ok(status.textContent.includes('MISSING1'));
         assert.ok(status.textContent.includes(locale === 'zh-CN' ? '下次检查' : 'Next check'));
@@ -405,7 +465,7 @@ for (const locale of ['en-US', 'zh-CN']) {
         await tick();
         assert.equal(statsCalls, initial + 1);
         assert.ok(dom.window.document.getElementById('mktero-cache-status').textContent.includes(
-            locale === 'zh-CN' ? '没有本地缓存' : 'No local cache entries'
+            locale === 'zh-CN' ? '缓存已清空' : 'Cache cleared'
         ));
         publishCacheCleanupStatus(services, { ...current, nextRunAt: 90000 });
         await tick();

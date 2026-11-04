@@ -21,7 +21,7 @@ function withoutServiceSourceWrites(writes) {
 test('formats cache statistics for the preferences pane', () => {
     assert.equal(
         formatCacheStats({ entries: 0, sizeBytes: 0 }),
-        'No local cache entries'
+        'Cache cleared'
     );
     assert.equal(
         formatCacheStats({ entries: 2, sizeBytes: 1536 }),
@@ -106,7 +106,7 @@ test('loads cache usage and clears it from the preferences pane', async () => {
     finishClear();
     await clearing;
     assert.equal(button.disabled, false);
-    assert.equal(status.textContent, 'No local cache entries');
+    assert.equal(status.textContent, 'Cache cleared');
     assert.equal(status.attributes['aria-busy'], 'false');
 });
 
