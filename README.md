@@ -203,7 +203,10 @@ background checks can remove registered orphaned data with no extra retention
 period once absence and lack of shared references are confirmed. Trash and
 shared PDFs remain protected. Only use of the affected attachment or cache
 delays cleanup; unrelated reading does not. Uncertain ownership is retained,
-and failed deletions are retried. See [Local cache cleanup](./docs/workflows.md#local-cache-cleanup).
+and failed deletions are retried. Settings show the cleanup result, reasons for
+retaining data, and the next check, with a **Check again** action. A missing PDF
+with no verifiable content identity still protects any potentially shared cache.
+See [Local cache cleanup](./docs/workflows.md#local-cache-cleanup).
 Manual clearing, self-healing of invalid entries, and profile filesystem loss
 can also remove cached data; individual archive, document, image, and parsing
 resource limits still apply. Deleting the llm-for-zotero source does not affect

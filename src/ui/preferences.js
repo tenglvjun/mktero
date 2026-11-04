@@ -2,6 +2,9 @@ import { createZoteroMarkdownCache } from '../cache/markdown-cache.js';
 import { createZoteroMinerUResultStore } from '../cache/mineru-result-store.js';
 import {
     notifyLocalCacheCleared,
+    observeCacheCleanupStatus,
+    requestCacheCleanupStatus,
+    requestCacheCleanupRetry,
     withSuccessfulClearNotification,
 } from '../cache/cache-events.js';
 import {
@@ -186,6 +189,8 @@ export function createPreferencesController({
 }) {
     const status = document.getElementById('mktero-cache-status');
     const clearButton = document.getElementById('mktero-clear-cache');
+    const cleanupStatus = document.getElementById('mktero-cache-cleanup-status');
+    const cleanupRetryButton = document.getElementById('mktero-cache-cleanup-retry');
     const readerFontSizeInput = document.getElementById(
         'mktero-reader-font-size'
     );
@@ -327,6 +332,12 @@ export function createPreferencesController({
     let initialized = false;
     let paneGeneration = 0;
     let deferredRefresh = null;
+    let disposeCleanupObserver = null;
+    let cleanupSnapshot = null;
+    let cleanupRefreshSignature = '';
+    let cacheRefresh = null;
+    let cacheRefreshQueued = false;
+    let cacheStatsStarted = false;
     let activeAIProvider = '';
     let aiTestController = null;
     let unsubscribeReasoningCatalog = null;
@@ -1603,24 +1614,97 @@ export function createPreferencesController({
         aiRequestTimeoutInput.addEventListener('change', saveAIRequestTimeout);
     }
 
-    async function refresh() {
-        const generation = paneGeneration;
-        status?.setAttribute('aria-busy', 'true');
-        try {
-            const stats = await cache.getStats();
-            if (!paneIsCurrent(generation)) return;
-            status.textContent = formatCacheStats(stats, t);
-        }
-        catch (error) {
-            if (!paneIsCurrent(generation)) return;
-            zotero.logError?.(error);
-            status.textContent = t('preferences.cache.unavailable');
-        }
-        finally {
-            if (paneIsCurrent(generation)) {
-                status?.setAttribute('aria-busy', 'false');
+    function renderCleanupStatus() {
+        if (!cleanupStatus) return;
+        const value = cleanupSnapshot;
+        const lines = [t(`preferences.cache.cleanup.${value?.state || 'waiting'}`)];
+        if (value) {
+            if (value.state === 'complete' || value.removed || value.ownersRemoved) {
+                lines.push(t('preferences.cache.cleanup.removed', value));
+            }
+            if (value.unknown) lines.push(t('preferences.cache.cleanup.unknown', { count: value.unknown }));
+            if (value.referenced) lines.push(t('preferences.cache.cleanup.referenced', { count: value.referenced }));
+            if (value.busy) lines.push(t('preferences.cache.cleanup.busy', { count: value.busy }));
+            if (value.errors) lines.push(t('preferences.cache.cleanup.errors', { count: value.errors }));
+            for (const reason of value.reasons) {
+                lines.push(t('preferences.cache.cleanup.reasonCount', {
+                    reason: t(`preferences.cache.cleanup.reason.${reason.code}`), count: reason.count,
+                }));
+            }
+            for (const blocker of value.blockers) {
+                lines.push(t('preferences.cache.cleanup.blocker', {
+                    key: blocker.attachmentKey, library: blocker.libraryID,
+                    reason: t(`preferences.cache.cleanup.reason.${blocker.reason}`),
+                }));
+            }
+            if (value.nextRunAt !== null) {
+                const time = new Intl.DateTimeFormat(localization.locale, {
+                    dateStyle: 'medium', timeStyle: 'short',
+                }).format(new Date(value.nextRunAt));
+                lines.push(t('preferences.cache.cleanup.nextRun', { time }));
             }
         }
+        cleanupStatus.textContent = lines.join(' ');
+        cleanupStatus.setAttribute('aria-busy', String(value?.state === 'running'));
+        if (cleanupRetryButton) cleanupRetryButton.disabled = !value || value.state === 'running';
+    }
+
+    function initializeCleanupStatus() {
+        if (!cleanupStatus) return;
+        const generation = paneGeneration;
+        cleanupSnapshot = null;
+        cleanupRefreshSignature = '';
+        renderCleanupStatus();
+        cleanupRetryButton?.addEventListener('click', retryCleanup);
+        disposeCleanupObserver = observeCacheCleanupStatus(services, value => {
+            if (!paneIsCurrent(generation)) return;
+            cleanupSnapshot = value;
+            renderCleanupStatus();
+            if (value.state !== 'complete' && value.state !== 'blocked') return;
+            // Rescheduling alone and frequent scanning notifications do not cause IO.
+            const signature = JSON.stringify({ ...value, nextRunAt: null });
+            if (signature === cleanupRefreshSignature) return;
+            cleanupRefreshSignature = signature;
+            if (!cacheStatsStarted) return;
+            if (cacheRefresh) cacheRefreshQueued = true;
+            else void refresh();
+        });
+        requestCacheCleanupStatus(services);
+    }
+
+    function retryCleanup() {
+        if (!initialized || !cleanupSnapshot || cleanupRetryButton?.disabled) return;
+        cleanupSnapshot = null;
+        renderCleanupStatus();
+        requestCacheCleanupRetry(services);
+    }
+
+    function refresh() {
+        if (cacheRefresh) return cacheRefresh.promise;
+        const generation = paneGeneration;
+        const record = { promise: null };
+        cacheRefresh = record;
+        cacheStatsStarted = true;
+        status?.setAttribute('aria-busy', 'true');
+        record.promise = Promise.resolve().then(async () => {
+            do {
+                cacheRefreshQueued = false;
+                try {
+                    const stats = await cache.getStats();
+                    if (!paneIsCurrent(generation)) return;
+                    if (status) status.textContent = formatCacheStats(stats, t);
+                }
+                catch (error) {
+                    if (!paneIsCurrent(generation)) return;
+                    zotero.logError?.(error);
+                    if (status) status.textContent = t('preferences.cache.unavailable');
+                }
+            } while (cacheRefreshQueued && paneIsCurrent(generation));
+        }).finally(() => {
+            if (cacheRefresh === record) cacheRefresh = null;
+            if (paneIsCurrent(generation)) status?.setAttribute('aria-busy', 'false');
+        });
+        return record.promise;
     }
 
     async function refreshDeferred() {
@@ -1642,6 +1726,7 @@ export function createPreferencesController({
         clearButton.addEventListener('click', clear);
         aiTestButton?.addEventListener('click', testAI);
         localize();
+        initializeCleanupStatus();
         initializePreferenceTabs();
         initializeAccount();
         initializeAccountIcons();
@@ -1683,6 +1768,7 @@ export function createPreferencesController({
         status.textContent = t('preferences.cache.clearing');
         try {
             await cache.clear();
+            if (cacheRefresh) cacheRefreshQueued = true;
             await refresh();
         }
         catch (error) {
@@ -1759,6 +1845,13 @@ export function createPreferencesController({
             initialized = false;
             paneGeneration += 1;
             deferredRefresh = null;
+            disposeCleanupObserver?.();
+            disposeCleanupObserver = null;
+            cleanupRetryButton?.removeEventListener('click', retryCleanup);
+            cleanupSnapshot = null;
+            cacheRefresh = null;
+            cacheRefreshQueued = false;
+            cacheStatsStarted = false;
             disposeQuotaObserver?.();
             disposeQuotaObserver = null;
             clearTimeout(quotaRefreshTimer);

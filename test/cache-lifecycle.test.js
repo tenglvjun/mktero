@@ -911,6 +911,68 @@ test('a failed hash scan retains the ledger for a later successful sweep', async
     assert.equal(f.removedOwners.length, 1);
 });
 
+test('an uncertain source protects only its possible candidates and exposes bounded reasons', async () => {
+    const f = fixture();
+    await f.lifecycle.remember(owner());
+    await f.lifecycle.remember(otherOwner());
+    const blocker = { itemID: 9, libraryID: 1, attachmentKey: 'MISSING1', reason: 'unreadable-file' };
+    f.live.uncertainSources = new Map([[HASH, [blocker]]]);
+    const result = await f.lifecycle.sweep();
+    assert.equal(result.removed, 1);
+    assert.equal(result.unknown, 1);
+    assert.deepEqual(result.reasons, [{ code: 'unreadable-file', count: 1 }]);
+    assert.deepEqual(result.blockers, [blocker]);
+    assert.deepEqual(f.removed, otherOwner().artifacts);
+    assert.deepEqual(f.records().map(value => value.itemID), [1]);
+    assert.equal(f.snapshots[1].candidates.length, 2);
+});
+
+test('unknown missing content protects every possible shared candidate, including legacy records', async () => {
+    const f = fixture();
+    await f.lifecycle.remember(owner());
+    await f.lifecycle.remember(otherOwner());
+    const missing = { itemID: 9, libraryID: 1, attachmentKey: 'MISSING1', reason: 'missing-file' };
+    f.live.uncertainSources = new Map([['*', [missing]], [HASH, [{ ...missing, reason: 'changed-file' }]]]);
+    const result = await f.lifecycle.sweep();
+    assert.equal(result.removed, 0);
+    assert.equal(result.unknown, 2);
+    assert.equal(result.reasons.find(value => value.code === 'missing-file').count, 2);
+    assert.equal(result.reasons.find(value => value.code === 'changed-file').count, 1);
+    assert.deepEqual(f.removed, []);
+    assert.equal(f.records().length, 2);
+    f.live.uncertainSources.clear();
+    assert.equal((await f.lifecycle.sweep()).removed, 2);
+});
+
+test('a confirmed shared source is reported as referenced even when another attachment is missing', async () => {
+    const f = fixture();
+    await f.lifecycle.remember(owner());
+    f.live.sources.add(HASH);
+    f.live.uncertainSources = new Map([['*', [{ itemID: 9, libraryID: 2, attachmentKey: 'MISSING1', reason: 'missing-file' }]]]);
+    const result = await f.lifecycle.sweep();
+    assert.equal(result.referenced, 1);
+    assert.equal(result.unknown, 0);
+    assert.deepEqual(result.blockers, []);
+    assert.deepEqual(f.removed, []);
+});
+
+test('incomplete membership and deletion failures explain why cleanup was deferred', async () => {
+    const f = fixture();
+    await f.lifecycle.remember(owner());
+    await f.lifecycle.remember(otherOwner());
+    f.live.complete = false;
+    const incomplete = await f.lifecycle.sweep();
+    assert.equal(incomplete.unknown, 2);
+    assert.deepEqual(incomplete.reasons, [{ code: 'library-unavailable', count: 2 }]);
+    assert.deepEqual(f.removedOwners, []);
+    f.live.complete = true;
+    f.lifecycle.remove = async () => { throw new Error('deletion failed'); };
+    const failed = await f.lifecycle.sweep();
+    assert.equal(failed.errors, 2);
+    assert.deepEqual(failed.reasons, [{ code: 'cleanup-failed', count: 2 }]);
+    assert.equal(f.records().length, 2);
+});
+
 test('shutdown cancels an in-flight scan and prevents subsequent cleanup', async t => {
     const f = fixture();
     await f.lifecycle.remember(owner());

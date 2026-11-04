@@ -48,7 +48,13 @@ PDF bytes protect shared data. Only use of the affected attachment or cache
 defers its cleanup; unrelated reading does not block it. These checks read
 only local files and never download or upload PDFs. Uncertain ownership or
 shared references, missing local PDFs and incomplete scans retain the affected
-data; failures are retried. Already recorded permanent deletions follow the
+data; failures are retried. A missing file does not stop enumeration, but without
+verifiable content identity its possible shared references remain protected.
+The settings pane shows cleanup reasons, at most ten blocking attachment keys
+and library IDs, and the next check. This status stays in session memory and
+is not sent anywhere; it contains no PDF content, file paths or content hashes.
+Automatic retry and **Check again** use the same local-only safety checks.
+Already recorded permanent deletions follow the
 same policy. Previously unregistered data is adopted only when its PDF is read
 again and its cache identity can be established. Other historical data is
 retained. PDF index, citation and legacy translation caches also retain their

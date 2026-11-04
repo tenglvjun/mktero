@@ -11,6 +11,7 @@ export const CACHE_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 export const CACHE_DELETE_DELAY_MS = 5_000;
 export const CACHE_STARTUP_DELAY_MS = 60_000;
 const CONTINUE_DELAY_MS = 250;
+const BLOCKED_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, CACHE_SWEEP_INTERVAL_MS];
 
 export function createCacheOwnershipStorage({ zotero, ioUtils: io, pathUtils: path }) {
     const root = path.join(zotero.Profile.dir, 'mktero-cache-owners', 'v1');
@@ -39,7 +40,8 @@ export function createCacheOwnershipStorage({ zotero, ioUtils: io, pathUtils: pa
 export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl = async () => {},
     cancelled = () => false, batchItems = SCAN_BATCH_ITEMS, batchBytes = HASH_BATCH_BYTES }) {
     let cursor = null;
-    const empty = () => ({ complete: false, owners: new Set(), libraries: new Set(), itemIDs: new Set(), sources: new Set() });
+    const empty = () => ({ complete: false, owners: new Set(), libraries: new Set(), itemIDs: new Set(),
+        sources: new Set(), uncertainSources: new Map() });
     async function* walk(result) {
         if (typeof zotero.Libraries?.getAll !== 'function' || typeof zotero.Items?.getAll !== 'function') return;
         const libraries = zotero.Libraries.getAll();
@@ -59,16 +61,20 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
         }
         result.complete = !cancelled();
     }
-    return async ({ hashes, sourceSizes = null, generation = 0 }) => {
+    return async ({ hashes, sourceSizes = null, candidates = null, generation = 0 }) => {
         if (!hashes) {
             const result = empty();
             let count = 0;
-            for await (const _item of walk(result)) {
-                if (++count % SCAN_BATCH_ITEMS === 0) await yieldControl();
+            try {
+                for await (const _item of walk(result)) {
+                    if (++count % SCAN_BATCH_ITEMS === 0) await yieldControl();
+                }
             }
+            catch { result.complete = false; }
             return result;
         }
-        const signature = JSON.stringify([generation, sourceSizes?.slice().sort((a, b) => a - b) ?? null]);
+        const signature = JSON.stringify([generation, sourceSizes?.slice().sort((a, b) => a - b) ?? null,
+            candidates?.map(record => [record.sourceHash, record.sourceBytes]).sort() ?? null]);
         if (!cursor || cursor.signature !== signature) {
             const result = empty();
             cursor = { signature, result, iterator: walk(result),
@@ -76,6 +82,20 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
         }
         const current = cursor;
         const sizes = sourceSizes ? new Set(sourceSizes) : null;
+        const uncertain = (item, reason, size = null) => {
+            // Only an observed, rechecked file size can exclude a candidate.
+            // A last-synced MD5 or a historical owner hash is not proof of a
+            // missing file's current content: unsynced changes may be absent.
+            const affected = candidates
+                ? candidates.filter(record => size === null || record.sourceBytes === size).map(record => record.sourceHash)
+                : ['*'];
+            const blocker = { itemID: item.id, libraryID: item.libraryID, attachmentKey: item.key, reason };
+            for (const hash of new Set(affected)) {
+                const list = current.result.uncertainSources.get(hash) || [];
+                if (list.length < 10 && !list.some(value => value.itemID === item.id && value.reason === reason)) list.push(blocker);
+                current.result.uncertainSources.set(hash, list);
+            }
+        };
         let bytes = 0;
         let count = 0;
         try {
@@ -87,7 +107,14 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
                     const step = current.verification.next();
                     if (step.done) { cursor = null; return current.result; }
                     const [file, before] = step.value;
-                    const after = await io.stat(file);
+                    let after;
+                    try { after = await io.stat(file); }
+                    catch (error) {
+                        uncertain(before.item, error?.name === 'NotFoundError' || error?.code === 'ENOENT'
+                            ? 'missing-file' : 'unreadable-file');
+                        count++;
+                        continue;
+                    }
                     if (after.type !== 'regular' || after.size !== before.size || after.lastModified !== before.lastModified) {
                         cursor = null;
                         return { ...current.result, complete: false, continuation: true };
@@ -106,38 +133,55 @@ export function createCacheLibrarySnapshot({ zotero, ioUtils: io, yieldControl =
                 count++;
                 const item = step.value;
                 if (!item.isPDFAttachment?.()) continue;
-                const file = await item.getFilePathAsync();
-                if (!file) break;
-                const before = await io.stat(file);
+                let file;
+                try { file = await item.getFilePathAsync(); }
+                catch { uncertain(item, 'unreadable-file'); continue; }
+                if (!file) { uncertain(item, 'missing-file'); continue; }
+                let before;
+                try { before = await io.stat(file); }
+                catch (error) {
+                    uncertain(item, error?.name === 'NotFoundError' || error?.code === 'ENOENT'
+                        ? 'missing-file' : 'unreadable-file');
+                    continue;
+                }
                 if (before.type !== 'regular' || !Number.isSafeInteger(before.size) || before.size < 0
-                    || !Number.isFinite(before.lastModified)) break;
+                    || !Number.isFinite(before.lastModified)) { uncertain(item, 'unreadable-file'); continue; }
                 const previous = current.fingerprints.get(file);
                 if (previous && (previous.size !== before.size || previous.lastModified !== before.lastModified)) {
                     cursor = null;
                     return { ...current.result, complete: false, continuation: true };
                 }
-                current.fingerprints.set(file, { size: before.size, lastModified: before.lastModified });
+                current.fingerprints.set(file, { size: before.size, lastModified: before.lastModified, item });
                 if (sizes && !sizes.has(before.size)) continue;
-                if (!before.size || before.size > MAX_PDF_BYTES) break;
-                const data = await io.read(file);
-                if (data.byteLength !== before.size) break;
-                const hash = await sha256Hex(data);
-                const after = await io.stat(file);
-                if (after.size !== before.size || after.lastModified !== before.lastModified) break;
-                current.result.sources.add(hash);
-                bytes += before.size;
+                if (!before.size || before.size > MAX_PDF_BYTES) {
+                    uncertain(item, 'oversized-file', before.size);
+                    continue;
+                }
+                try {
+                    const data = await io.read(file);
+                    bytes += before.size;
+                    if (data.byteLength !== before.size) { uncertain(item, 'changed-file'); continue; }
+                    const hash = await sha256Hex(data);
+                    const after = await io.stat(file);
+                    if (after.type !== 'regular' || after.size !== before.size || after.lastModified !== before.lastModified) {
+                        uncertain(item, 'changed-file');
+                        continue;
+                    }
+                    current.result.sources.add(hash);
+                }
+                catch { uncertain(item, 'unreadable-file', before.size); }
                 await yieldControl();
             }
             cursor = null;
             return { ...current.result, complete: false };
         }
-        catch (error) { cursor = null; throw error; }
+        catch { cursor = null; return { ...current.result, complete: false }; }
     };
 }
 
 export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfIndexProfile,
     stores, annotations, groups, importIndex, readiness, isBusy = () => false, timers,
-    onError = () => {}, onSummary = () => {}, now = Date.now }) {
+    onError = () => {}, onSummary = () => {}, onStatus = () => {}, now = Date.now }) {
     let stopped = false;
     let observerID = null;
     let timer = null;
@@ -145,6 +189,17 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
     let nextFullRun = Infinity;
     let fullRequested = false;
     let running = false;
+    let blockedRetry = 0;
+    let continuing = false;
+    let totals = { removed: 0, ownersRemoved: 0, errors: 0 };
+    let status = { state: 'waiting', checkedAt: null, nextRunAt: null, removed: 0, ownersRemoved: 0,
+        referenced: 0, busy: 0, unknown: 0, errors: 0, reasons: [], blockers: [] };
+    const getStatus = () => ({ ...status, nextRunAt: Number.isFinite(nextRun) ? nextRun : null,
+        reasons: status.reasons.map(value => ({ ...value })), blockers: status.blockers.map(value => ({ ...value })) });
+    const publish = () => {
+        if (stopped) return;
+        try { onStatus(getStatus()); } catch { /* Diagnostics are optional. */ }
+    };
     const pendingIDs = new Set();
     const originals = [];
     const removers = Object.fromEntries(Object.entries(stores).map(([name, store]) => [name, store.delete.bind(store)]));
@@ -209,6 +264,9 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             if (stopped) return;
             if (running) { schedule(CACHE_DELETE_DELAY_MS); return; }
             running = true;
+            if (!continuing) totals = { removed: 0, ownersRemoved: 0, errors: 0 };
+            status = { ...status, state: 'running' };
+            publish();
             const full = fullRequested || now() >= nextFullRun || !pendingIDs.size;
             const itemIDs = full ? null : new Set(pendingIDs);
             fullRequested = false;
@@ -216,17 +274,44 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             if (full) nextFullRun = now() + CACHE_SWEEP_INTERVAL_MS;
             try {
                 const summary = await lifecycle.sweep({ itemIDs });
+                totals.removed += summary.removed;
+                totals.ownersRemoved += summary.ownersRemoved;
+                totals.errors += summary.errors;
+                continuing = summary.continuation || summary.interrupted;
+                const reasons = summary.reasons.slice();
+                if (totals.errors && !reasons.some(value => value.code === 'cleanup-failed')) {
+                    reasons.push({ code: 'cleanup-failed', count: totals.errors });
+                }
+                status = { ...status, ...totals, referenced: summary.referenced, busy: summary.busy,
+                    unknown: summary.unknown, reasons, blockers: summary.blockers,
+                    checkedAt: continuing ? status.checkedAt : now(),
+                    state: continuing ? 'running' : (summary.unknown || summary.busy || summary.referenced || totals.errors)
+                        ? 'blocked' : 'complete' };
                 try { onSummary(summary); } catch { /* Diagnostics are optional. */ }
-                if (summary.continuation || summary.interrupted) {
+                if (continuing) {
                     if (full) fullRequested = true;
                     else for (const id of itemIDs) pendingIDs.add(id);
                     schedule(summary.continuation ? CONTINUE_DELAY_MS : CACHE_DELETE_DELAY_MS);
                 }
+                else if (summary.unknown || totals.errors) {
+                    fullRequested = true;
+                    schedule(BLOCKED_RETRY_DELAYS_MS[Math.min(blockedRetry++, BLOCKED_RETRY_DELAYS_MS.length - 1)]);
+                }
+                else blockedRetry = 0;
             }
-            catch { report(); }
+            catch (error) {
+                continuing = false;
+                const code = error?.cleanupReason === 'index-unavailable' ? 'index-unavailable' : 'cleanup-failed';
+                status = { ...status, ...totals, state: 'error', checkedAt: now(), referenced: 0, busy: 0, unknown: 0, errors: 1,
+                    reasons: [{ code, count: 1 }], blockers: [] };
+                fullRequested = true;
+                schedule(BLOCKED_RETRY_DELAYS_MS[Math.min(blockedRetry++, BLOCKED_RETRY_DELAYS_MS.length - 1)]);
+                report();
+            }
             finally {
                 running = false;
                 schedule(Math.max(0, Math.min(CACHE_SWEEP_INTERVAL_MS, nextFullRun - now())));
+                publish();
             }
         }, delay);
         if (timer === null) nextRun = Infinity;
@@ -234,6 +319,15 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
     return {
         use: (operation, scope) => lifecycle.use(operation, scope),
         retry,
+        getStatus,
+        requestCheck() {
+            if (stopped || observerID === null) return;
+            blockedRetry = 0;
+            fullRequested = true;
+            status = { ...status, state: 'running' };
+            schedule(0);
+            publish();
+        },
         async rememberPDF(item, fileData, importedIdentity = null) {
             try {
                 const identity = { itemID: item.id, libraryID: item.libraryID, attachmentKey: item.key };
@@ -253,6 +347,7 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             if (observerID === null || stopped) return;
             nextFullRun = Math.min(nextFullRun, now() + CACHE_STARTUP_DELAY_MS);
             schedule(CACHE_STARTUP_DELAY_MS);
+            publish();
         },
         start() {
             if (observerID !== null || stopped) return;
@@ -262,6 +357,14 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
                 notify(event, type, ids) {
                     if (stopped || !['item', 'file', 'collection-item', 'group', 'trash'].includes(type)) return;
                     lifecycle.invalidate();
+                    // A recovered/relinked file or changed library can resolve a
+                    // prior uncertainty. Retry without waiting for the hourly pass.
+                    if ((status.unknown || status.errors) && ['item', 'file', 'group'].includes(type)) {
+                        blockedRetry = 0;
+                        fullRequested = true;
+                        schedule(CACHE_DELETE_DELAY_MS);
+                        publish();
+                    }
                     if (event !== 'delete' || type !== 'item') return;
                     for (const id of ids || []) if (Number.isSafeInteger(Number(id))) pendingIDs.add(Number(id));
                     if (!pendingIDs.size) fullRequested = true;
@@ -270,10 +373,12 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
             }, ['item', 'file', 'collection-item', 'group', 'trash'], 'mktero-cache-ownership');
             nextFullRun = now() + CACHE_STARTUP_DELAY_MS;
             schedule(CACHE_STARTUP_DELAY_MS);
+            publish();
         },
         async dispose() {
             stopped = true;
             if (timer !== null) timers.clearTimer(timer);
+            nextRun = Infinity;
             if (observerID !== null) zotero.Notifier.unregisterObserver(observerID);
             await lifecycle.dispose();
             for (const restore of originals) restore();

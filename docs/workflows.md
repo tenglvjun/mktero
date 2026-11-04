@@ -100,6 +100,23 @@ ownership records, or incomplete scans keep the affected data. Scan resource
 limits can also postpone cleanup. Failed deletions are retried, so the short
 notification delay does not guarantee that files disappear within 5 seconds.
 
+A missing or unreadable PDF no longer stops enumeration of the remaining
+attachments. Checks track uncertainty per candidate: a readable, rechecked
+file size can rule out different-size candidates even when its bytes cannot
+be read. A completely missing PDF without verifiable content identity may still
+share any candidate, so those candidates are retained. Historical ownership
+hashes and Zotero's last-synced MD5 are never used to assume different content.
+Known shared sources remain protected, including trash and other libraries.
+
+In **Settings → Mktero → Automatic cleanup**, the result shows retained-cache
+counts, the reason, up to ten blocking attachment keys with library IDs, and
+the next check. Cache usage refreshes after a completed check. **Check again**
+runs the same safety checks; it does not bypass them or clear the whole cache.
+Uncertain checks and failed operations retry after about 1, 5, 15 and then
+60 minutes, subject to an earlier startup/hourly check. Relevant Zotero file
+or item notifications bring the retry forward. Restoring a missing local PDF
+allows the next check to establish whether it shares the cached content.
+
 Ownership is registered when Mktero next reads or imports a PDF. Recognizable
 older parser variants are adopted then; historical data whose ownership
 cannot be established stays on disk. Citation caches and the legacy separate

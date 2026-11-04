@@ -206,6 +206,22 @@
                              data-i18n="preferences.cache.clear"></html:button>
             </html:div>
 
+            <html:div class="mktero-setting-row">
+                <html:div class="mktero-setting-copy">
+                    <html:strong data-i18n="preferences.cache.cleanup.title"></html:strong>
+                    <html:small id="mktero-cache-cleanup-status"
+                                role="status"
+                                aria-live="polite"
+                                aria-busy="false"
+                                data-i18n="preferences.cache.cleanup.waiting"></html:small>
+                </html:div>
+                <html:button id="mktero-cache-cleanup-retry"
+                             class="mktero-button mktero-button-outline"
+                             type="button"
+                             disabled="disabled"
+                             data-i18n="preferences.cache.cleanup.retry"></html:button>
+            </html:div>
+
             <html:div class="mktero-card-note mktero-alert mktero-alert-muted"
                       role="note"
                       data-i18n="preferences.cache.note"></html:div>

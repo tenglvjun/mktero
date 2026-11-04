@@ -99,7 +99,12 @@ export class CacheLifecycle {
 
     async #sweep({ itemIDs = null } = {}) {
         const summary = { removed: 0, ownersRemoved: 0, referenced: 0, busy: 0, unknown: 0,
-            errors: 0, interrupted: false, continuation: false };
+            errors: 0, interrupted: false, continuation: false, reasons: [], blockers: [] };
+        const reason = (code, count = 1) => {
+            const entry = summary.reasons.find(value => value.code === code);
+            if (entry) entry.count += count;
+            else summary.reasons.push({ code, count });
+        };
         this.touched.clear();
         this.deferred.clear();
         if (this.stopped) return summary;
@@ -108,7 +113,8 @@ export class CacheLifecycle {
         const epoch = this.epoch;
         const membership = await this.snapshot({ hashes: false, generation: epoch });
         if (!membership.complete || !this.#valid(epoch)) {
-            summary.unknown++;
+            summary.unknown = records.length;
+            reason('library-unavailable', records.length);
             summary.interrupted = !this.#valid(epoch);
             return summary;
         }
@@ -166,7 +172,7 @@ export class CacheLifecycle {
                 record.ownerCleaned = true;
                 summary.ownersRemoved++;
             }
-            catch (error) { summary.errors++; this.#report(error); }
+            catch (error) { summary.errors++; reason('cleanup-failed'); this.#report(error); }
             await this.yieldControl();
         }
         const available = candidates.filter(record => {
@@ -179,10 +185,11 @@ export class CacheLifecycle {
             return summary;
         }
         const sourceSizes = [...new Set(available.map(record => record.sourceBytes))];
-        const live = await this.snapshot({ hashes: true, sourceSizes, generation: epoch });
+        const live = await this.snapshot({ hashes: true, sourceSizes, candidates: available, generation: epoch });
         if (!live.complete || !this.#valid(epoch)) {
             summary.continuation = Boolean(live.continuation) && this.#valid(epoch);
             summary.unknown += summary.continuation ? 0 : available.length;
+            if (!summary.continuation) reason('library-unavailable', available.length);
             summary.interrupted = !this.#valid(epoch);
             return summary;
         }
@@ -202,6 +209,19 @@ export class CacheLifecycle {
                 summary.referenced++;
                 continue;
             }
+            const blocked = [...(live.uncertainSources?.get(record.sourceHash) || []),
+                ...(live.uncertainSources?.get('*') || [])];
+            if (blocked.length) {
+                summary.unknown++;
+                for (const code of new Set(blocked.map(value => value.reason))) reason(code);
+                for (const blocker of blocked) {
+                    if (summary.blockers.length >= 10) break;
+                    if (!summary.blockers.some(value => value.itemID === blocker.itemID && value.reason === blocker.reason)) {
+                        summary.blockers.push(blocker);
+                    }
+                }
+                continue;
+            }
             try {
                 let remaining = null;
                 const cleaned = await this.#purge(record, epoch, async valid => {
@@ -217,7 +237,7 @@ export class CacheLifecycle {
                 records = remaining;
                 summary.removed++;
             }
-            catch (error) { summary.errors++; this.#report(error); }
+            catch (error) { summary.errors++; reason('cleanup-failed'); this.#report(error); }
             await this.yieldControl();
         }
         return summary;
@@ -252,7 +272,13 @@ export class CacheLifecycle {
     }
 
     async #read() {
-        const records = normalizeCacheOwnership(await this.storage.read());
+        let records;
+        try { records = normalizeCacheOwnership(await this.storage.read()); }
+        catch (cause) {
+            const error = new Error('Cache ownership index is corrupt or unavailable', { cause });
+            error.cleanupReason = 'index-unavailable';
+            throw error;
+        }
         this.itemSources.clear();
         for (const record of records) {
             const sources = this.itemSources.get(record.itemID) || new Set();

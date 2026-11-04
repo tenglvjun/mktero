@@ -37,6 +37,11 @@
   its cleanup; unrelated reading does not block it. Missing local PDFs,
   inaccessible libraries, incomplete scans, unknown ownership or uncertain
   shared references retain the affected data; failed deletions are retried.
+  Enumeration continues past missing/unreadable PDFs. Uncertainty is scoped to
+  candidates that cannot be ruled out using verified local file information.
+  Completely missing PDFs with unknown content can still protect all possible
+  shared candidates; an old synchronized MD5 or historical owner hash cannot
+  safely exclude them. Settings explain the reason and offer **Check again**.
   Cleanup timing therefore depends on completing these checks, not just the
   short notification delay. Previously recorded permanent deletions follow
   the same policy; historical data with unknown ownership remains on disk.

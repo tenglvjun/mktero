@@ -94,7 +94,9 @@ test('library scan includes trashed duplicate PDFs and never requests downloads'
     assert.ok(result.sources.has(HASH));
     assert.ok(result.owners.has('1:UNOPENED'));
     f.items[0].getFilePathAsync = async () => false;
-    assert.equal((await scan({ hashes: true })).complete, false);
+    const missing = await scan({ hashes: true });
+    assert.equal(missing.complete, true);
+    assert.equal(missing.uncertainSources.get('*')[0].reason, 'missing-file');
     assert.equal((await scan({ hashes: false })).complete, true);
 });
 
@@ -107,7 +109,9 @@ test('unknown libraries, oversized PDFs and files changed while hashing cannot j
     f.items.push({ id: 1, libraryID: 1, key: 'PDF1', isPDFAttachment: () => true, getFilePathAsync: async () => 'mock' });
     f.io.stat = async () => ({ type: 'regular', size: 512 * 1024 * 1024, lastModified: 1 });
     f.io.read = () => assert.fail('oversized PDF must not be read');
-    assert.equal((await scan({ hashes: true })).complete, false);
+    const oversized = await scan({ hashes: true });
+    assert.equal(oversized.complete, true);
+    assert.equal(oversized.uncertainSources.get('*')[0].reason, 'oversized-file');
     let modified = 0;
     f.io.stat = async () => ({ type: 'regular', size: 3, lastModified: ++modified });
     f.io.read = async () => DATA;
@@ -203,6 +207,7 @@ async function runtimeFixture(t, { isBusy = () => false } = {}) {
     const timers = new Map();
     const errors = [];
     const summaries = [];
+    const statuses = [];
     let timestamp = 100;
     let serial = 0;
     const adapter = createZoteroCacheLifecycle({ ...f.options, pdfIndexProfile: 'test-profile', stores, annotations, groups,
@@ -210,6 +215,7 @@ async function runtimeFixture(t, { isBusy = () => false } = {}) {
         timers: { setTimer(callback, delay) { timers.set(++serial, { callback, delay, at: timestamp + delay }); return serial; },
             clearTimer: id => timers.delete(id) },
         onError: error => errors.push(error), onSummary: summary => summaries.push(summary),
+        onStatus: status => statuses.push(status),
     });
     t.after(() => adapter.dispose());
     const item = { id: 1, libraryID: 1, key: 'PDF1' };
@@ -229,7 +235,7 @@ async function runtimeFixture(t, { isBusy = () => false } = {}) {
         timestamp = timer.at;
         await timer.callback();
     };
-    return { ...f, stores, annotations, groups, importIndex, adapter, timers, errors, summaries, item, key, notify, run,
+    return { ...f, stores, annotations, groups, importIndex, adapter, timers, errors, summaries, statuses, item, key, notify, run,
         ownership: createCacheOwnershipStorage(f.options), now: () => timestamp,
         nextDelay: () => Math.min(...[...timers.values()].map(timer => timer.at - timestamp)) };
 }
@@ -411,6 +417,142 @@ for (const initial of [Uint8Array.of(9, 9, 9), Uint8Array.of(9, 9, 9, 9)]) {
         assert.equal(result.sources.has(HASH), true);
     });
 }
+
+test('a missing PDF does not stop scanning later shared PDFs and explains unverified candidates', async t => {
+    const f = await runtimeFixture(t);
+    const shared = path.join(f.dir, 'shared.pdf');
+    await fs.writeFile(shared, DATA);
+    f.items.push({ id: 9, libraryID: 1, key: 'MISSING1', isPDFAttachment: () => true,
+        getFilePathAsync: async () => false });
+    f.items.push({ id: 10, libraryID: 1, key: 'SHARED01', deleted: true,
+        isPDFAttachment: () => true, getFilePathAsync: async () => shared });
+    await f.run();
+    assert.equal(f.summaries.at(-1).referenced, 1);
+    assert.equal(f.summaries.at(-1).unknown, 0);
+    assert.ok(await f.stores.markdown.get(f.key));
+    f.items.pop();
+    f.notify();
+    await f.run();
+    const status = f.adapter.getStatus();
+    assert.equal(status.state, 'blocked');
+    assert.equal(status.unknown, 1);
+    assert.equal(status.blockers[0].attachmentKey, 'MISSING1');
+    assert.equal(status.reasons[0].code, 'missing-file');
+    assert.ok(await f.stores.markdown.get(f.key));
+});
+
+test('a read failure only blocks matching sizes while unrelated cached content is cleaned', async t => {
+    const f = await runtimeFixture(t);
+    const second = Uint8Array.of(1, 2, 3, 4);
+    await f.adapter.rememberPDF({ id: 2, libraryID: 1, key: 'OTHERPDF' }, second);
+    const secondKey = await createMarkdownCacheKey(second);
+    await f.stores.markdown.put(secondKey, { markdown: 'Other', assets: [] });
+    const unreadable = path.join(f.dir, 'unreadable.pdf');
+    await fs.writeFile(unreadable, DATA);
+    f.items.push({ id: 9, libraryID: 1, key: 'BLOCKER1', isPDFAttachment: () => true,
+        getFilePathAsync: async () => unreadable });
+    const read = f.io.read;
+    f.io.read = async file => {
+        if (file === unreadable) throw new Error('unreadable');
+        return read(file);
+    };
+    await f.run();
+    assert.equal(f.summaries.at(-1).removed, 1);
+    assert.equal(f.summaries.at(-1).unknown, 1);
+    assert.equal(f.summaries.at(-1).reasons[0].code, 'unreadable-file');
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.equal(await f.stores.markdown.get(secondKey), null);
+});
+
+test('losing a file during final verification revokes every earlier size-based exclusion', async t => {
+    const f = await runtimeFixture(t);
+    const second = Uint8Array.of(1, 2, 3, 4);
+    await f.adapter.rememberPDF({ id: 2, libraryID: 1, key: 'OTHERPDF' }, second);
+    const secondKey = await createMarkdownCacheKey(second);
+    await f.stores.markdown.put(secondKey, { markdown: 'Other', assets: [] });
+    const file = path.join(f.dir, 'disappearing.pdf');
+    await fs.writeFile(file, DATA);
+    f.items.push({ id: 9, libraryID: 1, key: 'MISSING1', isPDFAttachment: () => true,
+        getFilePathAsync: async () => file });
+    const stat = f.io.stat;
+    const read = f.io.read;
+    let checks = 0;
+    f.io.stat = async value => {
+        if (value === file && ++checks > 1) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return stat(value);
+    };
+    f.io.read = async value => {
+        if (value === file) throw new Error('unreadable');
+        return read(value);
+    };
+    await f.run();
+    assert.equal(f.summaries.at(-1).removed, 0);
+    assert.equal(f.summaries.at(-1).unknown, 2);
+    assert.ok(f.summaries.at(-1).reasons.some(value => value.code === 'missing-file'));
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.ok(await f.stores.markdown.get(secondKey));
+});
+
+test('old synchronized hashes and historical ownership never exclude unknown missing content', async t => {
+    const f = await runtimeFixture(t);
+    const missing = { id: 9, libraryID: 1, key: 'MISSING1', isPDFAttachment: () => true,
+        getFilePathAsync: async () => false, attachmentSyncedHash: 'd'.repeat(32),
+        attachmentSyncState: 2, synced: true, version: 5, isStoredFileAttachment: () => true };
+    f.items.push(missing);
+    await f.adapter.rememberPDF(missing, Uint8Array.of(4, 5, 6, 7));
+    await f.run();
+    assert.equal(f.summaries.at(-1).removed, 0);
+    assert.equal(f.summaries.at(-1).unknown, 1);
+    assert.ok(await f.stores.markdown.get(f.key));
+    assert.equal((await f.ownership.read()).length, 2);
+});
+
+test('blocked cleanup retries with backoff and file recovery triggers a prompt check', async t => {
+    const f = await runtimeFixture(t);
+    const missing = { id: 9, libraryID: 1, key: 'MISSING1', isPDFAttachment: () => true,
+        getFilePathAsync: async () => false };
+    f.items.push(missing);
+    for (const delay of [60_000, 300_000, 900_000, 3600_000, 3600_000]) {
+        await f.run();
+        assert.equal(f.adapter.getStatus().state, 'blocked');
+        assert.equal(f.nextDelay(), delay);
+        assert.equal(f.adapter.getStatus().nextRunAt, f.now() + delay);
+    }
+    const recovered = path.join(f.dir, 'recovered.pdf');
+    await fs.writeFile(recovered, Uint8Array.of(9, 8, 7, 6));
+    missing.getFilePathAsync = async () => recovered;
+    f.notify('modify', 'file', [9]);
+    assert.equal(f.nextDelay(), CACHE_DELETE_DELAY_MS);
+    await f.run();
+    assert.equal(f.adapter.getStatus().state, 'complete');
+    assert.equal(f.adapter.getStatus().removed, 1);
+    assert.equal(await f.stores.markdown.get(f.key), null);
+    assert.deepEqual(f.adapter.getStatus().blockers, []);
+});
+
+test('manual checks cannot bypass uncertainty and corrupted ownership is reported safely', async t => {
+    const f = await runtimeFixture(t);
+    f.items.push({ id: 9, libraryID: 1, key: 'MISSING1', isPDFAttachment: () => true,
+        getFilePathAsync: async () => false });
+    await f.run();
+    f.adapter.requestCheck();
+    assert.equal(f.nextDelay(), 0);
+    assert.equal(f.adapter.getStatus().state, 'running');
+    await f.run();
+    assert.equal(f.adapter.getStatus().state, 'blocked');
+    assert.ok(await f.stores.markdown.get(f.key));
+    await fs.writeFile(path.join(f.dir, 'mktero-cache-owners/v1/index.json'), '{corrupt');
+    f.adapter.requestCheck();
+    await f.run();
+    assert.equal(f.adapter.getStatus().state, 'error');
+    assert.deepEqual(f.adapter.getStatus().reasons, [{ code: 'index-unavailable', count: 1 }]);
+    assert.ok(await f.stores.markdown.get(f.key));
+    const count = f.statuses.length;
+    await f.adapter.dispose();
+    f.adapter.requestCheck();
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.statuses.length, count);
+});
 
 test('membership enumeration yields even when no PDFs need hashing', async t => {
     const f = await fixture(t);

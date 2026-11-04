@@ -28,7 +28,8 @@ import {
     createCitationCacheKey,
     createZoteroCitationGraphCache,
 } from './cache/citation-graph-cache.js';
-import { observeLocalCacheCleared } from './cache/cache-events.js';
+import { observeLocalCacheCleared, publishCacheCleanupStatus,
+    registerCacheCleanupStatusProvider } from './cache/cache-events.js';
 import { createZoteroCacheLifecycle } from './platform/zotero-cache-lifecycle.js';
 import {
     createZoteroPDFTextIndexCache,
@@ -388,6 +389,7 @@ const runtime = {
     disposeAnnotationObserver: null,
     disposeReferenceObserver: null,
     disposeCacheObserver: null,
+    disposeCacheCleanupStatus: null,
     disposeAITargetLanguageObserver: null,
     disposeClientHeartbeat: null,
     annotationOverlayRefresher: null,
@@ -987,13 +989,19 @@ globalThis.startup = async function startup({ id, rootURI }) {
         ),
         timers: createWindowTimers(() => liveZoteroWindow()),
         onError: error => logMkteroError(error),
+        onStatus: status => publishCacheCleanupStatus(typeof Services === 'undefined' ? null : Services, status),
         onSummary: summary => {
-            if (Object.values(summary).some(Boolean)) {
-                debugMktero(`Mktero: local cache cleanup ${JSON.stringify(summary)}`);
+            const { reasons, blockers: _blockers, ...counts } = summary;
+            if (Object.values(counts).some(Boolean)) {
+                debugMktero(`Mktero: local cache cleanup ${JSON.stringify({ ...counts, reasons })}`);
             }
         },
     });
     runtime.cacheLifecycle = cacheLifecycle;
+    runtime.disposeCacheCleanupStatus = registerCacheCleanupStatusProvider(typeof Services === 'undefined' ? null : Services, {
+        getStatus: () => cacheLifecycle.getStatus(),
+        retry: () => cacheLifecycle.requestCheck(),
+    });
     for (const target of [mineruExtractor, mistralExtractor, mkteroExtractor,
         importedExtractor, runtime.importService]) {
         for (const method of ['extract', 'readCached', 'importLocal']) {
@@ -1254,6 +1262,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeReferenceObserver?.();
     runtime.referenceImportService?.dispose?.();
     runtime.disposeCacheObserver?.();
+    runtime.disposeCacheCleanupStatus?.();
     runtime.disposeAITargetLanguageObserver?.();
     runtime.disposeConversionProfileObserver?.();
     runtime.cache?.setStoreChangeListener?.(null);
@@ -1332,6 +1341,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeAnnotationObserver = null;
     runtime.disposeReferenceObserver = null;
     runtime.disposeCacheObserver = null;
+    runtime.disposeCacheCleanupStatus = null;
     runtime.disposeAITargetLanguageObserver = null;
     runtime.annotationOverlayRefresher = null;
     runtime.localAnnotations = null;
