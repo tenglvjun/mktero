@@ -7,6 +7,8 @@ import {
 } from '../src/mineru/mineru-client.js';
 import { createMinerUFigureInput } from '../src/mineru/document/prepare.js';
 import { createTestPNG } from './helpers/figure-fixtures.js';
+import { createLocalization } from '../src/i18n/localization.js';
+import { localizeConversionError } from '../src/ui/provider-neutral-copy.js';
 
 function jsonResponse(body, status = 200, headers = undefined) {
     return {
@@ -341,6 +343,173 @@ test('rejects an invalid MinerU API token with an actionable error', async () =>
         }),
         /API Token is invalid/
     );
+});
+
+test('asks users to update the API key after a MinerU HTTP 401', async () => {
+    const client = new MinerUClient({
+        fetch: async () => jsonResponse({ msg: 'authentication required' }, 401),
+    });
+
+    await assert.rejects(
+        () => client.submit({
+            apiKey: 'expired-token',
+            fileName: 'paper.pdf',
+            fileData: new Uint8Array([1]),
+            dataID: 'zotero-42',
+        }),
+        error => {
+            assert.equal(error.code, 'MINERU_API_KEY_INVALID');
+            assert.equal(error.status, 401);
+            for (const [locale, message] of [
+                ['zh-CN', 'API Key 无效或已过期，请在“设置 -> Mktero”中更新。'],
+                ['en-US', 'The API key is invalid or expired. Update it in Settings -> Mktero.'],
+            ]) {
+                const localization = createLocalization({ zoteroLocale: locale });
+                assert.equal(
+                    localizeConversionError(error, localization.t.bind(localization)),
+                    message
+                );
+            }
+            return true;
+        }
+    );
+});
+
+test('recognizes expired MinerU tokens without relying on the HTTP status or business code', async t => {
+    const cases = [
+        ['unknown business code', { code: -10001, msg: 'user token expired' }, 200],
+        ['missing business code', { msg: 'user token expired' }, 403],
+        ['message field', { code: 'AUTH_EXPIRED', message: 'User TOKEN EXPIRED' }, 200],
+        ['whitespace in message', { code: 'AUTH_EXPIRED', msg: 'user token   expired' }, 200],
+    ];
+    for (const [name, payload, status] of cases) {
+        await t.test(name, async () => {
+            const client = new MinerUClient({
+                fetch: async () => jsonResponse(payload, status),
+                sleep: async () => assert.fail('Expired API keys must not be retried'),
+            });
+
+            await assert.rejects(
+                () => client.collect({
+                    apiKey: 'expired-token',
+                    task: { batchID: 'batch-1', dataID: 'zotero-42' },
+                }),
+                error => error.code === 'MINERU_API_KEY_INVALID'
+                    && error.status === status
+            );
+        });
+    }
+});
+
+test('recognizes MinerU HTTP 401 responses even without a JSON error body', async t => {
+    for (const [name, response] of [
+        ['reported expiration', jsonResponse({ msg: 'user token expired' }, 401)],
+        ['HTML body', new Response('<html>Unauthorized</html>', { status: 401 })],
+        ['empty body', new Response(null, { status: 401 })],
+    ]) {
+        await t.test(name, async () => {
+            const client = new MinerUClient({ fetch: async () => response });
+            await assert.rejects(
+                () => client.submit({
+                    apiKey: 'expired-token',
+                    fileName: 'paper.pdf',
+                    fileData: new Uint8Array([1]),
+                }),
+                error => error.code === 'MINERU_API_KEY_INVALID'
+                    && error.status === 401
+            );
+        });
+    }
+});
+
+test('preserves MinerU authentication business codes in HTTP 200 responses', async t => {
+    for (const code of ['A0202', 'A0211']) {
+        await t.test(code, async () => {
+            const client = new MinerUClient({
+                fetch: async () => jsonResponse({ code, msg: 'Authentication failed' }),
+            });
+            await assert.rejects(
+                () => client.submit({
+                    apiKey: 'expired-token',
+                    fileName: 'paper.pdf',
+                    fileData: new Uint8Array([1]),
+                }),
+                error => error.code === 'MINERU_API_KEY_INVALID'
+                    && error.status === 200
+            );
+        });
+    }
+});
+
+test('keeps unrelated MinerU errors separate from API key failures', async t => {
+    for (const [name, payload, status, code] of [
+        ['permission denied', { msg: 'Forbidden' }, 403, 'MINERU_HTTP_ERROR'],
+        ['server failure', { msg: 'Service unavailable' }, 503, 'MINERU_HTTP_ERROR'],
+        ['expired task', { code: 'TASK_EXPIRED', msg: 'Task expired' }, 200, 'MINERU_API_ERROR'],
+        ['unexpired token', { msg: 'Token not expired' }, 403, 'MINERU_HTTP_ERROR'],
+    ]) {
+        await t.test(name, async () => {
+            const client = new MinerUClient({
+                fetch: async () => jsonResponse(payload, status),
+            });
+            await assert.rejects(
+                () => client.submit({
+                    apiKey: 'valid-token',
+                    fileName: 'paper.pdf',
+                    fileData: new Uint8Array([1]),
+                }),
+                error => error.code === code
+            );
+        });
+    }
+});
+
+test('does not classify upload or result URL rejections as expired MinerU API keys', async t => {
+    await t.test('upload URL', async () => {
+        const responses = [
+            jsonResponse({
+                code: 0,
+                data: { batch_id: 'batch-1', file_urls: ['https://upload.example/paper'] },
+            }),
+            { ok: false, status: 401 },
+        ];
+        const client = new MinerUClient({ fetch: async () => responses.shift() });
+        await assert.rejects(
+            () => client.submit({
+                apiKey: 'valid-token',
+                fileName: 'paper.pdf',
+                fileData: new Uint8Array([1]),
+            }),
+            error => error.code === 'MINERU_HTTP_ERROR' && error.status === 401
+        );
+    });
+
+    await t.test('result URL', async () => {
+        const responses = [
+            jsonResponse({
+                code: 0,
+                data: {
+                    extract_result: [{
+                        data_id: 'zotero-42',
+                        state: 'done',
+                        full_zip_url: 'https://download.example/result.zip',
+                    }],
+                },
+            }),
+            { ok: false, status: 401 },
+        ];
+        const client = new MinerUClient({
+            fetch: async () => responses.shift(),
+            sleep: async () => assert.fail('HTTP 401 must not be retried'),
+        });
+        await assert.rejects(
+            () => client.collect({
+                apiKey: 'valid-token',
+                task: { batchID: 'batch-1', dataID: 'zotero-42' },
+            }),
+            error => error.code === 'MINERU_HTTP_ERROR' && error.status === 401
+        );
+    });
 });
 
 test('retries transient polling failures without creating a second task', async () => {

@@ -21,6 +21,12 @@ Open `Settings -> Mktero` after installation.
 | PDF source thumbnail | Optional, on by default | Show a live PDF crop of the current paragraph |
 | Reuse conversion results | Optional | Reuse results for the same PDF content and parser profile |
 
+If the MinerU cloud API returns an authentication error (`HTTP 401` or
+`token expired`), update the MinerU API key in `Settings -> Mktero`. Get a new
+key from [MinerU's official API key management page](https://mineru.net/apiManage/token).
+Signing in again in your browser does not automatically update the key saved
+in the plugin.
+
 MinerU, Mistral, and AI credentials are stored as ordinary, unencrypted
 preferences in the active Zotero profile. Mistral uses a synchronous request;
 it can be cancelled locally, but it has no resumable server task. MinerU cloud

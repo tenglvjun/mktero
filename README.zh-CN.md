@@ -100,6 +100,8 @@ Mktero 账号托管转换和 MinerU 云端每个 PDF 最多 200 页。发送前 
 
 安装后打开 `设置 -> Mktero`。默认转换服务是 Mktero：在这里登录或注册。不想把 PDF 交给 Mktero 服务时，改选 MinerU 或 Mistral 并填写该服务的 API key。AI 功能和阅读选项都是可选的，每个 AI 厂商各自保存模型、密钥和相关设置。凭据会作为普通的未加密首选项存储在当前的 Zotero 配置文件中。
 
+若 MinerU 云端 API 返回认证错误（`HTTP 401` 或 `token expired`），请在 `设置 -> Mktero` 更新 MinerU API key。可从 [MinerU 官方 API key 管理页](https://mineru.net/apiManage/token)获取新 key。在浏览器中重新登录不会自动更新插件中保存的 key。
+
 所有设置项见[配置](./docs/configuration.zh-CN.md)，发送与存储位置见[数据与隐私](./docs/privacy.zh-CN.md)。
 
 ### 导入已有的 llm-for-zotero 结果
