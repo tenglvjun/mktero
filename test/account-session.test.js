@@ -13,6 +13,7 @@ import {
 import {
     clearAccountSession,
     getAccountSession,
+    getAccountSessionEpoch,
     saveAccountSession,
     setAccountApiBase,
 } from '../src/config/account-preferences.js';
@@ -97,6 +98,7 @@ test('refreshes the access token after a heartbeat is rejected once', async () =
         accessToken: 'access-stale',
     });
     const calls = [];
+    const epoch = getAccountSessionEpoch(zotero);
     const result = await reportAccountClientHeartbeat(zotero, {
         now: () => NOW,
         fetchImpl: async (url, options) => {
@@ -112,6 +114,7 @@ test('refreshes the access token after a heartbeat is rejected once', async () =
     assert.equal(calls[0].options.headers.Authorization, 'Bearer access-stale');
     assert.equal(calls[2].options.headers.Authorization, 'Bearer access-new');
     assert.equal(getAccountSession(zotero).accessToken, 'access-new');
+    assert.equal(getAccountSessionEpoch(zotero), epoch);
 });
 
 test('treats a pre-heartbeat server as an optional capability', async () => {

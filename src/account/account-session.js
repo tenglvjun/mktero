@@ -336,7 +336,7 @@ async function refreshWhileHoldingLock(zotero, {
             ...refreshed,
             email: refreshed.email || current.email,
             nickname: refreshed.nickname || current.nickname,
-        });
+        }, { preserveEpoch: true });
         return refreshed.accessToken;
     }
     catch (error) {

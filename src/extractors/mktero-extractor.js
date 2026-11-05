@@ -7,6 +7,7 @@ import {
 } from '../mineru/parser-profile.js';
 import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 import { MkteroSignInRequiredError } from '../account/account-session.js';
+import { SharedMkteroConversion } from '../mktero/shared-conversion.js';
 
 export { MkteroSignInRequiredError };
 
@@ -40,6 +41,8 @@ export class MkteroDocumentExtractor {
         onConversionSettled = () => {},
         onCacheError = error => zotero.logError?.(error),
         onPDFIndexError = error => zotero.logError?.(error),
+        sharedConversion = null,
+        getSharedScope = () => '',
     }) {
         if (!zotero) throw new TypeError('A Zotero runtime is required');
         if (!conversion?.convert) {
@@ -76,10 +79,21 @@ export class MkteroDocumentExtractor {
         this.onConversionSettled = onConversionSettled;
         this.onCacheError = onCacheError;
         this.onPDFIndexError = onPDFIndexError;
+        this.getSharedScope = getSharedScope;
+        this.sharedConversion = sharedConversion || new SharedMkteroConversion({
+            conversion,
+            getScope: getSharedScope,
+            resultStore: this.resultStore,
+            extractStoredResult,
+            assertPageLimit,
+            onCacheError: error => this.#reportCacheError(error),
+            onConversionSettled,
+        });
     }
 
     async extract(itemID, {
         onProgress, signal, forceRefresh = false, assertScope = () => {}, beforeCreate = () => {},
+        sharedScope, retainSharedLease = false,
     } = {}) {
         const opened = await this.#openPDF(itemID, signal);
         this.#preparePDFIndex(itemID, opened.fileData, signal);
@@ -88,6 +102,17 @@ export class MkteroDocumentExtractor {
             signal,
             forceRefresh,
         });
+        try {
+            return await this.#extractPrepared(itemID, opened, prepared, {
+                onProgress, signal, forceRefresh, assertScope, beforeCreate, sharedScope, retainSharedLease,
+            });
+        }
+        finally { prepared.cachePublication.release(); }
+    }
+
+    async #extractPrepared(itemID, opened, prepared, {
+        onProgress, signal, forceRefresh, assertScope, beforeCreate, sharedScope, retainSharedLease,
+    }) {
         const cached = await this.#cachedExtractResult(opened, prepared, {
             signal,
             onProgress,
@@ -95,66 +120,54 @@ export class MkteroDocumentExtractor {
         });
         if (cached) return cached;
 
-        const resultKey = prepared.cacheEnabled
-            ? await this.#resultKey(opened.fileData, prepared.sourceHash, signal)
-            : null;
-        let converted = forceRefresh ? null : await this.#readStoredResult(resultKey, signal);
-        if (!converted) {
-            // Checked only when the PDF is about to be uploaded: a correction,
-            // cached Markdown, or a stored result never reaches the service.
-            if (this.assertPageLimit) {
-                await this.assertPageLimit(opened.fileData, { signal });
-                throwIfAborted(signal);
-            }
-            try {
-                assertScope();
-                converted = await this.conversion.convert({
-                    assertScope,
-                    beforeCreate,
-                    apiBase: this.getApiBase(),
-                    getAccessToken: this.getAccessToken,
-                    fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
-                    fileData: opened.fileData,
-                    onProgress,
-                    ...(resultKey ? { includeArchive: true } : {}),
-                    signal,
+        const resultKey = await this.#resultKey(opened.fileData, prepared.sourceHash, signal);
+        const scope = sharedScope ?? this.getSharedScope();
+        const assertCurrentScope = () => {
+            assertScope();
+            if (scope !== this.getSharedScope()) {
+                throw Object.assign(new Error('The conversion account or provider changed'), {
+                    code: 'MKTERO_QUOTA_ACCOUNT_CHANGED',
                 });
             }
-            catch (error) {
-                if (error?.code === 'MKTERO_SIGN_IN_REQUIRED') {
-                    throw new MkteroSignInRequiredError();
-                }
-                throw error;
-            }
-            finally {
-                try { this.onConversionSettled(); }
-                catch { /* Informational refresh must not affect conversion. */ }
-            }
-            converted = await this.#keepResultArchive(resultKey, converted, signal);
-        }
-
-        prepared.warnings.push(...(converted.warnings || []));
-        const result = await this.#prepareConverted(converted.result, opened.fileData, {
-            signal,
-            onProgress,
+        };
+        const lease = this.sharedConversion.acquire({
+            scope, assertScope: assertCurrentScope, beforeCreate,
+            apiBase: this.getApiBase(),
+            getAccessToken: this.getAccessToken,
+            fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
+            fileData: opened.fileData,
+            sourceHash: prepared.sourceHash,
+            resultKey, cacheEnabled: prepared.cacheEnabled,
+            forceRefresh, onProgress, signal,
         });
-        if (prepared.cacheKey && prepared.cacheEnabled) {
-            await this.#saveCachedResult(
-                prepared.cacheKey,
-                result,
+        try {
+            const converted = await lease.result;
+            prepared.warnings.push(...(converted.warnings || []));
+            const result = await this.#prepareConverted(converted.result, opened.fileData, {
                 signal,
-                prepared.warnings
+                onProgress,
+            });
+            assertCurrentScope();
+            if (prepared.cacheKey && prepared.cacheEnabled && lease.canPublish()) {
+                await this.#saveCachedResult(
+                    prepared.cacheKey, result, signal, prepared.warnings, lease.canPublish
+                );
+            }
+            assertCurrentScope();
+            return createResult(
+                opened.title, result, converted.origin === 'cache', prepared.warnings,
+                prepared.cacheKey, converted.origin === 'resumed', prepared.sourceHash
             );
         }
-        return createResult(
-            opened.title,
-            result,
-            converted.origin === 'cache',
-            prepared.warnings,
-            prepared.cacheKey,
-            converted.origin === 'resumed',
-            prepared.sourceHash
-        );
+        catch (error) {
+            if (error?.code === 'MKTERO_SIGN_IN_REQUIRED') throw new MkteroSignInRequiredError();
+            throw error;
+        }
+        finally {
+            // Bootstrap retains through annotations/run completion. Standalone
+            // extraction owns its lease only through this local pipeline.
+            if (!retainSharedLease || !signal) lease.release();
+        }
     }
 
     async readCached(itemID, { signal, onProgress } = {}) {
@@ -164,6 +177,13 @@ export class MkteroDocumentExtractor {
             signal,
             forceRefresh: false,
         });
+        try {
+            return await this.#readCachedPrepared(opened, prepared, { signal, onProgress });
+        }
+        finally { prepared.cachePublication.release(); }
+    }
+
+    async #readCachedPrepared(opened, prepared, { signal, onProgress }) {
         const cached = await this.#cachedExtractResult(opened, prepared, {
             signal,
             onProgress,
@@ -179,7 +199,9 @@ export class MkteroDocumentExtractor {
             signal,
             onProgress,
         });
-        await this.#saveCachedResult(prepared.cacheKey, result, signal, prepared.warnings);
+        await this.#saveCachedResult(
+            prepared.cacheKey, result, signal, prepared.warnings, prepared.cachePublication.canPublish
+        );
         onProgress?.(100);
         return createResult(
             opened.title,
@@ -247,27 +269,6 @@ export class MkteroDocumentExtractor {
         }
     }
 
-    // Stores the trimmed MinerU archive and strips it from the conversion so
-    // the bytes never reach the document pipeline or the derived cache.
-    async #keepResultArchive(resultKey, converted, signal) {
-        if (!converted || typeof converted !== 'object' || !('resultArchive' in converted)) return converted;
-        const { resultArchive, ...rest } = converted;
-        if (!resultKey || !this.resultStore || !resultArchive) return rest;
-        try {
-            await this.resultStore.put(resultKey, {
-                archive: resultArchive,
-                provider: 'mktero',
-                extractedPages: rest.result?.extractedPages,
-                totalPages: rest.result?.totalPages,
-            }, { signal });
-        }
-        catch (error) {
-            throwIfAborted(signal);
-            this.#reportCacheError(error);
-        }
-        return rest;
-    }
-
     async #openPDF(itemID, signal) {
         throwIfAborted(signal);
         const item = await this.zotero.Items.getAsync(itemID);
@@ -323,6 +324,9 @@ export class MkteroDocumentExtractor {
             cacheKey,
             sourceHash,
             revision,
+            cachePublication: this.sharedConversion.captureCachePublication({
+                sourceHash, byteLength: fileData.byteLength, signal,
+            }),
         };
     }
 
@@ -355,6 +359,7 @@ export class MkteroDocumentExtractor {
             signal,
             warnings: prepared.warnings,
             onProgress,
+            canCommit: prepared.cachePublication.canPublish,
         });
         throwIfAborted(signal);
         if (!cached) return null;
@@ -407,6 +412,7 @@ export class MkteroDocumentExtractor {
         signal,
         warnings,
         onProgress,
+        canCommit,
     }) {
         if (!this.cache?.get) return null;
         const cached = await this.#getCachedResult(cacheKey, warnings);
@@ -421,6 +427,7 @@ export class MkteroDocumentExtractor {
                 signal,
                 warnings,
                 onProgress,
+                canCommit,
             });
         }
         if (!cacheEnabled || !this.createCacheKey) return null;
@@ -449,6 +456,7 @@ export class MkteroDocumentExtractor {
                 signal,
                 warnings,
                 onProgress,
+                canCommit,
             });
         }
         return null;
@@ -475,6 +483,7 @@ export class MkteroDocumentExtractor {
         signal,
         warnings,
         onProgress,
+        canCommit,
     }) {
         const recovered = await this.recoverFigures(cached, {
             fileData,
@@ -483,15 +492,15 @@ export class MkteroDocumentExtractor {
         });
         throwIfAborted(signal);
         if (cacheEnabled && (storedKey !== cacheKey || recovered !== cached)) {
-            await this.#saveCachedResult(cacheKey, recovered, signal, warnings);
+            await this.#saveCachedResult(cacheKey, recovered, signal, warnings, canCommit);
         }
         return recovered;
     }
 
-    async #saveCachedResult(cacheKey, result, signal, warnings) {
-        if (!this.cache?.put) return;
+    async #saveCachedResult(cacheKey, result, signal, warnings, canCommit = () => true) {
+        if (!this.cache?.put || !canCommit()) return;
         try {
-            await this.cache.put(cacheKey, result, { signal });
+            await this.cache.put(cacheKey, result, { signal, canCommit });
         }
         catch (error) {
             throwIfAborted(signal);

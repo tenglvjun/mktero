@@ -72,8 +72,9 @@ export class MinerUResultStore {
         return this.#withOperation(() => this.#get(key, signal, throwOnReadError));
     }
 
-    put(key, record, { signal } = {}) {
+    put(key, record, { signal, canCommit = alwaysCanCommit } = {}) {
         validateKey(key);
+        if (typeof canCommit !== 'function') throw new TypeError('canCommit must be a function');
         const archive = toUint8Array(record?.archive, 'The MinerU result archive');
         if (!archive.length || archive.length > this.maxArchiveBytes) {
             throw new Error('The MinerU result archive exceeds the store limit');
@@ -83,7 +84,7 @@ export class MinerUResultStore {
             provider: String(record.provider || ''),
             extractedPages: pageCount(record.extractedPages),
             totalPages: pageCount(record.totalPages),
-        }, signal));
+        }, signal, canCommit));
     }
 
     delete(key) {
@@ -140,8 +141,9 @@ export class MinerUResultStore {
         }
     }
 
-    async #put(key, record, signal) {
+    async #put(key, record, signal, canCommit) {
         throwIfAborted(signal);
+        if (!canCommit()) return;
         const entryPath = this.#entryPath(key);
         await this.#ensureRoot();
         await this.io.makeDirectory(entryPath, { ignoreExisting: true });
@@ -154,7 +156,7 @@ export class MinerUResultStore {
             await this.io.write(archivePath, record.archive, { tmpPath: temporaryPath });
             throwIfAborted(signal);
             const timestamp = this.now();
-            await this.#writeMetadata(metadataPath, {
+            const metadata = {
                 schemaVersion: STORE_SCHEMA_VERSION,
                 key,
                 provider: record.provider.slice(0, MAX_PROVIDER_LENGTH),
@@ -164,7 +166,15 @@ export class MinerUResultStore {
                 archiveBytes: record.archive.length,
                 extractedPages: record.extractedPages,
                 totalPages: record.totalPages,
-            });
+            };
+            if (!canCommit()) {
+                await Promise.all([archivePath, temporaryPath].map(filePath => (
+                    this.io.remove(filePath, { ignoreAbsent: true }).catch(() => {})
+                )));
+                return;
+            }
+            // Invoking the metadata write commits this generation; later writes stay queued.
+            await this.#writeMetadata(metadataPath, metadata);
         }
         catch (error) {
             await Promise.all([archivePath, temporaryPath].map(filePath => (
@@ -242,6 +252,10 @@ export class MinerUResultStore {
             if (this.operationTail === pending) this.operationTail = Promise.resolve();
         }
     }
+}
+
+function alwaysCanCommit() {
+    return true;
 }
 
 function validateKey(value) {

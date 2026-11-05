@@ -154,6 +154,183 @@ test('cancellation before figure cache commit leaves the previous generation int
         .filter(file => file.startsWith('figure-map-')).length, 0);
 });
 
+test('skips all mutations when Markdown publish rights are lost while queued', async t => {
+    const { cache, ioUtils, rootPath } = await createCacheFixture(t);
+    await cache.put(CACHE_KEY, { markdown: '# Corrected result', userEdited: true });
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    const metadataPath = path.join(entryPath, 'entry.json');
+    const before = await snapshotEntry(entryPath);
+    const events = [];
+    cache.setStoreChangeListener(event => events.push(event));
+    const originalReadUTF8 = ioUtils.readUTF8;
+    const readStarted = Promise.withResolvers();
+    const resumeRead = Promise.withResolvers();
+    ioUtils.readUTF8 = async filePath => {
+        if (filePath === metadataPath) {
+            ioUtils.readUTF8 = originalReadUTF8;
+            readStarted.resolve();
+            await resumeRead.promise;
+        }
+        return originalReadUTF8(filePath);
+    };
+    const mutations = [];
+    for (const method of ['makeDirectory', 'write', 'writeUTF8', 'remove']) {
+        const original = ioUtils[method];
+        ioUtils[method] = (...args) => {
+            mutations.push([method, args[0]]);
+            return original(...args);
+        };
+    }
+
+    const reading = cache.getStats();
+    await readStarted.promise;
+    let allowed = true;
+    let checks = 0;
+    const replacing = cache.put(CACHE_KEY, { markdown: '# Stale result' }, {
+        canCommit: () => { checks++; return allowed; },
+    });
+    assert.equal(checks, 0);
+    allowed = false;
+    resumeRead.resolve();
+
+    await reading;
+    assert.equal(await replacing, undefined);
+    assert.deepEqual(mutations, []);
+    assert.deepEqual(events, []);
+    assert.deepEqual(await snapshotEntry(entryPath), before);
+    const stored = await cache.get(CACHE_KEY);
+    assert.equal(stored.markdown, '# Corrected result');
+    assert.equal(stored.userEdited, true);
+});
+
+test('keeps user edits and cleans unpublished Markdown payloads before metadata commit', async t => {
+    for (const lastPayload of ['figure-map-', 'restoration-']) {
+        await t.test(lastPayload, async t => {
+            const { cache, ioUtils, rootPath } = await createCacheFixture(t);
+            const previous = {
+                markdown: '# Corrected result',
+                userEdited: true,
+                assets: [{ path: 'images/old.png', mimeType: 'image/png', data: new Uint8Array([1]) }],
+            };
+            await cache.put(CACHE_KEY, previous);
+            const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+            const metadataPath = path.join(entryPath, 'entry.json');
+            const before = await snapshotEntry(entryPath);
+            const previousMetadata = await readFile(metadataPath, 'utf8');
+            const { input } = makeFigureInput();
+            const document = lastPayload === 'figure-map-'
+                ? await makeRestoredFigureDocument()
+                : prepareFigureFixture(input);
+            document.sourceMap = [{
+                type: 'text', markdownFrom: 0, markdownTo: 1,
+                locations: [{ pageIndex: 0, bbox: [100, 200, 900, 260] }],
+            }];
+            document.chromeRanges = [{ from: 0, to: 1 }];
+            const events = [];
+            cache.setStoreChangeListener(event => events.push(event));
+            const originalWriteUTF8 = ioUtils.writeUTF8;
+            const payloadWritten = Promise.withResolvers();
+            const resumePayload = Promise.withResolvers();
+            const metadataWrites = [];
+            ioUtils.writeUTF8 = async (filePath, data, options) => {
+                if (filePath === metadataPath) metadataWrites.push(data);
+                const result = await originalWriteUTF8(filePath, data, options);
+                if (path.basename(filePath).startsWith(lastPayload)) {
+                    payloadWritten.resolve(filePath);
+                    await resumePayload.promise;
+                }
+                return result;
+            };
+            let allowed = true;
+            const replacing = cache.put(CACHE_KEY, document, {
+                canCommit: () => allowed,
+                ...(lastPayload === 'restoration-'
+                    ? { figureRestoration: { status: 'pending', input } }
+                    : {}),
+            });
+            const payloadPath = await payloadWritten.promise;
+            try {
+                assert.ok((await readFile(payloadPath)).length > 0);
+                assert.equal(await readFile(metadataPath, 'utf8'), previousMetadata);
+                const unpublished = await snapshotEntry(entryPath);
+                assert.ok(unpublished.length > before.length);
+                for (const prefix of ['document-', 'source-map-', 'chrome-ranges-', lastPayload]) {
+                    assert.ok(unpublished.some(([name]) => path.basename(name).startsWith(prefix)));
+                }
+                allowed = false;
+            }
+            finally {
+                resumePayload.resolve();
+            }
+
+            assert.equal(await replacing, undefined);
+            assert.deepEqual(metadataWrites, []);
+            assert.deepEqual(events, []);
+            assert.deepEqual(await snapshotEntry(entryPath), before);
+            const stored = await cache.get(CACHE_KEY);
+            assert.equal(stored.markdown, previous.markdown);
+            assert.equal(stored.userEdited, true);
+            assert.deepEqual(stored.assets, previous.assets);
+        });
+    }
+});
+
+test('finishes an invoked Markdown metadata commit before publishing a later queued generation', async t => {
+    const { cache, ioUtils, rootPath } = await createCacheFixture(t);
+    await cache.put(CACHE_KEY, { markdown: '# Previous result' });
+    const entryPath = path.join(rootPath, 'entries', CACHE_KEY);
+    const metadataPath = path.join(entryPath, 'entry.json');
+    const previousMetadata = await readFile(metadataPath, 'utf8');
+    const events = [];
+    cache.setStoreChangeListener(event => events.push(event));
+    const originalWriteUTF8 = ioUtils.writeUTF8;
+    const commitStarted = Promise.withResolvers();
+    const resumeCommit = Promise.withResolvers();
+    const committedGenerations = [];
+    ioUtils.writeUTF8 = async (filePath, data, options) => {
+        if (filePath === metadataPath) {
+            const metadata = JSON.parse(data);
+            if (committedGenerations.at(-1) !== metadata.markdownFile) {
+                committedGenerations.push(metadata.markdownFile);
+                if (committedGenerations.length === 1) {
+                    commitStarted.resolve();
+                    await resumeCommit.promise;
+                }
+            }
+        }
+        return originalWriteUTF8(filePath, data, options);
+    };
+    let allowed = true;
+    const replacing = cache.put(CACHE_KEY, { markdown: '# Committed result' }, {
+        canCommit: () => allowed,
+    });
+    await commitStarted.promise;
+    let committed;
+    let newer;
+    try {
+        assert.equal(await readFile(metadataPath, 'utf8'), previousMetadata);
+        allowed = false;
+        committed = cache.get(CACHE_KEY);
+        newer = cache.put(CACHE_KEY, { markdown: '# Newest result' });
+    }
+    finally {
+        resumeCommit.resolve();
+    }
+
+    await replacing;
+    assert.equal((await committed).markdown, '# Committed result');
+    await newer;
+    assert.equal(committedGenerations.length, 2);
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+    assert.equal(metadata.markdownFile, committedGenerations[1]);
+    assert.deepEqual((await readdir(entryPath)).sort(), ['assets', 'entry.json', metadata.markdownFile].sort());
+    assert.deepEqual(events, [
+        { type: 'written', cacheKey: CACHE_KEY },
+        { type: 'written', cacheKey: CACHE_KEY },
+    ]);
+    assert.equal((await cache.get(CACHE_KEY)).markdown, '# Newest result');
+});
+
 test('restores cached Markdown and images across cache instances', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
@@ -1405,6 +1582,26 @@ test('cache statistics do not remove another instance in progress entry', async 
     await writing;
     assert.equal((await writer.get(CACHE_KEY)).markdown, '# In progress');
 });
+
+async function createCacheFixture(t) {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const ioUtils = createNodeIOUtils();
+    const cache = new MarkdownCache({
+        rootPath,
+        ioUtils,
+        pathUtils: { join: path.join, filename: path.basename },
+    });
+    return { cache, ioUtils, rootPath };
+}
+
+async function snapshotEntry(entryPath) {
+    const names = (await readdir(entryPath, { recursive: true })).sort();
+    return Promise.all(names.map(async name => {
+        const filePath = path.join(entryPath, name);
+        return [name, (await stat(filePath)).isDirectory() ? null : await readFile(filePath)];
+    }));
+}
 
 function createNodeIOUtils() {
     return {

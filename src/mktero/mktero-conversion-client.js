@@ -124,6 +124,10 @@ export class MkteroConversionClient {
         metadata = null,
         onProgress = () => {},
         includeArchive = false,
+        includeRawArchive = false,
+        idempotencyKey,
+        sourceHash = '',
+        onCleanup = () => {},
         assertScope = () => {},
         beforeCreate = () => {},
         signal,
@@ -148,17 +152,27 @@ export class MkteroConversionClient {
         // shutdown abort this signal; they do not send their own DELETE, and a
         // queued item that never entered convert() has no job to cancel.
         let job = null;
+        let creating = null;
         try {
             notifyProgress(onProgress, CONVERSION_PROGRESS.PREPARING);
-            job = await this.#createJob({
+            creating = this.#createJob({
                 apiBase,
                 getAccessToken,
                 fileName,
                 bytes,
                 metadata,
-                sha256: await pdfSHA256(bytes),
+                sha256: normalizeSourceHash(sourceHash) || await pdfSHA256(bytes),
+                idempotencyKey: normalizeIdempotencyKey(idempotencyKey),
                 signal,
             });
+            job = await settleUnlessAborted(creating, signal);
+            if (!job?.job_id || (!job.upload_url
+                && !TERMINAL_STATUSES.has(job.status) && !IN_FLIGHT_STATUSES.has(job.status))) {
+                throw codedError(
+                    'The Mktero service did not return an upload URL',
+                    'MKTERO_INVALID_RESPONSE'
+                );
+            }
             notifyDiagnosticJob(this.onJob, {
                 provider: 'mktero',
                 id: job.job_id,
@@ -220,6 +234,7 @@ export class MkteroConversionClient {
                 result,
                 origin: 'network',
                 warnings: [],
+                ...(includeRawArchive ? { rawArchive: archive } : {}),
                 ...(resultArchive ? { resultArchive } : {}),
             };
         }
@@ -231,7 +246,25 @@ export class MkteroConversionClient {
                     status: error?.name === 'AbortError' ? 'aborted' : 'failed',
                 });
             }
-            this.#abandonJob({ apiBase, getAccessToken, job });
+            // A cancelled caller leaves one observer to recover a late job id.
+            // It owns the DELETE as well, so a late result cannot be cancelled twice.
+            const cleanup = job
+                ? this.#abandonJob({ apiBase, getAccessToken, job })
+                : creating
+                    ? creating.then(
+                        lateJob => this.#abandonJob({ apiBase, getAccessToken, job: lateJob }),
+                        () => {}
+                    )
+                    : Promise.resolve();
+            try {
+                const observed = onCleanup?.(cleanup);
+                if (observed && typeof observed.then === 'function') {
+                    void observed.catch(() => {});
+                }
+            }
+            catch {
+                // Cleanup observers must not replace the conversion error.
+            }
             throw error;
         }
     }
@@ -243,6 +276,7 @@ export class MkteroConversionClient {
         bytes,
         metadata,
         sha256,
+        idempotencyKey,
         signal,
     }) {
         const body = {
@@ -252,7 +286,7 @@ export class MkteroConversionClient {
         };
         if (metadata && typeof metadata === 'object') body.metadata = metadata;
         if (typeof sha256 === 'string' && sha256) body.sha256 = sha256;
-        const job = await this.#requestJSON({
+        return this.#requestJSON({
             apiBase,
             getAccessToken,
             path: '/api/v1/conversions',
@@ -261,16 +295,9 @@ export class MkteroConversionClient {
             signal,
             timeoutMs: this.requestTimeoutMs,
             label: 'conversion job',
-            idempotencyKey: createIdempotencyKey(),
+            idempotencyKey,
+            allowResponseAfterAbort: true,
         });
-        if (!job?.job_id || (!job.upload_url
-            && !TERMINAL_STATUSES.has(job.status) && !IN_FLIGHT_STATUSES.has(job.status))) {
-            throw codedError(
-                'The Mktero service did not return an upload URL',
-                'MKTERO_INVALID_RESPONSE'
-            );
-        }
-        return job;
     }
 
     async #upload({ apiBase, getAccessToken, job, bytes, onProgress, signal }) {
@@ -370,32 +397,44 @@ export class MkteroConversionClient {
         });
     }
 
-    // Fire-and-forget. convert() must reject without waiting for this DELETE:
-    // batch cancel and shutdown abort the caller signal and are already
-    // unwinding. Closing a tab does not abort; the run continues in the
-    // background. The DELETE has its own short timeout and must not see the
-    // caller's signal, or the aborted signal would stop it from leaving.
     #abandonJob({ apiBase, getAccessToken, job }) {
         const jobId = String(job?.job_id || '').trim();
-        if (!jobId || typeof getAccessToken !== 'function') return;
-        const pending = this.#cancelJob({ apiBase, getAccessToken, jobId });
-        void pending.catch(() => {});
+        if (!jobId || typeof getAccessToken !== 'function') return Promise.resolve();
+        return Promise.resolve()
+            .then(() => this.#cancelJob({ apiBase, getAccessToken, jobId }))
+            .catch(() => {});
     }
 
     async #cancelJob({ apiBase, getAccessToken, jobId }) {
+        const controller = this.createAbortController();
+        let timeoutID = null;
+        if (this.cancelTimeoutMs > 0) {
+            timeoutID = setTimeout(() => {
+                try { controller.abort(); }
+                catch { /* The best-effort cleanup is already bounded. */ }
+            }, this.cancelTimeoutMs);
+        } else {
+            controller.abort();
+        }
         try {
-            await this.#requestJSON({
-                apiBase,
-                getAccessToken,
-                path: `/api/v1/conversions/${encodeURIComponent(jobId)}`,
-                method: 'DELETE',
-                timeoutMs: this.cancelTimeoutMs,
-                label: 'conversion cancel',
-                replayUnauthorized: false,
-            });
+            if (!controller.signal.aborted) {
+                await this.#requestJSON({
+                    apiBase,
+                    getAccessToken,
+                    path: `/api/v1/conversions/${encodeURIComponent(jobId)}`,
+                    method: 'DELETE',
+                    signal: controller.signal,
+                    timeoutMs: this.cancelTimeoutMs,
+                    label: 'conversion cancel',
+                    replayUnauthorized: false,
+                });
+            }
         }
         catch {
             // Terminal jobs, 409 after queued, and transport failures are ignored.
+        }
+        finally {
+            if (timeoutID !== null) clearTimeout(timeoutID);
         }
     }
 
@@ -458,7 +497,7 @@ export class MkteroConversionClient {
             );
         }
         notifyProgress(onProgress, CONVERSION_PROGRESS.DOWNLOADING);
-        const response = await this.#send({
+        return this.#send({
             url: result.result_url,
             method: String(result.method || 'GET').toUpperCase(),
             headers: { ...(result.headers || {}) },
@@ -467,20 +506,22 @@ export class MkteroConversionClient {
             label: 'result download',
             stage: STAGE_DOWNLOAD,
             authorize: false,
+            consumeResponse: (response, responseSignal) => {
+                if (!response.ok) {
+                    throw codedError(
+                        'The Mktero result download failed',
+                        'MKTERO_DOWNLOAD_FAILED',
+                        { status: response.status, stage: STAGE_DOWNLOAD }
+                    );
+                }
+                return readBoundedBytes(
+                    response,
+                    this.maxArchiveBytes,
+                    responseSignal,
+                    'MKTERO_ARCHIVE_TOO_LARGE'
+                );
+            },
         });
-        if (!response.ok) {
-            throw codedError(
-                'The Mktero result download failed',
-                'MKTERO_DOWNLOAD_FAILED',
-                { status: response.status, stage: STAGE_DOWNLOAD }
-            );
-        }
-        return readBoundedBytes(
-            response,
-            this.maxArchiveBytes,
-            signal,
-            'MKTERO_ARCHIVE_TOO_LARGE'
-        );
     }
 
     async #requestJSON({
@@ -495,8 +536,9 @@ export class MkteroConversionClient {
         replayUnauthorized = true,
         forceTokenRefresh = false,
         idempotencyKey = '',
+        allowResponseAfterAbort = false,
     }) {
-        const response = await this.#send({
+        const { response, payload } = await this.#send({
             url: joinURL(apiBase, path),
             method,
             headers: idempotencyKey
@@ -510,8 +552,12 @@ export class MkteroConversionClient {
             authorize: true,
             getAccessToken,
             forceTokenRefresh,
+            allowResponseAfterAbort,
+            consumeResponse: async (response, responseSignal) => ({
+                response,
+                payload: await readBoundedJSON(response, responseSignal),
+            }),
         });
-        const payload = await readBoundedJSON(response, signal);
         if (!response.ok) {
             const error = codedError(
                 'The Mktero conversion request failed',
@@ -538,6 +584,7 @@ export class MkteroConversionClient {
                     replayUnauthorized: false,
                     forceTokenRefresh: true,
                     idempotencyKey,
+                    allowResponseAfterAbort,
                 });
             }
             throw error;
@@ -557,16 +604,36 @@ export class MkteroConversionClient {
         authorize,
         getAccessToken = null,
         forceTokenRefresh = false,
+        allowResponseAfterAbort = false,
+        consumeResponse = response => response,
     }) {
         throwIfAborted(signal);
         const controller = this.createAbortController();
         if (!controller?.signal) {
             throw new TypeError('AbortController factory returned an invalid controller');
         }
+        // Once create headers arrive, give its body a bounded chance to reveal
+        // the job id. The caller rejects independently; aborting this transfer
+        // immediately would make native fetch discard an otherwise readable id.
+        const responseController = allowResponseAfterAbort ? this.createAbortController() : controller;
+        if (!responseController?.signal) {
+            throw new TypeError('AbortController factory returned an invalid controller');
+        }
+        let responseStarted = false;
         let timedOut = false;
-        const relayAbort = () => controller.abort(signal?.reason);
-        signal?.addEventListener('abort', relayAbort, { once: true });
         let timeoutID = null;
+        let lateResponseTimeoutID = null;
+        const stopResponse = () => {
+            controller.abort();
+            if (responseController !== controller) responseController.abort();
+        };
+        const relayAbort = () => {
+            if (!allowResponseAfterAbort || !responseStarted) controller.abort(signal?.reason);
+            if (allowResponseAfterAbort) {
+                lateResponseTimeoutID = setTimeout(stopResponse, Math.max(0, this.cancelTimeoutMs));
+            }
+        };
+        signal?.addEventListener('abort', relayAbort, { once: true });
 
         try {
             const requestHeaders = { ...headers };
@@ -593,21 +660,30 @@ export class MkteroConversionClient {
             if (timeoutMs > 0) {
                 timeoutID = setTimeout(() => {
                     timedOut = true;
-                    controller.abort();
+                    stopResponse();
                 }, timeoutMs);
             }
             if (authorize) {
                 getAccessToken.assertScope?.();
                 if (label === 'conversion job') getAccessToken.beforeCreate?.();
             }
-            return await this.fetch(url, {
+            throwIfAborted(signal);
+            const response = await settleUnlessAborted(this.fetch(url, {
                 method,
                 headers: requestHeaders,
                 body,
                 signal: controller.signal,
-            });
+            }), responseController.signal);
+            responseStarted = true;
+            return await settleUnlessAborted(
+                consumeResponse(response, responseController.signal),
+                responseController.signal
+            );
         }
         catch (error) {
+            // Header validation may reject without reading the body. Stop that
+            // transfer before removing its deadline and caller cancellation.
+            stopResponse();
             if (signal?.aborted) throw abortReason(signal);
             if (timedOut) {
                 throw codedError(
@@ -631,6 +707,7 @@ export class MkteroConversionClient {
         }
         finally {
             if (timeoutID !== null) clearTimeout(timeoutID);
+            if (lateResponseTimeoutID !== null) clearTimeout(lateResponseTimeoutID);
             signal?.removeEventListener('abort', relayAbort);
         }
     }
@@ -643,6 +720,20 @@ async function pdfSHA256(bytes) {
     catch {
         return '';
     }
+}
+
+function normalizeSourceHash(value) {
+    const hash = String(value || '').trim();
+    return /^[a-f\d]{64}$/i.test(hash) ? hash.toLowerCase() : '';
+}
+
+function normalizeIdempotencyKey(value) {
+    if (value == null || String(value).trim() === '') return createIdempotencyKey();
+    const key = String(value).trim();
+    if (key.length > 256 || /[\u0000-\u001f\u007f]/u.test(key)) {
+        throw new TypeError('A valid idempotency key is required');
+    }
+    return key;
 }
 
 function reportJobProgress(onProgress, status, progress) {
@@ -735,7 +826,7 @@ async function readBoundedBytes(response, maxBytes, signal, code) {
     if (Number.isFinite(declared) && declared > maxBytes) {
         throw codedError('The Mktero response is too large', code);
     }
-    const buffer = await response.arrayBuffer();
+    const buffer = await settleUnlessAborted(response.arrayBuffer(), signal);
     throwIfAborted(signal);
     const bytes = new Uint8Array(buffer);
     if (bytes.length > maxBytes) {
@@ -830,6 +921,7 @@ function settleUnlessAborted(value, signal) {
     }
     return new Promise((resolve, reject) => {
         const onAbort = () => {
+            signal.removeEventListener('abort', onAbort);
             pending.catch(() => {});
             reject(abortReason(signal));
         };
@@ -849,12 +941,24 @@ async function waitFor(sleep, delayMs, signal) {
         throwIfAborted(signal);
         return;
     }
-    await sleep(delayMs);
+    await settleUnlessAborted(sleep(delayMs, signal), signal);
     throwIfAborted(signal);
 }
 
-function delay(delayMs) {
-    return new Promise(resolve => setTimeout(resolve, delayMs));
+function delay(delayMs, signal) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            signal?.removeEventListener('abort', abort);
+            resolve();
+        }, delayMs);
+        const abort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
+            reject(abortReason(signal));
+        };
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) abort();
+    });
 }
 
 export const MKTERO_CONVERSION_STATUSES = Object.freeze({

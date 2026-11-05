@@ -15,6 +15,16 @@ npm run build
 
 发布前请保持 `manifest.json`、`package.json` 和 `package-lock.json` 的版本一致。仓库架构、安全约束和贡献检查清单见 [AGENTS.md](../AGENTS.md)。
 
+## 托管转换共享
+
+`src/mktero/shared-conversion.js` 由 bootstrap 在运行时中创建一次，以 API 地址、账号会话范围、原始请求配置、完整 PDF SHA-256 和字节数为身份，共享原始缓存检查、托管网络请求和一次原始归档保存。各附件通过独立租约持有这次获取，直到自己的处理与注释加载完成。强制替换先预留交接，再取消旧 run；释放操作限定到具体 run signal。新一代建立时即撤销旧代的缓存发布权，缓存存储在串行队列内、元数据提交前检查 `canCommit`。新一代失败不会恢复旧代的写入权。本地缓存恢复也会持有离线发布保护，延迟完成的恢复不能覆盖并行强制转换的新结果；关闭扩展时，会在有界清理期内等待尚未完成的归档写入。
+
+不透明的 `accountSessionEpoch` 偏好在显式登录和退出时轮换，同邮箱重新登录也适用；刷新令牌时保留。独立的运行时 scope 还观察 API 和服务切换；两种身份都不包含访问令牌或刷新令牌。磁盘缓存身份和 schema 保持原有格式。取消清理有等待上限且仅尽力执行；本模块不提供重启后或建单响应丢失后的托管任务恢复。
+
+HTTP 超时和取消覆盖响应头及响应体读取。建单过程中取消时，调用方立即收到取消错误；若已经收到响应头，响应体仍可在回收窗口内返回任务 ID（默认最多 2 秒，同时受原请求剩余时限约束），随后只发送一次独立 DELETE。DELETE 自身另有 2 秒总预算，涵盖令牌查询、传输和响应体读取。共享层另行限制 shutdown 或替换等待清理的时间；这些上限都不代表远端任务一定已取消。
+
+`test/shared-mktero-conversion*.test.js` 通过显式时序门覆盖生命周期竞态；`test/mktero-sharing-boundaries.test.js` 组合真实 service、extractor 和 HTTP client，使用模拟传输；`test/mktero-sharing-response-cleanup.test.js` 组合真实共享协调器和 HTTP client，覆盖迟到建单响应与 DELETE 响应体时限；`test/bootstrap-hosted-sharing.test.js` 在 JSDOM 中走真实 bootstrap 入口。这些测试不使用生产数据或网络，仍需真实 Zotero 的人工验收。
+
 ## 图组回归语料
 
 `test/fixtures/figure-corpus/` 保存了已发布图组恢复修复的论文的图组判定结果（合成图、保留页、边界框）。除非指向本机上的 MinerU 结果压缩包，否则对应测试会被跳过；压缩包本身从不提交。

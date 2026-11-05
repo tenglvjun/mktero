@@ -4,6 +4,8 @@ const CANCELLED = 'cancelled';
 export function createConversionRunRegistry({
     createController,
     execute,
+    beforeReplace = () => {},
+    onSettled = () => {},
 } = {}) {
     if (typeof createController !== 'function') {
         throw new TypeError('An AbortController factory is required');
@@ -36,10 +38,19 @@ export function createConversionRunRegistry({
                 existing.owners.add(owner);
                 return { run: expose(existing), adopted: true };
             }
-            if (existing) abortEntry(existing, REPLACED);
-
             const controller = createController();
             validateController(controller);
+            if (existing && forceRefresh && !localOnly
+                && operation === 'convert' && existing.operation === 'convert') {
+                try {
+                    beforeReplace(existing.controller.signal, controller.signal);
+                }
+                catch (error) {
+                    controller.abort(error);
+                    throw error;
+                }
+            }
+            if (existing) abortEntry(existing, REPLACED);
             const entry = {
                 itemID,
                 operation,
@@ -107,6 +118,8 @@ export function createConversionRunRegistry({
                     throw error;
                 })
                 .finally(() => {
+                    try { onSettled(entry.controller.signal); }
+                    catch { /* Resource cleanup must preserve the run outcome. */ }
                     if (runs.get(itemID) === entry) runs.delete(itemID);
                 });
             runs.set(itemID, entry);
@@ -167,9 +180,11 @@ export function createConversionRunRegistry({
             return true;
         },
 
-        release(itemID, owner, { abortIfLast = true } = {}) {
+        release(itemID, owner, { abortIfLast = true, expectedSignal = null } = {}) {
             const entry = runs.get(itemID);
-            if (!entry || !owner) return false;
+            if (!entry || !owner || (expectedSignal && entry.controller.signal !== expectedSignal)) {
+                return false;
+            }
             entry.owners.delete(owner);
             if (entry.settled || entry.owners.size > 0 || !abortIfLast) {
                 return false;
