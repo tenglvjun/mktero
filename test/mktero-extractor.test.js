@@ -391,7 +391,8 @@ test('checks the page limit before uploading to the hosted service', async () =>
     assert.equal(result.markdown, '# Hosted result');
     assert.equal(assertPageLimit.calls.length, 1);
     assert.equal(assertPageLimit.calls[0].fileData, fileData);
-    assert.equal(assertPageLimit.calls[0].options.signal, controller.signal);
+    assert.notEqual(assertPageLimit.calls[0].options.signal, controller.signal);
+    assert.equal(assertPageLimit.calls[0].options.signal.aborted, false);
 });
 
 test('a PDF over the page limit is not uploaded and no session is read', async () => {

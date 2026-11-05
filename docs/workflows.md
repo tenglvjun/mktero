@@ -518,6 +518,19 @@ that have not finished. Opening one of those PDFs joins the existing
 preparation instead of uploading it again. Closing a tab during conversion
 does not cancel it; the PDF continues in the background queue.
 
+Within one running Mktero instance and account session, attachments with identical
+PDF bytes share an in-progress hosted conversion, even when local caching is off.
+Each attachment keeps its own title, annotations, corrections, and figure
+processing. Cancelling one participant leaves the others running; only the last
+participant leaving attempts to cancel the hosted job. Server cancellation may
+be refused once processing has started. A forced reparse joins an active
+acquisition, including its archive save; after it is ready, a new forced reparse
+starts a new acquisition. A replacement already reserved while work was active
+can still take that result after it completes. Signing out, signing in again,
+or changing provider or API address separates subsequent hosted work; automatic
+token refresh keeps the current session. Sharing does not survive a restart or
+coordinate separate Zotero processes or devices.
+
 ## Hosted daily quota
 
 When the service enables it, new hosted conversion results consume an account's

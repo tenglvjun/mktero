@@ -244,6 +244,10 @@ or cancellation do not by themselves start a conversion.
 > cancels active conversion and translation requests. Each uncached PDF in a
 > batch is sent the same way as a single conversion. Reopening the same PDF and
 > conversion profile restores the last reading paragraph.
+> Attachments with identical PDF bytes share in-progress hosted conversion within
+> one Mktero runtime and account session, including with local caching disabled.
+> Each attachment keeps its own reading state. See [workflows](./docs/workflows.md)
+> for cancellation and forced-reparse behavior.
 
 ## Documentation
 

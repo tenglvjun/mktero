@@ -221,9 +221,15 @@ export class MarkdownCache {
         }
     }
 
-    async put(cacheKey, result, { allowEmptyMarkdown = false, signal, figureRestoration = null } = {}) {
+    async put(cacheKey, result, {
+        allowEmptyMarkdown = false,
+        signal,
+        figureRestoration = null,
+        canCommit = alwaysCanCommit,
+    } = {}) {
         throwIfFigureAborted(signal);
         validateCacheKey(cacheKey);
+        if (typeof canCommit !== 'function') throw new TypeError('canCommit must be a function');
         if (typeof result?.markdown !== 'string'
             || (!allowEmptyMarkdown && !result.markdown.trim())) {
             throw new TypeError('Cached Markdown must be a non-empty string');
@@ -233,7 +239,13 @@ export class MarkdownCache {
             throw new TypeError('Cached figure restoration status is invalid');
         }
 
-        return this.#withOperation(() => this.#put(cacheKey, result, signal, figureRestoration));
+        return this.#withOperation(() => this.#put(
+            cacheKey,
+            result,
+            signal,
+            figureRestoration,
+            canCommit
+        ));
     }
 
     getTranslation(cacheKey, translationKey) {
@@ -487,8 +499,9 @@ export class MarkdownCache {
         await this.#scan({ removeInvalid: true });
     }
 
-    async #put(cacheKey, result, signal, figureRestoration) {
+    async #put(cacheKey, result, signal, figureRestoration, canCommit) {
         throwIfFigureAborted(signal);
+        if (!canCommit()) return;
         const serializedFigureMap = await serializeFigureMap(result.figureMap, result, {
             hash: this.hash, maxBytes: this.maxFigureMapBytes,
         });
@@ -660,6 +673,13 @@ export class MarkdownCache {
             }
             temporaryPaths.push(`${metadataPath}.tmp`);
             throwIfFigureAborted(signal);
+            if (!canCommit()) {
+                await Promise.all([...writtenPaths, ...temporaryPaths].map(filePath => (
+                    this.io.remove(filePath, { ignoreAbsent: true }).catch(() => {})
+                )));
+                return;
+            }
+            // Invoking the metadata write commits this generation; later writes stay queued.
             await this.#writeMetadata(metadataPath, metadata);
             await this.#removeReferencedFiles(entryPath, previousMetadata);
         }
@@ -1128,6 +1148,10 @@ export class MarkdownCache {
             }
         }
     }
+}
+
+function alwaysCanCommit() {
+    return true;
 }
 
 function createGenerationID(timestamp) {

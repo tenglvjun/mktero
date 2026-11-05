@@ -6,6 +6,7 @@ pref("extensions.mktero.conversionProvider", "mktero");
 pref("extensions.mktero.accountApiBase", "http://127.0.0.1:8080");
 pref("extensions.mktero.accountEmail", "");
 pref("extensions.mktero.accountNickname", "");
+pref("extensions.mktero.accountSessionEpoch", "");
 pref("extensions.mktero.accountAccessToken", "");
 pref("extensions.mktero.accountRefreshToken", "");
 pref("extensions.mktero.accountAccessExpiresAtMs", "");

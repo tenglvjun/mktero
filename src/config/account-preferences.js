@@ -9,6 +9,7 @@ export const ACCOUNT_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 export const ACCOUNT_EMAIL_PREF = 'extensions.mktero.accountEmail';
 export const ACCOUNT_NICKNAME_PREF = 'extensions.mktero.accountNickname';
+export const ACCOUNT_SESSION_EPOCH_PREF = 'extensions.mktero.accountSessionEpoch';
 export const ACCOUNT_ACCESS_TOKEN_PREF = 'extensions.mktero.accountAccessToken';
 export const ACCOUNT_REFRESH_TOKEN_PREF = 'extensions.mktero.accountRefreshToken';
 // The access-token expiry is a millisecond timestamp stored as a decimal
@@ -53,7 +54,8 @@ export function accessTokenNeedsRefresh(session, now = Date.now()) {
     return session.accessExpiresAt - now <= ACCOUNT_REFRESH_MARGIN_MS;
 }
 
-export function saveAccountSession(zotero, session) {
+export function saveAccountSession(zotero, session, { preserveEpoch = false } = {}) {
+    if (!preserveEpoch) rotateAccountSessionEpoch(zotero);
     writeString(zotero, ACCOUNT_EMAIL_PREF, session?.email);
     writeString(zotero, ACCOUNT_NICKNAME_PREF, session?.nickname);
     writeString(zotero, ACCOUNT_ACCESS_TOKEN_PREF, session?.accessToken);
@@ -90,8 +92,62 @@ export function saveAccountProfile(zotero, { email, nickname } = {}, {
 }
 
 export function clearAccountSession(zotero) {
+    rotateAccountSessionEpoch(zotero);
     for (const pref of SESSION_PREFS) zotero?.Prefs?.set?.(pref, '', true);
     clearLegacyExpiresAt(zotero);
+}
+
+export function getAccountSessionEpoch(zotero) {
+    // Existing profiles have no epoch until the next explicit login/logout.
+    // Reading identity must not mutate prefs or manufacture a new scope.
+    return readString(zotero, ACCOUNT_SESSION_EPOCH_PREF);
+}
+
+export function observeAccountSession(zotero, onChange) {
+    if (typeof onChange !== 'function'
+        || typeof zotero?.Prefs?.registerObserver !== 'function') return () => {};
+    const preferences = [
+        ACCOUNT_EMAIL_PREF,
+        ACCOUNT_API_BASE_PREF,
+        ACCOUNT_REFRESH_TOKEN_PREF,
+        ACCOUNT_SESSION_EPOCH_PREF,
+    ];
+    const registrations = [];
+    const notify = () => {
+        try {
+            onChange();
+        }
+        catch {
+            // Session observers must not make preference writes fail.
+        }
+    };
+    try {
+        for (const preference of preferences) {
+            const observer = zotero.Prefs.registerObserver(preference, notify, true);
+            registrations.push(observer);
+        }
+    }
+    catch (error) {
+        unregisterAccountSessionObservers(zotero, registrations);
+        throw error;
+    }
+    let disposed = false;
+    return () => {
+        if (disposed) return;
+        disposed = true;
+        unregisterAccountSessionObservers(zotero, registrations);
+    };
+}
+
+function unregisterAccountSessionObservers(zotero, registrations) {
+    for (const observer of registrations) {
+        try {
+            zotero.Prefs.unregisterObserver?.(observer);
+        }
+        catch {
+            // Observer cleanup must not prevent the remaining registrations from stopping.
+        }
+    }
 }
 
 export function getAccountApiBase(zotero) {
@@ -115,6 +171,27 @@ function normalizeAccountApiBase(value) {
     catch {
         return normalizeMinerULocalApiBase(MKTERO_DEBUG_API_BASE);
     }
+}
+
+let accountSessionEpochSerial = 0;
+
+function rotateAccountSessionEpoch(zotero) {
+    const secureRandom = globalThis.crypto;
+    let epoch = '';
+    if (typeof secureRandom?.randomUUID === 'function') {
+        epoch = secureRandom.randomUUID();
+    }
+    else if (typeof secureRandom?.getRandomValues === 'function') {
+        const bytes = new Uint8Array(16);
+        secureRandom.getRandomValues(bytes);
+        epoch = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+    else {
+        accountSessionEpochSerial += 1;
+        epoch = `${Date.now().toString(36)}-${accountSessionEpochSerial.toString(36)}-${Math.random().toString(36).slice(2)}`;
+    }
+    writeString(zotero, ACCOUNT_SESSION_EPOCH_PREF, epoch);
+    return epoch;
 }
 
 function readString(zotero, key) {

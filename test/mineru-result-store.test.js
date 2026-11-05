@@ -196,6 +196,150 @@ test('honors an aborted signal before touching the store', async t => {
     assert.deepEqual(await fixture.store.getStats(), { entries: 0, sizeBytes: 0 });
 });
 
+test('skips all mutations when raw result publish rights are lost while queued', async t => {
+    const fixture = await createStoreFixture(t);
+    await fixture.store.put(KEY, { archive: new Uint8Array([1]), provider: 'mineru' });
+    const entryPath = path.join(fixture.rootPath, 'entries', KEY);
+    const metadataPath = path.join(entryPath, 'entry.json');
+    const before = await snapshotEntry(entryPath);
+    const originalReadUTF8 = fixture.ioUtils.readUTF8;
+    const readStarted = Promise.withResolvers();
+    const resumeRead = Promise.withResolvers();
+    fixture.ioUtils.readUTF8 = async filePath => {
+        if (filePath === metadataPath) {
+            fixture.ioUtils.readUTF8 = originalReadUTF8;
+            readStarted.resolve();
+            await resumeRead.promise;
+        }
+        return originalReadUTF8(filePath);
+    };
+    const mutations = [];
+    for (const method of ['makeDirectory', 'write', 'writeUTF8', 'remove']) {
+        const original = fixture.ioUtils[method];
+        fixture.ioUtils[method] = (...args) => {
+            mutations.push([method, args[0]]);
+            return original(...args);
+        };
+    }
+
+    const reading = fixture.store.getStats();
+    await readStarted.promise;
+    let allowed = true;
+    let checks = 0;
+    const replacing = fixture.store.put(
+        KEY,
+        { archive: new Uint8Array([2]), provider: 'mineru' },
+        { canCommit: () => { checks++; return allowed; } }
+    );
+    assert.equal(checks, 0);
+    allowed = false;
+    resumeRead.resolve();
+
+    await reading;
+    assert.equal(await replacing, undefined);
+    assert.deepEqual(mutations, []);
+    assert.deepEqual(await snapshotEntry(entryPath), before);
+    assert.deepEqual([...((await fixture.store.get(KEY)).archive)], [1]);
+});
+
+test('keeps the old raw entry and cleans a payload that loses publish rights before metadata', async t => {
+    const fixture = await createStoreFixture(t);
+    await fixture.store.put(KEY, { archive: new Uint8Array([1]), provider: 'mineru' });
+    const entryPath = path.join(fixture.rootPath, 'entries', KEY);
+    const metadataPath = path.join(entryPath, 'entry.json');
+    const before = await snapshotEntry(entryPath);
+    const previousMetadata = await readFile(metadataPath, 'utf8');
+    const originalWrite = fixture.ioUtils.write;
+    const originalWriteUTF8 = fixture.ioUtils.writeUTF8;
+    const payloadWritten = Promise.withResolvers();
+    const resumePayload = Promise.withResolvers();
+    const metadataWrites = [];
+    fixture.ioUtils.write = async (filePath, data, options) => {
+        const result = await originalWrite(filePath, data, options);
+        payloadWritten.resolve(filePath);
+        await resumePayload.promise;
+        return result;
+    };
+    fixture.ioUtils.writeUTF8 = (filePath, data, options) => {
+        if (filePath === metadataPath) metadataWrites.push(data);
+        return originalWriteUTF8(filePath, data, options);
+    };
+    let allowed = true;
+    const replacing = fixture.store.put(
+        KEY,
+        { archive: new Uint8Array([2]), provider: 'mktero' },
+        { canCommit: () => allowed }
+    );
+    const payloadPath = await payloadWritten.promise;
+    try {
+        assert.deepEqual([...await readFile(payloadPath)], [2]);
+        assert.equal(await readFile(metadataPath, 'utf8'), previousMetadata);
+        allowed = false;
+    }
+    finally {
+        resumePayload.resolve();
+    }
+
+    assert.equal(await replacing, undefined);
+    assert.deepEqual(metadataWrites, []);
+    assert.deepEqual(await snapshotEntry(entryPath), before);
+    const stored = await fixture.store.get(KEY);
+    assert.deepEqual([...stored.archive], [1]);
+    assert.equal(stored.provider, 'mineru');
+});
+
+test('finishes an invoked raw metadata commit before publishing a later queued generation', async t => {
+    const fixture = await createStoreFixture(t);
+    await fixture.store.put(KEY, { archive: new Uint8Array([1]), provider: 'mineru' });
+    const entryPath = path.join(fixture.rootPath, 'entries', KEY);
+    const metadataPath = path.join(entryPath, 'entry.json');
+    const previousMetadata = await readFile(metadataPath, 'utf8');
+    const originalWriteUTF8 = fixture.ioUtils.writeUTF8;
+    const commitStarted = Promise.withResolvers();
+    const resumeCommit = Promise.withResolvers();
+    const committedGenerations = [];
+    fixture.ioUtils.writeUTF8 = async (filePath, data, options) => {
+        if (filePath === metadataPath) {
+            const metadata = JSON.parse(data);
+            if (committedGenerations.at(-1) !== metadata.archiveFile) {
+                committedGenerations.push(metadata.archiveFile);
+                if (committedGenerations.length === 1) {
+                    commitStarted.resolve();
+                    await resumeCommit.promise;
+                }
+            }
+        }
+        return originalWriteUTF8(filePath, data, options);
+    };
+    let allowed = true;
+    const replacing = fixture.store.put(
+        KEY,
+        { archive: new Uint8Array([2]), provider: 'mineru' },
+        { canCommit: () => allowed }
+    );
+    await commitStarted.promise;
+    let committed;
+    let newer;
+    try {
+        assert.equal(await readFile(metadataPath, 'utf8'), previousMetadata);
+        allowed = false;
+        committed = fixture.store.get(KEY);
+        newer = fixture.store.put(KEY, { archive: new Uint8Array([3]), provider: 'mktero' });
+    }
+    finally {
+        resumeCommit.resolve();
+    }
+
+    await replacing;
+    assert.deepEqual([...(await committed).archive], [2]);
+    await newer;
+    assert.equal(committedGenerations.length, 2);
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+    assert.equal(metadata.archiveFile, committedGenerations[1]);
+    assert.deepEqual((await readdir(entryPath)).sort(), ['entry.json', metadata.archiveFile].sort());
+    assert.deepEqual([...((await fixture.store.get(KEY)).archive)], [3]);
+});
+
 test('re-derives a cloud MinerU result from the store without the network', async () => {
     const store = createMemoryStore();
     await store.put(KEY, { archive: createMinerUResultArchive(resultZip()), provider: 'mineru', totalPages: 2 });
@@ -400,7 +544,7 @@ test('stores a hosted archive and strips it before preparation', async () => {
     });
     const result = await extractor.extract(42, { forceRefresh: true });
     assert.equal(result.cacheHit, false);
-    assert.equal(converts[0].includeArchive, true);
+    assert.equal(converts[0].includeRawArchive, true);
     assert.equal('resultArchive' in prepared[0], false);
     assert.deepEqual([...store.records.get(KEY).archive], [7]);
     assert.equal(store.records.get(KEY).provider, 'mktero');
@@ -452,6 +596,11 @@ function createMemoryPendingTasks() {
         async put(key, task) { tasks.set(key, task); },
         async delete(key) { return tasks.delete(key); },
     };
+}
+
+async function snapshotEntry(entryPath) {
+    const names = (await readdir(entryPath)).sort();
+    return Promise.all(names.map(async name => [name, await readFile(path.join(entryPath, name))]));
 }
 
 async function createStoreFixture(t, options = {}) {

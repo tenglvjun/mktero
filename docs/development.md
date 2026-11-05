@@ -20,6 +20,45 @@ Keep the versions in `manifest.json`, `package.json`, and `package-lock.json`
 consistent before tagging a release. See [AGENTS.md](../AGENTS.md) for the
 architecture, security invariants, and contribution checklist.
 
+## Hosted conversion sharing
+
+`src/mktero/shared-conversion.js` is owned once by bootstrap. It shares raw-cache
+lookup, hosted transport and one raw-archive save by API base, account-session
+scope, request profile, full PDF SHA-256 and byte length. Each attachment leases
+that acquisition through its own processing and annotations. Force replacement
+reserves before aborting its old run; releases identify the exact run signal.
+A new generation revokes older cache publication immediately, and stores check
+`canCommit` inside their serial queue before metadata publication. A failed new
+generation does not restore the old one's write permission. Local cache
+restoration captures an offline publication guard, so a delayed recovery cannot
+overwrite a parallel forced conversion. Shutdown also waits for outstanding
+archive writes within the bounded cleanup period.
+
+The opaque `accountSessionEpoch` preference rotates on explicit login/logout,
+including login with the same email. Token refresh preserves it. The separate
+runtime scope also observes API and provider changes; neither identity contains
+access or refresh tokens. Disk cache identities and schema stay unchanged.
+Cancellation cleanup is best effort and bounded; this module provides no hosted
+job recovery after restart or a lost create response.
+
+HTTP deadlines and cancellation cover both response headers and body reads.
+Cancelling a create rejects the caller immediately. Once headers have arrived,
+the body can still reveal a job id during a recovery window (by default at most
+2 seconds, also limited by the remaining request deadline), then cleanup sends
+one independent DELETE. That DELETE has its own 2-second total budget for token
+lookup, transfer and body consumption. The shared layer separately limits how
+long shutdown or a replacement waits; none of these limits proves that the
+remote task was cancelled.
+
+`test/shared-mktero-conversion*.test.js` controls lifecycle races with explicit
+gates. `test/mktero-sharing-boundaries.test.js` combines the real service,
+extractor and HTTP client with simulated transport.
+`test/mktero-sharing-response-cleanup.test.js` checks late create responses and
+DELETE body deadlines through the real shared coordinator and HTTP client.
+`test/bootstrap-hosted-sharing.test.js` exercises real bootstrap entry points in
+JSDOM. These tests use no production data or network and do not replace manual
+Zotero acceptance testing.
+
 ## Figure corpus regression
 
 `test/fixtures/figure-corpus/` stores the figure decisions (composed figures,

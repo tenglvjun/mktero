@@ -79,6 +79,8 @@ import { resolvePDFCandidates } from './ui/pdf-item-targets.js';
 import { ConversionProviderRouter } from './core/conversion-provider.js';
 import { createPDFPageLimitGuard } from './core/pdf-page-limit.js';
 import { MkteroConversionClient } from './mktero/mktero-conversion-client.js';
+import { SharedMkteroConversion } from './mktero/shared-conversion.js';
+import { createHostedConversionScope } from './mktero/conversion-scope.js';
 import { getMkteroConversionQuota } from './account/account-client.js';
 import { notifyConversionQuotaChanged } from './account/conversion-quota.js';
 import {
@@ -346,6 +348,8 @@ let obsidianExportStatusOverwritten = false;
 const runtime = {
     id: null,
     service: null,
+    sharedConversion: null,
+    hostedConversionScope: null,
     presenter: null,
     citationPresenter: null,
     citationGraph: null,
@@ -895,13 +899,33 @@ globalThis.startup = async function startup({ id, rootURI }) {
         readRevision: options => readRevisionSnapshot(options),
         isCacheEnabled: () => getMinerUCacheEnabled(Zotero),
     });
+    const hostedScope = createHostedConversionScope({
+        zotero: Zotero,
+        onChange: () => runtime.sharedConversion?.invalidateScope(),
+    });
+    runtime.hostedConversionScope = hostedScope;
+    const hostedClient = new MkteroConversionClient({
+        createAbortController: createZoteroAbortController,
+        onJob: recordDiagnosticJob,
+    });
+    const sharedHosted = new SharedMkteroConversion({
+        conversion: hostedClient,
+        getScope: hostedScope.current,
+        createController: createZoteroAbortController,
+        resultStore: mineruResultStore,
+        assertPageLimit: assertHostedPageLimit,
+        onCacheError: error => logMkteroError(error),
+        onConversionSettled: () => notifyConversionQuotaChanged(
+            typeof Services === 'undefined' ? null : Services
+        ),
+    });
+    runtime.sharedConversion = sharedHosted;
     const mkteroExtractor = new MkteroDocumentExtractor({
         zotero: Zotero,
         onPDFRead: rememberPDF,
-        conversion: new MkteroConversionClient({
-            createAbortController: createZoteroAbortController,
-            onJob: recordDiagnosticJob,
-        }),
+        conversion: hostedClient,
+        sharedConversion: sharedHosted,
+        getSharedScope: hostedScope.current,
         getApiBase: () => getAccountApiBase(Zotero),
         onConversionSettled: () => notifyConversionQuotaChanged(
             typeof Services === 'undefined' ? null : Services
@@ -1031,6 +1055,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.conversionRuns = createConversionRunRegistry({
         createController: createZoteroAbortController,
         execute: executeItemConversion,
+        beforeReplace: (previous, next) => sharedHosted.reserveReplacement(previous, next),
+        onSettled: signal => sharedHosted.releaseRun(signal),
     });
     runtime.conversionBatch = createConversionBatch({
         isReady: candidate => itemHasReadableMarkdown(candidate.itemID),
@@ -1253,6 +1279,8 @@ globalThis.shutdown = function shutdown() {
     conversionFailures.clear();
     runtime.pendingSelectionReveals?.clear();
     abortAllConversions();
+    const sharedConversionStopped = runtime.sharedConversion?.dispose();
+    runtime.hostedConversionScope?.dispose();
     abortObsidianExport();
     abortAllTranslations();
     runtime.reasoningCatalogStore?.dispose();
@@ -1300,6 +1328,8 @@ globalThis.shutdown = function shutdown() {
     runtime.referenceLibrary = null;
     runtime.referenceImportService = null;
     runtime.service = null;
+    runtime.sharedConversion = null;
+    runtime.hostedConversionScope = null;
     runtime.conversionRuns = null;
     runtime.importReadiness?.dispose();
     runtime.importReadiness = null;
@@ -1355,7 +1385,7 @@ globalThis.shutdown = function shutdown() {
     // Zotero waits for a promise returned by shutdown before it closes the
     // database or replaces the extension, so the corrections saved by the
     // closing tabs reach the profile first.
-    return Promise.all([revisionSessionsDestroyed, cacheLifecycleDisposed]);
+    return Promise.all([revisionSessionsDestroyed, cacheLifecycleDisposed, sharedConversionStopped]);
 };
 
 globalThis.uninstall = async function uninstall() {};
@@ -1654,6 +1684,7 @@ function continueConversionInBackground(itemID) {
         backgroundContinuations.delete(itemID);
         runtime.conversionRuns?.release(itemID, 'background', {
             abortIfLast: false,
+            expectedSignal: run.signal,
         });
         runtime.cacheLifecycle?.retry();
     });
@@ -1814,8 +1845,12 @@ async function executeItemConversion(itemID, {
     onProgressiveFigures,
 }) {
     const scope = currentConversionScope();
+    const hostedScope = isMkteroProvider() && operation === 'convert' && !localOnly
+        ? runtime.hostedConversionScope : null;
+    const sharedScope = hostedScope?.current();
     const assertScope = () => {
-        if (scope !== currentConversionScope()) {
+        if (scope !== currentConversionScope()
+            || (hostedScope && sharedScope !== hostedScope.current())) {
             throw Object.assign(new Error('The conversion account or provider changed'), {
                 code: 'MKTERO_QUOTA_ACCOUNT_CHANGED',
             });
@@ -1835,6 +1870,8 @@ async function executeItemConversion(itemID, {
         const result = await runtime.service.convert(itemID, {
             signal,
             assertScope,
+            sharedScope,
+            retainSharedLease: true,
             beforeCreate() {
                 assertScope();
                 const blocked = runtime.conversionBatch?.pausedScope(scope);
@@ -1871,6 +1908,7 @@ async function executeItemConversion(itemID, {
                 onProgressiveFigures(event);
             },
         });
+        if (hostedScope && !result.cacheHit) assertScope();
         if (imported) result.warnings = uniqueWarnings([
             ...(result.warnings || []), ...(imported.warnings || []),
         ]);
@@ -2161,7 +2199,7 @@ async function convertBatchItem(item, { signal, onProgress }) {
         if (event.type === 'progress') onProgress(event.progress, event.state);
     });
     const releaseBatch = () => {
-        runtime.conversionRuns.release(item.itemID, 'batch');
+        runtime.conversionRuns?.release(item.itemID, 'batch', { expectedSignal: begun.run.signal });
     };
     signal.addEventListener('abort', releaseBatch, { once: true });
     try {
@@ -2170,8 +2208,9 @@ async function convertBatchItem(item, { signal, onProgress }) {
     finally {
         signal.removeEventListener('abort', releaseBatch);
         unsubscribe();
-        runtime.conversionRuns.release(item.itemID, 'batch', {
+        runtime.conversionRuns?.release(item.itemID, 'batch', {
             abortIfLast: false,
+            expectedSignal: begun.run.signal,
         });
     }
 }

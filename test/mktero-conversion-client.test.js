@@ -76,11 +76,36 @@ function flushTasks() {
     return new Promise(resolve => setImmediate(resolve));
 }
 
+function deferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+}
+
 function resultArchive() {
     return zipSync({
         'result/full.md': strToU8('# Converted\n\nBody text.'),
         'result/images/figure.png': createTestPNG(),
     });
+}
+
+function successfulClient({ archive = resultArchive(), onRequest = () => {} } = {}) {
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            onRequest(url, options);
+            if (options.method === 'POST' && url.endsWith('/conversions')) {
+                return jsonResponse(201, { job_id: 'job-success', status: 'succeeded' });
+            }
+            if (url.endsWith('/result-url')) {
+                return jsonResponse(200, { result_url: 'https://r2.example/result.zip' });
+            }
+            if (url === 'https://r2.example/result.zip') return archiveResponse(archive);
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+        sleep: async () => {},
+    });
+    return client;
 }
 
 test('converts through the hosted service and decodes the MinerU archive', async () => {
@@ -254,12 +279,14 @@ test('asks the user to sign in when the token is rejected', async () => {
 
 test('refreshes the access token once when creating a job is unauthorized', async () => {
     let creates = 0;
+    const keys = [];
     let token = 'expired-token';
     const archive = resultArchive();
     const client = new MkteroConversionClient({
         fetch: async (url, options) => {
             if (url.endsWith('/conversions') && options.method === 'POST') {
                 creates += 1;
+                keys.push(options.headers['Idempotency-Key']);
                 if (creates === 1) {
                     assert.equal(options.headers.Authorization, 'Bearer expired-token');
                     return jsonResponse(401, {
@@ -297,10 +324,12 @@ test('refreshes the access token once when creating a job is unauthorized', asyn
             if (options?.forceRefresh) token = 'refreshed-token';
             return token;
         },
+        idempotencyKey: 'logical-create-replay-1',
     }));
 
     assert.match(converted.result.markdown, /Converted/);
     assert.equal(creates, 2);
+    assert.deepEqual(keys, ['logical-create-replay-1', 'logical-create-replay-1']);
 });
 
 test('reports a disabled account instead of asking for sign-in', async () => {
@@ -1081,4 +1110,555 @@ test('times a request from when its access token is ready', async () => {
         })),
         error => error.code === 'MKTERO_ACCOUNT_DISABLED'
     );
+});
+
+test('uses the provided source hash and idempotency key and optionally returns the raw archive', async () => {
+    const archive = resultArchive();
+    const requests = [];
+    const client = successfulClient({
+        archive,
+        onRequest: (url, options) => requests.push({ url, options }),
+    });
+
+    const converted = await client.convert(convertOptions({
+        sourceHash: 'B'.repeat(64),
+        idempotencyKey: 'logical-conversion-42',
+        includeRawArchive: true,
+    }));
+
+    assert.equal(requests[0].options.headers['Idempotency-Key'], 'logical-conversion-42');
+    assert.equal(JSON.parse(requests[0].options.body).sha256, 'b'.repeat(64));
+    assert.deepEqual(converted.rawArchive, archive);
+    assert.equal('resultArchive' in converted, false);
+});
+
+test('keeps the trimmed result archive independent from raw archive opt-in', async () => {
+    const archive = resultArchive();
+    const client = successfulClient({ archive });
+    const converted = await client.convert(convertOptions({ includeArchive: true }));
+
+    assert.equal('rawArchive' in converted, false);
+    assert.ok(converted.resultArchive instanceof Uint8Array);
+    assert.notDeepEqual(converted.resultArchive, archive);
+});
+
+test('rejects invalid explicit idempotency keys before contacting the service', async () => {
+    let calls = 0;
+    const client = new MkteroConversionClient({
+        fetch: async () => { calls += 1; return jsonResponse(201, {}); },
+        sleep: async () => {},
+    });
+
+    await assert.rejects(client.convert(convertOptions({ idempotencyKey: 'bad\nkey' })), TypeError);
+    assert.equal(calls, 0);
+});
+
+test('reports cancel cleanup before rejecting and isolates cleanup callback errors', async () => {
+    const controller = new AbortController();
+    let releaseDelete;
+    let cleanup;
+    const deleteGate = new Promise(resolve => { releaseDelete = resolve; });
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            if (options.method === 'POST') {
+                return awaitingUpload('job-cleanup-observer', 'https://r2.example/upload');
+            }
+            if (options.method === 'PUT') {
+                controller.abort();
+                throw new DOMException('The operation was aborted', 'AbortError');
+            }
+            if (options.method === 'DELETE') return deleteGate;
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+        sleep: async () => {},
+    });
+
+    await assert.rejects(client.convert(convertOptions({
+        signal: controller.signal,
+        onCleanup: pending => {
+            cleanup = pending;
+            throw new Error('observer failure');
+        },
+    })), { name: 'AbortError' });
+    assert.equal(typeof cleanup?.then, 'function');
+    const settled = settleWithin(cleanup, 20);
+    assert.equal((await settled).pending, true);
+    releaseDelete(jsonResponse(200, { job_id: 'job-cleanup-observer', status: 'failed' }));
+    await cleanup;
+});
+
+test('bounds cancel cleanup while waiting for an access token', async () => {
+    const controller = new AbortController();
+    let tokenCalls = 0;
+    let cleanup;
+    const requests = [];
+    const client = new MkteroConversionClient({
+        cancelTimeoutMs: 25,
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            if (options.method === 'POST') {
+                return awaitingUpload('job-token-timeout', 'https://r2.example/upload');
+            }
+            if (options.method === 'PUT') {
+                controller.abort();
+                throw new DOMException('The operation was aborted', 'AbortError');
+            }
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+        sleep: async () => {},
+    });
+
+    const started = Date.now();
+    await assert.rejects(client.convert(convertOptions({
+        signal: controller.signal,
+        getAccessToken: () => {
+            tokenCalls += 1;
+            return tokenCalls === 1 ? 'access-token' : new Promise(() => {});
+        },
+        onCleanup: pending => { cleanup = pending; },
+    })), { name: 'AbortError' });
+    const outcome = await settleWithin(cleanup, 1000);
+    assert.equal(outcome.pending, undefined);
+    assert.equal(outcome.error, undefined);
+    assert.ok(Date.now() - started < 1000);
+    assert.equal(requests.filter(request => request.options.method === 'DELETE').length, 0);
+});
+
+test('bounds DELETE body cleanup and aborts the transfer even when the body ignores cancellation', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const controller = new AbortController();
+    const reading = deferred();
+    const body = deferred();
+    let cleanup;
+    let cancelSignal;
+    let cleaned = false;
+    const client = new MkteroConversionClient({
+        cancelTimeoutMs: 20,
+        fetch: async (url, options) => {
+            if (options.method === 'POST') {
+                return awaitingUpload('job-cancel-body', 'https://r2.example/upload');
+            }
+            if (options.method === 'PUT') {
+                controller.abort();
+                throw new DOMException('The operation was aborted', 'AbortError');
+            }
+            if (options.method === 'DELETE') {
+                cancelSignal = options.signal;
+                return {
+                    ...jsonResponse(200, {}),
+                    arrayBuffer: () => { reading.resolve(); return body.promise; },
+                };
+            }
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+    });
+
+    await assert.rejects(client.convert(convertOptions({
+        signal: controller.signal,
+        onCleanup: pending => { cleanup = pending; },
+    })), { name: 'AbortError' });
+    await reading.promise;
+    void cleanup.then(() => { cleaned = true; });
+    try {
+        t.mock.timers.tick(19);
+        await flushTasks();
+        assert.equal(cleaned, false);
+        assert.equal(cancelSignal.aborted, false);
+        t.mock.timers.tick(1);
+        await flushTasks();
+        assert.equal(cancelSignal.aborted, true);
+        assert.equal(cleaned, true);
+    }
+    finally {
+        body.resolve(strToU8('{}').buffer);
+        await cleanup;
+    }
+});
+
+test('cancels a job when its create response arrives after the caller aborts', async () => {
+    const controller = new AbortController();
+    let returnCreate;
+    let signalCreateStarted;
+    let cleanup;
+    const createResponse = new Promise(resolve => { returnCreate = resolve; });
+    const started = new Promise(resolve => { signalCreateStarted = resolve; });
+    const requests = [];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            if (options.method === 'POST') {
+                signalCreateStarted();
+                return createResponse;
+            }
+            if (options.method === 'DELETE') {
+                return jsonResponse(200, { job_id: 'job-late', status: 'failed' });
+            }
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+        sleep: async () => {},
+    });
+
+    const converting = client.convert(convertOptions({
+        signal: controller.signal,
+        onCleanup: pending => { cleanup = pending; },
+    }));
+    await started;
+    controller.abort();
+    returnCreate(awaitingUpload('job-late', 'https://r2.example/upload'));
+    await assert.rejects(converting, { name: 'AbortError' });
+    await cleanup;
+
+    assert.equal(requests.filter(request => request.options.method === 'PUT').length, 0);
+    assert.equal(requests.filter(request => request.options.method === 'DELETE').length, 1);
+    assert.equal(requests.find(request => request.options.method === 'DELETE').url,
+        `${API_BASE}/api/v1/conversions/job-late`);
+});
+
+test('reports cancellation immediately and preserves the started create body for cleanup', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const controller = new AbortController();
+    const reading = deferred();
+    const body = deferred();
+    const requests = [];
+    let cleanup;
+    let failure;
+    const reason = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            if (options.method === 'POST') {
+                return {
+                    ...jsonResponse(201, {}),
+                    arrayBuffer: async () => {
+                        const abort = () => body.reject(options.signal.reason);
+                        options.signal.addEventListener('abort', abort, { once: true });
+                        reading.resolve();
+                        try { return await body.promise; }
+                        finally { options.signal.removeEventListener('abort', abort); }
+                    },
+                };
+            }
+            if (options.method === 'DELETE') return jsonResponse(200, {});
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+    });
+
+    const converted = client.convert(convertOptions({
+        signal: controller.signal,
+        onCleanup: pending => { cleanup = pending; },
+    }));
+    void converted.catch(error => { failure = error; });
+    await reading.promise;
+    controller.abort(reason);
+    try {
+        await flushTasks();
+        assert.equal(failure, reason);
+        assert.equal(requests[0].options.signal.aborted, false);
+    }
+    finally {
+        body.resolve(strToU8(JSON.stringify({
+            job_id: 'job-readable-after-abort',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+        })).buffer);
+        await converted.catch(() => {});
+        await cleanup;
+    }
+    assert.deepEqual(requests.map(request => request.options.method), ['POST', 'DELETE']);
+    t.mock.timers.tick(30_000);
+    await flushTasks();
+    // Neither the create recovery timer nor DELETE's total deadline survives
+    // a completed cleanup; successful response consumption removed them both.
+    assert.equal(requests.every(request => !request.options.signal.aborted), true);
+});
+
+test('cancels the late job when aborted during the create response body', async () => {
+    const controller = new AbortController();
+    const reading = deferred();
+    const body = deferred();
+    const requests = [];
+    let cleanup;
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            if (options.method === 'POST') {
+                return {
+                    ...jsonResponse(201, {}),
+                    arrayBuffer: () => { reading.resolve(); return body.promise; },
+                };
+            }
+            if (options.method === 'DELETE') return jsonResponse(200, {});
+            throw new Error(`unexpected ${options.method} ${url}`);
+        },
+    });
+
+    const converted = client.convert(convertOptions({
+        signal: controller.signal,
+        onCleanup: pending => { cleanup = pending; },
+    }));
+    const rejected = assert.rejects(converted, { name: 'AbortError' });
+    await reading.promise;
+    controller.abort();
+    body.resolve(strToU8(JSON.stringify({
+        job_id: 'job-late-body',
+        status: 'awaiting_upload',
+        upload_url: 'https://r2.example/upload',
+    })).buffer);
+    await rejected;
+    await cleanup;
+
+    assert.deepEqual(requests.map(request => request.options.method), ['POST', 'DELETE']);
+    const cancel = requests[1];
+    assert.equal(cancel.url, `${API_BASE}/api/v1/conversions/job-late-body`);
+    assert.equal(cancel.options.signal.aborted, false);
+});
+
+for (const phase of ['fetch', 'body']) {
+    test(`bounds late create ${phase} cleanup even with request timeouts disabled`, async t => {
+        t.mock.timers.enable({ apis: ['setTimeout'] });
+        const controller = new AbortController();
+        const entered = deferred();
+        const late = deferred();
+        const requests = [];
+        let cleanup;
+        let cleaned = false;
+        const client = new MkteroConversionClient({
+            requestTimeoutMs: 0,
+            cancelTimeoutMs: 20,
+            fetch: async (url, options) => {
+                requests.push({ url, options });
+                if (phase === 'fetch') {
+                    entered.resolve();
+                    return late.promise;
+                }
+                return {
+                    ...jsonResponse(201, {}),
+                    arrayBuffer: () => { entered.resolve(); return late.promise; },
+                };
+            },
+        });
+        const reason = Object.assign(new Error('cancelled while creating'), { name: 'AbortError' });
+        const converted = client.convert(convertOptions({
+            signal: controller.signal,
+            onCleanup: pending => { cleanup = pending; },
+        }));
+        const rejected = assert.rejects(converted, error => error === reason);
+        await entered.promise;
+        controller.abort(reason);
+        await rejected;
+        void cleanup.then(() => { cleaned = true; });
+        assert.equal(requests[0].options.signal.aborted, phase === 'fetch');
+        t.mock.timers.tick(19);
+        await flushTasks();
+        assert.equal(cleaned, false);
+        t.mock.timers.tick(1);
+        await flushTasks();
+        assert.equal(cleaned, true);
+        assert.equal(requests[0].options.signal.aborted, true);
+
+        // A transport settling after its recovery deadline cannot resume work
+        // or send an extra DELETE, and a late rejection must remain observed.
+        if (phase === 'fetch') late.resolve(awaitingUpload('job-too-late', 'https://r2.example/upload'));
+        else late.reject(new TypeError('late body failure'));
+        await flushTasks();
+        assert.deepEqual(requests.map(request => request.options.method), ['POST']);
+    });
+
+    test(`the DELETE deadline includes token wait and ${phase} transfer`, async t => {
+        t.mock.timers.enable({ apis: ['setTimeout'] });
+        const controller = new AbortController();
+        const tokenRequested = deferred();
+        const token = deferred();
+        const entered = deferred();
+        const late = deferred();
+        let tokenCalls = 0;
+        let cleanup;
+        let cancelSignal;
+        let cleaned = false;
+        const client = new MkteroConversionClient({
+            cancelTimeoutMs: 20,
+            fetch: async (url, options) => {
+                if (options.method === 'POST') return awaitingUpload('job-total-deadline', 'https://r2.example/upload');
+                if (options.method === 'PUT') {
+                    controller.abort();
+                    throw new DOMException('The operation was aborted', 'AbortError');
+                }
+                if (options.method === 'DELETE') {
+                    cancelSignal = options.signal;
+                    if (phase === 'fetch') { entered.resolve(); return late.promise; }
+                    return {
+                        ...jsonResponse(200, {}),
+                        arrayBuffer: () => { entered.resolve(); return late.promise; },
+                    };
+                }
+                throw new Error(`unexpected ${options.method} ${url}`);
+            },
+        });
+        await assert.rejects(client.convert(convertOptions({
+            signal: controller.signal,
+            getAccessToken: () => {
+                if (++tokenCalls === 1) return 'access-token';
+                tokenRequested.resolve();
+                return token.promise;
+            },
+            onCleanup: pending => { cleanup = pending; },
+        })), { name: 'AbortError' });
+        await tokenRequested.promise;
+        void cleanup.then(() => { cleaned = true; });
+        t.mock.timers.tick(15);
+        token.resolve('access-token');
+        await entered.promise;
+        t.mock.timers.tick(4);
+        await flushTasks();
+        assert.equal(cleaned, false);
+        assert.equal(cancelSignal.aborted, false);
+        t.mock.timers.tick(1);
+        await flushTasks();
+        assert.equal(cancelSignal.aborted, true);
+        assert.equal(cleaned, true);
+        late.reject(new TypeError('late transfer failure'));
+        await flushTasks();
+    });
+}
+
+for (const stage of ['JSON', 'download']) {
+    for (const stop of ['cancel', 'timeout']) {
+        test(`${stop} stops the ${stage} response body and cancels its transfer`, async t => {
+            t.mock.timers.enable({ apis: ['setTimeout'] });
+            const controller = new AbortController();
+            const reading = deferred();
+            const body = deferred();
+            let transferSignal;
+            let cleanup;
+            let failure;
+            const requests = [];
+            const client = new MkteroConversionClient({
+                requestTimeoutMs: 20,
+                downloadTimeoutMs: 20,
+                fetch: async (url, options) => {
+                    requests.push({ url, options });
+                    if (options.method === 'POST') return jsonResponse(201, { job_id: 'job-read-body', status: 'succeeded' });
+                    if (options.method === 'DELETE') return jsonResponse(409, { error: { code: 'conversion_not_cancellable' } });
+                    if (stage === 'download' && url.endsWith('/result-url')) {
+                        return jsonResponse(200, { result_url: 'https://r2.example/result.zip' });
+                    }
+                    transferSignal = options.signal;
+                    return {
+                        ...jsonResponse(200, {}),
+                        arrayBuffer: () => { reading.resolve(); return body.promise; },
+                    };
+                },
+            });
+            const converted = client.convert(convertOptions({
+                signal: controller.signal,
+                onCleanup: pending => { cleanup = pending; },
+            }));
+            void converted.catch(error => { failure = error; });
+            await reading.promise;
+            const reason = Object.assign(new Error('cancelled while reading'), { name: 'AbortError' });
+            if (stop === 'cancel') controller.abort(reason);
+            else t.mock.timers.tick(20);
+            await flushTasks();
+            assert.equal(transferSignal.aborted, true);
+            if (stop === 'cancel') assert.equal(failure, reason);
+            else assert.equal(failure?.code, 'MKTERO_REQUEST_TIMEOUT');
+            await cleanup;
+            assert.equal(requests.filter(request => request.options.method === 'DELETE').length, 1);
+            body.reject(new TypeError('late response body failure'));
+            await flushTasks();
+        });
+    }
+}
+
+for (const cancelled of [false, true]) {
+    test(`cleans up a ${cancelled ? 'late cancelled' : 'failed'} create that has a job id but no upload URL`, async () => {
+        const controller = new AbortController();
+        const reading = deferred();
+        const body = deferred();
+        const requests = [];
+        let cleanup;
+        const client = new MkteroConversionClient({
+            fetch: async (url, options) => {
+                requests.push({ url, options });
+                if (options.method === 'DELETE') return jsonResponse(200, {});
+                return {
+                    ...jsonResponse(201, {}),
+                    arrayBuffer: () => { reading.resolve(); return body.promise; },
+                };
+            },
+        });
+        const converted = client.convert(convertOptions({
+            signal: controller.signal,
+            onCleanup: pending => { cleanup = pending; },
+        }));
+        const rejected = assert.rejects(converted, cancelled
+            ? { name: 'AbortError' } : { code: 'MKTERO_INVALID_RESPONSE' });
+        await reading.promise;
+        if (cancelled) controller.abort();
+        body.resolve(strToU8(JSON.stringify({ job_id: 'job-invalid-upload', status: 'awaiting_upload' })).buffer);
+        await rejected;
+        await cleanup;
+        assert.deepEqual(requests.map(request => request.options.method), ['POST', 'DELETE']);
+        assert.equal(requests[1].url, `${API_BASE}/api/v1/conversions/job-invalid-upload`);
+    });
+}
+
+for (const stage of ['JSON limit', 'archive limit', 'download status']) {
+    test(`aborts the unread transfer after rejecting its ${stage}`, async () => {
+        let transferSignal;
+        let cleanup;
+        const client = new MkteroConversionClient({
+            fetch: async (url, options) => {
+                if (options.method === 'DELETE') return jsonResponse(200, {});
+                if (stage !== 'JSON limit') {
+                    if (options.method === 'POST') return jsonResponse(201, { job_id: 'job-unread', status: 'succeeded' });
+                    if (url.endsWith('/result-url')) return jsonResponse(200, { result_url: 'https://r2.example/result.zip' });
+                }
+                transferSignal = options.signal;
+                return {
+                    ok: stage !== 'download status',
+                    status: stage === 'download status' ? 500 : 200,
+                    headers: { get: () => String(300 * 1024 * 1024) },
+                    arrayBuffer: () => { throw new Error('The oversized or rejected body must not be read'); },
+                };
+            },
+        });
+        await assert.rejects(client.convert(convertOptions({ onCleanup: pending => { cleanup = pending; } })), {
+            code: stage === 'JSON limit' ? 'MKTERO_INVALID_RESPONSE'
+                : stage === 'archive limit' ? 'MKTERO_ARCHIVE_TOO_LARGE' : 'MKTERO_DOWNLOAD_FAILED',
+        });
+        await cleanup;
+        assert.equal(transferSignal.aborted, true);
+    });
+}
+
+test('a cancelled create receiving a late 401 does not refresh or replay', async () => {
+    const controller = new AbortController();
+    const reading = deferred();
+    const body = deferred();
+    const requests = [];
+    let cleanup;
+    let tokenCalls = 0;
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return {
+                ...jsonResponse(401, {}),
+                arrayBuffer: () => { reading.resolve(); return body.promise; },
+            };
+        },
+    });
+    const converted = client.convert(convertOptions({
+        signal: controller.signal,
+        getAccessToken: () => { tokenCalls += 1; return 'expired-token'; },
+        onCleanup: pending => { cleanup = pending; },
+    }));
+    const rejected = assert.rejects(converted, { name: 'AbortError' });
+    await reading.promise;
+    controller.abort();
+    await rejected;
+    body.resolve(strToU8(JSON.stringify({ error: { code: 'invalid_token' } })).buffer);
+    await cleanup;
+    assert.equal(tokenCalls, 1);
+    assert.deepEqual(requests.map(request => request.options.method), ['POST']);
 });
