@@ -21,5 +21,7 @@
 | PDF 原文缩略图 | 可选，默认开启 | 显示当前段落对应的 PDF 原貌裁切 |
 | 复用转换结果 | 可选 | 复用相同 PDF 内容和解析配置对应的结果 |
 
+若 MinerU 云端 API 返回认证错误（`HTTP 401` 或 `token expired`），请在 `设置 -> Mktero` 更新 MinerU API key。可从 [MinerU 官方 API key 管理页](https://mineru.net/apiManage/token)获取新 key。在浏览器中重新登录不会自动更新插件中保存的 key。
+
 MinerU、Mistral 和 AI 凭据会作为普通的未加密首选项存储在当前 Zotero 配置文件中。Mistral
 使用同步请求，可以在本地取消，但没有可恢复的服务端任务；MinerU 云端仍保留原有的任务恢复行为。本地 MinerU 服务只在自己的进程里保存任务，服务重启后 Mktero 不会恢复旧任务。开始翻译前，可以使用`测试连接`验证 AI 地址。

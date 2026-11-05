@@ -272,6 +272,9 @@ export class MinerUClient {
                     ...options,
                     signal: requestSignal,
                 });
+                if (response?.status === 401) {
+                    throw invalidAPIKeyError(response.status);
+                }
                 let payload;
                 try {
                     payload = await response.json();
@@ -283,8 +286,10 @@ export class MinerUClient {
                     error.code = 'MINERU_INVALID_RESPONSE';
                     throw error;
                 }
-                if (payload.code === 'A0202' || payload.code === 'A0211') {
-                    throw apiError(payload.code, payload.msg);
+                if (payload.code === 'A0202' || payload.code === 'A0211'
+                    || isExpiredTokenMessage(payload.msg)
+                    || isExpiredTokenMessage(payload.message)) {
+                    throw invalidAPIKeyError(response.status);
                 }
                 if (!response?.ok) {
                     throw httpError('MinerU request failed', response, payload.msg);
@@ -391,12 +396,18 @@ function progressFromPages(progress) {
     );
 }
 
+function isExpiredTokenMessage(message) {
+    return typeof message === 'string' && /\btoken\s+expired\b/i.test(message);
+}
+
+function invalidAPIKeyError(status = 0) {
+    const error = new Error('The MinerU API Token is invalid or expired');
+    error.code = 'MINERU_API_KEY_INVALID';
+    error.status = status;
+    return error;
+}
+
 function apiError(code, message) {
-    if (code === 'A0202' || code === 'A0211') {
-        const error = new Error('The MinerU API Token is invalid or expired');
-        error.code = 'MINERU_API_KEY_INVALID';
-        return error;
-    }
     const suffix = message ? `: ${message}` : '';
     const error = new Error(`MinerU API error ${String(code)}${suffix}`);
     error.code = code === -10001 || code === '-10001'

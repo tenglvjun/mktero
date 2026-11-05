@@ -183,6 +183,12 @@ are optional; each AI provider keeps its own model, key, and related settings.
 Credentials are stored as ordinary, unencrypted preferences in the active
 Zotero profile.
 
+If the MinerU cloud API returns an authentication error (`HTTP 401` or
+`token expired`), update the MinerU API key in `Settings -> Mktero`. Get a new
+key from [MinerU's official API key management page](https://mineru.net/apiManage/token).
+Signing in again in your browser does not automatically update the key saved
+in the plugin.
+
 See [Configuration](./docs/configuration.md) for every setting and
 [Privacy and data handling](./docs/privacy.md) for what is sent where.
 

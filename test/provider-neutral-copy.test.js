@@ -148,7 +148,7 @@ test('localizes Mistral conversion errors without exposing provider details', ()
     error.code = 'MISTRAL_API_KEY_INVALID';
     assert.equal(
         localizeConversionError(error, localization.t.bind(localization)),
-        'The API Token is invalid or expired. Update it in Settings -> Mktero.'
+        'The API key is invalid or expired. Update it in Settings -> Mktero.'
     );
 });
 
