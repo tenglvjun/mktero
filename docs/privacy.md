@@ -2,135 +2,163 @@
 
 [English](./privacy.md) · [简体中文](./privacy.zh-CN.md) · [Back to README](../README.md)
 
+This page lists what Mktero sends, where it keeps data, and what local cleanup removes.
+
+## At a glance
+
+- A cache miss sends the complete PDF to your account's Mktero service, or to your selected MinerU or Mistral converter instead.
+- Local llm-for-zotero imports leave the source unchanged. Import and reopening upload neither the PDF nor the result.
+- Credentials, tokens, caches, corrections, translations, reading positions, and local highlights are unencrypted in the active Zotero profile. Mktero does not sync them.
+- PDF annotations, Zotero notes, and snapshots sync according to Zotero settings. Mktero does not send notes anywhere.
+- Reference, citation, and translation requests are bounded and local-first. Logs exclude API tokens, presigned URLs, PDF bytes, and authenticated responses.
+- Problem reports stay on this computer. Copying or saving creates a redacted file; this version does not upload it.
+- Version reporting goes only to Mktero, without a device fingerprint. Mktero runs no third-party analytics.
+
+## Data tables
+
+The complete data inventory is grouped below by destination: [services](#sent-to-services), [the Zotero profile](#stored-in-your-zotero-profile), [the Zotero library](#kept-in-your-zotero-library), and [session memory or local exports](#session-memory-and-local-exports).
+
+## Sent to services
+
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
 | Complete PDF on a cache miss, with the default Mktero converter | The Mktero service for the signed-in account | Not by Mktero |
 | Complete PDF on a cache miss, after you switch to your own converter | Selected MinerU cloud, the configured local MinerU service, or Mistral | Not by Mktero |
-| MinerU cloud token, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
 | Email and password when signing in or registering, and the registration verification code | The Mktero service you select; the password and code are not saved | Not by Mktero |
-| Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
-| Your account profile, conversion-activity counts and daily quota balance, requested with the access token while the account pane is open; quota also refreshes after hosted requests settle or when you manually resume | The Mktero service you select | Not by Mktero |
+| Your account profile, conversion-activity counts and daily quota balance when supported, requested with the access token while the account pane is open; quota also refreshes after hosted requests settle or when you manually resume | The Mktero service you select | Not by Mktero |
 | Account-linked hosted conversion admissions, successful documents, pages, result reuse and quota-block aggregates | The Mktero service; used for quota enforcement, service operation and capacity planning | Not by Mktero |
-| Pending/blocked preparation list and account/provider scope | Memory only in the current Zotero session; the pending list is not uploaded or restored after restart | No |
 | Mktero extension version, sent with requests to the Mktero service and recorded when you sign in, refresh your token, or send a background heartbeat, so the operator can see which builds are still in use | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
 | Research invitation email, the token link, the answers you submit, and the research-email opt-out | The Mktero service you select; the link token is not saved by the website | Not by Mktero |
-| Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted; see the local retention rules below | No |
-| Stored MinerU results from Mktero, MinerU cloud, or a local MinerU service (the result's Markdown, content list, layout or middle JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted; see the local retention rules below | No |
-| Explicitly imported llm-for-zotero results: text, structure, original or supported cropped figures, and locally restored figures; no PDF copy | A separate copy in the active Zotero profile, unencrypted | No |
-| Import selection index: library ID, attachment key, PDF and imported-result hashes, cache keys, adapter version, import time, source-format category, and confirmation state; no source paths | Active Zotero profile, unencrypted, in `mktero-imports/v1` | No |
-| Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and a non-expiring readiness marker | Active Zotero profile, unencrypted | No |
-| Cache ownership index: library ID, local attachment ID/key, PDF hash and byte length, resource keys, first-confirmed-absence time and whether attachment-private resources were cleaned; no titles, paths, PDF bytes or OCR text | Active Zotero profile, unencrypted, in `mktero-cache-owners/v1`; not sent to any service | No |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
 | Anonymous models.dev catalog request on Zotero startup | models.dev, kept only in memory until Zotero quits | No |
-| Session diagnostic log: recent Mktero errors and stages, conversion job ids, and the versions collected by Report a problem | Memory only until Zotero quits. A redacted file only if you copy or save it. Nothing is uploaded. | No |
 | Protected Markdown translation batches | AI provider configured by you | Not by Mktero |
 | Selected Markdown text for selection translation | AI provider configured by you | Not by Mktero |
-| Zotero PDF annotations | Local Zotero library | According to Zotero settings |
+
+## Stored in your Zotero profile
+
+| Data | Sent to or stored in | Zotero sync |
+| --- | --- | --- |
+| MinerU cloud token, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
+| Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
+| Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted; see [local retention](#local-retention) | No |
+| Stored MinerU results from Mktero, MinerU cloud, or a local MinerU service (the result's Markdown, content list, layout or middle JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted; see [local retention](#local-retention) | No |
+| Explicitly imported llm-for-zotero results: text, structure, original or supported cropped figures, and locally restored figures; no PDF copy | A separate copy in the active Zotero profile, unencrypted | No |
+| Import selection index: library ID, attachment key, PDF and imported-result hashes, cache keys, adapter version, import time, source-format category, and confirmation state; no source paths | Active Zotero profile, unencrypted, in `mktero-imports/v1` | No |
+| Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and a non-expiring readiness marker | Active Zotero profile, unencrypted | No |
+| Cache ownership index: library ID, local attachment ID/key, PDF hash and byte length, resource keys, first-confirmed-absence time and whether attachment-private resources were cleaned; no titles, paths, PDF bytes or OCR text | Active Zotero profile, unencrypted, in `mktero-cache-owners/v1`; not sent to any service | No |
 | Local Markdown highlights not yet in the PDF, and the Zotero annotation keys of the page parts of a cross-page highlight | Active Zotero profile, unencrypted | No |
-| Zotero notes written in the Notes column, and passages added with Add to Note or Add Note from Annotations | Zotero note items in the local Zotero library | According to Zotero settings |
 | Reader layout preferences: which columns are open, their widths, and the selected left segment | Active Zotero profile, unencrypted | No |
-| Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
-| Exported Markdown and figures | User-selected local path, including an Obsidian vault. Mktero does not sync that copy. | No |
 | Obsidian export index: library ID, item key, note folder name, and content hash; the vault path preference | Active Zotero profile, unencrypted | No |
+
+## Kept in your Zotero library
+
+| Data | Sent to or stored in | Zotero sync |
+| --- | --- | --- |
+| Zotero PDF annotations | Local Zotero library | According to Zotero settings |
+| Zotero notes written in the Notes column, and passages added with `Add to Note` or `Add Note from Annotations` | Zotero note items in the local Zotero library | According to Zotero settings |
+| Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
 | Imported reference metadata and PDF attachments | Active Zotero profile, unencrypted | According to Zotero settings |
 
-Markdown and raw MinerU results are not evicted by count, total size or
-inactivity. Once a registered PDF attachment is confirmed permanently absent
-and its cache has no remaining references, background local checks can remove
-its orphaned results, matching corrections, PDF index, reading position, local
-highlights, highlight groups, import selections and availability markers with
-no extra retention period. Permanent deletion notifications are combined for
-about 5 seconds before checking; checks also run about 60 seconds after startup
-and hourly while Zotero is running. Trash and other attachments with identical
-PDF bytes protect shared data. Only use of the affected attachment or cache
-defers its cleanup; unrelated reading does not block it. These checks read
-only local files and never download or upload PDFs. Uncertain ownership,
-shared references and incomplete scans retain the affected data; failures are
-retried. A missing file does not stop enumeration. Because a completely missing
-PDF cannot be shown to share anything, its rebuildable caches (Markdown, raw
-conversion results and the PDF text index) are released, while corrections and
-reading positions are kept. A file that exists but cannot be verified still
-protects possible shared references.
-The settings pane shows cleanup reasons, released rebuildable caches, missing
-local PDFs, at most ten blocking attachment keys
-and library IDs, and the next check. This status stays in session memory and
-is not sent anywhere; it contains no PDF content, file paths or content hashes.
-Automatic retry and **Check again** use the same local-only safety checks.
-Already recorded permanent deletions follow the
-same policy. Previously unregistered data is adopted only when its PDF is read
-again and its cache identity can be established. Other historical data is
-retained. PDF index, citation and legacy translation caches also retain their
-existing expiry/size rules. See [Local cache cleanup](./workflows.md#local-cache-cleanup).
+## Session memory and local exports
 
-Explicitly importing a supported local llm-for-zotero result reads the source
-cache and the current PDF on this computer without changing that source cache.
-The import itself and reopening its saved copy work offline without an account
-or converter key, and upload neither the PDF nor the result. Mktero saves an
-independent copy of the adapted result and figures, without the PDF copy, full
-source metadata, or upstream absolute paths. The local import-selection index
-records which snapshot this attachment uses; it contains no source paths.
-These copies are not synced by Mktero. They are subject to the orphan cleanup
-rules above, manual clearing, self-healing of invalid entries, and availability
-of the profile filesystem. Individual archive, document, image, and
-parsing resource limits still apply. Deleting only the llm-for-zotero source
-cache does not affect offline reading from Mktero's copy. Saved corrections and
-prepared reading documents are used first; a retained raw result can rebuild
-the document offline. If all local content for the selected import is missing,
-a later ordinary `Read as Markdown with Mktero` uses the current converter
-and may send the complete PDF there. Import failure, corrupt content, read
-errors, or cancellation do not trigger conversion; the import action itself
-stays local. Explicitly choosing to reparse also uses the current converter
-and may send the PDF there. Optional translation and reference actions keep
-their separate data flows described below.
+| Data | Sent to or stored in | Zotero sync |
+| --- | --- | --- |
+| Pending/blocked preparation list and account/provider scope | Memory only in the current Zotero session; the pending list is not uploaded or restored after restart | No |
+| Session diagnostic log: recent Mktero errors and stages, conversion job ids, and the versions collected by `Report a problem` | Memory only until Zotero quits. A redacted file only if you copy or save it. Nothing is uploaded | No |
+| Exported Markdown and figures | User-selected local path, including an Obsidian vault. Mktero does not sync that copy | No |
 
-Mktero does not send PDF annotations, local PDF.js indexes, Zotero notes,
-complete item records, local paths, or cached Markdown to reference/PDF
-providers. Mktero does not send notes anywhere. Reference import requests are
-local-first. A title-only metadata lookup sends only bounded citation text
-after the explicit import action. A
-unique high-confidence match continues automatically; uncertain matches require
-candidate confirmation. Citation and reference requests use anonymous provider access and
-contain only the bounded citation text, normalized identifiers, and confirmed
-metadata described above, never Zotero keys or PDF bytes.
-Translation requests contain protected Markdown and instructions; if
-placeholder validation repeatedly fails, the final retry contains only the
-affected block's ordinary text segments. API Tokens, presigned URLs, PDF bytes,
-and authenticated responses are not written to logs. Selection translation
-requests contain only the selected text; they
-are not written to the full-document translation cache.
+## Account requests and service records
 
-Report a problem keeps that diagnostic log in memory for the current Zotero
-session. It is not written to the profile. Open it from Help > Report a Mktero
-Problem, from the Report a problem button on a failed conversion, or from the
-document actions menu of a Mktero tab. Copy and Save create a redacted package
-on this computer only; this version does not upload it. Open GitHub issue opens
-the empty issue form in your browser and sends nothing from the report. The
-package can include the extension version, Zotero version, operating system,
-conversion provider, parser profile label, the item key of the paper, the error
-code of its last failed conversion, conversion job ids, your description, and
-redacted log lines. It never includes API keys, account tokens, your account
-email, PDF bytes, or file paths. The log is discarded when Zotero quits.
+Signing in for the default conversion sends the email and password only at sign-in. Registration also emails a verification code.
 
-The version report carries only the extension's own build number. It is sent to the
-Mktero service on sign-in, token refresh, and background heartbeat. That report
-collects no device fingerprint, no hardware, operating-system, or IP-derived
-identifier, and Mktero runs no third-party analytics. The version is sent only to the
-Mktero service: it is never attached to a request that goes to object storage,
-to a MinerU or Mistral converter, or to an AI or citation provider you
-configure. It is not part of your account profile, so no product screen
-displays it back to you.
+The account card shows your profile and conversion-activity counters. Its requests and the service's account-linked usage records are listed in the [service data table](#sent-to-services); pending local batch lists are not uploaded.
 
-Research invitations are sent by the Mktero service, not by the extension.
-The extension does not send or store survey answers. Turn invitations off on
-the website account page, or with the link in an invitation sent after that
-control was added. Turning them off does not affect verification codes,
-password resets, or conversion, and does not delete answers already submitted.
+## References and translation
 
-When you request an uncached conversion with the default converter, the
-complete PDF is sent to the Mktero service for your account. Review that
-service's data handling, and the privacy
-policy of MinerU, Mistral, and any AI or citation provider you choose instead.
-Do not process confidential PDFs unless those data-handling terms are suitable
-for your use case.
+Mktero does not send PDF annotations, local PDF.js indexes, Zotero notes, complete item records, local paths, or cached Markdown to reference/PDF providers. Mktero does not send notes anywhere.
+
+Reference import requests are local-first:
+
+- A title-only metadata lookup sends only bounded citation text, after the explicit `Import reference` action.
+- A unique high-confidence match continues automatically; uncertain matches require candidate confirmation.
+- Citation and reference requests use anonymous provider access. They contain only the bounded citation text, normalized identifiers, and confirmed metadata listed above, never Zotero keys or PDF bytes.
+
+Translation requests contain protected Markdown and instructions. If placeholder validation repeatedly fails, the final retry contains only the affected block's ordinary text segments. Selection translation requests contain only the selected text and are not written to the full-document translation cache.
+
+## Diagnostics and logs
+
+`Report a problem` keeps its diagnostic log in session memory, not in the profile. Open it from:
+
+- Help > Report a Mktero Problem.
+- The `Report a problem` button on a failed conversion.
+- The document actions menu of a Mktero tab.
+
+`Copy` and `Save` create a redacted package on this computer only; this version does not upload it. `Open GitHub issue` opens the empty issue form in your browser and sends nothing from the report.
+
+The package can include:
+
+- Extension version, Zotero version, and operating system.
+- Conversion provider, parser profile label, and the paper's item key.
+- The error code of its last failed conversion and conversion job ids.
+- Your description and redacted log lines.
+
+It never includes API keys, account tokens, your account email, PDF bytes, or file paths. API tokens, presigned URLs, PDF bytes, and authenticated responses are never written to logs. The log is discarded when Zotero quits.
+
+## Version reporting
+
+The version report carries only the extension's own build number. It goes to the Mktero service on sign-in, token refresh, and background heartbeat, so the operator can see which builds are still in use.
+
+It collects no device fingerprint, hardware, operating-system, or IP-derived identifier. Mktero runs no third-party analytics. The version is never attached to requests to object storage, MinerU or Mistral converters, or an AI or citation provider you configure.
+
+The version is not part of your account profile, so no product screen displays it back to you.
+
+## Research invitations
+
+The Mktero service sends research invitations; the extension does not send or store survey answers.
+
+Turn invitations off on the website account page, or with the link in an invitation sent after that control was added. Turning them off does not affect verification codes, password resets, or conversion, and does not delete answers already submitted.
+
+## Details
+
+### Local retention
+
+Markdown and raw MinerU results are not evicted by count, total size or inactivity. Once a registered PDF attachment is confirmed permanently absent and its cache has no remaining references, background local checks can remove its orphaned results, matching corrections, PDF index, reading position, local highlights, highlight groups, import selections and availability markers. There is no extra retention period.
+
+Checks run:
+
+- About 5 seconds after combined permanent deletion notifications.
+- About 60 seconds after startup.
+- Hourly while Zotero is running.
+
+Trash and other attachments with identical PDF bytes protect shared data. Only use of the affected attachment or cache defers its cleanup; unrelated reading does not block it. Checks read only local files and never download or upload PDFs.
+
+When ownership or sharing cannot be confirmed:
+
+- Uncertain ownership, shared references and incomplete scans retain the affected data; failures are retried.
+- A missing file does not stop enumeration. A completely missing PDF cannot be shown to share anything, so its rebuildable caches (Markdown, raw conversion results and the PDF text index) are released, while corrections and reading positions are kept.
+- A file that exists but cannot be verified still protects possible shared references.
+
+The settings pane shows cleanup reasons, released rebuildable caches, missing local PDFs, at most ten blocking attachment keys and library IDs, and the next check. This status stays in session memory and is not sent anywhere. It contains no PDF content, file paths or content hashes. Automatic retry and `Check again` use the same local-only safety checks.
+
+Already recorded permanent deletions follow the same policy. Previously unregistered data is adopted only when its PDF is read again and its cache identity can be established; other historical data is retained. PDF index, citation and legacy translation caches keep their existing expiry/size rules. See [Local cache cleanup](./conversion.md#local-cache-cleanup).
+
+### Local llm-for-zotero imports
+
+Importing a supported local result reads the source cache and current PDF on this computer without changing the source cache. Import and reopening the saved copy work offline without an account or converter key, and upload neither the PDF nor the result.
+
+Mktero saves an independent copy of the adapted result and figures, without the PDF copy, full source metadata, or upstream absolute paths. The import-selection index records which snapshot the attachment uses and contains no source paths. Mktero does not sync these copies.
+
+The copies are subject to orphan cleanup, manual clearing, self-healing of invalid entries, and availability of the profile filesystem. Individual archive, document, image, and parsing resource limits still apply.
+
+- Deleting only the llm-for-zotero source cache does not affect offline reading from Mktero's copy.
+- Saved corrections and prepared reading documents are used first; a retained raw result can rebuild the document offline.
+- If all local content for the selected import is missing, a later ordinary `Read as Markdown with Mktero` uses the current converter and may send the complete PDF there.
+- Import failure, corrupt content, read errors, or cancellation do not trigger conversion. The import action itself stays local.
+- Explicitly choosing to reparse also uses the current converter and may send the PDF there.
+- Optional translation and reference actions keep their separate data flows described above.
+
+### Before sending a PDF
+
+An uncached conversion with the default converter sends the complete PDF to the Mktero service for your account. Review that service's data handling and the privacy policies of MinerU, Mistral, and any AI or citation provider you choose instead. Do not process confidential PDFs unless those terms are suitable for your use case.
