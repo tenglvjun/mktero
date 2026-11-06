@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH } from '../src/ui/markdown-window.js';
 
 const MARKDOWN_STYLES = readFileSync(
     new URL('../ui/markdown.css', import.meta.url),
@@ -133,12 +134,119 @@ test('hides back, forward, and progress chrome in focus mode', () => {
         '.markdown-reader-navigation-back',
         '.markdown-reader-navigation-forward',
         '.markdown-reading-progress',
+        '.markdown-citation-graph-toggle',
+        '.markdown-export-actions',
+        '.markdown-reader-action--primary',
     ]) {
         assert.ok(
             focusRules.includes(`.mktero-tab-view.is-focus-mode ${selector}`),
             `${selector} must be hidden in focus mode`
         );
     }
+    // The thumbnail switch lives in the Typography panel, which stays
+    // available in focus mode.
+    assert.doesNotMatch(focusRules, /source-peek/);
+    const focusResources = ruleBody(
+        '.mktero-tab-view.is-focus-mode .markdown-reader-resources'
+    );
+    assert.match(focusResources, /margin-inline-start:\s*0/);
+    assert.match(focusResources, /border-inline-end:\s*0/);
+});
+
+test('groups toolbar resources and document actions with dividers', () => {
+    const resources = ruleBodies('.markdown-reader-resources')
+        .find(body => /display:\s*flex/.test(body));
+    assert.ok(resources, 'Missing the base resources rule');
+    assert.match(resources, /margin-inline-start:\s*auto/);
+    const divided = ruleBody('.markdown-reader-resources.has-document-actions');
+    assert.match(divided, /border-inline-end:\s*1px solid var\(--border-subtle\)/);
+    assert.match(
+        MARKDOWN_STYLES,
+        /\.markdown-reader-resources:not\(\[hidden\]\) ~ \.markdown-reader-action--primary[^{]*\{[^}]*margin-inline-start:\s*0/
+    );
+    const divider = ruleBody('.markdown-toolbar-divider');
+    assert.match(divider, /width:\s*1px/);
+    assert.match(divider, /background:\s*var\(--border-subtle\)/);
+
+    // A rule only between visible groups, never above the first one.
+    const separated = ruleBody(
+        '.markdown-reader-action-group:not([hidden])\n'
+            + '    ~ .markdown-reader-action-group:not([hidden])'
+    );
+    assert.match(separated, /border-top:\s*1px solid var\(--border-subtle\)/);
+    assert.match(ruleBody('.markdown-reader-action-group'), /display:\s*grid/);
+
+    // The GitHub popup opens toward the reading area from the toolbar end.
+    const githubMenu = ruleBody('.markdown-github-repos-menu');
+    assert.match(githubMenu, /right:\s*0/);
+    assert.doesNotMatch(githubMenu, /left:\s*0/);
+});
+
+test('opens Save and export as its own toolbar popover', () => {
+    const wrapper = ruleBodies('.markdown-export-actions')
+        .find(body => /position:\s*relative/.test(body));
+    assert.ok(wrapper, 'Missing the Save and export wrapper rule');
+    assert.match(wrapper, /align-self:\s*stretch/);
+    assert.match(wrapper, /margin-inline-start:\s*auto/);
+    const menu = ruleBody('.markdown-export-actions .markdown-export-action-menu');
+    assert.match(menu, /top:\s*calc\(100% \+ 12px\)/);
+    assert.match(menu, /right:\s*0/);
+
+    // Each toggle opens only its own menu; the export menu sits inside the
+    // toolbar, so a descendant selector would open both.
+    const open = MARKDOWN_STYLES.match(
+        /\.markdown-reader-actions\.is-open > \.markdown-reader-action-menu,\s*\.markdown-export-actions\.is-open > \.markdown-reader-action-menu\s*\{([^}]*)\}/
+    )?.[1] ?? '';
+    assert.match(open, /visibility:\s*visible/);
+    assert.doesNotMatch(
+        MARKDOWN_STYLES,
+        /\.markdown-reader-actions\.is-open \.markdown-reader-action-menu/
+    );
+    assert.match(
+        MARKDOWN_STYLES,
+        /\.markdown-export-actions:not\(\[hidden\]\) ~ \.markdown-reader-action--primary\s*\{[^}]*margin-inline-start:\s*0/
+    );
+    assert.match(
+        ruleBody('.markdown-toolbar-export-busy-icon'),
+        /animation:\s*mktero-spin/
+    );
+    assert.match(
+        ruleBody('.markdown-toolbar-export-toggle.is-busy:disabled'),
+        /opacity:\s*1/
+    );
+    // The button folds away before the toolbar reaches the compact width
+    // that drops its dividers, so the two steps never fight over one width.
+    const compact = Number(MARKDOWN_STYLES.match(
+        /@container markdown-reader \(max-width: (\d+)px\)\s*\{\s*\.markdown-reader-toolbar/
+    )?.[1]);
+    assert.equal(compact, 620);
+    assert.ok(MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH > compact);
+});
+
+test('styles the PDF thumbnail preference as a switch and the banner exit', () => {
+    const row = ruleBody('.markdown-typography-switch-row');
+    assert.match(row, /grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+    const track = ruleBody('.markdown-source-peek-switch');
+    assert.match(track, /border-radius:\s*999px/);
+    const on = ruleBody(
+        '.markdown-source-peek-switch[aria-pressed=\'true\']\n'
+            + '    .markdown-source-peek-switch-thumb'
+    );
+    assert.match(on, /transform:\s*translateX\(14px\)/);
+    assert.match(
+        MARKDOWN_STYLES,
+        /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.markdown-source-peek-switch,[\s\S]*transition:\s*none/
+    );
+
+    const banner = ruleBody('.markdown-correction-banner');
+    assert.match(banner, /display:\s*flex/);
+    assert.match(banner, /flex-wrap:\s*wrap/);
+    const finish = ruleBody('.markdown-correction-finish');
+    assert.match(finish, /flex:\s*0 0 auto/);
+    assert.match(
+        ruleBody('.markdown-correction-finish:disabled'),
+        /opacity:\s*0\.55/
+    );
 });
 
 test('gives the notes resize handle a grabbable target without covering the scrollbar', () => {
@@ -931,6 +1039,8 @@ test('anchors the cached translation language menu below the mode selector', () 
     assert.match(option, /grid-template-columns:\s*14px minmax\(0, 1fr\)/);
     assert.match(disabledOption, /opacity:\s*0\.55/);
     assert.match(cancel, /border-top:\s*1px solid var\(--border-subtle\)/);
+    const action = ruleBody('.markdown-translation-language-action');
+    assert.match(action, /border-top:\s*1px solid var\(--border-subtle\)/);
     assert.match(
         MARKDOWN_STYLES,
         /data-translation-status='translating'[\s\S]*animation:\s*mktero-spin/

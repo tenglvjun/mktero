@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseHTML } from 'linkedom';
 import { createLocalization } from '../src/i18n/localization.js';
-import { createMarkdownTabView } from '../src/ui/markdown-window.js';
+import {
+    createMarkdownTabView,
+    MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH,
+} from '../src/ui/markdown-window.js';
 import { createConversionProgressChanges } from '../src/ui/markdown-tab-state.js';
 import { createEvidenceSnippet } from '../src/markdown/markdown-evidence.js';
 import { renderInlineMathTextHTML } from '../src/markdown/markdown-html.js';
@@ -305,8 +308,12 @@ test('opens a single GitHub repository from the reader toolbar', async () => {
             false
         );
         assert.equal(
-            shadow.querySelector('.markdown-reader-controls').contains(button),
+            shadow.querySelector('.markdown-reader-resources').contains(button),
             true
+        );
+        assert.equal(
+            shadow.querySelector('.markdown-reader-controls').contains(button),
+            false
         );
         assert.equal(button.getAttribute('aria-haspopup'), 'false');
         assert.equal(menu.hidden, true);
@@ -389,7 +396,7 @@ test('hides the GitHub repository button when the paper has none', async () => {
     }
 });
 
-test('opens the current-paper citation graph from document actions', async () => {
+test('opens the current-paper citation graph from the reader toolbar', async () => {
     const opened = [];
     const { view, shadow } = createView(createModel({
         status: 'ready',
@@ -402,8 +409,27 @@ test('opens the current-paper citation graph from document actions', async () =>
     try {
         const button = shadow.querySelector('#mktero-citation-graph');
         const actions = shadow.querySelector('#mktero-document-action-menu');
+        const resources = shadow.querySelector('.markdown-reader-resources');
+        const toggle = shadow.querySelector('#mktero-document-actions');
         assert.equal(button.hidden, false);
-        assert.equal(actions.contains(button), true);
+        assert.equal(resources.hidden, false);
+        assert.equal(actions.contains(button), false);
+        assert.equal(resources.contains(button), true);
+        // The resources group sits right before the document actions.
+        assert.ok(
+            resources.nextElementSibling
+                === shadow.querySelector('.markdown-export-actions')
+        );
+        assert.ok(
+            shadow.querySelector('.markdown-export-actions').nextElementSibling
+                === toggle
+        );
+        assert.equal(button.getAttribute('aria-haspopup'), 'dialog');
+        assert.equal(
+            button.getAttribute('aria-label'),
+            'Open this paper\'s citation graph'
+        );
+        assert.equal(button.hasAttribute('tabindex'), false);
         assert.equal(
             button.querySelector('[data-lucide]').dataset.lucide,
             'network'
@@ -411,6 +437,82 @@ test('opens the current-paper citation graph from document actions', async () =>
         button.click();
         await Promise.resolve();
         assert.deepEqual(opened, [42]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('closes the document actions when the citation graph opens', async () => {
+    const opened = [];
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onSaveSnapshot: () => {},
+        onReparse: () => {},
+        onOpenCitationGraph: itemID => opened.push(itemID),
+    }));
+
+    try {
+        const toggle = shadow.querySelector('#mktero-document-actions');
+        const exportToggle = shadow.querySelector('#mktero-export-actions');
+        toggle.click();
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+        shadow.querySelector('#mktero-citation-graph').click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(opened, [42]);
+        assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+
+        exportToggle.click();
+        assert.equal(exportToggle.getAttribute('aria-expanded'), 'true');
+        shadow.querySelector('#mktero-citation-graph').click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(opened, [42, 42]);
+        assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('divides paper resources from the document actions only when both show', () => {
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onOpenCitationGraph: () => {},
+    });
+    const { view, shadow } = createView(model);
+
+    try {
+        const resources = shadow.querySelector('.markdown-reader-resources');
+        const toggle = shadow.querySelector('#mktero-document-actions');
+        const exportToggle = shadow.querySelector('#mktero-export-actions');
+        assert.equal(resources.hidden, false);
+        assert.equal(toggle.hidden, true);
+        assert.equal(exportToggle.hidden, true);
+        assert.equal(resources.classList.contains('has-document-actions'), false);
+
+        // Save and export alone is enough for a divider.
+        view.render({ ...model, onSaveSnapshot: () => {} });
+        assert.equal(exportToggle.hidden, false);
+        assert.equal(toggle.hidden, true);
+        assert.equal(resources.classList.contains('has-document-actions'), true);
+
+        view.render({ ...model, onReparse: () => {} });
+        assert.equal(toggle.hidden, false);
+        assert.equal(exportToggle.hidden, true);
+        assert.equal(resources.classList.contains('has-document-actions'), true);
+
+        view.render({
+            ...model,
+            onOpenCitationGraph: null,
+            onSaveSnapshot: () => {},
+        });
+        assert.equal(resources.hidden, true);
     }
     finally {
         view.destroy();
@@ -539,6 +641,17 @@ test('toggles block correction mode and restores all saved corrections', async (
         correctionBanner.textContent,
         /double-click text or a table cell/i
     );
+    const finish = correctionBanner.querySelector('#mktero-correction-finish');
+    assert.equal(finish?.textContent, 'Finish correction');
+    assert.equal(finish.disabled, false);
+    // Only the message is the live region, so the button label is not
+    // re-announced with each saved-correction count.
+    assert.equal(correctionBanner.hasAttribute('aria-live'), false);
+    assert.equal(
+        correctionBanner.querySelector('.markdown-correction-banner-message')
+            .getAttribute('aria-live'),
+        'polite'
+    );
     assert.equal(
         correctionBanner.parentElement.classList.contains('markdown-reader-toolbar'),
         false
@@ -547,6 +660,19 @@ test('toggles block correction mode and restores all saved corrections', async (
         correctionBanner.previousElementSibling?.classList.contains('markdown-reader-toolbar'),
         true
     );
+    finish.click();
+    assert.deepEqual(modeChanges, [true, false]);
+    view.render({ ...model, correctionMode: false });
+    assert.equal(correctionBanner.hidden, true);
+    assert.equal(
+        correctionBanner.querySelector('.markdown-correction-banner-message')
+            .textContent,
+        ''
+    );
+    assert.ok(correctionBanner.querySelector('#mktero-correction-finish') === finish);
+    finish.click();
+    assert.deepEqual(modeChanges, [true, false]);
+    view.render({ ...model, correctionMode: true });
 
     restoreAll.click();
     await new Promise(resolve => setImmediate(resolve));
@@ -1070,7 +1196,16 @@ test('translates the document and switches between three reading modes', async (
             }]
         );
 
-        shadow.querySelector('#mktero-document-actions').click();
+        assert.equal(
+            shadow.querySelector('#mktero-translation-language-options')
+                .contains(retranslateDocument),
+            true
+        );
+        assert.equal(
+            shadow.querySelector('#mktero-document-action-menu')
+                .contains(retranslateDocument),
+            false
+        );
         retranslateDocument.click();
         assert.deepEqual(actions, [
             'translate',
@@ -1266,6 +1401,99 @@ test('chooses translated, incomplete, and new languages from the translated tab'
     finally {
         first.view.destroy();
         second.view.destroy();
+    }
+});
+
+test('retranslates the document from the end of the translation language menu', () => {
+    const actions = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        translationStatus: 'ready',
+        translationView: 'translated',
+        translationTargetLanguage: 'zh-CN',
+        translationCachedLanguages: ['zh-CN'],
+        translationBlocks: [{
+            id: 'translation-0-0-7-heading',
+            markdown: '# \u8bba\u6587',
+        }],
+        translatedMarkdown: '# \u8bba\u6587',
+        comparisonMarkdown: '# Paper\n\n# \u8bba\u6587',
+        onTranslateDocument: options => actions.push(
+            options?.forceRetranslate ? 'retranslate-all' : 'translate'
+        ),
+        onCancelDocumentTranslation: () => actions.push('cancel'),
+        onSetTranslationView: () => {},
+        onSelectTranslationLanguage: language => actions.push(language),
+    });
+    const { view, shadow } = createView(model);
+    const trigger = shadow.querySelector('[data-translation-view="translated"]');
+    const menu = shadow.querySelector('#mktero-translation-language-options');
+    const retranslate = shadow.querySelector('#mktero-retranslate-document');
+
+    try {
+        assert.equal(
+            shadow.querySelector('#mktero-document-action-menu')
+                .contains(retranslate),
+            false
+        );
+        trigger.click();
+        assert.equal(menu.hidden, false);
+        // The action closes the menu, after every language.
+        assert.ok(menu.lastElementChild === retranslate);
+        assert.equal(retranslate.hidden, false);
+        assert.equal(retranslate.disabled, false);
+        assert.equal(retranslate.getAttribute('role'), 'menuitem');
+        assert.equal(retranslate.textContent, 'Retranslate document');
+
+        // Arrow keys reach the action even though it has no language.
+        let focused = null;
+        for (const option of menu.querySelectorAll(
+            '.markdown-translation-language-option'
+        )) {
+            option.focus = () => { focused = option; };
+        }
+        const languages = [...menu.querySelectorAll('[data-translation-language]')];
+        dispatchKeyboardEvent(languages[0], 'ArrowUp');
+        assert.ok(focused === retranslate);
+        assert.equal(retranslate.getAttribute('tabindex'), '0');
+        assert.equal(languages[0].getAttribute('tabindex'), '-1');
+        dispatchKeyboardEvent(languages.at(-1), 'ArrowDown');
+        assert.ok(focused === retranslate);
+        dispatchKeyboardEvent(retranslate, 'ArrowDown');
+        assert.ok(focused === languages[0]);
+        dispatchKeyboardEvent(retranslate, 'End');
+        assert.ok(focused === retranslate);
+
+        retranslate.click();
+        assert.deepEqual(actions, ['retranslate-all']);
+        assert.equal(menu.hidden, true);
+
+        // While translating, cancel takes the action's place.
+        view.render({
+            ...model,
+            translationStatus: 'loading',
+            translationRequestedTargetLanguage: 'zh-CN',
+        });
+        trigger.click();
+        assert.equal(menu.contains(retranslate), false);
+        assert.ok(
+            menu.lastElementChild
+                === menu.querySelector('#mktero-cancel-translation-language')
+        );
+
+        view.render(model);
+        trigger.click();
+        assert.ok(menu.lastElementChild === retranslate);
+        assert.equal(
+            menu.querySelectorAll('#mktero-retranslate-document').length,
+            1
+        );
+    }
+    finally {
+        view.destroy();
     }
 });
 
@@ -2286,15 +2514,38 @@ test('disables export and snapshot while figures are still restoring', async () 
     const { view, shadow } = createView(model);
     const exportButton = shadow.querySelector('#mktero-export-markdown');
     const saveButton = shadow.querySelector('#mktero-save-snapshot');
+    const exportToggle = shadow.querySelector('#mktero-export-actions');
+    const pendingLabel = 'Figures are still being restored from the PDF. '
+        + 'Export and snapshot become available when they finish.';
 
+    // Visible but disabled, so the toolbar does not move when restoration
+    // finishes.
+    assert.equal(exportToggle.hidden, false);
+    assert.equal(exportToggle.disabled, true);
+    assert.equal(exportToggle.getAttribute('title'), pendingLabel);
+    assert.equal(exportButton.hidden, false);
+    assert.equal(saveButton.hidden, false);
     assert.equal(exportButton.disabled, true);
     assert.equal(saveButton.disabled, true);
-    assert.ok((exportButton.getAttribute('title') || '').length > 0);
+    assert.equal(exportButton.getAttribute('title'), pendingLabel);
 
-    shadow.querySelector('#mktero-document-actions').click();
+    exportToggle.click();
+    assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
     exportButton.click();
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(exports, 0);
+
+    view.render({ ...model, figureRestoration: { status: 'complete' } });
+    assert.equal(exportToggle.disabled, false);
+    assert.equal(
+        exportToggle.getAttribute('title'),
+        'Save or export this paper'
+    );
+    assert.notEqual(exportButton.getAttribute('title'), pendingLabel);
+    exportToggle.click();
+    exportButton.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(exports, 1);
     view.destroy();
 });
 
@@ -2739,7 +2990,11 @@ test('lists a problem report in the document actions menu of a ready paper', () 
         const menu = shadow.querySelector('#mktero-document-action-menu');
         const report = shadow.querySelector('#mktero-report-problem');
         assert.equal(toggle.hidden, false);
-        assert.equal(menu.lastElementChild, report);
+        // Report a problem closes the menu, in the maintenance group.
+        assert.ok(menu.lastElementChild.lastElementChild === report);
+        assert.ok(
+            menu.lastElementChild.contains(shadow.querySelector('#mktero-reparse'))
+        );
         assert.equal(report.hidden, false);
         assert.equal(report.getAttribute('tabindex'), '-1');
 
@@ -2754,6 +3009,179 @@ test('lists a problem report in the document actions menu of a ready paper', () 
     finally {
         view.destroy();
     }
+});
+
+test('groups document actions by purpose and hides groups with nothing in them', () => {
+    const markdown = '# Paper\n\nReadable text.';
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceKind: 'markdown',
+        editableBlocks: [{
+            id: 'paragraph-1',
+            type: 'paragraph',
+            from: markdown.indexOf('Readable'),
+            to: markdown.length,
+        }],
+        onSetCorrectionMode: () => {},
+        onCommitCorrection: async () => {},
+        onReparse: () => {},
+        onSaveSnapshot: () => {},
+        onExportMarkdown: () => {},
+        onExportObsidian: () => {},
+        onReportProblem: () => {},
+        onOpenCitationGraph: () => {},
+        onTranslateDocument: () => {},
+    });
+    const { view, shadow } = createView(model);
+
+    try {
+        const menu = shadow.querySelector('#mktero-document-action-menu');
+        const exportMenu = shadow.querySelector('#mktero-export-action-menu');
+        const groups = [...menu.children];
+        assert.equal(
+            groups.every(group => (
+                group.classList.contains('markdown-reader-action-group')
+            )),
+            true
+        );
+        // With room on the toolbar, the output actions are in their own menu
+        // and the first overflow group stays empty.
+        assert.deepEqual(
+            groups.map(group => [...group.children].map(action => action.id)),
+            [
+                [],
+                ['mktero-correction-toggle', 'mktero-restore-corrections'],
+                ['mktero-reparse', 'mktero-report-problem'],
+            ]
+        );
+        assert.deepEqual(
+            [...exportMenu.children].map(action => action.id),
+            [
+                'mktero-save-snapshot',
+                'mktero-export-markdown',
+                'mktero-export-obsidian',
+            ]
+        );
+        assert.deepEqual(groups.map(group => group.hidden), [true, false, false]);
+        for (const id of [
+            '#mktero-citation-graph',
+            '#mktero-retranslate-document',
+            '#mktero-translate-document',
+            '#mktero-source-peek-toggle',
+            '#mktero-export-actions',
+        ]) {
+            assert.equal(menu.contains(shadow.querySelector(id)), false, id);
+        }
+
+        view.render({
+            ...model,
+            editableBlocks: [],
+            onSaveSnapshot: null,
+            onExportMarkdown: null,
+            onExportObsidian: null,
+        });
+        assert.deepEqual(groups.map(group => group.hidden), [true, true, false]);
+        assert.equal(shadow.querySelector('#mktero-export-actions').hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+function createResizableView(model) {
+    const observers = [];
+    const created = createView(model, {}, {
+        configureWindow(window) {
+            window.ResizeObserver = class ResizeObserver {
+                constructor(callback) {
+                    this.callback = callback;
+                    this.targets = [];
+                    observers.push(this);
+                }
+
+                observe(target) {
+                    this.targets.push(target);
+                }
+
+                disconnect() {
+                    this.disconnected = true;
+                }
+            };
+        },
+    });
+    const resizeReader = width => {
+        const pane = created.shadow.querySelector('.markdown-editor');
+        const observer = observers.find(entry => entry.targets.includes(pane));
+        assert.ok(observer, 'the reading pane must be observed');
+        observer.callback([{ target: pane, contentRect: { width } }]);
+    };
+    return { ...created, observers, resizeReader };
+}
+
+test('folds Save and export into the document actions in a narrow reading pane', () => {
+    const saves = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onSaveSnapshot: () => { saves.push('save'); },
+        onExportMarkdown: () => {},
+        onExportObsidian: () => {},
+    });
+    const { view, shadow, observers, resizeReader } = createResizableView(model);
+
+    try {
+        const toggle = shadow.querySelector('#mktero-document-actions');
+        const exportToggle = shadow.querySelector('#mktero-export-actions');
+        const exportActions = shadow.querySelector('.markdown-export-actions');
+        const menu = shadow.querySelector('#mktero-document-action-menu');
+        const exportMenu = shadow.querySelector('#mktero-export-action-menu');
+        const save = shadow.querySelector('#mktero-save-snapshot');
+        const outputGroup = menu.firstElementChild;
+        assert.equal(MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH, 680);
+
+        resizeReader(900);
+        assert.equal(exportToggle.hidden, false);
+        assert.equal(toggle.hidden, true);
+        assert.ok(save.parentElement === exportMenu);
+
+        exportToggle.click();
+        assert.equal(exportToggle.getAttribute('aria-expanded'), 'true');
+        resizeReader(MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH);
+        // The same buttons move; nothing is duplicated.
+        assert.ok(save.parentElement === outputGroup);
+        assert.equal(shadow.querySelectorAll('#mktero-save-snapshot').length, 1);
+        assert.equal(exportMenu.children.length, 0);
+        assert.equal(exportActions.hidden, true);
+        assert.equal(exportToggle.hidden, true);
+        assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+        assert.equal(toggle.hidden, false);
+        assert.equal(outputGroup.hidden, false);
+        assert.equal(save.getAttribute('tabindex'), '-1');
+
+        toggle.click();
+        assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+        assert.equal(save.getAttribute('tabindex'), '0');
+        save.click();
+        assert.deepEqual(saves, ['save']);
+
+        resizeReader(MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH + 1);
+        assert.ok(save.parentElement === exportMenu);
+        assert.equal(exportToggle.hidden, false);
+        assert.equal(toggle.hidden, true);
+        assert.equal(outputGroup.hidden, true);
+
+        // An unmeasured pane (width 0) keeps the current layout.
+        resizeReader(0);
+        assert.ok(save.parentElement === exportMenu);
+    }
+    finally {
+        view.destroy();
+    }
+    assert.equal(observers.every(observer => observer.disconnected), true);
 });
 
 test('keeps the settings action beside previous content after a token reparse failure', () => {
@@ -2948,7 +3376,7 @@ test('keeps preserved figures silent while showing other warning toasts', () => 
     }
 });
 
-test('opens the document action popover and reports snapshot save state', async () => {
+test('opens the Save and export popover and reports snapshot save state', async () => {
     let saveCalls = 0;
     let finishSave;
     const model = createModel({
@@ -2956,6 +3384,7 @@ test('opens the document action popover and reports snapshot save state', async 
         progress: 100,
         markdown: '# Paper',
         sourceKind: 'markdown',
+        onReparse: () => {},
         onSaveSnapshot: () => {
             saveCalls++;
             return new Promise(resolve => {
@@ -2966,6 +3395,9 @@ test('opens the document action popover and reports snapshot save state', async 
     const { document, view, shadow } = createView(model);
     const toggle = shadow.querySelector('#mktero-document-actions');
     const menu = shadow.querySelector('#mktero-document-action-menu');
+    const exportToggle = shadow.querySelector('#mktero-export-actions');
+    const exportMenu = shadow.querySelector('#mktero-export-action-menu');
+    const exportActions = shadow.querySelector('.markdown-export-actions');
     const reparse = shadow.querySelector('#mktero-reparse');
     const save = shadow.querySelector('#mktero-save-snapshot');
 
@@ -2973,32 +3405,74 @@ test('opens the document action popover and reports snapshot save state', async 
         toggle.querySelector('svg')?.getAttribute('data-lucide'),
         'more-horizontal'
     );
+    assert.equal(
+        exportToggle.querySelector('svg:not([hidden])')
+            ?.getAttribute('data-lucide'),
+        'share'
+    );
     assert.equal(toggle.getAttribute('aria-haspopup'), 'dialog');
+    assert.equal(exportToggle.getAttribute('aria-haspopup'), 'dialog');
+    assert.equal(exportToggle.getAttribute('aria-label'), 'Save or export this paper');
     assert.equal(menu.getAttribute('role'), 'dialog');
     assert.equal(menu.getAttribute('aria-label'), 'Document actions');
+    assert.equal(exportMenu.getAttribute('role'), 'dialog');
+    assert.equal(exportMenu.getAttribute('aria-label'), 'Save and export');
+    assert.ok(exportToggle.nextElementSibling === exportMenu);
     assert.equal(reparse.textContent, 'Reparse PDF');
     assert.equal(save.textContent, 'Save snapshot');
     assert.equal(reparse.getAttribute('role'), null);
     assert.equal(save.getAttribute('role'), null);
-
-    toggle.click();
-    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-    assert.equal(menu.getAttribute('aria-hidden'), 'false');
-    assert.equal(shadow.querySelector('.markdown-reader-actions').classList.contains(
-        'is-open'
-    ), true);
-    assert.equal(save.getAttribute('tabindex'), '0');
-
-    dispatchWindowKeyboardEvent(document.defaultView, 'Escape');
-    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-    assert.equal(menu.getAttribute('aria-hidden'), 'true');
     assert.equal(save.getAttribute('tabindex'), '-1');
 
+    exportToggle.click();
+    assert.equal(exportToggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(exportMenu.getAttribute('aria-hidden'), 'false');
+    assert.equal(exportActions.classList.contains('is-open'), true);
+    assert.equal(menu.getAttribute('aria-hidden'), 'true');
+    assert.equal(save.getAttribute('tabindex'), '0');
+    assert.equal(reparse.getAttribute('tabindex'), '-1');
+
+    // The two toolbar menus share one popover slot.
     toggle.click();
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(exportActions.classList.contains('is-open'), false);
+    assert.equal(save.getAttribute('tabindex'), '-1');
+    assert.equal(reparse.getAttribute('tabindex'), '0');
+    exportToggle.click();
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(exportToggle.getAttribute('aria-expanded'), 'true');
+
+    let focused = null;
+    exportToggle.focus = () => { focused = exportToggle; };
+    dispatchWindowKeyboardEvent(document.defaultView, 'Escape');
+    assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(exportMenu.getAttribute('aria-hidden'), 'true');
+    assert.equal(save.getAttribute('tabindex'), '-1');
+    assert.ok(focused === exportToggle);
+
+    exportToggle.click();
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+    outside.dispatchEvent(new document.defaultView.Event('mousedown', {
+        bubbles: true,
+    }));
+    assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+
+    exportToggle.click();
     save.click();
     assert.equal(saveCalls, 1);
     assert.equal(save.disabled, true);
     assert.equal(toggle.disabled, true);
+    assert.equal(exportToggle.disabled, true);
+    assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(exportToggle.getAttribute('aria-busy'), 'true');
+    assert.equal(exportToggle.classList.contains('is-busy'), true);
+    assert.equal(
+        exportToggle.querySelector('svg:not([hidden])')
+            ?.getAttribute('data-lucide'),
+        'loader-circle'
+    );
     assert.equal(
         shadow.querySelector('.markdown-reader-action-status').textContent,
         'Saving Zotero snapshot…'
@@ -3008,6 +3482,13 @@ test('opens the document action popover and reports snapshot save state', async 
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(save.disabled, false);
     assert.equal(toggle.disabled, false);
+    assert.equal(exportToggle.disabled, false);
+    assert.equal(exportToggle.getAttribute('aria-busy'), 'false');
+    assert.equal(
+        exportToggle.querySelector('svg:not([hidden])')
+            ?.getAttribute('data-lucide'),
+        'share'
+    );
     assert.equal(
         shadow.querySelector('.markdown-reader-action-status').textContent,
         'Zotero snapshot saved'
@@ -3015,7 +3496,36 @@ test('opens the document action popover and reports snapshot save state', async 
     view.destroy();
 });
 
-test('exports Markdown from the document action menu and reports progress', async () => {
+test('closes the Save and export popover with other toolbar popups and in focus mode', () => {
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onSaveSnapshot: () => {},
+    }));
+
+    try {
+        const exportToggle = shadow.querySelector('#mktero-export-actions');
+        const typographyToggle = shadow.querySelector('#mktero-typography-toggle');
+        exportToggle.click();
+        typographyToggle.click();
+        assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+        assert.equal(typographyToggle.getAttribute('aria-expanded'), 'true');
+
+        exportToggle.click();
+        assert.equal(typographyToggle.getAttribute('aria-expanded'), 'false');
+        assert.equal(exportToggle.getAttribute('aria-expanded'), 'true');
+
+        shadow.querySelector('#mktero-focus-toggle').click();
+        assert.equal(exportToggle.getAttribute('aria-expanded'), 'false');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('exports Markdown from the Save and export menu and reports progress', async () => {
     let exportOptions;
     let finishExport;
     const model = createModel({
@@ -3031,9 +3541,13 @@ test('exports Markdown from the document action menu and reports progress', asyn
         },
     });
     const { document, view, shadow } = createView(model);
-    const toggle = shadow.querySelector('#mktero-document-actions');
+    const toggle = shadow.querySelector('#mktero-export-actions');
     const exportButton = shadow.querySelector('#mktero-export-markdown');
 
+    assert.equal(
+        shadow.querySelector('#mktero-document-actions').hidden,
+        true
+    );
     assert.equal(exportButton.textContent, 'Export Markdown');
     assert.equal(
         exportButton.querySelector('svg')?.getAttribute('data-lucide'),
@@ -3208,6 +3722,38 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
         assert.equal(readerControls?.nextElementSibling, translationControls);
         assert.equal(readerControls?.contains(translate), true);
         assert.equal(translationControls?.contains(translate), false);
+        // View settings, a divider, then the reading tools.
+        assert.deepEqual(
+            [...readerControls.children].map(child => (
+                child.id || child.className
+            )),
+            [
+                'markdown-typography',
+                'mktero-focus-toggle',
+                'markdown-toolbar-divider',
+                'mktero-document-search-toggle',
+                'mktero-translate-document',
+            ]
+        );
+        const sourcePeekToggle = shadow.querySelector('#mktero-source-peek-toggle');
+        assert.equal(
+            [...readerControls.children].includes(sourcePeekToggle),
+            false
+        );
+        assert.equal(typographyPanel?.contains(sourcePeekToggle), true);
+        assert.equal(
+            sourcePeekToggle.parentElement.classList
+                .contains('markdown-typography-switch-row'),
+            true
+        );
+        assert.equal(
+            sourcePeekToggle.getAttribute('aria-labelledby'),
+            'mktero-source-peek-label'
+        );
+        assert.equal(
+            shadow.querySelector('#mktero-source-peek-label').textContent,
+            'PDF source thumbnail'
+        );
         assert.equal(
             shadow.querySelector('.markdown-github-repos')?.hidden,
             true
@@ -3230,7 +3776,25 @@ test('keeps reading controls in a toolbar above the Markdown body', () => {
         assert.equal(menu?.contains(shadow.querySelector('#mktero-reparse')), true);
         assert.equal(
             menu?.contains(shadow.querySelector('#mktero-save-snapshot')),
+            false
+        );
+        assert.equal(
+            shadow.querySelector('#mktero-export-action-menu')
+                ?.contains(shadow.querySelector('#mktero-save-snapshot')),
             true
+        );
+        // Resources, Save and export, then the overflow menu close the row.
+        assert.deepEqual(
+            [...toolbar.children].slice(-5).map(child => (
+                child.id || child.className.split(' ')[0]
+            )),
+            [
+                'markdown-reader-resources',
+                'markdown-export-actions',
+                'mktero-document-actions',
+                'mktero-document-action-menu',
+                'mktero-focus-exit',
+            ]
         );
     }
     finally {
@@ -5251,10 +5815,16 @@ test('uses the measured Markdown container width for responsive panels', () => {
             });
             window.ResizeObserver = class ResizeObserver {
                 constructor(callback) {
-                    resizeObserverCallback = callback;
+                    this.callback = callback;
                 }
 
-                observe() {}
+                // The panels follow the observer on the view host; the
+                // toolbar has its own on the reading pane.
+                observe(target) {
+                    if (!target?.classList?.contains('markdown-editor')) {
+                        resizeObserverCallback = this.callback;
+                    }
+                }
 
                 disconnect() {}
             };

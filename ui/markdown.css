@@ -1521,10 +1521,19 @@ main {
 .mktero-tab-view.is-focus-mode .markdown-reader-navigation-back,
 .mktero-tab-view.is-focus-mode .markdown-reader-navigation-forward,
 .mktero-tab-view.is-focus-mode .markdown-reading-progress,
-.mktero-tab-view.is-focus-mode .markdown-source-peek-toggle,
+.mktero-tab-view.is-focus-mode .markdown-citation-graph-toggle,
+.mktero-tab-view.is-focus-mode .markdown-export-actions,
 .mktero-tab-view.is-focus-mode .markdown-reader-action--primary,
 .mktero-tab-view.is-focus-mode .markdown-focus-toggle {
     display: none !important;
+}
+
+/* Focus mode hides the document actions; the exit button takes the end of
+   the toolbar, so a GitHub link stays beside the reading tools. */
+.mktero-tab-view.is-focus-mode .markdown-reader-resources {
+    margin-inline-start: 0;
+    padding-inline-end: 0;
+    border-inline-end: 0;
 }
 
 .markdown-github-repos {
@@ -1532,11 +1541,65 @@ main {
     flex: 0 0 auto;
 }
 
+/* Paper resources (GitHub, citation graph) sit at the end of the toolbar,
+   divided from the document actions that follow them. */
+.markdown-reader-resources {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--toolbar-control-gap);
+    margin-inline-start: auto;
+}
+
+.markdown-reader-resources.has-document-actions {
+    padding-inline-end: var(--toolbar-control-gap);
+    border-inline-end: 1px solid var(--border-subtle);
+}
+
+.markdown-reader-action-status:not([hidden]) ~ .markdown-reader-resources,
+.markdown-reader-resources:not([hidden]) ~ .markdown-reader-action--primary,
+.markdown-reader-action-status:not([hidden])
+    ~ .markdown-reader-action--primary {
+    margin-inline-start: 0;
+}
+
+/* Save and export opens its own popover below its button. It takes the
+   free space only when nothing before it has taken it. */
+.markdown-export-actions {
+    position: relative;
+    display: flex;
+    flex: 0 0 auto;
+    align-self: stretch;
+    align-items: center;
+    margin-inline-start: auto;
+}
+
+.markdown-reader-action-status:not([hidden]) ~ .markdown-export-actions,
+.markdown-reader-resources:not([hidden]) ~ .markdown-export-actions,
+.markdown-export-actions:not([hidden]) ~ .markdown-reader-action--primary {
+    margin-inline-start: 0;
+}
+
+/* The wrapper stretches to the toolbar's content box, so 100% + 12px lands
+   on the same line as the overflow menu (toolbar padding 4px + 8px). */
+.markdown-export-actions .markdown-export-action-menu {
+    top: calc(100% + 12px);
+    right: 0;
+    max-width: min(240px, calc(100vw - 24px));
+}
+
+.markdown-toolbar-divider {
+    flex: 0 0 auto;
+    width: 1px;
+    height: 18px;
+    background: var(--border-subtle);
+}
+
 .markdown-github-repos-menu {
     position: absolute;
     z-index: 8;
     top: calc(100% + 8px);
-    left: 0;
+    right: 0;
     display: flex;
     min-width: 240px;
     max-width: min(360px, calc(100vw - 24px));
@@ -1680,9 +1743,14 @@ main {
 }
 
 .markdown-correction-banner {
+    display: flex;
     flex: 0 0 auto;
+    flex-wrap: wrap;
     width: 100%;
-    padding: 6px 16px;
+    align-items: center;
+    justify-content: center;
+    gap: 4px 12px;
+    padding: 5px 16px;
     border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
     color: var(--reader-text);
     background: color-mix(in srgb, var(--accent) 8%, var(--reader-background));
@@ -1694,6 +1762,36 @@ main {
 
 .markdown-correction-banner[hidden] {
     display: none;
+}
+
+.markdown-correction-banner-message {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.markdown-correction-finish {
+    flex: 0 0 auto;
+    min-height: 24px;
+    padding: 2px 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+    border-radius: var(--radius-sm);
+    color: var(--accent-strong);
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+    cursor: pointer;
+    font: 600 12px/1.2 var(--ui-font);
+}
+
+.markdown-correction-finish:hover:not(:disabled),
+.markdown-correction-finish:focus-visible {
+    border-color: var(--accent);
+    outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    outline-offset: 1px;
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+}
+
+.markdown-correction-finish:disabled {
+    cursor: default;
+    opacity: 0.55;
 }
 
 .markdown-correction-undo {
@@ -2146,7 +2244,7 @@ main {
     .markdown-translation-language-option-check,
 .markdown-translation-language-option[data-translation-status='translating']
     .markdown-translation-language-option-check,
-.markdown-translation-language-cancel
+.markdown-translation-language-action
     .markdown-translation-language-option-check {
     opacity: 1;
 }
@@ -2156,11 +2254,18 @@ main {
     animation: mktero-spin 900ms linear infinite;
 }
 
+/* The action at the end of the language menu: cancel while translating,
+   retranslate otherwise. */
 .markdown-translation-language-cancel {
     margin-top: 3px;
     padding-top: 4px;
     border-top: 1px solid var(--border-subtle);
     color: var(--muted);
+}
+
+.markdown-translation-language-action {
+    margin-top: 3px;
+    border-top: 1px solid var(--border-subtle);
 }
 
 .markdown-translation-language-option-label {
@@ -2260,6 +2365,20 @@ main {
 
 .markdown-reader-action-menu .markdown-reader-action-icon {
     flex: 0 0 18px;
+}
+
+.markdown-reader-action-group {
+    display: grid;
+    gap: 3px;
+}
+
+/* A rule between visible groups only, so a hidden first group leaves no
+   stray line at the top. */
+.markdown-reader-action-group:not([hidden])
+    ~ .markdown-reader-action-group:not([hidden]) {
+    margin-top: 3px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-subtle);
 }
 
 .markdown-reader-font-size,
@@ -2382,7 +2501,8 @@ main {
 }
 
 .markdown-document-search-toggle,
-.markdown-source-peek-toggle,
+.markdown-citation-graph-toggle,
+.markdown-toolbar-export-toggle,
 .markdown-focus-toggle,
 .markdown-typography-toggle,
 .markdown-github-repos-toggle,
@@ -2400,12 +2520,32 @@ main {
     cursor: pointer;
 }
 
-.markdown-document-search-toggle:hover {
+.markdown-document-search-toggle:hover,
+.markdown-citation-graph-toggle:hover:not(:disabled),
+.markdown-toolbar-export-toggle:hover:not(:disabled) {
     background: color-mix(in srgb, var(--surface) 82%, transparent);
 }
 
+.markdown-citation-graph-toggle:disabled,
+.markdown-toolbar-export-toggle:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+/* A running save or export keeps the button legible: it is busy, not
+   unavailable. */
+.markdown-toolbar-export-toggle.is-busy:disabled {
+    cursor: progress;
+    opacity: 1;
+}
+
+.markdown-toolbar-export-busy-icon {
+    animation: mktero-spin 0.85s linear infinite;
+}
+
 .markdown-document-search-toggle:focus-visible,
-.markdown-source-peek-toggle:focus-visible,
+.markdown-citation-graph-toggle:focus-visible,
+.markdown-toolbar-export-toggle:focus-visible,
 .markdown-focus-toggle:focus-visible,
 .markdown-typography-toggle:focus-visible,
 .markdown-github-repos-toggle:focus-visible {
@@ -2414,7 +2554,7 @@ main {
 }
 
 .markdown-document-search-toggle[aria-expanded='true'],
-.markdown-source-peek-toggle[aria-pressed='true'],
+.markdown-toolbar-export-toggle[aria-expanded='true'],
 .markdown-focus-toggle[aria-pressed='true'],
 .markdown-typography-toggle[aria-expanded='true'],
 .markdown-github-repos-toggle[aria-expanded='true'] {
@@ -2422,14 +2562,53 @@ main {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.markdown-source-peek-toggle[aria-pressed='true'],
 .markdown-focus-toggle[aria-pressed='true'] {
     color: var(--accent-strong);
 }
 
-.markdown-source-peek-toggle[aria-pressed='false'] {
-    border-color: transparent;
-    background: transparent;
+.markdown-typography-switch-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+}
+
+.markdown-source-peek-switch {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--muted) 22%, var(--surface-raised));
+    cursor: pointer;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.markdown-source-peek-switch-thumb {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--surface-raised);
+    box-shadow: 0 1px 2px rgb(28 36 46 / 24%);
+    transition: transform 140ms ease;
+}
+
+.markdown-source-peek-switch[aria-pressed='true'] {
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+    background: var(--accent);
+}
+
+.markdown-source-peek-switch[aria-pressed='true']
+    .markdown-source-peek-switch-thumb {
+    transform: translateX(14px);
+}
+
+.markdown-source-peek-switch:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 2px;
 }
 
 .markdown-document-search-panel {
@@ -2683,7 +2862,8 @@ main {
     white-space: nowrap;
 }
 
-.markdown-reader-actions.is-open .markdown-reader-action-menu {
+.markdown-reader-actions.is-open > .markdown-reader-action-menu,
+.markdown-export-actions.is-open > .markdown-reader-action-menu {
     pointer-events: auto;
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -2951,7 +3131,8 @@ blockquote.mktero-note,
     }
 
     .markdown-reader-action.is-reparsing .markdown-reader-action-icon,
-    .markdown-reader-action.is-saving .markdown-reader-action-icon {
+    .markdown-reader-action.is-saving .markdown-reader-action-icon,
+    .markdown-toolbar-export-busy-icon {
         animation: none;
     }
 }
@@ -5427,6 +5608,15 @@ blockquote.mktero-note,
     }
 
     .markdown-reader-action-menu { right: 8px; }
+
+    /* Narrow panes keep every control: the group dividers go first, so the
+       toolbar is no wider than with the thumbnail button it replaced. */
+    .markdown-toolbar-divider { display: none; }
+
+    .markdown-reader-resources.has-document-actions {
+        padding-inline-end: 0;
+        border-inline-end: 0;
+    }
 }
 
 @container markdown-reader (max-width: 390px) {
@@ -5451,6 +5641,8 @@ blockquote.mktero-note,
     .loading-spinner { animation-duration: 2s; }
     .markdown-reader-action-menu,
     .markdown-reader-font-chevron,
+    .markdown-source-peek-switch,
+    .markdown-source-peek-switch-thumb,
     .markdown-outline-link,
     .markdown-note-link {
         transition: none;

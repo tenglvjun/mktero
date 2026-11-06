@@ -2,86 +2,90 @@
 
 [English](./figure-pipeline.md) · [简体中文](./figure-pipeline.zh-CN.md) · [Back to README](../README.md)
 
-Mktero does not simply display whatever the OCR provider returns for a figure.
-When the evidence is strong enough, it rebuilds a complete figure from the
+When the evidence is strong enough, Mktero rebuilds complete figures from the
 local PDF at reading resolution (144 DPI and a 1600-pixel long edge, not print
-resolution) and replaces the OCR fragments in the reading flow.
-When the evidence is weak, it keeps the provider's original images and text
-instead of guessing.
+resolution) and replaces OCR fragments in the reading flow. Rasterization runs
+in a background worker, keeping the reader and the rest of Zotero responsive.
+MinerU supports coordinate-based region restoration; MinerU and Mistral both
+support the image-evidence passes described below. When the evidence is weak,
+Mktero keeps the provider's original images and text.
 
 ## Region restoration
 
-A figure candidate is built from provider blocks and exact Markdown ranges. A
-complete figure is cropped from the local PDF only when the layout evidence,
-the page coordinates, and the Markdown ranges all agree. The generated local
-PNG preserves `2x2`, `4x4`, missing-cell, spanning, and irregular panel
-arrangements.
+A figure candidate combines provider blocks with exact Markdown ranges. Mktero
+crops a complete figure from the local PDF only when the layout evidence, page
+coordinates, and Markdown ranges agree. The generated local PNG preserves
+`2x2`, `4x4`, missing-cell, spanning, and irregular panel arrangements.
 
-Interior OCR (labels and text that belong to the figure) leaves the reading
-flow only after a successful crop. Captions remain selectable, searchable, and
-translatable, and body references to the figure are untouched. A local pass
-also upgrades compatible cached results without another OCR upload and leaves
-user corrections intact. A compatible cache upgrade does not rasterize
-completed figures again.
+- Interior OCR (labels and text belonging to the figure) leaves the reading flow
+  only after a successful crop.
+- Captions remain selectable, searchable, and translatable. Body references to
+  the figure are untouched.
+- A local pass upgrades compatible cached results without another OCR upload
+  and leaves user corrections intact. It does not rasterize completed figures
+  again.
+- Ambiguous, rotated, or unverifiable groups retain their original images and
+  text.
 
-Ambiguous, rotated, or unverifiable groups retain their original images and
-text.
+### MinerU document rewrite
 
-For MinerU, Mktero writes the reading Markdown itself from MinerU's layout, so
-every figure's image, caption, and interior text has an exact Markdown range
-from the start; nothing is matched by text. A composed figure is written back
-into the document at its first member, and the document is written again from
-the same layout, so its source map stays exact. An unfinished restoration is
-not stored in the cache: after a restart it runs again from the stored MinerU
-result, and the provisional document stays readable when that result is gone.
+1. Mktero writes reading Markdown from MinerU's layout. Every figure's image,
+   caption, and interior text has an exact Markdown range from the start;
+   nothing is matched by text.
+2. A composed figure is written back at its first member. Mktero rewrites the
+   document from the same layout, keeping its source map exact.
+3. Unfinished restoration is not stored in the cache. After a restart, it runs
+   again from the stored MinerU result. If that result is gone, the provisional
+   document stays readable.
 
 ## Progressive rendering
 
-Local PDF rasterization runs in a background worker, so the reader and the rest
-of Zotero stay responsive while figures are stitched, and a page with several
-figures is rendered once.
+Reading starts as soon as conversion finishes. Each pending figure shows an
+animated placeholder (a lucide image with a spinner). The reader replaces each
+finished figure without rebuilding the article, so a slow figure never delays
+the rest.
 
-Reading starts as soon as the conversion finishes. Each pending figure shows an
-animated placeholder (a lucide image with a spinner). The reader replaces one
-finished figure without rebuilding the article, so one slow figure never delays
-the rest. Closing the reader tab does not stop a running restoration; it
-finishes and updates the cache. Export and snapshot stay disabled until every
-figure is resolved.
+A PDF page with several figures is rasterized once in the background worker.
+Closing the reader tab does not stop a running restoration; it finishes and
+updates the cache. Export and snapshot stay disabled until every figure is
+resolved.
 
 ## Labeled panels
 
-From a single complete PDF image, both providers can recover labeled panels
-when the image bounds, a matching PDF caption, and every panel's pixels agree.
+From a single complete PDF image, both MinerU and Mistral can recover labeled
+panels when three kinds of evidence agree: the image bounds, a matching PDF
+caption, and every panel's pixels.
 
-Independent OCR label rows such as `(A)`, `(B)`, and their fullwidth
-equivalents leave the text only after the complete image is recovered.
-References in the body and labels inside captions remain intact.
+Independent OCR label rows such as `(A)`, `(B)`, and their fullwidth equivalents
+leave the text only after the complete image is recovered. Body references and
+labels inside captions remain intact.
 
 ## Reuniting groups split by a misplaced title
 
 Both providers can reunite image groups split by a misplaced title when the PDF
 text positions, a shared caption, and every image's pixels verify the
-relationship, including vector charts.
+relationship. This includes vector charts.
 
-The title stays searchable above the group; the images return to PDF row order,
-and stale layout markers are rebuilt, including images that span a whole row.
+The title stays searchable above the group. Images return to PDF row order,
+and stale layout markers are rebuilt, including for images that span a whole
+row.
 
 ## Provider support
 
-- MinerU region restoration uses a `layout.json` page size that matches the
+- **MinerU:** Region restoration uses a `layout.json` page size that matches the
   PDF page. A 90° or 270° rotation swaps width and height, and each dimension
   must agree within 1%. A page that does not match keeps its figures as MinerU
   returned them.
-- Mistral's pixel dimensions do not establish the PDF CropBox origin or
-  rotation, and that is not independently verified, so the production Mistral
-  adapter does not perform coordinate-based region restoration and preserves the
-  original images and OCR text. The image-evidence passes above still apply.
-- MinerU and Mistral use independent parser profiles, so their figure results
-  are cached separately and are not reused across providers.
+- **Mistral:** Pixel dimensions do not establish the PDF CropBox origin or
+  rotation, and that is not independently verified. The production adapter
+  therefore does not perform coordinate-based region restoration and preserves
+  the original images and OCR text. The image-evidence passes above still apply.
+- **Caching:** MinerU and Mistral use independent parser profiles. Their figure
+  results are cached separately and are not reused across providers.
 
 ## Limits
 
-Figure work is bounded. Pages, layout blocks, candidate comparisons, crop
-pixels, canvas memory, generated bytes, and render time all have limits, and
-anything over budget is preserved rather than cropped. See
-[Development](./development.md) for the figure corpus regression.
+Figure work has limits on pages, layout blocks, candidate comparisons, crop
+pixels, canvas memory, generated bytes, and render time. Anything over budget
+is preserved rather than cropped. See [Development](./development.md) for the
+figure corpus regression.

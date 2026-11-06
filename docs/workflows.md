@@ -2,627 +2,84 @@
 
 [English](./workflows.md) · [简体中文](./workflows.zh-CN.md) · [Back to README](../README.md)
 
+This guide is now split into task pages. Each section below points to where its
+content moved, so older links keep working.
+
+- [Getting started](./getting-started.md): install, sign in, and read a first PDF.
+- [Reading](./reading.md): navigation, source links, copy actions, reading view, and AI translation.
+- [Annotations, notes, and corrections](./annotations.md): highlights, Zotero notes, and fixing recognition errors.
+- [References and export](./references-and-export.md): reference import, citation graph, snapshots, Markdown and Obsidian export.
+- [Conversion and local cache](./conversion.md): converters, limits, quota, batch preparation, llm-for-zotero import, and cache cleanup.
+
 ## Source-aware reading
 
-OCR content mappings connect Markdown blocks to physical PDF pages and
-regions. Source links and source-aware copy use those mappings when they are
-reliable; Mktero does not guess a location when a match is ambiguous. Selecting
-PDF text offers `Open in Markdown` when that PDF already has a readable cache.
-PDF-native safe HTTP(S) link annotations and MinerU-provided hyperlinks keep
-their original destinations, including underscores in URLs; missing or unsafe
-targets remain ordinary text.
-A unique source region focuses the Markdown paragraph. If no region overlaps
-the selection, a passage that occurs in exactly one cached paragraph still opens.
-A complete translation
-for that passage switches an original view to bilingual and leaves an existing
-translation or bilingual view unchanged. No translation request is started.
-Markdown is rendered in an isolated shadow root with a restricted link and image policy.
-Academic figure captions are recognized in common publisher formats, including
-`Figure N | ...` captions that follow an empty OCR image, so prose figure
-references remain previewable in cached documents.
+Moved to [Reading: Go between Markdown and the PDF](./reading.md#go-between-markdown-and-the-pdf).
 
 ## Import a local llm-for-zotero result
 
-1. Make the PDF available locally and finish parsing it in llm-for-zotero.
-   Enable Mktero's local cache. If you only have a synced result ZIP, restore it
-   locally with llm-for-zotero first; Mktero does not import that ZIP directly.
-2. In the Zotero library, right-click one PDF attachment or its parent item.
-   `Import parsed result from llm-for-zotero…` appears when a local candidate is
-   found. Choose it to start importing; for a parent item with several
-   candidates, choose the PDF from the submenu. The menu check only finds
-   candidates; full validation follows the click.
-3. Mktero validates the local result, saves its own copy, and opens that PDF in
-   the normal Mktero tab. The import itself works offline without an account
-   or API key, and does not upload the PDF or result or modify the source cache.
-   Cancelling or failing the import leaves the previous selection in place.
-
-Supported input has `full.md` and a standard content list with valid page
-numbers and bounding boxes, or a supported layout. Required figures must be
-available as original images, supported llm-for-zotero crops, or regions that
-Mktero can safely recover from the local PDF. Original images removed after
-llm-for-zotero creates its crops do not by themselves make a cache invalid.
-Plain Markdown, older loose Markdown files, and local MinerU V1 content lists
-without bounding boxes are not supported. The menu can find such a candidate,
-but the import then explains why it cannot be used.
-
-After a successful import, reading uses Mktero's copy and no longer needs the
-source cache: deleting only the llm-for-zotero source still allows offline
-reading. Mktero does not automatically evict its Markdown or raw MinerU cache
-by entry count, total size, or inactivity. Copies are subject to the orphan
-cleanup described below after permanent attachment deletion, manual clearing,
-self-healing of damaged entries, and profile filesystem availability; individual archive and document resource limits
-still apply. Mktero first uses saved corrections or a prepared reading
-document; if only the retained raw result remains, it rebuilds the document
-offline. If all local content for the selected import is missing, a later
-ordinary `Read as Markdown with Mktero` uses the current converter and may
-upload the PDF. The import action itself stays local; a failed import, corrupt
-content, read errors, or cancellation do not trigger conversion.
-
-To replace an import with a new result, repeat the import. A new snapshot has
-separate correction, translation, and reading-position identities. Explicitly
-choosing to reparse uses the current converter and may upload the PDF; only a
-successful reparse replaces this attachment's imported selection.
-
-Importing one PDF does not choose a different PDF for the parent's existing
-`Read as Markdown with Mktero` action, which still opens its first PDF. Use the
-chosen PDF's own reading action to reopen another attachment's imported result.
+Moved to [Conversion: Import a local llm-for-zotero result](./conversion.md#import-a-local-llm-for-zotero-result).
 
 ## Local cache cleanup
 
-Moving an item or PDF attachment to Zotero trash, or removing it from a
-collection, does not delete its Mktero data. Once background checks confirm
-that a registered PDF attachment is permanently absent and its cache has no
-remaining references, Mktero can clean it with no extra retention period.
-Restoring the attachment before cleanup protects its data. Already recorded
-permanent deletions follow the same policy; startup checks also reconcile
-missed notifications.
-
-Background checks can remove registered Markdown
-and its figures and translations, raw MinerU results, matching saved
-corrections, PDF text indexes and reading positions, plus the deleted
-attachment's local highlights, highlight-group records, import selections and
-readiness markers. Other attachments with the same PDF bytes, including
-attachments in other libraries or trash that were never opened in Mktero,
-protect shared data. Zotero PDF files, notes, annotations, saved snapshots,
-exported files and llm-for-zotero source caches are not deleted by this cleanup.
-
-Permanent deletion notifications are combined for about 5 seconds before a
-background check. Checks also run about 60 seconds after startup and hourly
-while Zotero is running. Use of the affected attachment or cache, such as its
-reading session, conversion or pending writes, defers that cleanup; reading
-an unrelated paper does not block it. Cleanup is checked again when the
-relevant use ends, without waiting for the next hourly check.
-
-Matching file sizes are checked locally before hashing; no attachment is
-downloaded or uploaded. Uncertain ownership or shared references, inaccessible
-libraries, damaged ownership records, or incomplete scans keep the affected
-data. Scan resource limits can also postpone cleanup. Failed deletions are
-retried, so the short notification delay does not guarantee that files
-disappear within 5 seconds.
-
-A missing or unreadable PDF no longer stops enumeration of the remaining
-attachments. Checks track uncertainty per candidate: a readable, rechecked
-file size can rule out different-size candidates even when its bytes cannot
-be read. Historical ownership hashes and Zotero's last-synced MD5 are never
-used to assume different content. Known shared sources remain protected,
-including trash and other libraries.
-
-A completely missing PDF is handled in two stages, because one absent file
-must not pin unrelated caches forever. Its derived caches (Markdown, raw
-conversion results and the PDF text index) can be rebuilt by converting again,
-so they are released once no readable PDF still shares them. The user's
-corrections and reading positions cannot be rebuilt, so they are kept while
-the attachment record itself still exists. A file that exists but cannot be
-verified, a PDF that changes during the check, or an incomplete library scan
-still retains everything.
-
-In **Settings → Mktero → Automatic cleanup**, the result shows retained-cache
-counts, released rebuildable cache sets, missing local PDFs, the reason, up to
-ten blocking attachment keys with library IDs, and the next check. Cache usage
-refreshes after a completed check. **Check again**
-runs the same safety checks; it does not bypass them or clear the whole cache.
-Uncertain checks and failed operations retry after about 1, 5, 15 and then
-60 minutes, subject to an earlier startup/hourly check. Relevant Zotero file
-or item notifications bring the retry forward. Restoring a missing local PDF
-allows the next check to establish whether it shares the cached content.
-
-Ownership is registered when Mktero next reads or imports a PDF. Recognizable
-older parser variants are adopted then; historical data whose ownership
-cannot be established stays on disk. Citation caches and the legacy separate
-translation cache keep their existing expiry/size rules. The existing
-**Clear cache** action remains available in Mktero settings.
+Moved to [Conversion: Local cache cleanup](./conversion.md#local-cache-cleanup).
 
 ## Footnotes and article information
 
-In a MinerU result, a footnote at the foot of a PDF page appears as a small,
-muted note right after the first paragraph of that page that carries its mark
-(a superscript number, `*`, or `†`). A note whose mark is not found follows the
-last paragraph of its page, without crossing a heading. Table and figure notes
-use the same style directly below their table or figure. Notes are ordinary
-quoted text: you can search, annotate, translate, and copy them. A footnote
-mark in the text is a link to its note, labeled `Go to footnote`, and the mark
-at the start of the note links back; both are recorded as jumps, so `Alt+Left`
-(`Cmd+[` on macOS) returns to where you were.
-
-Article metadata that is not part of the reading text goes into a collapsed
-section: affiliations, contact and contribution notes, funding, dates, and a
-journal's first-page sidebar appear under `Article information` below the
-title and author line, so the first screen shows the title, the authors, and
-the abstract. Author biographies after the references appear under `Author
-biographies`, and a Nature reporting summary under `Reporting summary`. When
-a self-hosted MinerU service reads the data of a chart (its high-effort tier),
-the data follows the chart under `Chart data`, as a table when it is one. A
-section is collapsed whenever the document opens. Its header is a button you
-can click or activate with `Enter` or `Space`. Search results, annotations,
-and other jumps into a collapsed section open it first. Headings inside a
-section are not listed in the outline. Snapshots and Zotero notes show the
-section label in bold followed by its content. Markdown and Obsidian exports
-keep the content as ordinary text; the section markers are HTML comments and
-do not show in Obsidian.
-
-For a confirmed publisher cover followed by the same article title and an
-abstract or introduction, MinerU reading uses the article page's title and
-authors. Submission prompts, view counts, related-article controls, and their
-associated icons are omitted. Citation, DOI, and publication-date fields stay
-in `Article information`, together with metadata from the actual article
-page. Long article titles retain their heading style. PDF page numbers and
-source locations stay unchanged.
-
-Mktero recognizes these parts from the layout and the wording of the page.
-A note can land after a different paragraph when its mark is printed in an
-unusual way, and metadata that does not look like metadata stays in the text.
+Moved to [Reading: Footnotes and article information](./reading.md#footnotes-and-article-information).
 
 ## Copy a formula, a code block, or a table
 
-A display formula and a table show their copy actions in the top corner when
-you point at them, and a code block has one in its toolbar.
-
-Copying a formula puts it on the clipboard as standard Markdown, a `$$` block
-around the TeX behind the rendered formula, including the OCR repairs Mktero
-applied so the formula could be typeset. It pastes as a formula into a Zotero
-note and into a Markdown editor that renders TeX math. A formula that was too
-large to render, or that used a command Mktero refuses to render, copies its
-source alone instead. Every display formula in a saved snapshot offers the same
-action when that snapshot is open in the reader.
-
-A table offers `Copy as Markdown` and `Copy as CSV`. When the reader rendered
-the table from a GFM block, the Markdown action is that block, so it pastes
-back as the same table. A table the paper carries as HTML, and every table in a
-saved snapshot, is converted back into a pipe table instead: the `thead` row
-becomes the header (the first row is promoted when there is none), merged cells
-are expanded, column alignment comes from the cells' own `align` attribute, and
-bold, italic, code, links, formulas, and superscripts keep their meaning.
-
-The CSV action writes comma-separated rows with plain-text cells: inline markup
-such as bold text, links, and formulas is reduced to what you read on screen,
-and a citation keeps its `[1]` marker. Cells that contain a comma or a quote are
-quoted the RFC 4180 way, and the caption is not part of the data. A copy is
-refused, rather than truncated, when a table is larger than the reader's export
-budget.
-
-A table's `Copy as Markdown` and a formula's copy action also put HTML on
-the clipboard, so a paste into a Zotero note keeps the table or the formula.
-A copy with `Cmd/Ctrl+C` puts the passage on the clipboard as standard
-Markdown, the way the reader shows it: each formula is `$…$` inline or a `$$`
-block with the TeX the reader typesets, a table the paper carries as HTML is a
-pipe table with its formulas, and the page headers, footers, and page labels
-the reader hides are left out. A Markdown editor that renders TeX math shows
-the same formulas and tables. When the passage has a formula or a table, the
-copy also carries HTML, which is that passage as a Zotero note shows it, every
-formula included, a one-letter `$i$` as well. A passage without either is
-copied as text only. A selection inside a rendered formula copies the whole
-formula, one inside a table cell copies the cell's text with its formulas, and
-one across cells of a rendered table copies those cells as a table. A formula
-that is too large, or that uses a command Mktero refuses to render, stays as
-its source, and a copy of a long stretch with very many formulas keeps the
-Markdown only. An application that reads HTML from the clipboard, such as a
-word processor or a browser editor, receives the same passage with its
-formulas as TeX between `$` signs; paste as plain text to get the Markdown
-there. A sourced copy from the selection menu quotes the passage with its
-formulas as Markdown math and adds its source link, and pastes into a Zotero
-note as a quote with typeset formulas and a working link. CSV and code copy
-are unchanged.
-
-All of these actions read the rendered document only. They send nothing, and
-they do not change the cached OCR Markdown, the corrections, or comments.
+Moved to [Reading: Copy a formula, a code block, or a table](./reading.md#copy-a-formula-a-code-block-or-a-table).
 
 ## Find your place and get back
 
-A thin bar along the bottom edge of the reading pane shows how far through the
-document you are. It appears only while the document is long enough to scroll
-and is hidden in focus mode.
-
-Jumping away from where you are reading records that spot, so you can return to
-it. These jumps are recorded: opening a citation, a table reference, or a
-figure reference; choosing an outline entry or an annotation; following an in-document
-link; and searching. Stepping through the matches of one search counts as a
-single jump. `Alt+Left` goes back and `Alt+Right` goes forward on Windows and
-Linux, and `Cmd+[` and `Cmd+]` do the same on macOS; either platform's chord
-works on both, and the arrow buttons at the start of the toolbar are the same
-action. Going back keeps the place you left, so forward returns to it; a new
-jump after going back discards the forward steps. Up to 50 positions are kept
-for the open document. They are not saved: closing the tab or replacing the
-document, for example by reparsing, clears them. Scrolling by hand does not create
-history entries.
+Moved to [Reading: Move around the document](./reading.md#move-around-the-document).
 
 ## Correct recognition errors
 
-Double-click an existing paragraph, heading, or GFM table cell to edit it, then
-save or cancel explicitly. Closing the tab, the main window, or Zotero saves an
-edit that is still open; press `Escape` or Cancel to discard it.
-Existing paragraphs and headings can also be
-deleted and restored from `Manage corrections`. Corrections are stored
-separately from the conversion cache and are tied to the PDF content and the
-selected source's parser profile; imported results also identify the particular
-imported snapshot. If saved corrections can no longer be
-read, the document opens with the original recognition result and a warning;
-the next saved correction or a reparse replaces the unreadable data. They cannot insert or reorder blocks, add images, or add raw
-HTML. Saving a correction preserves the reading position and keeps the full
-document available while scrolling. Prose around formulas and OCR
-dollar-wrapped citation tokens remains
-editable, while those tokens are protected from changes; a block containing
-protected content cannot be deleted as a whole. In rendered GFM tables, cells
-containing protected content remain read-only while other cells stay editable.
-Text covered by a matched annotation is protected in the same way: delete the
-annotation before changing that text. Edits before or after it remain allowed,
-and Mktero updates the annotation anchor so it still matches after reopening.
-Restoring a correction is refused when it would change annotated corrected
-text. Restoring all corrections and reparsing a corrected PDF use an in-reader
-Mktero confirmation dialog; `Escape`, the backdrop, or the default-focused
-Cancel action leaves the document unchanged.
+Moved to [Annotations, notes, and corrections: Correct recognition errors](./annotations.md#correct-recognition-errors).
 
 ## Annotate from Markdown
 
-Existing Zotero text highlights and underlines are loaded when a document opens.
-Drag across headings or body text to select it, including headings and paragraph
-endings immediately below figures and display formulas. A drag can also start
-on a citation, a figure or table reference, or a footnote mark; a click without
-a drag still opens it. The saved text is what the reader shows: a superscript
-mark such as `$^{*}$` is saved as its glyph, text from two table cells keeps a
-space between the cells, and a link's title is left out. A formula is saved as
-its TeX, also inside a figure caption or a table cell; a highlight there is
-shown over the rendered formula. A selection split into
-more than 512 separate parts is refused with a message instead of being saved
-incomplete.
-Selecting Markdown text can create a local annotation immediately; Mktero then
-creates the corresponding Zotero annotation only when the local PDF text index
-can identify one reliable match. Repeated or ambiguous text remains local and
-can be retried instead of receiving a guessed PDF position. If saved local
-annotations cannot be fully read, Mktero keeps the original file as a backup
-named `item-<id>.corrupt-<timestamp>.json` in `mktero-annotations/v1` in the
-Zotero profile, shows a warning, keeps the annotations that are still
-readable, and accepts new annotations. When a highlight
-overlaps a citation, table reference, or figure reference, that semantic
-reference keeps interaction priority; annotation actions remain available from
-the surrounding highlighted text or its comment marker.
-Selections that cross a PDF page break are split into one single-page Zotero
-highlight per page, so the complete Markdown selection remains navigable. A
-paragraph that resumes a page or two later is located the same way, across the
-full-page figure or running footer in between.
-Changing the color of one part, or deleting it, from the Markdown reader
-applies to every part Mktero created from that selection; a comment stays on
-the part it was written on. The annotation popup labels the comment actions
-`Add comment` and `Edit comment`. Mktero remembers which parts belong together in
-`mktero-annotations/groups-v1` in the Zotero profile, storing only Zotero
-annotation keys. A part that matched a highlight you had already made in Zotero
-is never grouped or deleted this way, and a part already deleted in the Zotero
-reader is skipped. Cross-page highlights made before this version have no group
-and change one part at a time.
-Common MinerU LaTeX math symbols and simple subscripts are normalized to the
-PDF's extracted text, and a few characters the PDF text layer mangles inside a
-passage are tolerated, so selections that include formulas can still be
-located. A display formula whose LaTeX never survives extraction falls back to
-the OCR region recorded for that block.
-
-A local highlight that has not reached the PDF yet shows a dashed underline.
-One whose sync failed shows a dotted warning underline, and hovering it shows
-the reason.
+Moved to [Annotations, notes, and corrections: Annotate from Markdown](./annotations.md#annotate-from-markdown).
 
 ## Zotero notes beside the reader
 
-The left column has three segments: `Headings`, `Figures`, and `Annotations`.
-The `Annotations` segment lists the paper's annotations, with search, a color
-filter, a jump to the Markdown position, `View in PDF`, delete, retry sync for
-a local highlight, and `Add to Note`.
-
-The right column is `Notes` with two tabs: `Item notes` and `Standalone
-notes`. `Item notes` lists the Zotero child notes attached to the paper being
-read, newest first. `Standalone notes` lists top-level notes from the same
-Zotero library, newest first. Child notes belonging to other papers are not
-shown. Use the plus menu to create a child note for the current item or a
-standalone note. Both kinds are normal Zotero note items and use Zotero's own
-note editor, so Mktero stores no notes.
-
-Clicking a note edits it in Zotero's own note editor inside the Mktero tab.
-`Back to notes` returns to the list. `Edit in a Separate Window` opens
-Zotero's note window. Right-clicking a note in the list opens the menu Zotero's
-notes pane shows: `Show in Library` selects the note in the library tab,
-`Edit in a Separate Window` opens it in Zotero's note window, and `Move to Trash`
-moves it to the Zotero trash, where it can be restored. These actions respect
-each note's library permissions. `Mktero Markdown Snapshot` notes are not
-listed. The Notes column can search note titles and previews.
-
-A standalone PDF without a parent item can still show and create standalone
-notes, but cannot have a child note. In a read-only library, notes open
-read-only and creation or deletion is unavailable. If Zotero cannot show its
-note editor inside the tab, the note opens in Zotero's note window instead.
-
-`Add to Note` is in the text-selection popup, in an annotation's popup, and on
-each item in the `Annotations` segment. It inserts the passage into the note
-open in the `Notes` column, the same way the Zotero PDF reader's `Add to Note`
-does: the highlighted text, a citation, and the page. Clicking that citation
-in the note opens Zotero's PDF reader, not Mktero. It needs an open note. It
-also needs a PDF position. A local highlight that has not reached the PDF yet,
-or a selection the local PDF index cannot locate (not found, or ambiguous), is
-refused with the reason. Mktero does not insert it without a source. Adding a
-plain selection to a note does not save a highlight.
-
-A formula in the passage is inserted as a note formula, so the note renders
-it. Zotero's highlights cannot hold a formula, so the highlight stops before
-each formula and starts again after it, and a display formula becomes its own
-block. The text keeps the highlight color and its link back to the page; the
-formula itself has neither. The annotation saved in the PDF is unchanged. A
-passage split across pages, an annotation Mktero cannot place in the
-Markdown, and an annotation whose text no longer matches its place keep
-Zotero's plain text. If Zotero's note editor changes in a way Mktero does not
-recognize, the passage is inserted the way Zotero inserts it, without
-rendered formulas.
-
-`Add Note from Annotations` is a button in the `Annotations` segment. It
-creates a new child note that contains every annotation of the PDF except ink
-annotations, like Zotero's command of the same name, and opens that note in
-the `Notes` column. Zotero writes the note; Mktero then saves it once more
-with the formulas of each annotation it placed in the Markdown, as above.
-
-While a Mktero tab is selected, Mktero hides Zotero's right-hand item pane,
-the context pane. The pane returns when another tab is selected. Zotero does
-not update that pane for a Mktero tab, so leaving it visible would show the
-previous tab's paper.
-
-Which columns are open, their widths, and the selected left segment are saved
-in Zotero preferences (`extensions.mktero.readerOutlineVisible`,
-`readerOutlineWidth`, `readerOutlineSegment`, `readerNotesVisible`, and
-`readerNotesWidth`) and used by the next Mktero tab. Automatic collapsing on
-a narrow window is not saved.
+Moved to [Annotations, notes, and corrections: Zotero notes beside the reader](./annotations.md#zotero-notes-beside-the-reader).
 
 ## Translate with AI
 
-AI translation is always opt-in and never rewrites the source Markdown. Mktero
-groups the article into bounded Markdown batches, protects formulas, citations,
-links, code, images, and structural placeholders, and runs at most five
-requests concurrently. Choose `Original`, `Translation`, or `Bilingual` in
-the reader. Translations are cached independently by source content, provider,
-protocol, model, language, reasoning effort, and prompt version, so partial
-work can resume. When a Mktero update reads a MinerU result again, the new
-document keeps the translation of every block whose text did not change; only
-the changed blocks are marked for translation.
-When local Markdown corrections delete a block, translations for unchanged
-blocks remain available and the deleted block disappears from `Bilingual`
-reading. Earlier source versions are retained, so restoring a deleted block can
-reuse its complete translation even after the corrected document was translated.
-Deleting a citation marker also preserves that block's translation when its
-protected placeholders can be mapped unambiguously; ambiguous changes remain
-pending for block-only retranslation. Editing a translated block keeps the
-other translations, marks that block as pending, and offers to retranslate only
-the changed block.
-Restoring all corrections reloads a complete cached translation for the
-original Markdown when one is available, without sending a new AI request.
-
-For a focused lookup, select text in `Original` or on the source side of
-`Bilingual` reading. The selection popup places its manual translation action
-at the end of the action row; loading, results, and errors expand below it only
-when needed in a compact panel. A successful result can be translated again or
-copied as plain text. With a streaming provider, incoming translation text
-appears progressively while cancellation remains available; non-streaming
-providers display the result after completion. The `Automatically translate
-Markdown selections` setting is off by default; when enabled, a stable
-selection starts one bounded request automatically after a short delay. The
-translated side of `Bilingual`, `Translation` reading, and saved HTML snapshots
-do not offer selection translation. Selection results stay in the popup, do not
-modify Markdown or comments, and are not added to the full-document translation
-cache. Each selection request sends only the selected text to the configured
-AI provider and may incur provider usage costs.
-
-Mktero includes adapters for OpenAI, Anthropic, Google Gemini, DeepSeek,
-Alibaba Cloud Model Studio, Moonshot/Kimi, MiniMax, and custom OpenAI-compatible
-or Open Responses services through Vercel AI SDK Core. Remote endpoints must
-use HTTPS; loopback services such as Ollama or LM Studio may use HTTP. Custom
-OpenCode Go bases such as `https://opencode.ai/zen/go/v1` also receive a
-per-conversation `x-opencode-session` header. Reasoning effort follows the selected model when Mktero knows it from
-[models.dev](https://models.dev): Mktero fetches that catalog once when Zotero
-starts, keeps it in memory, and drops it when Zotero quits. Unsupported models
-only offer `none`, models that cannot disable thinking omit `none`, and other
-known models list their supported levels, which may include `on`, `minimal`, or
-`max`. Unknown models, or a failed catalog fetch, keep `none`, `low`, `medium`,
-`high`, and `xhigh`. Reasoning output is not saved as translation text.
+Moved to [Reading: Translate with AI](./reading.md#translate-with-ai).
 
 ## Explore the citation graph
 
-The citation graph contains the focused paper and direct references that can be
-matched to items already in the current Zotero library. DOI and arXiv
-identifiers are queried concurrently from Semantic Scholar, OpenCitations, and
-OpenAlex when supported. Matching uses a unique normalized identifier, never a
-title, and provider metadata stays local. The graph details include a button
-labeled `Open with Mktero`. It opens the first local PDF attachment through the
-same Markdown reading workflow as `Read as Markdown with Mktero`.
+Moved to [References and export: Explore the citation graph](./references-and-export.md#explore-the-citation-graph).
 
 ## Import references from Markdown
 
-Open a citation popup to see local Zotero presence before any network lookup is
-made. Choosing `Import reference` for a title-only reference explicitly starts
-a bounded OpenAlex lookup. A unique exact title, year, and author match
-continues directly into import. Mktero also accepts a one-year provider date
-difference only when the cleaned title is nearly identical and the first author
-matches. Otherwise it shows at most three plausible candidates, and choosing
-one continues the same import. The lookup retries with a cleaned title when a
-full citation is too noisy and also covers OpenAlex records such as books that
-do not have a DOI. For IEEE-style references, a paired straight or typographic
-double-quoted article title is searched separately from its authors, venue,
-volume, and pages. For unquoted conference references, Mktero separates a
-paper title from a following `In ... Conference`, proceedings, workshop, or
-symposium venue. The popup lists accessible
-personal and group libraries and lets you choose the import target. A read-only
-library remains selectable for presence checks, while its import actions stay
-disabled with a permission explanation. If a matching item exists in another
-library, Mktero offers an explicit copy action rather than silently creating a
-duplicate. Missing references with a reliable DOI, arXiv ID, or PMID can be
-imported through Zotero's native translator; confirmed OpenAlex-only records
-such as books are created directly from their bounded metadata. When the target
-library permits files, Mktero also tries an arXiv or configured open-access
-PDF; metadata remains available when the PDF download fails and can be retried.
-The popup header contains only the target-library picker. Each reference shows
-its status on the left and its own import, retry, copy, or open action on the
-right, so actions always apply to one visible reference.
-
-Grouped author-year citations resolve every matched bibliography entry, including ACM/natbib square-bracket forms such as `Lewis et al. [2020]` and `[Kirkpatrick et al., 2017; Wei et al., 2026]`. If PDF
-conversion inserts a stray heading inside an APA-style bibliography, Mktero
-continues the reference list only when multiple bibliography-shaped entries
-clearly resume after it, so a genuine author note still ends the list.
+Moved to [References and export: Import references from Markdown](./references-and-export.md#import-references-from-markdown).
 
 ## Save a portable snapshot
 
-`Save snapshot` creates a dedicated `Mktero Markdown Snapshot` Note under the
-PDF's parent item. The Note contains portable HTML; figures are embedded image
-attachments; the original Markdown and source map are related attachments.
-Restored figures also include an optional `figure-map.json` attachment with
-page regions, panel identities, and consumed OCR fragments. Missing or invalid
-metadata never prevents reading the saved Markdown and PNGs; older snapshots
-remain readable.
-Mktero refuses to silently overwrite a snapshot Note that you edited. A
-standalone PDF without a parent library item cannot save a snapshot.
+Moved to [References and export: Save a portable snapshot](./references-and-export.md#save-a-portable-snapshot).
 
 ## See which items already have Markdown
 
-The item list has a Markdown column. A mark means this computer can open that
-PDF's cached Markdown with the current conversion settings or its selected
-imported result. A spinner means the PDF is queued or converting in this
-session; it is not stored. Clearing the cache turns the ready mark off.
-Changing provider or MinerU service changes which converted cache is ready; a selected imported result keeps its own identity. The import
-selection alone, without readable content, is not a ready mark. It does not
-sync, and it does not change the Zotero item. You can hide the column from the
-item-list column picker; that choice is remembered.
-
-Select several library items or PDF attachments and choose `Prepare selected
-Markdown`, or right-click one collection and choose `Prepare collection tree
-Markdown`. Both actions queue every selected PDF and do not
-open a reader tab. A collection action walks the selected collection and all
-its descendants. Before preparing, Mktero confirms the number of unique PDFs
-in that tree; cached or already preparing items are skipped by the queue.
-Right-clicking one paper still opens it for reading. Already cached or already preparing items
-are skipped, including readable imported results for the specific PDF. An
-imported result for one attachment does not make other PDFs of that parent
-item ready. A selection record without readable content is not skipped as
-ready. Zotero's progress window
-shows each item; minimizing it continues the queue, and Cancel stops items
-that have not finished. Opening one of those PDFs joins the existing
-preparation instead of uploading it again. Closing a tab during conversion
-does not cancel it; the PDF continues in the background queue.
-
-Within one running Mktero instance and account session, attachments with identical
-PDF bytes share an in-progress hosted conversion, even when local caching is off.
-Each attachment keeps its own title, annotations, corrections, and figure
-processing. Cancelling one participant leaves the others running; only the last
-participant leaving attempts to cancel the hosted job. Server cancellation may
-be refused once processing has started. A forced reparse joins an active
-acquisition, including its archive save; after it is ready, a new forced reparse
-starts a new acquisition. A replacement already reserved while work was active
-can still take that result after it completes. Signing out, signing in again,
-or changing provider or API address separates subsequent hosted work; automatic
-token refresh keeps the current session. Sharing does not survive a restart or
-coordinate separate Zotero processes or devices.
+Moved to [Conversion: See which items already have Markdown](./conversion.md#see-which-items-already-have-markdown).
+Preparing several PDFs at once is in [Conversion: Prepare several PDFs](./conversion.md#prepare-several-pdfs).
 
 ## Hosted daily quota
 
-When the service enables it, new hosted conversion results consume an account's
-UTC daily document quota. A request reserves a slot; success consumes it and a
-server-confirmed final failure or cancellation releases it. Client timeouts or
-closing a tab do not refund a server job still running. A job completing after
-midnight remains attributed to the UTC day it was admitted. Reusing an existing
-authorized result does not consume another slot; a first shared result for
-another account counts for that account. These rules do not guarantee unlimited
-future regeneration of expired results.
-
-The account pane reads the limit from the service and shows used, in-progress,
-available and the full reset date/time in your local time zone. Observation mode
-shows usage without claiming that a limit is being enforced. Older servers
-without the quota endpoint keep working.
-
-A quota response keeps the blocked item and pending items in the preparation
-window. Already submitted jobs continue. `Check quota and continue` queries the
-current quota and explicitly resumes the pending work, rechecking local readiness;
-`Cancel remaining` discards pending items without aborting the in-flight work.
-Resuming is allowed even when the remaining balance is zero: the service admits a
-document this account already converted without consuming quota, and refuses a new
-document again, which pauses the account once more. New items for that account
-remain paused until explicitly resumed. The list lasts
-only for this Zotero session and never restarts automatically at midnight.
-Switching accounts does not transfer the old list. To process the same PDF with
-another account or your own converter, explicitly select it again. Local cached
-reading, corrections, export, your own converters and AI translation are unaffected.
+Moved to [Conversion: Hosted daily quota](./conversion.md#hosted-daily-quota).
 
 ## Export Markdown
 
-`Export Markdown` opens the system folder picker. If the selected folder is `A`
-and the paper title is `B`, Mktero creates `A/B/B.md` and writes extracted
-figures under `A/B/assets/`, updating their Markdown paths accordingly. If `B`
-already exists, a numbered directory such as `B-2` is created with a matching
-`B-2.md`; existing exports are never overwritten. On Windows, a long title is
-shortened so the folder, the Markdown file, and the temporary file used while
-writing stay under the 260-character path limit. The same limit applies inside
-an Obsidian vault. Image names that collide on
-case-insensitive filesystems are numbered and their Markdown references are
-updated, so distinct figures cannot overwrite each other. Export does not
-include translated or bilingual views and never runs automatically.
+Moved to [References and export: Export Markdown](./references-and-export.md#export-markdown).
 
 ## Export to Obsidian
 
-`Export to Obsidian` writes the original Markdown, not the view currently
-open, into a folder inside a local Obsidian vault. Each complete saved
-translation is written beside it: a paper named `B` stays `B`, and its
-Simplified Chinese translation is `B - chinese`. Other languages use the same
-pattern, such as `japanese` or `spanish`. Incomplete translations and the
-bilingual reading view are not exported. `Export Markdown` still saves only
-the view you are reading. The first export asks for the vault folder that
-contains `.obsidian`. Later exports reuse it. Settings can change the vault.
-Notes always go in the `Mktero` folder, so they do not replace a literature
-note created by another plugin.
-
-A paper titled `B` becomes `<vault>/Mktero/B/B.md`, with figures in
-`<vault>/Mktero/B/assets/` and ordinary relative image links. Figure captions
-are written below each image, not inside its alt text, because Obsidian does
-not render an image when the alt text contains brackets. YAML frontmatter
-carries the title, authors, year, DOI, tags, a `zotero://` link, and the
-Zotero item identity. A Better BibTeX citation key is included only when Extra
-already contains one. Exporting the same item again updates that note even if
-the title changes. If the note was edited in Obsidian, or the file belongs to
-another item, Mktero asks before overwriting it. Mktero does not delete extra
-files you later add under `assets/`. Obsidian Sync, iCloud, or git can carry
-the vault; Mktero does not.
+Moved to [References and export: Export to Obsidian](./references-and-export.md#export-to-obsidian).
 
 ### Batch export
 
-The item menu shows `Export selected Markdown to Obsidian` only when at
-least one selected item already has converted Markdown, using the same check
-as the Markdown column. One selected item shows the export beside reading
-only when that item has Markdown; reading is not replaced. A selection with
-no converted Markdown does not show it. A collection shows `Export collection
-Markdown to Obsidian` only when at least one item in the collection tree has
-converted Markdown. It uses the same recursive collection-tree scope as
-`Prepare collection tree Markdown`. Before exporting, Mktero confirms the total
-number of unique PDFs and how many currently have Markdown; only ready Markdown
-is exported, and the batch report shows the status of other PDFs.
-Multiple PDFs for one Zotero item may be grouped into one note.
-
-Only Markdown that has already been converted is exported. A cache miss does
-not start OCR or conversion. One Zotero parent item becomes one note. If
-several converted PDFs belong to the same item, the first one with a cache is
-exported and the others are skipped.
-
-The vault is resolved once for the batch. If none is saved, Mktero asks once;
-cancelling that choice writes nothing. Notes still go in the vault's `Mktero`
-folder. Mktero does not sync the vault. Notes Mktero previously wrote, and
-that were not edited in Obsidian, update without asking. Notes edited in
-Obsidian, or files that belong to another item, are skipped and asked about
-once at the end. Cancel stops items that have not started. Files already
-written are not rolled back. This is not an account feature and not automatic
-sync.
+Moved to [References and export: Batch export](./references-and-export.md#batch-export).
