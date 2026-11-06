@@ -13,7 +13,6 @@ import {
     Download,
     ExternalLink,
     FileText,
-    GalleryThumbnails,
     Image as ImageIcon,
     Languages,
     LoaderCircle,
@@ -31,6 +30,7 @@ import {
     Save,
     Search,
     Settings,
+    Share,
     Sparkles,
     Trash2,
     TriangleAlert,
@@ -110,10 +110,6 @@ export const LUCIDE_ICONS = Object.freeze({
     fileText: Object.freeze({
         name: 'file-text',
         nodes: FileText,
-    }),
-    galleryThumbnails: Object.freeze({
-        name: 'gallery-thumbnails',
-        nodes: GalleryThumbnails,
     }),
     github: Object.freeze({
         name: 'github',
@@ -234,6 +230,10 @@ export const LUCIDE_ICONS = Object.freeze({
     settings: Object.freeze({
         name: 'settings',
         nodes: Settings,
+    }),
+    share: Object.freeze({
+        name: 'share',
+        nodes: Share,
     }),
     sparkles: Object.freeze({
         name: 'sparkles',

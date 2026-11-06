@@ -1011,7 +1011,7 @@ test('uses the language menu without changing the default translation language',
         }))
     );
     providerReplies.push(invalidReply, invalidReply, invalidReply);
-    shadow.querySelector('#mktero-document-actions').click();
+    translatedMode.click();
     shadow.querySelector('#mktero-retranslate-document').click();
     await waitFor(() => providerRequests.length === 6);
     await waitFor(() => languageOptions().every(option => !option.disabled));

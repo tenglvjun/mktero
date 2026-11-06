@@ -195,6 +195,13 @@ const ADD_TO_NOTE_ERROR_KEYS = new Map([
     [NOTE_SELECTION_NOT_LOCATED, 'notes.addToNoteNotLocated'],
 ]);
 const SOURCE_PEEK_DELAY_MS = 80;
+// Reading-pane width at or below which the Save and export button folds into
+// the document actions menu. Measured in the reader preview: with the button,
+// the English toolbar needs about 651px when the translated tab shows a long
+// language name ("Portuguese (Brazil)"); without it, about 611px. 680px
+// leaves room for the first case; the 620px container query that removes the
+// dividers in ui/markdown.css is a separate, smaller step.
+export const MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH = 680;
 const READING_POSITION_SAVE_DELAY_MS = 500;
 const SIDE_PANEL_KEYBOARD_STEP = 16;
 const SIDE_PANEL_RESIZE_ACTIVATION_DISTANCE = 4;
@@ -450,6 +457,11 @@ class MarkdownTabView {
         this.navigationForwardAvailable = false;
         this.searchNavigationRecorded = false;
         this.responsiveResizeObserver = null;
+        this.toolbarResizeObserver = null;
+        // A narrow reading pane folds the Save and export button into the
+        // document actions menu; see syncExportPlacement.
+        this.exportActionsCompact = false;
+        this.exportActionsOpen = false;
         this.documentActionsOpen = false;
         this.githubReposOpen = false;
         this.githubRepositories = [];
@@ -1118,6 +1130,8 @@ class MarkdownTabView {
         this.listeners = [];
         this.responsiveResizeObserver?.disconnect?.();
         this.responsiveResizeObserver = null;
+        this.toolbarResizeObserver?.disconnect?.();
+        this.toolbarResizeObserver = null;
         this.zoteroNotesPanel?.destroy();
         this.confirmationDialog.destroy();
         this.editor?.destroy();
@@ -1891,12 +1905,28 @@ class MarkdownTabView {
         // it to the editor would place it over the toolbar and its dropdowns,
         // which live in the toolbar's own stacking context.
         readingLayout.appendChild(sourcePeek);
+        // The banner is the visible exit from correction mode. Its message is
+        // the live region; the button sits outside it so a change of the
+        // saved-correction count does not re-announce the button label.
         const correctionBanner = this.createElement('div', {
             class: 'markdown-correction-banner',
+        });
+        correctionBanner.hidden = true;
+        const correctionBannerMessage = this.createElement('span', {
+            class: 'markdown-correction-banner-message',
             role: 'status',
             'aria-live': 'polite',
         });
-        correctionBanner.hidden = true;
+        const correctionFinish = this.createElement('button', {
+            id: 'mktero-correction-finish',
+            class: 'markdown-correction-finish',
+            type: 'button',
+        }, this.t('revision.finish'));
+        appendChildren(
+            correctionBanner,
+            correctionBannerMessage,
+            correctionFinish
+        );
         const correctionUndo = this.createElement('div', {
             class: 'markdown-correction-undo',
             role: 'status',
@@ -2115,12 +2145,14 @@ class MarkdownTabView {
             editorHost,
             snapshotHost,
             correctionBanner,
+            correctionBannerMessage,
+            correctionFinish,
             correctionUndo,
             correctionUndoMessage,
             correctionUndoButton,
             editorActions: documentActions.toolbar,
+            readerResources: documentActions.readerResources,
             citationGraphButton: documentActions.citationGraphButton,
-            citationGraphLabel: documentActions.citationGraphLabel,
             githubRepos: documentActions.githubRepos,
             githubReposButton: documentActions.githubReposButton,
             githubReposMenu: documentActions.githubReposMenu,
@@ -2135,6 +2167,13 @@ class MarkdownTabView {
             editorSection,
             actionToggle: documentActions.toggle,
             actionMenu: documentActions.menu,
+            actionGroups: documentActions.menuGroups,
+            outputActionGroup: documentActions.outputActionGroup,
+            exportActions: documentActions.exportActions,
+            exportToggle: documentActions.exportToggle,
+            exportIdleIcon: documentActions.exportIdleIcon,
+            exportBusyIcon: documentActions.exportBusyIcon,
+            exportMenu: documentActions.exportMenu,
             reparse: documentActions.reparse,
             reparseLabel: documentActions.reparseLabel,
             correctionToggle: documentActions.correctionToggle,
@@ -2188,6 +2227,7 @@ class MarkdownTabView {
             readerFontOptions: documentActions.readerFontOptions,
             documentSearchToggle: documentActions.documentSearchToggle,
             sourcePeekToggle: documentActions.sourcePeekToggle,
+            sourcePeekLabel: documentActions.sourcePeekLabel,
             focusToggle: documentActions.focusToggle,
             typography: documentActions.typography,
             typographyToggle: documentActions.typographyToggle,
@@ -2559,6 +2599,27 @@ class MarkdownTabView {
             options: MARKDOWN_READER_ALIGNMENT_OPTIONS,
             selected: this.readerAlignment,
         });
+        // The PDF source thumbnail is a set-once reading preference, so it
+        // lives with the other appearance settings instead of on the toolbar.
+        const sourcePeekLabel = this.createElement('span', {
+            id: 'mktero-source-peek-label',
+            class: 'markdown-typography-label',
+        }, this.t('viewer.sourcePeekToggle'));
+        const sourcePeekToggle = this.createElement('button', {
+            id: 'mktero-source-peek-toggle',
+            class: 'markdown-source-peek-switch',
+            type: 'button',
+            'aria-pressed': 'true',
+            'aria-labelledby': 'mktero-source-peek-label',
+        });
+        sourcePeekToggle.appendChild(this.createElement('span', {
+            class: 'markdown-source-peek-switch-thumb',
+            'aria-hidden': 'true',
+        }));
+        const sourcePeekRow = this.createElement('div', {
+            class: 'markdown-typography-row markdown-typography-switch-row',
+        });
+        appendChildren(sourcePeekRow, sourcePeekLabel, sourcePeekToggle);
         const typographyToggle = this.createElement('button', {
             id: 'mktero-typography-toggle',
             class: 'markdown-typography-toggle',
@@ -2589,7 +2650,8 @@ class MarkdownTabView {
             readerFontRow,
             readerLineHeight.row,
             readerWidth.row,
-            readerAlignment.row
+            readerAlignment.row,
+            sourcePeekRow
         );
         const typography = this.createElement('div', {
             class: 'markdown-typography',
@@ -2599,22 +2661,6 @@ class MarkdownTabView {
         const readerControls = this.createElement('div', {
             class: 'markdown-reader-controls',
         });
-        const sourcePeekToggle = this.createElement('button', {
-            id: 'mktero-source-peek-toggle',
-            class: 'markdown-source-peek-toggle',
-            type: 'button',
-            'aria-pressed': 'true',
-            'aria-label': this.t('viewer.sourcePeekToggle'),
-            title: this.t('viewer.sourcePeekToggle'),
-        });
-        sourcePeekToggle.appendChild(createLucideIcon(
-            this.document,
-            LUCIDE_ICONS.galleryThumbnails,
-            {
-                className: 'markdown-source-peek-toggle-icon',
-                size: 16,
-            }
-        ));
         const focusToggle = this.createElement('button', {
             id: 'mktero-focus-toggle',
             class: 'markdown-focus-toggle',
@@ -2662,13 +2708,39 @@ class MarkdownTabView {
         });
         githubRepos.hidden = true;
         appendChildren(githubRepos, githubReposButton, githubReposMenu);
+        // Paper-related resources sit together at the end of the toolbar,
+        // next to the document actions.
+        const citationGraphButton = this.createElement('button', {
+            id: 'mktero-citation-graph',
+            class: 'markdown-citation-graph-toggle',
+            type: 'button',
+            'aria-haspopup': 'dialog',
+            'aria-label': this.t('viewer.openCitationGraph'),
+            title: this.t('viewer.openCitationGraph'),
+        });
+        citationGraphButton.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.network,
+            {
+                className: 'markdown-citation-graph-icon',
+                size: 16,
+            }
+        ));
+        const readerResources = this.createElement('div', {
+            class: 'markdown-reader-resources',
+        });
+        appendChildren(readerResources, githubRepos, citationGraphButton);
+        // A divider between the view settings and the reading tools.
+        const readerControlsDivider = this.createElement('span', {
+            class: 'markdown-toolbar-divider',
+            'aria-hidden': 'true',
+        });
         appendChildren(
             readerControls,
             typography,
-            sourcePeekToggle,
             focusToggle,
-            documentSearchControls.documentSearchToggle,
-            githubRepos
+            readerControlsDivider,
+            documentSearchControls.documentSearchToggle
         );
         const correctionToggle = this.createElement('button', {
             id: 'mktero-correction-toggle',
@@ -2712,27 +2784,6 @@ class MarkdownTabView {
             this.t('revision.restoreAll')
         );
         restoreCorrections.appendChild(restoreCorrectionsLabel);
-        const retranslateDocument = this.createElement('button', {
-            id: 'mktero-retranslate-document',
-            class: 'markdown-reader-action markdown-reader-action--child',
-            type: 'button',
-            'aria-label': this.t('ai.retranslateDocument'),
-            title: this.t('ai.retranslateDocument'),
-        });
-        retranslateDocument.appendChild(createLucideIcon(
-            this.document,
-            LUCIDE_ICONS.refreshCw,
-            {
-                className: 'markdown-reader-action-icon',
-                size: 18,
-            }
-        ));
-        const retranslateDocumentLabel = this.createElement(
-            'span',
-            { class: 'markdown-reader-action-label' },
-            this.t('ai.retranslateDocument')
-        );
-        retranslateDocument.appendChild(retranslateDocumentLabel);
         const translateDocument = this.createElement('button', {
             id: 'mktero-translate-document',
             class: 'markdown-translation-action',
@@ -2831,6 +2882,33 @@ class MarkdownTabView {
             'aria-hidden': 'true',
         });
         translationLanguageOptions.hidden = true;
+        // Retranslating belongs with the language choice it repeats. The
+        // option stays one element; syncTranslationLanguageOptions moves it
+        // to the end of the rebuilt menu.
+        const retranslateDocument = this.createElement('button', {
+            id: 'mktero-retranslate-document',
+            class: 'markdown-translation-language-option '
+                + 'markdown-translation-language-action',
+            type: 'button',
+            role: 'menuitem',
+            'data-translation-retranslate': '',
+            tabindex: '-1',
+            'aria-label': this.t('ai.retranslateDocument'),
+            title: this.t('ai.retranslateDocument'),
+        });
+        const retranslateDocumentLabel = this.createElement('span', {
+            class: 'markdown-translation-language-option-label',
+        }, this.t('ai.retranslateDocument'));
+        appendChildren(
+            retranslateDocument,
+            createLucideIcon(this.document, LUCIDE_ICONS.refreshCw, {
+                className: 'markdown-translation-language-option-check',
+                size: 14,
+            }),
+            retranslateDocumentLabel
+        );
+        retranslateDocument.hidden = true;
+        translationLanguageOptions.appendChild(retranslateDocument);
         translationView.appendChild(translationLanguageOptions);
         const translationControls = this.createElement('div', {
             class: 'markdown-translation-controls',
@@ -2997,36 +3075,65 @@ class MarkdownTabView {
             this.t('diagnostics.action')
         );
         reportProblem.appendChild(reportProblemLabel);
-        const citationGraphButton = this.createElement('button', {
-            id: 'mktero-citation-graph',
-            class: 'markdown-reader-action markdown-reader-action--child',
-            type: 'button',
-            'aria-label': this.t('viewer.openCitationGraph'),
-            title: this.t('viewer.openCitationGraph'),
+        // Grouped by purpose. Reparse uploads the PDF again and can consume
+        // conversion quota, so it sits apart, at the end with problem
+        // reports. The output group stays empty while the toolbar has room
+        // for the Save and export button; a narrow pane moves the three
+        // output actions back here (syncExportPlacement).
+        const menuGroups = [
+            [],
+            [correctionToggle, restoreCorrections],
+            [reparse, reportProblem],
+        ].map(actions => {
+            const group = this.createElement('div', {
+                class: 'markdown-reader-action-group',
+            });
+            appendChildren(group, ...actions);
+            return group;
         });
-        citationGraphButton.appendChild(createLucideIcon(
+        const outputActionGroup = menuGroups[0];
+        appendChildren(menu, ...menuGroups);
+        const exportToggle = this.createElement('button', {
+            id: 'mktero-export-actions',
+            class: 'markdown-toolbar-export-toggle',
+            type: 'button',
+            'aria-expanded': 'false',
+            'aria-controls': 'mktero-export-action-menu',
+            'aria-haspopup': 'dialog',
+            'aria-label': this.t('viewer.exportActionsToggle'),
+            title: this.t('viewer.exportActionsToggle'),
+        });
+        const exportIdleIcon = createLucideIcon(
             this.document,
-            LUCIDE_ICONS.network,
+            LUCIDE_ICONS.share,
             {
-                className: 'markdown-reader-action-icon',
-                size: 18,
+                className: 'markdown-toolbar-export-icon',
+                size: 16,
             }
-        ));
-        const citationGraphLabel = this.createElement(
-            'span',
-            { class: 'markdown-reader-action-label' },
-            this.t('viewer.openCitationGraph')
         );
-        citationGraphButton.appendChild(citationGraphLabel);
-        menu.appendChild(citationGraphButton);
-        menu.appendChild(correctionToggle);
-        menu.appendChild(restoreCorrections);
-        menu.appendChild(retranslateDocument);
-        menu.appendChild(reparse);
-        menu.appendChild(saveSnapshot);
-        menu.appendChild(exportMarkdown);
-        menu.appendChild(exportObsidian);
-        menu.appendChild(reportProblem);
+        const exportBusyIcon = createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.loaderCircle,
+            {
+                className: 'markdown-toolbar-export-icon '
+                    + 'markdown-toolbar-export-busy-icon',
+                size: 16,
+            }
+        );
+        exportBusyIcon.setAttribute('hidden', 'hidden');
+        appendChildren(exportToggle, exportIdleIcon, exportBusyIcon);
+        const exportMenu = this.createElement('div', {
+            id: 'mktero-export-action-menu',
+            class: 'markdown-reader-action-menu markdown-export-action-menu',
+            role: 'dialog',
+            'aria-label': this.t('viewer.exportActions'),
+            'aria-hidden': 'true',
+        });
+        appendChildren(exportMenu, saveSnapshot, exportMarkdown, exportObsidian);
+        const exportActions = this.createElement('div', {
+            class: 'markdown-export-actions',
+        });
+        appendChildren(exportActions, exportToggle, exportMenu);
         const status = this.createElement('span', {
             class: 'markdown-reader-action-status',
             'aria-live': 'polite',
@@ -3055,6 +3162,8 @@ class MarkdownTabView {
             readerControls,
             translationControls,
             status,
+            readerResources,
+            exportActions,
             toggle,
             menu
         );
@@ -3064,6 +3173,13 @@ class MarkdownTabView {
             navigationForward,
             toggle,
             menu,
+            menuGroups,
+            outputActionGroup,
+            exportActions,
+            exportToggle,
+            exportIdleIcon,
+            exportBusyIcon,
+            exportMenu,
             reparse,
             reparseLabel,
             correctionToggle,
@@ -3099,7 +3215,7 @@ class MarkdownTabView {
             reportProblem,
             reportProblemLabel,
             citationGraphButton,
-            citationGraphLabel,
+            readerResources,
             githubRepos,
             githubReposButton,
             githubReposMenu,
@@ -3125,6 +3241,7 @@ class MarkdownTabView {
             readerAlignmentGroup: readerAlignment.group,
             ...documentSearchControls,
             sourcePeekToggle,
+            sourcePeekLabel,
             focusToggle,
             translationProgress,
             translationProgressBar,
@@ -3323,6 +3440,9 @@ class MarkdownTabView {
             this.setTypographyOpen(false);
             this.setDocumentActionsOpen(!this.documentActionsOpen);
         });
+        this.listen(this.elements.exportToggle, 'click', () => {
+            this.setExportActionsOpen(!this.exportActionsOpen);
+        });
         this.listen(this.elements.typographyToggle, 'click', () => {
             this.setDocumentActionsOpen(false);
             this.setTranslationLanguagesOpen(false);
@@ -3360,11 +3480,11 @@ class MarkdownTabView {
         this.listen(this.elements.correctionToggle, 'click', () => {
             this.toggleCorrectionMode();
         });
+        this.listen(this.elements.correctionFinish, 'click', () => {
+            this.finishCorrectionMode();
+        });
         this.listen(this.elements.translateDocument, 'click', () => {
             this.runDocumentTranslationAction();
-        });
-        this.listen(this.elements.retranslateDocument, 'click', () => {
-            this.runDocumentRetranslationAction();
         });
         for (const button of this.elements.translationViewButtons) {
             this.listen(button, 'click', () => {
@@ -3405,6 +3525,10 @@ class MarkdownTabView {
             }
             if (option.hasAttribute('data-translation-cancel')) {
                 this.cancelTranslationFromLanguageMenu();
+                return;
+            }
+            if (option.hasAttribute('data-translation-retranslate')) {
+                this.runDocumentRetranslationAction();
                 return;
             }
             this.selectTranslationLanguage(
@@ -3535,6 +3659,12 @@ class MarkdownTabView {
                 this.elements.typographyToggle.focus?.();
                 return;
             }
+            if (event.key === 'Escape' && this.exportActionsOpen) {
+                event.preventDefault();
+                this.setExportActionsOpen(false);
+                this.elements.exportToggle.focus?.();
+                return;
+            }
             if (event.key === 'Escape' && this.documentActionsOpen) {
                 event.preventDefault();
                 this.setDocumentActionsOpen(false);
@@ -3560,11 +3690,15 @@ class MarkdownTabView {
         });
         const closeDocumentActionsOnOutsidePress = event => {
             if (!this.documentActionsOpen
+                && !this.exportActionsOpen
                 && !this.readerFontOptionsOpen
                 && !this.translationLanguagesOpen
                 && !this.githubReposOpen
                 && !this.typographyOpen) return;
             const path = event.composedPath?.() || [];
+            if (!path.includes(this.elements.exportActions)) {
+                this.setExportActionsOpen(false);
+            }
             if (!path.includes(this.elements.translationView)) {
                 this.setTranslationLanguagesOpen(false);
             }
@@ -3730,6 +3864,15 @@ class MarkdownTabView {
                 this.syncResponsiveSidePanels(entry?.contentRect?.width);
             });
             this.responsiveResizeObserver.observe(this.host);
+            // The toolbar's own width decides where the Save and export
+            // actions live. It is the reading pane, not the whole tab.
+            this.toolbarResizeObserver = new ResizeObserverType(entries => {
+                const entry = entries.find(item => (
+                    item.target === this.elements.editorSection
+                )) || entries[0];
+                this.syncExportPlacement(entry?.contentRect?.width);
+            });
+            this.toolbarResizeObserver.observe(this.elements.editorSection);
         }
         this.listen(this.ownerWindow, 'mousemove', event => {
             this.resizeSidePanel('outline', event);
@@ -3884,6 +4027,12 @@ class MarkdownTabView {
         if (button.disabled || typeof this.model.onOpenCitationGraph !== 'function') {
             return;
         }
+        // The toolbar button opens a modal, so no toolbar popup stays open
+        // behind it.
+        this.setDocumentActionsOpen(false);
+        this.setGitHubReposOpen(false);
+        this.setTranslationLanguagesOpen(false);
+        this.setTypographyOpen(false);
         button.disabled = true;
         let operation;
         try {
@@ -3922,6 +4071,28 @@ class MarkdownTabView {
         }
     }
 
+    // The banner button is the visible way out of correction mode. The
+    // banner disappears with the mode, so a keyboard user on the button
+    // returns to the text instead of to the document body.
+    finishCorrectionMode() {
+        const button = this.elements.correctionFinish;
+        if (button.disabled
+            || this.documentActionBusy
+            || this.model.correctionMode !== true
+            || typeof this.model.onSetCorrectionMode !== 'function') {
+            return;
+        }
+        const hadFocus = this.mount.activeElement === button;
+        try {
+            this.model.onSetCorrectionMode(false);
+        }
+        catch (error) {
+            this.reportCorrectionError(error);
+            return;
+        }
+        if (hadFocus) this.editor?.focus?.();
+    }
+
     runDocumentTranslationAction() {
         if (this.elements.translateDocument.disabled
             || this.documentActionBusy) {
@@ -3949,7 +4120,8 @@ class MarkdownTabView {
             || typeof this.model.onTranslateDocument !== 'function') {
             return;
         }
-        this.setDocumentActionsOpen(false);
+        this.setTranslationLanguagesOpen(false);
+        this.translatedViewButton()?.focus?.();
         try {
             Promise.resolve(this.model.onTranslateDocument({
                 forceRetranslate: true,
@@ -4074,8 +4246,14 @@ class MarkdownTabView {
         const target = options.find(option => (
             option.getAttribute('data-translation-language') === language
         )) || options[lastFallback ? options.length - 1 : 0];
+        this.focusTranslationLanguageMenuButton(target);
+    }
+
+    // The menu ends with an action (cancel or retranslate) that has no
+    // language, so arrow keys move between elements, not language codes.
+    focusTranslationLanguageMenuButton(target) {
         if (!target) return;
-        for (const option of options) {
+        for (const option of this.translationLanguageMenuButtons()) {
             option.setAttribute('tabindex', option === target ? '0' : '-1');
         }
         target.focus?.();
@@ -4124,9 +4302,7 @@ class MarkdownTabView {
             return;
         }
         event.preventDefault();
-        this.focusTranslationLanguageOption(
-            options[nextIndex].getAttribute('data-translation-language')
-        );
+        this.focusTranslationLanguageMenuButton(options[nextIndex]);
     }
 
     handleTranslationViewKeydown(event, currentButton) {
@@ -5132,6 +5308,7 @@ class MarkdownTabView {
             || this.githubReposOpen
             || this.typographyOpen
             || this.documentActionsOpen
+            || this.exportActionsOpen
             || this.shortcutsPanelOpen;
     }
 
@@ -5648,13 +5825,8 @@ class MarkdownTabView {
             'title',
             this.t('viewer.find')
         );
-        this.elements.sourcePeekToggle.setAttribute(
-            'aria-label',
-            this.t('viewer.sourcePeekToggle')
-        );
-        this.elements.sourcePeekToggle.setAttribute(
-            'title',
-            this.t('viewer.sourcePeekToggle')
+        this.elements.sourcePeekLabel.textContent = this.t(
+            'viewer.sourcePeekToggle'
         );
         this.elements.typographyToggle.setAttribute(
             'aria-label',
@@ -5733,6 +5905,10 @@ class MarkdownTabView {
             'aria-label',
             this.t('viewer.documentActions')
         );
+        this.elements.exportMenu.setAttribute(
+            'aria-label',
+            this.t('viewer.exportActions')
+        );
         this.elements.actionToggle.setAttribute(
             'aria-label',
             this.t('viewer.documentActionsToggle')
@@ -5748,9 +5924,6 @@ class MarkdownTabView {
         this.elements.citationGraphButton.setAttribute(
             'title',
             this.t('viewer.openCitationGraph')
-        );
-        this.elements.citationGraphLabel.textContent = this.t(
-            'viewer.openCitationGraph'
         );
         this.elements.githubReposButton.setAttribute(
             'aria-label',
@@ -5833,6 +6006,7 @@ class MarkdownTabView {
         this.elements.retranslateDocumentLabel.textContent = this.t(
             'ai.retranslateDocument'
         );
+        this.elements.correctionFinish.textContent = this.t('revision.finish');
         this.elements.translationViewLabel.textContent = this.t(
             'ai.translationViewLabel'
         );
@@ -5963,17 +6137,24 @@ class MarkdownTabView {
     syncDocumentActions(model, loadingView) {
         const reparseAvailable = typeof model.onReparse === 'function';
         const figureRestorationPending = model.figureRestoration?.status === 'pending';
-        const saveAvailable = typeof model.onSaveSnapshot === 'function'
+        // Output actions stay visible while figures are being restored, and
+        // only become enabled afterwards, so the toolbar does not shift when
+        // restoration finishes.
+        const saveSupported = typeof model.onSaveSnapshot === 'function'
+            && model.renderMode !== 'html';
+        const exportSupported = model.status === 'ready'
             && model.renderMode !== 'html'
-            && !figureRestorationPending;
-        const exportAvailable = model.status === 'ready'
+            && typeof model.onExportMarkdown === 'function';
+        const obsidianSupported = model.status === 'ready'
             && model.renderMode !== 'html'
-            && typeof model.onExportMarkdown === 'function'
+            && typeof model.onExportObsidian === 'function';
+        const saveAvailable = saveSupported && !figureRestorationPending;
+        const exportAvailable = exportSupported && !figureRestorationPending;
+        const obsidianAvailable = obsidianSupported
             && !figureRestorationPending;
-        const obsidianAvailable = model.status === 'ready'
-            && model.renderMode !== 'html'
-            && typeof model.onExportObsidian === 'function'
-            && !figureRestorationPending;
+        const outputSupported = saveSupported
+            || exportSupported
+            || obsidianSupported;
         const correctionAvailable = model.status === 'ready'
             && model.renderMode !== 'html'
             && Array.isArray(model.editableBlocks)
@@ -5991,19 +6172,22 @@ class MarkdownTabView {
             && typeof model.onOpenCitationGraph === 'function';
         const reportAvailable = model.status === 'ready'
             && typeof model.onReportProblem === 'function';
+        // The overflow menu holds only what is in it. Translation and the
+        // citation graph live on the toolbar itself, and the output actions
+        // have their own Save and export button unless the pane is narrow.
+        const exportToolbarAvailable = outputSupported
+            && !this.exportActionsCompact;
         const documentActionsAvailable = reparseAvailable
-            || saveAvailable
-            || exportAvailable
-            || obsidianAvailable
+            || (outputSupported && this.exportActionsCompact)
             || correctionAvailable
             || restoreAvailable
-            || translationAvailable
-            || citationGraphAvailable
             || reportAvailable;
         const readerControlsAvailable = model.status === 'ready'
             || loadingView.preserveContent;
         const toolbarAvailable = documentActionsAvailable
+            || exportToolbarAvailable
             || readerControlsAvailable
+            || translationAvailable
             || citationGraphAvailable;
         const reparsing = loadingView.visible && loadingView.preserveContent;
         const activeElement = this.mount.activeElement;
@@ -6023,9 +6207,9 @@ class MarkdownTabView {
         }
         this.elements.editorActions.hidden = !toolbarAvailable;
         this.elements.reparse.hidden = !reparseAvailable;
-        this.elements.saveSnapshot.hidden = !saveAvailable;
-        this.elements.exportMarkdown.hidden = !exportAvailable;
-        this.elements.exportObsidian.hidden = !obsidianAvailable;
+        this.elements.saveSnapshot.hidden = !saveSupported;
+        this.elements.exportMarkdown.hidden = !exportSupported;
+        this.elements.exportObsidian.hidden = !obsidianSupported;
         this.elements.reportProblem.hidden = !reportAvailable;
         this.elements.reportProblem.disabled = !reportAvailable;
         this.elements.correctionToggle.hidden = !correctionAvailable;
@@ -6034,10 +6218,21 @@ class MarkdownTabView {
         }
         this.elements.restoreCorrections.hidden = !restoreAvailable;
         this.elements.actionToggle.hidden = !documentActionsAvailable;
+        this.elements.exportActions.hidden = !exportToolbarAvailable;
+        this.elements.exportToggle.hidden = !exportToolbarAvailable;
         this.elements.citationGraphButton.hidden = !citationGraphAvailable;
         this.elements.citationGraphButton.disabled = !citationGraphAvailable
             || Boolean(this.documentActionBusy);
         this.syncGitHubRepositories(model, citationGraphAvailable);
+        this.elements.readerResources.hidden = this.elements.githubRepos.hidden
+            && this.elements.citationGraphButton.hidden;
+        this.elements.readerResources.classList.toggle(
+            'has-document-actions',
+            documentActionsAvailable || exportToolbarAvailable
+        );
+        for (const group of this.elements.actionGroups) {
+            group.hidden = [...group.children].every(action => action.hidden);
+        }
         this.elements.readerFontSize.hidden = !readerControlsAvailable;
         this.elements.readerFontFamily.hidden = !readerControlsAvailable;
         this.elements.typography.hidden = !readerControlsAvailable;
@@ -6055,14 +6250,43 @@ class MarkdownTabView {
         this.elements.exportObsidian.disabled = !obsidianAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
-        if (figureRestorationPending) {
-            const pendingLabel = this.t('viewer.figureRestorationPending');
-            this.elements.saveSnapshot.setAttribute('title', pendingLabel);
-            this.elements.exportMarkdown.setAttribute('title', pendingLabel);
-            this.elements.exportObsidian.setAttribute('title', pendingLabel);
+        const pendingLabel = this.t('viewer.figureRestorationPending');
+        for (const [action, labelKey] of [
+            [this.elements.saveSnapshot, 'viewer.saveSnapshot'],
+            [this.elements.exportMarkdown, 'viewer.exportMarkdown'],
+            [this.elements.exportObsidian, 'viewer.exportObsidian'],
+        ]) {
+            action.setAttribute(
+                'title',
+                figureRestorationPending ? pendingLabel : this.t(labelKey)
+            );
+        }
+        const outputBusy = ['saveSnapshot', 'exportMarkdown', 'exportObsidian']
+            .includes(this.documentActionBusy);
+        const outputEnabled = (saveAvailable || exportAvailable
+            || obsidianAvailable)
+            && !loadingView.visible;
+        this.elements.exportToggle.disabled = !outputEnabled
+            || Boolean(this.documentActionBusy);
+        const exportToggleLabel = figureRestorationPending
+            ? pendingLabel
+            : this.t('viewer.exportActionsToggle');
+        this.elements.exportToggle.setAttribute('title', exportToggleLabel);
+        this.elements.exportToggle.setAttribute('aria-label', exportToggleLabel);
+        this.elements.exportToggle.setAttribute('aria-busy', String(outputBusy));
+        this.elements.exportToggle.classList.toggle('is-busy', outputBusy);
+        if (outputBusy) {
+            this.elements.exportIdleIcon.setAttribute('hidden', 'hidden');
+            this.elements.exportBusyIcon.removeAttribute('hidden');
+        }
+        else {
+            this.elements.exportIdleIcon.removeAttribute('hidden');
+            this.elements.exportBusyIcon.setAttribute('hidden', 'hidden');
         }
         this.elements.correctionToggle.disabled = !correctionAvailable
             || loadingView.visible
+            || Boolean(this.documentActionBusy);
+        this.elements.correctionFinish.disabled = loadingView.visible
             || Boolean(this.documentActionBusy);
         const translationReady = hasAvailableTranslation(model);
         const completeTranslationReady = hasCompleteTranslation(model);
@@ -6180,9 +6404,7 @@ class MarkdownTabView {
         if (!documentActionsAvailable) {
             this.documentActionsOpen = false;
         }
-        this.syncDocumentActionMenuState(
-            this.documentActionsOpen && documentActionsAvailable
-        );
+        this.syncDocumentActionMenuState();
         this.syncErrorActions(model);
         this.syncWarningActions(model);
     }
@@ -6252,7 +6474,9 @@ class MarkdownTabView {
                 ...groups.map(group => (
                     this.createTranslationLanguageGroup(group)
                 )),
-                ...(translating ? [this.createTranslationCancelOption()] : [])
+                translating
+                    ? this.createTranslationCancelOption()
+                    : this.elements.retranslateDocument
             );
             this.translationLanguageSignature = signature;
             if (optionHadFocus) button.focus?.();
@@ -6351,6 +6575,7 @@ class MarkdownTabView {
         const button = this.createElement('button', {
             id: 'mktero-cancel-translation-language',
             class: 'markdown-translation-language-option '
+                + 'markdown-translation-language-action '
                 + 'markdown-translation-language-cancel',
             type: 'button',
             role: 'menuitem',
@@ -6554,22 +6779,73 @@ class MarkdownTabView {
             this.t(model.correctionMode ? 'revision.start' : 'viewer.readOnly')
         );
         if (!visible) {
-            this.elements.correctionBanner.textContent = '';
+            this.elements.correctionBannerMessage.textContent = '';
             return;
         }
-        this.elements.correctionBanner.textContent = this.t(
+        this.elements.correctionBannerMessage.textContent = this.t(
             'revision.bannerActive',
             { count: model.correctionCount || 0 }
         );
     }
 
+    // The overflow menu and the Save and export menu are one popover slot:
+    // opening or closing either one closes the other, so every existing
+    // caller that closes the document actions also closes the export menu.
     setDocumentActionsOpen(open) {
         this.documentActionsOpen = Boolean(open);
-        const available = !this.elements.actionToggle.hidden;
-        this.syncDocumentActionMenuState(this.documentActionsOpen && available);
+        this.exportActionsOpen = false;
+        this.syncDocumentActionMenuState();
         if (this.documentActionsOpen) {
             this.setTypographyOpen(false);
             this.setGitHubReposOpen(false);
+        }
+    }
+
+    setExportActionsOpen(open) {
+        const toggle = this.elements.exportToggle;
+        this.exportActionsOpen = Boolean(open)
+            && !toggle.hidden
+            && !toggle.disabled;
+        if (this.exportActionsOpen) {
+            this.documentActionsOpen = false;
+            this.setReaderFontOptionsOpen(false);
+            this.setTranslationLanguagesOpen(false);
+            this.setTypographyOpen(false);
+            this.setGitHubReposOpen(false);
+        }
+        this.syncDocumentActionMenuState();
+    }
+
+    // At or below this reading-pane width the Save and export button folds
+    // into the document actions menu (see MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH).
+    syncExportPlacement(width) {
+        if (this.destroyed || !Number.isFinite(width) || width <= 0) return;
+        const compact = width <= MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH;
+        if (compact === this.exportActionsCompact) return;
+        this.exportActionsCompact = compact;
+        const focused = this.mount.activeElement;
+        const target = compact
+            ? this.elements.outputActionGroup
+            : this.elements.exportMenu;
+        const outputActions = [
+            this.elements.saveSnapshot,
+            this.elements.exportMarkdown,
+            this.elements.exportObsidian,
+        ];
+        appendChildren(target, ...outputActions);
+        // The open menu no longer holds what it showed; close both.
+        this.documentActionsOpen = false;
+        this.exportActionsOpen = false;
+        if (this.model) {
+            this.syncDocumentActions(
+                this.model,
+                createLoadingPresentation(this.model, this.t)
+            );
+        }
+        if (outputActions.includes(focused)) {
+            (compact
+                ? this.elements.actionToggle
+                : this.elements.exportToggle).focus?.();
         }
     }
 
@@ -6635,30 +6911,49 @@ class MarkdownTabView {
         }
     }
 
-    syncDocumentActionMenuState(visible) {
-        if (!visible) this.setReaderFontOptionsOpen(false);
+    syncDocumentActionMenuState() {
+        if (this.elements.actionToggle.hidden) this.documentActionsOpen = false;
+        if (this.elements.exportToggle.hidden
+            || this.elements.exportToggle.disabled) {
+            this.exportActionsOpen = false;
+        }
+        const documentVisible = this.documentActionsOpen;
+        const exportVisible = this.exportActionsOpen;
+        if (!documentVisible) this.setReaderFontOptionsOpen(false);
         this.elements.actionToggle.setAttribute(
             'aria-expanded',
-            String(visible)
+            String(documentVisible)
         );
-        this.elements.actionMenu.setAttribute('aria-hidden', String(!visible));
-        const menuTabIndex = visible ? '0' : '-1';
-        this.elements.reparse.setAttribute('tabindex', menuTabIndex);
-        this.elements.saveSnapshot.setAttribute('tabindex', menuTabIndex);
-        this.elements.exportMarkdown.setAttribute('tabindex', menuTabIndex);
-        this.elements.exportObsidian.setAttribute('tabindex', menuTabIndex);
-        this.elements.reportProblem.setAttribute('tabindex', menuTabIndex);
-        this.elements.correctionToggle.setAttribute('tabindex', menuTabIndex);
-        this.elements.retranslateDocument.setAttribute(
-            'tabindex',
-            menuTabIndex
+        this.elements.actionMenu.setAttribute(
+            'aria-hidden',
+            String(!documentVisible)
         );
-        this.elements.restoreCorrections.setAttribute(
-            'tabindex',
-            menuTabIndex
+        this.elements.exportToggle.setAttribute(
+            'aria-expanded',
+            String(exportVisible)
         );
-        this.elements.citationGraphButton.setAttribute('tabindex', menuTabIndex);
-        this.elements.editorActions.classList.toggle('is-open', visible);
+        this.elements.exportMenu.setAttribute(
+            'aria-hidden',
+            String(!exportVisible)
+        );
+        // An action is reachable by Tab only while the menu holding it is
+        // open; the output actions can sit in either menu.
+        for (const action of [
+            this.elements.reparse,
+            this.elements.saveSnapshot,
+            this.elements.exportMarkdown,
+            this.elements.exportObsidian,
+            this.elements.reportProblem,
+            this.elements.correctionToggle,
+            this.elements.restoreCorrections,
+        ]) {
+            const open = this.elements.exportMenu.contains(action)
+                ? exportVisible
+                : documentVisible;
+            action.setAttribute('tabindex', open ? '0' : '-1');
+        }
+        this.elements.editorActions.classList.toggle('is-open', documentVisible);
+        this.elements.exportActions.classList.toggle('is-open', exportVisible);
     }
 
     syncSidePanelControlLabels(name) {
