@@ -1,7 +1,7 @@
 // Run with an externally installed Playwright module, like the other browser checks:
 // MKTERO_PLAYWRIGHT_PATH=/path/to/playwright/index.mjs MKTERO_EPUB_BROWSERS=chrome node scripts/validate-epub-browser.mjs
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
@@ -16,7 +16,7 @@ const playwright = await import(pathToFileURL(playwrightPath).href);
 const browsers = (process.env.MKTERO_EPUB_BROWSERS || 'chromium,firefox').split(',').map(value => value.trim()).filter(Boolean);
 const bundle = await build({
     stdin: {
-        contents: "export { createZoteroEpubRenderers } from './src/platform/zotero-epub-renderers.js'; export { createEpub } from './src/epub/epub-export.js';",
+        contents: "export { createZoteroEpubRenderers } from './src/platform/zotero-epub-renderers.js'; export { createEpub } from './src/epub/epub-export.js'; export { MarkdownTabPresenter } from './src/ui/markdown-tab-presenter.js'; export { createMarkdownTabView } from './src/ui/markdown-window.js';",
         resolveDir: root,
     },
     bundle: true,
@@ -44,7 +44,7 @@ for (const name of browsers) {
         await page.route('**/*', route => route.abort());
         await page.setContent('<!DOCTYPE html><html><head><meta charset="utf-8"><style>table,caption{font-size:80px;padding:40px}p{margin:60px}body{line-height:3}</style></head><body></body></html>');
         await page.addScriptTag({ content: bundle.outputFiles[0].text });
-        const report = await page.evaluate(async () => {
+        const report = await page.evaluate(async stylesheetText => {
             const { createZoteroEpubRenderers, createEpub } = MkteroEpubValidation;
             const renderers = createZoteroEpubRenderers({ getMainWindow: () => window });
             function check(condition, message) {
@@ -152,8 +152,87 @@ for (const name of browsers) {
             }
             check(!window.epubUnsafe, 'Table event handlers must never execute');
             check(document.querySelectorAll('[aria-hidden="true"]').length === 0, 'Temporary table hosts must be removed');
-            return { archive: Array.from(archive), pngs, tableMetrics, refusedOversized };
-        });
+            // Drive the same presenter -> view path as Zotero. Passing a
+            // callback straight to a hand-built view model misses this seam.
+            const containers = [];
+            const owner = {
+                document,
+                Zotero_Tabs: {
+                    add() {
+                        const container = document.createElement('div');
+                        document.body.append(container);
+                        containers.push(container);
+                        return { id: 'epub-menu-' + containers.length, container };
+                    },
+                    select() {},
+                    rename() {},
+                    close() {},
+                },
+            };
+            const presenter = new MkteroEpubValidation.MarkdownTabPresenter({
+                zotero: { getMainWindow: () => owner },
+                rootURI: 'data:,',
+                createView: options => MkteroEpubValidation.createMarkdownTabView({
+                    ...options,
+                    stylesheetText,
+                    editorFactory: ({ document, parent }) => {
+                        const node = document.createElement('div');
+                        parent.append(node);
+                        return { setDocument() {}, refreshRendering() {}, destroy() { node.remove(); } };
+                    },
+                }),
+            });
+            let exportCalls = 0;
+            let refreshedCalls = 0;
+            const otherActions = {
+                onSaveSnapshot() {},
+                onExportMarkdown() {},
+                onExportObsidian() {},
+            };
+            const firstExport = async ({ ownerWindow }) => {
+                check(ownerWindow === window, 'The menu must pass its owner window');
+                exportCalls++;
+                return { status: 'cancelled' };
+            };
+            const visibleMenu = presentation => [...presentation.view.host.shadowRoot
+                .querySelector('#mktero-export-action-menu').children]
+                .filter(button => !button.hidden).map(button => button.id);
+            const expectedMenu = ['mktero-save-snapshot', 'mktero-export-markdown',
+                'mktero-export-obsidian', 'mktero-export-epub'];
+            let readerMenu;
+            try {
+                const presentation = presenter.open(42, { ...otherActions, onExportEpub: firstExport });
+                presenter.update(presentation, { status: 'ready', title: 'Menu verification',
+                    progress: 100, markdown: '# Paper', sourceKind: 'markdown' });
+                check(JSON.stringify(visibleMenu(presentation)) === JSON.stringify(expectedMenu),
+                    'The presenter must expose EPUB as the fourth visible export action');
+                const shadow = presentation.view.host.shadowRoot;
+                shadow.querySelector('#mktero-export-actions').click();
+                shadow.querySelector('#mktero-export-epub').click();
+                await new Promise(resolve => setTimeout(resolve, 0));
+                check(exportCalls === 1, 'Clicking EPUB must invoke the presenter callback');
+                presenter.open(42, { onExportEpub: async () => {
+                    refreshedCalls++;
+                    return { status: 'cancelled' };
+                } });
+                shadow.querySelector('#mktero-export-actions').click();
+                shadow.querySelector('#mktero-export-epub').click();
+                await new Promise(resolve => setTimeout(resolve, 0));
+                check(refreshedCalls === 1 && exportCalls === 1, 'Reused tabs must invoke the refreshed callback');
+                const late = presenter.open(43, otherActions);
+                presenter.update(late, { status: 'ready', progress: 100, markdown: '# Late action', sourceKind: 'markdown' });
+                check(visibleMenu(late).length === 3, 'A missing EPUB callback hides only that action');
+                presenter.open(43, { onExportEpub: firstExport });
+                check(JSON.stringify(visibleMenu(late)) === JSON.stringify(expectedMenu),
+                    'Adding the callback must immediately redraw a ready tab');
+                readerMenu = { actions: visibleMenu(presentation), exportCalls, refreshedCalls, lateActionVisible: true };
+            }
+            finally {
+                presenter.dispose();
+                containers.forEach(container => container.remove());
+            }
+            return { archive: Array.from(archive), pngs, tableMetrics, refusedOversized, readerMenu };
+        }, await readFile(path.join(root, 'ui/markdown.css'), 'utf8'));
         const xmlPage = await browser.newPage();
         xmlPage.on('request', request => {
             if (/^https?:/u.test(request.url())) networkRequests.push(request.url());
@@ -203,7 +282,7 @@ for (const name of browsers) {
         assert.ok(entries['OEBPS/images/table-0001.png'], 'Actual wide table PNG is packaged');
         await writeFile(path.join(output, name + '.epub'), archive);
         for (const [index, bytes] of report.pngs.entries()) await writeFile(path.join(output, name + '-table-' + (index + 1) + '.png'), Uint8Array.from(bytes));
-        const metrics = { browser: name, version: browser.version(), tables: report.tableMetrics, refusedOversized: report.refusedOversized, xmlHost };
+        const metrics = { browser: name, version: browser.version(), tables: report.tableMetrics, refusedOversized: report.refusedOversized, xmlHost, readerMenu: report.readerMenu };
         await writeFile(path.join(output, name + '-report.json'), JSON.stringify(metrics, null, 2) + '\n');
         console.log(name + ' ' + browser.version() + ': actual rasterization and EPUB export passed');
     }

@@ -221,6 +221,36 @@ test('passes the Obsidian export action to new and reused reader models', () => 
     presenter.dispose();
 });
 
+test('passes the EPUB export action to new and reused reader models', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const firstExport = () => ({ status: 'exported' });
+    try {
+        const presentation = presenter.open(42, { onExportEpub: firstExport });
+        assert.equal(presentation.model.onExportEpub, firstExport);
+        assert.equal(harness.calls[0].model.onExportEpub, firstExport);
+
+        presenter.update(presentation, { status: 'ready', markdown: '# Paper' });
+        assert.equal(harness.views[0].renderCalls.at(-1).onExportEpub, firstExport);
+
+        presenter.open(42);
+        assert.equal(presentation.model.onExportEpub, firstExport);
+
+        const secondExport = () => ({ status: 'cancelled' });
+        presenter.open(42, { onExportEpub: secondExport });
+        assert.equal(presentation.model.onExportEpub, secondExport);
+        assert.equal(harness.views[0].renderCalls.at(-1).onExportEpub, secondExport);
+
+        presenter.open(42, { onExportEpub: null });
+        assert.equal(presentation.model.onExportEpub, null);
+        assert.equal(harness.views[0].renderCalls.at(-1).onExportEpub, null);
+    }
+    finally {
+        presenter.dispose();
+    }
+});
+
 test('passes reference library actions to the Markdown reader model and refreshes reuse', () => {
     const mainWindow = createMainWindow();
     const harness = createViewHarness();

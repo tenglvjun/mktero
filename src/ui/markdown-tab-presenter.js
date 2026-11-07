@@ -128,6 +128,7 @@ export class MarkdownTabPresenter {
         onSaveSnapshot,
         onExportMarkdown,
         onExportObsidian,
+        onExportEpub,
         onReportProblem,
         onSetCorrectionMode,
         onCommitCorrection,
@@ -207,6 +208,9 @@ export class MarkdownTabPresenter {
             }
             if (onExportObsidian !== undefined) {
                 existing.model.onExportObsidian = onExportObsidian;
+            }
+            if (onExportEpub !== undefined) {
+                existing.model.onExportEpub = onExportEpub;
             }
             if (onReportProblem !== undefined) {
                 existing.model.onReportProblem = onReportProblem;
@@ -327,6 +331,9 @@ export class MarkdownTabPresenter {
                 existing.model.zoteroNotes = zoteroNotes;
                 existing.view.render(existing.model);
             }
+            if (onExportEpub !== undefined) {
+                existing.view.render(existing.model);
+            }
             if (this.selectPresentation(existing, owner)) {
                 return { ...existing, created: false };
             }
@@ -343,6 +350,7 @@ export class MarkdownTabPresenter {
                 onSaveSnapshot,
                 onExportMarkdown,
                 onExportObsidian,
+                onExportEpub,
                 onReportProblem,
                 onSetCorrectionMode,
                 onCommitCorrection,
