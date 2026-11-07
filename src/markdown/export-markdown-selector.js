@@ -17,6 +17,17 @@ export function selectExportMarkdown(model) {
     return model.markdown || '';
 }
 
+export function selectExportMarkdownLanguage(model) {
+    const view = selectExportMarkdownView(model);
+    if (view === 'translated') {
+        return typeof model.translationTargetLanguage === 'string'
+            && model.translationTargetLanguage.trim()
+            ? model.translationTargetLanguage.trim()
+            : 'und';
+    }
+    return view === 'compare' ? 'mul' : 'und';
+}
+
 export function selectExportMarkdownView(model) {
     if (!model) return 'original';
     const view = model.translationView;

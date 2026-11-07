@@ -150,6 +150,12 @@ import {
     createZoteroObsidianExporter,
 } from './platform/zotero-obsidian-exporter.js';
 import {
+    createZoteroEpubExporter,
+} from './platform/zotero-epub-exporter.js';
+import {
+    createZoteroEpubRenderers,
+} from './platform/zotero-epub-renderers.js';
+import {
     createZoteroMarkdownRevisionStore,
 } from './platform/zotero-markdown-revision-store.js';
 import {
@@ -169,7 +175,10 @@ import {
     formatEvidenceMarkdown,
 } from './markdown/markdown-evidence.js';
 import { zoteroNoteMarkdownHTML } from './markdown/zotero-note-clipboard.js';
-import { selectExportMarkdown } from './markdown/export-markdown-selector.js';
+import {
+    selectExportMarkdown,
+    selectExportMarkdownLanguage,
+} from './markdown/export-markdown-selector.js';
 import {
     resolveMarkdownReadingPosition,
 } from './markdown/markdown-outline.js';
@@ -374,6 +383,7 @@ const runtime = {
     savedMarkdownResolver: null,
     markdownExporter: null,
     obsidianExporter: null,
+    epubExporter: null,
     extractor: null,
     importedExtractor: null,
     importService: null,
@@ -467,6 +477,15 @@ globalThis.startup = async function startup({ id, rootURI }) {
     const presenter = runtime.presenter;
     await Zotero.uiReadyPromise;
     if (runtime.presenter !== presenter) return;
+
+    const epubRenderers = createZoteroEpubRenderers(Zotero);
+    runtime.epubExporter = createZoteroEpubExporter({
+        createFilePicker: createZoteroFilePicker,
+        ioUtils: IOUtils,
+        createID: createMarkdownExportID,
+        translate: runtimeTranslate,
+        ...epubRenderers,
+    });
 
     const cache = createZoteroMarkdownCache({
         zotero: Zotero,
@@ -1358,6 +1377,7 @@ globalThis.shutdown = function shutdown() {
     runtime.savedMarkdownResolver = null;
     runtime.markdownExporter = null;
     runtime.obsidianExporter = null;
+    runtime.epubExporter = null;
     runtime.rootURI = null;
     runtime.localization = null;
     runtime.annotationActions = null;
@@ -1472,6 +1492,7 @@ async function openItemAsMarkdown(itemID, {
         onSaveSnapshot: () => saveSnapshotForItem(itemID),
         onExportMarkdown: options => exportMarkdownForDocument(itemID, options),
         onExportObsidian: options => exportObsidianForDocument(itemID, options),
+        onExportEpub: options => exportEpubForDocument(itemID, options),
         onReportProblem: reportProblemForItem(itemID),
         onSetCorrectionMode: enabled => setCorrectionMode(itemID, enabled),
         onCommitCorrection: correction => commitCorrection(itemID, correction),
@@ -2461,6 +2482,7 @@ function createSavedMarkdownActions(noteID, sourceItem) {
             : null,
         onExportMarkdown: options => exportMarkdownForDocument(noteID, options),
         onExportObsidian: options => exportObsidianForDocument(noteID, options),
+        onExportEpub: options => exportEpubForDocument(noteID, options),
         onOpenAnnotationInPDF: withSource((itemID, annotationID) => (
             runAnnotationAction('openInPDF', itemID, annotationID)
         )),
@@ -2651,6 +2673,11 @@ async function exportObsidianForDocument(documentID, options) {
         options,
         documentID
     );
+}
+
+async function exportEpubForDocument(documentID, options) {
+    const presentation = runtime.presenter?.get(documentID);
+    return exportEpubForModel(presentation?.model, options);
 }
 
 async function readRevisionSnapshot({ itemID, cacheKey, signal, throwOnReadError = false }) {
@@ -3744,6 +3771,23 @@ async function exportMarkdownForModel(model, { ownerWindow } = {}) {
         markdown: selectExportMarkdown(model),
         assets: model.assets,
         assetBasePath: model.assetBasePath,
+    });
+}
+
+async function exportEpubForModel(model, { ownerWindow } = {}) {
+    if (model?.status !== 'ready' || model.renderMode === 'html') {
+        throw new Error('The Markdown document is unavailable');
+    }
+    if (!runtime.epubExporter?.export) {
+        throw new Error('EPUB export is unavailable');
+    }
+    return runtime.epubExporter.export({
+        ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
+        title: model.title,
+        markdown: selectExportMarkdown(model),
+        assets: model.assets,
+        assetBasePath: model.assetBasePath,
+        language: selectExportMarkdownLanguage(model),
     });
 }
 

@@ -27,6 +27,16 @@ export function safeMarkdownLinkURL(value) {
     return null;
 }
 
+export function safeEpubLinkURL(value) {
+    const url = normalizeMarkdownLinkURL(value);
+    const safeURL = safeMarkdownLinkURL(url);
+    if (safeURL && !/^zotero:\/\//iu.test(safeURL)) return safeURL;
+    if (/^chapter-\d{2,4}\.xhtml#[\p{L}\p{N}][\p{L}\p{N}_.:-]{0,127}$/u.test(url)) {
+        return url;
+    }
+    return null;
+}
+
 // MinerU URLs are provider data, not Markdown syntax. Only absolute HTTP(S)
 // URLs are allowed, and the raw value is not Markdown-unescaped.
 export function safeMinerULinkURL(value) {
