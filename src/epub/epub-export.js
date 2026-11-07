@@ -3,7 +3,7 @@ import { analyzeMarkdownCitations } from '../markdown/markdown-citations.js';
 import { findMarkdownDirectives } from '../markdown/markdown-directives.js';
 import { analyzeMarkdownFootnotes } from '../markdown/markdown-footnotes.js';
 import { createMarkdownExportPlan } from '../markdown/markdown-export.js';
-import { renderMarkdownHTML } from '../markdown/markdown-html.js';
+import { findInlineMathMatches, renderMarkdownHTML } from '../markdown/markdown-html.js';
 import { buildEpubPackage } from './epub-package.js';
 
 const PARSER = markdownParser.configure(GFM);
@@ -370,7 +370,11 @@ function rangesOverlap(left, right) {
 }
 
 function escapeMarkdownLinkLabel(value) {
-    return String(value).replace(/([\[\]])/gu, '\\$1');
+    const source = String(value);
+    // Complete math spans are handled by the renderer's math lexer.
+    // Keep their TeX commands and delimiters intact.
+    if (findInlineMathMatches(source)[0]?.raw === source) return source;
+    return source.replace(/([\\\[\]])/gu, '\\$1');
 }
 
 function extractLinkDefinitions(markdown) {
@@ -484,14 +488,21 @@ function slugHeading(value) {
 }
 
 function stripInlineMarkdown(value) {
-    return String(value || '')
+    const source = String(value || '')
         .replace(/!\[([^\]]*)\]\([^)]*\)/gu, '$1')
         .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1')
         .replace(/`([^`]+)`/gu, '$1')
         .replace(/\$\$?([\s\S]*?)\$\$?/gu, '$1')
-        .replace(/[\\*_~]/gu, '')
-        .replace(/<[^>]*>/gu, '')
-        .trim();
+        .replace(/[\\*_~]/gu, '');
+    let text = '';
+    let from = 0;
+    // Copy text from the original input, then remove remaining angle brackets.
+    // Removing a tag must not leave a newly assembled tag in the result.
+    for (const tag of source.matchAll(/<[^>]*>/gu)) {
+        text += source.slice(from, tag.index);
+        from = tag.index + tag[0].length;
+    }
+    return (text + source.slice(from)).replace(/[<>]/gu, '').trim();
 }
 
 function rewriteFragmentLinks(html, chapterFile, targets) {
