@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
     selectExportMarkdown,
+    selectExportMarkdownLanguage,
     selectExportMarkdownView,
 } from '../src/markdown/export-markdown-selector.js';
 
@@ -64,6 +65,45 @@ test('falls back to the original Markdown when the comparison view lacks text', 
         translationView: 'compare',
     };
     assert.equal(selectExportMarkdown(model), '# Paper');
+});
+
+test('selects a language tag for the Markdown actually exported', () => {
+    assert.equal(selectExportMarkdownLanguage({
+        markdown: '# 原文',
+        translationView: 'original',
+        translationTargetLanguage: 'zh-CN',
+    }), 'und');
+    assert.equal(selectExportMarkdownLanguage({
+        markdown: '# Paper',
+        translatedMarkdown: '# 论文',
+        translationView: 'translated',
+        translationTargetLanguage: 'zh-CN',
+    }), 'zh-CN');
+    assert.equal(selectExportMarkdownLanguage({
+        markdown: '# Paper',
+        comparisonMarkdown: ['# Paper', '', '# 论文'].join('\n'),
+        translationView: 'compare',
+        translationTargetLanguage: 'zh-CN',
+    }), 'mul');
+});
+
+test('uses the original language marker when a requested view falls back to original text', () => {
+    const translatedFallback = {
+        markdown: '# 原文',
+        translatedMarkdown: '',
+        translationView: 'translated',
+        translationTargetLanguage: 'zh-CN',
+    };
+    assert.equal(selectExportMarkdown(translatedFallback), '# 原文');
+    assert.equal(selectExportMarkdownView(translatedFallback), 'original');
+    assert.equal(selectExportMarkdownLanguage(translatedFallback), 'und');
+
+    const comparisonFallback = {
+        markdown: '# Paper',
+        comparisonMarkdown: '',
+        translationView: 'compare',
+    };
+    assert.equal(selectExportMarkdownLanguage(comparisonFallback), 'und');
 });
 
 test('returns an empty string for a missing model', () => {

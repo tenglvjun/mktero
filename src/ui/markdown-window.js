@@ -172,6 +172,12 @@ const DOCUMENT_ACTION_FEEDBACK = Object.freeze({
         failure: 'viewer.obsidianExportFailed',
         neutralStatus: 'cancelled',
     }),
+    exportEpub: Object.freeze({
+        progress: 'viewer.epubExporting',
+        success: 'viewer.epubExported',
+        failure: 'viewer.exportEpubFailed',
+        neutralStatus: 'cancelled',
+    }),
 });
 const WARNING_TOAST_TIMEOUT_MS = 5_000;
 const CORRECTION_UNDO_TIMEOUT_MS = 8_000;
@@ -2212,6 +2218,8 @@ class MarkdownTabView {
             exportMarkdownLabel: documentActions.exportMarkdownLabel,
             exportObsidian: documentActions.exportObsidian,
             exportObsidianLabel: documentActions.exportObsidianLabel,
+            exportEpub: documentActions.exportEpub,
+            exportEpubLabel: documentActions.exportEpubLabel,
             reportProblem: documentActions.reportProblem,
             reportProblemLabel: documentActions.reportProblemLabel,
             readerControls: documentActions.readerControls,
@@ -3054,6 +3062,27 @@ class MarkdownTabView {
             this.t('viewer.exportObsidianShort')
         );
         exportObsidian.appendChild(exportObsidianLabel);
+        const exportEpub = this.createElement('button', {
+            id: 'mktero-export-epub',
+            class: 'markdown-reader-action markdown-reader-action--child',
+            type: 'button',
+            'aria-label': this.t('viewer.exportEpub'),
+            title: this.t('viewer.exportEpub'),
+        });
+        exportEpub.appendChild(createLucideIcon(
+            this.document,
+            LUCIDE_ICONS.fileText,
+            {
+                className: 'markdown-reader-action-icon',
+                size: 18,
+            }
+        ));
+        const exportEpubLabel = this.createElement(
+            'span',
+            { class: 'markdown-reader-action-label' },
+            this.t('viewer.exportEpubShort')
+        );
+        exportEpub.appendChild(exportEpubLabel);
         const reportProblem = this.createElement('button', {
             id: 'mktero-report-problem',
             class: 'markdown-reader-action markdown-reader-action--child',
@@ -3078,8 +3107,8 @@ class MarkdownTabView {
         // Grouped by purpose. Reparse uploads the PDF again and can consume
         // conversion quota, so it sits apart, at the end with problem
         // reports. The output group stays empty while the toolbar has room
-        // for the Save and export button; a narrow pane moves the three
-        // output actions back here (syncExportPlacement).
+        // for the Save and export button; a narrow pane moves the four output
+        // actions back here (syncExportPlacement).
         const menuGroups = [
             [],
             [correctionToggle, restoreCorrections],
@@ -3129,7 +3158,13 @@ class MarkdownTabView {
             'aria-label': this.t('viewer.exportActions'),
             'aria-hidden': 'true',
         });
-        appendChildren(exportMenu, saveSnapshot, exportMarkdown, exportObsidian);
+        appendChildren(
+            exportMenu,
+            saveSnapshot,
+            exportMarkdown,
+            exportObsidian,
+            exportEpub
+        );
         const exportActions = this.createElement('div', {
             class: 'markdown-export-actions',
         });
@@ -3212,6 +3247,8 @@ class MarkdownTabView {
             exportMarkdownLabel,
             exportObsidian,
             exportObsidianLabel,
+            exportEpub,
+            exportEpubLabel,
             reportProblem,
             reportProblemLabel,
             citationGraphButton,
@@ -3580,6 +3617,11 @@ class MarkdownTabView {
                 ownerWindow: this.ownerWindow,
             });
         });
+        this.listen(this.elements.exportEpub, 'click', () => {
+            this.runDocumentAction('exportEpub', 'onExportEpub', {
+                ownerWindow: this.ownerWindow,
+            });
+        });
         this.listen(this.elements.citationGraphButton, 'click', () => {
             this.openCitationGraph();
         });
@@ -3945,6 +3987,7 @@ class MarkdownTabView {
             saveSnapshot: this.elements.saveSnapshot,
             exportMarkdown: this.elements.exportMarkdown,
             exportObsidian: this.elements.exportObsidian,
+            exportEpub: this.elements.exportEpub,
         }[kind];
         if (!button || button.disabled
             || this.documentActionBusy
@@ -5983,6 +6026,17 @@ class MarkdownTabView {
         this.elements.exportObsidianLabel.textContent = this.t(
             'viewer.exportObsidianShort'
         );
+        this.elements.exportEpub.setAttribute(
+            'aria-label',
+            this.t('viewer.exportEpub')
+        );
+        this.elements.exportEpub.setAttribute(
+            'title',
+            this.t('viewer.exportEpub')
+        );
+        this.elements.exportEpubLabel.textContent = this.t(
+            'viewer.exportEpubShort'
+        );
         for (const button of [
             this.elements.reportProblem,
             this.elements.errorReport,
@@ -6148,13 +6202,18 @@ class MarkdownTabView {
         const obsidianSupported = model.status === 'ready'
             && model.renderMode !== 'html'
             && typeof model.onExportObsidian === 'function';
+        const epubSupported = model.status === 'ready'
+            && model.renderMode !== 'html'
+            && typeof model.onExportEpub === 'function';
         const saveAvailable = saveSupported && !figureRestorationPending;
         const exportAvailable = exportSupported && !figureRestorationPending;
         const obsidianAvailable = obsidianSupported
             && !figureRestorationPending;
+        const epubAvailable = epubSupported && !figureRestorationPending;
         const outputSupported = saveSupported
             || exportSupported
-            || obsidianSupported;
+            || obsidianSupported
+            || epubSupported;
         const correctionAvailable = model.status === 'ready'
             && model.renderMode !== 'html'
             && Array.isArray(model.editableBlocks)
@@ -6210,6 +6269,7 @@ class MarkdownTabView {
         this.elements.saveSnapshot.hidden = !saveSupported;
         this.elements.exportMarkdown.hidden = !exportSupported;
         this.elements.exportObsidian.hidden = !obsidianSupported;
+        this.elements.exportEpub.hidden = !epubSupported;
         this.elements.reportProblem.hidden = !reportAvailable;
         this.elements.reportProblem.disabled = !reportAvailable;
         this.elements.correctionToggle.hidden = !correctionAvailable;
@@ -6250,21 +6310,29 @@ class MarkdownTabView {
         this.elements.exportObsidian.disabled = !obsidianAvailable
             || loadingView.visible
             || Boolean(this.documentActionBusy);
+        this.elements.exportEpub.disabled = !epubAvailable
+            || loadingView.visible
+            || Boolean(this.documentActionBusy);
         const pendingLabel = this.t('viewer.figureRestorationPending');
         for (const [action, labelKey] of [
             [this.elements.saveSnapshot, 'viewer.saveSnapshot'],
             [this.elements.exportMarkdown, 'viewer.exportMarkdown'],
             [this.elements.exportObsidian, 'viewer.exportObsidian'],
+            [this.elements.exportEpub, 'viewer.exportEpub'],
         ]) {
             action.setAttribute(
                 'title',
                 figureRestorationPending ? pendingLabel : this.t(labelKey)
             );
         }
-        const outputBusy = ['saveSnapshot', 'exportMarkdown', 'exportObsidian']
-            .includes(this.documentActionBusy);
+        const outputBusy = [
+            'saveSnapshot',
+            'exportMarkdown',
+            'exportObsidian',
+            'exportEpub',
+        ].includes(this.documentActionBusy);
         const outputEnabled = (saveAvailable || exportAvailable
-            || obsidianAvailable)
+            || obsidianAvailable || epubAvailable)
             && !loadingView.visible;
         this.elements.exportToggle.disabled = !outputEnabled
             || Boolean(this.documentActionBusy);
@@ -6400,6 +6468,15 @@ class MarkdownTabView {
         this.elements.exportObsidian.classList.toggle(
             'is-exporting',
             exportingObsidian
+        );
+        const exportingEpub = this.documentActionBusy === 'exportEpub';
+        this.elements.exportEpub.setAttribute(
+            'aria-busy',
+            String(exportingEpub)
+        );
+        this.elements.exportEpub.classList.toggle(
+            'is-exporting',
+            exportingEpub
         );
         if (!documentActionsAvailable) {
             this.documentActionsOpen = false;
@@ -6831,6 +6908,7 @@ class MarkdownTabView {
             this.elements.saveSnapshot,
             this.elements.exportMarkdown,
             this.elements.exportObsidian,
+            this.elements.exportEpub,
         ];
         appendChildren(target, ...outputActions);
         // The open menu no longer holds what it showed; close both.

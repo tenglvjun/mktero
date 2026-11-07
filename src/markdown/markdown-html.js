@@ -17,7 +17,7 @@ import {
 } from './markdown-figures.js';
 import { parseMarkdownDirective, SECTION_LABEL_KEYS } from './markdown-directives.js';
 import { isNumericCitationContent } from './text-normalization.js';
-import { safeMarkdownLinkURL } from './markdown-links.js';
+import { safeEpubLinkURL, safeMarkdownLinkURL } from './markdown-links.js';
 
 export { safeMarkdownLinkURL };
 
@@ -333,7 +333,9 @@ function createSafeRenderer(
 
         link({ href, tokens }) {
             const label = this.parser.parseInline(tokens);
-            const safeHref = safeMarkdownLinkURL(href);
+            const safeHref = target === 'epub'
+                ? safeEpubLinkURL(href)
+                : safeMarkdownLinkURL(href);
             if (!safeHref) return label;
             return `<a href="${escapeAttribute(safeHref)}" rel="noreferrer">${label}</a>`;
         },

@@ -2,7 +2,7 @@
 
 [English](./references-and-export.md) · [简体中文](./references-and-export.zh-CN.md) · [Back to README](../README.md)
 
-Check and import a paper's references, explore connections in your library, and save a snapshot or export Markdown with its figures. Exported Markdown includes your saved corrections.
+Check and import a paper's references, explore connections in your library, and save a snapshot or export Markdown or EPUB with its figures. Exported text includes your saved corrections.
 
 ## Import references from Markdown
 
@@ -24,7 +24,7 @@ In a paper's graph details, `Open with Mktero` opens its first local PDF attachm
 
 ## Save a portable snapshot
 
-`Save snapshot`, `Export Markdown`, and `Export to Obsidian` share the toolbar's `Save and export` menu, the share button before `⋯`. In a reading pane **680px wide or narrower**, the same three actions move into `⋯`. While figures are being restored from the PDF, the save/export entry and its actions remain visible but disabled; Focus mode hides the entry.
+`Save snapshot`, `Export Markdown`, `Export to Obsidian`, and `Export EPUB` share the toolbar's `Save and export` menu, the share button before `⋯`, in that order. In a reading pane **680px wide or narrower**, all four actions move into `⋯`. While figures are being restored from the PDF, the save/export entry and its actions remain visible but disabled; Focus mode hides the entry.
 
 Choose `Save snapshot` to create a dedicated `Mktero Markdown Snapshot` Zotero note under the PDF's parent item. It contains portable HTML, figures as embedded image attachments, and the original Markdown and source map as related attachments.
 
@@ -37,6 +37,18 @@ A standalone PDF without a parent library item cannot save a snapshot. If you ed
 3. If the folder is `A` and the paper title is `B`, the result is `A/B/B.md`, with extracted figures in `A/B/assets/`. Mktero updates the Markdown image paths.
 
 This action exports the view you are reading and never runs automatically. Existing exports are not overwritten: if `B` exists, Mktero creates a numbered directory such as `B-2` with a matching `B-2.md`. See [file and path rules](#file-and-path-rules) for Windows and image-name handling.
+
+## Export EPUB
+
+1. Open the document and switch to the reading view you want to save: `Original`, `Translation`, or `Bilingual`.
+2. Choose `Export EPUB`, the fourth action in `Save and export` (or `⋯` in a narrow pane). If figure restoration is still running, wait until the action becomes available.
+3. In the local file picker, choose a location and file name, then save. The suggested name uses the paper title and ends in `.epub`; Mktero adds the extension if it is missing. Cancelling the picker writes nothing.
+
+The reflowable EPUB contains the current document's selected reading view, including saved corrections. It packages available local images, splits chapters at top-level headings, and includes a chapter table of contents. Heading links point to their chapter, recognized citations link to the reference section, and recognized footnotes appear at chapter ends with links from the text.
+
+Formulas are kept as MathML. Ordinary tables remain HTML tables; tables estimated to be too wide are rendered as PNG images and packaged in the book. MathML display and link navigation depend on the EPUB reader.
+
+EPUB export uses the Markdown and image assets already loaded for reading. It starts no OCR or conversion, reads no PDF, and writes neither Mktero caches nor the Zotero library. Only the chosen local export file is saved, and Mktero does not sync that copy. To export multiple papers' original Markdown and complete saved translations, use [Obsidian batch export](#batch-export).
 
 ## Export to Obsidian
 

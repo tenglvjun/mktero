@@ -94,6 +94,14 @@ test('saves an open correction when its tab closes and opens past damaged correc
         const shadow = await waitFor(() => tabs.get(tabID)?.container
             .querySelector('.mktero-tab-host')?.shadowRoot);
         await waitFor(() => shadow.querySelector('.cm-content')?.textContent.includes(expectedText));
+        const menu = shadow.querySelector('#mktero-export-action-menu');
+        assert.deepEqual([...menu.children].filter(action => !action.hidden).map(action => action.id), [
+            'mktero-save-snapshot',
+            'mktero-export-markdown',
+            'mktero-export-obsidian',
+            'mktero-export-epub',
+        ], 'The bootstrap/presenter path exposes all four export actions');
+        await waitFor(() => !shadow.querySelector('#mktero-export-epub').disabled);
         return shadow;
     };
     const editFirstBlock = (shadow, replacement, replacedLength = 4) => {

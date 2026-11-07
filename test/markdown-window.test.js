@@ -3030,6 +3030,7 @@ test('groups document actions by purpose and hides groups with nothing in them',
         onSaveSnapshot: () => {},
         onExportMarkdown: () => {},
         onExportObsidian: () => {},
+        onExportEpub: () => {},
         onReportProblem: () => {},
         onOpenCitationGraph: () => {},
         onTranslateDocument: () => {},
@@ -3062,6 +3063,7 @@ test('groups document actions by purpose and hides groups with nothing in them',
                 'mktero-save-snapshot',
                 'mktero-export-markdown',
                 'mktero-export-obsidian',
+                'mktero-export-epub',
             ]
         );
         assert.deepEqual(groups.map(group => group.hidden), [true, false, false]);
@@ -3081,6 +3083,7 @@ test('groups document actions by purpose and hides groups with nothing in them',
             onSaveSnapshot: null,
             onExportMarkdown: null,
             onExportObsidian: null,
+            onExportEpub: null,
         });
         assert.deepEqual(groups.map(group => group.hidden), [true, true, false]);
         assert.equal(shadow.querySelector('#mktero-export-actions').hidden, true);
@@ -3130,6 +3133,7 @@ test('folds Save and export into the document actions in a narrow reading pane',
         onSaveSnapshot: () => { saves.push('save'); },
         onExportMarkdown: () => {},
         onExportObsidian: () => {},
+        onExportEpub: () => {},
     });
     const { view, shadow, observers, resizeReader } = createResizableView(model);
 
@@ -3140,6 +3144,7 @@ test('folds Save and export into the document actions in a narrow reading pane',
         const menu = shadow.querySelector('#mktero-document-action-menu');
         const exportMenu = shadow.querySelector('#mktero-export-action-menu');
         const save = shadow.querySelector('#mktero-save-snapshot');
+        const epub = shadow.querySelector('#mktero-export-epub');
         const outputGroup = menu.firstElementChild;
         assert.equal(MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH, 680);
 
@@ -3153,7 +3158,9 @@ test('folds Save and export into the document actions in a narrow reading pane',
         resizeReader(MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH);
         // The same buttons move; nothing is duplicated.
         assert.ok(save.parentElement === outputGroup);
+        assert.ok(epub.parentElement === outputGroup);
         assert.equal(shadow.querySelectorAll('#mktero-save-snapshot').length, 1);
+        assert.equal(shadow.querySelectorAll('#mktero-export-epub').length, 1);
         assert.equal(exportMenu.children.length, 0);
         assert.equal(exportActions.hidden, true);
         assert.equal(exportToggle.hidden, true);
@@ -3170,6 +3177,7 @@ test('folds Save and export into the document actions in a narrow reading pane',
 
         resizeReader(MARKDOWN_TOOLBAR_EXPORT_FOLD_WIDTH + 1);
         assert.ok(save.parentElement === exportMenu);
+        assert.ok(epub.parentElement === exportMenu);
         assert.equal(exportToggle.hidden, false);
         assert.equal(toggle.hidden, true);
         assert.equal(outputGroup.hidden, true);
@@ -3177,6 +3185,7 @@ test('folds Save and export into the document actions in a narrow reading pane',
         // An unmeasured pane (width 0) keeps the current layout.
         resizeReader(0);
         assert.ok(save.parentElement === exportMenu);
+        assert.ok(epub.parentElement === exportMenu);
     }
     finally {
         view.destroy();
@@ -3570,6 +3579,64 @@ test('exports Markdown from the Save and export menu and reports progress', asyn
     assert.equal(
         shadow.querySelector('.markdown-reader-action-status').textContent,
         'Markdown exported'
+    );
+    view.destroy();
+});
+
+test('exports EPUB as the fourth Save and export action and reports progress', async () => {
+    let exportOptions;
+    let finishExport;
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: '# Paper',
+        sourceKind: 'markdown',
+        onExportEpub: options => {
+            exportOptions = options;
+            return new Promise(resolve => {
+                finishExport = resolve;
+            });
+        },
+    });
+    const { document, view, shadow } = createView(model);
+    const toggle = shadow.querySelector('#mktero-export-actions');
+    const exportMenu = shadow.querySelector('#mktero-export-action-menu');
+    const exportButton = shadow.querySelector('#mktero-export-epub');
+
+    assert.deepEqual(
+        [...exportMenu.children].map(action => action.id),
+        [
+            'mktero-save-snapshot',
+            'mktero-export-markdown',
+            'mktero-export-obsidian',
+            'mktero-export-epub',
+        ]
+    );
+    assert.equal(exportButton.textContent, 'Export EPUB');
+    assert.equal(
+        exportButton.querySelector('svg')?.getAttribute('data-lucide'),
+        'file-text'
+    );
+
+    toggle.click();
+    exportButton.click();
+    assert.equal(exportOptions.ownerWindow, document.defaultView);
+    assert.equal(exportButton.disabled, true);
+    assert.equal(exportButton.getAttribute('aria-busy'), 'true');
+    assert.equal(toggle.getAttribute('aria-busy'), 'true');
+    assert.equal(
+        shadow.querySelector('.markdown-reader-action-status').textContent,
+        'Exporting EPUB…'
+    );
+
+    finishExport({ status: 'exported', path: '/exports/Paper.epub' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(exportButton.disabled, false);
+    assert.equal(exportButton.getAttribute('aria-busy'), 'false');
+    assert.equal(toggle.getAttribute('aria-busy'), 'false');
+    assert.equal(
+        shadow.querySelector('.markdown-reader-action-status').textContent,
+        'EPUB exported'
     );
     view.destroy();
 });
