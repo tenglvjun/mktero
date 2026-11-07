@@ -51,7 +51,8 @@ and parser profile.
 - Import supported local llm-for-zotero MinerU results without an account, API key, or another upload. [Import a result](./docs/conversion.md#import-a-local-llm-for-zotero-result)
 - Check references across accessible Zotero libraries, copy existing items, or import missing metadata and an optional public PDF. [References](./docs/references-and-export.md#import-references-from-markdown)
 - Explore direct reference relationships in your current library through Semantic Scholar, OpenCitations, and OpenAlex. [Citation graph](./docs/references-and-export.md#explore-the-citation-graph)
-- Save a portable Zotero snapshot or export corrected Markdown and figures to a folder or Obsidian, including batch export. [Save and export](./docs/references-and-export.md#save-a-portable-snapshot)
+- Save a portable Zotero snapshot or export corrected Markdown and figures to a folder. [Save and export](./docs/references-and-export.md#save-a-portable-snapshot)
+- Export the current reading view as EPUB, or batch-export original Markdown and complete saved translations to Obsidian. [EPUB](./docs/references-and-export.md#export-epub) · [Obsidian](./docs/references-and-export.md#export-to-obsidian)
 - See cached Markdown availability and preparation progress in the item list's local Markdown column. [Availability](./docs/conversion.md#see-which-items-already-have-markdown)
 
 ## Quick start

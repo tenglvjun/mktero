@@ -46,7 +46,8 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 - 导入受支持的 llm-for-zotero 本地 MinerU 结果，无需账号、API 密钥或再次上传。[导入结果](./docs/conversion.zh-CN.md#导入-llm-for-zotero-本地结果)
 - 在可访问的 Zotero 文库中检查引用，复制已有条目，或导入缺失的元数据与可选的公开 PDF。[参考文献](./docs/references-and-export.zh-CN.md#从-markdown-导入参考文献)
 - 借助 Semantic Scholar、OpenCitations 和 OpenAlex，浏览当前文库内的直接引用关系。[引用图谱](./docs/references-and-export.zh-CN.md#浏览引用图谱)
-- 保存便携 Zotero 快照，或将校对后的 Markdown 和图片导出到本地文件夹、Obsidian，也支持批量导出。[保存与导出](./docs/references-and-export.zh-CN.md#保存便携快照)
+- 保存便携 Zotero 快照，或将校对后的 Markdown 和图片导出到本地文件夹。[保存与导出](./docs/references-and-export.zh-CN.md#保存便携快照)
+- 将当前阅读视图导出为 EPUB，或将原文 Markdown 和完整保存的译文批量导出到 Obsidian。[EPUB](./docs/references-and-export.zh-CN.md#导出-epub) · [Obsidian](./docs/references-and-export.zh-CN.md#导出到-obsidian)
 - 在文献列表的本地 Markdown 列中查看缓存可用状态与准备进度。[Markdown 状态](./docs/conversion.zh-CN.md#查看哪些条目已有-markdown)
 
 ## 快速开始
