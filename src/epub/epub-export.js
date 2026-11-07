@@ -462,7 +462,7 @@ function addHeadingIDs(html, headings, reservedIDs = []) {
             ? primaryIDBySlug.get(slug) || allocateHeadingID(slug, usedIDs)
             : allocateHeadingID(slug, usedIDs);
         outputHeadings.push({ slug, id, level: Number(level) });
-        return `<h${level} id="${id}"${attributes}>${content}</h${level}>`;
+        return `<h${level} id="${escapeAttribute(id)}"${attributes}>${content}</h${level}>`;
     });
     return { html: output, headings: outputHeadings };
 }
