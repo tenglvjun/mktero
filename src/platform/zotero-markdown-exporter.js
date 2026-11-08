@@ -27,101 +27,155 @@ export function createZoteroMarkdownExporter({
         throw new TypeError('A Windows platform flag is required');
     }
     return {
-        async export({ ownerWindow, title, markdown, assets, assetBasePath }) {
-            const picker = createFilePicker();
-            picker.init(
+        // A batch resolves the destination folder once and then passes it to
+        // every document, so a hundred papers do not mean a hundred folder
+        // pickers. `null` means the user cancelled the picker.
+        async resolveDirectory({ ownerWindow } = {}) {
+            return pickExportDirectory({
+                createFilePicker,
+                translate,
                 ownerWindow,
-                translate('viewer.exportMarkdownDialogTitle'),
-                picker.modeGetFolder
-            );
-            const result = await picker.show();
-            if (result === picker.returnCancel) {
-                return { status: 'cancelled' };
-            }
-            const selectedDirectory = String(picker.file || '');
-            if (!selectedDirectory) {
-                throw new Error('The Markdown export directory is unavailable');
-            }
-            const plan = createMarkdownExportPlan({
+            });
+        },
+
+        async export({
+            ownerWindow,
+            directory = '',
+            title,
+            markdown,
+            assets,
+            assetBasePath,
+        }) {
+            const selectedDirectory = typeof directory === 'string' && directory
+                ? directory
+                : await pickExportDirectory({
+                    createFilePicker,
+                    translate,
+                    ownerWindow,
+                });
+            if (selectedDirectory === null) return { status: 'cancelled' };
+            return writeMarkdownDocument({
+                title,
                 markdown,
                 assets,
                 assetBasePath,
-                assetDirectoryName: 'assets',
+                selectedDirectory,
+                createID,
+                ioUtils,
+                pathUtils,
+                translate,
+                isWindows,
             });
-            const exportID = normalizeExportID(createID());
-            const temporarySuffix = markdownExportTemporarySuffix(exportID);
-            const join = (...parts) => pathUtils.join(...parts);
-            let preferredDocumentName = createMarkdownExportDirectoryName(
-                title,
-                translate('viewer.exportMarkdownDefaultFileName')
-            );
-            if (isWindows) {
-                preferredDocumentName = constrainExportDirectoryName({
-                    preferredName: preferredDocumentName,
-                    parentPath: selectedDirectory,
-                    join,
-                    temporarySuffix,
-                    assetRelativePaths: plan.assets.map(asset => (
-                        asset.relativePath
-                    )),
-                });
-            }
-            let directoryPath = null;
-            let outputPath = null;
-            let assetDirectoryPath = null;
-            let temporaryMarkdownPath = null;
-            let createdDocumentDirectory = false;
-            try {
-                const available = await createAvailableExportDirectory({
-                    directory: selectedDirectory,
-                    preferredName: preferredDocumentName,
-                    ioUtils,
-                    pathUtils,
-                });
-                directoryPath = available.path;
-                createdDocumentDirectory = true;
-                outputPath = pathUtils.join(
-                    directoryPath,
-                    available.name + '.md'
-                );
-                temporaryMarkdownPath = outputPath + temporarySuffix;
-                if (plan.assets.length) {
-                    assetDirectoryPath = pathUtils.join(directoryPath, 'assets');
-                    await ioUtils.makeDirectory(assetDirectoryPath, {
-                        ignoreExisting: false,
-                    });
-                    await writeExportAssets(
-                        assetDirectoryPath,
-                        plan.assets,
-                        ioUtils,
-                        pathUtils
-                    );
-                }
-                await ioUtils.writeUTF8(outputPath, plan.markdown, {
-                    tmpPath: temporaryMarkdownPath,
-                });
-            }
-            catch (error) {
-                if (temporaryMarkdownPath) {
-                    await ioUtils.remove(temporaryMarkdownPath, {
-                        ignoreAbsent: true,
-                    }).catch(() => {});
-                }
-                if (createdDocumentDirectory) {
-                    await ioUtils.remove(directoryPath, {
-                        recursive: true,
-                        ignoreAbsent: true,
-                    }).catch(() => {});
-                }
-                throw error;
-            }
-            return {
-                status: 'exported',
-                path: outputPath,
-                assetDirectoryPath,
-                assetCount: plan.assets.length,
-            };
         },
+    };
+}
+
+async function pickExportDirectory({ createFilePicker, translate, ownerWindow }) {
+    const picker = createFilePicker();
+    picker.init(
+        ownerWindow,
+        translate('viewer.exportMarkdownDialogTitle'),
+        picker.modeGetFolder
+    );
+    const result = await picker.show();
+    if (result === picker.returnCancel) return null;
+    const selectedDirectory = String(picker.file || '');
+    if (!selectedDirectory) {
+        throw new Error('The Markdown export directory is unavailable');
+    }
+    return selectedDirectory;
+}
+
+async function writeMarkdownDocument({
+    title,
+    markdown,
+    assets,
+    assetBasePath,
+    selectedDirectory,
+    createID,
+    ioUtils,
+    pathUtils,
+    translate,
+    isWindows,
+}) {
+    const plan = createMarkdownExportPlan({
+        markdown,
+        assets,
+        assetBasePath,
+        assetDirectoryName: 'assets',
+    });
+    const exportID = normalizeExportID(createID());
+    const temporarySuffix = markdownExportTemporarySuffix(exportID);
+    const join = (...parts) => pathUtils.join(...parts);
+    let preferredDocumentName = createMarkdownExportDirectoryName(
+        title,
+        translate('viewer.exportMarkdownDefaultFileName')
+    );
+    if (isWindows) {
+        preferredDocumentName = constrainExportDirectoryName({
+            preferredName: preferredDocumentName,
+            parentPath: selectedDirectory,
+            join,
+            temporarySuffix,
+            assetRelativePaths: plan.assets.map(asset => (
+                asset.relativePath
+            )),
+        });
+    }
+    let directoryPath = null;
+    let outputPath = null;
+    let assetDirectoryPath = null;
+    let temporaryMarkdownPath = null;
+    let createdDocumentDirectory = false;
+    try {
+        const available = await createAvailableExportDirectory({
+            directory: selectedDirectory,
+            preferredName: preferredDocumentName,
+            ioUtils,
+            pathUtils,
+        });
+        directoryPath = available.path;
+        createdDocumentDirectory = true;
+        outputPath = pathUtils.join(
+            directoryPath,
+            available.name + '.md'
+        );
+        temporaryMarkdownPath = outputPath + temporarySuffix;
+        if (plan.assets.length) {
+            assetDirectoryPath = pathUtils.join(directoryPath, 'assets');
+            await ioUtils.makeDirectory(assetDirectoryPath, {
+                ignoreExisting: false,
+            });
+            await writeExportAssets(
+                assetDirectoryPath,
+                plan.assets,
+                ioUtils,
+                pathUtils
+            );
+        }
+        await ioUtils.writeUTF8(outputPath, plan.markdown, {
+            tmpPath: temporaryMarkdownPath,
+        });
+    }
+    catch (error) {
+        if (temporaryMarkdownPath) {
+            await ioUtils.remove(temporaryMarkdownPath, {
+                ignoreAbsent: true,
+            }).catch(() => {});
+        }
+        if (createdDocumentDirectory) {
+            await ioUtils.remove(directoryPath, {
+                recursive: true,
+                ignoreAbsent: true,
+            }).catch(() => {});
+        }
+        throw error;
+    }
+    return {
+        status: 'exported',
+        path: outputPath,
+        assetDirectoryPath,
+        assetCount: plan.assets.length,
     };
 }
 
