@@ -48,7 +48,7 @@ The reflowable EPUB contains the current document's selected reading view, inclu
 
 Formulas, including mathematical author markers and citations, are rendered locally as PNG images so readers without MathML support retain their layout. Repeated formulas share an image, inline images scale with the text and preserve baseline alignment, and citation links remain attached. Formula symbols are images rather than selectable text. Ordinary tables remain HTML tables; tables estimated to be too wide are rendered as PNG images and packaged in the book. Link navigation depends on the EPUB reader.
 
-EPUB export uses the Markdown and image assets already loaded for reading. It starts no OCR or conversion, reads no PDF, and writes neither Mktero caches nor the Zotero library. Only the chosen local export file is saved, and Mktero does not sync that copy. To export multiple papers' original Markdown and complete saved translations, use [Obsidian batch export](#batch-export).
+EPUB export uses the Markdown and image assets already loaded for reading. It starts no OCR or conversion, reads no PDF, and writes neither Mktero caches nor the Zotero library. Only the chosen local export file is saved, and Mktero does not sync that copy. To export many papers at once, use [batch export](#batch-export).
 
 ## Export to Obsidian
 
@@ -62,11 +62,12 @@ Exporting the same Zotero item again updates its note even if the title changes.
 
 ### Batch export
 
-1. Select items and choose `Export selected Markdown to Obsidian`, or right-click a collection and choose `Export collection tree Markdown to Obsidian`. These entries appear only when at least one PDF in the selection or collection tree already has readable Markdown, using the Markdown column's readiness check.
+1. Right-click a selection and hover `Export selected Markdown` to open its submenu, or right-click a collection and use `Export collection tree Markdown`. The submenu offers four actions in the same order as the reader's `Save and export` menu: `Save snapshot`, `Export Markdown`, `Export to Obsidian`, and `Export EPUB`. The submenu appears only when at least one PDF in the selection or collection tree already has readable Markdown, using the Markdown column's readiness check.
 2. A collection includes all descendants, like `Prepare collection tree Markdown`. Confirm the total number of unique PDFs and the number that currently have Markdown; only ready Markdown is exported, and the report lists the other PDFs' status.
-3. Choose the vault once if none is saved. Cancelling the vault choice writes nothing. `Cancel` during the batch stops items that have not started; files already written are not rolled back.
+3. A batch of `Markdown` or `EPUB` asks for one parent folder, then writes a paper-named subfolder or `.epub` file per document inside it; a repeated title gets a numbered suffix instead of overwriting an existing file. `Save snapshot` needs no folder and writes a Zotero note. `Export to Obsidian` asks for the vault once if none is saved. Cancelling the picker writes nothing. `Cancel` during the batch stops items that have not started; files already written are not rolled back.
+4. A batch always writes the original Markdown rather than the current reading view, because a selection has no single active view. `Export Markdown` and `Export EPUB` in the reader toolbar still follow the view you are reading.
 
-For one selected item, the export action appears beside reading when Markdown is ready; it does not replace reading. A selection with no ready Markdown does not show the action. One parent item becomes one note: if it has several converted PDFs, Mktero exports the first with a cache and skips the others.
+For one selected item, the export entry appears beside reading when Markdown is ready; it does not replace reading. A selection with no ready Markdown does not show the entry. The per-item actions (`Export to Obsidian` and `Save snapshot`) handle one parent item as one output: if it has several converted PDFs, the first with a cache wins and the others are skipped. `Export Markdown` and `Export EPUB` write one file per PDF and never merge two attachments of the same item. A standalone PDF with no parent library item cannot save a snapshot; that row reports a failure and the rest of the batch continues.
 
 A cache miss never starts OCR or conversion. Batch export is not an account feature or automatic sync. See [batch updates and conflicts](#batch-updates-and-conflicts) for existing files.
 
@@ -106,3 +107,5 @@ YAML frontmatter includes the title, authors, year, DOI, tags, a `zotero://` lin
 The vault is resolved once for the whole batch, and notes still go in its `Mktero` folder. Notes previously written by Mktero and not edited in Obsidian update without asking.
 
 Notes edited in Obsidian, or files belonging to another item, are skipped during the batch. Mktero asks about those conflicts once at the end.
+
+`Export Markdown`, `Export EPUB`, and `Save snapshot` need no such question: a repeated folder or file name gets a numbered suffix, and a snapshot updates the existing Mktero snapshot for that item. Only a snapshot note edited by hand reports a conflict.
