@@ -7,7 +7,7 @@ import { extractReferenceIdentifiers } from './markdown-reference-identifiers.js
 const REFERENCE_HEADING_PATTERN = /^(?:(#{1,6})[ \t]+)?(?:\*{1,2}|_{1,2})?(?:(?:\d+(?:\.\d+)*)[.)]?[ \t]+)?(?:references?|bibliography|works[ \t]+cited|literature[ \t]+cited|参考文献|参考资料|参考书目)(?:\*{1,2}|_{1,2})?[ \t]*[:：]?[ \t]*#*[ \t]*$/gim;
 const AUTHOR_AFFILIATIONS_HEADING_PATTERN = /^#{1,6}[ \t]+(?:author[ \t]+affiliations?|作者单位|作者机构)[ \t]*#*[ \t]*$/gim;
 const MAIN_CONTENT_HEADING_PATTERN = /^(?:(?:#{1,6})[ \t]+)?(?:\*{1,2}|_{1,2})?(?:(?:\d+(?:\.\d+)*)[.)]?[ \t]+)?(?:abstract|summary|background|introduction|materials?[ \t]+and[ \t]+methods|methods?|results?|摘要|背景|引言|绪论|材料与方法|方法|结果)(?:\*{1,2}|_{1,2})?[ \t]*[:：]?[ \t]*#*[ \t]*$/gim;
-const FRONT_MATTER_HEADING_PATTERN = /^(?:authors?(?:[ \t]+(?:details?|information))?|affiliations?|institutional[ \t]+affiliations?|institutions?|departments?|correspond(?:ence|ing[ \t]+authors?)|contact[ \t]+information|keywords?|作者|作者信息|作者单位|机构|所属机构|通讯作者|关键词)$/i;
+const FRONT_MATTER_HEADING_PATTERN = /^(?:article[ \t]+information|authors?(?:[ \t]+(?:details?|information))?|affiliations?|institutional[ \t]+affiliations?|institutions?|departments?|correspond(?:ence|ing[ \t]+authors?)|contact[ \t]+information|keywords?|作者|作者信息|作者单位|机构|所属机构|通讯作者|关键词)$/i;
 const PUBLISHER_CHROME_HEADING_PATTERN = /^(?:check[ \t]+for[ \t]+updates|open[ \t]+access)$/i;
 const MAX_PUBLISHER_CHROME_WORDS = 4;
 const MARKDOWN_HEADING_PATTERN = /^(#{1,6})[ \t]+.+$/gm;

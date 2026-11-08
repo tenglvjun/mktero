@@ -46,7 +46,7 @@ This action exports the view you are reading and never runs automatically. Exist
 
 The reflowable EPUB contains the current document's selected reading view, including saved corrections. It packages available local images, splits chapters at top-level headings, and includes a chapter table of contents. Heading links point to their chapter, recognized citations link to the reference section, and recognized footnotes appear at chapter ends with links from the text.
 
-Formulas are kept as MathML. Ordinary tables remain HTML tables; tables estimated to be too wide are rendered as PNG images and packaged in the book. MathML display and link navigation depend on the EPUB reader.
+Formulas, including mathematical author markers and citations, are rendered locally as PNG images so readers without MathML support retain their layout. Repeated formulas share an image, inline images scale with the text and preserve baseline alignment, and citation links remain attached. Formula symbols are images rather than selectable text. Ordinary tables remain HTML tables; tables estimated to be too wide are rendered as PNG images and packaged in the book. Link navigation depends on the EPUB reader.
 
 EPUB export uses the Markdown and image assets already loaded for reading. It starts no OCR or conversion, reads no PDF, and writes neither Mktero caches nor the Zotero library. Only the chosen local export file is saved, and Mktero does not sync that copy. To export multiple papers' original Markdown and complete saved translations, use [Obsidian batch export](#batch-export).
 

@@ -50,7 +50,7 @@ for (const name of browsers) {
             function check(condition, message) {
                 if (!condition) throw new Error(message);
             }
-            async function inspectPNG(data) {
+            async function inspectPNG(data, formula = false) {
                 const bitmap = await createImageBitmap(new Blob([data], { type: 'image/png' }));
                 const canvas = document.createElement('canvas');
                 canvas.width = bitmap.width;
@@ -76,9 +76,10 @@ for (const name of browsers) {
                 }
                 const metrics = { width: canvas.width, height: canvas.height, dark, left, top, right, bottom };
                 canvas.width = canvas.height = 0;
-                check(dark > 100, 'The table PNG must contain visible table content');
-                check(left >= 10 && top >= 10 && right < metrics.width - 10 && bottom < metrics.height - 10,
-                    'Table content was clipped at a PNG edge: ' + JSON.stringify(metrics));
+                check(dark > (formula ? 20 : 100), 'The PNG must contain visible content');
+                const margin = formula ? 1 : 10;
+                check(left >= margin && top >= margin && right < metrics.width - margin && bottom < metrics.height - margin,
+                    'Content was clipped at a PNG edge: ' + JSON.stringify(metrics));
                 return metrics;
             }
             const pngs = [];
@@ -97,17 +98,36 @@ for (const name of browsers) {
             sourceCanvas.getContext('2d').fillRect(0, 0, 16, 16);
             const webp = await new Promise(resolve => sourceCanvas.toBlob(resolve, 'image/webp'));
             check(webp?.type === 'image/webp', 'Browser must supply a real WebP conversion fixture');
+            const formulaMetrics = [];
+            const formulaMarkdown = [
+                'Lin Shen $^{ID}$, Kun Qian $^{*ID}$.',
+                '',
+                'The EEG encoder $f_{eeg}$ uses $E_{x}^{i} \\in R^{C \\times S}$ and $M_x \\in R^{1 \\times N}$.',
+                '',
+                '$$\\frac{x^2}{y_1} + \\sqrt{x}$$',
+                '',
+                '$$\\begin{pmatrix}a & b \\\\ c & d\\end{pmatrix}$$',
+                '',
+                '$$x^2 + y^2 = z^2 \\tag{5}\\tag{5}$$',
+            ].join('\n');
+            async function renderMathToPNG(options) {
+                const rendered = await renderers.renderMathToPNG(options);
+                formulaMetrics.push(await inspectPNG(rendered.data, true));
+                check(Number.isFinite(rendered.verticalAlign), 'Formula baseline must be finite');
+                return rendered;
+            }
             const archive = await createEpub({
                 title: 'Actual EPUB renderer validation',
                 language: 'en',
                 modified: '2026-11-07T00:00:00Z',
-                markdown: ['# Paper', '', 'A formula $E=mc^2$, citation [1], and footnote $^{1}$.', '',
+                markdown: ['# Paper', '', formulaMarkdown, '', 'A formula $E=mc^2$, citation [1], and footnote $^{1}$.', '',
                     '<!-- mktero-note: footnote -->', '> $^{1}$ A chapter-end note.', '',
                     '![Converted image](images/plot.webp)', '', '| Key | Value |', '| --- | --- |', '| Small | HTML |', '',
                     wideMarkdown, '', 'See [details](#details).', '', '## Details', '', 'Content.', '',
                     '# References', '', '[1] Alpha A. A reference paper. 2020.'].join('\n'),
                 assets: [{ path: 'images/plot.webp', mimeType: 'image/webp', data: new Uint8Array(await webp.arrayBuffer()) }],
                 renderWideTable,
+                renderMathToPNG,
                 renderImageToPNG: renderers.renderImageToPNG,
             });
             const extraWide = '<table><caption>Caption with <p>several lines</p></caption><tbody>'
@@ -148,7 +168,12 @@ for (const name of browsers) {
                 let refused = false;
                 try { await renderers.renderWideTable({ html: '<table><tr><td>' + cell + '</td></tr></table>' }); }
                 catch (error) { refused = /unsupported markup|local asset/u.test(error.message); }
-                check(refused, 'Unsafe table markup must fail before insertion: ' + cell);
+                if (cell.startsWith('<img')) {
+                    check(refused, 'Unknown image resources must be rejected: ' + cell);
+                }
+                else {
+                    check(!refused, 'Unsupported wrappers and attributes must be removed safely: ' + cell);
+                }
             }
             check(!window.epubUnsafe, 'Table event handlers must never execute');
             check(document.querySelectorAll('[aria-hidden="true"]').length === 0, 'Temporary table hosts must be removed');
@@ -231,7 +256,7 @@ for (const name of browsers) {
                 presenter.dispose();
                 containers.forEach(container => container.remove());
             }
-            return { archive: Array.from(archive), pngs, tableMetrics, refusedOversized, readerMenu };
+            return { archive: Array.from(archive), pngs, tableMetrics, formulaMetrics, refusedOversized, readerMenu };
         }, await readFile(path.join(root, 'ui/markdown.css'), 'utf8'));
         const xmlPage = await browser.newPage();
         xmlPage.on('request', request => {
@@ -255,8 +280,14 @@ for (const name of browsers) {
                     + '<td><math xmlns="http://www.w3.org/1998/Math/MathML"><msup><mi>x</mi><mn>2</mn></msup></math></td></tr></table>',
                 assets: [{ path: 'images/cell.png', mimeType: 'image/png', data: bytes }],
             });
+            const formula = await renderers.renderMathToPNG({
+                html: '<math xmlns="http://www.w3.org/1998/Math/MathML"><msubsup><mi>E</mi><mi>x</mi><mi>i</mi></msubsup></math>',
+            });
+            if (!(formula.width > 0 && formula.height > 0 && Number.isFinite(formula.verticalAlign))) {
+                throw new Error('XML formula layout is invalid');
+            }
             const bitmap = await createImageBitmap(new Blob([rendered.data], { type: 'image/png' }));
-            const result = { contentType: document.contentType, width: bitmap.width, height: bitmap.height };
+            const result = { contentType: document.contentType, width: bitmap.width, height: bitmap.height, formulaWidth: formula.width };
             bitmap.close();
             canvas.width = canvas.height = 0;
             if (document.querySelector('[aria-hidden="true"]')) throw new Error('XML host was not cleaned');
@@ -270,7 +301,9 @@ for (const name of browsers) {
         const chapter = new JSDOM(new TextDecoder().decode(entries['OEBPS/text/chapter-01.xhtml']), { contentType: 'application/xhtml+xml' }).window.document;
         assert.equal(chapter.querySelectorAll('table').length, 1, 'Ordinary table remains HTML');
         assert.equal(chapter.querySelectorAll('figure.epub-table-image img').length, 1);
-        assert.ok(chapter.getElementsByTagNameNS('http://www.w3.org/1998/Math/MathML', 'math').length > 0);
+        assert.equal(chapter.querySelector('math, annotation'), null);
+        assert.ok(chapter.querySelectorAll('img.epub-math-image').length >= 9);
+        assert.ok(report.formulaMetrics.length >= 9);
         for (const element of chapter.querySelectorAll('a[href]')) {
             const href = element.getAttribute('href');
             if (!href.startsWith('chapter-')) continue;
@@ -282,7 +315,7 @@ for (const name of browsers) {
         assert.ok(entries['OEBPS/images/table-0001.png'], 'Actual wide table PNG is packaged');
         await writeFile(path.join(output, name + '.epub'), archive);
         for (const [index, bytes] of report.pngs.entries()) await writeFile(path.join(output, name + '-table-' + (index + 1) + '.png'), Uint8Array.from(bytes));
-        const metrics = { browser: name, version: browser.version(), tables: report.tableMetrics, refusedOversized: report.refusedOversized, xmlHost, readerMenu: report.readerMenu };
+        const metrics = { browser: name, version: browser.version(), tables: report.tableMetrics, formulas: report.formulaMetrics, refusedOversized: report.refusedOversized, xmlHost, readerMenu: report.readerMenu };
         await writeFile(path.join(output, name + '-report.json'), JSON.stringify(metrics, null, 2) + '\n');
         console.log(name + ' ' + browser.version() + ': actual rasterization and EPUB export passed');
     }
