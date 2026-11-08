@@ -758,11 +758,27 @@ function tableCaption(table) {
 }
 
 function mathImageAlternativeText(math) {
-    return decodeMathAlternativeEntities(String(math).replace(/<[^>]*>/gu, ''))
-        .replace(/[<>]/gu, character => character === '<' ? '\u2039' : '\u203a')
+    return decodeMathAlternativeEntities(mathMarkupText(math))
         .replace(/[\u0000-\u001F\u007F]/gu, ' ')
         .replace(/\s+/gu, ' ')
         .trim();
+}
+
+function mathMarkupText(math) {
+    let text = '';
+    let inTag = false;
+    for (const character of String(math)) {
+        if (inTag) {
+            if (character === '>') inTag = false;
+            continue;
+        }
+        if (character === '<') {
+            inTag = true;
+            continue;
+        }
+        text += character;
+    }
+    return text;
 }
 
 function decodeMathAlternativeEntities(value) {
