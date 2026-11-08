@@ -100,13 +100,14 @@ import {
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import {
-    createObsidianExportBatch,
-    mergeObsidianExportOverwrite,
-    obsidianExportRowMessage,
-    selectObsidianExportConfirmations,
-    selectObsidianExportGroups,
-    summarizeObsidianExportBatch,
-} from './core/obsidian-export-batch.js';
+    createDocumentExportBatch,
+    documentExportRowMessage,
+    mergeDocumentExportOverwrite,
+    selectDocumentExportConfirmations,
+    selectDocumentExportGroups,
+    summarizeDocumentExportBatch,
+    supportsExportAction,
+} from './core/document-export-batch.js';
 import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
     collectMatchedAnnotationRanges,
@@ -345,14 +346,65 @@ const conversionFailures = new Map();
 const batchItemWatchers = new Map();
 const backgroundContinuations = new Map();
 const OBSIDIAN_EXPORT_QUEUE_ID = 'mktero-obsidian-export';
+// Markdown, EPUB, and snapshot batches share one queue and one controller: they
+// all write from the same cached Markdown, so running two at once would race on
+// the same documents for no benefit.
+const DOCUMENT_EXPORT_QUEUE_ID = 'mktero-document-export';
 const OBSIDIAN_ITEM_KEY = /^[A-Z0-9]{8}$/;
+// Obsidian keeps its own wording so its progress window still says "note" and
+// "Obsidian" instead of the generic document-export copy.
+const OBSIDIAN_EXPORT_LABELS = Object.freeze({
+    summary: Object.freeze({
+        exported: 'obsidianBatch.exported',
+        notExported: 'obsidianBatch.notExported',
+    }),
+    rows: Object.freeze({
+        exported: 'obsidianBatch.rowExported',
+        notReady: 'obsidianBatch.rowNotReady',
+        preparing: 'obsidianBatch.rowPreparing',
+        conflict: 'obsidianBatch.rowConflict',
+        failed: 'obsidianBatch.rowFailed',
+    }),
+});
+const DOCUMENT_EXPORT_LABELS = Object.freeze({
+    summary: Object.freeze({
+        exported: 'exportBatch.exported',
+        notExported: 'exportBatch.notExported',
+    }),
+    rows: Object.freeze({
+        exported: 'exportBatch.rowExported',
+        notReady: 'exportBatch.rowNotReady',
+        preparing: 'exportBatch.rowPreparing',
+        conflict: 'exportBatch.rowConflict',
+        failed: 'exportBatch.rowFailed',
+    }),
+});
+// The success row says what was written, so a mixed-up menu choice is visible
+// in the progress window.
+const EXPORTED_ROW_LABEL_KEYS = Object.freeze({
+    snapshot: 'exportBatch.snapshotRowExported',
+    markdown: 'exportBatch.markdownRowExported',
+    epub: 'exportBatch.epubRowExported',
+});
+// The export actions the item and collection menus offer, in menu order.
+const EXPORT_ACTIONS = Object.freeze([
+    'snapshot',
+    'markdown',
+    'obsidian',
+    'epub',
+]);
 const progressButtonDisposers = new Map();
 const obsidianExportButtonDisposers = new Map();
+const documentExportButtonDisposers = new Map();
 const cancelledPreparations = new Set();
 let obsidianExportController = null;
 let obsidianExportRowsOpened = false;
 let obsidianExportStatus = '';
 let obsidianExportStatusOverwritten = false;
+let documentExportController = null;
+let documentExportRowsOpened = false;
+let documentExportStatus = '';
+let documentExportStatusOverwritten = false;
 
 const runtime = {
     id: null,
@@ -390,6 +442,7 @@ const runtime = {
     importIndex: null,
     importReadiness: null,
     obsidianExportProgress: null,
+    documentExportProgress: null,
     rootURI: null,
     preferencePaneID: null,
     localization: null,
@@ -1301,6 +1354,7 @@ globalThis.shutdown = function shutdown() {
     const sharedConversionStopped = runtime.sharedConversion?.dispose();
     runtime.hostedConversionScope?.dispose();
     abortObsidianExport();
+    abortDocumentExport();
     abortAllTranslations();
     runtime.reasoningCatalogStore?.dispose();
     runtime.disposeReasoningCatalogHost?.();
@@ -1359,6 +1413,7 @@ globalThis.shutdown = function shutdown() {
     runtime.conversionActivity = null;
     runtime.conversionProgress = null;
     runtime.obsidianExportProgress = null;
+    runtime.documentExportProgress = null;
     runtime.extractor = null;
     runtime.cache = null;
     runtime.readiness = null;
@@ -1415,6 +1470,7 @@ globalThis.onMainWindowLoad = function onMainWindowLoad({ window }) {
     registerDiagnosticMenu(window);
     installProgressButton(window);
     installObsidianExportProgressButton(window);
+    installDocumentExportProgressButton(window);
 };
 globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
     runtime.presenter?.closeForWindow(window);
@@ -1423,6 +1479,7 @@ globalThis.onMainWindowUnload = function onMainWindowUnload({ window }) {
     disposeDiagnosticMenu(window);
     disposeProgressButton(window);
     disposeObsidianExportProgressButton(window);
+    disposeDocumentExportProgressButton(window);
     runtime.citationPresenter?.closeForWindow(window);
 };
 
@@ -2204,6 +2261,59 @@ function abortObsidianExport() {
     obsidianExportController?.abort();
     runtime.obsidianExportProgress?.cancel();
     disposeObsidianExportProgressButtons();
+}
+
+function ensureDocumentExportProgress() {
+    if (runtime.documentExportProgress) return runtime.documentExportProgress;
+    runtime.documentExportProgress = createZoteroConversionProgress({
+        zotero: Zotero,
+        services: typeof Services === 'undefined' ? null : Services,
+        title: runtimeTranslate('exportBatch.windowTitle'),
+        queueID: DOCUMENT_EXPORT_QUEUE_ID,
+        onCancel: () => {
+            documentExportController?.abort();
+        },
+    });
+    if (runtime.documentExportProgress) installDocumentExportProgressButtons();
+    return runtime.documentExportProgress;
+}
+
+function installDocumentExportProgressButtons() {
+    const windows = Zotero.getMainWindows?.()
+        || [Zotero.getMainWindow?.()].filter(Boolean);
+    for (const window of windows) installDocumentExportProgressButton(window);
+}
+
+function installDocumentExportProgressButton(window) {
+    if (!window || !runtime.documentExportProgress) return;
+    disposeDocumentExportProgressButton(window);
+    const rootURI = runtime.rootURI || '';
+    const dispose = installZoteroConversionProgressButton({
+        zotero: Zotero,
+        window,
+        services: typeof Services === 'undefined' ? null : Services,
+        title: runtimeTranslate('exportBatch.windowTitle'),
+        iconURL: `${rootURI}${rootURI.endsWith('/') ? '' : '/'}ui/icons/mktero.svg`,
+        queueID: DOCUMENT_EXPORT_QUEUE_ID,
+    });
+    if (dispose) documentExportButtonDisposers.set(window, dispose);
+}
+
+function disposeDocumentExportProgressButton(window) {
+    documentExportButtonDisposers.get(window)?.();
+    documentExportButtonDisposers.delete(window);
+}
+
+function disposeDocumentExportProgressButtons() {
+    for (const window of [...documentExportButtonDisposers.keys()]) {
+        disposeDocumentExportProgressButton(window);
+    }
+}
+
+function abortDocumentExport() {
+    documentExportController?.abort();
+    runtime.documentExportProgress?.cancel();
+    disposeDocumentExportProgressButtons();
 }
 
 async function convertBatchItem(item, { signal, onProgress }) {
@@ -3922,7 +4032,7 @@ function confirmObsidianOverwrite(ownerWindow, path) {
     );
 }
 
-async function exportSelectedObsidian(targets) {
+async function exportSelectedObsidian(targets, { ownerWindow = null } = {}) {
     if (!runtime.obsidianExporter?.export || !targets?.length) return;
     if (obsidianExportController) {
         const message = runtimeTranslate('obsidianBatch.alreadyRunning');
@@ -3942,7 +4052,7 @@ async function exportSelectedObsidian(targets) {
     obsidianExportStatusOverwritten = false;
     obsidianExportController = controller;
     try {
-        await runSelectedObsidianExport(targets, controller);
+        await runSelectedObsidianExport(targets, controller, ownerWindow);
     }
     finally {
         if (obsidianExportController === controller) {
@@ -3963,19 +4073,20 @@ async function exportSelectedObsidian(targets) {
     }
 }
 
-async function runSelectedObsidianExport(targets, controller) {
+async function runSelectedObsidianExport(targets, controller, ownerWindow = null) {
     const identified = [];
     for (const target of targets) {
-        const identity = await obsidianExportTargetIdentity(target);
+        const identity = await exportTargetIdentity(target, 'obsidian');
         if (identity) identified.push(identity);
     }
-    const groups = selectObsidianExportGroups(identified);
+    const groups = selectDocumentExportGroups(identified);
     if (!groups.length || controller.signal.aborted) return;
 
     const exporter = runtime.obsidianExporter;
     if (!exporter?.resolveVault || !exporter.export) return;
+    const resolvedWindow = ownerWindow || Zotero.getMainWindow?.() || null;
     const vaultPath = String(await exporter.resolveVault({
-        ownerWindow: Zotero.getMainWindow?.() || null,
+        ownerWindow: resolvedWindow,
     }) || '').trim();
     if (!vaultPath || controller.signal.aborted) return;
 
@@ -3988,10 +4099,10 @@ async function runSelectedObsidianExport(targets, controller) {
     progress?.setStatus(obsidianExportStatus);
     progress?.open();
 
-    const batch = createObsidianExportBatch({
-        load: (pdf, options) => loadCachedObsidianDocument(pdf.itemID, options),
+    const batch = createDocumentExportBatch({
+        load: (pdf, options) => loadCachedExportDocument(pdf.itemID, options),
         exportDocument: (document, options) => exporter.export({
-            ownerWindow: Zotero.getMainWindow?.() || null,
+            ownerWindow: resolvedWindow,
             title: document?.title,
             markdown: document?.markdown || '',
             assets: document?.assets,
@@ -4008,7 +4119,7 @@ async function runSelectedObsidianExport(targets, controller) {
         signal: controller.signal,
         conflictPolicy: 'skip',
     });
-    const confirmations = selectObsidianExportConfirmations(result);
+    const confirmations = selectDocumentExportConfirmations(result);
     if (!controller.signal.aborted && confirmations.length > 0) {
         const overwrite = confirmObsidianBatchOverwrite(confirmations.length);
         if (overwrite && !controller.signal.aborted) {
@@ -4020,39 +4131,258 @@ async function runSelectedObsidianExport(targets, controller) {
                 signal: controller.signal,
                 conflictPolicy: 'overwrite',
             });
-            result = mergeObsidianExportOverwrite(result, overwritten);
+            result = mergeDocumentExportOverwrite(result, overwritten);
         }
     }
-    obsidianExportStatus = summarizeObsidianExportBatch(result, runtimeTranslate);
+    obsidianExportStatus = summarizeDocumentExportBatch(
+        result,
+        runtimeTranslate,
+        OBSIDIAN_EXPORT_LABELS.summary
+    );
     progress?.setStatus(obsidianExportStatus);
 }
 
-async function loadCachedObsidianDocument(itemID, { signal } = {}) {
+async function loadCachedExportDocument(itemID, { signal } = {}) {
     const live = runtime.presenter?.get(itemID)?.model;
     if (live?.status === 'ready' && live.renderMode !== 'html') {
-        return obsidianExportInput(itemID, live);
+        return exportDocumentInput(itemID, live);
     }
     if (typeof runtime.extractor?.readCached !== 'function') {
         throw new Error('Converted Markdown is unavailable');
     }
     const cached = await runtime.extractor.readCached(itemID, { signal });
     if (!cached) return null;
-    return obsidianExportInput(itemID, cached);
+    return exportDocumentInput(itemID, cached);
 }
 
-async function obsidianExportInput(itemID, model) {
+// One shape for every export action. Obsidian reads `metadata` and
+// `translations`, the snapshot reads `sourceMap`, `figureMap`, and the
+// correction counts, and Markdown and EPUB read `markdown` and the assets.
+async function exportDocumentInput(itemID, model) {
     return {
+        itemID,
         title: model.title,
         markdown: model.markdown || '',
         assets: model.assets,
         assetBasePath: model.assetBasePath,
+        sourceMap: model.sourceMap,
+        figureMap: model.figureMap,
+        cacheKey: model.cacheKey,
+        parserProfile: model.parserProfile,
+        hasCorrections: Boolean(model.hasCorrections),
+        correctionCount: model.correctionCount || 0,
+        // A batch always writes the original Markdown: there is no single
+        // active reading view across a selection. The reader menu keeps
+        // following the open tab's view.
+        language: selectExportMarkdownLanguage(model),
         metadata: await obsidianMetadataForItem(itemID, model),
         translations: await obsidianTranslationsForModel(model),
+        hasParent: await exportTargetHasParent(itemID),
     };
 }
 
+async function exportTargetHasParent(itemID) {
+    try {
+        const pdf = await zoteroItemRecord(itemID);
+        return Boolean(pdf?.parentItemID || pdf?.parentID);
+    }
+    catch {
+        return false;
+    }
+}
+
+// One entry point for the item and collection export submenus. Obsidian keeps
+// its own vault flow; the other three share a single folder prompt and the
+// document-export progress queue.
+async function exportSelectedDocuments(action, targets, { ownerWindow = null } = {}) {
+    if (!EXPORT_ACTIONS.includes(action) || !targets?.length) return;
+    if (action === 'obsidian') {
+        await exportSelectedObsidian(targets, { ownerWindow });
+        return;
+    }
+    await exportDocumentsBatch(action, targets, { ownerWindow });
+}
+
+async function exportDocumentsBatch(action, targets, { ownerWindow = null } = {}) {
+    if (documentExportController) {
+        const message = runtimeTranslate('exportBatch.alreadyRunning');
+        signalProgressAlreadyRunning({
+            running: true,
+            progress: runtime.documentExportProgress,
+            message,
+            ensureProgress: ensureDocumentExportProgress,
+        });
+        documentExportStatus = message;
+        documentExportStatusOverwritten = true;
+        return;
+    }
+    const controller = createZoteroAbortController();
+    const progressBeforeBatch = Boolean(runtime.documentExportProgress);
+    const previousStatus = documentExportStatus;
+    documentExportStatusOverwritten = false;
+    documentExportController = controller;
+    try {
+        await runDocumentsBatch(action, targets, controller, ownerWindow);
+    }
+    finally {
+        if (documentExportController === controller) {
+            documentExportController = null;
+        }
+        const nextStatus = resolveAbandonedExportProgressStatus({
+            rowsOpened: documentExportRowsOpened,
+            progressExisted: progressBeforeBatch,
+            alreadyRunningSignaled: documentExportStatusOverwritten,
+            previousStatus,
+        });
+        if (nextStatus !== null) {
+            runtime.documentExportProgress?.setStatus(nextStatus);
+            documentExportStatus = nextStatus;
+        }
+        documentExportRowsOpened = false;
+        documentExportStatusOverwritten = false;
+    }
+}
+
+async function runDocumentsBatch(action, targets, controller, ownerWindow) {
+    const identified = [];
+    for (const target of targets) {
+        const identity = await exportTargetIdentity(target, action);
+        if (identity) identified.push(identity);
+    }
+    const groups = selectDocumentExportGroups(identified);
+    if (!groups.length || controller.signal.aborted) return;
+
+    const exporter = exportExporterFor(action);
+    // A snapshot writes a Zotero note through the saved-Markdown store, which
+    // exposes saveSnapshot rather than export. The other actions export a file.
+    if (!supportsExportAction(action, exporter)) return;
+    // A snapshot needs no destination: it writes a Zotero note. The other two
+    // ask for the parent folder once, before any document is written.
+    let directory = '';
+    if (action !== 'snapshot') {
+        if (typeof exporter.resolveDirectory !== 'function') return;
+        const resolved = await exporter.resolveDirectory({
+            ownerWindow: ownerWindow || Zotero.getMainWindow?.() || null,
+        });
+        if (!resolved || controller.signal.aborted) return;
+        directory = resolved;
+    }
+
+    documentExportRowsOpened = true;
+    const usedPaths = new Set();
+    const progress = ensureDocumentExportProgress();
+    for (const group of groups) {
+        progress?.add(group.identity, obsidianExportGroupTitle(group.title));
+    }
+    documentExportStatus = runtimeTranslate('exportBatch.statusHint');
+    progress?.setStatus(documentExportStatus);
+    progress?.open();
+
+    const batch = createDocumentExportBatch({
+        load: (pdf, options) => loadCachedExportDocument(pdf.itemID, options),
+        exportDocument: (document, options) => runSingleDocumentExport({
+            action,
+            exporter,
+            document,
+            directory,
+            // Shared by every EPUB in this run, so two papers with the same
+            // title claim different files.
+            usedPaths,
+            ownerWindow: ownerWindow || Zotero.getMainWindow?.() || null,
+            options,
+        }),
+        isPreparing: isItemPreparing,
+        onEvent: event => handleDocumentExportEvent(action, event),
+    });
+    const result = await batch.run(groups, { signal: controller.signal });
+    documentExportStatus = summarizeDocumentExportBatch(
+        result,
+        runtimeTranslate,
+        DOCUMENT_EXPORT_LABELS.summary
+    );
+    progress?.setStatus(documentExportStatus);
+}
+
+function exportExporterFor(action) {
+    if (action === 'markdown') return runtime.markdownExporter;
+    if (action === 'epub') return runtime.epubExporter;
+    if (action === 'snapshot') return runtime.savedMarkdownStore;
+    return null;
+}
+
+async function runSingleDocumentExport({
+    action,
+    exporter,
+    document,
+    directory,
+    usedPaths,
+    ownerWindow,
+    options,
+}) {
+    if (action === 'snapshot') {
+        // The store refuses a standalone PDF on its own; a batch should report
+        // that row and keep going instead of aborting the whole run.
+        if (!document?.hasParent) {
+            throw new Error(runtimeTranslate('exportBatch.noParent'));
+        }
+        await saveSnapshotForExportDocument(document);
+        return { status: 'saved' };
+    }
+    if (action === 'markdown') {
+        return exporter.export({
+            ownerWindow,
+            directory,
+            title: document?.title,
+            markdown: document?.markdown || '',
+            assets: document?.assets,
+            assetBasePath: document?.assetBasePath,
+        });
+    }
+    return exporter.export({
+        ownerWindow,
+        directory,
+        usedPaths,
+        title: document?.title,
+        markdown: document?.markdown || '',
+        assets: document?.assets,
+        assetBasePath: document?.assetBasePath,
+        language: document?.language || 'en',
+        conflictPolicy: options?.conflictPolicy,
+    });
+}
+
+function handleDocumentExportEvent(action, event) {
+    const progress = runtime.documentExportProgress;
+    const identity = event?.group?.identity;
+    if (!progress || identity == null) return;
+    const status = {
+        exported: 'succeeded',
+        notReady: 'failed',
+        preparing: 'failed',
+        conflict: 'failed',
+        failed: 'failed',
+    }[event.type];
+    if (!status) return;
+    const labels = {
+        ...DOCUMENT_EXPORT_LABELS.rows,
+        ...(event.type === 'exported'
+            ? { exported: EXPORTED_ROW_LABEL_KEYS[action] }
+            : {}),
+    };
+    const message = documentExportRowMessage(
+        event.type,
+        runtimeTranslate,
+        event.type === 'failed' ? event.result?.message : '',
+        labels
+    );
+    updateProgressRow(progress, identity, status, message);
+}
+
 // Parent identity comes from the item record. Do not read PDF bytes here.
-async function obsidianExportTargetIdentity(target) {
+// Obsidian and snapshots are one output per parent item, so several PDFs of the
+// same item collapse into one group; Markdown and EPUB write one file per PDF,
+// so they key on the PDF and never merge attachments.
+async function exportTargetIdentity(target, action = 'obsidian') {
     const itemID = target?.itemID;
     if (!Number.isSafeInteger(itemID) || itemID <= 0) return null;
     let pdf = null;
@@ -4063,22 +4393,24 @@ async function obsidianExportTargetIdentity(target) {
         return null;
     }
     if (!pdf) return null;
-    const parentID = pdf.parentItemID || pdf.parentID;
-    let parent = pdf.parentItem || null;
-    if (parentID && parentID !== itemID) {
-        if (!parent) {
+    const perParent = action !== 'markdown' && action !== 'epub';
+    let anchor = pdf;
+    if (perParent) {
+        const parentID = pdf.parentItemID || pdf.parentID;
+        anchor = pdf.parentItem || null;
+        if (!anchor && parentID && parentID !== itemID) {
             try {
-                parent = await zoteroItemRecord(parentID);
+                anchor = await zoteroItemRecord(parentID);
             }
             catch {
                 return null;
             }
         }
-        if (!parent) return null;
+        // A standalone PDF has no parent; it is its own group.
+        if (!anchor) anchor = pdf;
     }
-    if (!parent) parent = pdf;
-    const libraryID = parent.libraryID;
-    const itemKey = parent.key;
+    const libraryID = anchor.libraryID;
+    const itemKey = anchor.key;
     if (!Number.isSafeInteger(libraryID) || libraryID < 0) return null;
     if (typeof itemKey !== 'string' || !OBSIDIAN_ITEM_KEY.test(itemKey)) {
         return null;
@@ -4110,10 +4442,11 @@ function handleObsidianExportEvent(event) {
         failed: 'failed',
     }[event.type];
     if (!status) return;
-    const message = obsidianExportRowMessage(
+    const message = documentExportRowMessage(
         event.type,
         runtimeTranslate,
-        event.type === 'failed' ? event.result?.message : ''
+        event.type === 'failed' ? event.result?.message : '',
+        OBSIDIAN_EXPORT_LABELS.rows
     );
     updateProgressRow(progress, identity, status, message);
 }
@@ -4141,6 +4474,20 @@ async function saveSnapshotForModel(pdfItemOrID, model) {
     if (model?.status !== 'ready' || model.renderMode === 'html') {
         throw new Error('The Markdown document is unavailable');
     }
+    return writeSnapshot(pdfItemOrID, model);
+}
+
+// A batch reads documents from the cache, which carries no reader status and
+// no render mode. The export input already dropped an HTML document, so the
+// only requirement left is a usable source map.
+async function saveSnapshotForExportDocument(document) {
+    if (!Array.isArray(document?.sourceMap)) {
+        throw new Error('The Markdown source map is unavailable');
+    }
+    return writeSnapshot(document.itemID, document);
+}
+
+async function writeSnapshot(pdfItemOrID, model) {
     if (!runtime.savedMarkdownStore?.saveSnapshot) {
         throw new Error('Saved Markdown notes are unavailable');
     }
@@ -4446,7 +4793,9 @@ function registerMainWindowContextMenu(window) {
             operation: 'import-llm-cache', localOnly: true, entryPoint: 'llm-cache-import',
         }),
         onPrepare: prepareSelectedMarkdown,
-        onExportObsidian: exportSelectedObsidian,
+        onExport: (action, targets) => exportSelectedDocuments(action, targets, {
+            ownerWindow: window,
+        }),
         onOpenSavedNote: openSavedMarkdownNote,
         isPreparing: isItemPreparing,
         hasMarkdown: itemHasReadableMarkdownItem,
@@ -4460,7 +4809,9 @@ function registerMainWindowContextMenu(window) {
         zotero: Zotero,
         window,
         onPrepare: prepareSelectedMarkdown,
-        onExportObsidian: exportSelectedObsidian,
+        onExport: (action, targets) => exportSelectedDocuments(action, targets, {
+            ownerWindow: window,
+        }),
         confirm: (action, details) => confirmCollectionAction(window, action, details),
         hasMarkdown: itemHasReadableMarkdownItem,
         onError: handleOpenError,
