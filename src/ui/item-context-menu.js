@@ -11,13 +11,39 @@ const COLLECTION_MENU_ITEM_ID = 'mktero-prepare-collection-markdown';
 const COLLECTION_EXPORT_MENU_ITEM_ID = 'mktero-export-collection-obsidian';
 const LEGACY_GRAPH_MENU_ITEM_ID = 'mktero-open-citation-graph';
 
+// The export entry is a submenu, so the item menu offers the same four output
+// actions as the reader's Save and export menu, in the same order. A snapshot
+// needs a parent library item, so it is the only action that can be missing.
+const EXPORT_ACTIONS = Object.freeze([
+    Object.freeze({
+        action: 'snapshot',
+        labelKey: 'menu.exportSnapshot',
+        needsParent: true,
+    }),
+    Object.freeze({
+        action: 'markdown',
+        labelKey: 'menu.exportMarkdown',
+        needsParent: false,
+    }),
+    Object.freeze({
+        action: 'obsidian',
+        labelKey: 'menu.exportObsidianAction',
+        needsParent: false,
+    }),
+    Object.freeze({
+        action: 'epub',
+        labelKey: 'menu.exportEpub',
+        needsParent: false,
+    }),
+]);
+
 export function registerItemContextMenu({
     zotero,
     window,
     rootURI,
     onOpen,
     onPrepare = null,
-    onExportObsidian = null,
+    onExport = null,
     onOpenSavedNote = null,
     probeLLMCache = null,
     onImportLLMCache = null,
@@ -41,11 +67,18 @@ export function registerItemContextMenu({
     menuItem.id = MENU_ITEM_ID;
     menuItem.hidden = true;
     menuItem.setAttribute('label', translate('menu.readAsMarkdown'));
-    const exportItem = document.createXULElement?.('menuitem')
-        || document.createElement('menuitem');
-    exportItem.id = EXPORT_MENU_ITEM_ID;
-    exportItem.hidden = true;
-    exportItem.setAttribute('label', translate('menu.exportObsidian'));
+    const exportSubmenu = createExportSubmenu({
+        document,
+        id: EXPORT_MENU_ITEM_ID,
+        labelKey: 'menu.exportSelected',
+        idPrefix: 'mktero-export',
+        onExport: typeof onExport === 'function'
+            ? (action, targets) => onExport(action, exportTargets(targets))
+            : null,
+        translate,
+        targets: () => exportPDFTargets(zotero, window, onExport, hasMarkdown),
+        onError,
+    });
 
     const handlePopupShowing = event => {
         if (event.target !== menu) return;
@@ -83,32 +116,12 @@ export function registerItemContextMenu({
     };
     const handleExportPopupShowing = event => {
         if (event.target !== menu) return;
-        const targets = exportPDFTargets(
-            zotero,
-            window,
-            onExportObsidian,
-            hasMarkdown
-        );
-        exportItem.hidden = !targets;
-        exportItem.setAttribute('label', translate('menu.exportObsidian'));
-    };
-    const handleExportCommand = () => {
-        const targets = exportPDFTargets(
-            zotero,
-            window,
-            onExportObsidian,
-            hasMarkdown
-        );
-        if (!targets) return;
-        Promise.resolve()
-            .then(() => onExportObsidian(exportTargets(targets)))
-            .catch(onError);
+        exportSubmenu.sync();
     };
     menu.addEventListener('popupshowing', handlePopupShowing);
     menu.addEventListener('popupshowing', handleExportPopupShowing);
     menuItem.addEventListener('command', handleCommand);
-    exportItem.addEventListener('command', handleExportCommand);
-    menu.append(menuItem, exportItem);
+    menu.append(menuItem, exportSubmenu.element);
     const disposeImportMenu = registerLLMCacheImportMenu({
         zotero,
         window,
@@ -127,14 +140,88 @@ export function registerItemContextMenu({
         menu.removeEventListener('popupshowing', handlePopupShowing);
         menu.removeEventListener('popupshowing', handleExportPopupShowing);
         menuItem.removeEventListener('command', handleCommand);
-        exportItem.removeEventListener('command', handleExportCommand);
+        exportSubmenu.dispose();
         menuItem.remove();
-        exportItem.remove();
+        exportSubmenu.element.remove();
     };
 }
 
-function exportPDFTargets(zotero, window, onExportObsidian, hasMarkdown) {
-    if (typeof onExportObsidian !== 'function') return null;
+// Builds a `menu` holding one `menuitem` per export action. The submenu owns
+// its own popup, so a caller only appends `element` and calls `sync()` when the
+// parent menu opens. Unavailable actions are removed from the popup rather than
+// left hidden, because a native XUL submenu sizes itself from its children.
+function createExportSubmenu({
+    document,
+    id,
+    labelKey,
+    idPrefix,
+    onExport,
+    translate,
+    targets,
+    onError,
+}) {
+    const element = document.createXULElement?.('menu') || document.createElement('menu');
+    element.id = id;
+    element.hidden = true;
+    element.setAttribute('label', translate(labelKey));
+    const popup = document.createXULElement?.('menupopup')
+        || document.createElement('menupopup');
+    popup.id = `${id}-popup`;
+    element.append(popup);
+
+    const entries = EXPORT_ACTIONS.map(({ action, labelKey: actionLabelKey }) => {
+        const item = document.createXULElement?.('menuitem')
+            || document.createElement('menuitem');
+        item.id = `${idPrefix}-${action}`;
+        item.setAttribute('label', translate(actionLabelKey));
+        const handleCommand = () => {
+            if (typeof onExport !== 'function') return;
+            const current = targets();
+            if (!current?.length) return;
+            // Callers receive the resolved targets, not the stripped menu
+            // shape: the collection flow still needs the ready count, so it
+            // passes its own adapter and gets the full records.
+            Promise.resolve()
+                .then(() => onExport(action, current))
+                .catch(onError);
+        };
+        item.addEventListener('command', handleCommand);
+        return { action, item, handleCommand, labelKey: actionLabelKey };
+    });
+
+    const sync = () => {
+        const current = targets();
+        element.hidden = !current?.length;
+        element.setAttribute('label', translate(labelKey));
+        const available = new Set(current?.length
+            ? EXPORT_ACTIONS
+                .filter(({ needsParent }) => !needsParent
+                    || current.some(target => target.hasParent))
+                .map(({ action }) => action)
+            : []);
+        popup.replaceChildren();
+        for (const entry of entries) {
+            entry.item.setAttribute('label', translate(entry.labelKey));
+            entry.item.hidden = !available.has(entry.action);
+            if (entry.item.hidden) continue;
+            popup.append(entry.item);
+        }
+    };
+
+    return {
+        element,
+        popup,
+        sync,
+        dispose() {
+            for (const entry of entries) {
+                entry.item.removeEventListener('command', entry.handleCommand);
+            }
+        },
+    };
+}
+
+function exportPDFTargets(zotero, window, onExport, hasMarkdown) {
+    if (typeof onExport !== 'function') return null;
     const selectedItems = window?.ZoteroPane?.getSelectedItems?.();
     if (!Array.isArray(selectedItems) || !selectedItems.length) return null;
     const targets = resolvePDFCandidates(zotero, selectedItems);
@@ -143,7 +230,10 @@ function exportPDFTargets(zotero, window, onExportObsidian, hasMarkdown) {
     ))) {
         return null;
     }
-    return targets;
+    return targets.map(target => ({
+        ...target,
+        hasParent: Boolean(target.item?.parentItemID || target.item?.parentID),
+    }));
 }
 
 function resolveMenuAction({
@@ -214,7 +304,7 @@ export function registerCollectionContextMenu({
     zotero,
     window,
     onPrepare = null,
-    onExportObsidian = null,
+    onExport = null,
     confirm = async () => false,
     hasMarkdown = () => false,
     onError,
@@ -231,11 +321,29 @@ export function registerCollectionContextMenu({
     menuItem.id = COLLECTION_MENU_ITEM_ID;
     menuItem.hidden = true;
     menuItem.setAttribute('label', translate('menu.prepareCollectionMarkdown'));
-    const exportItem = document.createXULElement?.('menuitem')
-        || document.createElement('menuitem');
-    exportItem.id = COLLECTION_EXPORT_MENU_ITEM_ID;
-    exportItem.hidden = true;
-    exportItem.setAttribute('label', translate('menu.exportCollectionObsidian'));
+    const exportSubmenu = createExportSubmenu({
+        document,
+        id: COLLECTION_EXPORT_MENU_ITEM_ID,
+        labelKey: 'menu.exportCollection',
+        idPrefix: 'mktero-export-collection',
+        onExport: typeof onExport === 'function'
+            ? (action, targets) => runCollectionExport({
+                action,
+                targets,
+                onExport,
+                confirm,
+                onError,
+            })
+            : null,
+        translate,
+        targets: () => collectionExportTargets(
+            zotero,
+            window,
+            onExport,
+            hasMarkdown
+        ),
+        onError,
+    });
 
     const handlePopupShowing = event => {
         if (event.target !== menu) return;
@@ -256,44 +364,12 @@ export function registerCollectionContextMenu({
     };
     const handleExportPopupShowing = event => {
         if (event.target !== menu) return;
-        const targets = collectionExportTargets(
-            zotero,
-            window,
-            onExportObsidian,
-            hasMarkdown
-        );
-        exportItem.hidden = !targets.length;
-        exportItem.setAttribute(
-            'label',
-            translate('menu.exportCollectionObsidian')
-        );
-    };
-    const handleExportCommand = () => {
-        const targets = collectionExportTargets(
-            zotero,
-            window,
-            onExportObsidian,
-            hasMarkdown
-        );
-        if (!targets.length) return;
-        const readyCount = targets.filter(target => (
-            safeHasMarkdown(hasMarkdown, target.item)
-        )).length;
-        Promise.resolve()
-            .then(() => confirm('export', {
-                count: targets.length,
-                readyCount,
-            }))
-            .then(confirmed => confirmed
-                ? onExportObsidian(exportTargets(targets))
-                : undefined)
-            .catch(onError);
+        exportSubmenu.sync();
     };
     menu.addEventListener('popupshowing', handlePopupShowing);
     menu.addEventListener('popupshowing', handleExportPopupShowing);
     menuItem.addEventListener('command', handleCommand);
-    exportItem.addEventListener('command', handleExportCommand);
-    menu.append(menuItem, exportItem);
+    menu.append(menuItem, exportSubmenu.element);
 
     let active = true;
     return () => {
@@ -302,10 +378,33 @@ export function registerCollectionContextMenu({
         menu.removeEventListener('popupshowing', handlePopupShowing);
         menu.removeEventListener('popupshowing', handleExportPopupShowing);
         menuItem.removeEventListener('command', handleCommand);
-        exportItem.removeEventListener('command', handleExportCommand);
+        exportSubmenu.dispose();
         menuItem.remove();
-        exportItem.remove();
+        exportSubmenu.element.remove();
     };
+}
+
+// A collection tree can hold hundreds of PDFs, so the batch asks once, with the
+// total and the ready count, before it starts writing files.
+async function runCollectionExport({
+    action,
+    targets,
+    onExport,
+    confirm,
+    onError,
+}) {
+    try {
+        const confirmed = await confirm('export', {
+            count: targets.length,
+            readyCount: targets.filter(target => target.hasMarkdown).length,
+            action,
+        });
+        if (!confirmed) return;
+        await onExport(action, exportTargets(targets));
+    }
+    catch (error) {
+        onError?.(error);
+    }
 }
 
 function exportTargets(targets) {
@@ -318,15 +417,19 @@ function exportTargets(targets) {
 function collectionExportTargets(
     zotero,
     window,
-    onExportObsidian,
+    onExport,
     hasMarkdown
 ) {
-    if (typeof onExportObsidian !== 'function') return [];
+    if (typeof onExport !== 'function') return null;
     const targets = collectionPDFRecords(zotero, window);
     if (!targets.some(target => safeHasMarkdown(hasMarkdown, target.item))) {
-        return [];
+        return null;
     }
-    return targets;
+    return targets.map(target => ({
+        ...target,
+        hasParent: Boolean(target.item?.parentItemID || target.item?.parentID),
+        hasMarkdown: safeHasMarkdown(hasMarkdown, target.item),
+    }));
 }
 
 function safeHasMarkdown(hasMarkdown, item) {
