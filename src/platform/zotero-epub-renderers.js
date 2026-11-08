@@ -19,6 +19,7 @@ export function createZoteroEpubRenderers(zotero, { services } = {}) {
     return Object.freeze({
         renderWideTable: options => renderWideTable(canvasEnvironment, options),
         renderImageToPNG: options => renderImageToPNG(canvasEnvironment, options),
+        renderMathToPNG: options => renderMathToPNG(canvasEnvironment, options),
     });
 }
 
@@ -73,6 +74,9 @@ const TABLE_MATH_TAGS = new Set([
     'munderover', 'mtable', 'mtr', 'mtd', 'mlabeledtr', 'mmultiscripts', 'mprescripts',
     'none', 'menclose', 'mstyle', 'merror', 'mphantom', 'mpadded',
 ]);
+const TABLE_ACTIVE_CONTENT_TAGS = new Set([
+    'base', 'embed', 'iframe', 'link', 'meta', 'object', 'script', 'style',
+]);
 const TABLE_ATTRIBUTES = new Set([
     'class', 'id', 'title', 'role', 'aria-hidden', 'aria-label', 'xmlns',
     'colspan', 'rowspan', 'span', 'scope', 'align', 'width', 'height', 'alt',
@@ -108,18 +112,26 @@ async function prepareTableElement(environment, html, assets) {
             : element.namespaceURI === 'http://www.w3.org/1998/Math/MathML'
                 ? TABLE_MATH_TAGS : null;
         if (!tags?.has(element.localName)) {
-            throw new Error('The EPUB table contains unsupported markup');
+            if (element.namespaceURI !== XHTML_NAMESPACE
+                || TABLE_ACTIVE_CONTENT_TAGS.has(element.localName)) {
+                element.remove();
+            }
+            else {
+                element.replaceWith(...element.childNodes);
+            }
+            continue;
         }
         for (const attribute of [...element.attributes]) {
             const name = attribute.name.toLowerCase();
-            if (name === 'href' && element.localName === 'a') {
+            if ((name === 'href' || name === 'rel')
+                && element.localName === 'a') {
                 element.removeAttributeNode(attribute);
                 continue;
             }
             if (name === 'src' && element.localName === 'img') continue;
             if (name === 'style' && /^\s*text-align\s*:\s*(left|right|center)\s*;?\s*$/iu.test(attribute.value)) continue;
             if (!TABLE_ATTRIBUTES.has(name)) {
-                throw new Error('The EPUB table contains unsupported markup');
+                element.removeAttributeNode(attribute);
             }
         }
         if (element.localName !== 'img') continue;
@@ -143,6 +155,83 @@ async function prepareTableElement(environment, html, assets) {
         element.setAttribute('src', embedded.url);
     }
     return table;
+}
+
+async function renderMathToPNG(environment, { html } = {}) {
+    if (typeof html !== 'string' || html.length > 250_000 || /<!/u.test(html)) {
+        throw new Error('The EPUB formula is invalid');
+    }
+    const document = environment.ownerDocument;
+    const view = document.defaultView;
+    const parsed = new view.DOMParser().parseFromString(html, 'application/xml');
+    const math = parsed.documentElement;
+    if (math.localName !== 'math'
+        || math.namespaceURI !== 'http://www.w3.org/1998/Math/MathML') {
+        throw new Error('The EPUB formula is invalid');
+    }
+    for (const element of [math, ...math.querySelectorAll('*')]) {
+        if (element.namespaceURI !== math.namespaceURI
+            || !TABLE_MATH_TAGS.has(element.localName)
+            || [...element.attributes].some(attribute => !TABLE_ATTRIBUTES.has(attribute.name))) {
+            throw new Error('The EPUB formula contains unsupported markup');
+        }
+    }
+    for (const annotation of math.querySelectorAll('annotation')) annotation.remove();
+    const fontSize = 24;
+    const padding = 4;
+    const wrapper = document.createElementNS(XHTML_NAMESPACE, 'div');
+    wrapper.setAttribute('aria-hidden', 'true');
+    wrapper.style.cssText = 'position:fixed;left:-100000px;top:0;visibility:hidden';
+    const shadow = wrapper.attachShadow({ mode: 'closed' });
+    const content = document.createElementNS(XHTML_NAMESPACE, 'span');
+    const css = 'display:inline-block;white-space:nowrap;font:24px "Times New Roman",serif;line-height:normal;color:#111';
+    content.style.cssText = css;
+    const baseline = document.createElementNS(XHTML_NAMESPACE, 'span');
+    baseline.style.cssText = 'display:inline-block;width:0;height:0;padding:0;margin:0';
+    // Keep the line box identical in HTML, XHTML, and the SVG foreignObject.
+    content.append('\u200b', document.importNode(math, true), baseline);
+    shadow.append(content);
+    (document.body || document.documentElement).append(wrapper);
+    let canvas;
+    let decoded;
+    try {
+        await document.fonts?.ready;
+        const rect = content.getBoundingClientRect();
+        const baselineY = baseline.getBoundingClientRect().top;
+        const width = Math.ceil(rect.width) + padding * 2;
+        const height = Math.ceil(rect.height) + padding * 2;
+        if (!Number.isFinite(width) || !Number.isFinite(height)
+            || width < 1 || height < 1 || width > 10_000 || height > 10_000
+            || width * height > FIGURE_LIMITS.maxDecodedImagePixels) {
+            throw new Error('The EPUB formula exceeds the rendering size limit');
+        }
+        const markup = new view.XMLSerializer().serializeToString(content);
+        const foreignObject = `<div xmlns="${XHTML_NAMESPACE}" style="box-sizing:border-box;display:flex;align-items:flex-start;width:${width}px;height:${height}px;padding:${padding}px;background:#fff">${markup}</div>`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject x="0" y="0" width="100%" height="100%">${foreignObject}</foreignObject></svg>`;
+        decoded = await decodeSVGImage(view, svg);
+        const scale = rasterScale(width, height, 2);
+        const pixelWidth = Math.max(1, Math.ceil(width * scale));
+        const pixelHeight = Math.max(1, Math.ceil(height * scale));
+        canvas = environment.createCanvas(pixelWidth, pixelHeight);
+        const context = canvas.getContext('2d', { alpha: false });
+        if (!context) throw new Error('The EPUB formula canvas is unavailable');
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, pixelWidth, pixelHeight);
+        context.setTransform(scale, 0, 0, scale, 0, 0);
+        context.drawImage(decoded.image, 0, 0, width, height);
+        return {
+            mimeType: 'image/png',
+            data: await environment.encodePNG(canvas),
+            width: width / fontSize,
+            height: height / fontSize,
+            verticalAlign: -(rect.bottom - baselineY + padding) / fontSize,
+        };
+    }
+    finally {
+        wrapper.remove();
+        if (canvas) canvas.width = canvas.height = 0;
+        decoded?.close();
+    }
 }
 
 async function renderWideTable(environment, { html, alt = '', assets = [] } = {}) {

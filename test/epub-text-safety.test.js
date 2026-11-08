@@ -100,11 +100,13 @@ test('exports escaped author-year labels and inert hostile chapter titles', asyn
     assert.ok(hostile);
     assert.ok(references);
 
-    const referenceLinks = [...main.querySelectorAll('a[href*="#references"]')];
+    const referenceLinks = [...main.querySelectorAll(
+        'a[href="chapter-03.xhtml#mktero-reference-number-1"]'
+    )];
     assert.equal(referenceLinks.length, citations.length);
     assert.deepEqual(referenceLinks.map(link => link.textContent), citations);
     assert.ok(referenceLinks.every(link => (
-        link.getAttribute('href') === 'chapter-03.xhtml#references'
+        link.getAttribute('href') === 'chapter-03.xhtml#mktero-reference-number-1'
     )));
     assert.equal(references.querySelector('h1')?.id, 'references');
 

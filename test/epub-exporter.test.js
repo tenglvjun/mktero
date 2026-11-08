@@ -126,10 +126,14 @@ test('passes content, language, assets and renderers to the builder and writes i
     const renderImageToPNG = async () => {
         assert.fail('the adapter must pass the image renderer to the builder');
     };
+    const renderMathToPNG = async () => {
+        assert.fail('the adapter must pass the formula renderer to the builder');
+    };
     const exporter = createExporter({
         writes,
         renderWideTable,
         renderImageToPNG,
+        renderMathToPNG,
         createID: () => 'dc3b6389-a940-4a5b-a85b-3369e0ab5e76',
         buildEpub: async options => {
             requests.push(options);
@@ -154,6 +158,7 @@ test('passes content, language, assets and renderers to the builder and writes i
         assetBasePath: 'result',
         renderWideTable,
         renderImageToPNG,
+        renderMathToPNG,
     }]);
     assert.equal(requests[0].assets, assets);
     assert.deepEqual(writes, [{

@@ -187,6 +187,7 @@ function renderMarkdownDocumentHTML(
         target = 'mktero',
         translate = translateEnglish,
         exposeImageAssetPath = false,
+        resolveMathCitation = null,
     } = {},
     mathBudget = createMathRenderBudget()
 ) {
@@ -203,7 +204,7 @@ function renderMarkdownDocumentHTML(
         renderer,
         extensions: [
             createMathBlockExtension(mathBudget, target),
-            createMathInlineExtension(mathBudget, target),
+            createMathInlineExtension(mathBudget, target, resolveMathCitation),
             createAcademicTableExtension(mathBudget, target),
         ],
     });
@@ -859,11 +860,21 @@ function createMathBlockExtension(mathBudget, target = 'mktero') {
     };
 }
 
-function createMathInlineExtension(mathBudget, target = 'mktero') {
+function createMathInlineExtension(
+    mathBudget,
+    target = 'mktero',
+    resolveMathCitation = null
+) {
     return {
         name: 'mkteroMathInline',
         renderer(token) {
-            return renderMath(token.text, false, mathBudget, target);
+            const mathHTML = renderMath(token.text, false, mathBudget, target);
+            const href = typeof resolveMathCitation === 'function'
+                ? resolveMathCitation(token.text)
+                : null;
+            return href
+                ? `<a href="${escapeHTML(href)}" rel="noreferrer">${mathHTML}</a>`
+                : mathHTML;
         },
     };
 }
@@ -1432,7 +1443,13 @@ function createMathRenderBudget() {
 }
 
 function renderMath(source, displayMode, mathBudget, target = 'mktero') {
-    const normalizedSource = normalizeOcrMathSource(String(source).trim());
+    let normalizedSource = normalizeOcrMathSource(String(source).trim());
+    if (target === 'epub') {
+        normalizedSource = normalizedSource.replace(
+            /(\\tag\*?\s*\{[^{}]*\})(?:\s*\1)+/gu,
+            '$1'
+        );
+    }
     if (UNSAFE_MATH_COMMAND.test(normalizedSource)
         || !mathBudget.claimSource(normalizedSource)) {
         return wrapMathFallback(normalizedSource, displayMode, target);

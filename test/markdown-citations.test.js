@@ -1180,6 +1180,50 @@ test('maps author superscripts to affiliations without stealing body references'
     );
 });
 
+test('recognizes Article information as front matter before affiliations', () => {
+    const markdown = [
+        'A diagnostic accuracy paper',
+        '',
+        'Yue Shi $^{1}$, Chi Chiu Wang $^{1,2}$',
+        '',
+        '## Article information',
+        '',
+        'Check for updates',
+        '',
+        '$^{1}$ Department of Obstetrics and Gynaecology',
+        '',
+        '$^{2}$ Faculty of Medicine',
+        '',
+        '## Abstract',
+        '',
+        'The result is supported by prior work $^{1}$.',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. A cited study. 2020.',
+    ].join('\n');
+
+    const result = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        result.affiliations.map(affiliation => affiliation.id),
+        ['affiliation:1', 'affiliation:2']
+    );
+    assert.deepEqual(
+        result.citations.map(citation => ({
+            label: markdown.slice(citation.from, citation.to),
+            kind: citation.kind,
+            targetIds: citation.referenceIds,
+        })),
+        [
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '1', kind: 'affiliation', targetIds: ['affiliation:1'] },
+            { label: '2', kind: 'affiliation', targetIds: ['affiliation:2'] },
+            { label: '1', kind: 'reference', targetIds: ['number:1'] },
+        ]
+    );
+});
+
 test('keeps the markers of an affiliation list that is repeated by a bilingual view', () => {
     const markdown = [
         '# Learning Reading Order',

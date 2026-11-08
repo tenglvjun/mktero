@@ -4,11 +4,14 @@ import { findMarkdownDirectives } from '../markdown/markdown-directives.js';
 import { analyzeMarkdownFootnotes } from '../markdown/markdown-footnotes.js';
 import { createMarkdownExportPlan } from '../markdown/markdown-export.js';
 import { findInlineMathMatches, renderMarkdownHTML } from '../markdown/markdown-html.js';
-import { buildEpubPackage } from './epub-package.js';
+import { buildEpubPackage, EPUB_PACKAGE_LIMITS } from './epub-package.js';
 
 const PARSER = markdownParser.configure(GFM);
 const REFERENCE_HEADING = /^(?:references?|bibliography|works\s+cited|literature\s+cited|参考文献|引用文献)$/iu;
 const REFERENCE_CITATION = /reference|citation/iu;
+const NUMERIC_CITATION_MATH_PATTERN = /^\s*\[\s*\d+(?:\s*(?:[,;，；]\s*\d+|[-–—]\s*\d+))*\s*\]\s*$/u;
+const NUMERIC_COMBINED_CITATION_PATTERN = /^\s*\[?\s*\d{1,4}(?:\s*[,;，；–—-]\s*\d{1,4})+\s*\]?\s*$/u;
+const REFERENCE_ANCHOR_MARKER = '\u200b';
 const MAX_TABLE_WIDTH = 560;
 const MAX_TABLE_COLUMNS = 8;
 const IMAGE_EXTENSIONS = Object.freeze({
@@ -26,6 +29,7 @@ export async function createEpub({
     language = 'en',
     renderWideTable,
     renderImageToPNG,
+    renderMathToPNG,
     modified = new Date().toISOString().replace(/\.\d{3}Z$/u, 'Z'),
 } = {}) {
     if (typeof title !== 'string' || !title.trim()) {
@@ -40,6 +44,10 @@ export async function createEpub({
     const footnoteDirectives = findMarkdownDirectives(markdown).notes
         .filter(note => note.kind === 'footnote');
     const citationAnalysis = analyzeMarkdownCitations(markdown);
+    const inlineMathMatches = findInlineMathMatches(markdown).filter(match => (
+        NUMERIC_CITATION_MATH_PATTERN.test(match.text)
+    ));
+    const inlineMathCitationTargets = new Map();
     const referenceHeading = findReferenceHeading(markdown);
     const referenceChapterIndex = referenceHeading
         ? chapterIndexAt(sourceChapters, referenceHeading.from)
@@ -47,6 +55,12 @@ export async function createEpub({
     const edits = [];
     const notesByChapter = sourceChapters.map(() => []);
     const citationLinks = [];
+    const referenceTargets = createReferenceTargets(
+        markdown,
+        citationAnalysis.references,
+        sourceChapters,
+        edits
+    );
     const noteCounters = sourceChapters.map(() => 0);
     const directiveByQuote = new Map(footnoteDirectives.map(note => [
         note.quote.from,
@@ -98,20 +112,47 @@ export async function createEpub({
         const referenceFile = chapterFileName(referenceChapterIndex);
         const referenceFragment = slugHeading(referenceHeading.label);
         for (const citation of citationAnalysis.citations) {
-            if (!citation.referenceIds?.length
-                || citationLinks.some(link => rangesOverlap(link, citation))) {
+            if (citation.kind === 'affiliation'
+                || !citation.referenceIds?.length) {
                 continue;
             }
-            const href = `${referenceFile}#${referenceFragment}`;
-            const label = markdown.slice(citation.from, citation.to);
+            const mathCitation = citation.superscriptMarkup
+                ? null
+                : inlineMathMatches.find(match => (
+                    citation.from >= match.start && citation.to <= match.end
+                ));
+            const linkRange = citation.superscriptMarkup
+                ? {
+                    from: citation.superscriptMarkup.wrapperFrom,
+                    to: citation.superscriptMarkup.wrapperTo,
+                }
+                : mathCitation
+                    ? { from: mathCitation.start, to: mathCitation.end }
+                    : citation;
+            if (citationLinks.some(link => rangesOverlap(link, linkRange))) {
+                continue;
+            }
+            const fallbackHref = `${referenceFile}#${referenceFragment}`;
+            const target = referenceTargetForCitation(
+                citation,
+                markdown,
+                referenceTargets.byReferenceId
+            );
+            const href = target?.href || fallbackHref;
+            if (mathCitation) {
+                inlineMathCitationTargets.set(mathCitation.text, href);
+                citationLinks.push(linkRange);
+                continue;
+            }
+            const label = markdown.slice(linkRange.from, linkRange.to);
             if (!label.trim()) continue;
             edits.push({
-                from: citation.from,
-                to: citation.to,
+                from: linkRange.from,
+                to: linkRange.to,
                 replacement: `[${escapeMarkdownLinkLabel(label)}](${href})`,
                 priority: 1,
             });
-            citationLinks.push({ from: citation.from, to: citation.to });
+            citationLinks.push(linkRange);
         }
     }
 
@@ -135,6 +176,7 @@ export async function createEpub({
         target: 'epub',
         exposeImageAssetPath: true,
         resolveImageURL: href => assetByMarkdownURL.get(normalizeAssetPath(href)) || null,
+        resolveMathCitation: source => inlineMathCitationTargets.get(source) || null,
     };
     const markdownSections = splitMarkdownChapters(plan.markdown, title);
     const linkDefinitions = extractLinkDefinitions(plan.markdown);
@@ -144,16 +186,18 @@ export async function createEpub({
 
     for (const [index, section] of markdownSections.entries()) {
         const chapterId = chapterID(index);
+        const chapterReferenceAnchorIDs = referenceTargets.anchorIDsByChapter.get(index) || [];
         let chapterHTML = renderMarkdownHTML(
             withLinkDefinitions(section.markdown, linkDefinitions),
             renderOptions
         );
+        chapterHTML = replaceReferenceAnchorMarkers(chapterHTML, chapterReferenceAnchorIDs);
         chapterHTML = replaceImageURLs(chapterHTML, resourceState.assetByBlobURL);
         const notes = notesByChapter[index] || [];
         const headingResult = addHeadingIDs(
             chapterHTML,
             section.headings,
-            notes.map(note => note.id)
+            [...notes.map(note => note.id), ...chapterReferenceAnchorIDs]
         );
         chapterHTML = headingResult.html;
         for (const heading of headingResult.headings) {
@@ -175,24 +219,43 @@ export async function createEpub({
 
     const chapters = [];
     const packagedImages = [...resourceState.assets];
+    const referenceTarget = referenceHeading
+        ? headingTargets.get(slugHeading(referenceHeading.label))
+        : null;
+    const referenceHrefs = new Set([
+        referenceTarget
+            ? `${referenceTarget.file}#${referenceTarget.id}`
+            : null,
+        ...[...referenceTargets.byReferenceId.values()].map(target => target.href),
+    ].filter(Boolean));
     let wideTableIndex = 0;
+    const mathImages = new Map();
     for (const chapter of renderedChapters) {
         let html = rewriteFragmentLinks(
             chapter.html,
             chapter.file,
             headingTargets
         );
+        if (referenceHrefs.size) {
+            html = stripMathAnnotationsFromReferenceLinks(html, referenceHrefs);
+        }
         const notes = chapterNotes[Number(chapter.id.slice('chapter-'.length)) - 1] || [];
         if (notes.length) {
             let notesHTML = '<section class="chapter-notes" epub:type="footnotes">'
                 + '<h2>Chapter notes</h2><ol>';
             for (const note of notes) {
                 const noteHTML = renderMarkdownHTML(note.body, renderOptions);
-                const linkedNoteHTML = rewriteFragmentLinks(
+                let linkedNoteHTML = rewriteFragmentLinks(
                     replaceImageURLs(noteHTML, resourceState.assetByBlobURL),
                     chapter.file,
                     headingTargets
                 );
+                if (referenceHrefs.size) {
+                    linkedNoteHTML = stripMathAnnotationsFromReferenceLinks(
+                        linkedNoteHTML,
+                        referenceHrefs
+                    );
+                }
                 notesHTML += `<li id="${note.id}" epub:type="footnote">${linkedNoteHTML}</li>`;
             }
             notesHTML += '</ol></section>';
@@ -205,6 +268,9 @@ export async function createEpub({
             resourceState.assets
         );
         html = tableResult.html;
+        if (typeof renderMathToPNG === 'function') {
+            html = await replaceMathWithImages(html, renderMathToPNG, mathImages);
+        }
         packagedImages.push(...tableResult.assets);
         chapters.push({
             id: chapter.id,
@@ -217,6 +283,7 @@ export async function createEpub({
         });
     }
 
+    packagedImages.push(...mathImages.values());
     return buildEpubPackage({
         title,
         language,
@@ -345,6 +412,68 @@ function footnoteBody(source, note) {
         .replace(/\r?\n\s+/gu, '\n')
         .replace(/^[\s.,;:–—-]+/u, '')
         .trim();
+}
+
+function createReferenceTargets(markdown, references, chapters, edits) {
+    const counts = new Map();
+    for (const reference of references) {
+        counts.set(reference.id, (counts.get(reference.id) || 0) + 1);
+    }
+
+    const targets = new Map();
+    const anchorIDsByChapter = new Map();
+    const occurrences = new Map();
+    for (const [index, reference] of references.entries()) {
+        const chapterIndex = chapterIndexAt(chapters, reference.from);
+        if (chapterIndex < 0) continue;
+        const base = reference.number === null
+            ? `mktero-reference-item-${String(index + 1).padStart(4, '0')}`
+            : `mktero-reference-number-${reference.number}`;
+        const occurrence = (occurrences.get(base) || 0) + 1;
+        occurrences.set(base, occurrence);
+        const id = occurrence === 1 ? base : `${base}-${occurrence}`;
+        const href = `${chapterFileName(chapterIndex)}#${id}`;
+        const markerFrom = referenceAnchorMarkerOffset(markdown, reference);
+        edits.push({
+            from: markerFrom,
+            to: markerFrom,
+            replacement: `[${REFERENCE_ANCHOR_MARKER}](#${id})`,
+            priority: 4,
+        });
+        const chapterIDs = anchorIDsByChapter.get(chapterIndex) || [];
+        chapterIDs.push(id);
+        anchorIDsByChapter.set(chapterIndex, chapterIDs);
+        if (counts.get(reference.id) === 1) {
+            targets.set(reference.id, { id, href });
+        }
+    }
+    return { byReferenceId: targets, anchorIDsByChapter };
+}
+
+function referenceAnchorMarkerOffset(markdown, reference) {
+    const source = markdown.slice(reference.from);
+    if (reference.number !== null) {
+        const marker = /^(?:(?:[-*+][ \t]+)?(?:\[\d{1,4}\]|\d{1,4}[.)])[ \t]+|\d{1,4}[ \t]+)/u.exec(source);
+        if (marker) return reference.from + marker[0].length;
+    }
+    return reference.from;
+}
+
+function replaceReferenceAnchorMarkers(html, ids) {
+    let output = String(html || '');
+    for (const id of ids) {
+        const marker = `<a href="#${id}" rel="noreferrer">${REFERENCE_ANCHOR_MARKER}</a>`;
+        output = output.replace(marker, `<span id="${id}"></span>`);
+    }
+    return output;
+}
+
+function referenceTargetForCitation(citation, markdown, targetsByID) {
+    const references = citation.referenceIds || [];
+    if (references.length === 1) return targetsByID.get(references[0]) || null;
+    const label = markdown.slice(citation.from, citation.to).trim();
+    if (!NUMERIC_COMBINED_CITATION_PATTERN.test(label)) return null;
+    return targetsByID.get(references[0]) || null;
 }
 
 function applyMarkdownEdits(source, edits) {
@@ -516,9 +645,67 @@ function rewriteFragmentLinks(html, chapterFile, targets) {
     });
 }
 
+function stripMathAnnotationsFromReferenceLinks(html, referenceHrefs) {
+    return String(html || '').replace(
+        /<a\b[^>]*>[\s\S]*?<\/a\s*>/giu,
+        anchor => {
+            const openingTag = /^<a\b[^>]*>/iu.exec(anchor)?.[0] || '';
+            const href = /\bhref\s*=\s*(["'])(.*?)\1/iu.exec(openingTag)?.[2];
+            if (!referenceHrefs.has(href) || !/<math\b/iu.test(anchor)) return anchor;
+            return anchor.replace(
+                /<annotation\b(?=[^>]*\bencoding\s*=\s*(["'])application\/x-tex\1)[^>]*>[\s\S]*?<\/annotation\s*>/giu,
+                ''
+            );
+        }
+    );
+}
+
 function decodeURIComponentSafe(value) {
     try { return decodeURIComponent(value); }
     catch { return value; }
+}
+
+async function replaceMathWithImages(html, renderMathToPNG, images) {
+    let output = '';
+    let offset = 0;
+    let imageBytes = [...images.values()].reduce((total, image) => total + image.data.byteLength, 0);
+    for (const match of html.matchAll(/<math\b[^>]*>[\s\S]*?<\/math\s*>/gu)) {
+        const math = match[0].replace(/<annotation\b[^>]*>[\s\S]*?<\/annotation\s*>/gu, '');
+        let image = images.get(math);
+        if (!image) {
+            if (images.size >= EPUB_PACKAGE_LIMITS.maxAssets) {
+                throw new Error('The EPUB formula images exceed the count limit');
+            }
+            const rendered = await renderMathToPNG({ html: math });
+            const { data, width, height, verticalAlign } = rendered || {};
+            if (!(data instanceof Uint8Array) || !isPNG(data)
+                || data.byteLength > 25 * 1024 * 1024
+                || rendered.mimeType !== 'image/png'
+                || !Number.isFinite(width) || width <= 0 || width > 500
+                || !Number.isFinite(height) || height <= 0 || height > 500
+                || !Number.isFinite(verticalAlign) || Math.abs(verticalAlign) > 500) {
+                throw new Error('The EPUB formula renderer did not return a valid PNG');
+            }
+            imageBytes += data.byteLength;
+            if (imageBytes > EPUB_PACKAGE_LIMITS.maxTotalAssetBytes) {
+                throw new Error('The EPUB formula images exceed the total size limit');
+            }
+            image = {
+                path: `images/math-${String(images.size + 1).padStart(4, '0')}.png`,
+                mimeType: 'image/png',
+                data,
+                width,
+                verticalAlign,
+            };
+            images.set(math, image);
+        }
+        const alt = mathImageAlternativeText(math);
+        output += html.slice(offset, match.index)
+            + `<img class="epub-math-image" src="../${image.path}" alt="${escapeAttribute(alt)}"`
+            + ` style="width:${image.width.toFixed(4)}em;vertical-align:${image.verticalAlign.toFixed(4)}em" />`;
+        offset = match.index + match[0].length;
+    }
+    return output + html.slice(offset);
 }
 
 async function replaceWideTables(html, renderWideTable, fileNameForIndex, imageAssets) {
@@ -568,6 +755,53 @@ async function replaceWideTables(html, renderWideTable, fileNameForIndex, imageA
 function tableCaption(table) {
     const caption = /<caption\b[^>]*>([\s\S]*?)<\/caption\s*>/iu.exec(table)?.[1];
     return caption ? htmlText(caption) : '';
+}
+
+function mathImageAlternativeText(math) {
+    return decodeMathAlternativeEntities(mathMarkupText(math))
+        .replace(/[\u0000-\u001F\u007F]/gu, ' ')
+        .replace(/\s+/gu, ' ')
+        .trim();
+}
+
+function mathMarkupText(math) {
+    let text = '';
+    let inTag = false;
+    for (const character of String(math)) {
+        if (inTag) {
+            if (character === '>') inTag = false;
+            continue;
+        }
+        if (character === '<') {
+            inTag = true;
+            continue;
+        }
+        text += character;
+    }
+    return text;
+}
+
+function decodeMathAlternativeEntities(value) {
+    return String(value)
+        .replace(/&lt;/giu, '\u2039')
+        .replace(/&gt;/giu, '\u203a')
+        .replace(/&quot;/giu, '\u2033')
+        .replace(/&apos;|&#39;/giu, '\u2032')
+        .replace(/&amp;/giu, '&')
+        .replace(/&#(\d+);/gu, (_, code) => mathAlternativeCodePoint(Number(code)))
+        .replace(/&#x([\da-f]+);/giu, (_, code) => mathAlternativeCodePoint(Number.parseInt(code, 16)));
+}
+
+function mathAlternativeCodePoint(codePoint) {
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff
+        || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+        return '';
+    }
+    if (codePoint === 0x3c) return '\u2039';
+    if (codePoint === 0x3e) return '\u203a';
+    if (codePoint === 0x22) return '\u2033';
+    if (codePoint === 0x27) return '\u2032';
+    return String.fromCodePoint(codePoint);
 }
 
 function htmlText(value) {

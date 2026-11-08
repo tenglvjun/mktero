@@ -78,6 +78,15 @@ test('renders display LaTeX fractions as block MathML', () => {
     assert.match(html, /<annotation encoding="application\/x-tex">\\frac/);
 });
 
+test('renders one EPUB equation number when OCR repeats an identical adjacent tag', () => {
+    const markdown = '$$x^2 + y^2 = z^2 \\tag{3}\\tag{3}$$';
+    const html = renderMarkdownHTML(markdown, { target: 'epub' });
+    assert.doesNotMatch(html, /katex-error/u);
+    assert.equal((html.match(/<mtext>\(3\)<\/mtext>/gu) || []).length, 1);
+    assert.match(renderMarkdownHTML(markdown), /katex-error/u);
+    assert.match(renderMarkdownHTML('$$x^2 \\tag{3}\\tag{4}$$', { target: 'epub' }), /katex-error/u);
+});
+
 test('marks tagged display formulas so the equation number can align independently', () => {
     const tagged = renderMarkdownHTML([
         '$$',

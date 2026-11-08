@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { JSDOM } from 'jsdom';
 
 import { createZoteroEpubRenderers } from '../src/platform/zotero-epub-renderers.js';
 import { createTestPNG } from './helpers/figure-fixtures.js';
@@ -99,6 +100,54 @@ function assertReleased(harness) {
     }
 }
 
+function createTableRendererHarness() {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>');
+    const view = dom.window;
+    let serializedTable = '';
+    view.HTMLCanvasElement.prototype.getContext = () => ({
+        fillStyle: '',
+        fillRect() {},
+        setTransform() {},
+        drawImage() {},
+    });
+    view.HTMLCanvasElement.prototype.toBlob = function toBlob(callback, type) {
+        assert.equal(type, 'image/png');
+        callback(new view.Blob([PNG_BYTES], { type }));
+    };
+    class ImageStub {
+        naturalWidth = 320;
+        naturalHeight = 120;
+
+        set src(value) {
+            this.source = value;
+            this.onload?.();
+        }
+
+        removeAttribute(name) {
+            if (name === 'src') this.source = '';
+        }
+    }
+    view.Image = ImageStub;
+    const NativeXMLSerializer = view.XMLSerializer;
+    view.XMLSerializer = class extends NativeXMLSerializer {
+        serializeToString(node) {
+            serializedTable = super.serializeToString(node);
+            return serializedTable;
+        }
+    };
+    const renderers = createZoteroEpubRenderers(
+        { getMainWindow: () => view },
+        { services: {} }
+    );
+    return {
+        dom,
+        renderers,
+        get serializedTable() {
+            return serializedTable;
+        },
+    };
+}
+
 test('converts a local WebP Blob to canvas PNG bytes and releases the bitmap and canvas', async () => {
     const h = createRendererHarness();
 
@@ -118,6 +167,124 @@ test('converts a local WebP Blob to canvas PNG bytes and releases the bitmap and
     assert.ok(result.data instanceof Uint8Array);
     assert.deepEqual(result, { mimeType: 'image/png', data: PNG_BYTES });
     assertReleased(h);
+});
+
+test('rasterizes formula presentation once with em dimensions and baseline alignment', async () => {
+    const h = createTableRendererHarness();
+    const view = h.dom.window;
+    const canvases = [];
+    const nativeCreate = view.document.createElementNS.bind(view.document);
+    view.document.createElementNS = (...args) => {
+        const element = nativeCreate(...args);
+        if (element.localName === 'canvas') canvases.push(element);
+        return element;
+    };
+    view.HTMLElement.prototype.getBoundingClientRect = function getRect() {
+        return this.querySelector('math')
+            ? { width: 120, height: 40, top: 0, bottom: 40 }
+            : { width: 0, height: 0, top: 30, bottom: 30 };
+    };
+    try {
+        const result = await h.renderers.renderMathToPNG({
+            html: '<math xmlns="http://www.w3.org/1998/Math/MathML"><semantics>'
+                + '<msup><mrow/><mtext>ID</mtext></msup>'
+                + '<annotation encoding="application/x-tex">^{ID}</annotation>'
+                + '</semantics></math>',
+        });
+        assert.deepEqual(result.data, PNG_BYTES);
+        assert.equal(result.mimeType, 'image/png');
+        assert.equal(result.width, 128 / 24);
+        assert.equal(result.height, 2);
+        assert.equal(result.verticalAlign, -14 / 24);
+        assert.match(h.serializedTable, /<msup>/u);
+        assert.doesNotMatch(h.serializedTable, /annotation|\^\{/u);
+        assert.equal(view.document.body.children.length, 0);
+        assert.equal(canvases.length, 1);
+        assert.equal(canvases[0].width, 0);
+        assert.equal(canvases[0].height, 0);
+    }
+    finally {
+        view.close();
+    }
+});
+
+test('rejects active or oversized formula markup before adopting it into the window', async t => {
+    const cases = [
+        '<math xmlns="http://www.w3.org/1998/Math/MathML" onclick="alert(1)"><mi>x</mi></math>',
+        '<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext><img xmlns="http://www.w3.org/1999/xhtml" src="https://example.com/pixel" /></mtext></math>',
+        '<math xmlns="http://www.w3.org/1998/Math/MathML"><script>alert(1)</script></math>',
+        '<!DOCTYPE math [<!ENTITY x "test">]><math xmlns="http://www.w3.org/1998/Math/MathML"><mi>&x;</mi></math>',
+        '<math><mi>x</mi></math>',
+        'x'.repeat(250_001),
+    ];
+    for (const [index, html] of cases.entries()) {
+        await t.test(String(index), async () => {
+            const h = createTableRendererHarness();
+            try {
+                await assert.rejects(h.renderers.renderMathToPNG({ html }), /EPUB formula/u);
+                assert.equal(h.dom.window.document.body.children.length, 0);
+                assert.equal(h.serializedTable, '');
+            }
+            finally {
+                h.dom.window.close();
+            }
+        });
+    }
+});
+
+test('cleans up formula DOM and canvas when PNG encoding fails', async () => {
+    const h = createTableRendererHarness();
+    h.dom.window.HTMLCanvasElement.prototype.toBlob = callback => callback(null);
+    try {
+        await assert.rejects(h.renderers.renderMathToPNG({
+            html: '<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi></math>',
+        }), /PNG encoding failed/u);
+        assert.equal(h.dom.window.document.body.children.length, 0);
+    }
+    finally {
+        h.dom.window.close();
+    }
+});
+
+test('rasterizes table citations after removing link-only attributes', async () => {
+    const h = createTableRendererHarness();
+    try {
+        const result = await h.renderers.renderWideTable({
+            html: '<table><tbody><tr><td><a href="chapter-01.xhtml#references" '
+                + 'rel="noreferrer">[1]</a></td></tr></tbody></table>',
+        });
+
+        assert.deepEqual(result, { mimeType: 'image/png', data: PNG_BYTES, alt: '' });
+        assert.match(h.serializedTable, /<a>\[1\]<\/a>/u);
+        assert.doesNotMatch(h.serializedTable, /\b(?:href|rel)=/iu);
+    }
+    finally {
+        h.dom.window.close();
+    }
+});
+
+test('rasterizes tables while stripping unsupported markup and attributes', async () => {
+    const h = createTableRendererHarness();
+    try {
+        const result = await h.renderers.renderWideTable({
+            html: '<table><tbody><tr><td>'
+                + '<mark data-ocr="note">HRV</mark>'
+                + '<span onclick="alert(1)" data-extra="value"> values</span>'
+                + '<script>window.pwned = true</script>'
+                + '<svg xmlns="http://www.w3.org/2000/svg"><text>hidden</text></svg>'
+                + '</td></tr></tbody></table>',
+        });
+
+        assert.deepEqual(result, { mimeType: 'image/png', data: PNG_BYTES, alt: '' });
+        assert.match(h.serializedTable, /HRV/iu);
+        assert.match(h.serializedTable, /values/iu);
+        assert.doesNotMatch(h.serializedTable, /<(?:mark|script|svg)\b/iu);
+        assert.doesNotMatch(h.serializedTable, /\b(?:onclick|data-ocr|data-extra)=/iu);
+        assert.doesNotMatch(h.serializedTable, /hidden|pwned/iu);
+    }
+    finally {
+        h.dom.window.close();
+    }
 });
 
 test('rejects image input above 25 MiB before creating a Blob or decoding', async () => {

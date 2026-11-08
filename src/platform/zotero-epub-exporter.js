@@ -8,6 +8,7 @@ export function createZoteroEpubExporter({
     createID,
     renderWideTable,
     renderImageToPNG,
+    renderMathToPNG,
     translate = translateEnglish,
     buildEpub = createEpub,
 } = {}) {
@@ -66,6 +67,7 @@ export function createZoteroEpubExporter({
                 assetBasePath,
                 renderWideTable,
                 renderImageToPNG,
+                renderMathToPNG,
             });
             if (!(archive instanceof Uint8Array) || !archive.byteLength) {
                 throw new Error(translate('viewer.exportEpubFailed'));
