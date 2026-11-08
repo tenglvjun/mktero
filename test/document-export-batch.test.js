@@ -8,6 +8,7 @@ import {
     selectDocumentExportConfirmations,
     selectDocumentExportGroups,
     summarizeDocumentExportBatch,
+    supportsExportAction,
 } from '../src/core/document-export-batch.js';
 import { translateMessage } from '../src/i18n/localization.js';
 
@@ -452,6 +453,22 @@ test('keeps going when a progress listener throws', async () => {
     assert.equal(events[0].group.identity, '1:SSSSSSSS');
     assert.deepEqual(events[0].result, { status: 'exported' });
     assert.equal(events[1].group.title, 'Two');
+});
+
+test('requires saveSnapshot for a snapshot and export for the file actions', () => {
+    const store = { async saveSnapshot() {} };
+    const fileExporter = { async export() {} };
+
+    // The saved-Markdown store has no export, and a file exporter has no
+    // saveSnapshot. Getting this backwards silently drops the menu action.
+    assert.equal(supportsExportAction('snapshot', store), true);
+    assert.equal(supportsExportAction('snapshot', fileExporter), false);
+    for (const action of ['markdown', 'obsidian', 'epub']) {
+        assert.equal(supportsExportAction(action, fileExporter), true);
+        assert.equal(supportsExportAction(action, store), false);
+    }
+    assert.equal(supportsExportAction('unknown', fileExporter), false);
+    assert.equal(supportsExportAction('markdown', null), false);
 });
 
 test('treats a saved snapshot as an exported group', async () => {

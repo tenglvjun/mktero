@@ -106,6 +106,7 @@ import {
     selectDocumentExportConfirmations,
     selectDocumentExportGroups,
     summarizeDocumentExportBatch,
+    supportsExportAction,
 } from './core/document-export-batch.js';
 import { createConversionRunRegistry } from './core/conversion-runs.js';
 import {
@@ -4252,7 +4253,9 @@ async function runDocumentsBatch(action, targets, controller, ownerWindow) {
     if (!groups.length || controller.signal.aborted) return;
 
     const exporter = exportExporterFor(action);
-    if (typeof exporter?.export !== 'function') return;
+    // A snapshot writes a Zotero note through the saved-Markdown store, which
+    // exposes saveSnapshot rather than export. The other actions export a file.
+    if (!supportsExportAction(action, exporter)) return;
     // A snapshot needs no destination: it writes a Zotero note. The other two
     // ask for the parent folder once, before any document is written.
     let directory = '';

@@ -103,6 +103,26 @@ export function mergeDocumentExportOverwrite(skipped, overwritten) {
     };
 }
 
+// Which member of an exporter each action needs. A snapshot writes a Zotero
+// note through the saved-Markdown store, which exposes saveSnapshot; the file
+// actions expose export. Keeping this here makes the difference testable, and
+// a wrong member shows up as a missing menu reaction rather than a crash.
+const EXPORT_ACTION_CAPABILITY = Object.freeze({
+    snapshot: 'saveSnapshot',
+    markdown: 'export',
+    obsidian: 'export',
+    epub: 'export',
+});
+
+export function exportActionCapability(action) {
+    return EXPORT_ACTION_CAPABILITY[action] || null;
+}
+
+export function supportsExportAction(action, exporter) {
+    const capability = exportActionCapability(action);
+    return capability !== null && typeof exporter?.[capability] === 'function';
+}
+
 export function createDocumentExportBatch({
     load,
     exportDocument,
