@@ -699,7 +699,7 @@ async function replaceMathWithImages(html, renderMathToPNG, images) {
             };
             images.set(math, image);
         }
-        const alt = decodeBasicEntities(math.replace(/<[^>]*>/gu, ''));
+        const alt = mathImageAlternativeText(math);
         output += html.slice(offset, match.index)
             + `<img class="epub-math-image" src="../${image.path}" alt="${escapeAttribute(alt)}"`
             + ` style="width:${image.width.toFixed(4)}em;vertical-align:${image.verticalAlign.toFixed(4)}em" />`;
@@ -755,6 +755,37 @@ async function replaceWideTables(html, renderWideTable, fileNameForIndex, imageA
 function tableCaption(table) {
     const caption = /<caption\b[^>]*>([\s\S]*?)<\/caption\s*>/iu.exec(table)?.[1];
     return caption ? htmlText(caption) : '';
+}
+
+function mathImageAlternativeText(math) {
+    return decodeMathAlternativeEntities(String(math).replace(/<[^>]*>/gu, ''))
+        .replace(/[<>]/gu, character => character === '<' ? '\u2039' : '\u203a')
+        .replace(/[\u0000-\u001F\u007F]/gu, ' ')
+        .replace(/\s+/gu, ' ')
+        .trim();
+}
+
+function decodeMathAlternativeEntities(value) {
+    return String(value)
+        .replace(/&lt;/giu, '\u2039')
+        .replace(/&gt;/giu, '\u203a')
+        .replace(/&quot;/giu, '\u2033')
+        .replace(/&apos;|&#39;/giu, '\u2032')
+        .replace(/&amp;/giu, '&')
+        .replace(/&#(\d+);/gu, (_, code) => mathAlternativeCodePoint(Number(code)))
+        .replace(/&#x([\da-f]+);/giu, (_, code) => mathAlternativeCodePoint(Number.parseInt(code, 16)));
+}
+
+function mathAlternativeCodePoint(codePoint) {
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff
+        || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+        return '';
+    }
+    if (codePoint === 0x3c) return '\u2039';
+    if (codePoint === 0x3e) return '\u203a';
+    if (codePoint === 0x22) return '\u2033';
+    if (codePoint === 0x27) return '\u2032';
+    return String.fromCodePoint(codePoint);
 }
 
 function htmlText(value) {

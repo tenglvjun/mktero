@@ -387,6 +387,25 @@ test('packages author markers, inline and display formulas as reusable images wi
     assert.doesNotMatch(new TextDecoder().decode(entries['OEBPS/content.opf']), /properties="mathml"/u);
 });
 
+test('keeps encoded markup inert in formula image alternative text', async () => {
+    let mathMarkup = '';
+    const archive = await createEpub({
+        title: 'Formula Alternative',
+        markdown: 'Text $\\text{&lt;script&gt;alert(1)&lt;/script&gt;}$.',
+        renderMathToPNG: async ({ html }) => {
+            mathMarkup = html;
+            return { mimeType: 'image/png', data: PNG_BYTES, width: 1, height: 1, verticalAlign: 0 };
+        },
+    });
+    const chapter = xhtmlFiles(archive)['OEBPS/text/chapter-01.xhtml'];
+    const alt = chapter.querySelector('img.epub-math-image')?.getAttribute('alt');
+
+    assert.match(mathMarkup, /&lt;script&gt;/u);
+    assert.equal(alt, '‹script›alert(1)‹/script›');
+    assert.doesNotMatch(alt, /[<>]/u);
+    assert.doesNotMatch(chapter.documentElement.outerHTML, /<script/iu);
+});
+
 test('keeps math-image footnote markers linked and renders chapter-end note formulas', async () => {
     const archive = await createEpub({
         title: 'Notes',
