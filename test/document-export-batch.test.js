@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    createObsidianExportBatch,
-    mergeObsidianExportOverwrite,
-    obsidianExportRowMessage,
-    selectObsidianExportConfirmations,
-    selectObsidianExportGroups,
-    summarizeObsidianExportBatch,
-} from '../src/core/obsidian-export-batch.js';
+    createDocumentExportBatch,
+    mergeDocumentExportOverwrite,
+    documentExportRowMessage,
+    selectDocumentExportConfirmations,
+    selectDocumentExportGroups,
+    summarizeDocumentExportBatch,
+} from '../src/core/document-export-batch.js';
 import { translateMessage } from '../src/i18n/localization.js';
 
 function target(itemID, title, libraryID, itemKey) {
@@ -20,7 +20,7 @@ function group(identity, pdfs, title = pdfs[0]?.title) {
 }
 
 test('merges PDFs that share a parent and drops invalid targets', () => {
-    const groups = selectObsidianExportGroups([
+    const groups = selectDocumentExportGroups([
         target(1, 'First', 1, 'ABCD2345'),
         target(2, 'Other parent', 1, 'ZZZZZZZZ'),
         target(3, 'Second', 1, 'ABCD2345'),
@@ -60,7 +60,7 @@ test('exports the first cached PDF and does not load later siblings', async () =
     const loads = [];
     const exported = [];
     const signal = new AbortController().signal;
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load(pdf, options) {
             loads.push({ itemID: pdf.itemID, signal: options.signal });
             if (pdf.itemID === 1) return null;
@@ -78,7 +78,7 @@ test('exports the first cached PDF and does not load later siblings', async () =
         isPreparing: () => false,
     });
 
-    const result = await batch.run(selectObsidianExportGroups([
+    const result = await batch.run(selectDocumentExportGroups([
         target(1, 'Missing', 2, 'AAAAAAAA'),
         target(2, 'Cached', 2, 'AAAAAAAA'),
         target(3, 'Later', 2, 'AAAAAAAA'),
@@ -111,7 +111,7 @@ test('exports the first cached PDF and does not load later siblings', async () =
 
 test('reports a group with no cache as not ready without exporting', async () => {
     let exports = 0;
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load: () => null,
         exportDocument() {
             exports += 1;
@@ -140,7 +140,7 @@ test('reports a group with no cache as not ready without exporting', async () =>
 
 test('skips a preparing PDF and exports the next cached sibling', async () => {
     const loads = [];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load(pdf) {
             loads.push(pdf.itemID);
             return { markdown: `doc ${pdf.itemID}` };
@@ -168,7 +168,7 @@ test('skips a preparing PDF and exports the next cached sibling', async () => {
 
 test('reports a preparing-only group without loading it', async () => {
     let loads = 0;
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load() {
             loads += 1;
             return { markdown: 'should not load' };
@@ -194,7 +194,7 @@ test('reports a preparing-only group without loading it', async () => {
 
 test('prefers preparing when every PDF is uncached and one is preparing', async () => {
     const loads = [];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load(pdf) {
             loads.push(pdf.itemID);
             return null;
@@ -224,7 +224,7 @@ test('prefers preparing when every PDF is uncached and one is preparing', async 
 
 test('records a load failure and still exports the next group', async () => {
     const loads = [];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load(pdf) {
             loads.push(pdf.itemID);
             if (pdf.itemID === 1) throw new Error('disk failed');
@@ -259,7 +259,7 @@ test('records a load failure and still exports the next group', async () => {
 });
 
 test('records an export failure and continues', async () => {
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load: pdf => ({ itemID: pdf.itemID }),
         exportDocument(document) {
             if (document.itemID === 1) throw new Error('index full');
@@ -287,7 +287,7 @@ test('records an export failure and continues', async () => {
 test('cancels before the next group without loading it', async () => {
     const controller = new AbortController();
     const loads = [];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load(pdf) {
             loads.push(pdf.itemID);
             return { markdown: 'cached' };
@@ -318,7 +318,7 @@ test('cancels before the next group without loading it', async () => {
 
 test('AbortError cancels the batch without recording the current group as failed', async () => {
     const loads = [];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load(pdf) {
             loads.push(pdf.itemID);
             if (pdf.itemID === 2) {
@@ -346,7 +346,7 @@ test('AbortError cancels the batch without recording the current group as failed
 
 test('records a conflict without counting it as exported', async () => {
     const conflicts = [{ language: 'original', path: 'Mktero/Paper.md' }];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load: () => ({ markdown: 'cached' }),
         exportDocument: () => ({ status: 'conflict', conflicts }),
         isPreparing: () => false,
@@ -379,7 +379,7 @@ test('confirms an exported result that still has conflicts once', async () => {
         language: 'zh-CN',
         path: 'Mktero/Paper/Paper - chinese.md',
     }];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load: () => ({ markdown: 'cached' }),
         exportDocument(_document, options) {
             if (options.conflictPolicy === 'overwrite') {
@@ -392,13 +392,13 @@ test('confirms an exported result that still has conflicts once', async () => {
     const groups = [group('1:UUUUUUUU', [{ itemID: 8, title: 'Paper' }])];
 
     const first = await batch.run(groups, { conflictPolicy: 'skip' });
-    const confirmations = selectObsidianExportConfirmations(first);
+    const confirmations = selectDocumentExportConfirmations(first);
 
     assert.deepEqual(confirmations.map(item => item.identity), ['1:UUUUUUUU']);
     assert.deepEqual(confirmations[0].conflicts, conflicts);
 
     const overwritten = await batch.run(groups, { conflictPolicy: 'overwrite' });
-    const merged = mergeObsidianExportOverwrite(first, overwritten);
+    const merged = mergeDocumentExportOverwrite(first, overwritten);
 
     assert.deepEqual(merged.exported.map(item => item.identity), ['1:UUUUUUUU']);
 });
@@ -406,7 +406,7 @@ test('confirms an exported result that still has conflicts once', async () => {
 test('does not overlap exportDocument calls', async () => {
     let running = 0;
     let maxRunning = 0;
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load: async pdf => ({ itemID: pdf.itemID }),
         async exportDocument() {
             running += 1;
@@ -431,7 +431,7 @@ test('does not overlap exportDocument calls', async () => {
 
 test('keeps going when a progress listener throws', async () => {
     const events = [];
-    const batch = createObsidianExportBatch({
+    const batch = createDocumentExportBatch({
         load: () => ({ markdown: 'cached' }),
         exportDocument: () => ({ status: 'exported' }),
         isPreparing: () => false,
@@ -454,6 +454,68 @@ test('keeps going when a progress listener throws', async () => {
     assert.equal(events[1].group.title, 'Two');
 });
 
+test('treats a saved snapshot as an exported group', async () => {
+    const batch = createDocumentExportBatch({
+        load: () => ({ markdown: 'cached', hasParent: true }),
+        exportDocument: () => ({ status: 'saved' }),
+        isPreparing: () => false,
+    });
+
+    const result = await batch.run([
+        group('1:QQQQQQQQ', [{ itemID: 21, title: 'Snapshotted' }]),
+    ]);
+
+    assert.equal(result.status, 'completed');
+    assert.deepEqual(result.exported, [{
+        identity: '1:QQQQQQQQ',
+        itemID: 21,
+        title: 'Snapshotted',
+    }]);
+    assert.deepEqual(result.failed, []);
+});
+
+test('reports a refused export as a failed row and keeps the batch going', async () => {
+    const batch = createDocumentExportBatch({
+        load: () => ({ markdown: 'cached' }),
+        exportDocument(document) {
+            if (document.markdown === 'cached') {
+                throw new Error('Only PDFs inside a library item can save a snapshot.');
+            }
+            return { status: 'exported' };
+        },
+        isPreparing: () => false,
+    });
+
+    const result = await batch.run([
+        group('1:RRRRRRRR', [{ itemID: 31, title: 'Standalone' }]),
+    ]);
+
+    assert.deepEqual(result.exported, []);
+    assert.deepEqual(result.failed, [{
+        identity: '1:RRRRRRRR',
+        itemID: 31,
+        title: 'Standalone',
+        message: 'Only PDFs inside a library item can save a snapshot.',
+    }]);
+});
+
+test('cancels without recording a group the exporter cancelled', async () => {
+    const batch = createDocumentExportBatch({
+        load: () => ({ markdown: 'cached' }),
+        exportDocument: () => ({ status: 'cancelled' }),
+        isPreparing: () => false,
+    });
+
+    const result = await batch.run([
+        group('1:SSSSSSSS', [{ itemID: 41, title: 'Picker cancelled' }]),
+        group('1:TTTTTTTT', [{ itemID: 42, title: 'Never reached' }]),
+    ]);
+
+    assert.equal(result.status, 'cancelled');
+    assert.deepEqual(result.exported, []);
+    assert.deepEqual(result.failed, []);
+});
+
 test('summarizes export counts for the progress status line', () => {
     const result = {
         status: 'completed',
@@ -465,34 +527,59 @@ test('summarizes export counts for the progress status line', () => {
         failed: [{ identity: '1:EEEEEEEE', message: 'disk' }],
     };
     assert.equal(
-        summarizeObsidianExportBatch(result, (key, variables) => (
+        summarizeDocumentExportBatch(result, (key, variables) => (
             `${key}=${variables.count}`
         )),
-        'obsidianBatch.exported=2 obsidianBatch.notExported=3'
+        'exportBatch.exported=2 exportBatch.notExported=3'
     );
-    const english = summarizeObsidianExportBatch(result);
+    const english = summarizeDocumentExportBatch(result);
     assert.equal(english, 'Exported 2. Not exported: 3.');
     assert.equal(
-        summarizeObsidianExportBatch(result, (key, variables) => (
+        summarizeDocumentExportBatch(result, (key, variables) => (
             translateMessage('zh-CN', key, variables)
         )),
         '已导出 2。 未导出 3。'
     );
-    assert.equal(summarizeObsidianExportBatch(null), 'Exported 0. Not exported: 0.');
+    assert.equal(summarizeDocumentExportBatch(null), 'Exported 0. Not exported: 0.');
+});
+
+test('keeps the Obsidian wording when the caller passes its own labels', () => {
+    const result = {
+        status: 'completed',
+        exported: [{ identity: '1:AAAAAAAA' }],
+        notReady: [],
+        preparing: [],
+        duplicate: [],
+        conflict: [{ identity: '1:DDDDDDDD' }],
+        failed: [],
+    };
+    assert.equal(
+        summarizeDocumentExportBatch(result, undefined, {
+            exported: 'obsidianBatch.exported',
+            notExported: 'obsidianBatch.notExported',
+        }),
+        'Exported 1. Not exported: 1.'
+    );
+    assert.equal(
+        documentExportRowMessage('conflict', undefined, '', {
+            conflict: 'obsidianBatch.rowConflict',
+        }),
+        'Skipped changed note'
+    );
 });
 
 test('progress rows name the outcome without repeating the batch count', () => {
-    assert.equal(obsidianExportRowMessage('notReady'), 'No Markdown');
-    assert.equal(obsidianExportRowMessage('exported'), 'Exported');
-    assert.equal(obsidianExportRowMessage('preparing'), 'Still preparing');
-    assert.equal(obsidianExportRowMessage('conflict'), 'Skipped changed note');
-    assert.equal(obsidianExportRowMessage('failed'), 'Failed');
-    assert.equal(obsidianExportRowMessage('failed', undefined, 'disk full'), 'disk full');
+    assert.equal(documentExportRowMessage('notReady'), 'No Markdown');
+    assert.equal(documentExportRowMessage('exported'), 'Exported');
+    assert.equal(documentExportRowMessage('preparing'), 'Still preparing');
+    assert.equal(documentExportRowMessage('conflict'), 'Skipped');
+    assert.equal(documentExportRowMessage('failed'), 'Failed');
+    assert.equal(documentExportRowMessage('failed', undefined, 'disk full'), 'disk full');
     assert.equal(
-        obsidianExportRowMessage('notReady', (key, variables) => (
+        documentExportRowMessage('notReady', (key, variables) => (
             translateMessage('zh-CN', key, variables)
         )),
         '没有 Markdown'
     );
-    assert.doesNotMatch(obsidianExportRowMessage('notReady'), /\d/);
+    assert.doesNotMatch(documentExportRowMessage('notReady'), /\d/);
 });

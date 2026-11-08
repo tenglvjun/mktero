@@ -481,6 +481,74 @@ test('does not shorten a Windows-looking path unless the platform flag is set', 
     );
 });
 
+test('resolves the batch folder once and reports a cancelled picker', async () => {
+    let shown = 0;
+    const picker = {
+        modeGetFolder: 2,
+        returnCancel: 1,
+        file: '/exports',
+        init() {},
+        async show() {
+            shown += 1;
+            return 1;
+        },
+    };
+    const exporter = createZoteroMarkdownExporter({
+        createFilePicker: () => picker,
+        ioUtils: createIOUtils([]),
+        pathUtils,
+        createID: () => 'request-id',
+        translate: key => key,
+    });
+
+    assert.equal(await exporter.resolveDirectory({ ownerWindow: {} }), null);
+    assert.equal(shown, 1);
+
+    const cancelled = await exporter.export({
+        ownerWindow: {},
+        title: 'Paper',
+        markdown: '# Paper',
+        assets: [],
+    });
+    assert.deepEqual(cancelled, { status: 'cancelled' });
+    assert.equal(shown, 2);
+});
+
+test('writes one paper directory per document into an already resolved folder', async () => {
+    const writes = [];
+    const picker = createFilePicker({ result: 0, file: '/exports' });
+    const exporter = createZoteroMarkdownExporter({
+        createFilePicker: () => picker,
+        ioUtils: createIOUtils(writes),
+        pathUtils,
+        createID: () => 'request-id',
+        translate: key => key,
+    });
+
+    const directory = await exporter.resolveDirectory({ ownerWindow: {} });
+    assert.equal(directory, '/exports');
+
+    const first = await exporter.export({
+        ownerWindow: {},
+        directory,
+        title: 'First',
+        markdown: '# First',
+        assets: [],
+    });
+    const second = await exporter.export({
+        ownerWindow: {},
+        directory,
+        title: 'Second',
+        markdown: '# Second',
+        assets: [],
+    });
+
+    assert.equal(first.path, '/exports/First/First.md');
+    assert.equal(second.path, '/exports/Second/Second.md');
+    // Only resolveDirectory opened the picker.
+    assert.equal(picker.shown, undefined);
+});
+
 function createFilePicker({ result, file = '/exports' }) {
     return {
         modeGetFolder: 2,

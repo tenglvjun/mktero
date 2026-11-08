@@ -1,15 +1,21 @@
 import { translateEnglish } from '../i18n/localization.js';
 
 const ITEM_KEY = /^[A-Z0-9]{8}$/;
-const ROW_LABELS = Object.freeze({
-    exported: 'obsidianBatch.rowExported',
-    notReady: 'obsidianBatch.rowNotReady',
-    preparing: 'obsidianBatch.rowPreparing',
-    conflict: 'obsidianBatch.rowConflict',
-    failed: 'obsidianBatch.rowFailed',
+const DEFAULT_ROW_LABELS = Object.freeze({
+    exported: 'exportBatch.rowExported',
+    notReady: 'exportBatch.rowNotReady',
+    preparing: 'exportBatch.rowPreparing',
+    conflict: 'exportBatch.rowConflict',
+    failed: 'exportBatch.rowFailed',
+});
+const DEFAULT_SUMMARY_LABELS = Object.freeze({
+    exported: 'exportBatch.exported',
+    notExported: 'exportBatch.notExported',
 });
 
-export function selectObsidianExportGroups(targets) {
+// One parent item becomes one exported document. Several PDFs of the same
+// parent therefore share a group, and the first one with Markdown wins.
+export function selectDocumentExportGroups(targets) {
     const groups = [];
     const indexByIdentity = new Map();
     for (const target of targets || []) {
@@ -31,21 +37,30 @@ export function selectObsidianExportGroups(targets) {
     return groups;
 }
 
-export function summarizeObsidianExportBatch(result, translate = translateEnglish) {
-    const counts = obsidianExportBatchCounts(result);
+export function summarizeDocumentExportBatch(
+    result,
+    translate = translateEnglish,
+    labels = DEFAULT_SUMMARY_LABELS
+) {
+    const counts = documentExportBatchCounts(result);
     return [
-        translate('obsidianBatch.exported', { count: counts.exported }),
-        translate('obsidianBatch.notExported', { count: counts.notExported }),
+        translate(labels.exported, { count: counts.exported }),
+        translate(labels.notExported, { count: counts.notExported }),
     ].join(' ');
 }
 
-export function obsidianExportRowMessage(type, translate = translateEnglish, errorMessage = '') {
+export function documentExportRowMessage(
+    type,
+    translate = translateEnglish,
+    errorMessage = '',
+    labels = DEFAULT_ROW_LABELS
+) {
     if (type === 'failed' && errorMessage) return String(errorMessage);
-    const key = ROW_LABELS[type];
+    const key = labels[type];
     return key ? translate(key) : '';
 }
 
-export function selectObsidianExportConfirmations(result) {
+export function selectDocumentExportConfirmations(result) {
     const selected = [];
     const seen = new Set();
     const add = item => {
@@ -61,7 +76,7 @@ export function selectObsidianExportConfirmations(result) {
     return selected;
 }
 
-export function mergeObsidianExportOverwrite(skipped, overwritten) {
+export function mergeDocumentExportOverwrite(skipped, overwritten) {
     const finished = new Set();
     for (const name of ['exported', 'notReady', 'preparing', 'conflict', 'failed']) {
         for (const item of overwritten?.[name] || []) {
@@ -88,17 +103,17 @@ export function mergeObsidianExportOverwrite(skipped, overwritten) {
     };
 }
 
-export function createObsidianExportBatch({
+export function createDocumentExportBatch({
     load,
     exportDocument,
     isPreparing = () => false,
     onEvent = () => {},
 } = {}) {
     if (typeof load !== 'function') {
-        throw new TypeError('An Obsidian export loader is required');
+        throw new TypeError('A document export loader is required');
     }
     if (typeof exportDocument !== 'function') {
-        throw new TypeError('An Obsidian document exporter is required');
+        throw new TypeError('A document exporter is required');
     }
 
     return {
@@ -190,7 +205,8 @@ async function exportGroup(group, {
             duplicates,
         };
     }
-    if (exportResult?.status === 'exported') {
+    if (exportResult?.status === 'exported'
+        || exportResult?.status === 'saved') {
         const conflicts = Array.isArray(exportResult.conflicts)
             ? exportResult.conflicts.slice()
             : [];
@@ -215,6 +231,9 @@ async function exportGroup(group, {
             exportResult,
             duplicates,
         };
+    }
+    if (exportResult?.status === 'cancelled') {
+        return { cancelled: true };
     }
     return {
         type: 'failed',
@@ -324,7 +343,7 @@ function emptyResult() {
     };
 }
 
-function obsidianExportBatchCounts(result) {
+function documentExportBatchCounts(result) {
     const exportedIdentities = new Set(
         (result?.exported || [])
             .map(item => item?.identity)
