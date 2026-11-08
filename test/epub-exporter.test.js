@@ -208,6 +208,77 @@ test('rejects invalid builder bytes without writing a file', async t => {
     }
 });
 
+test('resolves the batch folder once for a whole selection', async () => {
+    const writes = [];
+    const picker = createFilePicker({ result: 0, file: '/exports' });
+    const exporter = createExporter({ picker, writes });
+
+    assert.equal(
+        await exporter.resolveDirectory({ ownerWindow: {} }),
+        '/exports'
+    );
+
+    const usedPaths = new Set();
+    const first = await exporter.export({
+        directory: '/exports',
+        usedPaths,
+        title: 'Paper',
+        markdown: '# Paper',
+        assets: [],
+    });
+    const second = await exporter.export({
+        directory: '/exports',
+        usedPaths,
+        title: 'Paper',
+        markdown: '# Paper again',
+        assets: [],
+    });
+
+    assert.equal(first.path, '/exports/Paper.epub');
+    // The second document must not overwrite the first one.
+    assert.equal(second.path, '/exports/Paper-2.epub');
+    assert.deepEqual(
+        writes.map(write => write.path),
+        ['/exports/Paper.epub', '/exports/Paper-2.epub']
+    );
+});
+
+test('cancelling the batch folder writes nothing', async () => {
+    const writes = [];
+    const exporter = createExporter({
+        picker: createFilePicker({ result: 1 }),
+        writes,
+    });
+
+    assert.equal(await exporter.resolveDirectory({ ownerWindow: {} }), null);
+    assert.deepEqual(writes, []);
+});
+
+test('numbers around an EPUB that already exists in the batch folder', async () => {
+    const writes = [];
+    const exporter = createExporter({
+        picker: createFilePicker({ result: 0, file: '/exports' }),
+        writes,
+        ioUtils: {
+            async exists(filePath) {
+                return filePath === '/exports/Paper.epub';
+            },
+            async write(filePath, data, options) {
+                writes.push({ path: filePath, data, options });
+            },
+        },
+    });
+
+    const result = await exporter.export({
+        directory: '/exports',
+        title: 'Paper',
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    assert.equal(result.path, '/exports/Paper-2.epub');
+});
+
 function createExporter({
     picker = createFilePicker(),
     writes = [],
@@ -230,6 +301,7 @@ function createExporter({
 function createFilePicker({ result = 0, file = '/exports/Paper.epub' } = {}) {
     return {
         modeSave: 1,
+        modeGetFolder: 2,
         returnCancel: 1,
         file,
         filters: [],
