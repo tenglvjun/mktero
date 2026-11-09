@@ -70,6 +70,19 @@ export function createMkteroCanvasFactory(createCanvas, {
             this.totalPixels += width * height;
             return { canvas, context };
         }
+        // PDF.js 6.5 asks the factory for the opaque drawing context of the
+        // canvas it renders into instead of calling canvas.getContext itself.
+        // Zotero canvases and @napi-rs/canvas both accept the alpha option, but
+        // a canvas that refuses it must still render through its plain 2D
+        // context rather than aborting the page.
+        getNoAlphaContext(canvas) {
+            const context = canvas?.getContext?.('2d', { alpha: false, willReadFrequently: true })
+                || canvas?.getContext?.('2d');
+            if (!context) {
+                throw new Error('Canvas rendering is unavailable');
+            }
+            return context;
+        }
         reset(canvasAndContext, width, height) {
             if (!canvasAndContext?.canvas) {
                 throw new Error('Canvas is not specified');
