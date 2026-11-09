@@ -47,7 +47,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 - 在可访问的 Zotero 文库中检查引用，复制已有条目，或导入缺失的元数据与可选的公开 PDF。[参考文献](./docs/references-and-export.zh-CN.md#从-markdown-导入参考文献)
 - 借助 Semantic Scholar、OpenCitations 和 OpenAlex，浏览当前文库内的直接引用关系。[引用图谱](./docs/references-and-export.zh-CN.md#浏览引用图谱)
 - 保存便携 Zotero 快照，或将校对后的 Markdown 和图片导出到本地文件夹。[保存与导出](./docs/references-and-export.zh-CN.md#保存便携快照)
-- 将当前阅读视图导出为 EPUB，公式以图片保留排版以兼容阅读器；也可对整批所选文献或整个分类树批量导出快照、Markdown、EPUB 和 Obsidian 笔记。[EPUB](./docs/references-and-export.zh-CN.md#导出-epub) · [Obsidian](./docs/references-and-export.zh-CN.md#导出到-obsidian) · [批量导出](./docs/references-and-export.zh-CN.md#批量导出)
+- 将当前阅读视图导出为 EPUB，公式以图片保留排版以兼容阅读器（已在 Apple Books 和微信读书测试）；也可对整批所选文献或整个分类树批量导出快照、Markdown、EPUB 和 Obsidian 笔记。[EPUB](./docs/references-and-export.zh-CN.md#导出-epub) · [Obsidian](./docs/references-and-export.zh-CN.md#导出到-obsidian) · [批量导出](./docs/references-and-export.zh-CN.md#批量导出)
 - 在文献列表的本地 Markdown 列中查看缓存可用状态与准备进度。[Markdown 状态](./docs/conversion.zh-CN.md#查看哪些条目已有-markdown)
 
 ## 快速开始

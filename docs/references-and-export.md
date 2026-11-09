@@ -48,6 +48,8 @@ The reflowable EPUB contains the current document's selected reading view, inclu
 
 Formulas, including mathematical author markers and citations, are rendered locally as PNG images so readers without MathML support retain their layout. Repeated formulas share an image, inline images scale with the text and preserve baseline alignment, and citation links remain attached. Formula symbols are images rather than selectable text. Ordinary tables remain HTML tables; tables estimated to be too wide are rendered as PNG images and packaged in the book. Link navigation depends on the EPUB reader.
 
+Exported EPUB files can be read in Apple Books and WeChat Reading. Those are the only two readers Mktero has been tested with, so other EPUB readers are unverified. If the layout looks wrong, include the reader name and version when you [report a problem](../README.md#community).
+
 EPUB export uses the Markdown and image assets already loaded for reading. It starts no OCR or conversion, reads no PDF, and writes neither Mktero caches nor the Zotero library. Only the chosen local export file is saved, and Mktero does not sync that copy. To export many papers at once, use [batch export](#batch-export).
 
 ## Export to Obsidian
