@@ -77,9 +77,11 @@ test('builds reproducible release assets and Zotero update metadata', async () =
         'd3-quadtree',
         'd3-timer',
     ]) {
+        // d3 modules carry the ISC header with their own release year, so the
+        // assertion pins the author and the year span rather than one year.
         assert.match(
             strFromU8(packageEntries[`licenses/${name}.txt`]),
-            /Copyright 2010-2021 Mike Bostock/
+            /Copyright 2010-\d{4} Mike Bostock/
         );
     }
     assert.match(
