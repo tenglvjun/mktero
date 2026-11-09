@@ -156,6 +156,25 @@ test('adds the shared CSS or repairs a stylesheet link with a missing or incorre
     })] })), /stylesheet path/);
 });
 
+test('styles book captions like the reader, with a muted caption and a darker label', () => {
+    const entries = unzipSync(buildEpubPackage(options()));
+    const css = strFromU8(entries['OEBPS/styles/book.css']);
+    const rule = selector => {
+        const match = new RegExp(`${selector}\\s*\\{([^}]*)\\}`, 'u').exec(css);
+        assert.ok(match, `Missing CSS rule: ${selector}`);
+        return match[1];
+    };
+    const caption = rule('figcaption, caption');
+    assert.match(caption, /color:\s*#68717b/u);
+    assert.match(caption, /font-size:\s*\.82em/u);
+    assert.match(caption, /line-height:\s*1\.5/u);
+    assert.match(caption, /text-align:\s*center/u);
+    const label = rule('\\.mktero-figure-label, \\.mktero-table-label');
+    assert.match(label, /color:\s*#20252b/u);
+    assert.match(label, /font-weight:\s*650/u);
+    assert.match(css, /@media \(prefers-color-scheme: dark\)/u);
+});
+
 test('declares each core EPUB image type and accepts binary views without changing their bytes', () => {
     const gif = new Uint8Array([71, 73, 70, 56, 57, 97]);
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
