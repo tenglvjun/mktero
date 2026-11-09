@@ -30,12 +30,13 @@ p { margin: .65em 0; }
 a { text-decoration: underline; }
 img, svg { max-width: 100%; height: auto; }
 figure { margin: 1em 0; text-align: center; }
-figcaption, caption { font-size: .9em; text-align: left; line-height: 1.4; }
-.mktero-figure-label, .mktero-table-label { font-weight: bold; }
+figcaption, caption { color: #68717b; font-size: .82em; line-height: 1.5; text-align: center; }
+figcaption { margin: .6em 0 0; }
+.mktero-figure-label, .mktero-table-label { color: #20252b; font-weight: 650; }
 .mktero-figure-panel { margin: .5em 0; }
 table { max-width: 100%; border-collapse: collapse; font-size: .85em; }
 th, td { border: 1px solid; padding: .3em .45em; vertical-align: top; }
-caption { caption-side: top; margin-bottom: .5em; }
+caption { caption-side: top; margin: 0 0 .6em; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 code { font-family: monospace; }
 blockquote { margin: 1em 1.25em; }
@@ -45,6 +46,10 @@ math { font-size: 1em; }
 .chapter-notes { margin-top: 2em; border-top: 1px solid; padding-top: .5em; }
 .chapter-notes, .footnote { font-size: .9em; }
 .epub-table-image { display: block; margin: 1em auto; }
+@media (prefers-color-scheme: dark) {
+    figcaption, caption { color: #aab2bc; }
+    .mktero-figure-label, .mktero-table-label { color: #edf1f5; }
+}
 `;
 
 /**
