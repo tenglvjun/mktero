@@ -132,3 +132,33 @@ test('bridges session-long PDF.js globals from the hidden DOM window first', asy
         else globalThis.Services = previousServices;
     }
 });
+
+test('answers the PDF.js opaque canvas context request and falls back without it', async () => {
+    const { createMkteroCanvasFactory } = await import(
+        '../src/pdf/pdfjs-bootstrap-environment.js?canvas-factory-no-alpha'
+    );
+    const requested = [];
+    const CanvasFactory = createMkteroCanvasFactory((width, height) => {
+        const canvas = { width, height, getContext(type, options) {
+            requested.push(options ?? null);
+            // A canvas that rejects the alpha option must still render.
+            if (options?.alpha === false && this.rejectsAlpha) return null;
+            return { canvas: this };
+        } };
+        return canvas;
+    });
+    const factory = new CanvasFactory();
+    const entry = factory.create(4, 5);
+    assert.deepEqual(requested.at(-1), null);
+
+    const opaque = factory.getNoAlphaContext(entry.canvas);
+    assert.equal(opaque.canvas, entry.canvas);
+    assert.deepEqual(requested.at(-1), { alpha: false, willReadFrequently: true });
+
+    entry.canvas.rejectsAlpha = true;
+    assert.ok(factory.getNoAlphaContext(entry.canvas));
+    assert.deepEqual(requested.at(-1), null);
+
+    assert.throws(() => factory.getNoAlphaContext({}), /Canvas rendering is unavailable/);
+    factory.destroy(entry);
+});
