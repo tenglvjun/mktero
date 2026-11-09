@@ -14,8 +14,12 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
+import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { EditorView } from '@codemirror/view';
+import { pdfjsBuiltinPolyfillPlugin } from '../scripts/pdfjs-builtin-polyfill.mjs';
 import {
     createMinerUCacheKey,
     createZoteroMarkdownCache,
@@ -1173,15 +1177,26 @@ test('uses the language menu without changing the default translation language',
 test('uses the Zotero window AbortController when the plugin sandbox has none', {
     timeout: 5_000,
 }, async t => {
-    const NativeAbortController = globalThis.AbortController;
-    const previousGlobals = {
-        Zotero: globalThis.Zotero,
-        IOUtils: globalThis.IOUtils,
-        PathUtils: globalThis.PathUtils,
-        startup: globalThis.startup,
-        shutdown: globalThis.shutdown,
-        __MKTERO_MARKDOWN_STYLES__: globalThis.__MKTERO_MARKDOWN_STYLES__,
-    };
+    // Keep jsdom's host globals intact: its stylesheet loader also uses the
+    // Node AbortController. Only the plugin sandbox should lack one.
+    const context = vm.createContext({
+        console,
+        URL,
+        TextEncoder,
+        TextDecoder,
+        ReadableStream,
+        TransformStream,
+        WritableStream,
+        Blob,
+        FormData,
+        Response,
+        Request,
+        Headers,
+        btoa,
+        fetch: async () => { throw new Error('Unexpected network request'); },
+        setTimeout,
+        clearTimeout,
+    });
     const alerts = [];
     const debugLogs = [];
     const actionsTagsEvents = [];
@@ -1190,8 +1205,14 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
     const openedPreferences = new Promise(resolve => {
         resolveOpenedPreferences = resolve;
     });
-    const mainWindow = createMainWindow(NativeAbortController, alerts);
-    globalThis.Zotero = {
+    let controllersCreated = 0;
+    const mainWindow = createMainWindow(class extends AbortController {
+        constructor() {
+            super();
+            controllersCreated++;
+        }
+    }, alerts);
+    context.Zotero = {
         version: '9.0.6',
         uiReadyPromise: Promise.resolve(),
         Profile: { dir: '/tmp/mktero-test-profile' },
@@ -1245,36 +1266,44 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
         },
         logError() {},
     };
-    globalThis.IOUtils = {
+    context.IOUtils = {
         exists: async () => false,
         getChildren: async () => [],
         read: async () => new Uint8Array([1]),
         stat: async () => ({ size: 0 }),
         write: async () => {},
     };
-    globalThis.PathUtils = {
+    context.PathUtils = {
         join: path.join,
         parent: path.dirname,
         filename: path.basename,
     };
-    globalThis.__MKTERO_MARKDOWN_STYLES__ = readFileSync(
+    context.__MKTERO_MARKDOWN_STYLES__ = readFileSync(
         new URL('../ui/markdown.css', import.meta.url),
         'utf8'
     );
-    delete globalThis.AbortController;
 
     t.after(() => {
-        globalThis.shutdown?.();
+        context.shutdown?.();
         mainWindow.document.defaultView.close();
-        globalThis.AbortController = NativeAbortController;
-        for (const [name, value] of Object.entries(previousGlobals)) {
-            if (value === undefined) delete globalThis[name];
-            else globalThis[name] = value;
-        }
     });
 
-    await import('../src/bootstrap.js?abort-controller-regression');
-    await globalThis.startup({
+    const { outputFiles } = await build({
+        entryPoints: [fileURLToPath(new URL('../src/bootstrap.js', import.meta.url))],
+        bundle: true,
+        format: 'iife',
+        platform: 'browser',
+        target: ['firefox115'],
+        write: false,
+        plugins: [pdfjsBuiltinPolyfillPlugin()],
+        define: { process: 'undefined', Buffer: 'undefined' },
+    });
+    vm.runInContext(outputFiles[0].text, context);
+    // PDF.js bridges this during module evaluation. Remove only that sandbox
+    // copy so runtime actions must still fall back to the Zotero window.
+    delete context.AbortController;
+    assert.equal(context.AbortController, undefined);
+    await context.startup({
         id: 'mktero@tenglvjun.github.io',
         rootURI: 'resource://mktero/',
     });
@@ -1289,6 +1318,8 @@ test('uses the Zotero window AbortController when the plugin sandbox has none', 
 
     assert.deepEqual(alerts, []);
     assert.equal(await openedPreferences, 'mktero-preferences');
+    assert.equal(context.AbortController, undefined);
+    assert.ok(controllersCreated > 0);
     assert.ok(debugLogs.some(message => message.includes('conversion started for item 42')));
     assert.ok(debugLogs.some(message => message.includes('conversion failed for item 42')));
     assert.deepEqual(actionsTagsEvents, []);
