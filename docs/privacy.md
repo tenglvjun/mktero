@@ -12,7 +12,7 @@ This page lists what Mktero sends, where it keeps data, and what local cleanup r
 - PDF annotations, Zotero notes, and snapshots sync according to Zotero settings. Mktero does not send notes anywhere.
 - Reference, citation, and translation requests are bounded and local-first. Logs exclude API tokens, presigned URLs, PDF bytes, and authenticated responses.
 - Problem reports stay on this computer. Copying or saving creates a redacted file; this version does not upload it.
-- Version reporting goes only to Mktero, without a device fingerprint. Mktero runs no third-party analytics.
+- Version reporting and daily reading-activity totals go only to Mktero, without a device fingerprint. Mktero runs no third-party analytics.
 
 ## Data tables
 
@@ -28,6 +28,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | Your account profile, conversion-activity counts and daily quota balance when supported, requested with the access token while the account pane is open; quota also refreshes after hosted requests settle or when you manually resume | The Mktero service you select | Not by Mktero |
 | Account-linked hosted conversion admissions, successful documents, pages, result reuse and quota-block aggregates | The Mktero service; used for quota enforcement, service operation and capacity planning | Not by Mktero |
 | Mktero extension version, sent with requests to the Mktero service and recorded when you sign in, refresh your token, or send a background heartbeat, so the operator can see which builds are still in use | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
+| Daily reading-activity totals: reader tabs opened, distinct PDFs opened, of those scrolled and read to at least halfway, annotations created, exports completed, translations started, and the UTC day they belong to; no paper identifier, title, path, text, or per-action timestamp | The Mktero service you select; operations reporting only, never returned to the extension or shown in your profile | Not by Mktero |
 | Research invitation email, the token link, the answers you submit, and the research-email opt-out | The Mktero service you select; the link token is not saved by the website | Not by Mktero |
 | Focused DOI/arXiv/OpenAlex identifiers and provider-specific candidate identifiers | Semantic Scholar, OpenCitations, or OpenAlex | Not by Mktero |
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
@@ -113,6 +114,26 @@ The version report carries only the extension's own build number. It goes to the
 It collects no device fingerprint, hardware, operating-system, or IP-derived identifier. Mktero runs no third-party analytics. The version is never attached to requests to object storage, MinerU or Mistral converters, or an AI or citation provider you configure.
 
 The version is not part of your account profile, so no product screen displays it back to you.
+
+## Reading activity
+
+Mktero also reports daily reading-activity totals to the same service, so the operator can tell whether a conversion was actually read or whether the reader opened it once and stopped.
+
+One report carries seven numbers and one UTC day:
+
+- How many Markdown reader tabs were opened.
+- How many different PDFs were opened in the reader.
+- How many of those were scrolled at least once.
+- How many were read to at least half of the document.
+- How many annotations were created.
+- How many exports completed.
+- How many full-document translations were started.
+
+The report is sent at most every ten minutes, and only when at least one of those numbers changed since the last send. A final report is attempted when Zotero quits. There is no setting to turn it off; it is part of the same operations telemetry as the version report.
+
+It contains no paper identifier, title, author, file path, file name, hash, selected text, annotation text, translated text, or timestamp per action. The report does not say which paper was read, only how many reading actions happened that day. It is never attached to requests to object storage, MinerU or Mistral converters, or an AI or citation provider you configure, and it is not shown on your account page or in any product screen.
+
+The days a reader was active and the reading totals stay in the Mktero service as account-linked aggregates for operations and capacity planning. The extension keeps the unsent totals in memory only: nothing about them is written to your Zotero profile, and a crash loses whatever had not been sent yet.
 
 ## Research invitations
 

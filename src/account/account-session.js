@@ -2,6 +2,7 @@ import {
     isAccountSessionInvalid,
     refreshMkteroAccount,
     reportMkteroClientVersion,
+    reportMkteroReadingActivity,
 } from './account-client.js';
 import {
     accessTokenNeedsRefresh,
@@ -21,6 +22,16 @@ export const REFRESH_REQUEST_TIMEOUT_MS = 20 * 1000;
 export const CLIENT_HEARTBEAT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export const CLIENT_HEARTBEAT_RETRY_DELAY_MS = 60 * 1000;
 export const CLIENT_HEARTBEAT_REQUEST_TIMEOUT_MS = 20 * 1000;
+// Reading batches flush more often than the version heartbeat because they
+// carry increments: a crash loses whatever has not been sent, and a shorter
+// interval bounds that loss. Ten minutes also keeps an idle session silent, since
+// a flush with nothing pending sends no request at all.
+export const READING_ACTIVITY_INTERVAL_MS = 10 * 60 * 1000;
+export const READING_ACTIVITY_RETRY_DELAY_MS = 2 * 60 * 1000;
+export const READING_ACTIVITY_REQUEST_TIMEOUT_MS = 20 * 1000;
+// On shutdown Zotero waits for the promise shutdown() returns, so the final
+// flush gets a short budget rather than the full request timeout.
+export const READING_ACTIVITY_SHUTDOWN_TIMEOUT_MS = 2000;
 const PEER_POLL_MS = 25;
 const MAX_PEER_POLLS = 2400;
 
@@ -30,6 +41,9 @@ const MAX_PEER_POLLS = 2400;
 const refreshInFlight = new WeakMap();
 const heartbeatInFlight = new WeakMap();
 const heartbeatSchedulers = new WeakMap();
+// The reading reporter keeps its own scheduler map. Sharing the heartbeat's
+// would let one six-hour cycle swallow every ten-minute reading flush.
+const readingActivitySchedulers = new WeakMap();
 let refreshLockSerial = 0;
 
 export function reportAccountClientHeartbeat(zotero, {
@@ -162,6 +176,247 @@ function joinClientHeartbeat(zotero, start) {
     });
     heartbeatInFlight.set(zotero, promise);
     return promise;
+}
+
+// startReadingActivityReporter flushes the reading counters on a timer.
+//
+// It is separate from startAccountClientHeartbeat on purpose. The heartbeat
+// proves an account is alive every six hours; this carries increments that are
+// lost when Zotero quits, so it runs every ten minutes and only when there is
+// something to send.
+//
+// Failure handling follows the payload's value:
+//   - 404 and 405 mean the service predates this endpoint. The batch is kept and
+//     retried, so a client that ships before the server loses nothing.
+//   - 401 forces one token refresh, the same way the heartbeat does.
+//   - A sign-in-required or disabled-account error discards the batch: those
+//     counts can never be delivered, and retrying them forever would grow the
+//     held day without bound.
+//   - Any other failure keeps the batch for the next cycle.
+export function startReadingActivityReporter(zotero, {
+    counter,
+    fetchImpl,
+    now = Date.now,
+    sleep = delay,
+    secureRandom = globalThis.crypto,
+    setTimeoutImpl = globalThis.setTimeout?.bind(globalThis),
+    clearTimeoutImpl = globalThis.clearTimeout?.bind(globalThis),
+    intervalMs = READING_ACTIVITY_INTERVAL_MS,
+    retryDelayMs = READING_ACTIVITY_RETRY_DELAY_MS,
+    shutdownTimeoutMs = READING_ACTIVITY_SHUTDOWN_TIMEOUT_MS,
+    onError = () => {},
+} = {}) {
+    if (!zotero) throw new TypeError('A Zotero runtime is required');
+    if (!counter) throw new TypeError('A reading-activity counter is required');
+    const existing = readingActivitySchedulers.get(zotero);
+    if (existing) return existing;
+    if (typeof setTimeoutImpl !== 'function' || typeof clearTimeoutImpl !== 'function') {
+        throw new TypeError('Timer functions are required');
+    }
+
+    let disposed = false;
+    let timer = null;
+    let inFlight = null;
+    // A batch the service did not accept, kept here rather than pushed back into
+    // the counter. The counter has no "add back" API on purpose: that would let a
+    // caller inflate totals. Only one batch is held, and only for a failure that
+    // might succeed later (an older server, a network error), never for a lost
+    // session.
+    let retryBatch = null;
+
+    const schedule = delayMs => {
+        if (disposed) return;
+        timer = setTimeoutImpl(() => {
+            timer = null;
+            void run();
+        }, delayMs);
+    };
+
+    // send performs one flush. It returns true when the counter advanced (so the
+    // caller can wait the full interval) and false when the same batch should be
+    // retried sooner.
+    const send = async ({ timeoutMs = READING_ACTIVITY_REQUEST_TIMEOUT_MS } = {}) => {
+        // A held batch goes first: it is older, and once the service has the
+        // endpoint it is the one most likely to expire. A newer batch waits until
+        // the held one is accepted or dropped, which is also what bounds the hold
+        // to a single day.
+        const payload = retryBatch || counter.take();
+        if (!payload) return true;
+        const deliver = async accessToken => reportMkteroReadingActivity({
+            apiBase: getAccountApiBase(zotero),
+            accessToken,
+            counters: payload,
+            fetchImpl,
+            timeoutMs,
+        });
+        try {
+            const accessToken = await ensureAccountAccessToken(zotero, {
+                fetchImpl,
+                now,
+                sleep,
+                secureRandom,
+            });
+            await deliver(accessToken);
+            retryBatch = null;
+            return true;
+        }
+        catch (error) {
+            if (isAccountSessionInvalidLike(error)) {
+                // The counts cannot be delivered under this session. Dropping them
+                // is the only bounded choice; the alternative is a held batch that
+                // grows until the reader signs in again.
+                retryBatch = null;
+                return true;
+            }
+            if (error?.status === 401) {
+                try {
+                    const refreshed = await ensureAccountAccessToken(zotero, {
+                        fetchImpl,
+                        now,
+                        sleep,
+                        secureRandom,
+                        forceRefresh: true,
+                    });
+                    await deliver(refreshed);
+                    retryBatch = null;
+                    return true;
+                }
+                catch (retryError) {
+                    if (isAccountSessionInvalidLike(retryError)) {
+                        retryBatch = null;
+                        return true;
+                    }
+                    hold(payload);
+                    if (!isReadingActivityUnsupported(retryError)) reportError(retryError);
+                    return false;
+                }
+            }
+            hold(payload);
+            if (!isReadingActivityUnsupported(error)) reportError(error);
+            return false;
+        }
+    };
+
+    // hold keeps one batch for a later attempt. An older held batch is replaced:
+    // the service accepts only today and yesterday, so the newer one is the one
+    // that can still be accepted.
+    function hold(payload) {
+        retryBatch = payload;
+    }
+
+    const run = async () => {
+        if (disposed || inFlight) return;
+        // The next timer is scheduled before the promise settles, so a caller that
+        // drains the timer queue right after runNext() sees the delay it should
+        // wait. Scheduling inside .then() left a window where nothing was queued
+        // and a test — or a crash between the two microtasks — saw an idle
+        // scheduler.
+        const pending = send().catch(error => {
+            reportError(error);
+            return false;
+        });
+        inFlight = pending;
+        let ok = false;
+        try {
+            ok = await pending;
+        }
+        finally {
+            inFlight = null;
+            if (!disposed) schedule(ok ? intervalMs : retryDelayMs);
+        }
+    };
+
+    const handle = {
+        // dispose stops the timer. It does not flush: shutdown calls flush()
+        // separately and waits for the promise it returns.
+        dispose() {
+            if (disposed) return;
+            disposed = true;
+            if (timer !== null) clearTimeoutImpl(timer);
+            timer = null;
+            if (readingActivitySchedulers.get(zotero) === handle) {
+                readingActivitySchedulers.delete(zotero);
+            }
+        },
+
+        // flush makes one final attempt within the shutdown budget. It resolves
+        // to whether the batch was delivered, and never rejects: a failure to
+        // record telemetry must not delay or fail Zotero's shutdown.
+        async flush() {
+            if (!retryBatch && !counter.pending()) return true;
+            try {
+                return await withDeadline(
+                    () => send({ timeoutMs: shutdownTimeoutMs }),
+                    shutdownTimeoutMs,
+                    setTimeoutImpl,
+                    clearTimeoutImpl,
+                    () => false,
+                );
+            }
+            catch (error) {
+                reportError(error);
+                return false;
+            }
+        },
+    };
+    readingActivitySchedulers.set(zotero, handle);
+
+    function reportError(error) {
+        try {
+            onError(error);
+        }
+        catch {
+            // Reporting diagnostics must never stop the scheduler.
+        }
+    }
+
+    // The first flush waits a full interval. Opening Zotero is the busiest moment
+    // and there is nothing to send yet, so an immediate request would be wasted.
+    schedule(intervalMs);
+    return handle;
+}
+
+// isAccountSessionInvalidLike covers the two states where retrying is pointless:
+// the reader signed out, or the account is disabled.
+function isAccountSessionInvalidLike(error) {
+    return error?.code === 'MKTERO_SIGN_IN_REQUIRED'
+        || error?.code === 'MKTERO_ACCOUNT_DISABLED';
+}
+
+// isReadingActivityUnsupported detects a service that predates the endpoint, the
+// same signal the heartbeat uses.
+function isReadingActivityUnsupported(error) {
+    return error?.status === 404 || error?.status === 405;
+}
+
+// withDeadline races a promise against a timer. A runtime without timers still
+// runs the operation; only the waiting is bounded.
+function withDeadline(operation, timeoutMs, setTimeoutImpl, clearTimeoutImpl, onTimeout) {
+    if (!(timeoutMs > 0) || typeof setTimeoutImpl !== 'function') {
+        return operation();
+    }
+    return new Promise(resolve => {
+        let settled = false;
+        const timer = setTimeoutImpl(() => {
+            if (settled) return;
+            settled = true;
+            resolve(onTimeout());
+        }, timeoutMs);
+        Promise.resolve(operation()).then(
+            value => {
+                if (settled) return;
+                settled = true;
+                if (typeof clearTimeoutImpl === 'function') clearTimeoutImpl(timer);
+                resolve(value);
+            },
+            () => {
+                if (settled) return;
+                settled = true;
+                if (typeof clearTimeoutImpl === 'function') clearTimeoutImpl(timer);
+                resolve(onTimeout());
+            }
+        );
+    });
 }
 
 function isClientHeartbeatUnsupported(error) {

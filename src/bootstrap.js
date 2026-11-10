@@ -96,7 +96,9 @@ import {
 import {
     ensureAccountAccessToken as ensureMkteroAccessToken,
     startAccountClientHeartbeat,
+    startReadingActivityReporter,
 } from './account/account-session.js';
+import { createReadingActivityCounter } from './account/reading-activity.js';
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import {
@@ -351,6 +353,12 @@ const OBSIDIAN_EXPORT_QUEUE_ID = 'mktero-obsidian-export';
 // the same documents for no benefit.
 const DOCUMENT_EXPORT_QUEUE_ID = 'mktero-document-export';
 const OBSIDIAN_ITEM_KEY = /^[A-Z0-9]{8}$/;
+// A document counts as deeply read once the furthest saved position reaches this
+// share of the Markdown. Half is a reading-depth proxy, not a completion claim:
+// the figure feeds the funnel's "did anyone actually read this" column, and a
+// stricter threshold would leave it empty for papers that legitimately end before
+// the last block (appendix, references).
+const READING_ACTIVITY_DEEP_READ_RATIO = 0.5;
 // Obsidian keeps its own wording so its progress window still says "note" and
 // "Obsidian" instead of the generic document-export copy.
 const OBSIDIAN_EXPORT_LABELS = Object.freeze({
@@ -459,6 +467,10 @@ const runtime = {
     disposeCacheCleanupStatus: null,
     disposeAITargetLanguageObserver: null,
     disposeClientHeartbeat: null,
+    // The daily reading totals sent to the Mktero service. Both fields are null
+    // until the preference pane has registered a signed-in account.
+    readingActivity: null,
+    readingActivityReporter: null,
     annotationOverlayRefresher: null,
     localAnnotations: null,
     annotationGroups: null,
@@ -1212,6 +1224,16 @@ globalThis.startup = async function startup({ id, rootURI }) {
             clearTimeoutImpl: handle => accountTimers.clearTimer(handle),
             onError: error => logMkteroError(error),
         }).dispose;
+        // The reading reporter runs on its own ten-minute cycle. It only sends
+        // when the counter holds something, so an idle session stays silent.
+        runtime.readingActivity = createReadingActivityCounter();
+        runtime.readingActivityReporter = startReadingActivityReporter(Zotero, {
+            counter: runtime.readingActivity,
+            fetchImpl: accountFetch,
+            setTimeoutImpl: (callback, delay) => accountTimers.setTimer(callback, delay),
+            clearTimeoutImpl: handle => accountTimers.clearTimer(handle),
+            onError: error => logMkteroError(error),
+        });
     }
     registerReaderToolbarAction();
     registerMainWindowContextMenu(Zotero.getMainWindow?.());
@@ -1359,6 +1381,10 @@ globalThis.shutdown = function shutdown() {
     runtime.reasoningCatalogStore?.dispose();
     runtime.disposeReasoningCatalogHost?.();
     runtime.disposeClientHeartbeat?.();
+    // Stop the reading timer first, then let one final batch out. The promise is
+    // returned below so Zotero waits for it, but its own budget is two seconds and
+    // a failure still resolves: telemetry must never block shutdown.
+    const readingActivityFlushed = flushReadingActivityOnShutdown();
     runtime.disposeAnnotationObserver?.();
     runtime.disposeReferenceObserver?.();
     runtime.referenceImportService?.dispose?.();
@@ -1456,11 +1482,18 @@ globalThis.shutdown = function shutdown() {
     runtime.reasoningCatalogStore = null;
     runtime.disposeReasoningCatalogHost = null;
     runtime.disposeClientHeartbeat = null;
+    runtime.readingActivity = null;
+    runtime.readingActivityReporter = null;
     runtime.id = null;
     // Zotero waits for a promise returned by shutdown before it closes the
     // database or replaces the extension, so the corrections saved by the
     // closing tabs reach the profile first.
-    return Promise.all([revisionSessionsDestroyed, cacheLifecycleDisposed, sharedConversionStopped]);
+    return Promise.all([
+        revisionSessionsDestroyed,
+        cacheLifecycleDisposed,
+        sharedConversionStopped,
+        readingActivityFlushed,
+    ]);
 };
 
 globalThis.uninstall = async function uninstall() {};
@@ -1587,9 +1620,13 @@ async function openItemAsMarkdown(itemID, {
         onCopySourcedMarkdown: target => copySourcedMarkdown(itemID, target),
         onCopyCode: (code, options) => copyCode(code, options),
         ...readerCopyDeliveryHooks(),
-        onCreateMarkdownAnnotation: draft => (
-            runMarkdownAnnotationAction('create', itemID, draft)
-        ),
+        onCreateMarkdownAnnotation: async draft => {
+            const created = await runMarkdownAnnotationAction('create', itemID, draft);
+            // Counted after the action resolves: a rejected annotation must not
+            // look like a produced one.
+            recordAnnotationCreated();
+            return created;
+        },
         onUpdateMarkdownAnnotation: (annotationID, changes) => (
             runMarkdownAnnotationAction(
                 'update',
@@ -1616,6 +1653,10 @@ async function openItemAsMarkdown(itemID, {
         zoteroNotes: createTabNotesBridge(() => itemID),
     });
     if (presentation.created) {
+        // The tab was created, which is the only definition of "opened" this
+        // module can be sure of: a same-session reopen reuses the tab and must not
+        // inflate the count.
+        recordReaderOpened(itemID);
         void runtime.actionsTags?.openMarkdownSession({
             sessionID: itemID,
             sourceItemID: itemID,
@@ -2839,8 +2880,98 @@ async function attachReadingPosition(result) {
     }
 }
 
+// Reading-activity recording.
+//
+// These helpers never throw and never block the caller. Every one of them is a
+// counter increment on an object that may be null (no signed-in account at
+// startup, or after the preference pane has not registered yet), so a missing
+// counter simply means the sample is skipped rather than the reader failing.
+function recordReaderOpened(itemID) {
+    try {
+        runtime.readingActivity?.opened({ itemID });
+    }
+    catch (error) {
+        logMkteroError(error);
+    }
+}
+
+function recordReadingProgress(itemID, anchor, markdown) {
+    try {
+        const counter = runtime.readingActivity;
+        if (!counter || !anchor || !(anchor.offset > 0)) return;
+        // A non-zero offset is the whole signal for "opened and read at least a
+        // little". It is reported before the ratio check so a very short document
+        // with a small offset still counts as scrolled.
+        counter.scrolled({ itemID });
+        const length = typeof markdown === 'string' ? markdown.length : 0;
+        if (length > 0 && anchor.offset / length >= READING_ACTIVITY_DEEP_READ_RATIO) {
+            counter.deepRead({ itemID });
+        }
+    }
+    catch (error) {
+        logMkteroError(error);
+    }
+}
+
+function recordAnnotationCreated() {
+    try {
+        runtime.readingActivity?.annotationCreated();
+    }
+    catch (error) {
+        logMkteroError(error);
+    }
+}
+
+function recordExportCompleted() {
+    try {
+        runtime.readingActivity?.exported();
+    }
+    catch (error) {
+        logMkteroError(error);
+    }
+}
+
+function recordTranslationStarted() {
+    try {
+        runtime.readingActivity?.translated();
+    }
+    catch (error) {
+        logMkteroError(error);
+    }
+}
+
+// flushReadingActivityOnShutdown lets one last batch out while Zotero is closing.
+// The reporter owns the timeout and never rejects, so this cannot delay or fail
+// shutdown beyond its own two-second budget.
+function flushReadingActivityOnShutdown() {
+    const reporter = runtime.readingActivityReporter;
+    runtime.readingActivityReporter = null;
+    try {
+        // Stop the timer before the final send so no cycle starts during shutdown.
+        reporter?.dispose?.();
+    }
+    catch {
+        // Disposal is best effort; the flush below is what matters.
+    }
+    try {
+        const flushed = reporter?.flush?.();
+        return flushed && typeof flushed.then === 'function'
+            ? flushed
+            : Promise.resolve(true);
+    }
+    catch (error) {
+        logMkteroError(error);
+        return Promise.resolve(false);
+    }
+}
+
 function saveReadingPosition(itemID, anchor) {
     const model = runtime.presenter?.get(itemID)?.model;
+    // Reading activity is counted before the cache-key guard below: a document
+    // whose position cannot be persisted is still being read, and dropping the
+    // signal because of a storage detail would undercount the thing this exists
+    // to measure.
+    recordReadingProgress(itemID, anchor, model?.markdown);
     if (!runtime.readingPositions
         || typeof model?.sourceHash !== 'string'
         || typeof model?.cacheKey !== 'string') {
@@ -2998,6 +3129,10 @@ async function translateDocument(documentID, {
         throw error;
     }
     presentation.translationLanguageSelection = null;
+    // A started translation is the signal, not a finished one: a reader whose
+    // provider then fails still wanted the translation, and that intent is what
+    // the counter measures.
+    recordTranslationStarted();
     const previousTranslation = currentTranslationResult(
         presentation.model
     );
@@ -3875,13 +4010,15 @@ async function exportMarkdownForModel(model, { ownerWindow } = {}) {
     if (!runtime.markdownExporter?.export) {
         throw new Error('Markdown export is unavailable');
     }
-    return runtime.markdownExporter.export({
+    const result = await runtime.markdownExporter.export({
         ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
         title: model.title,
         markdown: selectExportMarkdown(model),
         assets: model.assets,
         assetBasePath: model.assetBasePath,
     });
+    recordExportCompleted();
+    return result;
 }
 
 async function exportEpubForModel(model, { ownerWindow } = {}) {
@@ -3891,7 +4028,7 @@ async function exportEpubForModel(model, { ownerWindow } = {}) {
     if (!runtime.epubExporter?.export) {
         throw new Error('EPUB export is unavailable');
     }
-    return runtime.epubExporter.export({
+    const result = await runtime.epubExporter.export({
         ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
         title: model.title,
         markdown: selectExportMarkdown(model),
@@ -3899,6 +4036,8 @@ async function exportEpubForModel(model, { ownerWindow } = {}) {
         assetBasePath: model.assetBasePath,
         language: selectExportMarkdownLanguage(model),
     });
+    recordExportCompleted();
+    return result;
 }
 
 async function exportObsidianForModel(
@@ -3913,7 +4052,7 @@ async function exportObsidianForModel(
         throw new Error('Obsidian export is unavailable');
     }
     const sourceItemID = model.sourceItemID ?? model.itemID ?? documentID;
-    return runtime.obsidianExporter.export({
+    const result = await runtime.obsidianExporter.export({
         ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
         title: model.title,
         markdown: model.markdown || '',
@@ -3922,6 +4061,8 @@ async function exportObsidianForModel(
         metadata: await obsidianMetadataForItem(sourceItemID, model),
         translations: await obsidianTranslationsForModel(model),
     });
+    recordExportCompleted();
+    return result;
 }
 
 async function obsidianTranslationsForModel(model) {
@@ -4101,17 +4242,21 @@ async function runSelectedObsidianExport(targets, controller, ownerWindow = null
 
     const batch = createDocumentExportBatch({
         load: (pdf, options) => loadCachedExportDocument(pdf.itemID, options),
-        exportDocument: (document, options) => exporter.export({
-            ownerWindow: resolvedWindow,
-            title: document?.title,
-            markdown: document?.markdown || '',
-            assets: document?.assets,
-            assetBasePath: document?.assetBasePath,
-            metadata: document?.metadata,
-            translations: document?.translations || [],
-            vaultPath,
-            conflictPolicy: options?.conflictPolicy,
-        }),
+        exportDocument: async (document, options) => {
+            const result = await exporter.export({
+                ownerWindow: resolvedWindow,
+                title: document?.title,
+                markdown: document?.markdown || '',
+                assets: document?.assets,
+                assetBasePath: document?.assetBasePath,
+                metadata: document?.metadata,
+                translations: document?.translations || [],
+                vaultPath,
+                conflictPolicy: options?.conflictPolicy,
+            });
+            recordExportCompleted();
+            return result;
+        },
         isPreparing: isItemPreparing,
         onEvent: handleObsidianExportEvent,
     });
@@ -4329,7 +4474,7 @@ async function runSingleDocumentExport({
         return { status: 'saved' };
     }
     if (action === 'markdown') {
-        return exporter.export({
+        const result = await exporter.export({
             ownerWindow,
             directory,
             title: document?.title,
@@ -4337,8 +4482,10 @@ async function runSingleDocumentExport({
             assets: document?.assets,
             assetBasePath: document?.assetBasePath,
         });
+        recordExportCompleted();
+        return result;
     }
-    return exporter.export({
+    const result = await exporter.export({
         ownerWindow,
         directory,
         usedPaths,
@@ -4349,6 +4496,8 @@ async function runSingleDocumentExport({
         language: document?.language || 'en',
         conflictPolicy: options?.conflictPolicy,
     });
+    recordExportCompleted();
+    return result;
 }
 
 function handleDocumentExportEvent(action, event) {
@@ -4519,6 +4668,9 @@ async function writeSnapshot(pdfItemOrID, model) {
         correctionCount: model.correctionCount || 0,
     });
     debugMktero('Mktero: saved Markdown snapshot for item ' + pdfItem.id);
+    // One counter for both the single-document and the batch snapshot path, which
+    // is why this sits in writeSnapshot rather than in either caller.
+    recordExportCompleted();
     return result;
 }
 
