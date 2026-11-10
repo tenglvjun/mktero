@@ -4,12 +4,15 @@ import test from 'node:test';
 
 import {
     constrainExportDirectoryName,
+    constrainExportFileNameStem,
     createMarkdownExportDirectoryName,
     createMarkdownExportPlan,
     createMarkdownExportFileName,
+    exportCollisionReserve,
     markdownExportTemporarySuffix,
     MAX_EXPORT_ASSET_BYTES,
     MAX_EXPORT_ASSETS,
+    MAX_EXPORT_COLLISION_INDEX,
     MAX_EXPORT_FILE_STEM_CODE_POINTS,
     MAX_EXPORT_MARKDOWN_BYTES,
     MAX_EXPORT_TOTAL_ASSET_BYTES,
@@ -101,6 +104,40 @@ test('refuses a Windows folder that cannot hold even a one-character export', ()
         preferredName: 'Paper',
         join: path.win32.join,
         temporarySuffix: '.mktero-dc3b6389.tmp',
+    }), /too long to export/);
+});
+
+test('keeps a one-file document stem inside the Windows limit', () => {
+    const desktop = 'C:\\Users\\Administrator\\Downloads';
+    const reserve = exportCollisionReserve();
+    assert.equal(MAX_EXPORT_COLLISION_INDEX, 1_000);
+    assert.equal(reserve, '-1000');
+    const stem = constrainExportFileNameStem({
+        preferredName: 'Context Engineering: Sessions, Memory',
+        extension: 'epub',
+        parentPath: desktop,
+        join: path.win32.join,
+        temporarySuffix: '.mktero-dc3b6389.tmp',
+    });
+    assert.equal(stem, 'Context Engineering Sessions, Memory');
+
+    const shortened = constrainExportFileNameStem({
+        preferredName: 'x'.repeat(200),
+        extension: 'epub',
+        parentPath: desktop,
+        join: path.win32.join,
+        temporarySuffix: '.mktero-dc3b6389.tmp',
+    });
+    assert.equal(shortened.length < 200, true);
+    assert.equal(path.win32.join(
+        desktop,
+        `${shortened}${reserve}.epub.mktero-dc3b6389.tmp`
+    ).length <= 259, true);
+    assert.throws(() => constrainExportFileNameStem({
+        preferredName: 'Paper',
+        extension: 'epub',
+        parentPath: `C:\\${'p'.repeat(253)}`,
+        join: path.win32.join,
     }), /too long to export/);
 });
 

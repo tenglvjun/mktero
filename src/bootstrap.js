@@ -556,8 +556,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
     runtime.epubExporter = createZoteroEpubExporter({
         createFilePicker: createZoteroFilePicker,
         ioUtils: IOUtils,
+        pathUtils: PathUtils,
         createID: createMarkdownExportID,
         translate: runtimeTranslate,
+        isWindows: mkteroIsWindows(),
         ...epubRenderers,
     });
 

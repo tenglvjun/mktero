@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -6,6 +7,9 @@ import {
 } from '../src/platform/zotero-epub-exporter.js';
 
 const EPUB_BYTES = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+const pathUtils = {
+    join: path.posix.join,
+};
 
 test('configures a localized EPUB save picker and cancels without building or writing', async () => {
     const writes = [];
@@ -279,9 +283,157 @@ test('numbers around an EPUB that already exists in the batch folder', async () 
     assert.equal(result.path, '/exports/Paper-2.epub');
 });
 
+test('joins a native Windows folder with a backslash instead of a slash', async () => {
+    const writes = [];
+    const directory = 'C:\\Users\\Administrator\\Downloads';
+    const exporter = createExporter({
+        picker: createFilePicker({ result: 0, file: directory }),
+        writes,
+        pathUtils: { join: path.win32.join },
+        isWindows: true,
+        ioUtils: {
+            async exists(filePath) {
+                // Gecko rejects a native Windows path that contains a forward
+                // slash with NS_ERROR_FILE_UNRECOGNIZED_PATH.
+                assert.equal(filePath.includes('/'), false, filePath);
+                return false;
+            },
+            async write(filePath, data, options) {
+                writes.push({ path: filePath, data, options });
+            },
+        },
+    });
+
+    const result = await exporter.export({
+        directory,
+        title: 'Context Engineering: Sessions, Memory',
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    assert.equal(
+        result.path,
+        'C:\\Users\\Administrator\\Downloads\\'
+            + 'Context Engineering Sessions, Memory.epub'
+    );
+    assert.deepEqual(writes.map(write => write.path), [result.path]);
+});
+
+test('treats an unparsable existing path as absent instead of failing the row', async () => {
+    const writes = [];
+    const exporter = createExporter({
+        writes,
+        ioUtils: {
+            async exists() {
+                const error = new Error(
+                    'Could not determine if `C:\\Downloads/Paper.epub\' exists: '
+                        + 'could not parse path (NS_ERROR_FILE_UNRECOGNIZED_PATH)'
+                );
+                error.name = 'OperationError';
+                throw error;
+            },
+            async write(filePath, data, options) {
+                writes.push({ path: filePath, data, options });
+            },
+        },
+    });
+
+    const result = await exporter.export({
+        directory: '/exports',
+        title: 'Paper',
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    assert.equal(result.path, '/exports/Paper.epub');
+    assert.equal(writes.length, 1);
+});
+
+test('keeps a real existence error from being swallowed', async () => {
+    const exporter = createExporter({
+        ioUtils: {
+            async exists() {
+                throw new Error('Access denied');
+            },
+            async write() {},
+        },
+    });
+
+    await assert.rejects(exporter.export({
+        directory: '/exports',
+        title: 'Paper',
+        markdown: '# Paper',
+        assets: [],
+    }), { message: 'Access denied' });
+});
+
+test('shortens a Windows EPUB name so the temporary file stays under 260 characters', async () => {
+    const directory = 'C:\\Users\\Administrator\\Desktop\\Research'
+        + '\\Conference Papers\\To Read\\Inbox';
+    const temporarySuffix = '.mktero-request-.tmp';
+    const exporter = createExporter({
+        picker: createFilePicker({ result: 0, file: directory }),
+        writes: [],
+        pathUtils: { join: path.win32.join },
+        isWindows: true,
+        ioUtils: {
+            async exists() {
+                return false;
+            },
+            async write() {},
+        },
+    });
+
+    const result = await exporter.export({
+        directory,
+        title: 'x'.repeat(180),
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    assert.equal(
+        result.path.length + temporarySuffix.length <= 259,
+        true,
+        result.path
+    );
+    assert.ok(result.path.length < path.win32.join(
+        directory,
+        `${'x'.repeat(180)}.epub`
+    ).length);
+});
+
+test('keeps an already short Windows EPUB name untouched', async () => {
+    const directory = 'C:\\Users\\Administrator\\Downloads';
+    const exporter = createExporter({
+        picker: createFilePicker({ result: 0, file: directory }),
+        writes: [],
+        pathUtils: { join: path.win32.join },
+        isWindows: true,
+        ioUtils: {
+            async exists() {
+                return false;
+            },
+            async write() {},
+        },
+    });
+
+    const result = await exporter.export({
+        directory,
+        title: 'Context Engineering: Sessions, Memory',
+        markdown: '# Paper',
+        assets: [],
+    });
+
+    assert.equal(result.path, path.win32.join(
+        directory,
+        'Context Engineering Sessions, Memory.epub'
+    ));
+});
+
 function createExporter({
     picker = createFilePicker(),
     writes = [],
+    pathUtils: injectedPathUtils = pathUtils,
     ...options
 } = {}) {
     return createZoteroEpubExporter({
@@ -291,6 +443,7 @@ function createExporter({
                 writes.push({ path: filePath, data, options: writeOptions });
             },
         },
+        pathUtils: injectedPathUtils,
         createID: () => 'request-id',
         translate: key => key,
         buildEpub: async () => EPUB_BYTES,

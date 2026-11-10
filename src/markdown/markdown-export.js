@@ -9,6 +9,7 @@ export const MAX_EXPORT_ASSETS = 2_000;
 // Windows CreateFile fails at 260 characters with NS_ERROR_FILE_NOT_FOUND.
 export const MAX_WINDOWS_EXPORT_PATH_LENGTH = 259;
 export const MAX_WINDOWS_PATH_COMPONENT_LENGTH = 255;
+export const MAX_EXPORT_COLLISION_INDEX = 1_000;
 export const EXPORT_DIRECTORY_COLLISION_RESERVE = '-1000';
 const RESERVED_WINDOWS_FILE_STEMS = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const MARKDOWN_PARSER = parser.configure(GFM);
@@ -94,6 +95,55 @@ export function constrainExportDirectoryName({
     throw new Error(
         'The selected folder path is too long to export this Markdown'
     );
+}
+
+// A paper title that fits a Windows `.md` name does not automatically fit
+// `Paper-1000.epub.tmp`, so a writer that picks its own file name shortens the
+// stem independently. `temporarySuffix` is the longest name the writer appends
+// to the final path before the OS rename, and it has to fit too.
+// `maxCollisionIndex` is the last `-N` suffix the writer will try, and the check
+// reserves room for it so a batch never fails on its last document.
+export function constrainExportFileNameStem({
+    preferredName,
+    extension,
+    parentPath,
+    join,
+    temporarySuffix = '',
+    maxCollisionIndex = MAX_EXPORT_COLLISION_INDEX,
+    maxPathLength = MAX_WINDOWS_EXPORT_PATH_LENGTH,
+    maxComponentLength = MAX_WINDOWS_PATH_COMPONENT_LENGTH,
+}) {
+    if (typeof extension !== 'string' || !extension) {
+        throw new TypeError('An export file extension is required');
+    }
+    if (typeof join !== 'function') {
+        throw new TypeError('A path join function is required');
+    }
+    if (typeof temporarySuffix !== 'string') {
+        throw new TypeError('An export temporary suffix is required');
+    }
+    if (!Number.isSafeInteger(maxCollisionIndex) || maxCollisionIndex < 2) {
+        throw new TypeError('An export collision index is required');
+    }
+    const reserve = exportCollisionReserve(maxCollisionIndex);
+    let stem = normalizeExportFileStem(preferredName);
+    const seen = new Set();
+    while (stem && !seen.has(stem)) {
+        seen.add(stem);
+        const fileName = `${stem}${reserve}.${extension}${temporarySuffix}`;
+        if (componentFits(fileName, maxComponentLength)
+            && join(parentPath, fileName).length <= maxPathLength) {
+            return stem;
+        }
+        stem = normalizeExportFileStem([...stem].slice(0, -1).join(''));
+    }
+    throw new Error(
+        'The selected folder path is too long to export this document'
+    );
+}
+
+export function exportCollisionReserve(maxCollisionIndex = MAX_EXPORT_COLLISION_INDEX) {
+    return `-${maxCollisionIndex}`;
 }
 
 function componentFits(value, maxComponentLength) {
