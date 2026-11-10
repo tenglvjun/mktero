@@ -172,6 +172,25 @@ export async function reportMkteroClientVersion({
     });
 }
 
+// reportMkteroReadingActivity sends one flush of daily reading totals.
+//
+// The payload is built by reading-activity.js and contains only seven counters
+// and a UTC day. This function deliberately takes that already-trimmed object
+// instead of raw arguments, so nothing richer can be added to the wire here
+// without also changing the module that documents what is collected.
+export async function reportMkteroReadingActivity({
+    apiBase,
+    accessToken,
+    counters,
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 0,
+} = {}) {
+    await postJSON(fetchImpl, apiBase, '/api/v1/me/reading-activity', counters || {}, {
+        token: accessToken,
+        timeoutMs,
+    });
+}
+
 // updateMkteroNickname replaces the display nickname of the signed-in account.
 export async function updateMkteroNickname({
     apiBase,
