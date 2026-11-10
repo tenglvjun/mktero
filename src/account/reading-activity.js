@@ -196,6 +196,25 @@ export function createReadingActivityCounter({
     }
 }
 
+// shouldReportReadingActivity decides whether the counters may be sent at all.
+//
+// Two conditions, both required:
+//
+//   - An account session exists, because the endpoint is authenticated and the
+//     counters are attached to that account.
+//   - The hosted converter is the selected provider. A reader who switched to
+//     their own MinerU or Mistral service did so to stop sending data to Mktero,
+//     and reading counts are still data about them. Respecting that choice is
+//     the whole point of the check: without it, "I use my own OCR key" would
+//     quietly stop being true.
+//
+// Reading a paper whose PDF already came from MinerU is not the case this
+// rejects: those counts were collected while the hosted converter was selected,
+// and they are flushed on shutdown.
+export function shouldReportReadingActivity({ signedIn, provider }) {
+    return Boolean(signedIn) && String(provider || '').trim() === 'mktero';
+}
+
 // readingActivityCountersFromPayload trims a payload to exactly the fields the
 // server accepts. It exists so a caller cannot widen the wire format by spreading
 // a richer object into the request body.

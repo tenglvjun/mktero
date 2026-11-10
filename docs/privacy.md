@@ -119,6 +119,8 @@ The version is not part of your account profile, so no product screen displays i
 
 Mktero also reports daily reading-activity totals to the same service, so the operator can tell whether a conversion was actually read or whether the reader opened it once and stopped.
 
+**This report is sent only while the hosted Mktero converter is the selected conversion service.** Switch to your own MinerU cloud, a self-hosted MinerU service, or Mistral, and the counters stop immediately and nothing more is sent, even though you stay signed in. Switching back resumes them. Counts collected before you switched are still flushed once when Zotero quits, because they describe reading that happened while the hosted converter was selected.
+
 One report carries seven numbers and one UTC day:
 
 - How many Markdown reader tabs were opened.
@@ -129,7 +131,7 @@ One report carries seven numbers and one UTC day:
 - How many exports completed.
 - How many full-document translations were started.
 
-The report is sent at most every ten minutes, and only when at least one of those numbers changed since the last send. A final report is attempted when Zotero quits. There is no setting to turn it off; it is part of the same operations telemetry as the version report.
+The report is sent at most every ten minutes, and only when at least one of those numbers changed since the last send. A final report is attempted when Zotero quits. There is no separate switch: choosing your own converter is the switch, and it works immediately without signing out.
 
 It contains no paper identifier, title, author, file path, file name, hash, selected text, annotation text, translated text, or timestamp per action. The report does not say which paper was read, only how many reading actions happened that day. It is never attached to requests to object storage, MinerU or Mistral converters, or an AI or citation provider you configure, and it is not shown on your account page or in any product screen.
 

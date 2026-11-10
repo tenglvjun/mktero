@@ -98,7 +98,10 @@ import {
     startAccountClientHeartbeat,
     startReadingActivityReporter,
 } from './account/account-session.js';
-import { createReadingActivityCounter } from './account/reading-activity.js';
+import {
+    createReadingActivityCounter,
+    shouldReportReadingActivity,
+} from './account/reading-activity.js';
 import { createConversionActivity } from './core/conversion-activity.js';
 import { createConversionBatch } from './core/conversion-batch.js';
 import {
@@ -468,9 +471,11 @@ const runtime = {
     disposeAITargetLanguageObserver: null,
     disposeClientHeartbeat: null,
     // The daily reading totals sent to the Mktero service. Both fields are null
-    // until the preference pane has registered a signed-in account.
+    // unless an account is signed in AND the hosted converter is the selected
+    // provider, and they are torn down again when either stops being true.
     readingActivity: null,
     readingActivityReporter: null,
+    disposeReadingActivityProviderObserver: null,
     annotationOverlayRefresher: null,
     localAnnotations: null,
     annotationGroups: null,
@@ -1224,17 +1229,23 @@ globalThis.startup = async function startup({ id, rootURI }) {
             clearTimeoutImpl: handle => accountTimers.clearTimer(handle),
             onError: error => logMkteroError(error),
         }).dispose;
-        // The reading reporter runs on its own ten-minute cycle. It only sends
-        // when the counter holds something, so an idle session stays silent.
-        runtime.readingActivity = createReadingActivityCounter();
-        runtime.readingActivityReporter = startReadingActivityReporter(Zotero, {
-            counter: runtime.readingActivity,
-            fetchImpl: accountFetch,
-            setTimeoutImpl: (callback, delay) => accountTimers.setTimer(callback, delay),
-            clearTimeoutImpl: handle => accountTimers.clearTimer(handle),
-            onError: error => logMkteroError(error),
-        });
     }
+    // Reading activity is reported only while the hosted converter is the
+    // selected provider, and it follows the preference as it changes rather than
+    // only at startup. A reader who switches to their own MinerU or Mistral
+    // service has opted out of sending anything to Mktero, so the counters stop
+    // and the reporter stops with them.
+    const readingActivityOptions = {
+        fetchImpl: accountFetch,
+        setTimeoutImpl: (callback, delay) => accountTimers.setTimer(callback, delay),
+        clearTimeoutImpl: handle => accountTimers.clearTimer(handle),
+        onError: error => logMkteroError(error),
+    };
+    syncReadingActivityReporter(readingActivityOptions);
+    runtime.disposeReadingActivityProviderObserver = observeConversionProfile(
+        Zotero,
+        () => syncReadingActivityReporter(readingActivityOptions)
+    );
     registerReaderToolbarAction();
     registerMainWindowContextMenu(Zotero.getMainWindow?.());
     registerDiagnosticMenu(Zotero.getMainWindow?.());
@@ -1392,6 +1403,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeCacheCleanupStatus?.();
     runtime.disposeAITargetLanguageObserver?.();
     runtime.disposeConversionProfileObserver?.();
+    runtime.disposeReadingActivityProviderObserver?.();
     runtime.cache?.setStoreChangeListener?.(null);
     runtime.readinessColumn?.dispose();
     runtime.readiness?.dispose();
@@ -1445,6 +1457,7 @@ globalThis.shutdown = function shutdown() {
     runtime.readiness = null;
     runtime.readinessColumn = null;
     runtime.disposeConversionProfileObserver = null;
+    runtime.disposeReadingActivityProviderObserver = null;
     runtime.translationService = null;
     runtime.translationRequests = null;
     runtime.revisionStore = null;
@@ -2880,6 +2893,37 @@ async function attachReadingPosition(result) {
     }
 }
 
+// syncReadingActivityReporter starts or stops the daily reading reporter so that
+// it runs only while the account is signed in and the hosted converter is the
+// selected provider.
+//
+// Both conditions are re-read on every call, and the conversion-profile observer
+// calls this whenever the provider preference changes. Stopping keeps the counter
+// object and its unsent totals: a reader who switches to MinerU for one paper and
+// back again should not lose the day's earlier counts, and the totals never leave
+// the machine while the hosted converter is not selected.
+function syncReadingActivityReporter(options) {
+    const wanted = shouldReportReadingActivity({
+        signedIn: isAccountSignedIn(getAccountSession(Zotero)),
+        provider: getConversionProvider(Zotero),
+    });
+    if (!wanted) {
+        if (runtime.readingActivityReporter) {
+            runtime.readingActivityReporter.dispose();
+            runtime.readingActivityReporter = null;
+        }
+        // The counter is kept so a later switch back resumes the same day. It is
+        // only nulled at shutdown, when nothing can be sent any more.
+        return;
+    }
+    if (runtime.readingActivityReporter) return;
+    runtime.readingActivity ||= createReadingActivityCounter();
+    runtime.readingActivityReporter = startReadingActivityReporter(Zotero, {
+        counter: runtime.readingActivity,
+        ...options,
+    });
+}
+
 // Reading-activity recording.
 //
 // These helpers never throw and never block the caller. Every one of them is a
@@ -2946,6 +2990,13 @@ function recordTranslationStarted() {
 function flushReadingActivityOnShutdown() {
     const reporter = runtime.readingActivityReporter;
     runtime.readingActivityReporter = null;
+    // A reader who finished the session on their own MinerU service still has
+    // counters for the part of the day they spent on the hosted converter. Those
+    // were collected while the hosted converter was selected, so one final flush
+    // is allowed here even though the reporter is currently stopped. The batch is
+    // empty when they never used the hosted converter that day, and an empty
+    // flush sends nothing.
+    const pending = runtime.readingActivity;
     try {
         // Stop the timer before the final send so no cycle starts during shutdown.
         reporter?.dispose?.();
@@ -2954,7 +3005,8 @@ function flushReadingActivityOnShutdown() {
         // Disposal is best effort; the flush below is what matters.
     }
     try {
-        const flushed = reporter?.flush?.();
+        const flushed = reporter?.flush?.()
+            || flushStoppedReadingActivity(pending);
         return flushed && typeof flushed.then === 'function'
             ? flushed
             : Promise.resolve(true);
@@ -2963,6 +3015,26 @@ function flushReadingActivityOnShutdown() {
         logMkteroError(error);
         return Promise.resolve(false);
     }
+}
+
+// flushStoppedReadingActivity sends a batch that was collected while the hosted
+// converter was selected but whose reporter is currently stopped. It runs once,
+// during shutdown, and only when the account is still signed in: without a
+// session the request could not be authenticated anyway.
+function flushStoppedReadingActivity(counter) {
+    if (!counter?.pending?.()) return Promise.resolve(true);
+    if (!isAccountSignedIn(getAccountSession(Zotero))) return Promise.resolve(true);
+    const reporter = startReadingActivityReporter(Zotero, {
+        counter,
+        fetchImpl: createWindowFetch(() => liveZoteroWindow(), {
+            fallback: globalThis.fetch?.bind(globalThis),
+        }),
+        setTimeoutImpl: globalThis.setTimeout?.bind(globalThis),
+        clearTimeoutImpl: globalThis.clearTimeout?.bind(globalThis),
+        onError: error => logMkteroError(error),
+    });
+    reporter.dispose();
+    return reporter.flush();
 }
 
 function saveReadingPosition(itemID, anchor) {

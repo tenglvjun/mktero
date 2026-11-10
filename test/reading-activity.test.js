@@ -8,6 +8,7 @@ import {
     isAcceptableReadingActivityDay,
     readingActivityCountersFromPayload,
     readingActivityDayKey,
+    shouldReportReadingActivity,
 } from '../src/account/reading-activity.js';
 
 const DAY = Date.UTC(2026, 10, 9, 12, 0, 0);
@@ -271,4 +272,27 @@ test('the tracking budget defaults to a bounded value', () => {
     const payload = counter.take();
     assert.equal(payload.readers_opened, MAX_TRACKED_DOCUMENTS + 50);
     assert.equal(payload.documents_read, MAX_TRACKED_DOCUMENTS);
+});
+
+// Reporting requires both a session and the hosted converter. A reader who
+// switched to their own MinerU or Mistral key did so to stop sending data to
+// Mktero, and reading counts are still data about them.
+test('reports only with a session and the hosted converter selected', () => {
+    assert.equal(shouldReportReadingActivity({ signedIn: true, provider: 'mktero' }), true);
+    assert.equal(shouldReportReadingActivity({ signedIn: false, provider: 'mktero' }), false);
+    for (const provider of ['mineru', 'mistral', '']) {
+        assert.equal(
+            shouldReportReadingActivity({ signedIn: true, provider }),
+            false,
+            `${provider || 'an empty provider'} must not report`
+        );
+    }
+});
+
+test('an unset or unknown provider is treated as not the hosted converter', () => {
+    assert.equal(shouldReportReadingActivity({ signedIn: true, provider: undefined }), false);
+    assert.equal(shouldReportReadingActivity({ signedIn: true, provider: null }), false);
+    assert.equal(shouldReportReadingActivity({ signedIn: true, provider: 'MKTREO' }), false);
+    assert.equal(shouldReportReadingActivity({ signedIn: true, provider: ' mktero ' }), true);
+    assert.equal(shouldReportReadingActivity({}), false);
 });

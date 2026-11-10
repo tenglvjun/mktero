@@ -107,7 +107,9 @@ The [workflow index](./docs/workflows.md) links to each task.
 - Daily reading-activity totals (reader tabs opened, distinct PDFs opened and how
   many were scrolled or read past halfway, plus counts of annotations, exports,
   and translations) go to Mktero, so the operator can tell whether a conversion
-  was actually read. They carry no paper identifier, title, path, or text.
+  was actually read. They carry no paper identifier, title, path, or text, and
+  they are sent only while the hosted Mktero converter is selected: choosing your
+  own MinerU or Mistral service stops them immediately.
 - Reference, citation, and translation requests are bounded and local-first. Logs
   never contain API tokens, presigned URLs, PDF bytes, or authenticated responses.
 
