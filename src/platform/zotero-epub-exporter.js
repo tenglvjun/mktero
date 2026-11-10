@@ -1,16 +1,26 @@
 import { createEpub } from '../epub/epub-export.js';
 import { translateEnglish } from '../i18n/localization.js';
-import { createMarkdownExportDirectoryName } from '../markdown/markdown-export.js';
+import {
+    constrainExportFileNameStem,
+    createMarkdownExportDirectoryName,
+    MAX_EXPORT_COLLISION_INDEX,
+} from '../markdown/markdown-export.js';
 
+// The picker gives a native path (`\` on Windows, `/` elsewhere), so the
+// destination has to be joined by the platform instead of by string literals.
+// A hand-built `C:\Downloads/Paper.epub` is rejected by Gecko on Windows with
+// NS_ERROR_FILE_UNRECOGNIZED_PATH, which made every batch export fail there.
 export function createZoteroEpubExporter({
     createFilePicker,
     ioUtils,
+    pathUtils,
     createID,
     renderWideTable,
     renderImageToPNG,
     renderMathToPNG,
     translate = translateEnglish,
     buildEpub = createEpub,
+    isWindows = false,
 } = {}) {
     if (typeof createFilePicker !== 'function') {
         throw new TypeError('A Zotero file picker factory is required');
@@ -18,11 +28,17 @@ export function createZoteroEpubExporter({
     if (typeof ioUtils?.write !== 'function') {
         throw new TypeError('Zotero binary file I/O is required');
     }
+    if (typeof pathUtils?.join !== 'function') {
+        throw new TypeError('Zotero path utilities are required');
+    }
     if (typeof createID !== 'function') {
         throw new TypeError('An EPUB export ID factory is required');
     }
     if (typeof buildEpub !== 'function') {
         throw new TypeError('An EPUB builder is required');
+    }
+    if (typeof isWindows !== 'boolean') {
+        throw new TypeError('A Windows platform flag is required');
     }
 
     return {
@@ -47,13 +63,21 @@ export function createZoteroEpubExporter({
             language = 'en',
         } = {}) {
             if (typeof directory === 'string' && directory) {
-                const filePath = await createAvailableEpubPath({
+                const stem = constrainEpubStem({
                     directory,
                     title,
+                    translate,
+                    pathUtils,
+                    isWindows,
+                });
+                const filePath = await createAvailableEpubPath({
+                    directory,
+                    stem,
                     // A batch passes one shared set so two documents with the
                     // same title do not both claim `Paper.epub`.
                     used: usedPaths instanceof Set ? usedPaths : new Set(),
                     ioUtils,
+                    pathUtils,
                     translate,
                 });
                 if (usedPaths instanceof Set) usedPaths.add(filePath);
@@ -128,10 +152,7 @@ async function pickEpubPath({ createFilePicker, translate, ownerWindow, title })
         translate('viewer.exportEpubDialogTitle'),
         picker.modeSave
     );
-    const stem = createMarkdownExportDirectoryName(
-        title,
-        translate('viewer.exportEpubDefaultFileName')
-    );
+    const stem = createEpubStem(title, translate);
     picker.defaultString = `${stem}.epub`;
     picker.appendFilter?.(
         translate('viewer.exportEpubFilter'),
@@ -145,29 +166,70 @@ async function pickEpubPath({ createFilePicker, translate, ownerWindow, title })
     return filePath;
 }
 
-// The folder join goes through a tiny local helper rather than a new path
-// adapter, because the exporter already writes to whatever the picker returns.
-async function createAvailableEpubPath({
-    directory,
-    title,
-    used,
-    ioUtils,
-    translate,
-}) {
-    const stem = createMarkdownExportDirectoryName(
+function createEpubStem(title, translate) {
+    return createMarkdownExportDirectoryName(
         title,
         translate('viewer.exportEpubDefaultFileName')
     );
-    for (let index = 1; index <= 1_000; index += 1) {
+}
+
+// Windows rejects a native path longer than 259 characters, and EPUB writes a
+// temporary sibling with a random suffix, so a long paper title has to be
+// shortened before the write instead of failing on it.
+const EPUB_TEMPORARY_SUFFIX = '.mktero-xxxxxxxx.tmp';
+
+function constrainEpubStem({ directory, title, translate, pathUtils, isWindows }) {
+    const stem = createEpubStem(title, translate);
+    if (!isWindows) return stem;
+    try {
+        return constrainExportFileNameStem({
+            preferredName: stem,
+            extension: 'epub',
+            parentPath: directory,
+            join: (...parts) => pathUtils.join(...parts),
+            temporarySuffix: EPUB_TEMPORARY_SUFFIX,
+        });
+    }
+    catch {
+        throw new Error(translate('viewer.exportEpubFailed'));
+    }
+}
+
+async function createAvailableEpubPath({
+    directory,
+    stem,
+    used,
+    ioUtils,
+    pathUtils,
+    translate,
+}) {
+    for (let index = 1; index <= MAX_EXPORT_COLLISION_INDEX; index += 1) {
         const name = index === 1 ? stem : `${stem}-${index}`;
-        const filePath = `${directory}/${name}.epub`;
+        const filePath = pathUtils.join(directory, `${name}.epub`);
         if (used.has(filePath)) continue;
-        if (typeof ioUtils.exists === 'function' && await ioUtils.exists(filePath)) {
-            continue;
-        }
+        if (await epubPathExists(filePath, ioUtils)) continue;
         return filePath;
     }
     throw new Error(translate('viewer.exportEpubFailed'));
+}
+
+// IOUtils.exists() throws instead of returning false for a path the platform
+// cannot parse, and that parse error is not the same thing as a real one.
+async function epubPathExists(filePath, ioUtils) {
+    if (typeof ioUtils.exists !== 'function') return false;
+    try {
+        return Boolean(await ioUtils.exists(filePath));
+    }
+    catch (error) {
+        if (isUnrecognizedPath(error)) return false;
+        throw error;
+    }
+}
+
+function isUnrecognizedPath(error) {
+    const message = String(error?.message || '');
+    return error?.name === 'OperationError'
+        && message.includes('NS_ERROR_FILE_UNRECOGNIZED_PATH');
 }
 
 async function writeEpubFile({
