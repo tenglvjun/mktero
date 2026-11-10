@@ -91,7 +91,9 @@ import {
     clearAccountSession,
     getAccountApiBase,
     getAccountSession,
+    getAccountSessionEpoch,
     isAccountSignedIn,
+    observeAccountSession,
 } from './config/account-preferences.js';
 import {
     ensureAccountAccessToken as ensureMkteroAccessToken,
@@ -475,7 +477,9 @@ const runtime = {
     // provider, and they are torn down again when either stops being true.
     readingActivity: null,
     readingActivityReporter: null,
+    readingActivityEpoch: '',
     disposeReadingActivityProviderObserver: null,
+    disposeReadingActivityAccountObserver: null,
     annotationOverlayRefresher: null,
     localAnnotations: null,
     annotationGroups: null,
@@ -1240,9 +1244,20 @@ globalThis.startup = async function startup({ id, rootURI }) {
         setTimeoutImpl: (callback, delay) => accountTimers.setTimer(callback, delay),
         clearTimeoutImpl: handle => accountTimers.clearTimer(handle),
         onError: error => logMkteroError(error),
+        onSchedule: event => debugMktero(
+            `Mktero reading activity: schedule ${JSON.stringify(event)}`
+        ),
     };
     syncReadingActivityReporter(readingActivityOptions);
     runtime.disposeReadingActivityProviderObserver = observeConversionProfile(
+        Zotero,
+        () => syncReadingActivityReporter(readingActivityOptions)
+    );
+    // Signing in or out also decides whether the reporter may run, and neither
+    // changes the conversion profile. Without this observer a session that starts
+    // signed out and signs in later never starts the reporter at all, because
+    // startup was the only other caller.
+    runtime.disposeReadingActivityAccountObserver = observeAccountSession(
         Zotero,
         () => syncReadingActivityReporter(readingActivityOptions)
     );
@@ -1377,6 +1392,9 @@ async function loadFigureWorkerSource(rootURI) {
 }
 
 globalThis.shutdown = function shutdown() {
+    // Reading activity has no shutdown flush. It is reported by its timer only:
+    // a request during teardown would race a window that is already gone, and the
+    // two-minute interval already bounds how much an abrupt quit can lose.
     const cacheLifecycleDisposed = runtime.cacheLifecycle?.dispose();
     runtime.cacheLifecycle = null;
     closeDiagnosticReportDialogs();
@@ -1392,10 +1410,11 @@ globalThis.shutdown = function shutdown() {
     runtime.reasoningCatalogStore?.dispose();
     runtime.disposeReasoningCatalogHost?.();
     runtime.disposeClientHeartbeat?.();
-    // Stop the reading timer first, then let one final batch out. The promise is
-    // returned below so Zotero waits for it, but its own budget is two seconds and
-    // a failure still resolves: telemetry must never block shutdown.
-    const readingActivityFlushed = flushReadingActivityOnShutdown();
+    // Reading activity is timer-only, so stopping the timer is the whole teardown.
+    // Without this the two-minute timer outlives shutdown and Zotero keeps an
+    // extension timer alive after the plugin is gone.
+    runtime.readingActivityReporter?.dispose?.();
+    runtime.readingActivityReporter = null;
     runtime.disposeAnnotationObserver?.();
     runtime.disposeReferenceObserver?.();
     runtime.referenceImportService?.dispose?.();
@@ -1404,6 +1423,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeAITargetLanguageObserver?.();
     runtime.disposeConversionProfileObserver?.();
     runtime.disposeReadingActivityProviderObserver?.();
+    runtime.disposeReadingActivityAccountObserver?.();
     runtime.cache?.setStoreChangeListener?.(null);
     runtime.readinessColumn?.dispose();
     runtime.readiness?.dispose();
@@ -1458,6 +1478,7 @@ globalThis.shutdown = function shutdown() {
     runtime.readinessColumn = null;
     runtime.disposeConversionProfileObserver = null;
     runtime.disposeReadingActivityProviderObserver = null;
+    runtime.disposeReadingActivityAccountObserver = null;
     runtime.translationService = null;
     runtime.translationRequests = null;
     runtime.revisionStore = null;
@@ -1497,6 +1518,7 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeClientHeartbeat = null;
     runtime.readingActivity = null;
     runtime.readingActivityReporter = null;
+    runtime.readingActivityEpoch = '';
     runtime.id = null;
     // Zotero waits for a promise returned by shutdown before it closes the
     // database or replaces the extension, so the corrections saved by the
@@ -1505,7 +1527,6 @@ globalThis.shutdown = function shutdown() {
         revisionSessionsDestroyed,
         cacheLifecycleDisposed,
         sharedConversionStopped,
-        readingActivityFlushed,
     ]);
 };
 
@@ -2893,6 +2914,29 @@ async function attachReadingPosition(result) {
     }
 }
 
+// logReadingActivityState writes the counter's current contents to the diagnostic
+// log so a manual test can see whether an action was counted and what the next
+// flush would carry. Without it the counters live in a closure and a tester has
+// no way to tell "not counted" from "counted but not sent", which is exactly the
+// distinction that matters when a flush does not appear on the server.
+function logReadingActivityState(action) {
+    const counter = runtime.readingActivity;
+    if (!counter) {
+        debugMktero(`Mktero reading activity: ${action} ignored (no counter)`);
+        return;
+    }
+    let snapshot;
+    try {
+        snapshot = counter.snapshot();
+    }
+    catch (error) {
+        debugMktero(`Mktero reading activity: ${action} snapshot failed (${error?.message || error})`);
+        return;
+    }
+    const running = runtime.readingActivityReporter ? 'running' : 'stopped';
+    debugMktero(`Mktero reading activity: ${action} -> reporter ${running}, ${JSON.stringify(snapshot)}`);
+}
+
 // syncReadingActivityReporter starts or stops the daily reading reporter so that
 // it runs only while the account is signed in and the hosted converter is the
 // selected provider.
@@ -2903,25 +2947,48 @@ async function attachReadingPosition(result) {
 // back again should not lose the day's earlier counts, and the totals never leave
 // the machine while the hosted converter is not selected.
 function syncReadingActivityReporter(options) {
+    const session = getAccountSession(Zotero);
     const wanted = shouldReportReadingActivity({
-        signedIn: isAccountSignedIn(getAccountSession(Zotero)),
+        signedIn: isAccountSignedIn(session),
         provider: getConversionProvider(Zotero),
     });
+    // The account the held counters belong to. Switching accounts must not carry
+    // one reader's totals to another, and the epoch is what the rest of the
+    // extension already uses to tell sessions apart.
+    const epoch = getAccountSessionEpoch(Zotero) || session.refreshToken || '';
+    const accountChanged = runtime.readingActivityEpoch !== epoch;
+
     if (!wanted) {
         if (runtime.readingActivityReporter) {
             runtime.readingActivityReporter.dispose();
             runtime.readingActivityReporter = null;
         }
-        // The counter is kept so a later switch back resumes the same day. It is
-        // only nulled at shutdown, when nothing can be sent any more.
+        // Switching to a converter that does not report keeps the counter, so a
+        // reader who switches back for one paper keeps the day's earlier totals.
+        // Signing out is different: the unsent totals now belong to nobody, so
+        // they are dropped rather than handed to the next session.
+        if (!isAccountSignedIn(session) && runtime.readingActivity) {
+            runtime.readingActivity = null;
+            runtime.readingActivityEpoch = '';
+        }
         return;
     }
-    if (runtime.readingActivityReporter) return;
+    if (accountChanged && runtime.readingActivity) {
+        // A different account is signed in. The held totals belong to the
+        // previous one and must not be sent under this session.
+        runtime.readingActivity = null;
+    }
+    runtime.readingActivityEpoch = epoch;
+    if (runtime.readingActivityReporter) {
+        debugMktero('Mktero reading activity: reporter already running');
+        return;
+    }
     runtime.readingActivity ||= createReadingActivityCounter();
     runtime.readingActivityReporter = startReadingActivityReporter(Zotero, {
         counter: runtime.readingActivity,
         ...options,
     });
+    debugMktero('Mktero reading activity: reporter started');
 }
 
 // Reading-activity recording.
@@ -2933,6 +3000,7 @@ function syncReadingActivityReporter(options) {
 function recordReaderOpened(itemID) {
     try {
         runtime.readingActivity?.opened({ itemID });
+        logReadingActivityState('opened');
     }
     catch (error) {
         logMkteroError(error);
@@ -2960,6 +3028,7 @@ function recordReadingProgress(itemID, anchor, markdown) {
 function recordAnnotationCreated() {
     try {
         runtime.readingActivity?.annotationCreated();
+        logReadingActivityState('annotation');
     }
     catch (error) {
         logMkteroError(error);
@@ -2969,6 +3038,7 @@ function recordAnnotationCreated() {
 function recordExportCompleted() {
     try {
         runtime.readingActivity?.exported();
+        logReadingActivityState('export');
     }
     catch (error) {
         logMkteroError(error);
@@ -2982,59 +3052,6 @@ function recordTranslationStarted() {
     catch (error) {
         logMkteroError(error);
     }
-}
-
-// flushReadingActivityOnShutdown lets one last batch out while Zotero is closing.
-// The reporter owns the timeout and never rejects, so this cannot delay or fail
-// shutdown beyond its own two-second budget.
-function flushReadingActivityOnShutdown() {
-    const reporter = runtime.readingActivityReporter;
-    runtime.readingActivityReporter = null;
-    // A reader who finished the session on their own MinerU service still has
-    // counters for the part of the day they spent on the hosted converter. Those
-    // were collected while the hosted converter was selected, so one final flush
-    // is allowed here even though the reporter is currently stopped. The batch is
-    // empty when they never used the hosted converter that day, and an empty
-    // flush sends nothing.
-    const pending = runtime.readingActivity;
-    try {
-        // Stop the timer before the final send so no cycle starts during shutdown.
-        reporter?.dispose?.();
-    }
-    catch {
-        // Disposal is best effort; the flush below is what matters.
-    }
-    try {
-        const flushed = reporter?.flush?.()
-            || flushStoppedReadingActivity(pending);
-        return flushed && typeof flushed.then === 'function'
-            ? flushed
-            : Promise.resolve(true);
-    }
-    catch (error) {
-        logMkteroError(error);
-        return Promise.resolve(false);
-    }
-}
-
-// flushStoppedReadingActivity sends a batch that was collected while the hosted
-// converter was selected but whose reporter is currently stopped. It runs once,
-// during shutdown, and only when the account is still signed in: without a
-// session the request could not be authenticated anyway.
-function flushStoppedReadingActivity(counter) {
-    if (!counter?.pending?.()) return Promise.resolve(true);
-    if (!isAccountSignedIn(getAccountSession(Zotero))) return Promise.resolve(true);
-    const reporter = startReadingActivityReporter(Zotero, {
-        counter,
-        fetchImpl: createWindowFetch(() => liveZoteroWindow(), {
-            fallback: globalThis.fetch?.bind(globalThis),
-        }),
-        setTimeoutImpl: globalThis.setTimeout?.bind(globalThis),
-        clearTimeoutImpl: globalThis.clearTimeout?.bind(globalThis),
-        onError: error => logMkteroError(error),
-    });
-    reporter.dispose();
-    return reporter.flush();
 }
 
 function saveReadingPosition(itemID, anchor) {

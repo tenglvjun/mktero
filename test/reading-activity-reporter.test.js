@@ -96,7 +96,7 @@ function counterWithActivity(now = () => NOW) {
 }
 
 // The reporter must not open a request for an idle session. An extension that
-// polls the service every ten minutes with nothing to say is worse than no
+// polls the service every two minutes with nothing to say is worse than no
 // telemetry at all.
 test('an idle reporter sends nothing', async () => {
     const timers = timerHarness();
@@ -248,6 +248,9 @@ test('a network failure keeps the batch and retries sooner', async () => {
     reporter.dispose();
 });
 
+// flush is kept on the handle for tests and manual triggering, but nothing calls
+// it during shutdown: a request racing a window that is already gone is exactly
+// what the timer-only design avoids.
 test('flush sends immediately and reports delivery', async () => {
     const timers = timerHarness();
     const zotero = signedInZotero();
@@ -280,7 +283,7 @@ test('flush resolves false instead of rejecting when the service is unreachable'
         ...timers,
     });
     const delivered = await reporter.flush();
-    assert.equal(delivered, false, 'shutdown must not reject on a telemetry failure');
+    assert.equal(delivered, false, 'a telemetry failure resolves false rather than rejecting');
     reporter.dispose();
 });
 
@@ -299,6 +302,32 @@ test('flush with nothing pending resolves true without a request', async () => {
     });
     assert.equal(await reporter.flush(), true);
     assert.equal(calls, 0);
+    reporter.dispose();
+});
+
+// The timer is the only trigger. A tick with an unchanged counter must produce no
+// request at all, which is what keeps an idle session silent.
+test('a tick with no new counts sends nothing', async () => {
+    const timers = timerHarness();
+    const zotero = signedInZotero();
+    let calls = 0;
+    const counter = counterWithActivity();
+    const reporter = startReadingActivityReporter(zotero, {
+        counter,
+        fetchImpl: async () => {
+            calls += 1;
+            return jsonResponse(204);
+        },
+        now: () => NOW,
+        ...timers,
+    });
+    // First tick delivers the batch, second and third have nothing new.
+    await timers.runNext();
+    assert.equal(calls, 1);
+    await timers.runNext();
+    await timers.runNext();
+    assert.equal(calls, 1, 'an unchanged counter must not produce another request');
+    assert.deepEqual(timers.pendingDelays(), [READING_ACTIVITY_INTERVAL_MS]);
     reporter.dispose();
 });
 

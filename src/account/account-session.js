@@ -23,11 +23,12 @@ export const CLIENT_HEARTBEAT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export const CLIENT_HEARTBEAT_RETRY_DELAY_MS = 60 * 1000;
 export const CLIENT_HEARTBEAT_REQUEST_TIMEOUT_MS = 20 * 1000;
 // Reading batches flush more often than the version heartbeat because they
-// carry increments: a crash loses whatever has not been sent, and a shorter
-// interval bounds that loss. Ten minutes also keeps an idle session silent, since
-// a flush with nothing pending sends no request at all.
-export const READING_ACTIVITY_INTERVAL_MS = 10 * 60 * 1000;
-export const READING_ACTIVITY_RETRY_DELAY_MS = 2 * 60 * 1000;
+// carry increments, and a crash or a missed shutdown loses whatever has not been
+// sent. Two minutes bounds that loss to roughly two minutes of reading while
+// still keeping an idle session silent, because a flush with nothing pending
+// sends no request at all.
+export const READING_ACTIVITY_INTERVAL_MS = 2 * 60 * 1000;
+export const READING_ACTIVITY_RETRY_DELAY_MS = 30 * 1000;
 export const READING_ACTIVITY_REQUEST_TIMEOUT_MS = 20 * 1000;
 // On shutdown Zotero waits for the promise shutdown() returns, so the final
 // flush gets a short budget rather than the full request timeout.
@@ -42,7 +43,7 @@ const refreshInFlight = new WeakMap();
 const heartbeatInFlight = new WeakMap();
 const heartbeatSchedulers = new WeakMap();
 // The reading reporter keeps its own scheduler map. Sharing the heartbeat's
-// would let one six-hour cycle swallow every ten-minute reading flush.
+// would let one six-hour cycle swallow every two-minute reading flush.
 const readingActivitySchedulers = new WeakMap();
 let refreshLockSerial = 0;
 
@@ -182,7 +183,7 @@ function joinClientHeartbeat(zotero, start) {
 //
 // It is separate from startAccountClientHeartbeat on purpose. The heartbeat
 // proves an account is alive every six hours; this carries increments that are
-// lost when Zotero quits, so it runs every ten minutes and only when there is
+// lost when Zotero quits, so it runs every two minutes and only when there is
 // something to send.
 //
 // Failure handling follows the payload's value:
@@ -205,6 +206,7 @@ export function startReadingActivityReporter(zotero, {
     retryDelayMs = READING_ACTIVITY_RETRY_DELAY_MS,
     shutdownTimeoutMs = READING_ACTIVITY_SHUTDOWN_TIMEOUT_MS,
     onError = () => {},
+    onSchedule = null,
 } = {}) {
     if (!zotero) throw new TypeError('A Zotero runtime is required');
     if (!counter) throw new TypeError('A reading-activity counter is required');
@@ -230,7 +232,20 @@ export function startReadingActivityReporter(zotero, {
             timer = null;
             void run();
         }, delayMs);
+        notifySchedule({ delayMs, pending: counter.pending() });
     };
+
+    // notifySchedule reports one scheduling decision to the diagnostics hook. A
+    // failure there must never stop the scheduler.
+    function notifySchedule(event) {
+        if (typeof onSchedule !== 'function') return;
+        try {
+            onSchedule(event);
+        }
+        catch {
+            // Diagnostics are best effort.
+        }
+    }
 
     // send performs one flush. It returns true when the counter advanced (so the
     // caller can wait the full interval) and false when the same batch should be
@@ -241,7 +256,11 @@ export function startReadingActivityReporter(zotero, {
         // the held one is accepted or dropped, which is also what bounds the hold
         // to a single day.
         const payload = retryBatch || counter.take();
-        if (!payload) return true;
+        if (!payload) {
+            notifySchedule({ idle: true });
+            return true;
+        }
+        notifySchedule({ sending: payload });
         const deliver = async accessToken => reportMkteroReadingActivity({
             apiBase: getAccountApiBase(zotero),
             accessToken,
@@ -261,6 +280,11 @@ export function startReadingActivityReporter(zotero, {
             return true;
         }
         catch (error) {
+            notifySchedule({
+                sendFailed: String(error?.message || error),
+                status: error?.status,
+                code: error?.code,
+            });
             if (isAccountSessionInvalidLike(error)) {
                 // The counts cannot be delivered under this session. Dropping them
                 // is the only bounded choice; the alternative is a held batch that
@@ -343,6 +367,10 @@ export function startReadingActivityReporter(zotero, {
         // to whether the batch was delivered, and never rejects: a failure to
         // record telemetry must not delay or fail Zotero's shutdown.
         async flush() {
+            notifySchedule({
+                flush: true,
+                pending: Boolean(retryBatch) || counter.pending(),
+            });
             if (!retryBatch && !counter.pending()) return true;
             try {
                 return await withDeadline(

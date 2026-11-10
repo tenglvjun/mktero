@@ -131,7 +131,7 @@ One report carries seven numbers and one UTC day:
 - How many exports completed.
 - How many full-document translations were started.
 
-The report is sent at most every ten minutes, and only when at least one of those numbers changed since the last send. A final report is attempted when Zotero quits. There is no separate switch: choosing your own converter is the switch, and it works immediately without signing out.
+The report is sent at most every two minutes, and only when at least one of those numbers changed since the last send. An idle session sends nothing: closing Zotero does not trigger a final report, so up to two minutes of unsent totals can be lost when Zotero quits unexpectedly. There is no separate switch: choosing your own converter is the switch, and it works immediately without signing out.
 
 It contains no paper identifier, title, author, file path, file name, hash, selected text, annotation text, translated text, or timestamp per action. The report does not say which paper was read, only how many reading actions happened that day. It is never attached to requests to object storage, MinerU or Mistral converters, or an AI or citation provider you configure, and it is not shown on your account page or in any product screen.
 

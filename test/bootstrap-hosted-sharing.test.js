@@ -189,7 +189,7 @@ async function createHarness(t) {
         }
         if (method === 'GET' && target === 'https://models.dev/api.json') return jsonResponse(200, {});
         if (method === 'POST' && target === `${API_BASE}/api/v1/me/client-version`) return jsonResponse(200, {});
-        // Reading-activity flushes arrive on their own ten-minute cycle. The
+        // Reading-activity flushes arrive on their own two-minute cycle. The
         // harness runs in milliseconds, so this only ever fires on the shutdown
         // flush, and it must not be counted as an unexpected request.
         if (method === 'POST' && target === `${API_BASE}/api/v1/me/reading-activity`) {
