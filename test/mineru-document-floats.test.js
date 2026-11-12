@@ -175,6 +175,51 @@ test('moves a second figure label onto the unlabeled figure it is closer to', ()
     assert.equal(ir.diagnostics.captionMoves[0].to, 'b');
 });
 
+test('moves the first label of two stacked figures up to the uncaptioned figure above it', () => {
+    // Two pictures stacked on one page. The upper picture's caption is printed
+    // between them, and MinerU files it under the lower picture together with
+    // that picture's own caption.
+    const upper = image('a', [167, 91, 413, 269], []);
+    const lower = image('b', [165, 343, 461, 507], [
+        caption('b:upper', [163, 280, 561, 333], 'Figure 3. Box plots for the BIS.'),
+        caption('b:lower', [163, 516, 560, 569], 'Figure 4. Box plots for the A-VAS.'),
+    ]);
+    const ir = run([upper, lower], reassignFloatCaptions);
+    assert.deepEqual(captionTexts(upper), ['Figure 3. Box plots for the BIS.']);
+    assert.deepEqual(captionTexts(lower), ['Figure 4. Box plots for the A-VAS.']);
+    assert.deepEqual(ir.diagnostics.captionMoves, [{
+        from: 'b',
+        to: 'a',
+        ids: ['b:upper'],
+        pageIndex: 0,
+    }]);
+});
+
+test('keeps a first label when the figure above is too far, captioned, or of another class', () => {
+    const stacked = () => image('b', [165, 343, 461, 507], [
+        caption('b:upper', [163, 280, 561, 333], 'Figure 3. Box plots for the BIS.'),
+        caption('b:lower', [163, 516, 560, 569], 'Figure 4. Box plots for the A-VAS.'),
+    ]);
+    // A picture whose bottom is a whole paragraph away did not print this
+    // caption; the caption stays where MinerU put it.
+    const far = image('a', [167, 91, 413, 240], []);
+    assert.equal(run([far, stacked()], reassignFloatCaptions).diagnostics.captionMoves.length, 0);
+    // A float that already has its own caption keeps it.
+    const claimed = image('a', [167, 91, 413, 269], [caption('a:own', [163, 275, 561, 300], 'Figure 2. Timeline.')]);
+    assert.equal(run([claimed, stacked()], reassignFloatCaptions).diagnostics.captionMoves.length, 0);
+    // A table is never the figure above a figure caption.
+    const other = table('a', [167, 91, 413, 269]);
+    assert.equal(run([other, stacked()], reassignFloatCaptions).diagnostics.captionMoves.length, 0);
+    // A label printed above its own body is a caption placed above a picture,
+    // not the caption of the picture above.
+    const above = image('b', [165, 343, 461, 507], [
+        caption('b:upper', [163, 280, 561, 333], 'Figure 3. Box plots for the BIS.'),
+        caption('b:lower', [163, 180, 560, 240], 'Figure 4. Box plots for the A-VAS.'),
+    ]);
+    assert.equal(run([image('a', [167, 91, 413, 269], []), above], reassignFloatCaptions)
+        .diagnostics.captionMoves.length, 0);
+});
+
 test('writes an uncaptioned table directly below a captioned table immediately after it', () => {
     const host = table('host', [77, 128, 922, 277], {
         captions: [

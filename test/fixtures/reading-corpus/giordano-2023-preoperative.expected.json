@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "giordano-2023-preoperative",
-  "archiveSha256": "4e0333d2b715316f726c0f22e2cd67471ebf301321ff643ce368edc284cbbda4",
+  "archiveSha256": "af8bf5a3bef53085bb0f1d42748560e3a7faf79a86f2e8c42199d5525ed26c20",
   "pipelines": {
     "ir": {
       "pages": 13,
@@ -58,7 +58,7 @@
       "floats": {
         "markdown": {
           "image": 7,
-          "captionedImage": 4,
+          "captionedImage": 5,
           "table": 3,
           "algorithm": 0,
           "code": 0,
@@ -132,7 +132,7 @@
       "floats": {
         "markdown": {
           "image": 7,
-          "captionedImage": 4,
+          "captionedImage": 5,
           "table": 3,
           "algorithm": 0,
           "code": 0,

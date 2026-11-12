@@ -48,6 +48,15 @@ independent images or extend the recovery to arbitrary vector figures.
    again from the stored MinerU result. If that result is gone, the provisional
    document stays readable.
 
+MinerU sometimes files a caption under the wrong float. Two figures stacked on
+one page can end up sharing a single float: the upper picture has no caption,
+and the lower one carries both its own caption and the caption printed between
+the two pictures. Mktero moves a caption onto the adjacent figure of the same
+kind that has none, both downward and upward, so each figure is restored with
+its own caption. A figure that already has a caption keeps it, and a caption
+further from the picture than a printed caption can be stays where MinerU put
+it.
+
 ## Progressive rendering
 
 Reading starts as soon as conversion finishes. Each pending figure shows an
