@@ -20,6 +20,7 @@ const STRUCTURE = /(?:^|\/)(?:.+_)?(?:content_list|middle|layout)\.json$/i;
 // Keep shipped pipeline values literal: later document changes must still find
 // corrections made for this snapshot under its original imported profile.
 const SHIPPED_PIPELINES = Object.freeze([
+    Object.freeze({ document: 'mineru-document-ir-v12', figureStructure: 'figure-region-v19' }),
     Object.freeze({ document: 'mineru-document-ir-v11', figureStructure: 'figure-region-v17' }),
 ]);
 

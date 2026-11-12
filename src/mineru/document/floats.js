@@ -62,12 +62,20 @@ const GROUP_LIMIT = 8;
 const CONTINUED_TOP = 150;
 const ORDERED_ROLES = new Set([BLOCK_ROLE.BODY, BLOCK_ROLE.HEADING, BLOCK_ROLE.REFERENCE, BLOCK_ROLE.FLOAT]);
 
-// MinerU sometimes attaches the next float's caption to the float above it.
-// When one float carries two labels of its class and the second label is
-// closer to an unlabeled float of the same class, that label and the
-// unlabeled caption pieces after it move. Distance is center to center:
-// a label under a tall table can be nearer that table's bottom edge and
-// still closer to the short table it captions.
+// MinerU sometimes attaches a neighbouring float's caption to the wrong float.
+// One float can then carry two labels of its class:
+// - the next float's caption, when the second label and the unlabeled caption
+//   pieces after it are nearer an unlabeled float below (distance is center to
+//   center, so a label under a tall table can be nearer that table's bottom
+//   edge and still closer to the short table it captions);
+// - the previous float's caption, when the first label is printed above this
+//   float's body while an unlabeled float of the same class sits directly
+//   above the label. Stacked figures on one page put the upper figure's
+//   caption between the two pictures, and MinerU files it under the lower
+//   picture together with that picture's own caption.
+// Either way the label moves with the unlabeled caption pieces printed after
+// it, and only onto a float that has no label of its own, so every float keeps
+// at most one caption.
 export function reassignFloatCaptions(ir) {
     const moves = ensureList(ir, 'captionMoves');
     const pending = [];
@@ -75,31 +83,9 @@ export function reassignFloatCaptions(ir) {
         for (const source of group) {
             const pieces = classedCaptionPieces(source);
             if (pieces.labeled.length < 2) continue;
-            const second = pieces.labeled[1];
-            const own = captionDistance(second.bbox, bodyBox(source));
-            let target = null;
-            let best = own;
-            for (const candidate of group) {
-                if (candidate === source || classedCaptionPieces(candidate).labeled.length) continue;
-                const box = bodyBox(candidate);
-                if (!boxesOverlapX(second.bbox, box)) continue;
-                const distance = captionDistance(second.bbox, box);
-                if (distance < best) {
-                    best = distance;
-                    target = candidate;
-                }
-            }
-            if (!target) continue;
-            const start = pieces.ordered.indexOf(second.child);
-            const nextLabel = pieces.ordered.findIndex((child, index) => (
-                index > start && captionLabel(captionChildText(child), floatClass(source))
-            ));
-            pending.push({
-                source,
-                target,
-                moving: pieces.ordered.slice(start, nextLabel < 0 ? undefined : nextLabel),
-                distance: best,
-            });
+            const unlabeled = group.filter(candidate => candidate !== source
+                && !classedCaptionPieces(candidate).labeled.length);
+            pending.push(...pendingCaptionMoves(source, pieces, unlabeled));
         }
     }
     pending.sort((left, right) => left.distance - right.distance);
@@ -120,6 +106,55 @@ export function reassignFloatCaptions(ir) {
         });
     }
     return ir;
+}
+
+function pendingCaptionMoves(source, pieces, unlabeled) {
+    const moves = [];
+    const body = bodyBox(source);
+    const second = pieces.labeled[1];
+    const own = captionDistance(second.bbox, body);
+    let target = null;
+    let best = own;
+    for (const candidate of unlabeled) {
+        const box = bodyBox(candidate);
+        if (!boxesOverlapX(second.bbox, box)) continue;
+        const distance = captionDistance(second.bbox, box);
+        if (distance < best) {
+            best = distance;
+            target = candidate;
+        }
+    }
+    if (target) moves.push({ source, target, moving: captionRun(pieces, 1), distance: best });
+    // A caption printed under the figure above sits above this body. Only the
+    // first label can be that caption, and only a float whose own label is
+    // printed below its body, next to an unlabeled body printed entirely above
+    // the first label within one caption's gap, can have received it.
+    const first = pieces.labeled[0];
+    if (!validBox(first.bbox) || !validBox(body) || first.bbox[3] > body[1]) return moves;
+    if (!validBox(second.bbox) || second.bbox[1] < body[3]) return moves;
+    const above = unlabeled
+        .map(candidate => ({ candidate, box: bodyBox(candidate) }))
+        .filter(entry => validBox(entry.box) && entry.box[3] <= first.bbox[1]
+            && first.bbox[1] - entry.box[3] <= MAX_CAPTION_GAP
+            && boxesOverlapX(first.bbox, entry.box))
+        .sort((left, right) => right.box[3] - left.box[3])[0];
+    if (!above) return moves;
+    moves.push({
+        source, target: above.candidate, moving: captionRun(pieces, 0),
+        distance: captionDistance(first.bbox, above.box),
+    });
+    return moves;
+}
+
+// The label at `index` and the unlabeled caption pieces printed after it. A
+// following label starts another float's caption and never moves with it.
+function captionRun(pieces, index) {
+    const label = pieces.labeled[index];
+    const start = pieces.ordered.indexOf(label.child);
+    const nextLabel = pieces.ordered.findIndex((child, at) => (
+        at > start && captionLabel(captionChildText(child), label.label.class)
+    ));
+    return pieces.ordered.slice(start, nextLabel < 0 ? undefined : nextLabel);
 }
 
 // MinerU's caption lines are not always caption. A float that has a
@@ -234,6 +269,10 @@ function strayReason(child, text, { labeled, body, decoration }) {
 }
 
 const MAX_CHROME_CAPTION_WORDS = 30;
+// A caption printed between two stacked figures sits right under the upper
+// body and right above the lower one. A paragraph of reading text that merely
+// happens to sit above a picture is further away and stays in the flow.
+const MAX_CAPTION_GAP = 24;
 // A panel letter alone ("c", "(b)"), and a line that opens with one
 // ("(b) Residual vs. Age", "d,e, Neural responses …").
 const PANEL_LINE = /^\(?[a-z]{1,2}\)?[.,]?$/iu;
