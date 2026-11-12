@@ -99,6 +99,13 @@ documentation-only. Report any command that could not be run.
   core and pure helpers; core and pure helpers must not depend on Zotero UI.
 - Use explicit `.js` extensions in imports. Do not introduce Node-only APIs
   into files bundled for Zotero.
+- `src/markdown/`, `src/mineru/document/` and `src/i18n/localization.js` are
+  also bundled by a downstream reader client that runs them without Zotero, a
+  DOM or a network. Keep Zotero globals, `document`, `window`, Node APIs and
+  fetch out of them, and keep `marked`, `katex` and `@lezer/markdown` the only
+  Markdown parsers. A downstream client pins the same three versions, so a
+  parser bump here is a breaking change for it. This repository builds no
+  client artifacts; see `docs/development.md`.
 - Preserve all bootstrap lifecycle globals: `install`, `startup`, `shutdown`,
   `uninstall`, `onMainWindowLoad`, and `onMainWindowUnload`.
 - Every registration, listener, object URL, tab, and in-flight

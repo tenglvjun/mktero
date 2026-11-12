@@ -13,7 +13,6 @@ conversions.
 - Check local figures: `node scripts/figure-corpus-check.mjs`.
 - Check local reading results: `node scripts/reading-corpus-check.mjs --pipeline ir`.
 - Build the browser preview: `npm run build:preview`.
-- Regenerate the iOS reader artifacts (renderer, stylesheet, KaTeX fonts): `npm run build:ios-renderer` and `npm run build:ios-reader`; `npm run check:ios-reader` fails when the committed copy is stale.
 
 ## Build and release
 
@@ -159,56 +158,40 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # full report for
 | `floats` | Images, tables, algorithms, code, and display math in the output versus the layout |
 | `references` | Parsed reference entries versus layout `ref_text` blocks |
 
-## iOS reader artifacts
+## Downstream reader clients
 
-`mktero-iOS` does not import this repository. It carries build outputs produced
-here, and the outputs are committed so building the app needs no Node:
+The extension's renderer and document pipeline are pure modules, and another
+client can bundle them to render a paper the same way Zotero does. Nothing in
+this repository builds that client's artifacts, and no build here reads another
+checkout: a downstream app owns its own bundling, its own committed output, and
+its own staleness check.
 
-```bash
-npm run build:ios-renderer   # Mktero/Resources/Renderer/{renderer.js,document.js}
-npm run build:ios-reader     # Mktero/Resources/Reader/{reader.css,katex.css,fonts/}
-npm run check:ios-reader     # fails when the committed stylesheet is stale
-```
+What this repository guarantees is the shape of the input, not the packaging:
 
-`build:ios-renderer` writes two bundles, both pure and both free of DOM, Zotero
-and network access:
+- `src/markdown/markdown-html.js` exports `renderMarkdownHTML(markdown,
+  { resolveImageURL, translate })` — Markdown in, reader HTML out. It needs no
+  Zotero, no network and no DOM.
+- `src/mineru/document/prepare.js` exports `prepareMinerUDocument(bundle,
+  { pdfText })` — a MinerU archive in, reading-order Markdown out. Passing
+  `pdfText: null` skips word-level correction but keeps ordering, chrome removal
+  and heading inference, which is what a client without a PDF view needs.
+- `src/i18n/localization.js` exports `createLocalization({ zoteroLocale })`, so a
+  client can render the same labels in `en-US` or `zh-CN`.
+- `ui/markdown.css` is the single reader stylesheet. A client that wants the
+  desktop look derives its own sheet from it rather than re-typing the rules.
 
-- `renderer.js` is `renderMarkdownHTML`, the function the desktop reader uses to
-  turn Markdown into reader HTML;
-- `document.js` is the document IR pipeline (`src/mineru/document/prepare.js`),
-  which is what turns a MinerU archive into reading-order Markdown. The app runs
-  it in JavaScriptCore rather than a WebView, because it needs no DOM.
+Two rules keep that boundary usable:
 
-The second one matters as much as the first: `full.md` in a MinerU archive is the
-provider's flat reading of the page, so rendering it directly shows the running
-header and page number on every page and reads a two-column paper across instead
-of down. `document.js` drops repeated page chrome, orders blocks the way the page
-is read, infers heading levels and merges continued tables — the same steps the
-extension performs before it renders. It is given no PDF text layer, so the
-word-level correction MinerU misreads is not applied; geometry, ordering and
-chrome removal do not depend on it.
+- Do not import Zotero globals, `document`, `window` or the network into
+  `src/markdown/` or `src/mineru/document/`. A downstream bundle runs in a
+  context that has none of them.
+- Keep `marked`, `katex` and `@lezer/markdown` as the only Markdown parsers. A
+  downstream client pins the same versions; a different parser renders a
+  different document from the same Markdown.
 
-`scripts/ios-document-entry.js` also refuses to return an empty document: a
-layout with no readable blocks keeps the provider's Markdown rather than
-replacing a paper with a blank page.
-
-Changing `ui/markdown.css` means running `build:ios-reader`.
-`scripts/build-ios-reader-styles.mjs` takes three parts of that stylesheet:
-
-- the `:host` variable block, with both palettes and every `--reader-*`;
-- the block typography the extension writes for a saved snapshot (`p`,
-  `h1`–`h6`, `table`, `pre`, `figure`, `figcaption`, `blockquote`, `code`,
-  links);
-- the translation table in `EDITOR_MODULE_RULES`: each figure, math and table
-  selector of the editor branch, mapped onto the flat markup the renderer
-  actually produces. Any editor rule not in the table is dropped and listed in
-  the artifact's `dropped.unmapped`, so a new desktop rule shows up in the build
-  summary instead of disappearing.
-
-KaTeX MathML is laid out from font metrics: `katex.css` keeps only woff2 and the
-20 fonts ship with the app. The app writes the page into a temporary directory
-before loading it, so the stylesheet's relative font URLs need the fonts beside
-the page; `ReaderStyleSheet.installFonts(into:)` does that.
+A change to `ui/markdown.css` or to the renderer is therefore a change that every
+downstream client has to pick up in its own build. Say so in the pull request
+description; there is no shared artifact to regenerate here.
 
 ## Browser preview
 
