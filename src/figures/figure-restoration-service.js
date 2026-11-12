@@ -5,6 +5,8 @@ import {
 } from './figure-model.js';
 import { bindFigureSourceRanges } from './figure-source-binding.js';
 import { resolveFigureCandidates } from './figure-region-resolver.js';
+import { embeddedImageCandidate, embeddedImageRequest } from './figure-embedded-image.js';
+import { captionedImageCandidate, captionedImageRequest } from './figure-captioned-image.js';
 import { composeFigureDraft, planFigureReplacement } from './figure-transaction.js';
 import { createFigureAbortScope, throwIfFigureAborted, waitForFigureOperation } from './figure-async.js';
 
@@ -111,9 +113,23 @@ export class FigureRestorationService {
             let generatedBytes = 0;
             const originalBytes = bound.assets.reduce((total, asset) => total + asset.data.byteLength, 0);
             const pageCrops = await this.#renderPageCrops(bound, candidates, session, scope.signal);
-            for (const [index, candidate] of candidates.entries()) {
+            for (const [index, originalCandidate] of candidates.entries()) {
                 throwIfFigureAborted(signal);
                 onProgress?.(97 + 2 * index / Math.max(1, candidates.length));
+                let candidate = originalCandidate;
+                let sharedCrop = pageCrops.get(candidate.id);
+                if (session?.recoverImageGroup && !scope.signal.aborted
+                    && bound.assets.length + completed.length < limits.maxAssets
+                    && originalBytes + generatedBytes < limits.maxTotalAssetBytes
+                    && generatedBytes < limits.maxGeneratedBytes) {
+                    const recovered = await this.#recoverOriginalImage(bound, candidate, candidates,
+                        session, scope.signal, budget);
+                    if (recovered) {
+                        candidate = recovered.candidate;
+                        sharedCrop = recovered.crop;
+                        candidates[index] = candidate;
+                    }
+                }
                 let reason = candidate.reason;
                 if (candidate.decision === 'compose') {
                     const expired = scope.signal.aborted || this.now() - started >= limits.documentTimeoutMs;
@@ -125,7 +141,7 @@ export class FigureRestorationService {
                     else {
                         const outcome = await this.#composeCandidate({
                             candidate, bound, session, limits, scope,
-                            sharedCrop: pageCrops.get(candidate.id), paths,
+                            sharedCrop, paths,
                         });
                         if (outcome.error) reason = outcome.reason;
                         else {
@@ -181,6 +197,33 @@ export class FigureRestorationService {
         finally {
             if (session) await session.close().catch(() => {});
             scope.dispose();
+        }
+    }
+
+    async #recoverOriginalImage(input, candidate, candidates, session, signal, budget) {
+        const request = embeddedImageRequest(input, candidate, candidates, budget)
+            || captionedImageRequest(input, candidate, budget);
+        if (!request) return null;
+        const operation = createFigureAbortScope([signal], {
+            ...this.abortOptions, timeoutMs: this.limits.cropTimeoutMs,
+        });
+        try {
+            const result = await waitForFigureOperation(session.recoverImageGroup(request,
+                { signal: operation.signal }), operation.signal);
+            if (!result) return null;
+            validateFigureCrop(result.crop, this.limits);
+            const page = input.pages.find(value => value.pageIndex === candidate.pageIndex);
+            const verified = request.mode === 'embedded-text'
+                ? embeddedImageCandidate(candidate, request, result, page)
+                : captionedImageCandidate(candidate, request, result, page);
+            return verified ? { candidate: verified, crop: result.crop } : null;
+        }
+        catch {
+            throwIfFigureAborted(signal);
+            return null;
+        }
+        finally {
+            operation.dispose();
         }
     }
 

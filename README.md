@@ -38,7 +38,7 @@ and parser profile.
 - Read multi-column papers as continuous text with formulas, tables, lists, and code, with page chrome hidden. [Reading](./docs/reading.md)
 - Navigate headings, figures, citations, and search results; jump between Markdown and its PDF source. [Navigation](./docs/reading.md#move-around-the-document)
 - Copy formula LaTeX, code, or tables as Markdown or CSV from the reader. [Copy actions](./docs/reading.md#copy-a-formula-a-code-block-or-a-table)
-- Restore figures from the local PDF in the background while you read. [Figure pipeline](./docs/figure-pipeline.md)
+- Restore figures from the local PDF in the background while you read, retaining shared captions (including dash-separated figure numbers) and unnumbered graphical abstracts when their original image can be verified. [Figure pipeline](./docs/figure-pipeline.md)
 
 ### Annotations and translation
 

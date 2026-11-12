@@ -19,13 +19,23 @@ coordinates, and Markdown ranges agree. The generated local PNG preserves
 
 - Interior OCR (labels and text belonging to the figure) leaves the reading flow
   only after a successful crop.
-- Captions remain selectable, searchable, and translatable. Body references to
-  the figure are untouched.
+- Captions remain selectable, searchable, and translatable, including publisher
+  captions with a dash after the figure number (`Figure 1—A and B: ...`).
+  Panel letters and column headings stay inside the figure; the full caption
+  appears once below it. Body references to the figure are untouched.
 - A local pass upgrades compatible cached results without another OCR upload
   and leaves user corrections intact. It does not rasterize completed figures
   again.
 - Ambiguous, rotated, or unverifiable groups retain their original images and
   text.
+
+For a resolved MinerU figure, OCR coordinates can still miss a shared heading or
+an outer subplot. Mktero expands the crop to the original PDF image only when
+that image is unique, every panel matches its pixels, and its PDF caption
+matches. The full caption remains separate. Expansion cannot overlap other
+layout content or native PDF text outside the existing region; failed checks
+keep the original safe crop. This does not infer relationships between
+independent images or extend the recovery to arbitrary vector figures.
 
 ### MinerU document rewrite
 
@@ -45,7 +55,8 @@ animated placeholder (a lucide image with a spinner). The reader replaces each
 finished figure without rebuilding the article, so a slow figure never delays
 the rest.
 
-A PDF page with several figures is rasterized once in the background worker.
+Ordinary region crops share one page rasterization in the background worker.
+Image-boundary and pixel verification may require additional page rendering.
 Closing the reader tab does not stop a running restoration; it finishes and
 updates the cache. Export and snapshot stay disabled until every figure is
 resolved.
@@ -59,6 +70,21 @@ caption, and every panel's pixels.
 Independent OCR label rows such as `(A)`, `(B)`, and their fullwidth equivalents
 leave the text only after the complete image is recovered. Body references and
 labels inside captions remain intact.
+
+## Unnumbered graphical abstracts
+
+For MinerU results, Mktero can restore an unnumbered graphical abstract when
+its panels and embedded text belong to one original PDF image. It verifies
+the page coordinates, image boundary, and every panel's pixels before replacing
+the fragments. The image keeps its internal title, labels, and explanations in
+their original positions; these are not repeated as article paragraphs or
+invented figure captions. External article text remains in the reading flow.
+
+The OCR fragments remain visible while this additional verification runs;
+the completed document replaces them together. If the image boundary, text
+ownership, or pixels cannot be verified, the original fragments remain.
+This recovery uses the local PDF and stored MinerU
+result, without another OCR upload.
 
 ## Reuniting groups split by a misplaced title
 

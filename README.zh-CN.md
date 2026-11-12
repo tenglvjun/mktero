@@ -33,7 +33,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 - 将双栏论文重排为连续正文，保留公式、表格、列表和代码，并隐藏刊头、页眉页脚等页面装饰。[阅读](./docs/reading.zh-CN.md)
 - 通过目录、图表、引用和查找定位，在 Markdown 与 PDF 来源之间跳转。[文档导航](./docs/reading.zh-CN.md#在文档中定位)
 - 在阅读器内复制公式 LaTeX、代码，或将表格复制为 Markdown、CSV。[复制操作](./docs/reading.zh-CN.md#复制公式代码块与表格)
-- 阅读时在后台从本地 PDF 恢复图组。[图组恢复流程](./docs/figure-pipeline.zh-CN.md)
+- 阅读时在后台从本地 PDF 恢复图组，保留共享图注（包括图号后使用破折号的格式），也支持能核验原始图片的无编号图形摘要。[图组恢复流程](./docs/figure-pipeline.zh-CN.md)
 
 ### 注释、校对和翻译
 

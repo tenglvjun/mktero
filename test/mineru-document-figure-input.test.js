@@ -400,6 +400,77 @@ test('composes side-by-side panels and owns their footnotes under an unpunctuate
     assert.equal(caption.text, 'Figure 1 The impact of reusable skills on sleep.');
 });
 
+test('restores a numbered six-panel figure with a dash caption attached to its last panel', async () => {
+    for (const separator of ['—', '–', ' — ', ' – ']) {
+        const caption = `Figure 12${separator}A and B: Signal over time. C and D: Response to input. `
+            + 'E and F: Individual values for $x_{50}$. Data are mean ± SEM. *P < 0.05.';
+        const names = Array.from({ length: 6 }, (_, index) => `panel-${index}.jpg`);
+        const charts = names.map((name, index) => {
+            const column = index % 2;
+            const row = Math.floor(index / 2);
+            const left = 80 + column * 400;
+            const top = 140 + row * 210;
+            const bbox = [left, top, left + 330, top + 165];
+            const labelBox = [left, top - 22, left + 24, top - 2];
+            const children = [text(labelBox, String.fromCharCode(65 + index), 'image_caption')];
+            if (row === 0) children.push(text([left + 70, 106, left + 280, 124],
+                column === 0 ? 'Control group' : 'Treatment group', 'image_caption'));
+            if (index === 5) children.push(text([80, 745, 810, 790], caption, 'image_caption'));
+            return imageBlock(bbox, name, children);
+        });
+        const following = 'The following paragraph is ordinary body text and must remain intact.';
+        const input = createMinerUFigureInput(layoutBundle([layoutPage(0, [
+            ...charts, text([80, 830, 810, 900], following),
+        ])], names));
+        const original = input.markdown;
+        const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+        assert.equal(candidates.length, 1);
+        const candidate = candidates[0];
+        assert.equal(candidate.decision, 'compose', `${separator}: ${candidate.reason}`);
+        assert.equal(candidate.panelBlockIds.length, 6);
+        assert.equal(candidate.captionBlockIds.length, 1);
+        const legend = input.blocks.find(block => block.id === candidate.captionBlockIds[0]);
+        assert.equal(legend.text, caption);
+        const owned = candidate.ownedTextBlockIds.map(id => input.blocks.find(block => block.id === id).text);
+        for (const label of ['A', 'B', 'C', 'D', 'E', 'F', 'Control group', 'Treatment group']) {
+            assert.ok(owned.includes(label), label);
+        }
+        assert.ok(candidate.visualBBox[1] <= 106, 'The crop must include the shared column headings');
+        assert.ok(candidate.visualBBox[3] < candidate.captionBBox[1], 'The legend stays outside the crop');
+        const draft = await service().restore(input, { fileData: Uint8Array.of(1) });
+        assert.deepEqual(draft.preserved, []);
+        const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+        assert.equal(input.markdown, original, 'The provider input stays immutable');
+        assert.equal(document.figureMap.figures.length, 1);
+        const figure = document.figureMap.figures[0];
+        assert.equal(figure.panels.length, 6);
+        assert.equal(figure.render.captionRanges.length, 1);
+        const range = figure.render.captionRanges[0];
+        assert.equal(document.markdown.slice(range.from, range.to), caption);
+        for (const name of names) assert.equal(document.markdown.includes(`images/${name}`), false);
+        assert.ok(document.markdown.includes(following));
+        assert.equal(document.markdown.split(caption).length, 2, 'The full caption appears exactly once');
+        assert.ok(document.sourceMap.every(entry => isValidSourceMapEntry(entry, document.markdown.length)));
+        const mapping = document.sourceMap.find(entry => entry.markdownFrom === figure.render.range.from);
+        assert.deepEqual(mapping.locationRanges[0].location.bbox, figure.captionBBox);
+    }
+});
+
+test('keeps adjacent figures with distinct dash captions separate', () => {
+    const left = imageBlock([80, 100, 410, 320], 'left.jpg', [
+        text([80, 340, 410, 380], 'Figure 8—First independent experiment.', 'image_caption'),
+    ]);
+    const right = imageBlock([450, 100, 780, 320], 'right.jpg', [
+        text([450, 340, 780, 380], 'Figure 9—Second independent experiment.', 'image_caption'),
+    ]);
+    const input = createMinerUFigureInput(layoutBundle([layoutPage(0, [left, right])], ['left.jpg', 'right.jpg']));
+    const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+    assert.equal(candidates.length, 2);
+    assert.ok(candidates.every(candidate => candidate.decision === 'compose'));
+    assert.ok(candidates.every(candidate => candidate.panelBlockIds.length === 1));
+    assert.notEqual(candidates[0].label, candidates[1].label);
+});
+
 test('keeps a valid page frame when a later image block is empty', () => {
     const input = createMinerUFigureInput(layoutBundle([
         layoutPage(0, [imageBlock([100, 100, 800, 700], 'a.jpg')]),
