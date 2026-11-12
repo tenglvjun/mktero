@@ -11,6 +11,7 @@
 - 检查本地图组：`node scripts/figure-corpus-check.mjs`。
 - 检查本地阅读结果：`node scripts/reading-corpus-check.mjs --pipeline ir`。
 - 构建浏览器预览：`npm run build:preview`。
+- 重新生成 iOS 阅读器产物（渲染器、样式表与 KaTeX 字体）：`npm run build:ios-renderer`、`npm run build:ios-reader`；`npm run check:ios-reader` 校验已提交的副本是否过期。
 
 ## 构建与发布
 
@@ -118,6 +119,30 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # 输出部分论
 | `sourceMap` | 被来源映射覆盖的可见顶层块比例，以及跨多页的条目数 |
 | `floats` | 输出中的图片、表格、算法、代码和行间公式数量，与版面中的数量对比 |
 | `references` | 解析出的参考文献条目数，与版面 `ref_text` 块数对比 |
+
+## iOS 阅读器产物
+
+`mktero-iOS` 不导入本仓库的代码，只携带由这里生成的产物。两个脚本都会写进
+`../mktero-iOS/`，产物需要提交，这样构建 iOS App 不需要 Node：
+
+```bash
+npm run build:ios-renderer   # Mktero/Resources/Renderer/renderer.js
+npm run build:ios-reader     # Mktero/Resources/Reader/{reader.css,katex.css,fonts/}
+npm run check:ios-reader     # 已提交的样式表是否过期
+```
+
+改了 `ui/markdown.css` 就要跑 `build:ios-reader`。`scripts/build-ios-reader-styles.mjs`
+从这份样式表里取三部分：
+
+- `:host` 变量块，含明暗两套配色和全部 `--reader-*`；
+- 扩展为「已存快照」写的块级排版（`p`、`h1`–`h6`、`table`、`pre`、`figure`、`figcaption`、`blockquote`、`code`、链接）；
+- `EDITOR_MODULE_RULES` 里的翻译表：把编辑器的 figure / math / table 模块选择器，
+  逐条映射到渲染器实际产出的扁平 DOM 上。表里没有的编辑分支规则一律丢弃，并记进
+  产物的 `dropped.unmapped`，所以新加的桌面规则会出现在摘要里，而不是悄悄消失。
+
+KaTeX 的 MathML 靠字体度量排版：`katex.css` 只保留 woff2，20 个字体随包发布。
+App 把页面写进临时目录后再加载，因此样式表里的相对字体 URL 需要字体就在页面旁边，
+`ReaderStyleSheet.installFonts(into:)` 负责这一步。
 
 ## 浏览器预览
 
