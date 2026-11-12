@@ -10,14 +10,20 @@
 // cross the script bridge.
 import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
 import { analyzeMarkdownFootnotes } from '../src/markdown/markdown-footnotes.js';
+import { createLocalization } from '../src/i18n/localization.js';
 
 /**
  * Renders Markdown to the same HTML the extension's reader produces.
  *
  * `assets` is a list of `{ path, mimeType, base64 }`. Each entry is turned into
  * a blob URL once and reused, so a figure referenced twice costs one blob.
+ *
+ * `language` is the extension's own message language (`en-US` or `zh-CN`): the
+ * renderer emits a label for page markers, image fallbacks and the collapsible
+ * section headings, and the app must not show English section names to a
+ * Chinese reader.
  */
-function render(markdown, assets) {
+function render(markdown, assets, language) {
     const source = typeof markdown === 'string' ? markdown : '';
     const urls = createAssetURLs(assets);
     const resolveImageURL = href => {
@@ -25,15 +31,18 @@ function render(markdown, assets) {
         if (!key) return null;
         return urls.get(key) || null;
     };
+    const { t } = createLocalization({
+        zoteroLocale: language === 'zh-CN' ? 'zh-CN' : 'en-US',
+    });
 
     let html = '';
     try {
-        html = renderMarkdownHTML(source, { resolveImageURL });
+        html = renderMarkdownHTML(source, { resolveImageURL, translate: t });
     }
     catch (error) {
         // A renderer failure must not leave the reader blank: escape the source
         // so the user still sees the text.
-        html = `<pre class="mktero-render-fallback">${escapeHTML(source)}</pre>`;
+        html = `<pre class="markdown-source-fallback">${escapeHTML(source)}</pre>`;
         return { html, footnotes: [], error: String(error && error.message || error) };
     }
 

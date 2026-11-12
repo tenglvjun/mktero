@@ -13,6 +13,7 @@ conversions.
 - Check local figures: `node scripts/figure-corpus-check.mjs`.
 - Check local reading results: `node scripts/reading-corpus-check.mjs --pipeline ir`.
 - Build the browser preview: `npm run build:preview`.
+- Regenerate the iOS reader artifacts (renderer, stylesheet, KaTeX fonts): `npm run build:ios-renderer` and `npm run build:ios-reader`; `npm run check:ios-reader` fails when the committed copy is stale.
 
 ## Build and release
 
@@ -157,6 +158,35 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # full report for
 | `sourceMap` | Share of visible top-level blocks covered by a source-map entry, and entries that span several pages |
 | `floats` | Images, tables, algorithms, code, and display math in the output versus the layout |
 | `references` | Parsed reference entries versus layout `ref_text` blocks |
+
+## iOS reader artifacts
+
+`mktero-iOS` does not import this repository. It carries build outputs produced
+here, and both outputs are committed so building the app needs no Node:
+
+```bash
+npm run build:ios-renderer   # Mktero/Resources/Renderer/renderer.js
+npm run build:ios-reader     # Mktero/Resources/Reader/{reader.css,katex.css,fonts/}
+npm run check:ios-reader     # fails when the committed stylesheet is stale
+```
+
+Changing `ui/markdown.css` means running `build:ios-reader`.
+`scripts/build-ios-reader-styles.mjs` takes three parts of that stylesheet:
+
+- the `:host` variable block, with both palettes and every `--reader-*`;
+- the block typography the extension writes for a saved snapshot (`p`,
+  `h1`–`h6`, `table`, `pre`, `figure`, `figcaption`, `blockquote`, `code`,
+  links);
+- the translation table in `EDITOR_MODULE_RULES`: each figure, math and table
+  selector of the editor branch, mapped onto the flat markup the renderer
+  actually produces. Any editor rule not in the table is dropped and listed in
+  the artifact's `dropped.unmapped`, so a new desktop rule shows up in the build
+  summary instead of disappearing.
+
+KaTeX MathML is laid out from font metrics: `katex.css` keeps only woff2 and the
+20 fonts ship with the app. The app writes the page into a temporary directory
+before loading it, so the stylesheet's relative font URLs need the fonts beside
+the page; `ReaderStyleSheet.installFonts(into:)` does that.
 
 ## Browser preview
 
