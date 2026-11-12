@@ -162,13 +162,35 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # full report for
 ## iOS reader artifacts
 
 `mktero-iOS` does not import this repository. It carries build outputs produced
-here, and both outputs are committed so building the app needs no Node:
+here, and the outputs are committed so building the app needs no Node:
 
 ```bash
-npm run build:ios-renderer   # Mktero/Resources/Renderer/renderer.js
+npm run build:ios-renderer   # Mktero/Resources/Renderer/{renderer.js,document.js}
 npm run build:ios-reader     # Mktero/Resources/Reader/{reader.css,katex.css,fonts/}
 npm run check:ios-reader     # fails when the committed stylesheet is stale
 ```
+
+`build:ios-renderer` writes two bundles, both pure and both free of DOM, Zotero
+and network access:
+
+- `renderer.js` is `renderMarkdownHTML`, the function the desktop reader uses to
+  turn Markdown into reader HTML;
+- `document.js` is the document IR pipeline (`src/mineru/document/prepare.js`),
+  which is what turns a MinerU archive into reading-order Markdown. The app runs
+  it in JavaScriptCore rather than a WebView, because it needs no DOM.
+
+The second one matters as much as the first: `full.md` in a MinerU archive is the
+provider's flat reading of the page, so rendering it directly shows the running
+header and page number on every page and reads a two-column paper across instead
+of down. `document.js` drops repeated page chrome, orders blocks the way the page
+is read, infers heading levels and merges continued tables — the same steps the
+extension performs before it renders. It is given no PDF text layer, so the
+word-level correction MinerU misreads is not applied; geometry, ordering and
+chrome removal do not depend on it.
+
+`scripts/ios-document-entry.js` also refuses to return an empty document: a
+layout with no readable blocks keeps the provider's Markdown rather than
+replacing a paper with a blank page.
 
 Changing `ui/markdown.css` means running `build:ios-reader`.
 `scripts/build-ios-reader-styles.mjs` takes three parts of that stylesheet:

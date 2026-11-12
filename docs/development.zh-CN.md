@@ -122,14 +122,31 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # 输出部分论
 
 ## iOS 阅读器产物
 
-`mktero-iOS` 不导入本仓库的代码，只携带由这里生成的产物。两个脚本都会写进
-`../mktero-iOS/`，产物需要提交，这样构建 iOS App 不需要 Node：
+`mktero-iOS` 不导入本仓库的代码，只携带由这里生成的产物。产物需要提交，这样构建
+iOS App 不需要 Node：
 
 ```bash
-npm run build:ios-renderer   # Mktero/Resources/Renderer/renderer.js
+npm run build:ios-renderer   # Mktero/Resources/Renderer/{renderer.js,document.js}
 npm run build:ios-reader     # Mktero/Resources/Reader/{reader.css,katex.css,fonts/}
 npm run check:ios-reader     # 已提交的样式表是否过期
 ```
+
+`build:ios-renderer` 产出两个 bundle，都不依赖 DOM、Zotero 或网络：
+
+- `renderer.js` 是 `renderMarkdownHTML`，桌面阅读器把 Markdown 变成阅读 HTML 的
+  同一个函数；
+- `document.js` 是文档 IR 管线（`src/mineru/document/prepare.js`），负责把 MinerU
+  结果变成按阅读顺序排好的 Markdown。App 用 JavaScriptCore 跑它而不是 WebView，
+  因为它不需要 DOM。
+
+第二个和第一个同样重要：MinerU 结果里的 `full.md` 是服务商对页面的平铺读法，直接
+渲染会在每一页显示刊头与页码，并把双栏论文按左右横读。`document.js` 剔除跨页重复
+的页面装饰、按页面阅读顺序排列块、推断标题层级、合并跨页续表——正是扩展在渲染前做
+的那几步。它拿不到 PDF 文字层，所以 MinerU 认错的词不会被校正；但版面、排序与页面
+装饰剔除都不依赖它。
+
+`scripts/ios-document-entry.js` 还拒绝返回空文档：layout 里没有可读块时，保留服务商
+的 Markdown，而不是用空白页替换论文。
 
 改了 `ui/markdown.css` 就要跑 `build:ios-reader`。`scripts/build-ios-reader-styles.mjs`
 从这份样式表里取三部分：
