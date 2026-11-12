@@ -11,7 +11,6 @@
 - 检查本地图组：`node scripts/figure-corpus-check.mjs`。
 - 检查本地阅读结果：`node scripts/reading-corpus-check.mjs --pipeline ir`。
 - 构建浏览器预览：`npm run build:preview`。
-- 重新生成 iOS 阅读器产物（渲染器、样式表与 KaTeX 字体）：`npm run build:ios-renderer`、`npm run build:ios-reader`；`npm run check:ios-reader` 校验已提交的副本是否过期。
 
 ## 构建与发布
 
@@ -120,46 +119,35 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # 输出部分论
 | `floats` | 输出中的图片、表格、算法、代码和行间公式数量，与版面中的数量对比 |
 | `references` | 解析出的参考文献条目数，与版面 `ref_text` 块数对比 |
 
-## iOS 阅读器产物
+## 下游阅读器客户端
 
-`mktero-iOS` 不导入本仓库的代码，只携带由这里生成的产物。产物需要提交，这样构建
-iOS App 不需要 Node：
+扩展的渲染器与文档管线都是纯模块，别的客户端可以把它们打包进去，用与 Zotero 相同
+的方式渲染论文。本仓库不构建任何客户端的产物，也不读取别的仓库：下游 App 自己负责
+打包、提交产物、以及校验产物是否过期。
 
-```bash
-npm run build:ios-renderer   # Mktero/Resources/Renderer/{renderer.js,document.js}
-npm run build:ios-reader     # Mktero/Resources/Reader/{reader.css,katex.css,fonts/}
-npm run check:ios-reader     # 已提交的样式表是否过期
-```
+本仓库保证的是输入的形状，不是打包方式：
 
-`build:ios-renderer` 产出两个 bundle，都不依赖 DOM、Zotero 或网络：
+- `src/markdown/markdown-html.js` 导出 `renderMarkdownHTML(markdown,
+  { resolveImageURL, translate })`：Markdown 进，阅读 HTML 出。不依赖 Zotero、
+  网络或 DOM。
+- `src/mineru/document/prepare.js` 导出 `prepareMinerUDocument(bundle,
+  { pdfText })`：MinerU 结果进，按阅读顺序排好的 Markdown 出。传 `pdfText: null`
+  会跳过逐词校正，但保留排序、页面装饰剔除与标题层级推断——这正是不带 PDF 视图的
+  客户端需要的。
+- `src/i18n/localization.js` 导出 `createLocalization({ zoteroLocale })`，
+  客户端可以用 `en-US` 或 `zh-CN` 渲染同一批标签。
+- `ui/markdown.css` 是唯一的阅读器样式表。想要桌面观感的客户端从它派生自己的样式
+  表，而不是重新手写一遍规则。
 
-- `renderer.js` 是 `renderMarkdownHTML`，桌面阅读器把 Markdown 变成阅读 HTML 的
-  同一个函数；
-- `document.js` 是文档 IR 管线（`src/mineru/document/prepare.js`），负责把 MinerU
-  结果变成按阅读顺序排好的 Markdown。App 用 JavaScriptCore 跑它而不是 WebView，
-  因为它不需要 DOM。
+两条规则让这个边界可用：
 
-第二个和第一个同样重要：MinerU 结果里的 `full.md` 是服务商对页面的平铺读法，直接
-渲染会在每一页显示刊头与页码，并把双栏论文按左右横读。`document.js` 剔除跨页重复
-的页面装饰、按页面阅读顺序排列块、推断标题层级、合并跨页续表——正是扩展在渲染前做
-的那几步。它拿不到 PDF 文字层，所以 MinerU 认错的词不会被校正；但版面、排序与页面
-装饰剔除都不依赖它。
+- 不要把 Zotero 全局、`document`、`window` 或网络访问引入 `src/markdown/` 与
+  `src/mineru/document/`。下游 bundle 运行在没有这些东西的环境里。
+- Markdown 解析器只保留 `marked`、`katex` 与 `@lezer/markdown`。下游客户端钉住同样
+  的版本；换一个解析器，同一份 Markdown 就会渲染出不同的文档。
 
-`scripts/ios-document-entry.js` 还拒绝返回空文档：layout 里没有可读块时，保留服务商
-的 Markdown，而不是用空白页替换论文。
-
-改了 `ui/markdown.css` 就要跑 `build:ios-reader`。`scripts/build-ios-reader-styles.mjs`
-从这份样式表里取三部分：
-
-- `:host` 变量块，含明暗两套配色和全部 `--reader-*`；
-- 扩展为「已存快照」写的块级排版（`p`、`h1`–`h6`、`table`、`pre`、`figure`、`figcaption`、`blockquote`、`code`、链接）；
-- `EDITOR_MODULE_RULES` 里的翻译表：把编辑器的 figure / math / table 模块选择器，
-  逐条映射到渲染器实际产出的扁平 DOM 上。表里没有的编辑分支规则一律丢弃，并记进
-  产物的 `dropped.unmapped`，所以新加的桌面规则会出现在摘要里，而不是悄悄消失。
-
-KaTeX 的 MathML 靠字体度量排版：`katex.css` 只保留 woff2，20 个字体随包发布。
-App 把页面写进临时目录后再加载，因此样式表里的相对字体 URL 需要字体就在页面旁边，
-`ReaderStyleSheet.installFonts(into:)` 负责这一步。
+因此改动 `ui/markdown.css` 或渲染器，等于要求每个下游客户端在自己的构建里跟上。请
+在 PR 描述里写明这一点；本仓库没有需要重新生成的共享产物。
 
 ## 浏览器预览
 
