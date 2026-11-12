@@ -156,8 +156,11 @@ test('a new document pipeline reads a stored local result again without the serv
 test('the local parser profile records its document pipeline and keeps the shipped literal', async () => {
     const { MINERU_DOCUMENT_PIPELINE, MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS, MINERU_LOCAL_REQUEST_PROFILE_ID } = await import('../src/mineru/parser-profile.js');
     assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).document, MINERU_DOCUMENT_PIPELINE);
+    assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).figureStructure, 'figure-region-v19');
     assert.deepEqual(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
         [
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v12","figureStructure":"figure-region-v18"}',
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v12"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v11"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v10"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v9"}',

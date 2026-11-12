@@ -584,6 +584,53 @@ test('parses appendix, supplementary and dotted figure labels', () => {
     assert.equal(parseAcademicFigureCaption('Figure 2: Plain.').label, 'Figure 2:');
 });
 
+test('parses dash-separated figure captions with or without spaces', () => {
+    for (const separator of ['—', '–', ' — ', ' – ', '\u00a0—\u00a0']) {
+        for (const label of ['Figure 12', 'Fig. 12', 'Fig.12', 'Supplementary Figure S2', '图 12']) {
+            const text = `${label}${separator}A and B: Signal over time; C and D: Response.`;
+            const parsed = parseAcademicFigureCaption(text);
+            assert.ok(parsed, text);
+            assert.equal(parsed.label, `${label}${separator.trimEnd()}`);
+            assert.equal(parsed.description, 'A and B: Signal over time; C and D: Response.');
+            assert.equal(parsed.text, text);
+        }
+    }
+});
+
+test('keeps dash ranges, ordinary prose and unrelated image descriptions out of figure captions', () => {
+    for (const text of ['Figure 1–3', 'Figure 1 – 3 show the results.', 'Fig. 1–3',
+        'Fig.1—3 show the results.', 'Figure S1–S3 show the controls.',
+        'See Figure 1—A and B for details.', 'A time-series image — ordinary alt text']) {
+        assert.equal(parseAcademicFigureCaption(text), null, text);
+        assert.equal(parseLooseAcademicFigureCaption(text), null, text);
+        const html = renderMarkdownHTML(`![${text}](images/f.png)`, { resolveImageURL: () => 'blob:f' });
+        assert.doesNotMatch(html, /<figcaption>/, text);
+    }
+});
+
+test('groups, normalizes and renders dash captions once with their complete mathematical legend', () => {
+    const caption = 'Figure 12—A and B: Signal for $x_{50}$. C and D: Response to input. Data are mean ± SEM. *P < 0.05.';
+    const markdown = ['![](images/a.png)', '', '![](images/b.png)', '', caption].join('\n');
+    const normalized = normalizeMarkdownFigureCaptions(markdown);
+    const [group] = findAcademicFigures(normalized);
+    assert.equal(group.caption.label, 'Figure 12—');
+    assert.equal(group.images.length, 2);
+    assert.equal(normalized.split(caption).length, 2);
+    for (const source of [group.renderSource || group.source, `![${caption}](images/full.png)`]) {
+        const html = renderMarkdownHTML(source, { resolveImageURL: image => `blob:${image}` });
+        assert.equal((html.match(/<figcaption>/g) || []).length, 1);
+        assert.match(html, /mktero-figure-label">Figure 12—<\/span>/);
+        assert.match(html, /C and D: Response to input/);
+        assert.match(html, /Data are mean ± SEM\. \*P &lt; 0\.05\./);
+        assert.match(html, /class="katex"/);
+        assert.doesNotMatch(html, /katex-error/);
+    }
+    const body = 'This preceding paragraph contains enough words to be article prose.';
+    const split = splitTrailingAcademicFigureCaption(`${body} ${caption}`);
+    assert.equal(split.body, body);
+    assert.equal(split.caption.text, caption);
+});
+
 test('renders an appendix figure caption below its image', () => {
     const html = renderMarkdownHTML('![Figure A1: Graphical model of TC-WM.](images/f.png)', {
         resolveImageURL: () => 'blob:f',

@@ -6,12 +6,24 @@ const ACADEMIC_REFERENCE_SPACE_SOURCE = '[\\p{Zs}\\t]';
 const ACADEMIC_REFERENCE_IDENTIFIER_SOURCE =
     '(?:(?:[a-z]{1,2}[.．]?[\\p{Zs}\\t]*)?\\d+[a-z]?|[ivxlcdm]+[a-z]?)';
 const ACADEMIC_FIGURE_CAPTION_SEPARATOR_SOURCE =
-    '(?:[.:：。]|[\\p{Zs}\\t]*[|｜])';
+    '(?:[.:：。]|[\\p{Zs}\\t]*[|｜—–])';
+const ACADEMIC_DASH_RANGE_PATTERN = /^[—–][\p{Zs}\t]*(?:[a-z]{1,2}[.．]?[\p{Zs}\t]*)?\d/iu;
 // Nature-style series labels ("Extended Data Fig. 1", "Supplementary Fig. 2")
 // share the academic figure caption grammar.
 const ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE =
     '(?:(?:extended[\\p{Zs}\\t]+data|supplement(?:ary|al)?|suppl\\.?)[\\p{Zs}\\t]+)?';
 const ACADEMIC_FIGURE_CAPTION_PATTERNS = [
+    // Some journals join the figure number and first panel letter with a dash.
+    // Other separators keep their existing whitespace rules.
+    new RegExp(
+        `^((?:${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme|table)`
+            + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
+            + `|fig[.．]${ACADEMIC_REFERENCE_SPACE_SOURCE}*`
+            + `|(?:图表|图)${ACADEMIC_REFERENCE_SPACE_SOURCE}*)`
+            + `${ACADEMIC_REFERENCE_IDENTIFIER_SOURCE}${ACADEMIC_REFERENCE_SPACE_SOURCE}*[—–])`
+            + `${ACADEMIC_REFERENCE_SPACE_SOURCE}*(\\S[\\s\\S]*)$`,
+        'iu'
+    ),
     new RegExp(
         `^((?:${ACADEMIC_FIGURE_LABEL_PREFIX_SOURCE}(?:algorithm|chart|fig\\.?|figure|scheme|table)`
             + `${ACADEMIC_REFERENCE_SPACE_SOURCE}+`
@@ -130,7 +142,7 @@ export function parseAcademicFigureCaption(value) {
     const match = ACADEMIC_FIGURE_CAPTION_PATTERNS
         .map(pattern => pattern.exec(text))
         .find(Boolean);
-    if (!match) return null;
+    if (!match || ACADEMIC_DASH_RANGE_PATTERN.test(match[1].slice(-1) + match[2])) return null;
     return {
         text,
         label: match[1],
@@ -169,7 +181,7 @@ export function splitTrailingAcademicFigureCaption(value) {
 export function parseLooseAcademicFigureCaption(value) {
     const text = String(value || '').trim();
     const match = LOOSE_ACADEMIC_FIGURE_CAPTION_PATTERN.exec(text);
-    if (!match) return null;
+    if (!match || ACADEMIC_DASH_RANGE_PATTERN.test(match[2])) return null;
     return {
         text,
         label: match[1],

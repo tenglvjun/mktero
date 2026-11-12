@@ -608,6 +608,8 @@ test('historical ownership and synchronized hashes never replace a verified file
         attachmentSyncState: 2, synced: true, version: 5, isStoredFileAttachment: () => true };
     f.items.push(missing);
     await f.adapter.rememberPDF(missing, Uint8Array.of(4, 5, 6, 7));
+    const originalArtifacts = (await f.ownership.read())
+        .find(value => value.attachmentKey === 'MISSING1').artifacts;
     await f.run();
     const summary = f.summaries.at(-1);
     // The attachment still exists and only its file is missing, so its own full
@@ -618,7 +620,7 @@ test('historical ownership and synchronized hashes never replace a verified file
     assert.equal(summary.unidentified[0].attachmentKey, 'MISSING1');
     const records = await f.ownership.read();
     const missingRecord = records.find(value => value.attachmentKey === 'MISSING1');
-    assert.equal(missingRecord.artifacts.length, 79);
+    assert.deepEqual(missingRecord.artifacts, originalArtifacts);
     assert.equal(missingRecord.resourcesCleared, undefined);
     const orphanRecord = records.find(value => value.attachmentKey === 'PDF1');
     assert.deepEqual(new Set(orphanRecord.artifacts.map(value => value.store)),
