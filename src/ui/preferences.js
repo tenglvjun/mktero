@@ -56,17 +56,20 @@ import {
     MISTRAL_API_KEY_PREF,
     DEFAULT_MINERU_LOCAL_API_BASE,
     MINERU_API_KEY_PREF,
+    MINERU_CLOUD_MODEL_VERSION_PREF,
     MINERU_ENDPOINT_LOCAL,
     MINERU_ENDPOINT_PREF,
     MINERU_LOCAL_API_BASE_PREF,
     MINERU_LOCAL_API_KEY_PREF,
     getConversionProvider,
     getMinerUApiKey,
+    getMinerUCloudModelVersion,
     getMinerUEndpoint,
     getMinerULocalApiBase,
     getMinerULocalApiKey,
     getMistralApiKey,
     normalizeConversionProvider,
+    normalizeMinerUCloudModelVersion,
     normalizeMinerUEndpoint,
 } from '../config/conversion-preferences.js';
 import {
@@ -289,6 +292,13 @@ export function createPreferencesController({
     const conversionApiKeyHelp = document.getElementById('mktero-api-key-help');
     const mineruEndpointRow = document.getElementById('mktero-mineru-endpoint-row');
     const mineruEndpointInput = document.getElementById('mktero-mineru-endpoint');
+    // The cloud parsing model only applies to a direct MinerU cloud request.
+    const mineruCloudModelRow = document.getElementById(
+        'mktero-mineru-cloud-model-row'
+    );
+    const mineruCloudModelInput = document.getElementById(
+        'mktero-mineru-cloud-model'
+    );
     const mineruLocalBaseRow = document.getElementById('mktero-mineru-local-base-row');
     const mineruLocalBaseInput = document.getElementById('mktero-mineru-local-base');
     const conversionPrivacyNote = document.getElementById(
@@ -638,10 +648,20 @@ export function createPreferencesController({
             mineruEndpointRow.hidden = hosted
                 || provider !== CONVERSION_PROVIDER_MINERU;
         }
+        // Only a direct MinerU cloud request carries a model choice. Hosted
+        // Mktero and the local service must not be able to pick one here.
+        if (mineruCloudModelRow) {
+            mineruCloudModelRow.hidden = hosted
+                || provider !== CONVERSION_PROVIDER_MINERU
+                || local;
+        }
         if (mineruLocalBaseRow) mineruLocalBaseRow.hidden = hosted || !local;
         if (conversionApiKeyRow) conversionApiKeyRow.hidden = hosted || local;
         if (mineruEndpointInput && !mineruEndpointInput.value) {
             mineruEndpointInput.value = getMinerUEndpoint(zotero);
+        }
+        if (mineruCloudModelInput && !mineruCloudModelInput.value) {
+            mineruCloudModelInput.value = getMinerUCloudModelVersion(zotero);
         }
         if (!conversionApiKeyInput) return;
         const config = getConversionApiKeyConfig(provider);
@@ -669,6 +689,22 @@ export function createPreferencesController({
         mineruEndpointInput.value = endpoint;
         zotero?.Prefs?.set?.(MINERU_ENDPOINT_PREF, endpoint, true);
         updateConversionApiKeyControl();
+    }
+
+    function saveMinerUCloudModel() {
+        if (!mineruCloudModelInput) return;
+        // The selection is kept even while another provider is active, so it
+        // survives switching away and back. Normalizing on read is what keeps
+        // an unknown stored value out of a request.
+        const modelVersion = normalizeMinerUCloudModelVersion(
+            mineruCloudModelInput.value
+        );
+        mineruCloudModelInput.value = modelVersion;
+        zotero?.Prefs?.set?.(
+            MINERU_CLOUD_MODEL_VERSION_PREF,
+            modelVersion,
+            true
+        );
     }
 
     function saveMinerULocalApiBase() {
@@ -1361,12 +1397,16 @@ export function createPreferencesController({
             mineruLocalBaseInput.value = getMinerULocalApiBase(zotero)
                 || DEFAULT_MINERU_LOCAL_API_BASE;
         }
+        if (mineruCloudModelInput) {
+            mineruCloudModelInput.value = getMinerUCloudModelVersion(zotero);
+        }
         updateConversionApiKeyControl();
         conversionProviderInput.addEventListener(
             'change',
             saveConversionChoice
         );
         mineruEndpointInput?.addEventListener('change', saveMinerUEndpoint);
+        mineruCloudModelInput?.addEventListener('change', saveMinerUCloudModel);
         mineruLocalBaseInput?.addEventListener('change', saveMinerULocalApiBase);
         conversionApiKeyInput?.addEventListener(
             'change',
@@ -1918,6 +1958,10 @@ export function createPreferencesController({
                 saveConversionChoice
             );
             mineruEndpointInput?.removeEventListener('change', saveMinerUEndpoint);
+            mineruCloudModelInput?.removeEventListener(
+                'change',
+                saveMinerUCloudModel
+            );
             mineruLocalBaseInput?.removeEventListener(
                 'change',
                 saveMinerULocalApiBase

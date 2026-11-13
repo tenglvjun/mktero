@@ -482,3 +482,68 @@ test('readCached never checks the page limit', async () => {
 test('rejects a hosted page limit check that is not a function', () => {
     assert.throws(() => createExtractor({ assertPageLimit: 'yes' }), TypeError);
 });
+
+test('a signed-out reader is reported as needing a sign-in, not read offline', async () => {
+    const extractor = createExtractor({
+        conversion: {
+            async convert() { assert.fail('A signed-out reader must not convert'); },
+            async resolveTarget({ getAccessToken }) {
+                // The real token provider refuses without a stored session.
+                await getAccessToken();
+            },
+        },
+        getAccessToken: () => {
+            throw new MkteroSignInRequiredError();
+        },
+        createCacheKey: async () => 'a'.repeat(64),
+        createSourceHash: async () => 'e'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: { async get() { assert.fail('A signed-out reader must not read a retained entry'); } },
+    });
+
+    await assert.rejects(
+        extractor.readCached(42, {}),
+        error => error instanceof MkteroSignInRequiredError
+            && error.code === 'MKTERO_SIGN_IN_REQUIRED'
+    );
+});
+
+test('a resolve transport failure reads a retained entry and says why', async () => {
+    const warnings = [];
+    const extractor = createExtractor({
+        conversion: {
+            async convert() { assert.fail('An offline read must not convert'); },
+            async resolveTarget() {
+                throw Object.assign(new Error('offline'), { code: 'MKTERO_NETWORK_ERROR' });
+            },
+        },
+        createCacheKey: async () => 'a'.repeat(64),
+        createSourceHash: async () => 'e'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: { async get() { return { markdown: '# Retained offline' }; } },
+    });
+
+    const result = await extractor.readCached(42, {});
+    warnings.push(...result.warnings);
+
+    assert.equal(result.markdown, '# Retained offline');
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /unreachable/);
+});
+
+test('a rejected session is reported even when a retained entry exists', async () => {
+    for (const code of ['MKTERO_SIGN_IN_REQUIRED', 'MKTERO_INVALID_TARGET', 'MKTERO_TARGET_MISMATCH']) {
+        const extractor = createExtractor({
+            conversion: {
+                async convert() { assert.fail('A refused session must not convert'); },
+                async resolveTarget() { throw Object.assign(new Error('refused'), { code }); },
+            },
+            createCacheKey: async () => 'a'.repeat(64),
+            createSourceHash: async () => 'e'.repeat(64),
+            isCacheEnabled: () => true,
+            cache: { async get() { return { markdown: '# Unverified' }; } },
+        });
+
+        await assert.rejects(extractor.readCached(42, {}), error => error.code === code);
+    }
+});

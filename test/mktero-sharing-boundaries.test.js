@@ -50,13 +50,24 @@ function harness({ cacheEnabled = false, failCache = false,
         sleep: async () => { polling.resolve(); await finish.promise; },
         fetch: async (url, request) => {
             requests.push({ url, ...request });
+            // The client resolves the parse target before creating a job. These
+            // scenarios exercise sharing, so the route answers the shipped vlm
+            // target and the job echoes that same snapshot.
+            if (request.method === 'POST' && url.endsWith('/conversions/resolve')) {
+                return json(200, {
+                    route_id: 'route-shared',
+                    model_version: 'vlm',
+                    parser_profile_id: 'mineru/v4-batch-vlm-1',
+                });
+            }
             if (request.method === 'POST' && url.endsWith('/conversions')) {
                 const jobID = `job-${++creates}`;
                 if (unauthorizedFirstCreate && creates === 1) {
                     return json(401, { error: { code: 'invalid_token' } });
                 }
                 return json(201, { job_id: jobID, status: 'awaiting_upload',
-                    upload_url: `https://storage.example.test/upload/${jobID}`, upload_method: 'PUT' });
+                    upload_url: `https://storage.example.test/upload/${jobID}`, upload_method: 'PUT',
+                    model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-vlm-1' });
             }
             if (request.method === 'PUT') return json(200, {});
             if (request.method === 'DELETE') return json(409, { error: { code: 'conflict' } });
@@ -64,7 +75,10 @@ function harness({ cacheEnabled = false, failCache = false,
             if (url.endsWith('/result-url')) return json(200, { result_url: 'https://storage.example.test/result.zip' });
             if (url.endsWith('/result.zip')) return { ok: true, status: 200,
                 headers: { get: () => null }, arrayBuffer: async () => archive.slice().buffer };
-            return json(200, { job_id: url.split('/').pop(), status: 'succeeded' });
+            return json(200, {
+                job_id: url.split('/').pop(), status: 'succeeded',
+                model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-vlm-1',
+            });
         },
     });
     const getScope = () => scopeProvider?.current() ?? scope;
@@ -321,7 +335,10 @@ test('switching scope during token lookup cannot send using the new account toke
     token.resolve('new-account-token');
     await rejected;
     await h.shared.dispose();
-    assert.equal(h.requests.length, 0);
+    // The resolve lookup is the only request that may have been attempted: no
+    // job was created and no PDF bytes were sent.
+    assert.equal(h.creates, 0);
+    assert.equal(h.requests.filter(request => request.method === 'PUT').length, 0);
 });
 
 test('a scope change after job creation cannot DELETE through the later account', async () => {
@@ -379,7 +396,11 @@ for (const [label, change] of [
         await rejected;
         assert.equal(h.creates, 1);
         assert.equal(h.deletes().length, 0);
-        assert.equal(h.requests.length, 1);
+        // Exactly one job was created, before the session changed; the resolve
+        // lookup that preceded it is not a session for the new account.
+        assert.equal(h.requests.filter(request => request.method === 'POST'
+            && request.url.endsWith('/conversions')).length, 1);
+        assert.equal(h.requests.filter(request => request.method === 'PUT').length, 0);
     });
 }
 
@@ -410,9 +431,16 @@ test('automatic token refresh retains the shared job and replays the exact creat
     assert.equal(h.requests.filter(request => request.method === 'PUT').length, 1);
 });
 
-test('local-only reading does not start or join a network conversion', async t => {
+test('local-only reading looks up a target but never starts or joins a conversion', async t => {
     const h = harness();
     t.after(() => h.shared.dispose());
     assert.equal(await h.extractor.readCached(1), null);
-    assert.equal(h.requests.length, 0);
+    // Reading asks which model the paper follows, which sends only the digest.
+    // It never creates a job, uploads the PDF, or downloads a result.
+    assert.equal(h.creates, 0);
+    assert.equal(h.requests.filter(request => request.method === 'PUT').length, 0);
+    assert.equal(h.requests.filter(request => request.url.endsWith('/result-url')).length, 0);
+    const resolve = h.requests.filter(request => request.url.endsWith('/conversions/resolve'));
+    assert.equal(resolve.length, 1);
+    assert.equal(JSON.parse(resolve[0].body).sha256, await sha256Hex(PDF));
 });

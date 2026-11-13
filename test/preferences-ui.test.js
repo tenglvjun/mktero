@@ -2530,3 +2530,148 @@ test('saving a nickname does not overwrite tokens a conversion refreshed meanwhi
     assert.equal(values.get('extensions.mktero.accountAccessToken'), 'access-2');
     controller.destroy();
 });
+
+function mineruCloudModelFixture(values, writes = []) {
+    const dom = new JSDOM(`<!doctype html><body>
+        <section id="mktero-preferences-pane">
+            <select id="mktero-conversion-provider">
+                <option value="mktero">Mktero</option>
+                <option value="mineru">MinerU</option>
+                <option value="mistral">Mistral OCR 4.1</option>
+            </select>
+            <div id="mktero-mineru-endpoint-row">
+                <select id="mktero-mineru-endpoint">
+                    <option value="cloud">Cloud</option>
+                    <option value="local">Local</option>
+                </select>
+            </div>
+            <div id="mktero-mineru-cloud-model-row">
+                <select id="mktero-mineru-cloud-model">
+                    <option value="vlm">VLM</option>
+                    <option value="pipeline">Pipeline</option>
+                </select>
+                <small id="mktero-mineru-cloud-model-help"></small>
+            </div>
+            <div id="mktero-mineru-local-base-row">
+                <input id="mktero-mineru-local-base">
+            </div>
+            <div id="mktero-api-key-row">
+                <input id="mktero-api-key">
+                <small id="mktero-api-key-help"></small>
+                <a id="mktero-api-key-manage"></a>
+            </div>
+            <small id="mktero-conversion-privacy-note"></small>
+            <span id="mktero-cache-status"></span>
+            <button id="mktero-clear-cache"></button>
+        </section>
+    </body>`);
+    const controller = createPreferencesController({
+        document: dom.window.document,
+        zotero: {
+            Prefs: {
+                get: key => values.get(key),
+                set: (key, value, global) => {
+                    values.set(key, value);
+                    writes.push({ key, value, global });
+                },
+            },
+            logError: assert.fail,
+        },
+        cache: {
+            getStats: async () => ({ entries: 0, sizeBytes: 0 }),
+            clear: async () => {},
+        },
+    });
+    return { dom, controller };
+}
+
+test('shows the MinerU cloud parsing model only for direct cloud conversion', async () => {
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mineru'],
+        ['extensions.mktero.mineruEndpoint', 'cloud'],
+        ['extensions.mktero.mineruCloudModelVersion', 'pipeline'],
+    ]);
+    const { dom, controller } = mineruCloudModelFixture(values);
+    await controller.init();
+    const doc = dom.window.document;
+    const provider = doc.getElementById('mktero-conversion-provider');
+    const endpoint = doc.getElementById('mktero-mineru-endpoint');
+    const modelRow = doc.getElementById('mktero-mineru-cloud-model-row');
+    const model = doc.getElementById('mktero-mineru-cloud-model');
+
+    assert.equal(modelRow.hidden, false);
+    assert.equal(model.value, 'pipeline');
+
+    // The local MinerU service has its own request profile, so it hides the row.
+    endpoint.value = 'local';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(modelRow.hidden, true);
+
+    // Hosted Mktero and Mistral never show it either.
+    provider.value = 'mistral';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(modelRow.hidden, true);
+    provider.value = 'mktero';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(modelRow.hidden, true);
+
+    // Switching back keeps the stored choice instead of resetting it.
+    provider.value = 'mineru';
+    provider.dispatchEvent(new dom.window.Event('change'));
+    endpoint.value = 'cloud';
+    endpoint.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(modelRow.hidden, false);
+    assert.equal(model.value, 'pipeline');
+    assert.equal(values.get('extensions.mktero.mineruCloudModelVersion'), 'pipeline');
+
+    controller.destroy();
+});
+
+test('defaults an unknown MinerU cloud model preference to vlm', async () => {
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mineru'],
+        ['extensions.mktero.mineruEndpoint', 'cloud'],
+        ['extensions.mktero.mineruCloudModelVersion', 'hybrid'],
+    ]);
+    const { dom, controller } = mineruCloudModelFixture(values);
+    await controller.init();
+
+    assert.equal(
+        dom.window.document.getElementById('mktero-mineru-cloud-model').value,
+        'vlm'
+    );
+    assert.equal(values.get('extensions.mktero.mineruCloudModelVersion'), 'hybrid');
+
+    controller.destroy();
+});
+
+test('saves the MinerU cloud parsing model and stops listening on destroy', async () => {
+    const values = new Map([
+        ['extensions.mktero.conversionProvider', 'mineru'],
+        ['extensions.mktero.mineruEndpoint', 'cloud'],
+        ['extensions.mktero.mineruCloudModelVersion', 'vlm'],
+    ]);
+    const writes = [];
+    const { dom, controller } = mineruCloudModelFixture(values, writes);
+    await controller.init();
+    const model = dom.window.document.getElementById('mktero-mineru-cloud-model');
+
+    model.value = 'pipeline';
+    model.dispatchEvent(new dom.window.Event('change'));
+    assert.deepEqual(withoutServiceSourceWrites(writes), [{
+        key: 'extensions.mktero.mineruCloudModelVersion',
+        value: 'pipeline',
+        global: true,
+    }]);
+    assert.equal(values.get('extensions.mktero.mineruCloudModelVersion'), 'pipeline');
+
+    // An unsupported value in the control normalizes before it is stored.
+    model.value = 'vlm';
+    model.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(withoutServiceSourceWrites(writes).length, 2);
+
+    controller.destroy();
+    model.value = 'pipeline';
+    model.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(withoutServiceSourceWrites(writes).length, 2);
+});

@@ -13,6 +13,7 @@
 | 转换服务 | 可选，默认 Mktero | 转换页提供 Mktero、MinerU 和 Mistral。Mktero 使用账号登录和托管服务；MinerU 和 Mistral 使用你自己的凭据。AI 翻译始终使用你自己的服务商密钥 |
 | 转换服务 | 使用自己的 API 时必需 | 选择 MinerU 或 Mistral OCR 4.1 |
 | MinerU 服务 | 仅 MinerU | 选择 MinerU 云端，或自部署的 MinerU 4.0 V1 服务 |
+| 解析模型 | 仅 MinerU 云端 | 为直连 MinerU 云端操作选择 `VLM`（默认）或 `Pipeline`；每次操作开始时即固定。Mktero 托管转换由服务端决定模型，本地 MinerU 服务不受影响 |
 | 本地服务地址 | 仅本地 MinerU | 服务根地址，默认 `http://127.0.0.1:8000`。HTTP 只允许回环地址和私网地址 |
 | API key | 云端缓存未命中时必需 | 填写 MinerU 云端或 Mistral 的密钥。选择本地 MinerU 时隐藏该字段 |
 
@@ -55,12 +56,14 @@
 
 如果 MinerU 云端返回 `HTTP 401` 或 `token expired`，请在 `设置 -> Mktero` 更新 MinerU API key。可从 [MinerU 官方 API key 管理页](https://mineru.net/apiManage/token)获取新 key。在浏览器中重新登录不会更新插件中保存的 key。
 
+`解析模型`只作用于直连 MinerU 云端的请求。Mktero 托管转换的模型由服务端决定，不会读取该设置；本地 MinerU 服务沿用自己固定的请求。每次操作在开始时（早于本地导入检查、也早于加载 PDF）就确定模型，因此之后修改设置只影响后续操作；若该项目已有正在运行的任务，再次打开会加入原任务，既不会移动也不会取消它。本版本无法识别的设置值按 `VLM` 处理；在出现该选择之前记录的待续任务同样按 `VLM` 处理。缓存、待续任务和恢复规则见[MinerU 云端解析模型](./conversion.zh-CN.md#mineru-云端解析模型)。
+
 各转换服务的取消和恢复方式不同：
 
 | 转换服务 | 行为 |
 | --- | --- |
 | Mistral | 使用同步请求，可以在本地取消，但没有可恢复的服务端任务 |
-| MinerU 云端 | 保留原有的任务恢复行为 |
+| MinerU 云端 | 保留原有的任务恢复行为，恢复的任务仍使用该任务开始时就固定的解析模型 |
 | 本地 MinerU | 只在自己的进程中保存任务。服务重启后，Mktero 不会恢复旧任务 |
 
 ### AI 翻译

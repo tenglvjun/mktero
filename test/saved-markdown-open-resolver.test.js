@@ -7,6 +7,8 @@ import {
 } from '../src/core/saved-markdown-open-resolver.js';
 import { sha256Hex } from '../src/core/sha256.js';
 
+import { MINERU_CLOUD_CACHE_PROFILE_IDS } from '../src/mineru/parser-profile.js';
+
 const hash = value => sha256Hex(value, { crypto: webcrypto });
 
 async function manifestFor(markdown, overrides = {}) {
@@ -103,6 +105,27 @@ test('accepts any supported parser profile when resolving a saved note', async (
     assert.equal(result.cacheHit, true);
     assert.equal(result.parserProfile, 'mistral-profile-v1');
 });
+
+for (const parserProfile of MINERU_CLOUD_CACHE_PROFILE_IDS) {
+    test(`opens the retained ${JSON.parse(parserProfile).batch.model_version} snapshot with its original parser identity`, async () => {
+        const markdown = '# Retained model snapshot';
+        const manifest = await manifestFor(markdown, { parserProfile });
+        const resolver = new SavedMarkdownOpenResolver({
+            store: { read: async () => savedNote(markdown, { manifest }) },
+            cache: { get: async key => {
+                assert.equal(key, manifest.cacheKey);
+                return { markdown, assets: [], sourceMap: [] };
+            } },
+            parserProfiles: MINERU_CLOUD_CACHE_PROFILE_IDS,
+            resolveSourceItem: async () => ({ id: 42, isPDFAttachment: () => true }),
+            hash,
+        });
+        const result = await resolver.resolve(900);
+        assert.equal(result.cacheHit, true);
+        assert.equal(result.parserProfile, parserProfile);
+        assert.equal(result.markdown, markdown);
+    });
+}
 
 test('rejects an unsupported parser profile when a whitelist is supplied', async () => {
     const markdown = '# Unknown';

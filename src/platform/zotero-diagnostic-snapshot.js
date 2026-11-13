@@ -8,6 +8,7 @@ import {
     CONVERSION_PROVIDER_MISTRAL,
     getConversionProvider,
     getMinerUApiKey,
+    getMinerUCloudModelVersion,
     getMinerUEndpoint,
     getMinerULocalApiBase,
     getMinerULocalApiKey,
@@ -20,6 +21,7 @@ import {
     MINERU_DOCUMENT_PIPELINE,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
+    mineruCloudProfilesFor,
 } from '../mineru/parser-profile.js';
 import {
     MISTRAL_OCR_MODEL_ID,
@@ -48,7 +50,9 @@ export async function readDiagnosticEnvironment({
         ? MISTRAL_PARSER_PROFILE_ID
         : endpoint === MINERU_ENDPOINT_LOCAL
             ? MINERU_LOCAL_PARSER_PROFILE_ID
-            : MINERU_PARSER_PROFILE_ID;
+            : provider === CONVERSION_PROVIDER_MINERU
+                ? mineruCloudProfilesFor(getMinerUCloudModelVersion(zotero)).cacheProfile
+                : MINERU_PARSER_PROFILE_ID;
     const session = safe(() => getAccountSession(zotero), null);
     const osName = clean(services?.appinfo?.OS, 32);
     return {

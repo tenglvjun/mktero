@@ -2,6 +2,8 @@ import { prepareMinerUResult } from '../mineru/document/prepare.js';
 import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS } from '../mineru/parser-profile.js';
 import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 
+const SELECTION = Symbol('mineru-conversion-selection');
+
 export class MinerUConfigurationError extends Error {
     constructor() {
         super('Configure a MinerU API Token in the Mktero preferences');
@@ -21,6 +23,7 @@ export class MinerUDocumentExtractor {
         createCacheKey = null,
         createSourceHash = null,
         getParserProfile = () => MINERU_PARSER_PROFILE_ID,
+        getConversionOptions = () => ({}),
         getPreviousParserProfiles = () => [
             ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
             LEGACY_FIGURE_PROFILES.mineru,
@@ -46,6 +49,7 @@ export class MinerUDocumentExtractor {
         this.createCacheKey = createCacheKey;
         this.createSourceHash = createSourceHash;
         this.getParserProfile = getParserProfile;
+        this.getConversionOptions = getConversionOptions;
         this.getPreviousParserProfiles = getPreviousParserProfiles;
         this.readRevision = readRevision;
         this.isCacheEnabled = isCacheEnabled;
@@ -54,22 +58,30 @@ export class MinerUDocumentExtractor {
         this.onPDFIndexError = onPDFIndexError;
     }
 
-    async extract(itemID, { onProgress, onProgressiveFigures = null, signal, forceRefresh = false } = {}) {
+    captureOptions(options = {}) {
+        return { ...options, [SELECTION]: options[SELECTION] || this.#captureSelection() };
+    }
+
+    async extract(itemID, options = {}) {
+        const { onProgress, onProgressiveFigures = null, signal, forceRefresh = false } = options;
+        const selection = options[SELECTION] || this.#captureSelection();
         const opened = await this.#openPDF(itemID, signal);
         this.#preparePDFIndex(itemID, opened.fileData, signal);
         const prepared = await this.#prepareCachedRead(opened, {
             itemID,
             signal,
             forceRefresh,
+            selection,
         });
         if (prepared.revision) {
             onProgress?.(100);
             return this.#revisionResult(opened, prepared);
         }
-        const apiKey = String(this.getApiKey() || '').trim();
+        const apiKey = prepared.conversionOptions.apiKey;
         let converted;
         try {
             converted = await this.conversion.convert({
+                ...prepared.conversionOptions,
                 key: prepared.cacheKey,
                 apiKey,
                 fileName: opened.item.attachmentFilename || `zotero-${itemID}.pdf`,
@@ -77,7 +89,9 @@ export class MinerUDocumentExtractor {
                 cacheEnabled: prepared.cacheEnabled,
                 forceRefresh,
                 onProgress,
-                onProgressiveFigures,
+                onProgressiveFigures: typeof onProgressiveFigures === 'function'
+                    ? event => onProgressiveFigures({ ...event, parserProfile: prepared.parserProfile })
+                    : null,
                 signal,
             });
         }
@@ -88,7 +102,7 @@ export class MinerUDocumentExtractor {
             throw error;
         }
         prepared.warnings.push(...(converted.warnings || []));
-        const result = this.prepareResult(converted.result);
+        const result = this.prepareResult(converted.result, prepared.conversionOptions);
         return createResult(
             opened.title,
             result,
@@ -101,18 +115,22 @@ export class MinerUDocumentExtractor {
         );
     }
 
-    async readCached(itemID, { signal, onProgress } = {}) {
+    async readCached(itemID, options = {}) {
+        const { signal, onProgress } = options;
+        const selection = options[SELECTION] || this.#captureSelection();
         const opened = await this.#openPDF(itemID, signal);
         const prepared = await this.#prepareCachedRead(opened, {
             itemID,
             signal,
             forceRefresh: false,
+            selection,
         });
         if (prepared.revision) {
             onProgress?.(100);
             return this.#revisionResult(opened, prepared);
         }
         const converted = await this.conversion.readCached({
+            ...prepared.conversionOptions,
             key: prepared.cacheKey,
             fileData: opened.fileData,
             cacheEnabled: prepared.cacheEnabled,
@@ -122,7 +140,7 @@ export class MinerUDocumentExtractor {
         if (!converted) return null;
         onProgress?.(100);
         prepared.warnings.push(...(converted.warnings || []));
-        const result = this.prepareResult(converted.result);
+        const result = this.prepareResult(converted.result, prepared.conversionOptions);
         return createResult(
             opened.title,
             result,
@@ -155,10 +173,10 @@ export class MinerUDocumentExtractor {
         return { item, fileData, title };
     }
 
-    async #prepareCachedRead({ fileData, title }, { itemID, signal, forceRefresh }) {
+    async #prepareCachedRead({ fileData, title }, { itemID, signal, forceRefresh, selection }) {
         const cacheEnabled = Boolean(this.isCacheEnabled());
         const warnings = [];
-        const parserProfile = this.#parserProfile();
+        const { parserProfile, previousParserProfiles, conversionOptions } = selection;
         let cacheKey = null;
         if (this.createCacheKey) {
             try {
@@ -181,9 +199,11 @@ export class MinerUDocumentExtractor {
             signal,
             forceRefresh,
             parserProfile,
+            previousParserProfiles,
         });
         return {
             title,
+            conversionOptions,
             cacheEnabled,
             warnings,
             parserProfile,
@@ -200,6 +220,7 @@ export class MinerUDocumentExtractor {
         signal,
         forceRefresh,
         parserProfile,
+        previousParserProfiles,
     }) {
         if (forceRefresh || !cacheKey || typeof this.readRevision !== 'function') return null;
         let revisionKey = cacheKey;
@@ -213,7 +234,7 @@ export class MinerUDocumentExtractor {
         if (!revision && this.createCacheKey) {
             try {
                 const visited = new Set([cacheKey]);
-                for (const previousProfile of this.#previousParserProfiles()) {
+                for (const previousProfile of previousParserProfiles) {
                     const legacyKey = await this.createCacheKey(fileData, {
                         parserProfile: previousProfile,
                     });
@@ -248,7 +269,7 @@ export class MinerUDocumentExtractor {
         const result = this.prepareResult({
             ...prepared.revision.snapshot,
             userEdited: true,
-        });
+        }, prepared.conversionOptions);
         return createResult(
             opened.title,
             result,
@@ -268,8 +289,22 @@ export class MinerUDocumentExtractor {
             : MINERU_PARSER_PROFILE_ID;
     }
 
-    #previousParserProfiles() {
-        const profiles = this.getPreviousParserProfiles();
+    // Capture before the first await: changing preferences while a PDF is
+    // loading cannot pair one model's request with another model's cache key.
+    #captureSelection() {
+        const parserProfile = this.#parserProfile();
+        return {
+            parserProfile,
+            previousParserProfiles: this.#previousParserProfiles(parserProfile),
+            conversionOptions: Object.freeze({
+                ...this.getConversionOptions(),
+                apiKey: String(this.getApiKey() || '').trim(),
+            }),
+        };
+    }
+
+    #previousParserProfiles(parserProfile) {
+        const profiles = this.getPreviousParserProfiles(parserProfile);
         return Array.isArray(profiles)
             ? profiles.filter(profile => typeof profile === 'string' && profile)
             : [];

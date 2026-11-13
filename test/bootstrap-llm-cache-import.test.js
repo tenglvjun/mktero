@@ -36,7 +36,9 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
     const confirmations = [];
     const requests = [];
     const hostedRequests = [];
+    const hostedOfflineRequests = [];
     let hostedRun = null;
+    let hostedOffline = false;
     const readyResults = [];
     const controllers = [];
     const conversionStarts = [];
@@ -86,6 +88,16 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
         requests.push(request);
         if (method === 'GET' && target === 'https://models.dev/api.json') {
             return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (hostedOffline) {
+            hostedOfflineRequests.push(request);
+            if (method === 'POST' && (target.endsWith('/api/v1/me/client-version')
+                || target.endsWith('/api/v1/me/reading-activity'))) {
+                return new Response(null, { status: 204 });
+            }
+            assert.equal(method, 'POST');
+            assert.equal(target, 'http://127.0.0.1:8080/api/v1/conversions/resolve');
+            throw new TypeError('The Mktero conversion service is unreachable in this test');
         }
         if (hostedRun) {
             const expected = hostedRun.steps.shift();
@@ -235,8 +247,8 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
     const indexPath = path.join(profilePath, 'mktero-imports', 'v1', 'index.json');
     const assertLocalRequests = () => {
         assert.deepEqual(requests.filter(request => request.url !== 'https://models.dev/api.json'
-            && !hostedRequests.includes(request)), [],
-            'only the explicit cache-miss conversion scenarios may make account or conversion requests');
+            && !hostedRequests.includes(request) && !hostedOfflineRequests.includes(request)), [],
+            'only the explicit hosted conversion and retained-copy scenarios may make account or conversion requests');
     };
     const readSelections = () => createZoteroMinerUImportIndex(adapters).load();
     const readSelection = async (target = attachment) => {
@@ -319,9 +331,30 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
             return [key, value];
         }));
         const steps = [
+            // The client asks which parse target this PDF follows before it
+            // creates a job. Resolve sends only the digest, size, and type.
+            {
+                method: 'POST', url: `${apiURL}/resolve`,
+                response: json(200, {
+                    route_id: 'route_cache_miss',
+                    model_version: 'vlm',
+                    parser_profile_id: 'mineru/v4-batch-vlm-1',
+                }),
+                check(options) {
+                    authenticated(options);
+                    const body = JSON.parse(options.body);
+                    assert.equal(body.sha256, updatedSelection.sourceHash);
+                    assert.equal(body.expected_size, pdfData.byteLength);
+                    assert.equal(body.content_type, 'application/pdf');
+                },
+            },
             {
                 method: 'POST', url: apiURL,
-                response: json(201, { job_id: jobID, status: 'awaiting_upload', upload_url: uploadURL, upload_method: 'PUT' }),
+                response: json(201, {
+                    job_id: jobID, status: 'awaiting_upload', upload_url: uploadURL,
+                    upload_method: 'PUT',
+                    model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-vlm-1',
+                }),
                 check(options) {
                     authenticated(options);
                     const body = JSON.parse(options.body);
@@ -329,6 +362,9 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
                     assert.equal(body.size, pdfData.byteLength);
                     assert.equal(body.content_type, 'application/pdf');
                     assert.equal(body.sha256, updatedSelection.sourceHash);
+                    assert.equal(body.route_id, 'route_cache_miss');
+                    assert.equal(body.model_version, 'vlm');
+                    assert.equal(body.parser_profile_id, 'mineru/v4-batch-vlm-1');
                 },
             },
             {
@@ -340,13 +376,21 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
             },
             {
                 method: 'POST', url: `${jobURL}/complete`, check: authenticated,
-                response: json(202, { job_id: jobID, status: 'queued' }),
+                response: json(202, {
+                    job_id: jobID, status: 'queued',
+                    model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-vlm-1',
+                }),
             },
             {
                 method: 'GET', url: jobURL, check: authenticated,
-                response: json(200, failed
-                    ? { job_id: jobID, status: 'failed', error_code: 'MINERU_TASK_FAILED' }
-                    : { job_id: jobID, status: 'succeeded', progress: 100 }),
+                response: json(200, {
+                    job_id: jobID,
+                    model_version: 'vlm',
+                    parser_profile_id: 'mineru/v4-batch-vlm-1',
+                    ...(failed
+                        ? { status: 'failed', error_code: 'MINERU_TASK_FAILED' }
+                        : { status: 'succeeded', progress: 100 }),
+                }),
             },
         ];
         if (failed) {
@@ -713,7 +757,8 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
             assert.deepEqual(requests.slice(requestCount).filter(request => request.url !== 'https://models.dev/api.json'), [],
                 'a revision read error must never start an account, upload, poll, or result request');
             assert.equal(hostedRequests.length, run.requestStart);
-            assert.equal(run.steps.length, 5, 'the fake Mktero HTTP responses must remain unused');
+            assert.equal(run.steps.length, 6,
+                'the fake resolve, create, upload, poll, and cleanup responses must remain unused');
             assert.equal(error.querySelector('.message-body').textContent, translateEnglish('error.conversionFailed'));
             assert.equal(failedShadow.querySelector('#mktero-content').getAttribute('aria-busy'), 'false');
             assert.equal(failedShadow.querySelector('.cm-content').textContent.includes(target.text), false);
@@ -773,7 +818,9 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
             assert.equal(shadow.querySelector('#mktero-error-retry').textContent, translateEnglish('viewer.retryConversion'));
             assert.equal(readyResults.length, publishedCount, 'a failed fallback must not publish a document');
             await waitFor(() => run.steps.length === 0, 'the failed hosted job cleanup');
-            assert.equal(hostedRequests.length - run.requestStart, 5, 'the real Mktero upload and poll path must run');
+            // resolve, create, upload, complete, poll, cancel
+            assert.equal(hostedRequests.length - run.requestStart, 6,
+                'the real Mktero resolve, upload, poll, and cleanup path must run');
             assert.deepEqual(errors.slice(errorCount).map(value => value.code), ['MKTERO_CONVERSION_FAILED']);
             assert.deepEqual(await readSelection(), updatedSelection);
             assert.deepEqual(await readSelection(secondAttachment), secondSelection);
@@ -803,7 +850,8 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
             const shadow = await reopenFromParent();
             await readyText(shadow, text);
             assert.equal(run.steps.length, 0, 'the real Mktero client must upload, poll, and download its ZIP');
-            assert.equal(hostedRequests.length - run.requestStart, 6);
+            // resolve, create, upload, complete, poll, result URL, download
+            assert.equal(hostedRequests.length - run.requestStart, 7);
             assert.deepEqual(readyResults.slice(publishedCount), [{
                 documentID: attachment.id, provider: 'mktero',
                 parserProfile: MINERU_PARSER_PROFILE_ID, cacheKey: providerCacheKey,
@@ -832,16 +880,36 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
         const requestCount = requests.length;
         const reopenedCount = readyResults.length;
         await globalThis.shutdown();
-        await globalThis.startup(STARTUP_OPTIONS);
+        const offlineSession = {
+            accountEmail: 'reader@example.com',
+            accountAccessToken: 'test-access-token',
+            accountRefreshToken: 'test-refresh-token',
+            accountAccessExpiresAtMs: String(Date.now() + 3600_000),
+        };
+        const previousOfflinePrefs = new Map(Object.entries(offlineSession).map(([name, value]) => {
+            const key = `extensions.mktero.${name}`;
+            const previous = prefs.get(key);
+            prefs.set(key, value);
+            return [key, previous];
+        }));
+        hostedOffline = true;
         try {
+            await globalThis.startup(STARTUP_OPTIONS);
             const shadow = await reopenFromParent();
             await readyText(shadow, text);
             assert.deepEqual(readyResults.slice(reopenedCount), [{
                 documentID: attachment.id, provider: 'mktero',
                 parserProfile: MINERU_PARSER_PROFILE_ID, cacheKey: providerCacheKey,
             }]);
-            assert.deepEqual(requests.slice(requestCount).filter(request => request.url !== 'https://models.dev/api.json'), [],
-                'reopening must use the current provider cache without any account, upload, or result request');
+            const reopenRequests = requests.slice(requestCount).filter(request => (
+                request.url !== 'https://models.dev/api.json'
+            ));
+            const resolves = reopenRequests.filter(request => request.url.endsWith('/api/v1/conversions/resolve'));
+            assert.ok(resolves.length > 0, 'reopening must resolve before reading the retained provider cache');
+            assert.ok(reopenRequests.every(request => request.method === 'POST'
+                && ['/api/v1/conversions/resolve', '/api/v1/me/client-version', '/api/v1/me/reading-activity']
+                    .some(endpoint => request.url === `http://127.0.0.1:8080${endpoint}`)),
+            'reopening must only attempt resolution and account reports, without uploading or converting');
             assert.equal(await ioUtils.exists(sourcePath), false);
             assert.equal(await readSelection(), null);
             assert.deepEqual(await readSelection(secondAttachment), secondSelection);
@@ -851,6 +919,11 @@ test('imports a local MinerU cache through bootstrap and preserves its offline s
         }
         finally {
             closeTab();
+            hostedOffline = false;
+            for (const [key, value] of previousOfflinePrefs) {
+                if (value === undefined) prefs.delete(key);
+                else prefs.set(key, value);
+            }
         }
     });
 

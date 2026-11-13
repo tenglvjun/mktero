@@ -500,6 +500,26 @@
                     </html:div>
                 </html:div>
 
+                <html:div id="mktero-mineru-cloud-model-row"
+                          class="mktero-setting-row mktero-field-row"
+                          hidden="hidden">
+                    <html:div class="mktero-setting-copy">
+                        <html:label for="mktero-mineru-cloud-model">
+                            <html:strong data-i18n="preferences.conversion.mineruCloudModelLabel"></html:strong>
+                        </html:label>
+                        <html:small id="mktero-mineru-cloud-model-help"
+                                    data-i18n="preferences.conversion.mineruCloudModelHelp"></html:small>
+                    </html:div>
+                    <html:div class="mktero-field-control mktero-field-control-compact">
+                        <html:select id="mktero-mineru-cloud-model"
+                                     preference="extensions.mktero.mineruCloudModelVersion"
+                                     aria-describedby="mktero-mineru-cloud-model-help">
+                            <html:option value="vlm" data-i18n="preferences.conversion.mineruCloudModel.vlm"></html:option>
+                            <html:option value="pipeline" data-i18n="preferences.conversion.mineruCloudModel.pipeline"></html:option>
+                        </html:select>
+                    </html:div>
+                </html:div>
+
                 <html:div id="mktero-mineru-local-base-row"
                           class="mktero-setting-row mktero-field-row"
                           hidden="hidden">

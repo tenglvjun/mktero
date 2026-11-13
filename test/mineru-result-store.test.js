@@ -11,6 +11,7 @@ import {
 import { createMinerUResultArchive, tryCreateMinerUResultArchive } from '../src/mineru/result-archive.js';
 import { MinerUConversion } from '../src/mineru/mineru-conversion.js';
 import { MkteroDocumentExtractor } from '../src/extractors/mktero-extractor.js';
+import { MINERU_REQUEST_PROFILE_ID } from '../src/mineru/parser-profile.js';
 import { extractMinerUResultFromZip } from '../src/mineru/zip-markdown.js';
 
 const KEY = 'a'.repeat(64);
@@ -517,7 +518,13 @@ test('re-derives a hosted Mktero result from the store without the network', asy
     const result = await extractor.extract(42);
     assert.equal(result.markdown, '# Hosted stored');
     assert.equal(result.cacheHit, true);
-    assert.deepEqual(keyCalls, [{ sourceHash: SOURCE_HASH }]);
+    // Without a route lookup the hosted result keeps the shipped vlm request
+    // identity, so an existing stored archive stays readable.
+    assert.deepEqual(keyCalls, [{
+        sourceHash: SOURCE_HASH,
+        modelVersion: 'vlm',
+        requestProfile: MINERU_REQUEST_PROFILE_ID,
+    }]);
     assert.equal(cache.entries.get('c'.repeat(64)).markdown, '# Hosted stored');
     cache.entries.clear();
     const read = await extractor.readCached(42);

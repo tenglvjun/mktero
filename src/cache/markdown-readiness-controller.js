@@ -103,6 +103,26 @@ export function createMarkdownReadinessController({
             }
         },
 
+        isReadyForAny(item, parserProfiles) {
+            if (!active) return false;
+            try {
+                return index.isReadyForAny(item, parserProfiles);
+            }
+            catch {
+                return false;
+            }
+        },
+
+        cacheKeyForAny(item, parserProfiles) {
+            if (!active) return null;
+            try {
+                return index.cacheKeyForAny(item, parserProfiles);
+            }
+            catch {
+                return null;
+            }
+        },
+
         dispose() {
             active = false;
         },

@@ -99,6 +99,13 @@ test('owns citation graph requests across refresh, window unload, and shutdown',
         ['extensions.mktero.openAlexApiKey', 'openalex-secret'],
         ['extensions.mktero.openCitationsAccessToken', 'open-citations-secret'],
         ['extensions.mktero.cacheEnabled', true],
+        // A signed-in account, so a hosted read really resolves a target first.
+        // The access token is unexpired, so the resolve reaches fetch instead of
+        // stopping at sign-in; the transport below decides the outcome.
+        ['extensions.mktero.accountEmail', 'reader@example.com'],
+        ['extensions.mktero.accountAccessToken', 'test-access-token'],
+        ['extensions.mktero.accountRefreshToken', 'test-refresh-token'],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
     ]);
     const zotero = {
         version: '9.0.6',
@@ -335,6 +342,13 @@ test('aborts live AI SDK requests across bootstrap translation lifecycles', {
     };
     const preferences = new Map([
         ['extensions.mktero.cacheEnabled', true],
+        // A signed-in account, so a hosted read really resolves a target first.
+        // The access token is unexpired, so the resolve reaches fetch instead of
+        // stopping at sign-in; the transport below decides the outcome.
+        ['extensions.mktero.accountEmail', 'reader@example.com'],
+        ['extensions.mktero.accountAccessToken', 'test-access-token'],
+        ['extensions.mktero.accountRefreshToken', 'test-refresh-token'],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
         ['extensions.mktero.aiProvider', 'custom'],
         ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
         ['extensions.mktero.aiApiBase', 'https://ai.example.com/v1'],
@@ -545,8 +559,16 @@ test('translates in a main window opened after the startup window closed', {
         view.clearTimeout = () => assertOpen();
         view.fetch = async (url, { signal } = {}) => {
             assertOpen();
-            if (!String(url).endsWith('/chat/completions')) {
-                throw new Error('offline test transport');
+            const target = String(url);
+            // The account endpoints a signed-in session polls are answered as the
+            // real service does, so this window's timers stay the transcription's
+            // own plus the one heartbeat schedule.
+            if (target.endsWith('/api/v1/me/client-version')
+                || target.endsWith('/api/v1/me/reading-activity')) {
+                return new Response(null, { status: 204 });
+            }
+            if (!target.endsWith('/chat/completions')) {
+                throw new TypeError('The Mktero service is unreachable in this test');
             }
             chatRequests.push({ window: name, signal });
             return new Promise((_, reject) => {
@@ -577,6 +599,13 @@ test('translates in a main window opened after the startup window closed', {
     };
     const preferences = new Map([
         ['extensions.mktero.cacheEnabled', true],
+        // A signed-in account, so a hosted read really resolves a target first.
+        // The access token is unexpired, so the resolve reaches fetch instead of
+        // stopping at sign-in; the transport below decides the outcome.
+        ['extensions.mktero.accountEmail', 'reader@example.com'],
+        ['extensions.mktero.accountAccessToken', 'test-access-token'],
+        ['extensions.mktero.accountRefreshToken', 'test-refresh-token'],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
         ['extensions.mktero.aiProvider', 'custom'],
         ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
         ['extensions.mktero.aiApiBase', 'https://ai.example.com/v1'],
@@ -617,8 +646,18 @@ test('translates in a main window opened after the startup window closed', {
         new URL('../ui/markdown.css', import.meta.url),
         'utf8'
     );
-    globalThis.fetch = async () => {
-        throw new Error('offline sandbox test transport');
+    // The hosted (unreachable) service is only asked for the PDF's parse target;
+    // nothing is converted. The account endpoints a signed-in session polls are
+    // answered as the real service does, so the scheduled timers in this test
+    // stay the transcription's own plus the one heartbeat timer.
+    globalThis.fetch = async (url, { method } = {}) => {
+        const verb = String(method || 'GET').toUpperCase();
+        const target = String(url);
+        if (verb === 'POST' && (target.endsWith('/api/v1/me/client-version')
+            || target.endsWith('/api/v1/me/reading-activity'))) {
+            return new Response(null, { status: 204 });
+        }
+        throw new TypeError('The Mktero service is unreachable in this test');
     };
 
     t.after(async () => {
@@ -676,7 +715,15 @@ test('translates in a main window opened after the startup window closed', {
     const secondRequest = await waitFor(() => chatRequests[1]);
     assert.equal(secondRequest.window, 'second');
     // The reasoning catalog loads once at startup, then one timer per request.
-    assert.deepEqual(timers, ['first 30000', 'first 120000', 'second 120000']);
+    // A signed-in account also keeps its client heartbeat on the window it was
+    // started from, so that schedule appears alongside them.
+    assert.deepEqual(timers, [
+        'first 30000',
+        'first 120000',
+        'first 21600000',
+        'first 120000',
+        'second 120000',
+    ]);
     secondWindow.Zotero_Tabs.close('tab-1');
     await waitFor(() => secondRequest.signal.aborted);
     assert.deepEqual(
@@ -715,6 +762,13 @@ test('uses the language menu without changing the default translation language',
     };
     const preferences = new Map([
         ['extensions.mktero.cacheEnabled', true],
+        // A signed-in account, so a hosted read really resolves a target first.
+        // The access token is unexpired, so the resolve reaches fetch instead of
+        // stopping at sign-in; the transport below decides the outcome.
+        ['extensions.mktero.accountEmail', 'reader@example.com'],
+        ['extensions.mktero.accountAccessToken', 'test-access-token'],
+        ['extensions.mktero.accountRefreshToken', 'test-refresh-token'],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
         ['extensions.mktero.aiProvider', 'custom'],
         ['extensions.mktero.aiProtocol', 'openai-chat-completions'],
         ['extensions.mktero.aiApiBase', 'https://ai.example.com/v1'],
@@ -782,7 +836,13 @@ test('uses the language menu without changing the default translation language',
     globalThis.IOUtils = ioUtils;
     globalThis.PathUtils = pathUtils;
     globalThis.Services = { obs: createObserverService() };
-    globalThis.fetch = async (_url, { signal, body } = {}) => {
+    globalThis.fetch = async (url, { signal, body } = {}) => {
+        // Only the translation provider is a real transport here. Anything else
+        // (an account call or a hosted resolve) is unreachable, so it fails as a
+        // transport error instead of being read as a chat reply and hanging.
+        if (!String(url).endsWith('/chat/completions')) {
+            throw new TypeError('The Mktero service is unreachable in this test');
+        }
         const request = {
             signal,
             body: JSON.parse(body),

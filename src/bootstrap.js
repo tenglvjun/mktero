@@ -2,6 +2,7 @@ import { unzipSync } from 'fflate';
 import {
     CONVERSION_PROVIDER_MISTRAL,
     CONVERSION_PROVIDER_MKTERO,
+    getMinerUCloudModelVersion,
     observeConversionProfile,
 } from './config/conversion-preferences.js';
 import {
@@ -130,6 +131,8 @@ import {
     createSavedMarkdownOpenResolver,
 } from './core/saved-markdown-open-resolver.js';
 import {
+    MINERU_CLOUD_CACHE_PROFILE_IDS,
+    mineruCloudProfilesFor,
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
@@ -138,6 +141,11 @@ import {
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
 } from './mineru/parser-profile.js';
+import {
+    hostedCacheProfileFor,
+    MKTERO_MODEL_PIPELINE,
+    MKTERO_MODEL_VLM,
+} from './mktero/conversion-target.js';
 import {
     MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
     MISTRAL_PARSER_PROFILE_ID,
@@ -663,7 +671,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
             store: runtime.savedMarkdownStore,
             cache,
             parserProfiles: [
-                MINERU_PARSER_PROFILE_ID,
+                ...MINERU_CLOUD_CACHE_PROFILE_IDS,
                 MINERU_LOCAL_PARSER_PROFILE_ID,
                 MISTRAL_PARSER_PROFILE_ID,
             ],
@@ -880,23 +888,23 @@ globalThis.startup = async function startup({ id, rootURI }) {
         // restarts it from the raw result store.
         progressiveResult: progressiveWithFigures(withPDFText(createMinerUFigureInput), prepareMinerUResult),
         recoverFigures,
-        createPreviousCacheKeys: fileData => Promise.all(
-            MINERU_COMPATIBLE_CACHE_PROFILE_IDS.map(parserProfile => (
+        createPreviousCacheKeys: (fileData, { modelVersion } = {}) => Promise.all(
+            (modelVersion === 'pipeline' ? [] : MINERU_COMPATIBLE_CACHE_PROFILE_IDS).map(parserProfile => (
                 createMarkdownCacheKey(fileData, { parserProfile })
             ))
         ),
         // A new profile entry takes the translations of the newest earlier
         // entry of the same PDF.
-        createTranslationSourceKeys: fileData => Promise.all(
-            [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru].map(parserProfile => (
-                createMarkdownCacheKey(fileData, { parserProfile })
-            ))
+        createTranslationSourceKeys: (fileData, { modelVersion } = {}) => Promise.all(
+            (modelVersion === 'pipeline' ? [] : [
+                ...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru,
+            ]).map(parserProfile => createMarkdownCacheKey(fileData, { parserProfile }))
         ),
         resultStore: mineruResultStore,
-        createResultKey: fileData => createMinerUResultKey({
+        createResultKey: (fileData, { requestProfile } = {}) => createMinerUResultKey({
             fileData,
             provider: 'mineru',
-            requestProfile: MINERU_REQUEST_PROFILE_ID,
+            requestProfile: requestProfile || MINERU_REQUEST_PROFILE_ID,
         }),
         assertPageLimit: assertHostedPageLimit,
         onError: error => logMkteroError(error),
@@ -937,15 +945,20 @@ globalThis.startup = async function startup({ id, rootURI }) {
             ? getMinerULocalApiKey(Zotero)
             : getMinerUApiKey(Zotero),
         getParserProfile: () => currentMinerUParserProfile(),
-        getPreviousParserProfiles: () => (
-            getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
+        getConversionOptions: () => {
+            const endpoint = getMinerUEndpoint(Zotero);
+            return endpoint === MINERU_ENDPOINT_LOCAL
+                ? { endpoint, apiBase: getMinerULocalApiBase(Zotero) }
+                : { endpoint, modelVersion: getMinerUCloudModelVersion(Zotero) };
+        },
+        getPreviousParserProfiles: parserProfile => (
+            parserProfile === MINERU_LOCAL_PARSER_PROFILE_ID
                 ? [...MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS]
-                : [
-                    ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
-                    LEGACY_FIGURE_PROFILES.mineru,
-                ]
+                : parserProfile === MINERU_PARSER_PROFILE_ID
+                    ? [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru]
+                    : []
         ),
-        prepareResult: result => getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
+        prepareResult: (result, { endpoint } = {}) => endpoint === MINERU_ENDPOINT_LOCAL
             && !result?.userEdited
             ? result
             : prepareMinerUResult(result),
@@ -1044,13 +1057,15 @@ globalThis.startup = async function startup({ id, rootURI }) {
         recoverFigures,
         resultStore: mineruResultStore,
         // The hosted service fixes its own MinerU request; its results are
-        // kept apart from direct MinerU results.
-        createResultKey: (fileData, { sourceHash } = {}) => createMinerUResultKey({
+        // kept apart from direct MinerU results and, since the service can
+        // select a model, apart per model as well.
+        createResultKey: (fileData, { sourceHash, requestProfile } = {}) => createMinerUResultKey({
             fileData,
             sourceHash,
             provider: 'mktero',
-            requestProfile: MINERU_REQUEST_PROFILE_ID,
+            requestProfile: requestProfile || MINERU_REQUEST_PROFILE_ID,
         }),
+        resolveTarget: options => hostedClient.resolveTarget(options),
         assertPageLimit: assertHostedPageLimit,
     });
     const importIndex = createZoteroMinerUImportIndex({
@@ -1154,7 +1169,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         onSettled: signal => sharedHosted.releaseRun(signal),
     });
     runtime.conversionBatch = createConversionBatch({
-        isReady: candidate => itemHasReadableMarkdown(candidate.itemID),
+        isReady: candidate => itemIsPreparedForCurrentConversion(candidate.itemID),
         isActive: candidate => runtime.conversionRuns.isActive(candidate.itemID),
         isBlockedError: conversionNeedsSettings,
         getScope: currentConversionScope,
@@ -2108,10 +2123,12 @@ function noteProgressiveDocument(itemID, event) {
             source: 'mineru-result-store',
             completedFigureIds: [],
         },
-    }).then(() => rememberMarkdownReadiness(itemID, {
-        cacheKey: event.cacheKey,
-        parserProfile: currentConversionParserProfile(),
-    })).catch(error => logMkteroError(error));
+    }).then(() => {
+        if (event.parserProfile) return rememberMarkdownReadiness(itemID, {
+            cacheKey: event.cacheKey,
+            parserProfile: event.parserProfile,
+        });
+    }).catch(error => logMkteroError(error));
 }
 
 async function publishConversionResult(presentation, itemID, result, signal) {
@@ -2531,7 +2548,14 @@ function batchStatusMessage(summary) {
     return parts.join(' ');
 }
 
-function itemHasReadableMarkdown(itemID) {
+// Batch admission asks a different question than the readiness column. The
+// column is advisory: it says *some* retained entry exists, which is all it can
+// know without a network lookup. Skipping real work needs the current host
+// model, and for the hosted provider that is only knowable from a resolve. So a
+// hosted item is always admitted and lets the extractor resolve it, which is a
+// cache hit when the retained entry already matches and never uploads the PDF.
+function itemIsPreparedForCurrentConversion(itemID) {
+    if (isMkteroProvider()) return false;
     return itemHasReadableMarkdownItem(Zotero.Items?.get?.(itemID));
 }
 
@@ -2548,10 +2572,11 @@ function itemHasReadableMarkdownItem(item, { verify = false } = {}) {
     const targets = item?.isRegularItem?.()
         ? resolvePDFCandidates(Zotero, [item]).map(target => target.item)
         : [item];
+    const profiles = currentConversionParserProfiles();
     return targets.some(target => {
         const importedKey = runtime.importReadiness?.cacheKeyFor(target, { verify });
         if (importedKey !== undefined) return Boolean(importedKey);
-        return runtime.readiness?.isReady(target, currentConversionParserProfile()) === true;
+        return runtime.readiness?.isReadyForAny(target, profiles) === true;
     });
 }
 
@@ -3974,13 +3999,28 @@ function ensureAccountAccessToken(options = {}) {
 function currentMinerUParserProfile() {
     return getMinerUEndpoint(Zotero) === MINERU_ENDPOINT_LOCAL
         ? MINERU_LOCAL_PARSER_PROFILE_ID
-        : MINERU_PARSER_PROFILE_ID;
+        : mineruCloudProfilesFor(getMinerUCloudModelVersion(Zotero)).cacheProfile;
 }
 
 function currentConversionParserProfile() {
-    return getConversionProvider(Zotero) === CONVERSION_PROVIDER_MISTRAL
-        ? MISTRAL_PARSER_PROFILE_ID
-        : currentMinerUParserProfile();
+    return currentConversionParserProfiles()[0];
+}
+
+// A hosted paper can be retained under either MinerU model, and the one its
+// route follows is only known after a network lookup. Readiness and export
+// lookups therefore accept every identity this provider can legitimately own.
+// A pipeline result is never reachable through a vlm key: each profile is a
+// separate readiness record.
+function currentConversionParserProfiles() {
+    const provider = getConversionProvider(Zotero);
+    if (provider === CONVERSION_PROVIDER_MISTRAL) return [MISTRAL_PARSER_PROFILE_ID];
+    if (provider === CONVERSION_PROVIDER_MKTERO) {
+        return [
+            hostedCacheProfileFor(MKTERO_MODEL_VLM),
+            hostedCacheProfileFor(MKTERO_MODEL_PIPELINE),
+        ];
+    }
+    return [currentMinerUParserProfile()];
 }
 
 const conversionScopes = new Map();
@@ -4039,6 +4079,8 @@ function initializeMarkdownReadiness(cache, pluginID, rootURI) {
 async function rememberMarkdownReadiness(itemID, result) {
     if (cancelledPreparations.has(itemID)) return;
     if (!runtime.readiness || !runtime.cache || !result?.cacheKey) return;
+    // A hosted result states the model it was parsed under; nothing else may
+    // claim its cache key as ready.
     const parserProfile = result.parserProfile || currentConversionParserProfile();
     try {
         const readable = await runtime.cache.hasReadable(result.cacheKey);
@@ -5305,7 +5347,9 @@ function registerReaderToolbarAction() {
         pluginID: runtime.id,
         onOpen: openReaderAsMarkdown,
         onOpenSelection: openPdfSelectionAsMarkdown,
-        isMarkdownReady: reader => itemHasReadableMarkdown(reader?.itemID),
+        isMarkdownReady: reader => itemHasReadableMarkdownItem(
+            Zotero.Items?.get?.(reader?.itemID)
+        ),
         onSelectionUnresolved: message => showSelectionNotice(message),
         onPDFReaderAvailable: reader => (
             runtime.localAnnotations?.synchronizePending(
@@ -5394,7 +5438,54 @@ function finishSelectionReveal(itemID) {
     return true;
 }
 
-async function loadSelectionSource(itemID) {
+// A hosted entry that readCached already resolved: its cache key names the
+// current model, so corrections load from that same key.
+function hostedSelectionSource(itemID, cached) {
+    if (typeof cached.markdown !== 'string' || !Array.isArray(cached.sourceMap)) {
+        return null;
+    }
+    const baseSource = {
+        markdown: cached.markdown,
+        sourceMap: cached.sourceMap,
+        documentLength: cached.markdown.length,
+    };
+    try {
+        const stored = runtime.revisionStore?.load?.(cached.cacheKey);
+        if (!stored || typeof stored.then !== 'function') return baseSource;
+        return stored.then(revision => {
+            if (!revision) return baseSource;
+            try {
+                const corrected = snapshotStoredMarkdownRevision(revision, cached.cacheKey);
+                if (typeof corrected.markdown !== 'string'
+                    || !Array.isArray(corrected.sourceMap)) {
+                    return null;
+                }
+                return {
+                    markdown: corrected.markdown,
+                    sourceMap: corrected.sourceMap,
+                    documentLength: corrected.markdown.length,
+                };
+            }
+            catch (error) {
+                logMkteroError(error);
+                return isInvalidMarkdownRevisionError(error) ? baseSource : null;
+            }
+        }, error => {
+            logMkteroError(error);
+            return baseSource;
+        });
+    }
+    catch (error) {
+        logMkteroError(error);
+        return baseSource;
+    }
+}
+
+// A selection reveal may run before any tab is open, so this must resolve the
+// current hosted entry itself instead of trusting presentation state. It never
+// converts: a hosted lookup only asks which model the paper follows, and an
+// offline lookup still reads a retained entry.
+async function loadSelectionSource(itemID, { signal } = {}) {
     const presentation = runtime.presenter?.get(itemID);
     const model = presentation?.model;
     if (model?.status === 'ready'
@@ -5415,14 +5506,22 @@ async function loadSelectionSource(itemID) {
         catch {
             return null;
         }
-        return loadSelectionSource(itemID);
+        return loadSelectionSource(itemID, { signal });
     }
     if (!getMinerUCacheEnabled(Zotero) || !runtime.cache || !runtime.revisionStore) return null;
     const item = Zotero.Items?.get?.(itemID) || await Zotero.Items?.getAsync?.(itemID);
     const imported = runtime.importReadiness
         ? await runtime.importReadiness.validate(item) : { selected: false };
-    const cacheKey = imported.selected ? imported.cacheKey : runtime.readiness?.cacheKeyFor?.(
-        readinessItem(item), currentConversionParserProfile()
+    if (!imported.selected && isMkteroProvider()) {
+        // The hosted model is only knowable from a lookup, so the readiness
+        // index cannot answer which entry is current. readCached resolves it,
+        // and an offline lookup still reads a retained entry.
+        const hosted = await runtime.extractor.readCached(itemID, { signal });
+        if (!hosted?.cacheKey) return null;
+        return hostedSelectionSource(itemID, hosted);
+    }
+    const cacheKey = imported.selected ? imported.cacheKey : runtime.readiness?.cacheKeyForAny?.(
+        readinessItem(item), currentConversionParserProfiles()
     );
     if (typeof cacheKey !== 'string') return null;
     const cached = await runtime.cache.get(cacheKey);

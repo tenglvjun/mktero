@@ -10,15 +10,20 @@ import {
     getConversionProvider,
     getMinerUApiKey,
     getMinerUCacheEnabled,
+    getMinerUCloudModelVersion,
     getMinerUEndpoint,
     getMinerULocalApiBase,
     getMinerULocalApiKey,
     getMistralApiKey,
     MINERU_API_KEY_PREF,
     MINERU_CACHE_ENABLED_PREF,
+    MINERU_CLOUD_MODEL_PIPELINE,
+    MINERU_CLOUD_MODEL_VLM,
+    MINERU_CLOUD_MODEL_VERSION_PREF,
     MINERU_ENDPOINT_LOCAL,
     MISTRAL_API_KEY_PREF,
     normalizeConversionProvider,
+    normalizeMinerUCloudModelVersion,
 } from './conversion-preferences.js';
 
 export const MINERU_PREFERENCE_PANE_ID = 'mktero-preferences';
@@ -31,15 +36,20 @@ export {
     getConversionProvider,
     getMinerUApiKey,
     getMinerUCacheEnabled,
+    getMinerUCloudModelVersion,
     getMinerUEndpoint,
     getMinerULocalApiBase,
     getMinerULocalApiKey,
     getMistralApiKey,
     MINERU_API_KEY_PREF,
     MINERU_CACHE_ENABLED_PREF,
+    MINERU_CLOUD_MODEL_PIPELINE,
+    MINERU_CLOUD_MODEL_VLM,
+    MINERU_CLOUD_MODEL_VERSION_PREF,
     MINERU_ENDPOINT_LOCAL,
     MISTRAL_API_KEY_PREF,
     normalizeConversionProvider,
+    normalizeMinerUCloudModelVersion,
 };
 
 export const PREFERENCE_CONTROL_LIMITS = Object.freeze({

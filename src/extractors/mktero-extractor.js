@@ -8,15 +8,26 @@ import {
 import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 import { MkteroSignInRequiredError } from '../account/account-session.js';
 import { SharedMkteroConversion } from '../mktero/shared-conversion.js';
+import {
+    hostedCacheProfileFor,
+    hostedProfilesFor,
+    hostedRequestProfileFor,
+    isTrustworthyOfflineFailure,
+    MKTERO_MODEL_PIPELINE,
+    MKTERO_MODEL_VLM,
+} from '../mktero/conversion-target.js';
 
 export { MkteroSignInRequiredError };
 
 /**
  * Converts a PDF through the hosted Mktero service.
  *
- * The hosted worker runs the same MinerU pipeline the extension runs locally,
- * so the downloaded ZIP is decoded with the existing MinerU result adapter and
- * shares its cache identity.
+ * The hosted service decides which MinerU model parses a PDF. That model is
+ * part of the cache identity: a pipeline result is never readable through the
+ * vlm entry, and the vlm identity is exactly the one this build already ships,
+ * so switching models back reuses the retained result instead of converting
+ * again. The service's short profile string is only used to validate the target
+ * and to derive the local identity; it never becomes a local cache key.
  */
 export class MkteroDocumentExtractor {
     constructor({
@@ -43,6 +54,7 @@ export class MkteroDocumentExtractor {
         onPDFIndexError = error => zotero.logError?.(error),
         sharedConversion = null,
         getSharedScope = () => '',
+        resolveTarget = null,
     }) {
         if (!zotero) throw new TypeError('A Zotero runtime is required');
         if (!conversion?.convert) {
@@ -80,6 +92,12 @@ export class MkteroDocumentExtractor {
         this.onCacheError = onCacheError;
         this.onPDFIndexError = onPDFIndexError;
         this.getSharedScope = getSharedScope;
+        // The client owns the route lookup; injecting it keeps this extractor
+        // testable without a service that describes targets.
+        this.resolveTarget = resolveTarget
+            || (typeof conversion?.resolveTarget === 'function'
+                ? options => conversion.resolveTarget(options)
+                : null);
         this.sharedConversion = sharedConversion || new SharedMkteroConversion({
             conversion,
             getScope: getSharedScope,
@@ -102,25 +120,31 @@ export class MkteroDocumentExtractor {
             signal,
             forceRefresh,
         });
+        prepared.assertScope = assertScope;
         try {
-            return await this.#extractPrepared(itemID, opened, prepared, {
-                onProgress, signal, forceRefresh, assertScope, beforeCreate, sharedScope, retainSharedLease,
+            const resolved = await this.#resolveIdentity(opened, prepared, { signal });
+            prepared.cachePublication = this.#claimPublication(prepared, resolved);
+            return await this.#extractPrepared(itemID, opened, prepared, resolved, {
+                onProgress, signal, forceRefresh, assertScope, beforeCreate, sharedScope,
+                retainSharedLease,
             });
         }
-        finally { prepared.cachePublication.release(); }
+        finally { prepared.cachePublication?.release(); }
     }
 
-    async #extractPrepared(itemID, opened, prepared, {
+    async #extractPrepared(itemID, opened, prepared, resolved, {
         onProgress, signal, forceRefresh, assertScope, beforeCreate, sharedScope, retainSharedLease,
     }) {
-        const cached = await this.#cachedExtractResult(opened, prepared, {
+        const cached = await this.#readAnyCachedResult(opened, prepared, resolved, {
             signal,
             onProgress,
             forceRefresh,
         });
         if (cached) return cached;
 
-        const resultKey = await this.#resultKey(opened.fileData, prepared.sourceHash, signal);
+        const resultKey = await this.#resultKey(
+            opened.fileData, prepared.sourceHash, resolved.local, signal
+        );
         const scope = sharedScope ?? this.getSharedScope();
         const assertCurrentScope = () => {
             assertScope();
@@ -130,6 +154,7 @@ export class MkteroDocumentExtractor {
                 });
             }
         };
+        const extractor = this;
         const lease = this.sharedConversion.acquire({
             scope, assertScope: assertCurrentScope, beforeCreate,
             apiBase: this.getApiBase(),
@@ -139,25 +164,41 @@ export class MkteroDocumentExtractor {
             sourceHash: prepared.sourceHash,
             resultKey, cacheEnabled: prepared.cacheEnabled,
             forceRefresh, onProgress, signal,
+            target: resolved.target,
+            // A job that moved to another model owns a different raw result,
+            // so the published key is derived from the target it reports.
+            resolveResultKey(converted) {
+                const identity = extractor.#convertedIdentity(converted, resolved);
+                const key = extractor.#resultKey(
+                    opened.fileData, prepared.sourceHash, identity, signal
+                );
+                return key;
+            },
         });
         try {
             const converted = await lease.result;
             prepared.warnings.push(...(converted.warnings || []));
+            // The job snapshot is authoritative: a route that moved between
+            // resolve and create returns the target it actually parsed with,
+            // and that — not the pre-computed one — owns the cache identity.
+            const actual = this.#convertedIdentity(converted, resolved);
             const result = await this.#prepareConverted(converted.result, opened.fileData, {
                 signal,
                 onProgress,
             });
             assertCurrentScope();
-            if (prepared.cacheKey && prepared.cacheEnabled && lease.canPublish()) {
+            const cacheKey = await this.#cacheKeyFor(opened.fileData, actual, prepared);
+            if (cacheKey && prepared.cacheEnabled && lease.canPublish()) {
                 await this.#saveCachedResult(
-                    prepared.cacheKey, result, signal, prepared.warnings, lease.canPublish
+                    cacheKey, result, signal, prepared.warnings, lease.canPublish
                 );
             }
             assertCurrentScope();
-            return createResult(
-                opened.title, result, converted.origin === 'cache', prepared.warnings,
-                prepared.cacheKey, converted.origin === 'resumed', prepared.sourceHash
+            const extracted = hostedResult(
+                opened.title, result, prepared, cacheKey, actual, converted.origin === 'cache'
             );
+            extracted.resumedTask = converted.origin === 'resumed';
+            return extracted;
         }
         catch (error) {
             if (error?.code === 'MKTERO_SIGN_IN_REQUIRED') throw new MkteroSignInRequiredError();
@@ -177,41 +218,191 @@ export class MkteroDocumentExtractor {
             signal,
             forceRefresh: false,
         });
+        prepared.assertScope = () => {};
         try {
-            return await this.#readCachedPrepared(opened, prepared, { signal, onProgress });
+            const resolved = await this.#resolveIdentity(opened, prepared, { signal });
+            prepared.cachePublication = this.#claimPublication(prepared, resolved);
+            return await this.#readCachedPrepared(opened, prepared, resolved, { signal, onProgress });
         }
-        finally { prepared.cachePublication.release(); }
+        finally { prepared.cachePublication?.release(); }
     }
 
-    async #readCachedPrepared(opened, prepared, { signal, onProgress }) {
-        const cached = await this.#cachedExtractResult(opened, prepared, {
+    async #readCachedPrepared(opened, prepared, resolved, { signal, onProgress }) {
+        const cached = await this.#readAnyCachedResult(opened, prepared, resolved, {
             signal,
             onProgress,
             forceRefresh: false,
         });
-        if (cached || !prepared.cacheEnabled || !prepared.cacheKey) return cached;
+        if (cached || !prepared.cacheEnabled) return cached;
         // A pipeline change leaves no derived entry, but a stored MinerU result
         // can still be read without a network request.
-        const resultKey = await this.#resultKey(opened.fileData, prepared.sourceHash, signal);
-        const stored = await this.#readStoredResult(resultKey, signal);
-        if (!stored) return null;
-        const result = await this.#prepareConverted(stored.result, opened.fileData, {
-            signal,
-            onProgress,
+        for (const local of await this.#candidatesFor(opened, prepared, resolved)) {
+            const resultKey = await this.#resultKey(
+                opened.fileData, prepared.sourceHash, local, signal
+            );
+            const stored = await this.#readStoredResult(resultKey, signal);
+            if (!stored) continue;
+            const result = await this.#prepareConverted(stored.result, opened.fileData, {
+                signal,
+                onProgress,
+            });
+            const cacheKey = await this.#cacheKeyFor(opened.fileData, local, prepared);
+            await this.#saveCachedResult(
+                cacheKey, result, signal, prepared.warnings,
+                prepared.cachePublication.canPublish
+            );
+            onProgress?.(100);
+            return hostedResult(
+                opened.title, result, prepared, cacheKey, local, false
+            );
+        }
+        return null;
+    }
+
+    /**
+     * Reads a retained entry for the resolved model. When the service could not
+     * be reached, a retained entry for either model is readable: the file on
+     * disk states which model produced it, so it stays trustworthy. Nothing is
+     * read after an authentication, quota, or integrity failure.
+     */
+    async #readAnyCachedResult(opened, prepared, resolved, options) {
+        for (const local of await this.#candidatesFor(opened, prepared, resolved)) {
+            const cached = await this.#cachedExtractResult(opened, {
+                ...prepared,
+                ...local,
+            }, options);
+            if (!cached) continue;
+            if (local.modelVersion) cached.hostedModel = local.modelVersion;
+            return cached;
+        }
+        return null;
+    }
+
+    /**
+     * Claims the derived-entry write for the identities this run may produce.
+     *
+     * Online that is the resolved model only. Offline it is both models,
+     * because whichever retained entry is read becomes the current one.
+     */
+    #claimPublication(prepared, resolved) {
+        const models = resolved.offline
+            ? offlineProfiles(resolved.local.modelVersion).map(identity => identity.modelVersion)
+            : [resolved.local.modelVersion];
+        const holds = models.map(model => this.sharedConversion.captureCachePublication({
+            sourceHash: prepared.sourceHash,
+            byteLength: prepared.byteLength,
+            signal: prepared.signal,
+            model,
+        }));
+        if (holds.length === 1) return holds[0];
+        return {
+            canPublish: () => holds.every(hold => hold.canPublish()),
+            release: () => {
+                for (const hold of holds) hold.release();
+            },
+        };
+    }
+
+    /**
+     * The identities a read may use, in order.
+     *
+     * Online there is exactly one: the model the service reported. Offline the
+     * entry must be readable, so both models are candidates; the file on disk
+     * still states which model produced it, which is what keeps that read
+     * trustworthy when the service cannot be asked.
+     */
+    async #candidatesFor(opened, prepared, resolved) {
+        const identities = resolved.offline
+            ? offlineProfiles(resolved.local.modelVersion)
+            : [resolved.local];
+        const candidates = [];
+        for (const identity of identities) {
+            const cacheKey = identity.cacheKey
+                || await this.#cacheKeyFor(opened.fileData, identity, prepared);
+            candidates.push({ ...identity, cacheKey });
+        }
+        return candidates;
+    }
+
+    /**
+     * Asks the service which model this PDF follows now.
+     *
+     * A route answer is authoritative for the local identity. Nothing here
+     * guesses a model: without a route lookup a hosted PDF keeps the shipped
+     * vlm identity, which is what an older service always produced. The one
+     * deliberate exception is an unreachable service, where a retained entry is
+     * readable under either model — authentication, quota, and integrity
+     * failures are reported instead of reading an unverified entry.
+     */
+    async #resolveIdentity(opened, prepared, { signal }) {
+        const localProfile = profile => ({
+            modelVersion: profile,
+            cacheProfile: hostedCacheProfileFor(profile),
+            requestProfile: hostedRequestProfileFor(profile),
+            cacheKey: null,
         });
-        await this.#saveCachedResult(
-            prepared.cacheKey, result, signal, prepared.warnings, prepared.cachePublication.canPublish
-        );
-        onProgress?.(100);
-        return createResult(
-            opened.title,
-            result,
-            true,
-            prepared.warnings,
-            prepared.cacheKey,
-            false,
-            prepared.sourceHash
-        );
+        if (typeof this.resolveTarget !== 'function' || !prepared.sourceHash) {
+            return { target: null, local: localProfile(MKTERO_MODEL_VLM), offline: false };
+        }
+        let target = null;
+        try {
+            target = await this.resolveTarget({
+                apiBase: this.getApiBase(),
+                getAccessToken: this.getAccessToken,
+                sourceHash: prepared.sourceHash,
+                expectedSize: opened.fileData.byteLength,
+                contentType: 'application/pdf',
+                signal,
+                assertScope: prepared.assertScope,
+            });
+        }
+        catch (error) {
+            throwIfAborted(signal);
+            // A service that does not describe targets is reported, never
+            // assumed to be an old vlm-only deployment: a 404 can also be a
+            // proxy or a missing route. Only an unreachable service may read a
+            // retained entry, because the file itself says which model wrote it.
+            if (!isTrustworthyOfflineFailure(error)) throw error;
+            prepared.warnings.push(OFFLINE_WARNING);
+            return { target: null, local: localProfile(MKTERO_MODEL_VLM), offline: true };
+        }
+        throwIfAborted(signal);
+        const local = localProfile(target.modelVersion);
+        local.cacheKey = await this.#cacheKeyFor(opened.fileData, local, prepared);
+        return { target, local, offline: false };
+    }
+
+    /**
+     * The identity a converted result actually belongs to.
+     *
+     * The model always comes from a target the client validated: the job
+     * snapshot first, the resolved target second. Both name a model whose
+     * profile is a pure function of it, so a profile can never be paired with
+     * the wrong model. Only a conversion that sent no target at all falls back,
+     * and the service pins such a legacy request to vlm itself — it refuses with
+     * an upgrade error rather than return a pipeline result.
+     */
+    #convertedIdentity(converted, resolved) {
+        const target = converted?.target || resolved.target;
+        const modelVersion = target?.modelVersion || MKTERO_MODEL_VLM;
+        const profiles = hostedProfilesFor(modelVersion);
+        return { ...profiles, target: target || null, cacheKey: null };
+    }
+
+    async #cacheKeyFor(fileData, identity, prepared) {
+        if (!this.createCacheKey) return null;
+        try {
+            const cacheKey = await this.createCacheKey(fileData, {
+                parserProfile: identity.cacheProfile,
+            });
+            return typeof cacheKey === 'string' && cacheKey ? cacheKey : null;
+        }
+        catch (error) {
+            throwIfAborted(prepared.signal);
+            this.#reportCacheError(error);
+            prepared.warnings.push('The local Markdown cache is unavailable.');
+            return null;
+        }
     }
 
     async #prepareConverted(raw, fileData, { signal, onProgress }) {
@@ -230,10 +421,14 @@ export class MkteroDocumentExtractor {
         return result;
     }
 
-    async #resultKey(fileData, sourceHash, signal) {
+    async #resultKey(fileData, sourceHash, identity, signal) {
         if (!this.resultStore || !this.createResultKey) return null;
         try {
-            const resultKey = await this.createResultKey(fileData, { sourceHash });
+            const resultKey = await this.createResultKey(fileData, {
+                sourceHash,
+                requestProfile: identity.requestProfile,
+                modelVersion: identity.modelVersion,
+            });
             throwIfAborted(signal);
             return typeof resultKey === 'string' && resultKey ? resultKey : null;
         }
@@ -244,6 +439,8 @@ export class MkteroDocumentExtractor {
         }
     }
 
+    // The key names the model through its request profile, so an archive
+    // stored for one model is never reachable for the other.
     async #readStoredResult(resultKey, signal) {
         if (!resultKey || !this.resultStore) return null;
         try {
@@ -291,67 +488,65 @@ export class MkteroDocumentExtractor {
 
     async #prepareCachedRead({ fileData }, { itemID, signal, forceRefresh }) {
         const warnings = [];
-        let cacheKey = null;
-        if (this.createCacheKey) {
-            try {
-                cacheKey = await this.createCacheKey(fileData, {
-                    parserProfile: MINERU_PARSER_PROFILE_ID,
-                });
-            }
-            catch (error) {
-                this.#reportCacheError(error);
-                warnings.push('The local Markdown cache is unavailable.');
-            }
-        }
+        const cacheEnabled = Boolean(this.isCacheEnabled());
         const sourceHash = await readSourceHash(
             this.createSourceHash,
             fileData,
             error => this.#reportCacheError(error)
         );
-        let revision = null;
-        if (!forceRefresh && cacheKey && typeof this.readRevision === 'function') {
-            revision = await this.#readRevision({
-                itemID,
-                cacheKey,
-                fileData,
-                signal,
-            });
-            throwIfAborted(signal);
-        }
         return {
-            cacheEnabled: Boolean(this.isCacheEnabled()),
+            itemID,
+            cacheEnabled,
             warnings,
-            cacheKey,
             sourceHash,
-            revision,
-            cachePublication: this.sharedConversion.captureCachePublication({
-                sourceHash, byteLength: fileData.byteLength, signal,
-            }),
+            byteLength: fileData.byteLength,
+            // cacheKey and the publication claim depend on the resolved model,
+            // so both are filled in after #resolveIdentity. Nothing is read
+            // before that.
+            cacheKey: null,
+            cacheProfile: null,
+            requestProfile: null,
+            modelVersion: null,
+            forceRefresh,
+            signal,
+            assertScope: () => {},
+            cachePublication: null,
         };
     }
 
     async #cachedExtractResult(opened, prepared, { signal, onProgress, forceRefresh }) {
-        if (prepared.revision?.snapshot) {
-            onProgress?.(100);
-            const result = await this.prepareResult({
-                ...prepared.revision.snapshot,
-                userEdited: true,
-            }, {
+        if (forceRefresh) return null;
+        if (prepared.cacheKey && typeof this.readRevision === 'function') {
+            const revision = await this.#readRevision({
+                itemID: prepared.itemID,
+                cacheKey: prepared.cacheKey,
+                cacheProfile: prepared.cacheProfile,
                 fileData: opened.fileData,
                 signal,
-                onProgress,
             });
-            return createResult(
-                opened.title,
-                result,
-                true,
-                prepared.warnings,
-                prepared.revision.cacheKey,
-                false,
-                prepared.sourceHash
-            );
+            if (revision?.snapshot) {
+                onProgress?.(100);
+                const result = await this.prepareResult({
+                    ...revision.snapshot,
+                    userEdited: true,
+                }, {
+                    fileData: opened.fileData,
+                    signal,
+                    onProgress,
+                });
+                return createResult(
+                    opened.title,
+                    result,
+                    true,
+                    prepared.warnings,
+                    revision.cacheKey,
+                    false,
+                    prepared.sourceHash,
+                    prepared.cacheProfile
+                );
+            }
         }
-        if (forceRefresh || !prepared.cacheKey) return null;
+        if (!prepared.cacheKey) return null;
         const cached = await this.#readCachedResult({
             cacheKey: prepared.cacheKey,
             fileData: opened.fileData,
@@ -360,6 +555,7 @@ export class MkteroDocumentExtractor {
             warnings: prepared.warnings,
             onProgress,
             canCommit: prepared.cachePublication.canPublish,
+            cacheProfile: prepared.cacheProfile,
         });
         throwIfAborted(signal);
         if (!cached) return null;
@@ -371,19 +567,19 @@ export class MkteroDocumentExtractor {
             prepared.warnings,
             prepared.cacheKey,
             false,
-            prepared.sourceHash
+            prepared.sourceHash,
+            prepared.cacheProfile
         );
     }
 
-    async #readRevision({ itemID, cacheKey, fileData, signal }) {
+    async #readRevision({ itemID, cacheKey, cacheProfile, fileData, signal }) {
         let revision = await this.readRevision({ itemID, cacheKey, signal });
         throwIfAborted(signal);
-        if (revision || !this.createCacheKey) {
+        if (revision || !this.createCacheKey || cacheProfile !== MINERU_PARSER_PROFILE_ID) {
             return revision ? { snapshot: revision, cacheKey } : null;
         }
-        // A correction made under any earlier profile is still the user's
-        // text, so every earlier profile is searched, not only those whose
-        // cached Markdown can be reused.
+        // Historical profiles all requested VLM. Preserve the user's earlier
+        // VLM corrections without treating them as a Pipeline document.
         const visited = new Set([cacheKey]);
         for (const parserProfile of [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru]) {
             const legacyKey = await this.createCacheKey(fileData, {
@@ -413,6 +609,7 @@ export class MkteroDocumentExtractor {
         warnings,
         onProgress,
         canCommit,
+        cacheProfile,
     }) {
         if (!this.cache?.get) return null;
         const cached = await this.#getCachedResult(cacheKey, warnings);
@@ -431,6 +628,9 @@ export class MkteroDocumentExtractor {
             });
         }
         if (!cacheEnabled || !this.createCacheKey) return null;
+        // Only the vlm identity has shipped before model selection. A pipeline
+        // entry is never read through a vlm key, and vice versa.
+        if (cacheProfile !== MINERU_PARSER_PROFILE_ID) return null;
         const visited = new Set([cacheKey]);
         for (const parserProfile of MINERU_COMPATIBLE_CACHE_PROFILE_IDS) {
             let legacyKey = null;
@@ -548,12 +748,13 @@ function createResult(
     warnings = [],
     cacheKey = null,
     resumedTask = false,
-    sourceHash = null
+    sourceHash = null,
+    parserProfile = MINERU_PARSER_PROFILE_ID
 ) {
     const extracted = {
         kind: 'markdown',
         provider: 'mktero',
-        parserProfile: MINERU_PARSER_PROFILE_ID,
+        parserProfile,
         title,
         markdown: parsedResult.markdown,
         assets: parsedResult.assets || [],
@@ -576,6 +777,33 @@ function createResult(
         extracted.documentStructure = parsedResult.documentStructure;
     }
     return extracted;
+}
+
+// A hosted result carries the model identity it was actually parsed under, so
+// bootstrap can record readiness for that identity and nothing else.
+function hostedResult(title, result, prepared, cacheKey, identity, cacheHit) {
+    const extracted = createResult(
+        title, result, cacheHit, prepared.warnings, cacheKey, false,
+        prepared.sourceHash, identity.cacheProfile
+    );
+    extracted.hostedModel = identity.modelVersion;
+    if (identity.target?.routeId) extracted.hostedRouteId = identity.target.routeId;
+    return extracted;
+}
+
+const OFFLINE_WARNING = 'The Mktero conversion service is unreachable; this paper was read from a retained local copy.';
+
+/** Both model identities, the resolved one first. */
+function offlineProfiles(preferred) {
+    const order = preferred === MKTERO_MODEL_PIPELINE
+        ? [MKTERO_MODEL_PIPELINE, MKTERO_MODEL_VLM]
+        : [MKTERO_MODEL_VLM, MKTERO_MODEL_PIPELINE];
+    return order.map(modelVersion => ({
+        modelVersion,
+        cacheProfile: hostedCacheProfileFor(modelVersion),
+        requestProfile: hostedRequestProfileFor(modelVersion),
+        cacheKey: null,
+    }));
 }
 
 async function readSourceHash(createSourceHash, fileData, onError) {

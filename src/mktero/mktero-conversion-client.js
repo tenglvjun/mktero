@@ -7,6 +7,12 @@ import { sha256Hex } from '../core/sha256.js';
 import { mkteroVersion } from '../config/runtime-config.js';
 import { notifyDiagnosticJob } from '../diagnostics/diagnostic-log.js';
 import { parseConversionQuota } from '../account/conversion-quota.js';
+import {
+    normalizeHostedSnapshot,
+    normalizeHostedTarget,
+    normalizeHostedTargetOrNull,
+    targetFromSnapshot,
+} from './conversion-target.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 600;
@@ -40,8 +46,7 @@ const API_HEADERS = Object.freeze({
 });
 
 // Job states reported by the hosted service.
-const STATUS_AWAITING_UPLOAD = 'awaiting_upload';
-const STATUS_QUEUED = 'queued';
+const STATUS_AWAITING_UPLOAD = 'awaiting_upload';const STATUS_QUEUED = 'queued';
 const STATUS_WAITING_FOR_SHARED_PARSE = 'waiting_for_shared_parse';
 const STATUS_SUBMITTING = 'submitting';
 const STATUS_PROCESSING = 'processing';
@@ -50,6 +55,12 @@ const STATUS_SUCCEEDED = 'succeeded';
 const STATUS_FAILED = 'failed';
 
 const TERMINAL_STATUSES = new Set([STATUS_SUCCEEDED, STATUS_FAILED]);
+
+// The hosted service answers a conversion target that no longer matches the
+// PDF's stored parse route. The client re-resolves once and creates again.
+const TARGET_CHANGED_CODE = 'conversion_target_changed';
+export const MKTERO_TARGET_CHANGED_CODE = 'MKTERO_TARGET_CHANGED';
+export const MKTERO_RESOLVE_UNSUPPORTED_CODE = 'MKTERO_RESOLVE_UNSUPPORTED';
 const IN_FLIGHT_STATUSES = new Set([
     STATUS_QUEUED, STATUS_WAITING_FOR_SHARED_PARSE, STATUS_SUBMITTING,
     STATUS_PROCESSING, STATUS_DOWNLOADING,
@@ -111,6 +122,64 @@ export class MkteroConversionClient {
     }
 
     /**
+     * Asks the hosted service which parse target this PDF should use now.
+     *
+     * The answer names the MinerU model and the parser profile identity the
+     * result will be cached under. It is a read-only lookup: no PDF bytes are
+     * sent and no conversion quota is consumed. A service that predates the
+     * route answers 404, which is reported as MKTERO_RESOLVE_UNSUPPORTED so a
+     * caller can fall back deliberately instead of guessing a model.
+     */
+    async resolveTarget({
+        apiBase,
+        getAccessToken,
+        sourceHash,
+        expectedSize,
+        contentType = 'application/pdf',
+        signal,
+        assertScope = () => {},
+    }) {
+        if (typeof getAccessToken !== 'function') {
+            throw new TypeError('An access token provider is required');
+        }
+        const sha256 = normalizeSourceHash(sourceHash);
+        if (!sha256) throw new TypeError('A PDF SHA-256 is required to resolve a target');
+        if (!Number.isSafeInteger(expectedSize) || expectedSize <= 0) {
+            throw new TypeError('A PDF byte length is required to resolve a target');
+        }
+        let payload;
+        try {
+            payload = await this.#requestJSON({
+                apiBase,
+                getAccessToken,
+                path: '/api/v1/conversions/resolve',
+                method: 'POST',
+                body: { sha256, expected_size: expectedSize, content_type: contentType },
+                signal,
+                timeoutMs: this.requestTimeoutMs,
+                label: 'conversion target',
+            });
+        }
+        catch (error) {
+            assertScope();
+            if (error?.status === 404) {
+                throw codedError(
+                    'The Mktero service does not describe conversion targets',
+                    MKTERO_RESOLVE_UNSUPPORTED_CODE,
+                    { status: 404, stage: STAGE_API }
+                );
+            }
+            throw error;
+        }
+        assertScope();
+        return normalizeHostedTarget({
+            routeId: payload?.route_id,
+            modelVersion: payload?.model_version,
+            parserProfileId: payload?.parser_profile_id,
+        });
+    }
+
+    /**
      * Converts one PDF and returns the decoded MinerU result.
      *
      * `getAccessToken` is awaited for every request so a caller can refresh an
@@ -127,6 +196,7 @@ export class MkteroConversionClient {
         includeRawArchive = false,
         idempotencyKey,
         sourceHash = '',
+        target = null,
         onCleanup = () => {},
         assertScope = () => {},
         beforeCreate = () => {},
@@ -153,19 +223,42 @@ export class MkteroConversionClient {
         // queued item that never entered convert() has no job to cancel.
         let job = null;
         let creating = null;
+        let resolved = normalizeHostedTargetOrNull(target);
         try {
             notifyProgress(onProgress, CONVERSION_PROGRESS.PREPARING);
+            const sha256 = normalizeSourceHash(sourceHash) || await pdfSHA256(bytes);
             creating = this.#createJob({
                 apiBase,
                 getAccessToken,
                 fileName,
                 bytes,
                 metadata,
-                sha256: normalizeSourceHash(sourceHash) || await pdfSHA256(bytes),
+                sha256,
+                target: resolved,
                 idempotencyKey: normalizeIdempotencyKey(idempotencyKey),
                 signal,
             });
-            job = await settleUnlessAborted(creating, signal);
+            try {
+                job = await settleUnlessAborted(creating, signal);
+            }
+            catch (error) {
+                // The stored route moved between resolve and create. Re-ask
+                // once; a second mismatch is surfaced rather than looping.
+                if (!isTargetChanged(error) || !resolved) throw error;
+                assertScope();
+                resolved = await this.resolveTarget({
+                    apiBase, getAccessToken, sourceHash: sha256,
+                    expectedSize: bytes.length, signal, assertScope,
+                });
+                creating = this.#createJob({
+                    apiBase, getAccessToken, fileName, bytes, metadata, sha256,
+                    target: resolved,
+                    idempotencyKey: normalizeIdempotencyKey(idempotencyKey),
+                    signal,
+                });
+                job = await settleUnlessAborted(creating, signal);
+            }
+            assertJobMatchesTarget(job, resolved);
             if (!job?.job_id || (!job.upload_url
                 && !TERMINAL_STATUSES.has(job.status) && !IN_FLIGHT_STATUSES.has(job.status))) {
                 throw codedError(
@@ -230,9 +323,23 @@ export class MkteroConversionClient {
                 id: finished?.job_id || job.job_id,
                 status: finished?.status || 'succeeded',
             });
+            // The job snapshot is what this result actually was parsed with. A
+            // resumed job keeps the model it started under even when the
+            // operator changed the account afterwards. The route is not part
+            // of a job, so the route reference the caller already holds is kept
+            // for the target it still describes.
+            const snapshot = resolvedSnapshot(finished) || resolvedSnapshot(job);
+            const resolvedRoute = snapshot && resolved
+                && snapshot.modelVersion === resolved.modelVersion
+                && snapshot.parserProfileId === resolved.parserProfileId
+                ? resolved.routeId
+                : '';
             return {
                 result,
                 origin: 'network',
+                target: snapshot
+                    ? targetFromSnapshot(snapshot, resolvedRoute)
+                    : resolved,
                 warnings: [],
                 ...(includeRawArchive ? { rawArchive: archive } : {}),
                 ...(resultArchive ? { resultArchive } : {}),
@@ -276,6 +383,7 @@ export class MkteroConversionClient {
         bytes,
         metadata,
         sha256,
+        target = null,
         idempotencyKey,
         signal,
     }) {
@@ -286,6 +394,14 @@ export class MkteroConversionClient {
         };
         if (metadata && typeof metadata === 'object') body.metadata = metadata;
         if (typeof sha256 === 'string' && sha256) body.sha256 = sha256;
+        // The three fields travel together. The service compares them with
+        // the route it stored for this PDF and rejects a stale answer, so a
+        // result can never be filed under a model it was not parsed with.
+        if (target) {
+            body.route_id = target.routeId;
+            body.model_version = target.modelVersion;
+            body.parser_profile_id = target.parserProfileId;
+        }
         return this.#requestJSON({
             apiBase,
             getAccessToken,
@@ -452,8 +568,16 @@ export class MkteroConversionClient {
 
     async #waitForResult({ apiBase, getAccessToken, job, onProgress, signal }) {
         let current = job;
+        // The snapshot this job is being read under. A resumed job already
+        // reports its own, so that one is the baseline: an operator changing an
+        // account must not relabel work that is already in flight.
+        const expected = resolvedSnapshot(job);
         for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
             throwIfAborted(signal);
+            // Every poll is a fresh report of the same job. It must keep the
+            // snapshot it was created with; a job that changes model mid-flight
+            // would otherwise file its result under the wrong identity.
+            assertSnapshotUnchanged(current, expected);
             if (current.status === STATUS_SUCCEEDED) return current;
             if (current.status === STATUS_FAILED) {
                 throw codedError(
@@ -727,6 +851,123 @@ function normalizeSourceHash(value) {
     return /^[a-f\d]{64}$/i.test(hash) ? hash.toLowerCase() : '';
 }
 
+/** The wire-name adapter for a resolve response. */
+export function targetFromResponse(payload) {
+    return normalizeHostedTarget({
+        routeId: payload?.route_id,
+        modelVersion: payload?.model_version,
+        parserProfileId: payload?.parser_profile_id,
+    });
+}
+
+/**
+ * A job's parse snapshot.
+ *
+ * The service deliberately omits the route from a job: the route is a lookup
+ * handle, while the job keeps only the model and profile it was submitted with.
+ * Decoding a job therefore validates a model/profile pair, and the caller keeps
+ * its own route reference. An inconsistent pair throws rather than being
+ * silently dropped, so a result can never be filed under a model it was not
+ * parsed with.
+ */
+export function snapshotFromJob(job) {
+    if (!job || typeof job !== 'object') return null;
+    if (!jobNamesSnapshot(job)) return null;
+    return parseJobSnapshot(job);
+}
+
+// A service that predates model selection omits the fields entirely. That is
+// different from a service that sends them and gets them wrong.
+function jobNamesSnapshot(job) {
+    return Object.prototype.hasOwnProperty.call(job || {}, 'model_version')
+        || Object.prototype.hasOwnProperty.call(job || {}, 'parser_profile_id');
+}
+
+// Throws for a snapshot that is present but unusable, so a caller can never
+// treat malformed metadata as "no metadata". A job report is judged like any
+// other disagreement about the target, so it fails as a target mismatch.
+function parseJobSnapshot(job) {
+    try {
+        return normalizeHostedSnapshot({
+            modelVersion: job?.model_version,
+            parserProfileId: job?.parser_profile_id,
+        });
+    }
+    catch (error) {
+        throw codedError(
+            'The Mktero service described an inconsistent conversion target',
+            'MKTERO_TARGET_MISMATCH',
+            { stage: STAGE_API, cause: error }
+        );
+    }
+}
+
+// The snapshot a job was created under, checked the same way.
+function resolvedSnapshot(job) {
+    return jobNamesSnapshot(job) ? parseJobSnapshot(job) : null;
+}
+
+// A later report of the same job must repeat the snapshot exactly. A job that
+// stays silent after declaring a snapshot is also a disagreement: the client
+// cannot know which model the download belongs to.
+function assertSnapshotUnchanged(report, expected) {
+    if (!expected) {
+        if (jobNamesSnapshot(report)) parseJobSnapshot(report);
+        return;
+    }
+    if (!jobNamesSnapshot(report)) {
+        throw codedError(
+            'The Mktero service stopped reporting this conversion target',
+            'MKTERO_TARGET_MISMATCH',
+            { stage: STAGE_API }
+        );
+    }
+    const reported = parseJobSnapshot(report);
+    if (reported.modelVersion !== expected.modelVersion
+        || reported.parserProfileId !== expected.parserProfileId) {
+        throw codedError(
+            'The Mktero service parsed this PDF with a different target',
+            'MKTERO_TARGET_MISMATCH',
+            { stage: STAGE_API }
+        );
+    }
+}
+
+/** A job must report the same model and profile the client asked for. A
+ *  service that predates the fields omits them; then only a vlm target is
+ *  safe, because that is the model an older service always submitted. */
+function assertJobMatchesTarget(job, target) {
+    if (!target) return;
+    if (!job || typeof job !== 'object') return;
+    if (!jobNamesSnapshot(job)) {
+        // No snapshot at all: an older service, which only ever submits vlm.
+        if (target.modelVersion !== 'vlm') {
+            throw codedError(
+                'The Mktero service cannot confirm this conversion target',
+                'MKTERO_TARGET_MISMATCH',
+                { stage: STAGE_API }
+            );
+        }
+        return;
+    }
+    // Fields that are present but unusable throw from here; malformed metadata
+    // is a refusal, not an old service that needs the legacy exemption.
+    const reported = parseJobSnapshot(job);
+    if (reported.modelVersion !== target.modelVersion
+        || reported.parserProfileId !== target.parserProfileId) {
+        throw codedError(
+            'The Mktero service parsed this PDF with a different target',
+            'MKTERO_TARGET_MISMATCH',
+            { stage: STAGE_API }
+        );
+    }
+}
+
+function isTargetChanged(error) {
+    return error?.code === MKTERO_TARGET_CHANGED_CODE
+        || error?.errorCode === TARGET_CHANGED_CODE;
+}
+
 function normalizeIdempotencyKey(value) {
     if (value == null || String(value).trim() === '') return createIdempotencyKey();
     const key = String(value).trim();
@@ -761,6 +1002,7 @@ function reportJobProgress(onProgress, status, progress) {
 
 function errorCodeForStatus(status, payload) {
     const code = String(payload?.error?.code || '').trim();
+    if (code === TARGET_CHANGED_CODE) return MKTERO_TARGET_CHANGED_CODE;
     if (status === 429 && code === 'conversion_daily_limit_exceeded') {
         return 'MKTERO_DAILY_LIMIT_EXCEEDED';
     }

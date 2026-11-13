@@ -13,6 +13,7 @@ Open `Settings -> Mktero` after installation. This page covers every setting and
 | Conversion service | Optional, Mktero by default | The Conversion tab lists Mktero, MinerU, and Mistral. Mktero uses account sign-in and hosted conversion; MinerU and Mistral use your credentials. AI translation always uses your own provider key |
 | Conversion provider | When using your own API | Select MinerU or Mistral OCR 4.1 |
 | MinerU service | MinerU only | Choose MinerU cloud or a self-hosted MinerU 4.0 V1 service |
+| Parsing model | MinerU cloud only | Choose `VLM` (default) or `Pipeline` for direct MinerU cloud operations; each operation fixes it when it starts. The hosted Mktero service chooses its own model, and a self-hosted MinerU service is unaffected |
 | Local service address | Local MinerU only | Service origin, default `http://127.0.0.1:8000`. HTTP is limited to loopback and private-network addresses |
 | API key | For a cloud cache miss | Enter the MinerU cloud or Mistral key. The field is hidden for a local MinerU service |
 
@@ -55,12 +56,14 @@ Clearing the local cache asks for confirmation.
 
 If MinerU cloud returns `HTTP 401` or `token expired`, update the MinerU API key in `Settings -> Mktero`. Get a new key from [MinerU's official API key management page](https://mineru.net/apiManage/token). Signing in again in your browser does not update the key saved in the plugin.
 
+`Parsing model` belongs to the direct MinerU cloud request only. The Mktero service picks the model on the server, so that setting never reaches hosted conversion, and a self-hosted MinerU service keeps its own fixed request. An operation fixes the model when it starts, before the local-import check and before the PDF is loaded; a setting change applies to later operations only, and opening an item that is already running joins that run instead of moving or cancelling it. A stored value this build does not recognize reads as `VLM`, and so does a pending task recorded before the choice existed. See [MinerU cloud parsing model](./conversion.md#mineru-cloud-parsing-model) for cache, pending, and resume behaviour.
+
 The converters handle cancellation and resuming differently:
 
 | Converter | Behaviour |
 | --- | --- |
 | Mistral | Uses a synchronous request. You can cancel it locally, but there is no resumable server task |
-| MinerU cloud | Keeps its existing resumable task behaviour |
+| MinerU cloud | Keeps its existing resumable task behaviour, and a resumed task keeps the parsing model fixed when that task started |
 | Local MinerU | Keeps jobs only in its own process. Mktero does not resume them after that service restarts |
 
 ### AI translation

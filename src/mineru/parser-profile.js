@@ -166,6 +166,76 @@ export const MINERU_REQUEST_PROFILE_ID = JSON.stringify({
     file: MINERU_FILE_OPTIONS,
 });
 
+// Direct MinerU cloud can submit either batch model. `vlm` is the historical
+// identity above, byte for byte, so every entry written before model selection
+// stays readable. `pipeline` derives its own request and cache identities from
+// the same document and figure versions, so neither model can read the other's
+// result.
+export const MINERU_CLOUD_MODEL_VERSIONS = Object.freeze(['vlm', 'pipeline']);
+
+function cloudBatchOptions(modelVersion) {
+    return Object.freeze({
+        ...MINERU_BATCH_OPTIONS,
+        model_version: modelVersion,
+    });
+}
+
+const MINERU_CLOUD_CACHE_PROFILES = Object.freeze({
+    vlm: MINERU_PARSER_PROFILE_ID,
+    pipeline: JSON.stringify({
+        batch: cloudBatchOptions('pipeline'),
+        file: MINERU_FILE_OPTIONS,
+        document: MINERU_DOCUMENT_PIPELINE,
+        figureStructure: FIGURE_PIPELINE_PROFILE,
+    }),
+});
+
+const MINERU_CLOUD_REQUEST_PROFILES = Object.freeze({
+    vlm: MINERU_REQUEST_PROFILE_ID,
+    pipeline: JSON.stringify({
+        batch: cloudBatchOptions('pipeline'),
+        file: MINERU_FILE_OPTIONS,
+    }),
+});
+
+// Only the two batch models are accepted. An omitted value means the
+// historical vlm model; an explicit null is not an omission, it is a caller
+// bug, so it is refused like any other unknown model instead of being guessed.
+export function normalizeMineruModelVersion(modelVersion) {
+    if (modelVersion === undefined) return 'vlm';
+    if (MINERU_CLOUD_MODEL_VERSIONS.includes(modelVersion)) return modelVersion;
+    const error = new TypeError(
+        'The MinerU model must be one of: '
+        + MINERU_CLOUD_MODEL_VERSIONS.join(', ')
+    );
+    error.code = 'MINERU_UNKNOWN_MODEL';
+    throw error;
+}
+
+/** The batch options one cloud model is requested with. */
+export function mineruBatchOptionsFor(modelVersion = 'vlm') {
+    return cloudBatchOptions(normalizeMineruModelVersion(modelVersion));
+}
+
+/** The cache and raw-result identities one cloud model owns. */
+export function mineruCloudProfilesFor(modelVersion = 'vlm') {
+    const model = normalizeMineruModelVersion(modelVersion);
+    return Object.freeze({
+        modelVersion: model,
+        cacheProfile: MINERU_CLOUD_CACHE_PROFILES[model],
+        requestProfile: MINERU_CLOUD_REQUEST_PROFILES[model],
+    });
+}
+
+// Every identity this build can produce, for cache and raw-result cleanup.
+export const MINERU_CLOUD_CACHE_PROFILE_IDS = Object.freeze(
+    MINERU_CLOUD_MODEL_VERSIONS.map(modelVersion => MINERU_CLOUD_CACHE_PROFILES[modelVersion])
+);
+
+export const MINERU_CLOUD_REQUEST_PROFILE_IDS = Object.freeze(
+    MINERU_CLOUD_MODEL_VERSIONS.map(modelVersion => MINERU_CLOUD_REQUEST_PROFILES[modelVersion])
+);
+
 // Local V1 results do not share the hosted batch contract or figure layout.
 // What the self-hosted service is asked for; it keys the raw-result store.
 export const MINERU_LOCAL_REQUEST_PROFILE_ID = JSON.stringify({

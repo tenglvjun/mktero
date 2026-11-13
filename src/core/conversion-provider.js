@@ -41,9 +41,11 @@ export class ConversionProviderRouter {
     }
 
     async extract(itemID, options) {
+        const extractor = this.#extractor();
+        options = extractor.captureOptions?.(options) ?? options;
         if (options?.forceRefresh) {
             const selection = await this.imported?.lookup?.(itemID, options);
-            return this.#readProvider('extract', itemID, options, selection);
+            return this.#readProvider('extract', itemID, options, selection, extractor);
         }
         const { result, selection } = await this.#readImported('extract', itemID, options);
         if (result) return result;
@@ -52,14 +54,16 @@ export class ConversionProviderRouter {
                 code: 'LLM_CACHE_UNAVAILABLE',
             });
         }
-        return this.#readProvider('extract', itemID, options, selection);
+        return this.#readProvider('extract', itemID, options, selection, extractor);
     }
 
     async readCached(itemID, options) {
+        const extractor = this.#extractor();
+        options = extractor.captureOptions?.(options) ?? options;
         const { result, selection } = await this.#readImported('readCached', itemID, options);
         if (result) return result;
         if (options?.localOnly) return null;
-        return this.#readProvider('readCached', itemID, options, selection);
+        return this.#readProvider('readCached', itemID, options, selection, extractor);
     }
 
     async #readImported(method, itemID, options) {
@@ -77,10 +81,10 @@ export class ConversionProviderRouter {
         }
     }
 
-    async #readProvider(method, itemID, options, selection) {
+    async #readProvider(method, itemID, options, selection, extractor) {
         throwIfAborted(options?.signal);
         options?.assertScope?.();
-        const result = await this.#extractor()[method](itemID, options);
+        const result = await extractor[method](itemID, options);
         throwIfAborted(options?.signal);
         if (selection && isUsableMarkdown(result)) {
             // The record came from the failed read. Conditional removal preserves

@@ -23,6 +23,17 @@ export function createMarkdownReadinessIndex({
         ))?.cacheKey || null;
     }
 
+    // A hosted paper can be retained under more than one model, and the model a
+    // route follows is only known after a network lookup. Readiness is advisory,
+    // so it accepts any profile the caller lists.
+    function readableCacheKeyForAny(item, parserProfiles) {
+        for (const parserProfile of normalizeProfiles(parserProfiles)) {
+            const cacheKey = readableCacheKey(item, parserProfile);
+            if (cacheKey) return cacheKey;
+        }
+        return null;
+    }
+
     return {
         replace(nextRecords) {
             records = normalizeRecords(nextRecords);
@@ -101,6 +112,14 @@ export function createMarkdownReadinessIndex({
             return readableCacheKey(item, parserProfile);
         },
 
+        isReadyForAny(item, parserProfiles) {
+            return readableCacheKeyForAny(item, parserProfiles) !== null;
+        },
+
+        cacheKeyForAny(item, parserProfiles) {
+            return readableCacheKeyForAny(item, parserProfiles);
+        },
+
         snapshot() {
             return records.map(record => ({ ...record }));
         },
@@ -133,6 +152,11 @@ export function serializeMarkdownReadinessRecords(records) {
         schemaVersion: 1,
         records: normalizeRecords(records),
     };
+}
+
+function normalizeProfiles(parserProfiles) {
+    const values = Array.isArray(parserProfiles) ? parserProfiles : [parserProfiles];
+    return values.filter(value => typeof value === 'string' && value);
 }
 
 function normalizeRecords(records) {
