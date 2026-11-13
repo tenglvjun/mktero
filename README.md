@@ -59,6 +59,10 @@ and parser profile.
 
 1. Download the latest `mktero-<version>.xpi` from [GitHub Releases](https://github.com/tenglvjun/mktero/releases/latest) and install it in Zotero.
 2. Open `Settings -> Mktero` and sign in, register, or choose your own converter.
+   With your own MinerU cloud key, `Parsing model` chooses `VLM` (the default) or
+   `Pipeline` for MinerU cloud operations; each operation fixes it when it starts,
+   so a change applies to later operations only. The hosted Mktero service picks
+   its model on the server, so that setting does not apply to it.
 3. Open a PDF and click the Mktero toolbar icon, or right-click it and choose `Read as Markdown with Mktero`.
 4. Follow the conversion progress, then read with the outline, find, previews, and source links. A valid cache skips remote conversion.
 
@@ -84,9 +88,14 @@ The [workflow index](./docs/workflows.md) links to each task.
 ## Privacy
 
 - An uncached conversion with the default converter sends the complete PDF to the
-  Mktero service for your account.
+  Mktero service for your account. Before reusing a hosted cache, a lightweight
+  lookup sends only the PDF SHA-256, byte size, and content type, without PDF
+  bytes or conversion-quota use. The service stores an account-linked PDF
+  identity and parser route. A changed model can require another conversion
+  and PDF upload; a retained matching result can be reused.
 - Choosing MinerU cloud, a local MinerU service, or Mistral sends the complete PDF
-  there instead, and not to Mktero.
+  there instead, and not to Mktero. A direct MinerU cloud request also names the
+  parsing model fixed when that operation started.
 - Local llm-for-zotero imports leave the source cache unchanged and save a separate,
   unencrypted copy and import selection. Import and local reopening upload neither
   the PDF nor the result. If all local content is missing, a later ordinary open may

@@ -54,6 +54,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 
 1. 从 [GitHub Releases](https://github.com/tenglvjun/mktero/releases/latest) 下载最新的 `mktero-<version>.xpi`，安装到 Zotero。
 2. 打开 `设置 -> Mktero`，登录、注册账号，或选择自备的转换服务。
+   使用自己的 MinerU 云端密钥时，`解析模型`可为 MinerU 云端操作选择 `VLM`（默认）或 `Pipeline`；每次操作开始时即固定，之后的修改只影响后续操作。Mktero 托管转换由服务端决定模型，该设置不作用于它。
 3. 打开 PDF 并点击阅读器工具栏的 Mktero 图标，或右键 PDF，选择`使用 Mktero 阅读 Markdown`。
 4. 等待转换完成后，用目录、查找、预览和来源链接阅读。命中有效缓存时会跳过远程转换。
 
@@ -79,7 +80,9 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 ## 数据与隐私
 
 - 主动请求未缓存的转换且使用默认转换服务时，完整 PDF 会发送到你账号所使用的 Mktero 服务。
-- 若改选 MinerU 云端、本地 MinerU 服务或 Mistral，完整 PDF 改发到那里，不再发到 Mktero。
+  复用托管转换缓存前，轻量查询只发送 PDF 的 SHA-256、字节大小和内容类型，不发送 PDF 字节，也不占转换额度。
+  服务端保存与账号关联的 PDF 标识和解析路由。模型变化可能需要重新转换和上传；仍保留的匹配结果可以复用。
+- 若改选 MinerU 云端、本地 MinerU 服务或 Mistral，完整 PDF 改发到那里，不再发到 Mktero。直连 MinerU 云端的请求还会带上该次操作开始时固定的解析模型。
 - 导入 llm-for-zotero 本地结果时不改动源缓存，另存未加密的副本和导入选择。导入及本地重开不上传 PDF 或结果；
   如果本地内容全部缺失，之后普通打开可能上传 PDF。主动重新解析也可能上传。导入失败、内容损坏、读取错误或取消不会触发转换。
 - 凭据、缓存的 Markdown 和图片、MinerU 原始结果（不含 PDF）、校对、译文、阅读位置、尚未写入 PDF 的本地高亮，

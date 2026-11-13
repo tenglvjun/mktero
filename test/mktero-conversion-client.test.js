@@ -1662,3 +1662,553 @@ test('a cancelled create receiving a late 401 does not refresh or replay', async
     assert.equal(tokenCalls, 1);
     assert.deepEqual(requests.map(request => request.options.method), ['POST']);
 });
+
+test('resolves a conversion target without sending PDF bytes', async () => {
+    const requests = [];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return jsonResponse(200, {
+                route_id: 'route-1',
+                model_version: 'pipeline',
+                parser_profile_id: 'mineru/v4-batch-pipeline-1',
+            });
+        },
+        sleep: async () => {},
+    });
+
+    const target = await client.resolveTarget({
+        apiBase: API_BASE,
+        getAccessToken: () => 'access-token',
+        sourceHash: 'A'.repeat(64),
+        expectedSize: 4096,
+    });
+
+    assert.deepEqual(target, {
+        routeId: 'route-1',
+        modelVersion: 'pipeline',
+        parserProfileId: 'mineru/v4-batch-pipeline-1',
+    });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, `${API_BASE}/api/v1/conversions/resolve`);
+    assert.equal(requests[0].options.method, 'POST');
+    const body = JSON.parse(requests[0].options.body);
+    // A resolve is a lookup, not an upload: only identity is sent.
+    assert.deepEqual(body, {
+        sha256: 'a'.repeat(64),
+        expected_size: 4096,
+        content_type: 'application/pdf',
+    });
+});
+
+test('a service without the resolve route is reported instead of guessing a model', async () => {
+    const client = new MkteroConversionClient({
+        fetch: async () => jsonResponse(404, { error: { code: 'not_found', message: 'no route' } }),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.resolveTarget({
+            apiBase: API_BASE,
+            getAccessToken: () => 'access-token',
+            sourceHash: 'b'.repeat(64),
+            expectedSize: 2048,
+        }),
+        error => error.code === 'MKTERO_RESOLVE_UNSUPPORTED'
+    );
+});
+
+test('a resolve answer that names no usable model is rejected', async () => {
+    for (const payload of [
+        // A model the client does not know, a missing profile, a missing
+        // route, and a model that disagrees with the profile it names.
+        { route_id: 'route-1', model_version: 'MinerU-HTML', parser_profile_id: 'mineru/v4-batch-vlm-1' },
+        { route_id: 'route-1', model_version: 'pipeline' },
+        { model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-vlm-1' },
+        { route_id: 'route-1', model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-pipeline-1' },
+        { route_id: 'route-1', model_version: 'pipeline', parser_profile_id: 'mineru/v4-batch-vlm-1' },
+    ]) {
+        const client = new MkteroConversionClient({
+            fetch: async () => jsonResponse(200, payload),
+            sleep: async () => {},
+        });
+        await assert.rejects(
+            () => client.resolveTarget({
+                apiBase: API_BASE,
+                getAccessToken: () => 'access-token',
+                sourceHash: 'c'.repeat(64),
+                expectedSize: 1024,
+            }),
+            error => error.code === 'MKTERO_INVALID_TARGET'
+        );
+    }
+});
+
+test('sends the resolved target with the job and returns it with the result', async () => {
+    const requests = [];
+    const archive = resultArchive();
+    const target = { routeId: 'route-9', modelVersion: 'pipeline', parserProfileId: 'mineru/v4-batch-pipeline-1' };
+    const responses = [
+        jsonResponse(201, {
+            job_id: 'job-target',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+            upload_method: 'PUT',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        uploadResponse(200),
+        jsonResponse(202, { job_id: 'job-target', status: 'queued' }),
+        jsonResponse(200, {
+            job_id: 'job-target',
+            status: 'succeeded',
+            progress: 100,
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        jsonResponse(200, { result_url: 'https://r2.example/result.zip' }),
+        archiveResponse(archive),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return responses.shift();
+        },
+        sleep: async () => {},
+    });
+
+    const converted = await client.convert(convertOptions({ target }));
+
+    const created = JSON.parse(requests[0].options.body);
+    assert.equal(created.route_id, 'route-9');
+    assert.equal(created.model_version, 'pipeline');
+    assert.equal(created.parser_profile_id, 'mineru/v4-batch-pipeline-1');
+    // A job carries only the parse snapshot; the route handle stays with the
+    // caller. The returned target therefore keeps the route it already had.
+    assert.deepEqual(converted.target, target);
+});
+
+test('re-resolves once when the stored route moved before create', async () => {
+    const created = [];
+    const archive = resultArchive();
+    const responses = [
+        jsonResponse(409, { error: { code: 'conversion_target_changed', message: 'moved' } }),
+        jsonResponse(200, {
+            route_id: 'route-2',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        jsonResponse(201, {
+            job_id: 'job-moved',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        uploadResponse(200),
+        jsonResponse(202, { job_id: 'job-moved', status: 'queued' }),
+        jsonResponse(200, {
+            job_id: 'job-moved',
+            status: 'succeeded',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        jsonResponse(200, { result_url: 'https://r2.example/result.zip' }),
+        archiveResponse(archive),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            if (options.method === 'POST' && url.endsWith('/conversions')) {
+                created.push(JSON.parse(options.body));
+            }
+            return responses.shift();
+        },
+        sleep: async () => {},
+    });
+
+    const converted = await client.convert(convertOptions({
+        sourceHash: 'd'.repeat(64),
+        target: { routeId: 'route-1', modelVersion: 'pipeline', parserProfileId: 'mineru/v4-batch-pipeline-1' },
+    }));
+
+    assert.equal(created.length, 2);
+    assert.equal(created[1].route_id, 'route-2');
+    // The re-resolved target is the one the job reports. The job itself has no
+    // route, so the route reference comes from the fresh resolve.
+    assert.deepEqual(converted.target, {
+        routeId: 'route-2',
+        modelVersion: 'pipeline',
+        parserProfileId: 'mineru/v4-batch-pipeline-1',
+    });
+});
+
+test('a moved route changes the model the returned target names', async () => {
+    const created = [];
+    const responses = [
+        jsonResponse(409, { error: { code: 'conversion_target_changed', message: 'moved' } }),
+        jsonResponse(200, {
+            route_id: 'route-2',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        jsonResponse(201, {
+            job_id: 'job-moved',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        uploadResponse(200),
+        jsonResponse(202, { job_id: 'job-moved', status: 'queued' }),
+        jsonResponse(200, {
+            job_id: 'job-moved',
+            status: 'succeeded',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        }),
+        jsonResponse(200, { result_url: 'https://r2.example/result.zip' }),
+        archiveResponse(resultArchive()),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            if (options.method === 'POST' && url.endsWith('/conversions')) {
+                created.push(JSON.parse(options.body));
+            }
+            return responses.shift();
+        },
+        sleep: async () => {},
+    });
+
+    const converted = await client.convert(convertOptions({
+        sourceHash: 'e'.repeat(64),
+        target: { routeId: 'route-1', modelVersion: 'vlm', parserProfileId: 'mineru/v4-batch-vlm-1' },
+    }));
+
+    assert.equal(created[0].model_version, 'vlm');
+    assert.equal(created[1].model_version, 'pipeline');
+    assert.equal(converted.target.modelVersion, 'pipeline');
+    assert.equal(converted.target.parserProfileId, 'mineru/v4-batch-pipeline-1');
+});
+
+test('a job snapshot without a route is accepted for the target it names', async () => {
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            if (options.method === 'PUT') return uploadResponse(200);
+            if (url.endsWith('/result-url')) {
+                return jsonResponse(200, { result_url: 'https://r2.example/result.zip' });
+            }
+            if (url.endsWith('/result.zip')) return archiveResponse(resultArchive());
+            if (url.endsWith('/complete')) return jsonResponse(202, { status: 'processing' });
+            const status = options.method === 'POST' ? 201 : 200;
+            return jsonResponse(status, {
+                job_id: 'job-real',
+                status: options.method === 'GET' ? 'succeeded' : 'awaiting_upload',
+                ...(options.method === 'POST' ? { upload_url: 'https://r2.example/upload' } : {}),
+                model_version: 'pipeline',
+                parser_profile_id: 'mineru/v4-batch-pipeline-1',
+            });
+        },
+        sleep: async () => {},
+    });
+
+    const converted = await client.convert(convertOptions({
+        target: { routeId: 'route-1', modelVersion: 'pipeline', parserProfileId: 'mineru/v4-batch-pipeline-1' },
+    }));
+
+    assert.equal(converted.target.modelVersion, 'pipeline');
+});
+
+test('refuses a job the service parsed with a different model than requested', async () => {
+    const responses = [
+        jsonResponse(201, {
+            job_id: 'job-wrong',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+            model_version: 'vlm',
+            parser_profile_id: 'mineru/v4-batch-vlm-1',
+        }),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async () => responses.shift(),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({
+            target: { routeId: 'route-1', modelVersion: 'pipeline', parserProfileId: 'mineru/v4-batch-pipeline-1' },
+        })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+});
+
+test('a job that names a model and a profile for the other model is refused', async () => {
+    const client = new MkteroConversionClient({
+        fetch: async () => jsonResponse(201, {
+            job_id: 'job-mixed',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+            model_version: 'pipeline',
+            parser_profile_id: 'mineru/v4-batch-vlm-1',
+        }),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({
+            target: { routeId: 'route-1', modelVersion: 'pipeline', parserProfileId: 'mineru/v4-batch-pipeline-1' },
+        })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+});
+
+test('an older service cannot confirm a pipeline target', async () => {
+    const client = new MkteroConversionClient({
+        fetch: async () => jsonResponse(201, {
+            job_id: 'job-old',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+        }),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({
+            target: { routeId: 'route-1', modelVersion: 'pipeline', parserProfileId: 'mineru/v4-batch-pipeline-1' },
+        })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+});
+
+function snapshotJob(status, extra = {}) {
+    return {
+        job_id: 'job-snapshot',
+        status,
+        model_version: 'pipeline',
+        parser_profile_id: 'mineru/v4-batch-pipeline-1',
+        ...extra,
+    };
+}
+
+const PIPELINE_TARGET = Object.freeze({
+    routeId: 'route-snapshot',
+    modelVersion: 'pipeline',
+    parserProfileId: 'mineru/v4-batch-pipeline-1',
+});
+
+test('every poll must repeat the snapshot the job was created under', async () => {
+    const requests = [];
+    const responses = [
+        jsonResponse(201, snapshotJob('awaiting_upload', { upload_url: 'https://r2.example/upload' })),
+        uploadResponse(200),
+        jsonResponse(202, snapshotJob('queued')),
+        // The same job answers with the other model on the next poll.
+        jsonResponse(200, {
+            job_id: 'job-snapshot',
+            status: 'processing',
+            model_version: 'vlm',
+            parser_profile_id: 'mineru/v4-batch-vlm-1',
+        }),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return responses.shift();
+        },
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({ target: PIPELINE_TARGET })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+    assert.equal(requests.filter(request => request.url
+        .endsWith('/api/v1/conversions/job-snapshot')
+        && request.options.method === 'GET').length, 1);
+});
+
+test('a terminal poll that drops the snapshot is refused instead of guessed', async () => {
+    const responses = [
+        jsonResponse(201, snapshotJob('awaiting_upload', { upload_url: 'https://r2.example/upload' })),
+        uploadResponse(200),
+        jsonResponse(202, snapshotJob('queued')),
+        jsonResponse(200, { job_id: 'job-snapshot', status: 'succeeded' }),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async () => responses.shift(),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({ target: PIPELINE_TARGET })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+});
+
+test('a terminal poll that names a mismatched profile is refused', async () => {
+    const responses = [
+        jsonResponse(201, snapshotJob('awaiting_upload', { upload_url: 'https://r2.example/upload' })),
+        uploadResponse(200),
+        jsonResponse(202, snapshotJob('queued')),
+        jsonResponse(200, snapshotJob('succeeded', {
+            parser_profile_id: 'mineru/v4-batch-vlm-1',
+        })),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async () => responses.shift(),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({ target: PIPELINE_TARGET })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+});
+
+test('malformed snapshot fields on a poll are refused, not read as an older service', async () => {
+    for (const extra of [
+        { model_version: '', parser_profile_id: 'mineru/v4-batch-pipeline-1' },
+        { model_version: 'pipeline', parser_profile_id: 'mineru/unknown-1' },
+        { model_version: 'pipeline', parser_profile_id: '' },
+    ]) {
+        const responses = [
+            jsonResponse(201, snapshotJob('awaiting_upload', { upload_url: 'https://r2.example/upload' })),
+            uploadResponse(200),
+            jsonResponse(202, snapshotJob('queued')),
+            jsonResponse(200, snapshotJob('succeeded', extra)),
+        ];
+        const client = new MkteroConversionClient({
+            fetch: async () => responses.shift(),
+            sleep: async () => {},
+        });
+        await assert.rejects(
+            () => client.convert(convertOptions({ target: PIPELINE_TARGET })),
+            error => error.code === 'MKTERO_TARGET_MISMATCH'
+        );
+    }
+});
+
+test('present but empty or non-string snapshot fields cannot use the legacy VLM exemption', async () => {
+    for (const fields of [
+        { model_version: null, parser_profile_id: null },
+        { model_version: '', parser_profile_id: '' },
+        { model_version: 1, parser_profile_id: 2 },
+    ]) {
+        const requests = [];
+        const client = new MkteroConversionClient({
+            fetch: async (url, options) => {
+                requests.push({ url, options });
+                return jsonResponse(200, {
+                    job_id: 'job-malformed-snapshot', status: 'succeeded', ...fields,
+                });
+            },
+            sleep: async () => {},
+        });
+        await assert.rejects(client.convert(convertOptions({
+            target: { routeId: 'route-vlm', modelVersion: 'vlm', parserProfileId: 'mineru/v4-batch-vlm-1' },
+        })), error => error.code === 'MKTERO_TARGET_MISMATCH');
+        assert.equal(requests.some(request => request.url.endsWith('/result-url')), false);
+    }
+});
+
+test('a create answer that names a different model is refused', async () => {
+    // Create is asked for one target. A service that answers with another model
+    // has ignored that request; the result would then be filed under the wrong
+    // identity, so it is refused rather than silently relabelled. A route that
+    // really moved is reported as 409 and re-resolved instead.
+    const client = new MkteroConversionClient({
+        fetch: async () => jsonResponse(201, {
+            job_id: 'job-other',
+            status: 'succeeded',
+            model_version: 'vlm',
+            parser_profile_id: 'mineru/v4-batch-vlm-1',
+        }),
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({
+            sourceHash: 'f'.repeat(64),
+            target: PIPELINE_TARGET,
+        })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+});
+
+test('an idempotent replay of an accepted job keeps that job snapshot and cancels nothing', async () => {
+    // The service fingerprints the whole create request, target included, so a
+    // replayed job was accepted for exactly the target being asked for again.
+    // The client must accept that report, label the download with it, and not
+    // send a DELETE for work the service still considers usable.
+    const requests = [];
+    const replayedJob = {
+        job_id: 'job-replay',
+        status: 'succeeded',
+        model_version: 'pipeline',
+        parser_profile_id: 'mineru/v4-batch-pipeline-1',
+    };
+    const responses = [
+        jsonResponse(201, replayedJob),
+        jsonResponse(200, { result_url: 'https://r2.example/result.zip' }),
+        archiveResponse(resultArchive()),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return responses.shift();
+        },
+        sleep: async () => {},
+    });
+
+    const converted = await client.convert(convertOptions({
+        sourceHash: 'a'.repeat(64),
+        target: PIPELINE_TARGET,
+        idempotencyKey: 'replay-key-1',
+    }));
+
+    assert.equal(converted.target.modelVersion, 'pipeline');
+    assert.equal(converted.target.parserProfileId, 'mineru/v4-batch-pipeline-1');
+    assert.equal(requests[0].options.headers['Idempotency-Key'], 'replay-key-1');
+    assert.equal(requests.filter(request => request.options.method === 'DELETE').length, 0);
+    assert.equal(requests.filter(request => request.options.method === 'PUT').length, 0,
+        'an accepted job already holds the PDF');
+});
+
+test('a job whose snapshot contradicts the requested target is cancelled, not relabelled', async () => {
+    // The only way a create answer can disagree is a service that ignored the
+    // requested target. Caching its ZIP under the requested model would file a
+    // pipeline result under the vlm identity, so the job is refused and its
+    // own record released.
+    const requests = [];
+    const responses = [
+        jsonResponse(201, {
+            job_id: 'job-contradict',
+            status: 'awaiting_upload',
+            upload_url: 'https://r2.example/upload',
+            model_version: 'vlm',
+            parser_profile_id: 'mineru/v4-batch-vlm-1',
+        }),
+        jsonResponse(200, { job_id: 'job-contradict', status: 'failed' }),
+    ];
+    const client = new MkteroConversionClient({
+        fetch: async (url, options) => {
+            requests.push({ url, options });
+            return responses.shift();
+        },
+        sleep: async () => {},
+    });
+
+    await assert.rejects(
+        () => client.convert(convertOptions({
+            sourceHash: 'b'.repeat(64),
+            target: PIPELINE_TARGET,
+        })),
+        error => error.code === 'MKTERO_TARGET_MISMATCH'
+    );
+    assert.equal(requests.filter(request => request.options.method === 'PUT').length, 0);
+    // Cancelling is best effort and runs after the caller already failed.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (requests.some(request => request.options.method === 'DELETE')) break;
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(requests.filter(request => request.options.method === 'DELETE').length, 1);
+});

@@ -7,6 +7,7 @@ This page lists what Mktero sends, where it keeps data, and what local cleanup r
 ## At a glance
 
 - A cache miss sends the complete PDF to your account's Mktero service, or to your selected MinerU or Mistral converter instead.
+- Before reusing a hosted cache, Mktero sends the PDF SHA-256, byte size, and content type to confirm the applicable parser profile. This lookup sends no PDF bytes and uses no conversion allowance.
 - Local llm-for-zotero imports leave the source unchanged. Import and reopening upload neither the PDF nor the result.
 - Credentials, tokens, caches, corrections, translations, reading positions, and local highlights are unencrypted in the active Zotero profile. Mktero does not sync them.
 - PDF annotations, Zotero notes, and snapshots sync according to Zotero settings. Mktero does not send notes anywhere.
@@ -22,8 +23,8 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
-| Complete PDF on a cache miss, with the default Mktero converter | The Mktero service for the signed-in account | Not by Mktero |
-| Complete PDF on a cache miss, after you switch to your own converter | Selected MinerU cloud, the configured local MinerU service, or Mistral | Not by Mktero |
+| PDF SHA-256, byte size, and content type before reusing a hosted cache; the complete PDF when a conversion runs | The Mktero service for the signed-in account; the service stores an account-linked PDF identity and parser route | Not by Mktero |
+| Complete PDF on a cache miss, after you switch to your own converter | Selected MinerU cloud, the configured local MinerU service, or Mistral; a direct MinerU cloud request also names the parsing model fixed when that operation started | Not by Mktero |
 | Email and password when signing in or registering, and the registration verification code | The Mktero service you select; the password and code are not saved | Not by Mktero |
 | Your account profile, conversion-activity counts and daily quota balance when supported, requested with the access token while the account pane is open; quota also refreshes after hosted requests settle or when you manually resume | The Mktero service you select | Not by Mktero |
 | Account-linked hosted conversion admissions, successful documents, pages, result reuse and quota-block aggregates | The Mktero service; used for quota enforcement, service operation and capacity planning | Not by Mktero |
@@ -41,7 +42,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
-| MinerU cloud token, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
+| MinerU cloud token, the MinerU cloud parsing model, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
 | Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
 | Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted; see [local retention](#local-retention) | No |
 | Stored MinerU results from Mktero, MinerU cloud, or a local MinerU service (the result's Markdown, content list, layout or middle JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted; see [local retention](#local-retention) | No |
@@ -50,6 +51,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | Markdown availability index: library ID, item key, attachment key, cache key, parser profile, and a non-expiring readiness marker | Active Zotero profile, unencrypted | No |
 | Cache ownership index: library ID, local attachment ID/key, PDF hash and byte length, resource keys, first-confirmed-absence time and whether attachment-private resources were cleaned; no titles, paths, PDF bytes or OCR text | Active Zotero profile, unencrypted, in `mktero-cache-owners/v1`; not sent to any service | No |
 | Local Markdown highlights not yet in the PDF, and the Zotero annotation keys of the page parts of a cross-page highlight | Active Zotero profile, unencrypted | No |
+| Pending MinerU cloud task record: a cache key derived from the PDF content hash and the parser profile, the batch ID, the task data ID, the submission time, and the parsing model fixed when that operation started; no PDF bytes or result | Active Zotero profile, unencrypted, in `mktero-conversions/v1`; not sent to any service | No |
 | Reader layout preferences: which columns are open, their widths, and the selected left segment | Active Zotero profile, unencrypted | No |
 | Obsidian export index: library ID, item key, note folder name, and content hash; the vault path preference | Active Zotero profile, unencrypted | No |
 
@@ -75,6 +77,14 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 Signing in for the default conversion sends the email and password only at sign-in. Registration also emails a verification code.
 
 The account card shows your profile and conversion-activity counters. Its requests and the service's account-linked usage records are listed in the [service data table](#sent-to-services); pending local batch lists are not uploaded.
+
+## Hosted model selection and cached reading
+
+The hosted service stores the PDF identity and parser route for the signed-in account so the same PDF follows a stable model selection. The lookup sends no title, path, PDF bytes, annotations, or notes. A changed model or parser profile makes the next open seek a matching result; if none is available, conversion may upload the complete PDF again. New results follow the normal conversion-quota rules. A retained result for the same model can be reused when that model is selected again.
+
+A converted paper can be read from retained local content while offline, but the current hosted model cannot be confirmed offline. Authentication failures and invalid or inconsistent target metadata are reported instead of silently using an unverified result. Explicit local imports keep their independent offline behavior.
+
+This route belongs to the Mktero service alone. With your own MinerU cloud key, the `Parsing model` choice is a local preference that names a model in your own MinerU requests; each operation fixes it when it starts, so a later change only affects later operations. It is never sent to the Mktero service and does not change which hosted model a PDF follows. A pending MinerU cloud task record stays in your Zotero profile and is not uploaded.
 
 ## References and translation
 

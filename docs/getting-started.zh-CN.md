@@ -32,6 +32,7 @@
 3. 若要自备转换服务，改选 [MinerU](https://mineru.net/) 或 [Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1)。完整 PDF 会改发到那里，不再发到 Mktero。
 
 MinerU 云端和 [Mistral](https://console.mistral.ai/api-keys/) 需要你自己的 API key，也可以选择自部署的 MinerU 4.0 服务，其密钥可选。
+直连 MinerU 云端时，`解析模型`可选 `VLM`（默认）或 `Pipeline`；每次操作开始时即固定，之后的修改只影响后续操作；Mktero 托管转换和本地 MinerU 服务都不读取它。
 转换方式见[选择转换服务](./conversion.zh-CN.md#选择转换服务)，MinerU 认证问题见[配置](./configuration.zh-CN.md)。
 
 AI 功能和阅读选项均可选。AI 翻译使用你自己的厂商密钥；每个厂商分别保存模型、密钥和相关设置。
@@ -42,7 +43,7 @@ AI 功能和阅读选项均可选。AI 翻译使用你自己的厂商密钥；�
 ## 阅读第一篇 PDF
 
 1. 在 Zotero 中打开 PDF，点击阅读器工具栏的 Mktero 文件图标。也可以右键 PDF 附件或其父文献条目，选择`使用 Mktero 阅读 Markdown`。
-2. 在临时 Mktero 标签页中查看上传、转换和下载进度。存在有效缓存时会跳过远程转换。
+2. 在临时 Mktero 标签页中查看上传、转换和下载进度。存在有效缓存时会跳过远程转换。托管转换会先用 PDF 哈希、大小和内容类型轻量查询当前解析配置，不发送 PDF 字节，也不占转换额度。模型变化后可能需要匹配的转换和再次上传。离线可以阅读保留的本地内容，但无法确认当前模型。
 3. 使用目录、`Cmd/Ctrl+F`、引用和图表预览、来源链接、`注释`分段和笔记栏阅读文档。
 
 Mktero 标签页只在当前会话中保留。关闭标签页、取消任务、恢复阅读位置和强制重新解析的规则，见[标签页、取消与重新解析](./conversion.zh-CN.md#标签页取消与重新解析)。

@@ -16,6 +16,7 @@ const JOB_URL = `${API_BASE}/api/v1/conversions/${JOB_ID}`;
 const UPLOAD_URL = 'https://storage.example.test/shared/upload';
 const RESULT_URL = 'https://storage.example.test/shared/result.zip';
 const PDF_TEXT = 'Ovulation limits (±2 days)';
+const RESOLVED_ROUTE_ID = 'route_hosted_sharing';
 let importSerial = 0;
 
 // Bootstrap owns process globals; each scenario gets its own module instance.
@@ -195,14 +196,31 @@ async function createHarness(t) {
         if (method === 'POST' && target === `${API_BASE}/api/v1/me/reading-activity`) {
             return new Response(null, { status: 204 });
         }
+        // The client asks which parse target this PDF follows before creating a
+        // job. Resolve sends only the digest, size, and content type.
+        if (method === 'POST' && target === `${API_BASE}/api/v1/conversions/resolve`) {
+            const body = JSON.parse(options.body);
+            assert.equal(body.sha256, await sha256Hex(pdfData));
+            assert.equal(body.expected_size, pdfData.byteLength);
+            assert.equal(body.content_type, 'application/pdf');
+            return jsonResponse(200, {
+                route_id: RESOLVED_ROUTE_ID,
+                model_version: 'vlm',
+                parser_profile_id: 'mineru/v4-batch-vlm-1',
+            });
+        }
         if (method === 'POST' && target === `${API_BASE}/api/v1/conversions`) {
             const body = JSON.parse(options.body);
             assert.equal(body.size, pdfData.byteLength);
             assert.equal(body.sha256, await sha256Hex(pdfData));
             assert.equal(body.content_type, 'application/pdf');
+            assert.equal(body.route_id, RESOLVED_ROUTE_ID);
+            assert.equal(body.model_version, 'vlm');
+            assert.equal(body.parser_profile_id, 'mineru/v4-batch-vlm-1');
             return jsonResponse(201, {
                 job_id: JOB_ID, status: 'awaiting_upload', progress: 0,
                 upload_url: UPLOAD_URL, upload_method: 'PUT',
+                model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-vlm-1',
             });
         }
         if (method === 'PUT' && target === UPLOAD_URL) {
@@ -216,7 +234,10 @@ async function createHarness(t) {
         if (method === 'GET' && target === JOB_URL) {
             polling = true;
             await waitForGate(gate.promise, options.signal);
-            return jsonResponse(200, { job_id: JOB_ID, status: 'succeeded', progress: 100 });
+            return jsonResponse(200, {
+                job_id: JOB_ID, status: 'succeeded', progress: 100,
+                model_version: 'vlm', parser_profile_id: 'mineru/v4-batch-vlm-1',
+            });
         }
         if (method === 'GET' && target === `${JOB_URL}/result-url`) {
             return jsonResponse(200, { result_url: RESULT_URL, method: 'GET' });

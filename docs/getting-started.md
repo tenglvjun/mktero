@@ -43,6 +43,10 @@ prereleases are not offered as automatic updates.
 
 MinerU cloud and [Mistral](https://console.mistral.ai/api-keys/) need your own API
 key. You can also choose a self-hosted MinerU 4.0 service, whose key is optional.
+For direct MinerU cloud conversion, `Parsing model` chooses `VLM` (the default) or
+`Pipeline`; each operation fixes it when it starts, so a change applies to later
+operations only, and neither the hosted Mktero service nor a self-hosted MinerU
+service follows it.
 See [Choose a converter](./conversion.md#choose-a-converter) for the alternatives
 and [Configuration](./configuration.md) for MinerU authentication help.
 
@@ -61,7 +65,11 @@ limits. Check [Page and size limits](./conversion.md#page-and-size-limits) and
    Alternatively, right-click a PDF attachment or its parent library item and
    choose `Read as Markdown with Mktero`.
 2. Follow upload, conversion, and download progress in the temporary Mktero tab.
-   A valid cache skips remote conversion.
+   A valid cache skips remote conversion. For the hosted converter, a lightweight
+   lookup first checks the PDF hash, size, and content type against the current
+   parser profile; it sends no PDF bytes and uses no conversion allowance. A
+   changed model may require a matching conversion and another PDF upload.
+   Retained content can be read offline, without confirming the current model.
 3. Read with the outline, `Cmd/Ctrl+F`, citation and figure/table previews,
    source links, the `Annotations` segment, and the Notes column.
 

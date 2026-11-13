@@ -177,7 +177,7 @@ test('dispose removes account and conversion observers and prevents notification
     const { zotero, prefs } = createZotero();
     let calls = 0;
     const hosted = createHostedConversionScope({ zotero, onChange: () => calls++ });
-    assert.equal(prefs.registrations.size, 6);
+    assert.equal(prefs.registrations.size, 7);
 
     hosted.dispose();
     hosted.dispose();

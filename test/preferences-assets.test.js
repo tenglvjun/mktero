@@ -35,6 +35,10 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     ]);
 
     assert.match(prefs, /pref\("extensions\.mktero\.mineruApiKey", ""\)/);
+    assert.match(
+        prefs,
+        /pref\("extensions\.mktero\.mineruCloudModelVersion", "vlm"\)/
+    );
     assert.match(prefs, /pref\("extensions\.mktero\.conversionProvider", "mktero"\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.mistralApiKey", ""\)/);
     assert.match(prefs, /pref\("extensions\.mktero\.cacheEnabled", true\)/);
@@ -101,6 +105,18 @@ test('ships conversion, AI, cache preferences, and localized Markdown UI assets'
     assert.match(pane, /id="mktero-conversion-provider"[\s\S]*?<html:option value="mktero"/);
     assert.match(pane, /<html:option value="mineru" data-i18n="preferences\.conversion\.provider\.mineru"><\/html:option>/);
     assert.match(pane, /<html:option value="mistral" data-i18n="preferences\.conversion\.provider\.mistral"><\/html:option>/);
+    assert.match(pane, /id="mktero-mineru-cloud-model-row"[\s\S]*?hidden="hidden"/);
+    assert.match(
+        pane,
+        /id="mktero-mineru-cloud-model"[\s\S]*?preference="extensions\.mktero\.mineruCloudModelVersion"[\s\S]*?aria-describedby="mktero-mineru-cloud-model-help"/
+    );
+    assert.match(pane, /<html:option value="vlm" data-i18n="preferences\.conversion\.mineruCloudModel\.vlm"><\/html:option>/);
+    assert.match(pane, /<html:option value="pipeline" data-i18n="preferences\.conversion\.mineruCloudModel\.pipeline"><\/html:option>/);
+    assert.match(pane, /data-i18n="preferences\.conversion\.mineruCloudModelLabel"/);
+    assert.match(pane, /data-i18n="preferences\.conversion\.mineruCloudModelHelp"/);
+    assert.match(script, /getMinerUCloudModelVersion/);
+    assert.match(script, /normalizeMinerUCloudModelVersion/);
+    assert.match(script, /MINERU_CLOUD_MODEL_VERSION_PREF/);
     assert.equal((pane.match(/id="mktero-api-key"/g) || []).length, 1);
     assert.doesNotMatch(pane, /mktero-mineru-api-key|mktero-mistral-api-key/);
     assert.match(pane, /data-i18n="preferences\.conversion\.apiKeyLabel"/);
@@ -254,6 +270,7 @@ test('ships responsive settings cards and a cache switch', async () => {
     assert.match(styles, /#mktero-ai-moonshot-endpoint-row\[hidden\]/);
     assert.match(styles, /#mktero-ai-minimax-endpoint-row\[hidden\]/);
     assert.match(styles, /#mktero-ai-alibaba-endpoint-row\[hidden\]/);
+    assert.match(styles, /#mktero-mineru-cloud-model-row\[hidden\]/);
     assert.match(styles, /#mktero-mineru-local-base-row\[hidden\]/);
     assert.match(styles, /#mktero-api-key-row\[hidden\]/);
     assert.doesNotMatch(
@@ -343,13 +360,13 @@ test('keeps preference fields in an aligned responsive grid layout', async () =>
         (pane.match(
             /class="mktero-setting-row mktero-(?:field|reader-font)-row[^\"]*"/g
         ) || []).length,
-        20
+        21
     );
     assert.equal(
         (pane.match(
             /<html:div class="mktero-field-control(?: [^"]+)?">/g
         ) || []).length,
-        15
+        16
     );
 });
 

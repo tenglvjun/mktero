@@ -19,6 +19,28 @@ Choosing MinerU or Mistral sends the PDF to that service instead of Mktero. [Imp
 
 See [Configuration](./configuration.md) for settings and [Privacy and data handling](./privacy.md) for sending, storage, and sync rules.
 
+## Hosted parser models
+
+The operator can select MinerU-VLM or MinerU Pipeline independently for each MinerU account managed by the hosted service. This is a server-side decision: the extension has no hosted model setting, and the direct MinerU cloud preference below does not reach it. A PDF follows a stable parser route; newly created jobs use the route's current model, while existing jobs retain their saved model.
+
+Before using a hosted cache, Mktero looks up the applicable parser profile with only the PDF SHA-256, byte size, and content type. The lookup uploads no PDF and uses no conversion allowance. If the model changes, the next open looks for a result with that model. It may need conversion and another PDF upload; new results follow normal quota accounting. Switching back can reuse a retained result for the previous model.
+
+Retained content can be read offline, but offline reading cannot verify the current hosted model. Authentication failures and invalid or inconsistent target metadata are reported. Explicit local imports keep working offline without this hosted lookup.
+
+Corrections belong to the parser identity that produced the reading. A hosted `Pipeline` reading never opens a revision saved for `VLM`, and a route that switches back to `VLM` still finds the `VLM` corrections, including ones recorded under an older `VLM` parser profile.
+
+## MinerU cloud parsing model
+
+With your own MinerU cloud key, `Settings -> Mktero` also offers `Parsing model`: `VLM` (the default) or `Pipeline`. It applies to direct MinerU cloud operations only. The hosted Mktero service chooses its model on the server, and a self-hosted MinerU service keeps its own fixed request, so neither follows this setting.
+
+Each operation fixes the MinerU cloud model when it starts: before the local-import check and before Mktero loads the PDF. Changing `Parsing model` afterwards therefore applies to later operations only. If the same item already has an active run, opening it again joins that run, so a new setting neither moves nor cancels work already in progress. An accepted task keeps the model it was sent with: it is never polled or resumed as the other model, and becomes resumable again when you switch back. Opening the same PDF under the other model starts a separate task for that model. A pending task recorded before this choice existed is a `VLM` task, and a stored preference value this build does not recognize also reads as `VLM`.
+
+The two models keep separate local caches and separate pending task records. Switching the setting therefore neither overwrites nor deletes the other model's retained result or unfinished task: switching back can reuse a matching retained result, and can still resume a task that is still valid for that model. If a pending task belongs to the other model, Mktero reports the mismatch instead of resuming it under the wrong model or discarding it.
+
+The Markdown cache identity is the parser profile, so a direct MinerU cloud conversion reuses the local Markdown entry that the same model already produced through the hosted Mktero service, and the other way round. The retained raw MinerU results stay separate for the two paths; only the readable Markdown and its figures are shared.
+
+This choice does not carry a reading across models. A result parsed by one model is not presented as the other model's result, and a `Pipeline` reading does not pick up corrections saved on a `VLM` reading. Switching back to `VLM` still finds those earlier `VLM` corrections, including ones saved under an older `VLM` parser profile. Figures belong to the result they were restored for: a matching cached result keeps them, a result that still needs them is restored from the local PDF for whichever model is open, and they are never carried across models as a correction.
+
 ## Page and size limits
 
 The selected converter controls file-size, page-count, quota, and service-availability limits. Check the current [MinerU API documentation](https://mineru.net/apiManage/docs) or [Mistral OCR documentation](https://docs.mistral.ai/studio/document-processing/basic_ocr) when using those services.
@@ -56,7 +78,7 @@ For one paper, open its PDF and click the Mktero file icon in Zotero's reader to
 - Closing a tab leaves its active conversion running in the background preparation window. Shutting down the extension cancels active conversion and translation requests.
 - `Reparse PDF` is in the reader's `⋯` menu. It uses the current converter and may upload the PDF; for a selected imported result, only a successful reparse replaces that attachment's import selection.
 
-Identical PDF bytes share an in-progress hosted conversion within one running Mktero instance and account session, even with local caching off. Each attachment keeps its own reading state, title, annotations, corrections, and figure processing. See [shared conversion and cancellation](#shared-conversion-and-cancellation) for cancellation and forced-reparse rules.
+Identical PDF bytes with the same parser profile share an in-progress hosted conversion within one running Mktero instance and account session, even with local caching off. Each attachment keeps its own reading state, title, annotations, corrections, and figure processing. See [shared conversion and cancellation](#shared-conversion-and-cancellation) for cancellation and forced-reparse rules.
 
 ## Import a local llm-for-zotero result
 
@@ -76,10 +98,10 @@ The library item list has a Markdown column:
 
 | Indicator | Meaning |
 | --- | --- |
-| Ready mark | This computer can open readable cached Markdown for the current conversion settings or that PDF's selected imported result |
+| Ready mark | This computer can open readable cached Markdown for the current conversion settings or that PDF's selected imported result. For hosted conversion it reports a retained result only; the model the server currently assigns is known once the PDF is opened |
 | Spinner | The PDF is queued or converting in this session; the spinner is not stored |
 
-The ready marker stays in the Zotero profile, does not change the Zotero item, and does not sync. Clearing the cache turns it off. Changing provider or MinerU service changes which converted cache is ready; a selected imported result keeps its own identity, but its selection record alone is not a ready mark.
+The ready marker stays in the Zotero profile, does not change the Zotero item, and does not sync. Clearing the cache turns it off. Changing provider, MinerU service, or the MinerU cloud parsing model changes which converted cache is ready. For hosted conversion the marker only says a retained result exists; it does not follow the server's current model, which a real open resolves. A selected imported result keeps its own identity, but its selection record alone is not a ready mark.
 
 Hide the column with the item-list column picker if you prefer; Zotero remembers the choice.
 

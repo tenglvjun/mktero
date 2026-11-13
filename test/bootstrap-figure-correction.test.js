@@ -46,10 +46,22 @@ test('preserves a restored figure through bootstrap correction save and reopen',
     const pdfData = new Uint8Array(await fs.readFile(new URL('./fixtures/offline-annotation.pdf', import.meta.url)));
     const pdfPath = path.join(profilePath, 'paper.pdf');
     await fs.writeFile(pdfPath, pdfData);
+    // A signed-in account, so the hosted path really asks the service which
+    // model this PDF follows before it reads the retained copy. Its prefs carry
+    // an unexpired access token, so the resolve reaches fetch instead of
+    // stopping at sign-in. The transport is unreachable below, which is the only
+    // failure that may fall back to a retained entry.
+    const prefs = new Map([
+        ['extensions.mktero.cacheEnabled', true],
+        ['extensions.mktero.accountEmail', 'reader@example.com'],
+        ['extensions.mktero.accountAccessToken', 'test-access-token'],
+        ['extensions.mktero.accountRefreshToken', 'test-refresh-token'],
+        ['extensions.mktero.accountAccessExpiresAtMs', String(Date.now() + 3600_000)],
+    ]);
     const zotero = {
         version: '9.0.6', locale: 'en-US', uiReadyPromise: Promise.resolve(),
         Profile: { dir: profilePath }, Session: { state: { windows: [] } },
-        Prefs: { get: key => key === 'extensions.mktero.cacheEnabled' ? true : '' },
+        Prefs: { get: key => prefs.get(key) ?? '' },
         Items: {
             getAsync: async id => ({ id, libraryID: 1, key: 'PAPERKEY', attachmentFilename: 'paper.pdf', parentItem: null,
                 isPDFAttachment: () => true, getDisplayTitle: () => 'Paper',
@@ -60,8 +72,25 @@ test('preserves a restored figure through bootstrap correction save and reopen',
         Reader: { registerEventListener: (_type, handler) => { toolbarHandler = handler; } },
         getMainWindow: () => owner, debug() {}, logError: error => errors.push(error),
     };
+    // This paper is read from the retained local copy, so the service is
+    // unreachable here. Only the resolve that precedes every hosted cache read
+    // is attempted, and it fails as a transport error: the one failure that may
+    // read a retained entry. An authentication answer would be reported instead.
+    // The account endpoints a signed-in session polls are answered as the real
+    // service does (204), so the transport failure stays attributable to resolve.
+    const networkRequests = [];
+    const offlineFetch = async (url, { method } = {}) => {
+        const verb = String(method || 'GET').toUpperCase();
+        const target = String(url);
+        networkRequests.push(`${verb} ${target}`);
+        if (verb === 'POST' && (target.endsWith('/api/v1/me/client-version')
+            || target.endsWith('/api/v1/me/reading-activity'))) {
+            return new Response(null, { status: 204 });
+        }
+        throw new TypeError('The Mktero service is unreachable in this test');
+    };
     const globals = {
-        Zotero: zotero, IOUtils: ioUtils, PathUtils: pathUtils,
+        Zotero: zotero, IOUtils: ioUtils, PathUtils: pathUtils, fetch: offlineFetch,
         Services: { obs: { addObserver() {}, removeObserver() {} } },
         __MKTERO_MARKDOWN_STYLES__: await fs.readFile(new URL('../ui/markdown.css', import.meta.url), 'utf8'),
     };
@@ -112,6 +141,22 @@ test('preserves a restored figure through bootstrap correction save and reopen',
         .dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
     assert.ok(reopened.querySelector('.mktero-figure-source-button'));
     assert.deepEqual(errors, []);
+    // Both opens were local cache reads, but each one did ask the service which
+    // model the PDF follows first: the retained entry is reached through an
+    // unreachable resolve, not by skipping the lookup. Nothing was converted and
+    // no PDF bytes left the machine.
+    const hostedRequests = networkRequests.filter(request => (
+        request.includes('/api/v1/conversions/')
+    ));
+    assert.ok(hostedRequests.length > 0, 'the hosted path must resolve before a cache read');
+    assert.ok(hostedRequests.every(request => (
+        request === 'POST http://127.0.0.1:8080/api/v1/conversions/resolve'
+    )), `unexpected request: ${hostedRequests.join(', ')}`);
+    assert.ok(networkRequests.every(request => (
+        request.includes('/api/v1/conversions/resolve')
+        || request === 'POST http://127.0.0.1:8080/api/v1/me/client-version'
+        || request === 'POST http://127.0.0.1:8080/api/v1/me/reading-activity'
+    )), `unexpected request: ${networkRequests.join(', ')}`);
 });
 
 async function waitFor(read) {

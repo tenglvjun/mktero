@@ -13,11 +13,14 @@ import {
     getMistralApiKey,
     MINERU_API_KEY_PREF,
     MINERU_CACHE_ENABLED_PREF,
+    MINERU_CLOUD_MODEL_VERSION_PREF,
     MINERU_ENDPOINT_PREF,
     MINERU_LOCAL_API_BASE_PREF,
     MINERU_LOCAL_API_KEY_PREF,
     MISTRAL_API_KEY_PREF,
+    getMinerUCloudModelVersion,
     normalizeConversionProvider,
+    normalizeMinerUCloudModelVersion,
     normalizeMinerUEndpoint,
     observeConversionProfile,
 } from '../src/config/conversion-preferences.js';
@@ -78,15 +81,47 @@ test('refreshes Markdown readiness when the conversion profile changes', () => {
     assert.deepEqual(observers.map(observer => observer.pref), [
         CONVERSION_PROVIDER_PREF,
         MINERU_ENDPOINT_PREF,
+        MINERU_CLOUD_MODEL_VERSION_PREF,
     ]);
     assert.equal(observers.every(observer => observer.global === true), true);
     observers[0].onChange();
     observers[1].onChange('local');
+    observers[2].onChange('pipeline');
     stop();
 
-    assert.deepEqual(changes, ['changed', 'changed']);
+    assert.deepEqual(changes, ['changed', 'changed', 'changed']);
     assert.equal(observers.every(observer => observer.removed === true), true);
     assert.equal(typeof observeConversionProfile({}, () => {}), 'function');
+});
+
+test('defaults the MinerU cloud model to vlm and ignores unknown values', () => {
+    assert.equal(normalizeMinerUCloudModelVersion('vlm'), 'vlm');
+    assert.equal(normalizeMinerUCloudModelVersion(' pipeline '), 'pipeline');
+    assert.equal(normalizeMinerUCloudModelVersion('hybrid'), 'vlm');
+    assert.equal(normalizeMinerUCloudModelVersion(''), 'vlm');
+    assert.equal(normalizeMinerUCloudModelVersion(undefined), 'vlm');
+});
+
+test('reads the MinerU cloud model from global Zotero preferences', () => {
+    const calls = [];
+    const zotero = {
+        Prefs: {
+            get(key, global) {
+                calls.push({ key, global });
+                return key === MINERU_CLOUD_MODEL_VERSION_PREF ? 'pipeline' : '';
+            },
+        },
+    };
+
+    assert.equal(getMinerUCloudModelVersion(zotero), 'pipeline');
+    assert.deepEqual(calls, [
+        { key: MINERU_CLOUD_MODEL_VERSION_PREF, global: true },
+    ]);
+    assert.equal(
+        getMinerUCloudModelVersion({ Prefs: { get: () => 'unsupported' } }),
+        'vlm'
+    );
+    assert.equal(getMinerUCloudModelVersion({}), 'vlm');
 });
 
 test('reads and trims independent MinerU and Mistral API keys', () => {

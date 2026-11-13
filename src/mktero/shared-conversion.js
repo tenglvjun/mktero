@@ -2,6 +2,7 @@ import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 import { tryCreateMinerUResultArchive } from '../mineru/result-archive.js';
 import { MINERU_REQUEST_PROFILE_ID } from '../mineru/parser-profile.js';
+import { MKTERO_MODEL_VLM as LEGACY_HOSTED_MODEL } from './conversion-target.js';
 
 const NETWORK_STATES = new Set(['running', 'publishing']);
 
@@ -9,6 +10,7 @@ const NETWORK_STATES = new Set(['running', 'publishing']);
 // filenames, cache preferences and credentials. A missing hash never coalesces.
 export function createSharedConversionKey({
     apiBase, scope, requestProfile = MINERU_REQUEST_PROFILE_ID, sourceHash, byteLength,
+    target = null,
 }) {
     if (!/^[a-f\d]{64}$/i.test(sourceHash || '')) return null;
     const base = new URL(apiBase);
@@ -19,9 +21,13 @@ export function createSharedConversionKey({
     if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
         throw new TypeError('A PDF byte length is required');
     }
+    // The resolved model is part of the shared identity so a pipeline run can
+    // never hand its ZIP to a vlm participant. An unresolved target shares
+    // across every model, because the service decides which model it parses.
+    const model = target?.modelVersion || '';
     return JSON.stringify([
         'mktero-shared-v1', base.toString().replace(/\/+$/, ''), String(scope || ''),
-        'mktero', requestProfile, sourceHash.toLowerCase(), byteLength,
+        'mktero', requestProfile, model, sourceHash.toLowerCase(), byteLength,
     ]);
 }
 
@@ -93,8 +99,17 @@ export class SharedMkteroConversion {
         return lease;
     }
 
-    captureCachePublication({ sourceHash, byteLength, signal }) {
-        const key = publicationKey({ sourceHash, byteLength });
+    /**
+     * Claims permission to write a derived entry for this PDF.
+     *
+     * Publication is scoped per model, because the two models write different
+     * files: a pipeline conversion must never stop a vlm conversion of the same
+     * PDF from saving its own Markdown. `model` is the identity the caller
+     * intends to write; null means the model is not known yet, which guards the
+     * shared stream only and is superseded by any per-model generation.
+     */
+    captureCachePublication({ sourceHash, byteLength, signal, model = null }) {
+        const key = publicationKey({ sourceHash, byteLength, model });
         const publication = this._publication(key);
         const generation = publication.latest;
         const permitted = publication.entries.size === 0;
@@ -177,9 +192,33 @@ export class SharedMkteroConversion {
         if (!publication.entries.size && !publication.readers.size) this.publications.delete(key);
     }
 
+    // The raw result belongs to the model the job reports, which may differ from
+    // the target resolved before the job was created (a route that moved). The
+    // owner refreshes that key once the transport answers. Derivation failure
+    // means the archive is not stored at all: writing it under the stale key
+    // would file one model's result under the other.
+    async _publishKey(entry) {
+        if (!entry.resolveResultKey) return entry.resultKey;
+        try {
+            const key = await entry.resolveResultKey(entry.value);
+            if (typeof key === 'string' && key) {
+                entry.resultKey = key;
+                return key;
+            }
+        }
+        catch (error) {
+            if (!entry.controller.signal.aborted) safeCall(this.onCacheError, error);
+        }
+        return null;
+    }
+
     _createEntry(key, options) {
+        // The publication stream must be the one the caller later claims. Both
+        // sides normalise an unresolved model to the legacy vlm identity.
         const sharedPublicationKey = publicationKey({
-            ...options, byteLength: options.fileData.byteLength,
+            sourceHash: options.sourceHash,
+            byteLength: options.fileData.byteLength,
+            model: options.target?.modelVersion || null,
         });
         const publication = this._publication(sharedPublicationKey);
         const entry = {
@@ -187,6 +226,11 @@ export class SharedMkteroConversion {
             controller: this.createController(), state: 'checking', origin: null,
             members: new Set(), pins: new Set(), lastProgress: null,
             resultKey: options.resultKey, value: null, error: null,
+            // Kept on the entry: `options` is released once the result is ready,
+            // but the result key may still need to follow the job's target.
+            resolveResultKey: typeof options.resolveResultKey === 'function'
+                ? options.resolveResultKey
+                : null,
             publicationKey: sharedPublicationKey, publication, cleanup: Promise.resolve(), finished: false,
             scopeCheck: options.assertScope, transportDone: Promise.resolve(), persistence: null,
         };
@@ -240,7 +284,7 @@ export class SharedMkteroConversion {
             deliver: () => {
                 if (!member.active || !member.pending) return;
                 try {
-                    const value = this._copyResult(entry.value);
+                    const value = this._copyResult(entry.value, entry);
                     member.pending = false;
                     resolve(value);
                 }
@@ -336,6 +380,7 @@ export class SharedMkteroConversion {
                     fileName: options.fileName,
                     fileData: options.fileData,
                     sourceHash: options.sourceHash,
+                    target: options.target || null,
                     idempotencyKey: operationID(),
                     includeRawArchive: true,
                     // Cleanup uses its own signal: cancellation of the task must
@@ -382,8 +427,11 @@ export class SharedMkteroConversion {
             try {
                 const value = entry.value;
                 const archive = value?.resultArchive || (value?.rawArchive && this.keepArchive(value.rawArchive));
-                if (archive && this._canPublish(entry)) {
-                    await this.resultStore.put(entry.resultKey, {
+                const resultKey = await this._publishKey(entry);
+                if (archive && resultKey && this._canPublish(entry)) {
+                    // The key already names the model through its request
+                    // profile, so a pipeline archive is unreachable from vlm.
+                    await this.resultStore.put(resultKey, {
                         archive, provider: 'mktero',
                         extractedPages: value.result?.extractedPages,
                         totalPages: value.result?.totalPages,
@@ -399,7 +447,7 @@ export class SharedMkteroConversion {
         return entry.persistence;
     }
 
-    _copyResult(value) {
+    _copyResult(value, entry = null) {
         const { rawArchive, resultArchive, result, ...rest } = value;
         const archive = rawArchive;
         return {
@@ -409,6 +457,9 @@ export class SharedMkteroConversion {
                 ...(result?.extractedPages != null ? { extractedPages: result.extractedPages } : {}),
                 ...(result?.totalPages != null ? { totalPages: result.totalPages } : {}),
             } : cloneValue(result),
+            // Bootstrap derives cache, raw-result, and readiness identities from
+            // this, so it follows the job's own snapshot rather than a guess.
+            ...(entry?.resultKey ? { resultKey: entry.resultKey } : {}),
         };
     }
 
@@ -489,9 +540,18 @@ export class SharedMkteroConversion {
     }
 }
 
-function publicationKey({ sourceHash, byteLength, requestProfile = MINERU_REQUEST_PROFILE_ID }) {
+// One publication stream per PDF and model: the two models write different
+// files, so only a newer generation of the same model may supersede a write.
+// An unresolved target is the legacy identity, which the shipped profile still
+// names vlm, so a null model is guarded under that same stream.
+function publicationKey({
+    sourceHash, byteLength, requestProfile = MINERU_REQUEST_PROFILE_ID, model = null,
+}) {
     if (!/^[a-f\d]{64}$/i.test(sourceHash || '')) return Symbol('unshared-publication');
-    return JSON.stringify(['mktero', requestProfile, sourceHash.toLowerCase(), byteLength]);
+    return JSON.stringify([
+        'mktero', requestProfile, model || LEGACY_HOSTED_MODEL,
+        sourceHash.toLowerCase(), byteLength,
+    ]);
 }
 
 function operationID() {

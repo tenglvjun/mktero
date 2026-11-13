@@ -49,6 +49,7 @@ test('returns a resumable task after upload without polling for results', async 
         batchID: 'batch-1',
         dataID: 'mktero-task-1',
         fileName: 'paper.pdf',
+        modelVersion: 'vlm',
     });
     assert.deepEqual(requests.map(request => request.url), [
         'https://mineru.net/api/v4/file-urls/batch',
@@ -723,4 +724,101 @@ test('uses an injected AbortController when the calling sandbox has none', async
         /API Token is invalid/
     );
     assert.equal(controllerCalls, 1);
+});
+
+test('requests the vlm model by default and never reads a preference', async () => {
+    const bodies = [];
+    const client = new MinerUClient({
+        fetch: async (url, options = {}) => {
+            if (url.endsWith('/file-urls/batch')) {
+                bodies.push(JSON.parse(options.body));
+                return jsonResponse({
+                    code: 0,
+                    data: { batch_id: 'batch-1', file_urls: ['https://upload.example/paper'] },
+                });
+            }
+            return { ok: true, status: 200 };
+        },
+    });
+
+    const task = await client.submit({
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        dataID: 'zotero-42',
+    });
+
+    assert.deepEqual(bodies[0], {
+        files: [{ name: 'paper.pdf', data_id: 'zotero-42', is_ocr: true }],
+        model_version: 'vlm',
+        enable_formula: true,
+        enable_table: true,
+    });
+    assert.equal(task.modelVersion, 'vlm');
+});
+
+test('submits the pipeline model for one operation without changing the vlm request', async () => {
+    const bodies = [];
+    const client = new MinerUClient({
+        fetch: async (url, options = {}) => {
+            if (url.endsWith('/file-urls/batch')) {
+                bodies.push(JSON.parse(options.body));
+                return jsonResponse({
+                    code: 0,
+                    data: {
+                        batch_id: `batch-${bodies.length}`,
+                        file_urls: ['https://upload.example/paper'],
+                    },
+                });
+            }
+            return { ok: true, status: 200 };
+        },
+    });
+    const base = {
+        apiKey: 'secret-token',
+        fileName: 'paper.pdf',
+        fileData: new Uint8Array([1]),
+        dataID: 'zotero-42',
+    };
+
+    const pipeline = await client.submit({ ...base, modelVersion: 'pipeline' });
+    const vlm = await client.submit(base);
+
+    assert.equal(pipeline.modelVersion, 'pipeline');
+    assert.equal(vlm.modelVersion, 'vlm');
+    assert.deepEqual(bodies.map(body => body.model_version), ['pipeline', 'vlm']);
+    assert.deepEqual(bodies[1], {
+        files: [{ name: 'paper.pdf', data_id: 'zotero-42', is_ocr: true }],
+        model_version: 'vlm',
+        enable_formula: true,
+        enable_table: true,
+    });
+    assert.deepEqual(bodies[0], {
+        files: [{ name: 'paper.pdf', data_id: 'zotero-42', is_ocr: true }],
+        model_version: 'pipeline',
+        enable_formula: true,
+        enable_table: true,
+    });
+});
+
+test('rejects an unknown MinerU model before uploading the PDF', async () => {
+    let requested = false;
+    const client = new MinerUClient({
+        fetch: async () => {
+            requested = true;
+            return jsonResponse({ code: 0 });
+        },
+    });
+
+    await assert.rejects(
+        () => client.submit({
+            apiKey: 'secret-token',
+            fileName: 'paper.pdf',
+            fileData: new Uint8Array([1]),
+            dataID: 'zotero-42',
+            modelVersion: 'mineru-html',
+        }),
+        error => error.code === 'MINERU_UNKNOWN_MODEL'
+    );
+    assert.equal(requested, false);
 });

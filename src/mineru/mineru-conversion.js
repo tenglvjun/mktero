@@ -5,6 +5,10 @@ import {
 } from './pending-task-store.js';
 import { prepareMinerUResult } from './document/prepare.js';
 import { extractMinerUResultFromZip } from './zip-markdown.js';
+import {
+    mineruCloudProfilesFor,
+    normalizeMineruModelVersion,
+} from './parser-profile.js';
 import { throwIfFigureAborted as throwIfAborted } from '../figures/figure-async.js';
 import { notifyDiagnosticJob } from '../diagnostics/diagnostic-log.js';
 
@@ -75,12 +79,19 @@ export class MinerUConversion {
         apiKey,
         fileName,
         fileData,
+        // The model is chosen per operation and frozen here: a preference
+        // change mid-conversion must not move an accepted task to another
+        // model, and a resume must be judged against the model it was sent
+        // with.
+        modelVersion = 'vlm',
         cacheEnabled = false,
         forceRefresh = false,
         onProgress = () => {},
         onProgressiveFigures = null,
         signal,
     }) {
+        const model = normalizeMineruModelVersion(modelVersion);
+        const profiles = mineruCloudProfilesFor(model);
         throwIfAborted(signal);
         const warnings = [];
         if (!key) {
@@ -88,6 +99,7 @@ export class MinerUConversion {
                 apiKey,
                 fileName,
                 fileData,
+                modelVersion: model,
                 onProgress,
                 onProgressiveFigures,
                 signal,
@@ -98,14 +110,21 @@ export class MinerUConversion {
             ? event => onProgressiveFigures({ ...event, cacheKey: key })
             : null;
         const reportBounded = (progress, state) => onProgress(Math.min(96, progress), state);
-        const resultKey = cacheEnabled ? await this.#resultKey(fileData, signal) : null;
+        const resultKey = cacheEnabled
+            ? await this.#resultKey(fileData, {
+                modelVersion: model,
+                requestProfile: profiles.requestProfile,
+                signal,
+            })
+            : null;
         const selected = await this.#withKeyOperation(key, async () => {
-            const resumed = await this.#selectResumableTask({ key, forceRefresh });
+            const resumed = await this.#selectResumableTask({ key, forceRefresh, modelVersion: model });
             if (resumed?.origin) return resumed;
             if (!forceRefresh) {
                 const cached = await this.#readCached({
                     key,
                     fileData,
+                    modelVersion: model,
                     cacheEnabled,
                     signal,
                     onProgress: reportBounded,
@@ -123,6 +142,7 @@ export class MinerUConversion {
                 apiKey,
                 fileName,
                 fileData,
+                modelVersion: model,
                 onProgress: reportBounded,
                 signal,
             });
@@ -172,7 +192,7 @@ export class MinerUConversion {
         catch (error) {
             throwIfAborted(signal);
             if (isTerminalTaskError(error)) {
-                await this.#clearCurrentTask(key, selected.task.batchID);
+                await this.#clearCurrentTask(key, selected.task.batchID, model);
             }
             throw error;
         }
@@ -180,6 +200,7 @@ export class MinerUConversion {
             key,
             selected,
             result,
+            modelVersion: model,
             cacheEnabled,
             warnings,
             signal,
@@ -194,6 +215,7 @@ export class MinerUConversion {
         apiKey,
         fileName,
         fileData,
+        modelVersion,
         onProgress,
         onProgressiveFigures,
         signal,
@@ -204,6 +226,7 @@ export class MinerUConversion {
             fileName,
             fileData,
             dataID: this.createDataID(),
+            modelVersion,
             onProgress: progress => onProgress(Math.min(96, progress)),
             signal,
         });
@@ -226,19 +249,27 @@ export class MinerUConversion {
 
     async readCached(options = {}) {
         if (!options?.key) return null;
+        const modelVersion = normalizeMineruModelVersion(options.modelVersion);
         const resultKey = options.cacheEnabled
-            ? await this.#resultKey(options.fileData, options.signal)
+            ? await this.#resultKey(options.fileData, {
+                modelVersion,
+                requestProfile: mineruCloudProfilesFor(modelVersion).requestProfile,
+                signal: options.signal,
+            })
             : null;
         return this.#withKeyOperation(
             options.key,
-            () => this.#readCached({ ...options, resultKey })
+            () => this.#readCached({ ...options, modelVersion, resultKey })
         );
     }
 
-    async #resultKey(fileData, signal) {
+    async #resultKey(fileData, { modelVersion, requestProfile, signal }) {
         if (!this.resultStore || !this.createResultKey) return null;
         try {
-            const resultKey = await this.createResultKey(fileData);
+            const resultKey = await this.createResultKey(fileData, {
+                modelVersion,
+                requestProfile,
+            });
             throwIfAborted(signal);
             return typeof resultKey === 'string' && resultKey ? resultKey : null;
         }
@@ -306,6 +337,7 @@ export class MinerUConversion {
     async #readCached({
         key,
         fileData,
+        modelVersion = 'vlm',
         cacheEnabled = false,
         signal,
         onProgress = () => {},
@@ -327,7 +359,10 @@ export class MinerUConversion {
                     fileData, signal, onProgress, onProgressiveFigures,
                 });
                 if (result.pdfLinksIncomplete !== true) {
-                    await this.#putCache(key, result, signal, reportedWarnings, fileData);
+                    await this.#putCache(key, result, signal, reportedWarnings, {
+                        fileData,
+                        modelVersion,
+                    });
                 }
                 return { result, origin: 'cache', warnings: reportedWarnings };
             }
@@ -339,13 +374,16 @@ export class MinerUConversion {
                 const result = await this.#prepareStoredResult(stored, {
                     fileData, signal, onProgress, onProgressiveFigures,
                 });
-                await this.#putCache(key, result, signal, reportedWarnings, fileData);
+                await this.#putCache(key, result, signal, reportedWarnings, {
+                    fileData,
+                    modelVersion,
+                });
                 return { result, origin: 'cache', warnings: reportedWarnings };
             }
         }
         if (!cached && cacheEnabled && this.createPreviousCacheKeys) {
             try {
-                const previousKeys = await this.createPreviousCacheKeys(fileData);
+                const previousKeys = await this.createPreviousCacheKeys(fileData, { modelVersion });
                 throwIfAborted(signal);
                 for (const previousKey of new Set(previousKeys)) {
                     if (!previousKey || previousKey === key) continue;
@@ -375,7 +413,12 @@ export class MinerUConversion {
                 const result = await this.#prepareStoredResult(stored, {
                     fileData, signal, onProgress, onProgressiveFigures,
                 });
-                if (cacheEnabled) await this.#putCache(key, result, signal, reportedWarnings, migrated ? fileData : null);
+                if (cacheEnabled) {
+                    await this.#putCache(key, result, signal, reportedWarnings, {
+                        fileData: migrated ? fileData : null,
+                        modelVersion,
+                    });
+                }
                 return { result, origin: 'cache', warnings: reportedWarnings };
             }
         }
@@ -399,15 +442,19 @@ export class MinerUConversion {
         const result = await this.#recoverFigures(resolved, { fileData, signal, onProgress });
         throwIfAborted(signal);
         if (cacheEnabled && (migrated || result !== cached || wasPending)) {
-            await this.#putCache(key, result, signal, reportedWarnings, migrated ? fileData : null);
+            await this.#putCache(key, result, signal, reportedWarnings, {
+                fileData: migrated ? fileData : null,
+                modelVersion,
+            });
         }
         return { result, origin: 'cache', warnings: reportedWarnings };
     }
 
     // `fileData` is passed when the entry is new for this profile, so the
     // translations of the same PDF under an earlier profile carry over.
-    async #putCache(key, result, signal, warnings, fileData = null) {
+    async #putCache(key, result, signal, warnings, context) {
         if (!this.cache || !result || result.pdfLinksIncomplete === true) return;
+        const fileData = context?.fileData || null;
         try { await this.cache.put(key, result, { signal }); }
         catch (error) {
             throwIfAborted(signal);
@@ -416,17 +463,19 @@ export class MinerUConversion {
             warnings.push('The Markdown result could not be saved to the local cache.');
             return;
         }
-        if (fileData) await this.#copyEarlierTranslations(key, fileData, signal);
+        if (fileData) {
+            await this.#copyEarlierTranslations(key, fileData, signal, context?.modelVersion);
+        }
     }
 
     // The newest earlier profile entry that has translations gives them to
     // the new entry. Reading a copied translation reuses only the blocks
     // whose source text is unchanged, so this never shows a stale block.
     // Failure is only reported: the conversion result is already saved.
-    async #copyEarlierTranslations(key, fileData, signal) {
+    async #copyEarlierTranslations(key, fileData, signal, modelVersion) {
         if (!this.createTranslationSourceKeys || !this.cache?.copyTranslations || !fileData) return;
         try {
-            const previousKeys = await this.createTranslationSourceKeys(fileData);
+            const previousKeys = await this.createTranslationSourceKeys(fileData, { modelVersion });
             for (const previousKey of new Set(previousKeys)) {
                 throwIfAborted(signal);
                 if (!previousKey || previousKey === key) continue;
@@ -440,13 +489,18 @@ export class MinerUConversion {
         }
     }
 
-    async #selectResumableTask({ key, forceRefresh }) {
+    async #selectResumableTask({ key, forceRefresh, modelVersion }) {
         if (forceRefresh) {
-            return { supersededTask: await this.#tryReadPendingTask(key) };
+            // A forced refresh supersedes only a task of the model it is
+            // refreshing. A task of the other model on this key is refused:
+            // resubmitting here would overwrite a task that model can still
+            // resume.
+            const supersededTask = await this.#readPendingTask(key, modelVersion);
+            return supersededTask ? { supersededTask } : null;
         }
-        const active = this.#currentTask(key);
+        const active = this.#currentTask(key, modelVersion);
         if (active) return { task: active, origin: 'resumed' };
-        const pending = await this.#readPendingTask(key);
+        const pending = await this.#readPendingTask(key, modelVersion);
         if (pending) {
             this.#rememberTask(key, pending);
             return { task: pending, origin: 'resumed' };
@@ -488,6 +542,7 @@ export class MinerUConversion {
         apiKey,
         fileName,
         fileData,
+        modelVersion,
         onProgress,
         signal,
     }) {
@@ -496,14 +551,23 @@ export class MinerUConversion {
             fileName,
             fileData,
             dataID: this.createDataID(),
+            modelVersion,
             onProgress,
             signal,
         });
+        // The task records the model this operation froze. A client that
+        // answers with another model is a bug, and mislabelling the pending
+        // record would file its result under the wrong identity.
+        if (submitted?.modelVersion !== undefined
+            && submitted.modelVersion !== modelVersion) {
+            throw submittedModelMismatchError(submitted.modelVersion, modelVersion);
+        }
         const task = {
             batchID: submitted.batchID,
             dataID: submitted.dataID,
             fileName: submitted.fileName,
             uploadedAt: this.now(),
+            modelVersion,
         };
         this.#rememberTask(key, task);
         try {
@@ -515,16 +579,25 @@ export class MinerUConversion {
         return task;
     }
 
-    async #commitResult({ key, selected, result, cacheEnabled, warnings, signal, fileData }) {
+    async #commitResult({
+        key,
+        selected,
+        result,
+        modelVersion,
+        cacheEnabled,
+        warnings,
+        signal,
+        fileData,
+    }) {
         await this.#withKeyOperation(key, async () => {
             throwIfAborted(signal);
-            if (this.#currentTask(key)?.batchID !== selected.task.batchID) {
+            if (this.#currentTask(key, modelVersion)?.batchID !== selected.task.batchID) {
                 return;
             }
             if (this.cache && cacheEnabled && result.pdfLinksIncomplete !== true) {
                 try {
                     await this.cache.put(key, result, { signal });
-                    await this.#copyEarlierTranslations(key, fileData, signal);
+                    await this.#copyEarlierTranslations(key, fileData, signal, modelVersion);
                 }
                 catch (error) {
                     throwIfAborted(signal);
@@ -543,30 +616,31 @@ export class MinerUConversion {
                 );
             }
             await this.#deletePendingTask(key, selected.task.batchID);
-            if (this.#currentTask(key)?.batchID === selected.task.batchID) {
-                this.currentTasks.delete(key);
+            if (this.#currentTask(key, modelVersion)?.batchID === selected.task.batchID) {
+                this.currentTasks.delete(taskKey(key, modelVersion));
             }
         });
     }
 
-    async #readPendingTask(key) {
+    // A pending record belongs to the model that submitted it. Resuming it
+    // under another model would file its result under the wrong identity, so
+    // the mismatch is reported instead of silently resubmitting or deleting
+    // a task the other model can still resume.
+    async #readPendingTask(key, modelVersion) {
+        let pending;
         try {
-            return await this.pendingTasks.get(key);
+            pending = await this.pendingTasks.get(key);
         }
         catch (error) {
             this.#reportError(error);
             throw error;
         }
-    }
-
-    async #tryReadPendingTask(key) {
-        try {
-            return await this.pendingTasks.get(key);
+        if (!pending) return null;
+        const pendingModel = normalizeMineruModelVersion(pending.modelVersion);
+        if (pendingModel !== modelVersion) {
+            throw pendingModelMismatchError(pendingModel, modelVersion);
         }
-        catch (error) {
-            this.#reportError(error);
-            return null;
-        }
+        return pending;
     }
 
     async #deletePendingTask(key, batchID) {
@@ -579,23 +653,26 @@ export class MinerUConversion {
         }
     }
 
-    async #clearCurrentTask(key, batchID) {
+    async #clearCurrentTask(key, batchID, modelVersion) {
         await this.#withKeyOperation(key, async () => {
-            if (this.#currentTask(key)?.batchID !== batchID) return;
+            if (this.#currentTask(key, modelVersion)?.batchID !== batchID) return;
             await this.#deletePendingTask(key, batchID);
-            if (this.#currentTask(key)?.batchID === batchID) {
-                this.currentTasks.delete(key);
+            if (this.#currentTask(key, modelVersion)?.batchID === batchID) {
+                this.currentTasks.delete(taskKey(key, modelVersion));
             }
         });
     }
 
-    #currentTask(key) {
+    #currentTask(key, modelVersion) {
         this.#pruneCurrentTasks();
-        return this.currentTasks.get(key) || null;
+        return this.currentTasks.get(taskKey(key, modelVersion)) || null;
     }
 
     #rememberTask(key, task) {
-        this.currentTasks.set(key, task);
+        this.currentTasks.set(
+            taskKey(key, normalizeMineruModelVersion(task.modelVersion)),
+            task
+        );
         this.#pruneCurrentTasks();
     }
 
@@ -653,6 +730,34 @@ export function createTaskDataID(secureRandom = globalThis.crypto) {
         return `mktero-${random}`;
     }
     throw new Error('Secure random number generation is unavailable');
+}
+
+// In-memory tasks are held per cache key and per model, so switching the
+// model and switching back finds the task it left running.
+function taskKey(key, modelVersion) {
+    return `${modelVersion}\u0000${key}`;
+}
+
+function pendingModelMismatchError(pendingModel, requestedModel) {
+    const error = new Error(
+        `A pending MinerU task was submitted with the ${pendingModel} model, `
+        + `not ${requestedModel}`
+    );
+    error.code = 'MINERU_PENDING_MODEL_MISMATCH';
+    error.pendingModelVersion = pendingModel;
+    error.modelVersion = requestedModel;
+    return error;
+}
+
+function submittedModelMismatchError(submittedModel, requestedModel) {
+    const error = new Error(
+        `The MinerU client submitted the ${submittedModel} model, `
+        + `not ${requestedModel}`
+    );
+    error.code = 'MINERU_SUBMIT_MODEL_MISMATCH';
+    error.submittedModelVersion = submittedModel;
+    error.modelVersion = requestedModel;
+    return error;
 }
 
 function isTerminalTaskError(error) {

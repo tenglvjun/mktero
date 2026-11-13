@@ -22,18 +22,19 @@ export function createMinerUConversionFacade({
         throw new TypeError('Local MinerU credential providers are required');
     }
 
-    const isLocal = () => getEndpoint() === MINERU_ENDPOINT_LOCAL;
+    const isLocal = options => (options?.endpoint ?? getEndpoint()) === MINERU_ENDPOINT_LOCAL;
     return {
         convert(options) {
-            if (!isLocal()) return cloud.convert(options);
+            if (!isLocal(options)) return cloud.convert(options);
             return local.convert({
                 ...options,
-                apiKey: getLocalApiKey(),
-                apiBase: getLocalApiBase(),
+                apiKey: options?.endpoint === MINERU_ENDPOINT_LOCAL
+                    ? options.apiKey : getLocalApiKey(),
+                apiBase: options?.apiBase ?? getLocalApiBase(),
             });
         },
         readCached(options) {
-            if (!isLocal()) return cloud.readCached(options);
+            if (!isLocal(options)) return cloud.readCached(options);
             return local.readCached(options);
         },
     };

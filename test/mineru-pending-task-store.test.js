@@ -39,9 +39,11 @@ test('restores an uploaded MinerU task across store instances', async t => {
 
     await new MinerUPendingTaskStore(options).put(CONVERSION_KEY, task);
 
+    // A record written without a model is a vlm task: that was the only cloud
+    // model before model selection existed.
     assert.deepEqual(
         await new MinerUPendingTaskStore(options).get(CONVERSION_KEY),
-        task
+        { ...task, modelVersion: 'vlm' }
     );
 });
 
@@ -63,6 +65,101 @@ test('does not delete a newer task when an older task finishes', async t => {
     assert.equal(await store.delete(CONVERSION_KEY, 'batch-old'), false);
     assert.equal(await store.delete(CONVERSION_KEY, 'batch-new'), true);
     assert.equal(await store.get(CONVERSION_KEY), null);
+});
+
+test('stores and restores the model a pending task was submitted with', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-pending-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const options = {
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: createNodePathUtils(),
+        now: () => 1_700_000_000_000,
+    };
+    const task = {
+        batchID: 'batch-pipeline',
+        dataID: 'mktero-task-pipeline',
+        uploadedAt: 1_700_000_000_000,
+        modelVersion: 'pipeline',
+    };
+
+    await new MinerUPendingTaskStore(options).put(CONVERSION_KEY, task);
+
+    assert.deepEqual(
+        await new MinerUPendingTaskStore(options).get(CONVERSION_KEY),
+        task
+    );
+});
+
+test('reads a stored record without a model as the vlm task it was', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-pending-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const tasksPath = path.join(rootPath, 'tasks');
+    await mkdir(tasksPath, { recursive: true });
+    // Written by a build that had only one cloud model.
+    await writeFile(
+        path.join(tasksPath, `${CONVERSION_KEY}.json`),
+        JSON.stringify({
+            schemaVersion: 1,
+            conversionKey: CONVERSION_KEY,
+            batchID: 'batch-legacy',
+            dataID: 'mktero-task-legacy',
+            uploadedAt: 1_700_000_000_000,
+        })
+    );
+    const store = new MinerUPendingTaskStore({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: createNodePathUtils(),
+        now: () => 1_700_000_000_000,
+    });
+
+    assert.deepEqual(await store.get(CONVERSION_KEY), {
+        batchID: 'batch-legacy',
+        dataID: 'mktero-task-legacy',
+        uploadedAt: 1_700_000_000_000,
+        modelVersion: 'vlm',
+    });
+});
+
+test('rejects an unknown model instead of guessing one', async t => {
+    const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-pending-'));
+    t.after(() => rm(rootPath, { recursive: true, force: true }));
+    const tasksPath = path.join(rootPath, 'tasks');
+    await mkdir(tasksPath, { recursive: true });
+    await writeFile(
+        path.join(tasksPath, `${CONVERSION_KEY}.json`),
+        JSON.stringify({
+            schemaVersion: 1,
+            conversionKey: CONVERSION_KEY,
+            batchID: 'batch-unknown',
+            dataID: 'mktero-task-unknown',
+            uploadedAt: 1_700_000_000_000,
+            modelVersion: 'mineru-html',
+        })
+    );
+    const store = new MinerUPendingTaskStore({
+        rootPath,
+        ioUtils: createNodeIOUtils(),
+        pathUtils: createNodePathUtils(),
+        now: () => 1_700_000_000_000,
+    });
+
+    // The record is unusable, so it is dropped rather than resumed as vlm.
+    assert.equal(await store.get(CONVERSION_KEY), null);
+    assert.equal(
+        await pathExists(path.join(tasksPath, `${CONVERSION_KEY}.json`)),
+        false
+    );
+    await assert.rejects(
+        () => store.put(CONVERSION_KEY, {
+            batchID: 'batch-unknown',
+            dataID: 'mktero-task-unknown',
+            uploadedAt: 1_700_000_000_000,
+            modelVersion: 'mineru-html',
+        }),
+        /The MinerU model must be one of/
+    );
 });
 
 test('removes an expired task when it is read', async t => {

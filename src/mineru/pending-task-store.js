@@ -1,3 +1,5 @@
+import { normalizeMineruModelVersion } from './parser-profile.js';
+
 const TASK_SCHEMA_VERSION = 1;
 export const DEFAULT_PENDING_TASK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PENDING_TASK_MAX_ENTRIES = 256;
@@ -60,6 +62,11 @@ export class MinerUPendingTaskStore {
             batchID: task?.batchID,
             dataID: task?.dataID,
             uploadedAt: task?.uploadedAt,
+            // A record written before model selection has no model; it is a
+            // vlm task, which is what the only cloud model used to be.
+            ...(task?.modelVersion === undefined
+                ? {}
+                : { modelVersion: task.modelVersion }),
         };
         validateStoredTask(stored, conversionKey);
         return this.#withOperation(async () => {
@@ -210,6 +217,8 @@ function validateStoredTask(task, conversionKey) {
         || task.uploadedAt < 0) {
         throw new Error('Invalid pending MinerU task');
     }
+    // An unknown model is an invalid record, not a record to guess about.
+    normalizeMineruModelVersion(task.modelVersion);
 }
 
 function validOpaqueID(value) {
@@ -222,5 +231,6 @@ function publicTask(stored) {
         batchID: stored.batchID,
         dataID: stored.dataID,
         uploadedAt: stored.uploadedAt,
+        modelVersion: normalizeMineruModelVersion(stored.modelVersion),
     };
 }

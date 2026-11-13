@@ -1,5 +1,9 @@
 import { concatenateUint8Arrays, toUint8Array } from './binary.js';
-import { MINERU_BATCH_OPTIONS, MINERU_FILE_OPTIONS } from './parser-profile.js';
+import {
+    MINERU_FILE_OPTIONS,
+    mineruBatchOptionsFor,
+    normalizeMineruModelVersion,
+} from './parser-profile.js';
 import { extractMinerUResultFromZip } from './zip-markdown.js';
 import { tryCreateMinerUResultArchive } from './result-archive.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
@@ -55,6 +59,7 @@ export class MinerUClient {
         fileName,
         fileData,
         dataID,
+        modelVersion = 'vlm',
         onProgress = () => {},
         signal,
     }) {
@@ -63,6 +68,7 @@ export class MinerUClient {
             fileName,
             fileData,
             dataID,
+            modelVersion,
             onProgress,
             signal,
         });
@@ -74,12 +80,16 @@ export class MinerUClient {
         fileName,
         fileData,
         dataID,
+        modelVersion = 'vlm',
         onProgress = () => {},
         signal,
     }) {
         const token = String(apiKey || '').trim();
         if (!token) throw new Error('A MinerU API Token is required');
         if (!fileName) throw new Error('A PDF file name is required');
+        // The model is chosen per operation, never read from a preference in
+        // the client, so a task cannot change model while it is running.
+        const batchOptions = mineruBatchOptionsFor(modelVersion);
         throwIfAborted(signal);
 
         onProgress(CONVERSION_PROGRESS.PREPARING);
@@ -92,7 +102,7 @@ export class MinerUClient {
                     data_id: dataID,
                     ...MINERU_FILE_OPTIONS,
                 }],
-                ...MINERU_BATCH_OPTIONS,
+                ...batchOptions,
             }),
             signal,
         });
@@ -118,7 +128,12 @@ export class MinerUClient {
         }
         onProgress(CONVERSION_PROGRESS.PARSING);
 
-        return { batchID, dataID, fileName };
+        return {
+            batchID,
+            dataID,
+            fileName,
+            modelVersion: normalizeMineruModelVersion(modelVersion),
+        };
     }
 
     async collect({

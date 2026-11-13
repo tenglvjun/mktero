@@ -69,6 +69,25 @@ test('reads the current Zotero PDF and delegates conversion', async () => {
     assert.deepEqual(progress, [50]);
 });
 
+test('progressive documents carry the operation profile after the setting changes', async () => {
+    let profile = 'original-profile';
+    const events = [];
+    const extractor = new MinerUDocumentExtractor({
+        zotero: { Items: { getAsync: async () => createPDFItem() } },
+        readFile: async () => new Uint8Array([1]),
+        getApiKey: () => 'fixture-only',
+        getParserProfile: () => profile,
+        conversion: { async convert({ onProgressiveFigures }) {
+            profile = 'changed-profile';
+            onProgressiveFigures({ type: 'document', cacheKey: 'original-key', document: { markdown: '# Original' } });
+            return { result: { markdown: '# Original' }, origin: 'fresh' };
+        } },
+    });
+    const result = await extractor.extract(42, { onProgressiveFigures: event => events.push(event) });
+    assert.equal(result.parserProfile, 'original-profile');
+    assert.equal(events[0].parserProfile, 'original-profile');
+});
+
 test('prepares the offline PDF index in parallel with MinerU conversion', async () => {
     const fileData = new Uint8Array([1, 2, 3]);
     const controller = new AbortController();

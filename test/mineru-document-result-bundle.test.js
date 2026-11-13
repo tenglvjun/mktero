@@ -12,9 +12,9 @@ function line(bbox, content, extra = {}) {
     return { bbox, spans: [{ bbox, type: 'text', content, ...extra }] };
 }
 
-function layoutFixture() {
+function layoutFixture(backend = 'hybrid') {
     return {
-        _backend: 'hybrid',
+        _backend: backend,
         _version_name: '3.4.4',
         _effort: 'medium',
         _ocr_enable: true,
@@ -145,6 +145,28 @@ test('extracts the projected layout from a ZIP', () => {
     }));
     assert.equal(broken.layout, undefined);
     assert.equal(broken.markdown, '# A Paper');
+});
+
+test('extracts and prepares a Pipeline cloud-layout ZIP through the existing document and figure paths', async () => {
+    const { prepareMinerUDocument, createMinerUFigureInput } = await import('../src/mineru/document/prepare.js');
+    const layout = layoutFixture('pipeline');
+    const archive = zipSync({
+        'result/full.md': strToU8('# Cloud result'),
+        'result/layout.json': strToU8(JSON.stringify(layout)),
+        'result/paper_content_list.json': strToU8('[]'),
+        'result/images/figure.png': strToU8('fixture-image-bytes'),
+    });
+    const bundle = extractMinerUResultFromZip(archive);
+
+    assert.equal(bundle.layout.backend, 'pipeline');
+    assert.equal(bundle.layout.pages.length, 2);
+    assert.equal(bundle.assets.length, 1);
+    const prepared = prepareMinerUDocument(bundle);
+    assert.match(prepared.markdown, /A Paper/);
+    assert.match(prepared.markdown, /continues here/);
+    const figureInput = createMinerUFigureInput(bundle);
+    assert.equal(figureInput.provider, 'mineru');
+    assert.equal(figureInput.pages.length, 2);
 });
 
 test('ignores a layout.json outside the Markdown result root', () => {
