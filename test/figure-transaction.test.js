@@ -161,7 +161,15 @@ test('opens the generated legend with the labelled caption', () => {
     assert.ok(line.startsWith('![Extended Data Fig. 5 | Odor-odor correlation'));
 });
 
-test('consumes a see-next-page placeholder and keeps the next-page legend', () => {
+test('keeps the figure page for a legend printed on the same page', () => {
+    const { input, completed } = fixture();
+    const draft = composeFigureDraft(input, completed);
+    const [blueprint] = draft.blueprints;
+    assert.ok(blueprint.captionBBox);
+    assert.ok(!('captionPageIndex' in blueprint));
+});
+
+test('records the page of a legend printed on the page after the figure', () => {
     const placeholder = 'Extended Data Fig. 9 | See next page for caption.';
     const caption = 'Extended Data Fig. 9 | Odor delivery system and experimental timing. '
         + 'A. Odors were delivered using a multi-cassette air dilution olfactometer.';
@@ -209,6 +217,11 @@ test('consumes a see-next-page placeholder and keeps the next-page legend', () =
     assert.ok(!draft.input.markdown.includes('See next page for caption'));
     assert.ok(!draft.input.markdown.split('\n')
         .some(value => value.startsWith('Extended Data Fig. 9 | Odor delivery')));
+    // The legend's own coordinates belong to the next page, so the blueprint
+    // records that page instead of the figure page.
+    assert.equal(draft.blueprints[0].pageIndex, 0);
+    assert.equal(draft.blueprints[0].captionPageIndex, 1);
+    assert.deepEqual(draft.blueprints[0].captionBBox, [61, 58, 943, 238]);
 });
 
 test('escapes an explicit-range caption once and records the composed members', () => {

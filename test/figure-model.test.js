@@ -84,6 +84,36 @@ test('binds persisted figure maps to their Markdown and local images', () => {
     assert.throws(() => validateFigureMap({ ...map, figures: [map.figures[0], map.figures[0]] }, document));
 });
 
+test('validates a caption page index and accepts maps that predate it', () => {
+    const markdown = '![Figure 1. Results.](generated/f.png)';
+    const asset = { path: 'generated/f.png', mimeType: 'image/png', data: createTestPNG() };
+    const figure = { id: 'fig-p0-b0', label: 'Figure 1.', pageIndex: 0,
+        visualBBox: [100, 100, 900, 800], captionBBox: [100, 850, 900, 900],
+        memberBlockIds: ['b1'], panels: [{ blockId: 'b1', label: null,
+            bbox: [100, 100, 900, 800], originalAssetPath: 'generated/f.png' }],
+        render: { mode: 'pdf-region', assetPath: 'generated/f.png', width: 8, height: 8,
+            range: { from: 0, to: markdown.length }, captionRanges: [{ from: 2, to: 20 }] },
+        provenance: { coordinateFrame: 'display-cropbox', rotation: 0,
+            evidence: ['explicit-parent'], fragments: [{ blockId: 'b1', role: 'panel',
+                bbox: [100, 100, 900, 800], markdown: '![](generated/f.png)' }] },
+    };
+    const map = {
+        version: 1, pipeline: FIGURE_PIPELINE_PROFILE, markdownHash: 'a'.repeat(64),
+        figures: [figure], preserved: [],
+    };
+    const document = { markdown, assets: [asset], persisted: true, markdownHash: 'a'.repeat(64) };
+    assert.ok(!('captionPageIndex' in figure));
+    assert.equal(validateFigureMap(map, document), map);
+    const nextPage = { ...map, figures: [{ ...figure, captionPageIndex: 1 }] };
+    assert.equal(validateFigureMap(nextPage, document), nextPage);
+    for (const value of [-1, 1.5, '1', Number.NaN, Number.POSITIVE_INFINITY, 10_000, null]) {
+        assert.throws(() => validateFigureMap({ ...map, figures: [{ ...figure, captionPageIndex: value }] }, document),
+            { code: 'INVALID_FIGURE_PAGE' });
+    }
+    const absent = { ...map, figures: [{ ...figure, captionPageIndex: undefined }] };
+    assert.equal(validateFigureMap(absent, document), absent);
+});
+
 test('a 1601 pixel crop is still a valid PNG for cached images', () => {
     const data = createTestPNG(1601, 8);
     assert.doesNotThrow(() => validateFigureCrop({

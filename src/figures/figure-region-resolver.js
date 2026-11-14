@@ -27,6 +27,11 @@ export function resolveFigureCandidates(input, { limits: overrides, budget: shar
             break;
         }
         const groups = groupPanels(blocks, panels, limits, budget);
+        const nextPage = pageInfo.get(pageIndex + 1);
+        const followingCaption = input.provider === 'mineru' && input.rangesExplicit === true
+            && nextPage?.coordinateFrame === 'display-cropbox' && !nextPage.geometryReason
+            ? inferFollowingPageCaption(groups, blocks, pageBlocks.get(pageIndex + 1) || [], limits, budget)
+            : null;
         const pageCandidates = [];
         for (const group of groups) {
             if (pageCandidates.length >= limits.maxFiguresPerPage
@@ -35,20 +40,20 @@ export function resolveFigureCandidates(input, { limits: overrides, budget: shar
                 break;
             }
             pageCandidates.push(resolveGroup(group, blocks, pageInfo.get(pageIndex), limits, budget,
-                input.blocks));
-        }
-        const owners = new Map();
-        for (const candidate of pageCandidates) {
-            for (const id of [...candidate.captionBlockIds, ...candidate.ownedTextBlockIds]) {
-                const previous = owners.get(id);
-                if (previous) {
-                    preserve(previous, 'ambiguous-membership');
-                    preserve(candidate, 'ambiguous-membership');
-                }
-                else owners.set(id, candidate);
-            }
+                input.blocks, followingCaption));
         }
         output.push(...pageCandidates);
+    }
+    const owners = new Map();
+    for (const candidate of output) {
+        for (const id of [...candidate.captionBlockIds, ...candidate.ownedTextBlockIds]) {
+            const previous = owners.get(id);
+            if (previous) {
+                preserve(previous, 'ambiguous-membership');
+                preserve(candidate, 'ambiguous-membership');
+            }
+            else owners.set(id, candidate);
+        }
     }
     if (budget.remaining < 0) {
         for (const candidate of output) preserve(candidate, 'resource-limit');
@@ -179,7 +184,7 @@ function groupBox(group) {
     return union(group.panels.map(panel => panel.bbox));
 }
 
-function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
+function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks, followingCaption = null) {
     const { panels } = group;
     const parents = group.parents || (group.parent ? [group.parent] : []);
     const parent = parents[0] || null;
@@ -282,6 +287,11 @@ function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks) {
         else {
             captions = nearby;
         }
+    }
+    if (followingCaption && !captions.some(block => isFigureCaptionText(block.text))) {
+        captions = [followingCaption];
+        mergedContinuation = false;
+        candidate.evidence.push('following-page-caption');
     }
     if (captions.length > 1 && !mergedContinuation) {
         return preserve(candidate, 'ambiguous-caption');
@@ -474,7 +484,7 @@ const LINK_ROW_PATTERN = /^(?:(?:https?:\/\/|www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?
 const MAX_FIGURE_GAP_CODE_POINTS = 2_000;
 
 function figureGapBlocks(blocks, panels, caption, limits) {
-    if (!caption || !validBox(caption.bbox)) return [];
+    if (!caption || caption.pageIndex !== panels[0].pageIndex || !validBox(caption.bbox)) return [];
     const panelBox = union(panels.map(panel => panel.bbox));
     const gap = [];
     let codePoints = 0;
@@ -529,7 +539,7 @@ function isFigureCaptionText(text) {
 }
 
 function captionContinues(primary, block, limits) {
-    if (!validBox(primary.bbox) || !validBox(block.bbox)) return false;
+    if (primary.pageIndex !== block.pageIndex || !validBox(primary.bbox) || !validBox(block.bbox)) return false;
     if (overlap(primary.bbox[1], primary.bbox[3], block.bbox[1], block.bbox[3])
         < limits.captionProjectionOverlap) return false;
     const gap = Math.max(0, Math.max(primary.bbox[0], block.bbox[0])
@@ -616,6 +626,80 @@ function captionContinuationText(blocks, parents, caption, panelBox, limits) {
     ));
 }
 
+const SINGLE_PANEL_LETTER = /^\(?([a-z])\)?[.]?$/iu;
+const CAPTION_PANEL_REFERENCES = /\(([a-z](?:\s*(?:,\s*(?:and\s+)?|and\s+|to\s+|[-–—]\s*)[a-z])*)\)/giu;
+const CAPTION_PANEL_RANGE = /([a-z])\s*(?:to|[-–—])\s*([a-z])/giu;
+
+// Without an explicit cross-page pointer, only a figure-only page and matching
+// panel letters establish ownership. Ordinary article pages keep their floats.
+function inferFollowingPageCaption(groups, blocks, nextBlocks, limits, budget) {
+    if (groups.length !== 1 || !nextBlocks.length) return null;
+    const group = groups[0];
+    if (group.exhausted || group.panels.length < 3 || group.panels.length > limits.maxPanels) return null;
+    const box = groupBox(group);
+    if (!box || box[1] > 150 || box[3] < 850 || box[3] - box[1] < 700
+        || box[2] - box[0] < 500) return null;
+    const panelIDs = new Set(group.panels.map(panel => panel.id));
+    const band = padded(box, limits.captionMinGap);
+    const letters = new Set();
+    for (const block of blocks) {
+        if (!consume(budget)) return null;
+        if (block.bboxKind === 'group' || panelIDs.has(block.id)) continue;
+        if (block.role === 'body' || FOREIGN_TYPES.has(block.type) || isPanel(block)) return null;
+        const text = String(block.text || '').trim();
+        if (!text) continue;
+        if (!validBox(block.bbox) || !contains(band, block.bbox) || isFigureCaptionText(text)) return null;
+        const letter = SINGLE_PANEL_LETTER.exec(text)?.[1].toLowerCase();
+        if (letter) {
+            if (letters.has(letter)) return null;
+            letters.add(letter);
+        }
+        else if (!['caption', 'figure-text'].includes(block.role)
+            || [...text].length > limits.ownedCaptionTextCodePoints
+            || text.split(/\r?\n/u).length > limits.maxGapTextLines
+            || GAP_PROSE_END_PATTERN.test(text)) return null;
+    }
+    if (letters.size < 3 || !letters.has('a')) return null;
+    const leads = [];
+    for (const block of nextBlocks) {
+        if (!consume(budget)) return null;
+        // A distant image can own a top-of-page caption too. Without an
+        // explicit pointer, proximity cannot settle which page owns it.
+        if (isPanel(block) || (block.bboxKind === 'group'
+            && ['image', 'chart'].includes(block.type))) return null;
+        if (block.bboxKind === 'group') continue;
+        if (block.text && !validBox(block.bbox)) return null;
+        if (isFigureCaptionText(block.text) && block.bbox?.[1] <= 150) leads.push(block);
+    }
+    if (leads.length !== 1) return null;
+    const lead = leads[0];
+    if (lead.parentId || lead.role === 'body' || FOREIGN_TYPES.has(lead.type)
+        || !lead.sourceRanges?.length || lead.rangeEvidence === 'unresolved'
+        || lead.text.length > limits.maxCaptionLength) return null;
+    const references = captionPanelLetters(lead.text);
+    if ([...letters].some(letter => !references.has(letter))) return null;
+    for (const block of nextBlocks) {
+        if (!consume(budget)) return null;
+        if (block === lead || block.bboxKind === 'group' || !validBox(block.bbox)) continue;
+        if (block.bbox[1] < lead.bbox[1] || intersectionArea(block.bbox, lead.bbox) > 0) return null;
+    }
+    return lead;
+}
+
+function captionPanelLetters(text) {
+    const letters = new Set();
+    for (const match of String(text || '').matchAll(CAPTION_PANEL_REFERENCES)) {
+        const value = match[1].toLowerCase();
+        for (const letter of value.replace(/and|to/gu, '').match(/[a-z]/gu) || []) letters.add(letter);
+        for (const range of value.matchAll(CAPTION_PANEL_RANGE)) {
+            const first = range[1].charCodeAt(0);
+            const last = range[2].charCodeAt(0);
+            for (let code = first; code <= last; code++) letters.add(String.fromCharCode(code));
+        }
+    }
+    return letters;
+}
+
 const NEXT_PAGE_CAPTION_PATTERN = /see (?:the )?next page/iu;
 
 export function isNextPageCaptionPlaceholder(text) {
@@ -700,7 +784,7 @@ function isInBandAnnotationText(block, panelBox, captions, limits) {
         ? Math.max(limits.ownedTextPadding, limits.captionMinGap)
         : limits.ownedTextPadding;
     if (!contains(padded(panelBox, padding), block.bbox)) return false;
-    return captions.every(part => !validBox(part.bbox)
+    return captions.every(part => part.pageIndex !== block.pageIndex || !validBox(part.bbox)
         || intersectionArea(part.bbox, block.bbox) === 0);
 }
 

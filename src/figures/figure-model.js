@@ -163,6 +163,12 @@ export function validateFigureMap(map, document = {}) {
         if (figure.captionBBox !== null && figure.captionBBox !== undefined) {
             validateBBox(figure.captionBBox);
         }
+        // A legend printed on the page after the figure records its own page.
+        // Maps written before the field existed omit it and fall back to the
+        // figure page when the caption location is built.
+        if (figure.captionPageIndex !== undefined) {
+            validateCaptionPageIndex(figure.captionPageIndex);
+        }
         if (!Array.isArray(figure.panels) || !figure.panels.length
             || figure.panels.length > FIGURE_LIMITS.maxPanels
             || !Array.isArray(figure.memberBlockIds)
@@ -414,6 +420,12 @@ function validateBBox(value) {
         || value[0] < 0 || value[1] < 0 || value[2] > 1000 || value[3] > 1000
         || value[2] <= value[0] || value[3] <= value[1]) {
         throw figureError('INVALID_FIGURE_BBOX', 'Figure bounding box is invalid');
+    }
+}
+
+function validateCaptionPageIndex(value) {
+    if (!Number.isSafeInteger(value) || value < 0 || value >= FIGURE_LIMITS.maxPDFPages) {
+        throw figureError('INVALID_FIGURE_PAGE', 'Figure caption page index is invalid');
     }
 }
 

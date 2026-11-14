@@ -4,7 +4,12 @@ import {
     MkteroDocumentExtractor,
     MkteroSignInRequiredError,
 } from '../src/extractors/mktero-extractor.js';
-import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS } from '../src/mineru/parser-profile.js';
+import {
+    MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS,
+} from '../src/mineru/parser-profile.js';
+import { hostedCacheProfileFor } from '../src/mktero/conversion-target.js';
+import { LEGACY_FIGURE_PROFILES } from '../src/figures/legacy-figure-profiles.js';
 
 function createPDFItem(overrides = {}) {
     return {
@@ -359,6 +364,192 @@ test('finds a correction made under an earlier MinerU profile', async () => {
     assert.equal(result.markdown, '# Corrected earlier');
     assert.equal(result.cacheKey, 'b'.repeat(64));
     assert.deepEqual(profiles, [MINERU_PARSER_PROFILE_ID, earlier]);
+});
+
+const HOSTED_VLM_PROFILE = hostedCacheProfileFor('vlm');
+const HOSTED_PIPELINE_PROFILE = hostedCacheProfileFor('pipeline');
+const PIPELINE_SHIPPED_PROFILE = MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0];
+
+/** One distinct 64-character cache key per profile, in the order given. */
+function profileKeys(profiles) {
+    return new Map(profiles.map((profile, index) => [
+        profile,
+        (index + 1).toString(16).padStart(2, '0').repeat(32),
+    ]));
+}
+
+// A hosted extractor that reports a fixed model, records every profile it
+// derives a key for, and serves revisions from an explicit table. A profile
+// missing from the table yields no key, so consulting it would show up as a
+// missing entry rather than an accidental hit.
+function createHostedModelExtractor({ model, keys, revisions = {} } = {}) {
+    const consultedProfiles = [];
+    const reads = [];
+    let conversions = 0;
+    const extractor = createExtractor({
+        conversion: {
+            async resolveTarget() {
+                return {
+                    routeId: 'stable-paper-route',
+                    modelVersion: model,
+                    parserProfileId: `mineru/v4-batch-${model}-1`,
+                };
+            },
+            async convert() {
+                conversions += 1;
+                return { result: { markdown: `# Parsed with ${model}` }, origin: 'network' };
+            },
+        },
+        createSourceHash: async () => 'e'.repeat(64),
+        createCacheKey: async (_data, { parserProfile }) => {
+            consultedProfiles.push(parserProfile);
+            return keys.get(parserProfile) || null;
+        },
+        readRevision: async ({ cacheKey }) => {
+            reads.push(cacheKey);
+            return revisions[cacheKey] || null;
+        },
+        isCacheEnabled: () => true,
+        cache: { async get() { return null; }, async put() {} },
+        preparePDFIndex() {},
+    });
+    return { extractor, consultedProfiles, reads, conversions: () => conversions };
+}
+
+const ALL_HOSTED_KEYS = profileKeys([
+    HOSTED_PIPELINE_PROFILE,
+    PIPELINE_SHIPPED_PROFILE,
+    HOSTED_VLM_PROFILE,
+    ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+    LEGACY_FIGURE_PROFILES.mineru,
+]);
+
+for (const [operation, run] of [
+    ['extract', extractor => extractor.extract(42)],
+    ['readCached', extractor => extractor.readCached(42)],
+]) {
+    test(`${operation} reaches a Pipeline correction stored under the shipped v19 identity`, async () => {
+        const shippedKey = ALL_HOSTED_KEYS.get(PIPELINE_SHIPPED_PROFILE);
+        const { extractor, consultedProfiles, reads, conversions } = createHostedModelExtractor({
+            model: 'pipeline',
+            keys: ALL_HOSTED_KEYS,
+            revisions: { [shippedKey]: { markdown: '# Corrected before the bump', userEdited: true } },
+        });
+
+        const result = await run(extractor);
+
+        assert.equal(result.markdown, '# Corrected before the bump');
+        assert.equal(result.cacheHit, true);
+        assert.equal(result.cacheKey, shippedKey);
+        assert.equal(result.parserProfile, HOSTED_PIPELINE_PROFILE);
+        assert.equal(conversions(), 0);
+        assert.deepEqual(consultedProfiles, [HOSTED_PIPELINE_PROFILE, PIPELINE_SHIPPED_PROFILE]);
+        assert.deepEqual(reads, [ALL_HOSTED_KEYS.get(HOSTED_PIPELINE_PROFILE), shippedKey]);
+    });
+
+    // The Pipeline entry of the fixture is never consulted: a VLM document must
+    // not be matched against a differently parsed Pipeline document.
+    test(`${operation} keeps a Pipeline correction out of the VLM identity and the reverse`, async () => {
+        for (const [model, otherProfiles, otherName] of [
+            ['vlm', [HOSTED_PIPELINE_PROFILE, PIPELINE_SHIPPED_PROFILE], 'Pipeline'],
+            ['pipeline', [
+                HOSTED_VLM_PROFILE,
+                ...MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+                LEGACY_FIGURE_PROFILES.mineru,
+            ], 'VLM'],
+        ]) {
+            const revisions = {};
+            for (const profile of otherProfiles) {
+                revisions[ALL_HOSTED_KEYS.get(profile)] = { markdown: '# Other model only' };
+            }
+            const { extractor, consultedProfiles, reads, conversions } = createHostedModelExtractor({
+                model,
+                keys: ALL_HOSTED_KEYS,
+                revisions,
+            });
+
+            const result = await run(extractor);
+
+            if (operation === 'readCached') assert.equal(result, null);
+            else {
+                assert.equal(result.markdown, `# Parsed with ${model}`);
+                assert.equal(result.parserProfile, hostedCacheProfileFor(model));
+                assert.equal(conversions(), 1);
+            }
+            assert.equal(consultedProfiles.includes(HOSTED_PIPELINE_PROFILE), model === 'pipeline');
+            for (const otherKey of otherProfiles.map(profile => ALL_HOSTED_KEYS.get(profile))) {
+                assert.equal(reads.includes(otherKey), false, `${otherName} history was read for ${model}`);
+            }
+        }
+    });
+
+    test(`${operation} prefers the current Pipeline revision over its earlier identities`, async () => {
+        const currentKey = ALL_HOSTED_KEYS.get(HOSTED_PIPELINE_PROFILE);
+        const { extractor, consultedProfiles, reads } = createHostedModelExtractor({
+            model: 'pipeline',
+            keys: ALL_HOSTED_KEYS,
+            revisions: {
+                [currentKey]: { markdown: '# Corrected on the current identity', userEdited: true },
+                [ALL_HOSTED_KEYS.get(PIPELINE_SHIPPED_PROFILE)]: { markdown: '# Corrected before the bump' },
+            },
+        });
+
+        const result = await run(extractor);
+
+        assert.equal(result.markdown, '# Corrected on the current identity');
+        assert.equal(result.cacheKey, currentKey);
+        assert.deepEqual(consultedProfiles, [HOSTED_PIPELINE_PROFILE]);
+        assert.deepEqual(reads, [currentKey]);
+    });
+}
+
+test('a Pipeline revision lookup skips an earlier identity that shares its key', async () => {
+    const sharedKey = 'a'.repeat(64);
+    const reads = [];
+    const extractor = createExtractor({
+        conversion: {
+            async resolveTarget() {
+                return {
+                    routeId: 'stable-paper-route',
+                    modelVersion: 'pipeline',
+                    parserProfileId: 'mineru/v4-batch-pipeline-1',
+                };
+            },
+            async convert() { assert.fail('No conversion for a correction'); },
+        },
+        createSourceHash: async () => 'e'.repeat(64),
+        createCacheKey: async () => sharedKey,
+        readRevision: async ({ cacheKey }) => {
+            reads.push(cacheKey);
+            return null;
+        },
+        isCacheEnabled: () => true,
+        cache: { async get() { return null; }, async put() {} },
+        preparePDFIndex() {},
+    });
+
+    assert.equal(await extractor.readCached(42), null);
+    assert.deepEqual(reads, [sharedKey]);
+});
+
+test('an aborted Pipeline revision lookup stops before the earlier identity is read', async () => {
+    const controller = new AbortController();
+    const keys = ALL_HOSTED_KEYS;
+    const { extractor, reads, conversions } = createHostedModelExtractor({
+        model: 'pipeline',
+        keys,
+        revisions: {},
+    });
+    extractor.readRevision = async ({ cacheKey }) => {
+        reads.push(cacheKey);
+        controller.abort();
+        return null;
+    };
+
+    await assert.rejects(extractor.extract(42, { signal: controller.signal }), { name: 'AbortError' });
+
+    assert.deepEqual(reads, [keys.get(HOSTED_PIPELINE_PROFILE)]);
+    assert.equal(conversions(), 0);
 });
 
 function createPageLimitGuard(error = null) {

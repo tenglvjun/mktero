@@ -132,13 +132,13 @@ import {
 } from './core/saved-markdown-open-resolver.js';
 import {
     MINERU_CLOUD_CACHE_PROFILE_IDS,
+    mineruCloudPreviousParserProfilesFor,
     mineruCloudProfilesFor,
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_LOCAL_REQUEST_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
-    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
 } from './mineru/parser-profile.js';
 import {
@@ -896,9 +896,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
         // A new profile entry takes the translations of the newest earlier
         // entry of the same PDF.
         createTranslationSourceKeys: (fileData, { modelVersion } = {}) => Promise.all(
-            (modelVersion === 'pipeline' ? [] : [
-                ...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru,
-            ]).map(parserProfile => createMarkdownCacheKey(fileData, { parserProfile }))
+            [
+                ...mineruCloudPreviousParserProfilesFor(mineruCloudProfilesFor(modelVersion).cacheProfile),
+                ...(modelVersion === 'pipeline' ? [] : [LEGACY_FIGURE_PROFILES.mineru]),
+            ].map(parserProfile => createMarkdownCacheKey(fileData, { parserProfile }))
         ),
         resultStore: mineruResultStore,
         createResultKey: (fileData, { requestProfile } = {}) => createMinerUResultKey({
@@ -954,9 +955,10 @@ globalThis.startup = async function startup({ id, rootURI }) {
         getPreviousParserProfiles: parserProfile => (
             parserProfile === MINERU_LOCAL_PARSER_PROFILE_ID
                 ? [...MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS]
-                : parserProfile === MINERU_PARSER_PROFILE_ID
-                    ? [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru]
-                    : []
+                : [
+                    ...mineruCloudPreviousParserProfilesFor(parserProfile),
+                    ...(parserProfile === MINERU_PARSER_PROFILE_ID ? [LEGACY_FIGURE_PROFILES.mineru] : []),
+                ]
         ),
         prepareResult: (result, { endpoint } = {}) => endpoint === MINERU_ENDPOINT_LOCAL
             && !result?.userEdited
