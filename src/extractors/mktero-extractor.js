@@ -3,7 +3,7 @@ import { extractMinerUResultFromZip } from '../mineru/zip-markdown.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_PARSER_PROFILE_ID,
-    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+    mineruCloudPreviousParserProfilesFor,
 } from '../mineru/parser-profile.js';
 import { LEGACY_FIGURE_PROFILES } from '../figures/legacy-figure-profiles.js';
 import { MkteroSignInRequiredError } from '../account/account-session.js';
@@ -575,13 +575,19 @@ export class MkteroDocumentExtractor {
     async #readRevision({ itemID, cacheKey, cacheProfile, fileData, signal }) {
         let revision = await this.readRevision({ itemID, cacheKey, signal });
         throwIfAborted(signal);
-        if (revision || !this.createCacheKey || cacheProfile !== MINERU_PARSER_PROFILE_ID) {
-            return revision ? { snapshot: revision, cacheKey } : null;
-        }
-        // Historical profiles all requested VLM. Preserve the user's earlier
-        // VLM corrections without treating them as a Pipeline document.
+        if (revision) return { snapshot: revision, cacheKey };
+        if (!this.createCacheKey) return null;
+        // Each model reaches only its own earlier identities, so a Pipeline
+        // document never inherits a VLM correction (and the reverse). The
+        // full.md legacy entry predates model selection and is VLM's alone, and
+        // an identity no shipped model owns reads nothing but its own key.
+        const previousProfiles = [
+            ...mineruCloudPreviousParserProfilesFor(cacheProfile),
+            ...(cacheProfile === MINERU_PARSER_PROFILE_ID ? [LEGACY_FIGURE_PROFILES.mineru] : []),
+        ];
+        if (!previousProfiles.length) return null;
         const visited = new Set([cacheKey]);
-        for (const parserProfile of [...MINERU_PREVIOUS_PARSER_PROFILE_IDS, LEGACY_FIGURE_PROFILES.mineru]) {
+        for (const parserProfile of previousProfiles) {
             const legacyKey = await this.createCacheKey(fileData, {
                 parserProfile,
             });

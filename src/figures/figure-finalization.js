@@ -29,6 +29,8 @@ export async function finalizeFigureMap(prepared, blueprints, { hash, signal, pr
         return {
             id: blueprint.id, label: blueprint.label, pageIndex: blueprint.pageIndex,
             visualBBox: blueprint.visualBBox, captionBBox: blueprint.captionBBox,
+            ...(blueprint.captionPageIndex === undefined || blueprint.captionPageIndex === null
+                ? {} : { captionPageIndex: blueprint.captionPageIndex }),
             memberBlockIds: blueprint.memberBlockIds, panels: blueprint.panels, provenance: blueprint.provenance,
             render: {
                 mode: 'pdf-region', assetPath: blueprint.renderAssetPath,
@@ -53,9 +55,12 @@ export async function finalizeFigureMap(prepared, blueprints, { hash, signal, pr
             locations: [{ pageIndex: figure.pageIndex, bbox: [...figure.visualBBox] }],
         };
         if (figure.captionBBox && figure.render.captionRanges.length) {
+            // A legend printed on the following page is located there; a map
+            // written before that field existed still names the figure page.
+            const captionPageIndex = figure.captionPageIndex ?? figure.pageIndex;
             entry.locationRanges = figure.render.captionRanges.map(range => ({
                 markdownFrom: range.from, markdownTo: range.to,
-                location: { pageIndex: figure.pageIndex, bbox: [...figure.captionBBox] },
+                location: { pageIndex: captionPageIndex, bbox: [...figure.captionBBox] },
             }));
         }
         sourceMap.push(entry);

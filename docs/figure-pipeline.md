@@ -37,6 +37,24 @@ layout content or native PDF text outside the existing region; failed checks
 keep the original safe crop. This does not infer relationships between
 independent images or extend the recovery to arbitrary vector figures.
 
+### Captions on the following page
+
+For MinerU results, a single figure occupying a full page can be restored even
+when its complete caption starts on the immediately following page and there
+is no “See next page” notice. The page must contain one complete figure group,
+its panel letters must agree with the caption, and the top of the next page
+must provide a unique caption whose ownership is unambiguous. The caption
+page must contain no other figure, including one farther down the page. Body
+text must not intervene or fall inside the crop.
+
+The crop comes from the figure's own PDF page. Panel letters and internal
+headings stay in their original positions, while the complete caption remains
+separate and appears once. Geometry checks keep the two pages separate, so a
+caption's position on the next page cannot overlap a panel on the figure page.
+This is a limited recovery rule: multiple possible figures or captions,
+conflicting text, or unverifiable geometry leave the original fragments intact.
+It does not join arbitrary figures across pages.
+
 ### MinerU document rewrite
 
 1. Mktero writes reading Markdown from MinerU's layout. Every figure's image,

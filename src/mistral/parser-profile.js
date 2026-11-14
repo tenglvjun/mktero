@@ -57,7 +57,11 @@ export const MISTRAL_FIGURE_REGION_V17_PARSER_PROFILE_ID = '{"provider":"mistral
 // Preserve the embedded-image test build's correction identity.
 export const MISTRAL_FIGURE_REGION_V18_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v18","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
 
+// Preserve corrections from before cross-page caption recovery.
+export const MISTRAL_FIGURE_REGION_V19_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v19","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
+
 export const MISTRAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MISTRAL_FIGURE_REGION_V19_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V18_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V17_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V16_PARSER_PROFILE_ID,

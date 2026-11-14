@@ -4,7 +4,10 @@ import { MkteroDocumentExtractor } from '../src/extractors/mktero-extractor.js';
 import { createMarkdownCacheKey, sha256Hex } from '../src/cache/markdown-cache.js';
 import { createMinerUResultKey } from '../src/cache/mineru-result-store.js';
 import { hostedCacheProfileFor, hostedRequestProfileFor } from '../src/mktero/conversion-target.js';
-import { MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS } from '../src/mineru/parser-profile.js';
+import {
+    MINERU_PARSER_PROFILE_ID, MINERU_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS,
+} from '../src/mineru/parser-profile.js';
 import { SharedMkteroConversion } from '../src/mktero/shared-conversion.js';
 
 const PDF = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
@@ -91,6 +94,8 @@ test('Pipeline keeps historical VLM corrections separate and switching back find
     const { state, keys, extractor } = await fixture();
     const legacyProfile = MINERU_PREVIOUS_PARSER_PROFILE_IDS[0];
     const legacyKey = await createMarkdownCacheKey(PDF, { parserProfile: legacyProfile });
+    const pipelinePreviousKeys = await Promise.all(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS
+        .map(parserProfile => createMarkdownCacheKey(PDF, { parserProfile })));
     const reads = [];
     extractor.readRevision = async ({ cacheKey }) => {
         reads.push(cacheKey);
@@ -99,7 +104,7 @@ test('Pipeline keeps historical VLM corrections separate and switching back find
     state.model = 'pipeline';
     const pipeline = await extractor.extract(42);
     assert.equal(pipeline.markdown, '# Parsed with pipeline');
-    assert.deepEqual(reads, [keys.pipeline.markdown]);
+    assert.deepEqual(reads, [keys.pipeline.markdown, ...pipelinePreviousKeys]);
     state.model = 'vlm';
     const vlm = await extractor.extract(42);
     assert.equal(vlm.markdown, '# Corrected VLM');

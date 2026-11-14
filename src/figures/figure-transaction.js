@@ -134,6 +134,8 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
         });
     // A "see next page" placeholder is consumed but never shown as legend.
     const legendMembers = captionMembers.filter(block => !isNextPageCaptionPlaceholder(block.text));
+    const captionPageIndex = candidate.captionBBox
+        ? legendCaptionPageIndex(legendMembers, candidate.pageIndex) : null;
     // A provider with explicit ranges keeps the caption's own text: its range
     // can be an image description that is already escaped for Markdown.
     const captionText = (legendMembers.length ? legendMembers : captionMembers)
@@ -176,6 +178,7 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
     const blueprint = {
         id: candidate.id, label: candidate.label, pageIndex: candidate.pageIndex,
         visualBBox: [...candidate.visualBBox], captionBBox: candidate.captionBBox ? [...candidate.captionBBox] : null,
+        ...(captionPageIndex === null ? {} : { captionPageIndex }),
         memberBlockIds: ids, panels, renderAssetPath: destination, renderCaption,
         width: crop.width, height: crop.height,
         provenance: {
@@ -205,6 +208,17 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
             rangeEvidence: 'explicit-range',
         },
     };
+}
+
+// A legend printed on the page after the figure carries that page's
+// coordinates, so its location must name its own page. Only a legend wholly on
+// one other page is labelled; a same-page or mixed-page legend keeps the
+// historical figure-page result byte for byte.
+function legendCaptionPageIndex(legendMembers, pageIndex) {
+    const pages = new Set(legendMembers.map(block => block.pageIndex));
+    if (pages.size !== 1) return null;
+    const [page] = pages;
+    return Number.isSafeInteger(page) && page >= 0 && page !== pageIndex ? page : null;
 }
 
 // A caption range nested inside a panel image range must not produce two

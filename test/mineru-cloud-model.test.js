@@ -8,12 +8,20 @@ import {
     MINERU_CLOUD_CACHE_PROFILE_IDS,
     MINERU_CLOUD_MODEL_VERSIONS,
     MINERU_CLOUD_REQUEST_PROFILE_IDS,
+    MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_PIPELINE,
+    MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
     mineruBatchOptionsFor,
+    mineruCloudPreviousParserProfilesFor,
     mineruCloudProfilesFor,
 } from '../src/mineru/parser-profile.js';
+import { createMarkdownCacheKey } from '../src/cache/markdown-cache.js';
+import { MinerUDocumentExtractor } from '../src/extractors/mineru-extractor.js';
 import { MinerUConversion } from '../src/mineru/mineru-conversion.js';
 import { MinerUPendingTaskStore } from '../src/mineru/pending-task-store.js';
 import { FIGURE_PIPELINE_PROFILE } from '../src/figures/figure-limits.js';
@@ -61,6 +69,131 @@ test('derives a separate pipeline identity from the same document and figure ver
     });
     assert.equal('document' in request, false);
 });
+
+test('keeps the shipped IR v13 figure v19 Pipeline identity as an independent literal', () => {
+    assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}');
+    assert.deepEqual(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS, [
+        MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
+    ]);
+    assert.ok(Object.isFrozen(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS));
+    assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v20');
+});
+
+test('selects previous profiles only for the exact current cloud model identity', () => {
+    for (const [modelVersion, expected] of [
+        ['vlm', MINERU_PREVIOUS_PARSER_PROFILE_IDS],
+        ['pipeline', MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS],
+    ]) {
+        const current = mineruCloudProfilesFor(modelVersion).cacheProfile;
+        const previous = mineruCloudPreviousParserProfilesFor(current);
+        assert.equal(previous, expected);
+        assert.ok(previous.every(profile => JSON.parse(profile).batch.model_version === modelVersion));
+        assert.equal(previous.includes(current), false);
+    }
+    for (const unknown of [
+        undefined, null, '', 'vlm', 'pipeline', {},
+        MINERU_LOCAL_PARSER_PROFILE_ID,
+        MINERU_REQUEST_PROFILE_ID,
+        mineruCloudProfilesFor('pipeline').requestProfile,
+        MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
+        MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
+        mineruCloudProfilesFor('pipeline').cacheProfile.replace('"enable_table":true', '"enable_table":false'),
+    ]) {
+        assert.deepEqual(mineruCloudPreviousParserProfilesFor(unknown), []);
+    }
+});
+
+for (const [modelVersion, previousProfile, otherPreviousProfile] of [
+    ['vlm', MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID],
+]) {
+    const currentProfile = mineruCloudProfilesFor(modelVersion).cacheProfile;
+    const fileData = new Uint8Array([1]);
+    const keyFor = parserProfile => createMarkdownCacheKey(fileData, { parserProfile });
+
+    for (const method of ['extract', 'readCached']) {
+        test(`${method} reopens the ${modelVersion} v19 correction after the v20 upgrade`, async () => {
+            const currentKey = await keyFor(currentProfile);
+            const previousKey = await keyFor(previousProfile);
+            const reads = [];
+            const extractor = createRevisionExtractor(modelVersion, async ({ cacheKey }) => {
+                reads.push(cacheKey);
+                return cacheKey === previousKey ? { markdown: '# Corrected v19' } : null;
+            });
+
+            const result = await extractor[method](42);
+
+            assert.equal(result.markdown, '# Corrected v19');
+            assert.equal(result.parserProfile, previousProfile);
+            assert.equal(result.cacheKey, previousKey);
+            assert.deepEqual(reads, [currentKey, previousKey]);
+        });
+
+        test(`${method} never accesses another model's correction from ${modelVersion}`, async () => {
+            const otherKey = await keyFor(otherPreviousProfile);
+            const reads = [];
+            const extractor = createRevisionExtractor(modelVersion, async ({ cacheKey }) => {
+                reads.push(cacheKey);
+                return cacheKey === otherKey ? { markdown: '# Other model correction' } : null;
+            });
+            // A cache miss is enough to exercise every historical revision lookup.
+            extractor.conversion = {
+                convert: async () => ({ origin: 'fresh', result: { markdown: '# Current result' } }),
+                readCached: async () => null,
+            };
+
+            const result = await extractor[method](42);
+
+            assert.equal(result?.markdown ?? null, method === 'extract' ? '# Current result' : null);
+            assert.deepEqual(reads, await Promise.all([
+                currentProfile, ...mineruCloudPreviousParserProfilesFor(currentProfile),
+            ].map(keyFor)));
+            assert.equal(reads.includes(otherKey), false);
+        });
+    }
+
+    test(`${modelVersion} inherits v19 translations without accessing the other model`, async () => {
+        const currentKey = await keyFor(currentProfile);
+        const previousKey = await keyFor(previousProfile);
+        const otherKey = await keyFor(otherPreviousProfile);
+        const previousKeys = await Promise.all(mineruCloudPreviousParserProfilesFor(currentProfile).map(keyFor));
+        for (const availableKey of [previousKey, otherKey]) {
+            const copies = [];
+            const conversion = new MinerUConversion({
+                client: createSuccessfulClient('# Converted'),
+                pendingTasks: createKeyedMemoryPendingTasks(),
+                cache: {
+                    get: async () => null,
+                    put: async () => {},
+                    copyTranslations: async (from, to) => {
+                        copies.push([from, to]);
+                        return from === availableKey ? 1 : 0;
+                    },
+                },
+                createTranslationSourceKeys: (bytes, { modelVersion: selected }) => Promise.all(
+                    mineruCloudPreviousParserProfilesFor(mineruCloudProfilesFor(selected).cacheProfile)
+                        .map(parserProfile => createMarkdownCacheKey(bytes, { parserProfile }))
+                ),
+                createDataID: () => 'mktero-task-profile-upgrade',
+            });
+
+            const result = await conversion.convert({
+                key: currentKey,
+                apiKey: 'secret-token',
+                fileName: 'paper.pdf',
+                fileData,
+                cacheEnabled: true,
+                modelVersion,
+            });
+
+            assert.deepEqual(result.warnings, []);
+            assert.deepEqual(copies, (availableKey === previousKey ? [previousKey] : previousKeys)
+                .map(key => [key, currentKey]));
+            assert.equal(copies.some(([from]) => from === otherKey), false);
+        }
+    });
+}
 
 test('lists exactly the two cloud models and rejects anything else', () => {
     assert.deepEqual([...MINERU_CLOUD_MODEL_VERSIONS], ['vlm', 'pipeline']);
@@ -645,6 +778,32 @@ test('rejects an unknown model before touching the network or the cache', async 
     );
     assert.equal(touched, false);
 });
+
+function createRevisionExtractor(modelVersion, readRevision) {
+    return new MinerUDocumentExtractor({
+        zotero: {
+            Items: {
+                getAsync: async () => ({
+                    isPDFAttachment: () => true,
+                    getFilePathAsync: async () => '/fixture.pdf',
+                    getDisplayTitle: () => 'Fixture',
+                }),
+            },
+        },
+        conversion: {
+            convert: async () => assert.fail('a saved correction must not convert'),
+            readCached: async () => assert.fail('a saved correction must not read the OCR cache'),
+        },
+        getApiKey: () => '',
+        getParserProfile: () => mineruCloudProfilesFor(modelVersion).cacheProfile,
+        getPreviousParserProfiles: mineruCloudPreviousParserProfilesFor,
+        getConversionOptions: () => ({ endpoint: 'cloud', modelVersion }),
+        readFile: async () => new Uint8Array([1]),
+        createCacheKey: createMarkdownCacheKey,
+        readRevision,
+        prepareResult: result => result,
+    });
+}
 
 function createSuccessfulClient(markdown) {
     return {

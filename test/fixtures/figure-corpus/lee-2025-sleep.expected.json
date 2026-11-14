@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "id": "lee-2025-sleep",
+  "archiveSha256": "784856f2121595970e3762a8a136b36b21d6860c853ee5fae37bebd6ec842094",
+  "pages": 20,
+  "bboxTolerance": 6,
+  "figures": [
+    {
+      "pageIndex": 2,
+      "label": "Fig. 1.",
+      "panels": 14,
+      "captions": 1,
+      "owned": 14,
+      "bbox": [
+        148,
+        50,
+        849,
+        957
+      ]
+    },
+    {
+      "pageIndex": 4,
+      "label": "Fig. 2.",
+      "panels": 20,
+      "captions": 1,
+      "owned": 5,
+      "bbox": [
+        87,
+        47,
+        909,
+        870
+      ]
+    },
+    {
+      "pageIndex": 6,
+      "label": "Fig. 3.",
+      "panels": 12,
+      "captions": 1,
+      "owned": 9,
+      "bbox": [
+        62,
+        51,
+        938,
+        830
+      ]
+    },
+    {
+      "pageIndex": 8,
+      "label": "Fig. 4.",
+      "panels": 13,
+      "captions": 1,
+      "owned": 13,
+      "bbox": [
+        59,
+        55,
+        936,
+        559
+      ]
+    },
+    {
+      "pageIndex": 9,
+      "label": "Fig. 5.",
+      "panels": 15,
+      "captions": 1,
+      "owned": 13,
+      "bbox": [
+        86,
+        79,
+        913,
+        682
+      ]
+    },
+    {
+      "pageIndex": 10,
+      "label": "Fig. 6.",
+      "panels": 17,
+      "captions": 1,
+      "owned": 12,
+      "bbox": [
+        59,
+        73,
+        936,
+        608
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": "Fig. 7.",
+      "panels": 10,
+      "captions": 1,
+      "owned": 10,
+      "bbox": [
+        59,
+        75,
+        928,
+        388
+      ]
+    },
+    {
+      "pageIndex": 12,
+      "label": "Fig. 8.",
+      "panels": 16,
+      "captions": 1,
+      "owned": 16,
+      "bbox": [
+        59,
+        72,
+        931,
+        585
+      ]
+    }
+  ],
+  "preserved": [
+    {
+      "pageIndex": 0,
+      "reason": "caption-overlap"
+    }
+  ]
+}

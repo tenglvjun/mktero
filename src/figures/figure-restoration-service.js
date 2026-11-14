@@ -58,8 +58,11 @@ export class FigureRestorationService {
             const panelPages = new Set(bound.blocks.filter(block => block.role === 'panel')
                 .map(block => block.pageIndex));
             const geometries = new Map();
-            const possiblePages = bound.pages.filter(page => panelPages.has(page.pageIndex)
-                && pageNeedsPDFGeometry(page));
+            // Caption-only pages can establish a cross-page figure's ownership.
+            // Verify their PDF frame too before the resolver uses their coordinates.
+            const possiblePages = bound.pages.filter(page => (
+                panelPages.has(page.pageIndex) || panelPages.has(page.pageIndex - 1)
+            ) && pageNeedsPDFGeometry(page));
             if (possiblePages.length) {
                 try {
                     const opening = Promise.resolve(this.openPDF(fileData, { signal: scope.signal }));
