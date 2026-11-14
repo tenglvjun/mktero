@@ -2,7 +2,7 @@ import {
     escapeMarkdownLinkDestination,
     normalizeMarkdownLinkURL,
 } from '../../markdown/markdown-links.js';
-import { escapeImageDescription, parseAcademicFigureCaption } from '../../markdown/markdown-figures.js';
+import { escapeImageDescription, parseAcademicFigureCaption, parseLooseAcademicFigureCaption } from '../../markdown/markdown-figures.js';
 import { planFigureLayouts } from '../../markdown/figure-layout-normalizer.js';
 import { noteDirective, SECTION_CLOSE_DIRECTIVE, sectionOpenDirective } from '../../markdown/markdown-directives.js';
 import { NOTE_KIND } from './notes.js';
@@ -103,7 +103,7 @@ function placeComposites(units, composites) {
 }
 
 function blockUnits(block, vocabulary, floats) {
-    if (SKIPPED_ROLES.has(block.role)) return [];
+    if (SKIPPED_ROLES.has(block.role) || block.captionConsumed) return [];
     if (block.role === BLOCK_ROLE.FLOAT_NOTE && !block.attachedTo) return [];
     // A content footnote of the page is a note; article metadata is a
     // paragraph of its collapsible section; page decoration MinerU discarded
@@ -292,9 +292,12 @@ function chartDataUnits(block) {
 function tableUnits(block) {
     const body = block.children.find(child => child.kind === 'body');
     const captions = captionChildren(block).map(child => childText(child));
-    const caption = captions.join(' ').trim();
-    const figureCaption = !hasIndependentTableCaption(block)
-        && /^(?:fig|figure)\b/iu.test(parseAcademicFigureCaption(caption)?.label || '');
+    const caption = captions.join(' ').replace(/\s+/gu, ' ').trim();
+    // Native Figure evidence may describe several OCR fragments. Keep the
+    // HTML fallback until their shared PDF image has been verified.
+    const figureCaption = !block.pdfFigure && !hasIndependentTableCaption(block)
+        && /^(?:fig|figure)\b/iu.test((parseAcademicFigureCaption(caption)
+            || parseLooseAcademicFigureCaption(caption))?.label || '');
     const units = [];
     if (figureCaption && body?.assetPath) {
         units.push(imageUnit(block, body, body.assetPath, caption, 'image', 'table'));

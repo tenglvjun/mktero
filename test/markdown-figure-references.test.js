@@ -78,6 +78,22 @@ test('maps a prose figure reference to a uniquely captioned image', () => {
     }]);
 });
 
+test('maps a prose reference to an image caption with no separator after its figure number', () => {
+    const markdown = [
+        'The response is summarized in Figure 17.',
+        '',
+        '![FIGURE 17 Estimated response in each group.](images/response.png)',
+    ].join('\n');
+    const result = analyzeMarkdownFigureReferences(markdown);
+    assert.deepEqual(result.targets.map(target => ({ id: target.id, caption: target.caption })), [{
+        id: 'figure:17', caption: 'FIGURE 17 Estimated response in each group.',
+    }]);
+    assert.deepEqual(result.references.map(reference => ({
+        text: markdown.slice(reference.from, reference.to), targetId: reference.targetId,
+    })), [{ text: 'Figure 17', targetId: 'figure:17' }]);
+    assert.equal(analyzeMarkdownFigureReferences('Figure 17 shows a response in each group.').targets.length, 0);
+});
+
 test('maps Figure references to captions that use a pipe separator', () => {
     const markdown = [
         'The WikiSkill workspace is shown in (Figure 2).',

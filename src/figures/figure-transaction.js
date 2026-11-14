@@ -103,17 +103,32 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
     }
     const members = ids.map(id => blocksByID.get(id));
     const captionIDs = new Set(candidate.captionBlockIds);
+    const native = candidate.nativeFigure === true && input.provider === 'mineru' && input.rangesExplicit === true
+        && candidate.evidence.includes('pdf-image-container') && candidate.evidence.includes('verified-panel-pixels');
+    if (candidate.nativeFigure === true && (!native
+        || candidate.panelBlockIds.some(id => !validBox(candidate.panelBBoxes?.[id])))) {
+        throw transactionError('ambiguous-membership');
+    }
     for (const block of members) {
         // A "see next page" caption lives on the following page.
         if (!block || (!captionIDs.has(block.id) && block.pageIndex !== candidate.pageIndex)
             || !block.sourceRanges?.length || block.rangeEvidence === 'unresolved') {
             throw transactionError('ambiguous-source-range');
         }
-        if (!captionIDs.has(block.id) && (!contains(candidate.visualBBox, block.bbox)
-            || ['body'].includes(block.role) || ['table', 'code', 'heading', 'equation'].includes(block.type))) {
+        const nativePanel = native && candidate.panelBlockIds.includes(block.id)
+            && block.pdfFigurePart === 'panel' && block.pdfFigure?.label === candidate.label
+            && ['image', 'chart', 'table'].includes(block.type)
+            && sameBox(candidate.panelBBoxes?.[block.id], clippedBox(block.bbox, candidate.visualBBox));
+        if (native && candidate.panelBlockIds.includes(block.id) && !nativePanel) {
+            throw transactionError('ambiguous-membership');
+        }
+        if (!captionIDs.has(block.id) && (!contains(candidate.visualBBox,
+            nativePanel ? candidate.panelBBoxes[block.id] : block.bbox)
+            || !nativePanel && (block.role === 'body' || ['table', 'code', 'heading', 'equation'].includes(block.type)))) {
             throw transactionError('foreign-content-overlap');
         }
-        if (candidate.panelBlockIds.includes(block.id) && !images.some(image => (
+        if (candidate.panelBlockIds.includes(block.id) && !(nativePanel && block.type === 'table')
+            && !images.some(image => (
             image.standalone && image.from === block.sourceRanges[0].from
             && image.to === block.sourceRanges[0].to
             && normalizeFigureAssetPath(image.assetPath, input.assetBasePath)
@@ -173,7 +188,7 @@ function createPlan(input, { candidate, crop, assetPath }, blocksByID, pagesByIn
             && contains(block.bbox, member.bbox) && /^\(?[a-z]\)?[.]?$/iu.test(member.text?.trim() || ''));
         const label = labels.length === 1 ? labels[0].text.trim().replace(/[().]/gu, '').toLowerCase() : null;
         return { blockId: id, label: block.panelLabel || label,
-            bbox: [...block.bbox], originalAssetPath: block.assetPath };
+            bbox: [...(native ? candidate.panelBBoxes[id] : block.bbox)], originalAssetPath: block.assetPath };
     });
     const blueprint = {
         id: candidate.id, label: candidate.label, pageIndex: candidate.pageIndex,
@@ -281,6 +296,15 @@ function contains(outer, inner) {
 
 function validBox(box) {
     return Array.isArray(box) && box.length === 4 && box.every(Number.isFinite);
+}
+
+function clippedBox(a, b) {
+    if (!validBox(a) || !validBox(b)) return null;
+    return [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+}
+
+function sameBox(a, b) {
+    return validBox(a) && validBox(b) && a.every((value, index) => Math.abs(value - b[index]) < 1e-7);
 }
 
 function transactionError(reason) {

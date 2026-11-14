@@ -772,10 +772,7 @@ export function findAcademicFigures(markdown) {
             || groups.some(group => rangeContainsLine(group, line))) {
             continue;
         }
-        const match = CAPTIONED_IMAGE_LINE_PATTERN.exec(line.raw);
-        const caption = match
-            ? parseAcademicFigureCaption(unescapeImageDescription(match[1]))
-            : null;
+        const caption = captionFromImageLine(line.raw);
         if (!caption) continue;
         figures.push({
             from: line.from,
@@ -1628,9 +1625,9 @@ function parseCaptionLine(line) {
 
 function captionFromImageLine(line) {
     const match = CAPTIONED_IMAGE_LINE_PATTERN.exec(line || '');
-    return match
-        ? parseAcademicFigureCaption(unescapeImageDescription(match[1]))
-        : null;
+    if (!match) return null;
+    const text = unescapeImageDescription(match[1]);
+    return parseAcademicFigureCaption(text) || parseLooseAcademicFigureCaption(text);
 }
 
 function tableCaptionFromImageLine(line) {

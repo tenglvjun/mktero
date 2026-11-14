@@ -55,6 +55,40 @@ This is a limited recovery rule: multiple possible figures or captions,
 conflicting text, or unverifiable geometry leave the original fragments intact.
 It does not join arbitrary figures across pages.
 
+### Captions from the PDF text layer
+
+MinerU can lose a figure number, print the number and its legend as separate
+paragraphs, or file the number under the float below it. For MinerU results,
+Mktero reads the PDF's own text layer to restore those captions before the
+reading document is written. It accepts captions written on one line or wrapped
+across lines, with or without a trailing period, and captions aligned with the
+outer frame rather than centred over the picture.
+
+- The printed number and legend are kept as they appear in the PDF. Mktero does
+  not exchange two captions because a picture looks like a different chart.
+- A caption moves to another figure only when the PDF text locates it once,
+  the figure it should belong to has no caption of its own, and no body text or
+  other figure stands between them. Ambiguous ownership keeps MinerU's
+  placement.
+- Text that merely mentions a figure inside a sentence is not a caption, and a
+  real table heading is never taken from a table.
+- Without a PDF text layer the earlier OCR-only rules still apply, including the
+  same-page float repair described below.
+
+### Splitting a figure MinerU stored as a table
+
+MinerU sometimes stores one printed figure as a table fragment plus a chart
+fragment. For MinerU results, Mktero restores the complete figure only when a
+single native PDF image contains both fragments, every fragment's pixels match
+that image, the complete native caption is verified at its own PDF location,
+and no other layout content or body text falls inside the recovered bounds.
+The verified image replaces all fragments together and the caption stays
+selectable below it.
+
+If any check fails, the table keeps its HTML and the chart keeps its image.
+A table with its own table heading is never converted into a figure, and the
+recovery does not merge independent figures that merely sit next to each other.
+
 ### MinerU document rewrite
 
 1. Mktero writes reading Markdown from MinerU's layout. Every figure's image,
@@ -73,7 +107,8 @@ the two pictures. Mktero moves a caption onto the adjacent figure of the same
 kind that has none, both downward and upward, so each figure is restored with
 its own caption. A figure that already has a caption keeps it, and a caption
 further from the picture than a printed caption can be stays where MinerU put
-it.
+it. This is the fallback used when the PDF text layer provides no evidence of
+its own.
 
 A caption is moved only when the evidence agrees: the same-page float that
 wrongly carries it has a separate caption of another class and keeps its own

@@ -34,18 +34,19 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
     for (const piece of serialized.pieces) {
         if (piece.part === 'composite' || !Number.isSafeInteger(piece.pageIndex)) continue;
         const source = blocksByID.get(piece.blockId);
+        const pushSource = block => push({ ...block, ...nativeFigurePiece(source, piece) });
         const bbox = validBBox(piece.bbox);
         const range = [{ from: piece.from, to: piece.to }];
         if (piece.part === 'panel') {
             if (!groups.has(source.id)) {
                 groups.add(source.id);
-                push({
+                pushSource({
                     id: source.id, pageIndex: source.pageIndex, type: source.kind, role: 'unknown',
                     bboxKind: 'group', bbox: groupBBox(source), text: '',
                     sourceRanges: [], rangeEvidence: 'unresolved',
                 });
             }
-            push({
+            pushSource({
                 id: piece.key, pageIndex: source.pageIndex, type: source.kind, role: 'panel',
                 bboxKind: 'visual-body', bbox, assetPath: piece.assetPath, parentId: source.id, text: '',
                 sourceRanges: range, rangeEvidence: 'explicit-range',
@@ -53,7 +54,7 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
             continue;
         }
         if (piece.part === 'caption' && piece.parentId) {
-            push({
+            pushSource({
                 id: piece.key, pageIndex: source.pageIndex, type: 'caption', role: 'caption',
                 bboxKind: 'caption', bbox, parentId: piece.parentId, embeddedCaption: true,
                 text: boundedText(piece.text), sourceRanges: range, rangeEvidence: 'explicit-range',
@@ -79,7 +80,7 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
         // fragments mark where text is, but a figure can never consume them or
         // read them as the rest of its caption.
         const stitched = source.fragments.length > 1 && /#f\d+$/u.test(piece.key);
-        push({
+        pushSource({
             id: piece.key, pageIndex: piece.pageIndex, type: PIECE_TYPES[piece.part] || 'text',
             role: pieceRole(piece), bboxKind: 'text', bbox: located ? bbox : null, text: boundedText(piece.text),
             sourceRanges: stitched ? [] : range, rangeEvidence: stitched ? 'unresolved' : 'explicit-range',
@@ -112,6 +113,30 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
         totalPages: bundle.totalPages,
         warnings: Array.isArray(bundle.warnings) ? [...bundle.warnings] : [],
     };
+}
+
+// Keep table Markdown intact until PDF image evidence proves that it is a
+// fragment of a figure. These annotations never turn a table into a panel in
+// the ordinary layout resolver.
+function nativeFigurePiece(source, piece) {
+    const figure = source?.pdfFigure;
+    if (!figure || typeof figure.id !== 'string' || !figure.id
+        || typeof figure.text !== 'string' || figure.text.length > FIGURE_LIMITS.maxCaptionLength
+        || typeof figure.label !== 'string' || !/^(?:fig(?:ure)?|chart|scheme|algorithm)\b/iu.test(figure.label)
+        || !validBBox(figure.bbox)) return {};
+    const caption = piece.part === 'caption' || piece.key === `${source.id}:caption`;
+    const tableBody = source.kind === 'table'
+        && (piece.key === `${source.id}:body` || piece.key === source.children.find(child => child.kind === 'body')?.id);
+    if (caption) return {
+        pdfFigure: figure, pdfFigurePart: 'caption', type: 'caption', role: 'caption',
+        bbox: [...figure.bbox], text: boundedText(figure.text),
+    };
+    if (piece.part === 'panel' || tableBody) return {
+        pdfFigure: figure, pdfFigurePart: 'panel',
+        ...(tableBody ? { assetPath: source.children.find(child => child.kind === 'body')?.assetPath,
+            bbox: validBBox(piece.bbox) } : {}),
+    };
+    return {};
 }
 
 // A note attached to a float is reading text, not part of the picture: as a
