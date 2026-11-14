@@ -7,6 +7,7 @@ import { planFigureLayouts } from '../../markdown/figure-layout-normalizer.js';
 import { noteDirective, SECTION_CLOSE_DIRECTIVE, sectionOpenDirective } from '../../markdown/markdown-directives.js';
 import { NOTE_KIND } from './notes.js';
 import { BLOCK_KIND, BLOCK_ROLE, fragmentText, spansText, unionBBox } from './ir.js';
+import { hasIndependentTableCaption } from './floats.js';
 import {
     createHyphenationVocabulary,
     escapeLineStart,
@@ -292,7 +293,8 @@ function tableUnits(block) {
     const body = block.children.find(child => child.kind === 'body');
     const captions = captionChildren(block).map(child => childText(child));
     const caption = captions.join(' ').trim();
-    const figureCaption = /^(?:fig|figure)\b/iu.test(parseAcademicFigureCaption(caption)?.label || '');
+    const figureCaption = !hasIndependentTableCaption(block)
+        && /^(?:fig|figure)\b/iu.test(parseAcademicFigureCaption(caption)?.label || '');
     const units = [];
     if (figureCaption && body?.assetPath) {
         units.push(imageUnit(block, body, body.assetPath, caption, 'image', 'table'));

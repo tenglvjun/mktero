@@ -154,11 +154,21 @@ test('a new document pipeline reads a stored local result again without the serv
 });
 
 test('the local parser profile records its document pipeline and keeps the shipped literal', async () => {
-    const { MINERU_DOCUMENT_PIPELINE, MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS, MINERU_LOCAL_REQUEST_PROFILE_ID } = await import('../src/mineru/parser-profile.js');
+    const { MINERU_DOCUMENT_PIPELINE, MINERU_LOCAL_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID, MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS, MINERU_LOCAL_REQUEST_PROFILE_ID } = await import('../src/mineru/parser-profile.js');
     assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).document, MINERU_DOCUMENT_PIPELINE);
     assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).figureStructure, 'figure-region-v20');
+    // A document-pipeline bump must not touch what the local service was asked
+    // to produce, which keys the stored result.
+    assert.equal(MINERU_LOCAL_REQUEST_PROFILE_ID, '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip"}');
+    assert.equal(JSON.parse(MINERU_LOCAL_REQUEST_PROFILE_ID).output, 'zip');
+    assert.equal(MINERU_LOCAL_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
+        '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v14","figureStructure":"figure-region-v20"}');
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_LOCAL_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_LOCAL_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID);
     assert.deepEqual(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
         [
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v14","figureStructure":"figure-region-v20"}',
+            '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v13","figureStructure":"figure-region-v20"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v12","figureStructure":"figure-region-v19"}',
             '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v12","figureStructure":"figure-region-v18"}',

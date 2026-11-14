@@ -78,7 +78,7 @@ const ORDERED_ROLES = new Set([BLOCK_ROLE.BODY, BLOCK_ROLE.HEADING, BLOCK_ROLE.R
 // at most one caption.
 export function reassignFloatCaptions(ir) {
     const moves = ensureList(ir, 'captionMoves');
-    const pending = [];
+    const pending = pendingCrossClassCaptionMoves(ir.blocks);
     for (const group of floatsByPageClass(ir.blocks)) {
         for (const source of group) {
             const pieces = classedCaptionPieces(source);
@@ -146,14 +146,88 @@ function pendingCaptionMoves(source, pieces, unlabeled) {
     return moves;
 }
 
-// The label at `index` and the unlabeled caption pieces printed after it. A
-// following label starts another float's caption and never moves with it.
+// A table can carry a neighbouring figure's caption as well as its own (or
+// vice versa). Only two independent labels, an external caption between the
+// bodies, and one uncaptioned neighbour provide enough evidence to move it.
+function pendingCrossClassCaptionMoves(blocks) {
+    const byPage = new Map();
+    for (const block of blocks) {
+        if (block.role !== BLOCK_ROLE.FLOAT || !floatClass(block)) continue;
+        if (!byPage.has(block.pageIndex)) byPage.set(block.pageIndex, []);
+        byPage.get(block.pageIndex).push(block);
+    }
+    const moves = [];
+    for (const floats of byPage.values()) {
+        for (const source of floats) {
+            const cls = floatClass(source);
+            const pieces = classedCaptionPieces(source, null);
+            if (pieces.labeled.length !== 2
+                || source.children.filter(child => child.kind === 'body').length !== 1) continue;
+            const own = pieces.labeled.filter(piece => piece.label.class === cls
+                && explicitCaptionLabel(captionChildText(piece.child)));
+            if (own.length !== 1) continue;
+            const index = pieces.labeled.findIndex(piece => piece.label.class !== cls);
+            if (index < 0) continue;
+            const foreign = pieces.labeled[index];
+            const text = captionChildText(foreign.child);
+            // An unpunctuated "Table 1 reports ..." can be a reference in a
+            // split caption. Moving it needs a separator or a bare label.
+            if (!explicitCaptionLabel(text)) continue;
+            const moving = captionRun(pieces, index);
+            if (moving.some(child => !validBox(child.bbox) || child.pageIndex !== source.pageIndex)) continue;
+            const bbox = unionBox(moving.map(child => child.bbox));
+            const sourceBox = bodyBox(source);
+            const side = adjacentCaptionSide(bbox, sourceBox);
+            if (!side || !adjacentCaptionSide(own[0].bbox, sourceBox)) continue;
+            const targets = floats.filter(target => {
+                if (target === source || floatClass(target) !== foreign.label.class || hasCaptionText(target)) return false;
+                const box = bodyBox(target);
+                const targetSide = adjacentCaptionSide(bbox, box);
+                return targetSide && targetSide !== side
+                    && !captionMoveBlocked(blocks, source, target, sourceBox, box);
+            });
+            if (targets.length !== 1) continue;
+            moves.push({ source, target: targets[0], moving, distance: captionDistance(bbox, bodyBox(targets[0])) });
+        }
+    }
+    const claims = new Map();
+    for (const move of moves) claims.set(move.target, (claims.get(move.target) || 0) + 1);
+    return moves.filter(move => claims.get(move.target) === 1);
+}
+
+function adjacentCaptionSide(caption, body) {
+    if (!validBox(caption) || !validBox(body)) return null;
+    const overlap = Math.min(caption[2], body[2]) - Math.max(caption[0], body[0]);
+    if (overlap / Math.min(caption[2] - caption[0], body[2] - body[0]) < GROUP_OVERLAP) return null;
+    if (caption[3] <= body[1] && body[1] - caption[3] <= MAX_CAPTION_GAP) return 'above';
+    if (caption[1] >= body[3] && caption[1] - body[3] <= MAX_CAPTION_GAP) return 'below';
+    return null;
+}
+
+function captionMoveBlocked(blocks, source, target, sourceBox, targetBox) {
+    const [above, below] = sourceBox[1] < targetBox[1] ? [sourceBox, targetBox] : [targetBox, sourceBox];
+    const corridor = [Math.max(above[0], below[0]), above[3], Math.min(above[2], below[2]), below[1]];
+    if (!validBox(corridor)) return true;
+    return blocks.some(block => {
+        if (block === source || block === target || block.pageIndex !== source.pageIndex
+            || block.role === BLOCK_ROLE.CHROME || block.role === BLOCK_ROLE.PAGE_NOTE
+            || block.kind === BLOCK_KIND.DISCARDED) return false;
+        const box = block.role === BLOCK_ROLE.FLOAT ? bodyBox(block) : block.bbox;
+        return validBox(box) && boxesOverlapX(corridor, box) && box[3] > corridor[1] && box[1] < corridor[3];
+    });
+}
+
+// The label at `index` and the unlabeled caption pieces printed after it.
+// Keep the existing same-class boundaries; another class needs an explicit
+// label so a continuation such as "Table 1 reports ..." moves with its caption.
 function captionRun(pieces, index) {
     const label = pieces.labeled[index];
     const start = pieces.ordered.indexOf(label.child);
-    const nextLabel = pieces.ordered.findIndex((child, at) => (
-        at > start && captionLabel(captionChildText(child), label.label.class)
-    ));
+    const nextLabel = pieces.ordered.findIndex((child, at) => {
+        if (at <= start) return false;
+        const text = captionChildText(child);
+        return captionLabel(text, label.label.class) || explicitCaptionLabel(text);
+    });
     return pieces.ordered.slice(start, nextLabel < 0 ? undefined : nextLabel);
 }
 
@@ -460,8 +534,7 @@ function floatClass(block) {
     return CAPTION_CLASS.get(block?.kind) || null;
 }
 
-function classedCaptionPieces(block) {
-    const cls = floatClass(block);
+function classedCaptionPieces(block, cls = floatClass(block)) {
     const ordered = captionChildren(block);
     const labeled = ordered
         .map(child => ({ child, bbox: child.bbox, label: captionLabel(captionChildText(child), cls) }))
@@ -521,6 +594,23 @@ function bareCaptionLabel(text) {
 
 function hasTableLabel(block) {
     return captionChildren(block).some(child => captionLabel(captionChildText(child), 'table'));
+}
+
+function explicitCaptionLabel(text) {
+    const parsed = parseAcademicFigureCaption(text);
+    return parsed && /[.:：。|｜—–]$/u.test(parsed.label)
+        ? parsedCaptionLabel(text) : bareCaptionLabel(text);
+}
+
+export function hasIndependentTableCaption(block) {
+    const body = bodyBox(block);
+    return captionChildren(block).some(child => {
+        if (explicitCaptionLabel(captionChildText(child))?.class !== 'table') return false;
+        if (!validBox(body) || !validBox(child.bbox)) return true;
+        // A table label inside the picture can belong to one of its panels.
+        const box = child.bbox;
+        return box[0] < body[0] || box[1] < body[1] || box[2] > body[2] || box[3] > body[3];
+    });
 }
 
 function hasCaptionText(block) {

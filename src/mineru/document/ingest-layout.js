@@ -332,7 +332,7 @@ function buildFloat(block, raw, context) {
             continue;
         }
         if (block.kind === BLOCK_KIND.CODE || block.kind === BLOCK_KIND.ALGORITHM) {
-            const code = codeText(child);
+            const code = codeText(child, block.kind === BLOCK_KIND.ALGORITHM);
             if (code) block.children.push({ id: `${block.id}:body${counts.body++}`, kind, pageIndex: block.pageIndex, bbox, code });
             continue;
         }
@@ -361,13 +361,23 @@ function buildFloat(block, raw, context) {
     return block;
 }
 
-function codeText(child) {
+function codeText(child, separateMath = false) {
     const lines = [];
     for (const line of child.lines || []) {
-        lines.push((line.spans || []).map(span => {
-            if (typeof span.content !== 'string') return '';
-            return span.type === 'inline_equation' ? `$${span.content.trim()}$` : span.content;
-        }).join(''));
+        let text = '';
+        let afterMath = false;
+        for (const span of line.spans || []) {
+            if (typeof span.content !== 'string') continue;
+            const math = span.type === 'inline_equation';
+            const content = math ? span.content.trim() : span.content;
+            if (separateMath && !content) continue;
+            // Adjacent algorithm equations need distinct closing/opening '$'
+            // markers. Preserve all text spacing and ordinary code verbatim.
+            if (separateMath && afterMath && math) text += ' ';
+            text += math ? `$${content}$` : content;
+            if (content) afterMath = math;
+        }
+        lines.push(text);
     }
     return lines.join('\n').replace(/\s+$/u, '');
 }

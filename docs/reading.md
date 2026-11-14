@@ -4,6 +4,8 @@
 
 Mktero reflows OCR output, multi-column text, formulas, tables, figures, lists, and code into a continuous reading document. This page covers navigation, the PDF source, copying, reading controls, and optional AI translation.
 
+Adjacent inline formulas in algorithm steps render separately, preserving their boundaries without changing the algorithm's text, indentation, or ordinary code.
+
 ## Move around the document
 
 - Use `Headings` in the left column for the outline, or `Figures` for the figure/table index.

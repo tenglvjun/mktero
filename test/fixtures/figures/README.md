@@ -20,3 +20,11 @@ arrows, labels, an inset bitmap, a caption, and body text. The provider fixture
 still supplies bounded layout evidence, so the complete panel region can be
 restored without consulting a PDF text layer; the caption and body remain
 outside the crop and searchable in Markdown.
+
+`rrsi-caption-ownership.layout.json` is a minimal excerpt of the MinerU layout
+for page 8 of *RRSI: Regularized Recursive Self-Improvement of Agent Harnesses*
+(arXiv:2609.24972). It preserves the two floats, their caption text and geometry,
+and the table HTML needed to reproduce a cross-type caption ownership error.
+Image paths are shortened; the original PDF, archive, and image bytes remain
+local. The document caption-ownership test checks the IR, Markdown, HTML,
+source map, and Figure 3 restoration candidate.
