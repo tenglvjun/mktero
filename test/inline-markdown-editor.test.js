@@ -4299,8 +4299,11 @@ test('keeps rendered GFM table cells read-only', () => {
         resolveImageURL: () => null,
         openLink: () => {},
     });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    assert.equal(forceParsing(view, view.state.doc.length, 1000), true);
     const valueCell = document.querySelector('.cm-mktero-table tbody td:last-child');
 
+    assert.ok(valueCell);
     assert.equal(valueCell.getAttribute('contenteditable'), 'false');
     enterTableCellEditing(valueCell, dom.window);
     assert.equal(valueCell.getAttribute('contenteditable'), 'false');
