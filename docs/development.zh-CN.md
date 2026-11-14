@@ -89,6 +89,8 @@ node scripts/figure-corpus-check.mjs --update             # 复核后刷新
 
 RRSI 用例（`arxiv-2609.24972`）检查 Figure 3 的图注归属及 Table 1 的 HTML 表格输出。完整压缩包和 PDF 留在本地语料中；仓库只保存期望值和最小布局回归样例。图组脚本可用 `--id arxiv-2609.24972` 单独验证，两个阅读管线则使用 `--ids arxiv-2609.24972`。
 
+算法步骤中的相邻行内公式属于文档管线，不属于图组管线。两个行内公式相邻时，阅读器让每个公式保持自己的 `$…$` 边界，并分开相邻的结束和起始分隔符；普通文本、缩进、代码块和合法的块级公式都不做改动，也不会对 Markdown 做全局替换。该修复位于 `src/mineru/document/`，因此需要升 `MINERU_DOCUMENT_PIPELINE`，但不需要改 `FIGURE_PIPELINE_PROFILE`。已保存的原始结果足以重新解析：原始结果库以 `MINERU_REQUEST_PROFILE_ID` 为键，而文档管线升级不会改动它，所以 `node scripts/reading-corpus-check.mjs --pipeline ir` 能直接重读现有归档，不访问 MinerU。
+
 图组输入现在来自 MinerU 文档 IR。此前记录的 10 份期望由旧图组适配器生成：
 
 `beyond-alignment`、`brainbench`、`clinical-llm`、`envharness`、`externalization`、`menstrual-wearable`、`mosaic`、`neuradock`、`olfactory`、`parsimonious`。

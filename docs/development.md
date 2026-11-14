@@ -122,6 +122,18 @@ the repository contains expectations and a minimal layout regression fixture.
 Check this case with `--id arxiv-2609.24972` for the figure script and
 `--ids arxiv-2609.24972` for both reading pipelines.
 
+Adjacent inline formulas in an algorithm step are a document-pipeline concern,
+not a figure one. The reader keeps every inline equation inside its own `$…$`
+span when two of them are adjacent, separating the closing and opening delimiters;
+ordinary text, indentation, code blocks, and genuine display formulas are left
+untouched, and no global replacement runs over the Markdown. The fix lives in
+`src/mineru/document/`, so it needs a `MINERU_DOCUMENT_PIPELINE` bump and no
+`FIGURE_PIPELINE_PROFILE` change. A stored raw result is enough to re-derive the
+Markdown: the raw-result store is keyed by `MINERU_REQUEST_PROFILE_ID`, which a
+document bump leaves byte for byte, so
+`node scripts/reading-corpus-check.mjs --pipeline ir` re-reads an existing
+archive without contacting MinerU.
+
 Figure input now comes from the MinerU document IR. The ten expectations below
 were recorded by the earlier figure adapter:
 

@@ -10,11 +10,13 @@ import {
     MINERU_CLOUD_REQUEST_PROFILE_IDS,
     MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_PIPELINE,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
@@ -72,25 +74,28 @@ test('derives a separate pipeline identity from the same document and figure ver
     assert.equal('document' in request, false);
 });
 
-test('keeps the shipped IR v13 figure v20 Pipeline identity as an independent literal', () => {
-    assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
-        '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v20"}');
-    assert.deepEqual(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID), {
+test('keeps the shipped IR v14 figure v20 Pipeline identity as an independent literal', () => {
+    assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v14","figureStructure":"figure-region-v20"}');
+    assert.deepEqual(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID), {
         batch: { model_version: 'pipeline', enable_formula: true, enable_table: true },
         file: { is_ocr: true },
-        document: 'mineru-document-ir-v13',
+        document: 'mineru-document-ir-v14',
         figureStructure: 'figure-region-v20',
     });
     assert.deepEqual(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS, [
+        MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
     ]);
     assert.ok(Object.isFrozen(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS));
+    assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v20"}');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}');
     assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v20');
     assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).document, MINERU_DOCUMENT_PIPELINE);
-    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v14');
+    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v15');
 });
 
 test('selects previous profiles only for the exact current cloud model identity', () => {
@@ -109,6 +114,7 @@ test('selects previous profiles only for the exact current cloud model identity'
         MINERU_LOCAL_PARSER_PROFILE_ID,
         MINERU_REQUEST_PROFILE_ID,
         mineruCloudProfilesFor('pipeline').requestProfile,
+        MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
         MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
         MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
@@ -120,26 +126,26 @@ test('selects previous profiles only for the exact current cloud model identity'
 });
 
 for (const [modelVersion, previousProfile, otherPreviousProfile] of [
-    ['vlm', MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID],
-    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID],
+    ['vlm', MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID],
 ]) {
     const currentProfile = mineruCloudProfilesFor(modelVersion).cacheProfile;
     const fileData = new Uint8Array([1]);
     const keyFor = parserProfile => createMarkdownCacheKey(fileData, { parserProfile });
 
     for (const method of ['extract', 'readCached']) {
-        test(`${method} reopens the ${modelVersion} v13 correction after the v14 upgrade`, async () => {
+        test(`${method} reopens the ${modelVersion} v14 correction after the v15 upgrade`, async () => {
             const currentKey = await keyFor(currentProfile);
             const previousKey = await keyFor(previousProfile);
             const reads = [];
             const extractor = createRevisionExtractor(modelVersion, async ({ cacheKey }) => {
                 reads.push(cacheKey);
-                return cacheKey === previousKey ? { markdown: '# Corrected v13' } : null;
+                return cacheKey === previousKey ? { markdown: '# Corrected v14' } : null;
             });
 
             const result = await extractor[method](42);
 
-            assert.equal(result.markdown, '# Corrected v13');
+            assert.equal(result.markdown, '# Corrected v14');
             assert.equal(result.parserProfile, previousProfile);
             assert.equal(result.cacheKey, previousKey);
             assert.deepEqual(reads, [currentKey, previousKey]);
@@ -168,7 +174,7 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
         });
     }
 
-    test(`${modelVersion} inherits v13 translations without accessing the other model`, async () => {
+    test(`${modelVersion} inherits v14 translations without accessing the other model`, async () => {
         const currentKey = await keyFor(currentProfile);
         const previousKey = await keyFor(previousProfile);
         const otherKey = await keyFor(otherPreviousProfile);
