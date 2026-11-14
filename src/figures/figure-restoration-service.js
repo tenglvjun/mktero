@@ -7,6 +7,7 @@ import { bindFigureSourceRanges } from './figure-source-binding.js';
 import { resolveFigureCandidates } from './figure-region-resolver.js';
 import { embeddedImageCandidate, embeddedImageRequest } from './figure-embedded-image.js';
 import { captionedImageCandidate, captionedImageRequest } from './figure-captioned-image.js';
+import { documentFigureCandidate, documentFigureRequest } from './figure-document.js';
 import { composeFigureDraft, planFigureReplacement } from './figure-transaction.js';
 import { createFigureAbortScope, throwIfFigureAborted, waitForFigureOperation } from './figure-async.js';
 
@@ -55,7 +56,8 @@ export class FigureRestorationService {
                     id: 'fig-p0-b0', pageIndex: input.pages[0]?.pageIndex ?? 0, reason: error.preserveReason,
                 }] };
             }
-            const panelPages = new Set(bound.blocks.filter(block => block.role === 'panel')
+            const panelPages = new Set(bound.blocks.filter(block => block.role === 'panel'
+                || block.pdfFigurePart === 'panel')
                 .map(block => block.pageIndex));
             const geometries = new Map();
             // Caption-only pages can establish a cross-page figure's ownership.
@@ -204,7 +206,8 @@ export class FigureRestorationService {
     }
 
     async #recoverOriginalImage(input, candidate, candidates, session, signal, budget) {
-        const request = embeddedImageRequest(input, candidate, candidates, budget)
+        const request = documentFigureRequest(input, candidate, budget)
+            || embeddedImageRequest(input, candidate, candidates, budget)
             || captionedImageRequest(input, candidate, budget);
         if (!request) return null;
         const operation = createFigureAbortScope([signal], {
@@ -216,9 +219,11 @@ export class FigureRestorationService {
             if (!result) return null;
             validateFigureCrop(result.crop, this.limits);
             const page = input.pages.find(value => value.pageIndex === candidate.pageIndex);
-            const verified = request.mode === 'embedded-text'
-                ? embeddedImageCandidate(candidate, request, result, page)
-                : captionedImageCandidate(candidate, request, result, page);
+            const verified = request.mode === 'document-figure'
+                ? documentFigureCandidate(candidate, request, result, page)
+                : request.mode === 'embedded-text'
+                    ? embeddedImageCandidate(candidate, request, result, page)
+                    : captionedImageCandidate(candidate, request, result, page);
             return verified ? { candidate: verified, crop: result.crop } : null;
         }
         catch {

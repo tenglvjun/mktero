@@ -1,4 +1,5 @@
 import { FIGURE_LIMITS } from './figure-limits.js';
+import { resolveDocumentFigures } from './figure-document.js';
 import { isValidNormalizedSourceBBox } from '../core/markdown-source-map.js';
 import {
     parseAcademicFigureCaption,
@@ -44,6 +45,7 @@ export function resolveFigureCandidates(input, { limits: overrides, budget: shar
         }
         output.push(...pageCandidates);
     }
+    output.push(...resolveDocumentFigures(input, { limits, budget, existingCandidates: output }));
     const owners = new Map();
     for (const candidate of output) {
         for (const id of [...candidate.captionBlockIds, ...candidate.ownedTextBlockIds]) {
@@ -228,7 +230,7 @@ function resolveGroup(group, blocks, page, limits, budget, allBlocks = blocks, f
     const nearbyCaptions = [];
     for (const block of blocks) {
         if (!consume(budget)) return preserve(candidate, 'resource-limit');
-        if (block.role !== 'caption' && !isLooseFigureCaption(block.text)) continue;
+        if (block.pdfFigure || block.role !== 'caption' && !isLooseFigureCaption(block.text)) continue;
         if (parents.some(parentBlock => block.parentId === parentBlock.id)) {
             explicitCaptions.push(block);
         }
@@ -442,7 +444,7 @@ function preserve(candidate, reason) {
 }
 
 function isPanel(block) {
-    return block.bboxKind !== 'group' && (block.role === 'panel'
+    return !block.pdfFigure && block.bboxKind !== 'group' && (block.role === 'panel'
         || ['image', 'chart'].includes(block.type));
 }
 

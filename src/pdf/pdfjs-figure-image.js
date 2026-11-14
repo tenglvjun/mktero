@@ -3,6 +3,7 @@ import { throwIfFigureAborted, waitForFigureOperation } from '../figures/figure-
 import { normalizeFigurePanelLabel } from '../figures/figure-label-recovery.js';
 
 import { findPDFCaptions, textBox, verifyPDFPanelPixels } from './pdfjs-figure-evidence.js';
+import { inspectDocumentFigureImage } from './pdfjs-document-figure.js';
 export { matchingSamples } from './pdfjs-figure-evidence.js';
 
 // An unnumbered figure (for example a graphical abstract) is one raster image
@@ -16,6 +17,7 @@ const EMBEDDED_MAX_PASSES = 4;
 const MAX_IMAGE_AREA = 750_000;
 
 export async function inspectPDFFigureImage(page, request, options) {
+    if (request?.mode === 'document-figure') return inspectDocumentFigureImage(page, request, options);
     if (request?.mode === 'embedded-text') return inspectEmbeddedTextImage(page, request, options);
     return inspectCaptionedFigureImage(page, request, options);
 }
