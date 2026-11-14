@@ -75,6 +75,18 @@ its own caption. A figure that already has a caption keeps it, and a caption
 further from the picture than a printed caption can be stays where MinerU put
 it.
 
+A caption is moved only when the evidence agrees: the same-page float that
+wrongly carries it has a separate caption of another class and keeps its own
+separate caption, the receiving float is of the same class as the moved caption
+and has no caption at all, and the geometry is sufficient with no body text
+between them. Anything still uncertain keeps MinerU's original ownership. The
+rule does not split a caption away from body text that refers to a table, does
+not split table panels that belong inside a figure, and does not stop an
+image-compatible figure that MinerU labelled a table. A table that also has its
+own separate table heading keeps its HTML when another figure's heading was
+filed under it. This repairs only the relationships that evidence supports; it
+is not a promise that any particular wrong caption is corrected.
+
 ## Progressive rendering
 
 Reading starts as soon as conversion finishes. Each pending figure shows an

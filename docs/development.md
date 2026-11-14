@@ -116,6 +116,12 @@ node scripts/figure-corpus-check.mjs --update             # refresh after review
 3. Missing archives are skipped. An archive whose bytes changed fails until it
    is re-verified and updated.
 
+The RRSI case (`arxiv-2609.24972`) checks Figure 3 caption ownership and keeps
+Table 1 as an HTML table. Its complete archive and PDF stay in the local corpus;
+the repository contains expectations and a minimal layout regression fixture.
+Check this case with `--id arxiv-2609.24972` for the figure script and
+`--ids arxiv-2609.24972` for both reading pipelines.
+
 Figure input now comes from the MinerU document IR. The ten expectations below
 were recorded by the earlier figure adapter:
 

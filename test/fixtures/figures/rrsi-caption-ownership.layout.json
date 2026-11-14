@@ -1,0 +1,178 @@
+{
+  "_fixture": {
+    "source": "RRSI: Regularized Recursive Self-Improvement of Agent Harnesses (arXiv:2609.24972)",
+    "pageNumber": 8,
+    "description": "Two float blocks from the real MinerU layout; only image filenames are shortened. The PDF and image bytes are not included."
+  },
+  "_backend": "hybrid",
+  "_version_name": "3.4.4",
+  "pdf_info": [
+    {
+      "page_idx": 7,
+      "page_size": [
+        595,
+        841
+      ],
+      "para_blocks": [
+        {
+          "type": "chart",
+          "bbox": [
+            85,
+            86,
+            509,
+            280
+          ],
+          "blocks": [
+            {
+              "bbox": [
+                85,
+                86,
+                509,
+                280
+              ],
+              "type": "chart_body",
+              "angle": 0,
+              "lines": [
+                {
+                  "bbox": [
+                    85,
+                    86,
+                    509,
+                    280
+                  ],
+                  "spans": [
+                    {
+                      "bbox": [
+                        85,
+                        86,
+                        509,
+                        280
+                      ],
+                      "type": "chart",
+                      "image_path": "rrsi-figure.jpg"
+                    }
+                  ]
+                }
+              ],
+              "index": 1
+            }
+          ],
+          "index": 1
+        },
+        {
+          "type": "table",
+          "bbox": [
+            62,
+            322,
+            530,
+            428
+          ],
+          "blocks": [
+            {
+              "bbox": [
+                59,
+                297,
+                271,
+                312
+              ],
+              "type": "table_caption",
+              "angle": 0,
+              "lines": [
+                {
+                  "bbox": [
+                    59,
+                    297,
+                    271,
+                    312
+                  ],
+                  "spans": [
+                    {
+                      "bbox": [
+                        59,
+                        297,
+                        271,
+                        312
+                      ],
+                      "type": "text",
+                      "content": "Figure 3 | Main results in all three domains."
+                    }
+                  ]
+                }
+              ],
+              "index": 2
+            },
+            {
+              "bbox": [
+                62,
+                322,
+                530,
+                428
+              ],
+              "type": "table_body",
+              "angle": 0,
+              "lines": [
+                {
+                  "bbox": [
+                    62,
+                    322,
+                    530,
+                    428
+                  ],
+                  "spans": [
+                    {
+                      "bbox": [
+                        62,
+                        322,
+                        530,
+                        428
+                      ],
+                      "type": "table",
+                      "html": "<table><tr><td rowspan=\"2\">Method</td><td colspan=\"2\">In-Distribution</td><td colspan=\"3\">Out-of-Distribution</td></tr><tr><td>Harvey LAB (Evolve)</td><td>Harvey LAB (ID Held-out)</td><td>JobBench</td><td>GDPval</td><td>APEX-Agents</td></tr><tr><td><eq>H_0</eq>(no evolution)</td><td>89.4</td><td>86.9</td><td>36.0</td><td>48.8</td><td>34.2</td></tr><tr><td>Meta-Harness (Lee et al., 2026b)</td><td>93.0</td><td>89.2</td><td>37.1</td><td>49.1</td><td>35.7</td></tr><tr><td>AHE (Lin et al., 2026a)</td><td>90.7</td><td>88.7</td><td>37.2</td><td>47.2</td><td>33.1</td></tr><tr><td>TTHE (Nie et al., 2026)</td><td>91.1</td><td>88.5</td><td>35.2</td><td>47.0</td><td>31.7</td></tr><tr><td>HarnessX (Chen et al., 2026)</td><td>91.8</td><td>89.1</td><td>36.3</td><td>48.5</td><td>34.3</td></tr><tr><td>RRSI (ours)</td><td>90.5</td><td>89.2</td><td>40.7</td><td>52.3</td><td>37.9</td></tr></table>",
+                      "image_path": "rrsi-table.jpg"
+                    }
+                  ]
+                }
+              ],
+              "index": 3
+            },
+            {
+              "bbox": [
+                58,
+                438,
+                477,
+                452
+              ],
+              "type": "table_caption",
+              "angle": 0,
+              "lines": [
+                {
+                  "bbox": [
+                    58,
+                    438,
+                    477,
+                    452
+                  ],
+                  "spans": [
+                    {
+                      "bbox": [
+                        58,
+                        438,
+                        477,
+                        452
+                      ],
+                      "type": "text",
+                      "content": "Table 1 | Comparison with prior harness evolution methods on agentic workspace tasks."
+                    }
+                  ]
+                }
+              ],
+              "index": 4
+            }
+          ],
+          "index": 3
+        }
+      ],
+      "discarded_blocks": []
+    }
+  ]
+}

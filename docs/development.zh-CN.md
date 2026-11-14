@@ -87,6 +87,8 @@ node scripts/figure-corpus-check.mjs --update             # 复核后刷新
 2. 验证新论文时，把它的压缩包加入语料目录，并提交生成的 `<id>.expected.json`。
 3. 缺失的压缩包会被跳过。压缩包字节发生变化时会失败，直到重新验证并更新。
 
+RRSI 用例（`arxiv-2609.24972`）检查 Figure 3 的图注归属及 Table 1 的 HTML 表格输出。完整压缩包和 PDF 留在本地语料中；仓库只保存期望值和最小布局回归样例。图组脚本可用 `--id arxiv-2609.24972` 单独验证，两个阅读管线则使用 `--ids arxiv-2609.24972`。
+
 图组输入现在来自 MinerU 文档 IR。此前记录的 10 份期望由旧图组适配器生成：
 
 `beyond-alignment`、`brainbench`、`clinical-llm`、`envharness`、`externalization`、`menstrual-wearable`、`mosaic`、`neuradock`、`olfactory`、`parsimonious`。
