@@ -33,16 +33,24 @@ function line(value, bottom, size = 9, width = 800) {
     return { text: value, width, height: size, transform: [size, 0, 0, size, 100, 1000 - bottom] };
 }
 
-function fixture({ ocrCaption = CAPTION, nativeLines = LINES } = {}) {
+function fixture({ ocrCaption = CAPTION, nativeLines = LINES, threePanels = false } = {}) {
+    const panels = threePanels ? [
+        [[100, 100, 340, 280], 'left.png'],
+        [[360, 100, 600, 288], 'middle.png'],
+        [[620, 100, 900, 300], 'right.png'],
+    ] : [
+        [[100, 100, 480, 300], 'left.png'],
+        [[500, 100, 900, 300], 'right.png'],
+    ];
     const result = {
         markdown: '', assetBasePath: '',
-        assets: ['left.png', 'right.png'].map(name => ({
+        assets: panels.map(([, name]) => ({
             path: `images/${name}`, mimeType: 'image/png', data: createTestPNG(),
         })),
         layout: projectMinerULayout({ _backend: 'vlm', _version_name: '3.4.5', pdf_info: [{
             page_idx: 0, page_size: [1000, 1000], discarded_blocks: [], para_blocks: [
-                picture([100, 100, 480, 300], 'left.png'),
-                picture([500, 100, 900, 300], 'right.png', ocrCaption),
+                ...panels.map(([bbox, name], index) => picture(bbox, name,
+                    index === panels.length - 1 ? ocrCaption : '')),
                 text('text', [100, 500, 900, 540], PROSE),
             ],
         }] }),
@@ -101,6 +109,70 @@ test('keeps a complete OCR legend when the native continuation cannot be read', 
     const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
     assert.equal(candidates.length, 1);
     assert.equal(candidates[0].panelBlockIds.length, 2);
+});
+
+for (const [name, ending, continuation] of [
+    ['compound word', 'cross-', 'cohort selection agrees with the independent measurements.'],
+    ['word broken across lines', 'compart-', 'ments remain consistent across all independent measurements.'],
+    ['hyphenated word with the same token count', 'cross-', 'cohort'],
+    ['Unicode hyphen', 'compart‐', 'ments remain consistent across all independent measurements.'],
+]) {
+    test(`keeps one three-panel figure when a bounded native caption ends in a ${name}`, () => {
+        const first = `Figure 12: Comparison of independent measurements in ${ending}`;
+        const caption = first.replace(/[-‐]$/u, '') + (ending === 'cross-' ? '-' : '') + continuation;
+        const { result, pdfText } = fixture({ ocrCaption: caption, nativeLines: [first], threePanels: true });
+        const input = bindFigureSourceRanges(createMinerUFigureInput(result, { pdfText }));
+        assert.equal(input.providerState.mineruDocument.ir.diagnostics.pdfCaptions.restored, 0);
+        assert.equal(input.markdown.split('Figure 12:').length - 1, 1);
+        assert.ok(input.markdown.includes(caption));
+        const candidates = resolveFigureCandidates(input);
+        assert.equal(candidates.length, 1);
+        assert.equal(candidates[0].decision, 'compose');
+        assert.equal(candidates[0].panelBlockIds.length, 3);
+        assert.equal(candidates[0].captionBlockIds.length, 1);
+        const draft = composeFigureDraft(input, [{ candidate: candidates[0], assetPath: 'generated/figures/chart.png',
+            crop: { data: createTestPNG(800, 200), mimeType: 'image/png', width: 800, height: 200 } }]);
+        const document = prepareMinerUResult(draft.input);
+        assert.ok(document.markdown.includes(`![${caption}](generated/figures/chart.png)`));
+        assert.equal(document.markdown.includes('images/'), false);
+        assert.equal(document.markdown.split('Figure 12:').length - 1, 1);
+        assert.ok(document.markdown.includes(PROSE));
+        assert.ok(document.sourceMap.every(entry => isValidSourceMapEntry(entry, document.markdown.length)));
+    });
+}
+
+for (const [name, adjust] of [
+    ['a different figure number', (result) => {
+        result.layout.pages[0].blocks[2].blocks[1].lines[0].spans[0].content =
+            'Figure 13: Comparison of independent measurements in cross-cohort selection agrees with the independent measurements.';
+    }],
+    ['a different printed location', (result) => {
+        result.layout.pages[0].blocks[2].blocks[1].bbox = [100, 400, 900, 450];
+    }],
+    ['a different ordered prefix', (result) => {
+        result.layout.pages[0].blocks[2].blocks[1].lines[0].spans[0].content =
+            'Figure 12: Results from a separate trial in cross-cohort selection agree with the observations.';
+    }],
+]) {
+    test(`does not suppress a native caption using an OCR copy with ${name}`, () => {
+        const { result, pdfText } = fixture({
+            nativeLines: ['Figure 12: Comparison of independent measurements in cross-'],
+            ocrCaption: 'Figure 12: Comparison of independent measurements in cross-cohort selection agrees with the independent measurements.',
+            threePanels: true,
+        });
+        adjust(result);
+        const input = createMinerUFigureInput(result, { pdfText });
+        assert.equal(input.providerState.mineruDocument.ir.diagnostics.pdfCaptions.restored, 1);
+    });
+}
+
+test('does not treat an unhyphenated partial word as evidence of a complete OCR caption', () => {
+    const { result, pdfText } = fixture({
+        ocrCaption: 'Figure 12: Evaluation of methodology in the reference cohort.',
+        nativeLines: ['Figure 12: Evaluation of method'],
+    });
+    const input = createMinerUFigureInput(result, { pdfText });
+    assert.equal(input.providerState.mineruDocument.ir.diagnostics.pdfCaptions.restored, 1);
 });
 
 test('does not create another legend when a native caption exceeds the line budget', () => {

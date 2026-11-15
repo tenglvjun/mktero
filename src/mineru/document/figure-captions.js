@@ -1102,9 +1102,23 @@ function shortensOCRCaption(caption, floats) {
     return floats.some(float => captionChildren(float).some(child => {
         const text = captionText(child);
         return sameLabelNumber(text, caption.label) && boxMatches(child.bbox, caption.bbox)
-            && coversCaption(text, caption.text)
-            && normalize(text).split(' ').length > normalize(caption.text).split(' ').length;
+            && (continuesHyphenatedCaption(text, caption.text)
+                || coversCaption(text, caption.text)
+                && normalize(text).split(' ').length > normalize(caption.text).split(' ').length);
     }));
+}
+
+// A bounded native read can end in the middle of a printed word ("compart-")
+// or compound ("homing-"). The OCR copy may already join the continuation.
+// Require the entire ordered prefix, plus a letter continuing that last word;
+// the same figure number or a shared word alone never protects a different legend.
+function continuesHyphenatedCaption(text, native) {
+    const value = String(native || '').trim();
+    if (!/[-\u00ad\u2010\u2011]$/u.test(value)) return false;
+    const prefix = normalize(value.slice(0, -1));
+    const complete = normalize(text);
+    return Boolean(prefix) && complete.startsWith(prefix)
+        && /^[-\u00ad\u2010\u2011]?\p{L}/u.test(complete.slice(prefix.length));
 }
 
 // The OCR copy reads the whole native caption: every printed word is there.

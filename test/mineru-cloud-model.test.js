@@ -15,6 +15,7 @@ import {
     MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_PIPELINE,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
@@ -25,6 +26,7 @@ import {
     MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID,
     MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
@@ -92,6 +94,7 @@ test('keeps the shipped IR v15 figure v20 Pipeline identity as an independent li
         figureStructure: 'figure-region-v20',
     });
     assert.deepEqual(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS, [
+        MINERU_PIPELINE_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
@@ -105,18 +108,21 @@ test('keeps the shipped IR v15 figure v20 Pipeline identity as an independent li
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v20"}');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}');
-    assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v24');
+    assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v25');
     assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).document, MINERU_DOCUMENT_PIPELINE);
-    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v19');
-    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0]).document, 'mineru-document-ir-v18');
-    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0]).figureStructure, 'figure-region-v23');
+    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v20');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0]).document, 'mineru-document-ir-v19');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0]).figureStructure, 'figure-region-v24');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[1]).document, 'mineru-document-ir-v18');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[1]).figureStructure, 'figure-region-v23');
     assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).document, 'mineru-document-ir-v17');
     assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).figureStructure, 'figure-region-v22');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v16","figureStructure":"figure-region-v21"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
 });
 
