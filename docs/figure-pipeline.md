@@ -96,8 +96,11 @@ outer frame rather than centred over the picture.
 - Full-width, multi-line legends are not treated as prose merely because they
   fill the text column. A complete OCR legend stays intact when the native
   reading is shorter or reaches its line budget; it never gains a second,
-  truncated copy on another panel. Intact chart groups use ordinary region
-  restoration, including when the PDF charts are vector drawings.
+  truncated copy on another panel. When the native reading ends at a line-final
+  hyphen inside a word or compound, a same-number OCR caption at the same
+  printed location that continues that ordered prefix stays intact. Intact
+  chart groups use ordinary region restoration, including when the PDF charts
+  are vector drawings.
 - A caption moves to another figure only when the PDF text locates it once,
   the figure it should belong to has no caption of its own, and no body text or
   other figure stands between them. Ambiguous ownership keeps MinerU's
