@@ -13,6 +13,7 @@ import {
     MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_PIPELINE,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
@@ -21,6 +22,7 @@ import {
     MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
     MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
@@ -88,6 +90,7 @@ test('keeps the shipped IR v15 figure v20 Pipeline identity as an independent li
         figureStructure: 'figure-region-v20',
     });
     assert.deepEqual(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS, [
+        MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
@@ -99,12 +102,15 @@ test('keeps the shipped IR v15 figure v20 Pipeline identity as an independent li
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v20"}');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}');
-    assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v22');
+    assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v23');
     assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).document, MINERU_DOCUMENT_PIPELINE);
-    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v17');
+    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v18');
+    assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).document, 'mineru-document-ir-v17');
+    assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).figureStructure, 'figure-region-v22');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v16","figureStructure":"figure-region-v21"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
 });
 
@@ -139,26 +145,26 @@ test('selects previous profiles only for the exact current cloud model identity'
 });
 
 for (const [modelVersion, previousProfile, otherPreviousProfile] of [
-    ['vlm', MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID],
-    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID],
+    ['vlm', MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID],
 ]) {
     const currentProfile = mineruCloudProfilesFor(modelVersion).cacheProfile;
     const fileData = new Uint8Array([1]);
     const keyFor = parserProfile => createMarkdownCacheKey(fileData, { parserProfile });
 
     for (const method of ['extract', 'readCached']) {
-        test(`${method} reopens the ${modelVersion} v16 correction after the v17 upgrade`, async () => {
+        test(`${method} reopens the ${modelVersion} v17 correction after the v18 upgrade`, async () => {
             const currentKey = await keyFor(currentProfile);
             const previousKey = await keyFor(previousProfile);
             const reads = [];
             const extractor = createRevisionExtractor(modelVersion, async ({ cacheKey }) => {
                 reads.push(cacheKey);
-                return cacheKey === previousKey ? { markdown: '# Corrected v16' } : null;
+                return cacheKey === previousKey ? { markdown: '# Corrected v17' } : null;
             });
 
             const result = await extractor[method](42);
 
-            assert.equal(result.markdown, '# Corrected v16');
+            assert.equal(result.markdown, '# Corrected v17');
             assert.equal(result.parserProfile, previousProfile);
             assert.equal(result.cacheKey, previousKey);
             assert.deepEqual(reads, [currentKey, previousKey]);
@@ -187,7 +193,7 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
         });
     }
 
-    test(`${modelVersion} inherits v16 translations without accessing the other model`, async () => {
+    test(`${modelVersion} inherits v17 translations without accessing the other model`, async () => {
         const currentKey = await keyFor(currentProfile);
         const previousKey = await keyFor(previousProfile);
         const otherKey = await keyFor(otherPreviousProfile);

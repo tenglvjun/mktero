@@ -98,15 +98,28 @@
     },
     {
       "pageIndex": 11,
-      "label": "Figure 10.",
+      "label": "Figure 9.",
       "panels": 1,
       "captions": 1,
       "owned": 0,
       "bbox": [
-        739,
+        255,
+        58,
+        595,
+        264
+      ]
+    },
+    {
+      "pageIndex": 11,
+      "label": "Figure 10.",
+      "panels": 4,
+      "captions": 1,
+      "owned": 2,
+      "bbox": [
+        121,
         329,
         935,
-        473
+        494
       ]
     }
   ],
@@ -114,10 +127,6 @@
     {
       "pageIndex": 8,
       "reason": "ambiguous-caption"
-    },
-    {
-      "pageIndex": 11,
-      "reason": "caption-overlap"
     },
     {
       "pageIndex": 13,

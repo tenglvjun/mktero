@@ -19,6 +19,32 @@
       ]
     },
     {
+      "pageIndex": 3,
+      "label": "Figure 1.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        205,
+        81,
+        790,
+        567
+      ]
+    },
+    {
+      "pageIndex": 3,
+      "label": "Figure 2.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        185,
+        598,
+        812,
+        737
+      ]
+    },
+    {
       "pageIndex": 4,
       "label": "Figure 3.",
       "panels": 1,
@@ -46,10 +72,6 @@
     }
   ],
   "preserved": [
-    {
-      "pageIndex": 3,
-      "reason": "ambiguous-caption"
-    },
     {
       "pageIndex": 10,
       "reason": "foreign-content-overlap"

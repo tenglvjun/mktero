@@ -19,6 +19,9 @@ coordinates, and Markdown ranges agree. The generated local PNG preserves
 
 - Interior OCR (labels and text belonging to the figure) leaves the reading flow
   only after a successful crop.
+- A numbered caption between two panel rows keeps those figures separate.
+  Panels of the same figure retain their PDF arrangement, including rows of
+  unequal-width charts and groups spread over several rows.
 - Captions remain selectable, searchable, and translatable, including publisher
   captions with a dash after the figure number (`Figure 1—A and B: ...`).
   Panel letters and column headings stay inside the figure; the full caption
@@ -68,6 +71,11 @@ outer frame rather than centred over the picture.
 
 - The printed number and legend are kept as they appear in the PDF. Mktero does
   not exchange two captions because a picture looks like a different chart.
+- Full-width, multi-line legends are not treated as prose merely because they
+  fill the text column. A complete OCR legend stays intact when the native
+  reading is shorter or reaches its line budget; it never gains a second,
+  truncated copy on another panel. Intact chart groups use ordinary region
+  restoration, including when the PDF charts are vector drawings.
 - A caption moves to another figure only when the PDF text locates it once,
   the figure it should belong to has no caption of its own, and no body text or
   other figure stands between them. Ambiguous ownership keeps MinerU's
