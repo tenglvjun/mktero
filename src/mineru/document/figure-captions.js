@@ -77,13 +77,14 @@ export function restorePDFFigureCaptions(ir, pdfText) {
         // cost more than the pipeline allows is left exactly as MinerU wrote
         // it. A hostile page therefore cannot make the pass quadratic.
         const lines = captionLines(pdfLines(items));
-        if (!withinBudget(lines.length, floats.length, pageBlocks.length)) {
+        const blockCount = pageBlocks.reduce((count, block) => count + 1 + (block.children?.length || 0), 0);
+        if (!withinBudget(lines.length, floats.length, blockCount)) {
             report.skipped++;
             continue;
         }
         const captions = findNativeCaptions(page, lines, pageBlocks);
         if (!captions.length) continue;
-        if (!withinBudget(lines.length, floats.length, pageBlocks.length, captions.length)) {
+        if (!withinBudget(lines.length, floats.length, blockCount, captions.length)) {
             report.skipped++;
             continue;
         }
@@ -99,7 +100,7 @@ export function restorePDFFigureCaptions(ir, pdfText) {
 function withinBudget(lineCount, floatCount, blockCount, captionCount = floatCount) {
     const pairs = captionCount * floatCount;
     const work = pairs * pairs // pairing, rival search and the copy scan
-        + pairs * blockCount // text between a caption and a picture
+        + pairs * blockCount * (captionCount + floatCount) // group, child-caption and prose scans
         + lineCount * lineCount; // column measure and following lines
     return work <= FIGURE_LIMITS.maxComparisons;
 }
@@ -109,6 +110,11 @@ function withinBudget(lineCount, floatCount, blockCount, captionCount = floatCou
 // completes, and the misfiled copies it consumes. A caption with no single
 // owner produces no plan, so the page keeps every child MinerU wrote.
 function planPage(captions, floats, pageBlocks) {
+    return planDisplacedPanelCaptions(captions, floats, pageBlocks)
+        || planIndependentCaptions(captions, floats, pageBlocks);
+}
+
+function planIndependentCaptions(captions, floats, pageBlocks) {
     const assignments = assignCaptions(captions, floats, pageBlocks);
     // A picture another caption owns is never absorbed into this one: two
     // pictures printed side by side with their own legends stay separate.
@@ -143,6 +149,15 @@ function planPage(captions, floats, pageBlocks) {
 }
 
 function applyPlan(ir, plan, report) {
+    for (const { source, target, child } of plan.panelMoves || []) {
+        child.pdfPanelLabel = true;
+        if (source === target) continue;
+        source.children = source.children.filter(member => member !== child);
+        target.children.push(child);
+        const moves = ir.captionMoves || (ir.captionMoves = []);
+        moves.push({ from: source.id, to: target.id, ids: [child.id], pageIndex: child.pageIndex,
+            reason: 'panel-label' });
+    }
     if (plan.match) report.completed++;
     else report.restored++;
     if (plan.group.length > 1) report.groups++;
@@ -154,6 +169,171 @@ function applyPlan(ir, plan, report) {
         report.reassigned += plan.copies.length;
     }
     releaseTextCopies(ir, plan.texts, plan.destination, report);
+}
+
+// A shared, explicitly lettered legend can reserve a row of panels before
+// matching the other captions. OCR can file the upper figure's legend under
+// the first panel and a panel letter under that upper figure. Plan both moves
+// together: no child changes unless every displaced legend has another owner.
+// The resulting group still needs native-image and pixel verification.
+function planDisplacedPanelCaptions(captions, floats, pageBlocks) {
+    const shared = [];
+    for (const caption of captions) {
+        if (caption.kind !== 'figure') continue;
+        const letters = panelLetters(caption.text);
+        if (letters.size < 2 || letters.size > FIGURE_LIMITS.maxPanels) continue;
+        const anchors = floats.filter(float => captionChildren(float).some(child => sameCaption(child, caption)));
+        if (anchors.length !== 1) continue;
+        const anchor = anchors[0];
+        const side = captionSide(caption.bbox, anchor.bbox);
+        if (!side) continue;
+        const group = floats.filter(float => alignedPanels(float, anchor)
+            && compatiblePanelCaptions(float, caption, captions, letters, side)
+            && !pageBlocks.some(block => isProse(block) && validBox(block.bbox)
+                && betweenColumns(block.bbox, float.bbox, anchor.bbox)))
+            .sort((left, right) => left.bbox[0] - right.bbox[0]);
+        if (!group.includes(anchor) || group.length !== letters.size) continue;
+        if (group.some(float => captionSide(caption.bbox, float.bbox) !== side)) continue;
+        const displaced = group.flatMap(float => captionChildren(float)
+            .filter(child => !panelLetter(child) && !completesCaption(child, caption)));
+        if (!displaced.length) continue;
+        shared.push({ caption, anchor, group, letters, displaced });
+    }
+    if (!shared.length) return null;
+    const reserved = new Set();
+    for (const { group } of shared) {
+        for (const float of group) {
+            if (reserved.has(float)) return null;
+            reserved.add(float);
+        }
+    }
+    const panelMoves = [];
+    const panelLabels = new Map();
+    for (const source of floats) {
+        for (const child of captionChildren(source)) {
+            const letter = panelLetter(child);
+            if (!letter || !validBox(child.bbox)) continue;
+            const owners = floats.filter(float => labelInsidePanel(child.bbox, float.bbox));
+            if (owners.length !== 1) continue;
+            const target = owners[0];
+            const owner = shared.find(value => value.group.includes(target) && value.letters.has(letter));
+            if (!owner) continue;
+            if (source !== target && (intersectionArea(child.bbox, source.bbox) > 0
+                || verticalGap(source.bbox, target.bbox) === 0
+                || verticalGap(child.bbox, source.bbox) > MAX_CAPTION_GAP)) continue;
+            const assigned = panelLabels.get(target) || new Set();
+            if (assigned.has(letter)) return null;
+            assigned.add(letter);
+            panelLabels.set(target, assigned);
+            panelMoves.push({ source, target, child });
+        }
+    }
+    const labels = new Set(panelMoves.map(move => move.child));
+    const remaining = captions.filter(caption => !shared.some(value => value.caption === caption));
+    // Filter only proven panel letters in these views; preserve the actual IR
+    // until the complete page plan has been checked.
+    const originals = new Map();
+    const views = floats.filter(float => !reserved.has(float)).map(float => {
+        const view = { ...float, children: float.children.filter(child => !labels.has(child)) };
+        originals.set(view, float);
+        return view;
+    });
+    const external = planIndependentCaptions(remaining, views, pageBlocks).map(plan => ({
+        ...plan,
+        destination: originals.get(plan.destination),
+        group: plan.group.map(float => originals.get(float)),
+        copies: plan.copies.map(copy => ({ ...copy, float: originals.get(copy.float) })),
+    }));
+    if (panelMoves.some(move => move.source !== move.target
+        && !external.some(plan => plan.destination === move.source))) return null;
+    const plans = [];
+    for (const entry of shared) {
+        const { caption, anchor, group, displaced } = entry;
+        if (group.some(float => captionChildren(float).some(child => panelLetter(child) && !labels.has(child)))) {
+            return null;
+        }
+        for (const child of displaced) {
+            const owners = external.filter(plan => completesCaption(child, plan.caption));
+            if (owners.length !== 1) return null;
+            const source = group.find(float => float.children.includes(child));
+            owners[0].copies.push({ float: source, child });
+        }
+        const match = captionChildren(anchor).find(child => completesCaption(child, caption));
+        plans.push({ caption, destination: anchor, group, match,
+            copies: captionCopies(floats, caption, match, new Set()),
+            texts: textCopies(pageBlocks, caption, group),
+            panelMoves: panelMoves.filter(move => group.includes(move.target)),
+        });
+    }
+    // A marker whose receiving panel is uncertain remains on its source. It
+    // must not be hidden by a newly attached native caption on that source.
+    for (const plan of external) {
+        const remainingChildren = captionChildren(plan.destination).filter(child => !labels.has(child)
+            && !completesCaption(child, plan.caption)
+            && !plan.copies.some(copy => copy.child === child));
+        if (remainingChildren.length) return null;
+    }
+    return [...external, ...plans];
+}
+
+function panelLetters(text) {
+    const letters = new Set();
+    for (const match of String(text || '').normalize('NFKC').matchAll(/\(\s*([a-z])\s*\)/giu)) {
+        letters.add(match[1].toLowerCase());
+    }
+    // A sequence beginning with a and b distinguishes panel descriptions from
+    // isolated parenthetical abbreviations or statistical symbols.
+    if (!letters.has('a') || !letters.has('b')
+        || [...letters].sort().some((letter, index) => letter.charCodeAt(0) !== 97 + index)) return new Set();
+    return letters;
+}
+
+function panelLetter(child) {
+    const match = /^(?:([a-z])|\(\s*([a-z])\s*\))[.,]?$/iu.exec(captionText(child).normalize('NFKC').trim());
+    return match ? (match[1] || match[2]).toLowerCase() : null;
+}
+
+function captionSide(caption, picture) {
+    if (!validBox(caption) || !validBox(picture)) return null;
+    if (caption[3] <= picture[1] && picture[1] - caption[3] <= MAX_CAPTION_GAP) return 'above';
+    if (caption[1] >= picture[3] && caption[1] - picture[3] <= MAX_CAPTION_GAP) return 'below';
+    return null;
+}
+
+function alignedPanels(float, anchor) {
+    if (float === anchor) return true;
+    const box = float.bbox;
+    const other = anchor.bbox;
+    const overlap = Math.min(box[3], other[3]) - Math.max(box[1], other[1]);
+    return overlap / Math.min(box[3] - box[1], other[3] - other[1]) >= 0.6
+        && horizontalGap(box, other) <= SIDE_BY_SIDE_GAP
+        && Math.min(box[2], other[2]) <= Math.max(box[0], other[0]);
+}
+
+function compatiblePanelCaptions(float, caption, captions, letters, side) {
+    return captionChildren(float).every(child => {
+        const letter = panelLetter(child);
+        if (letter) return letters.has(letter) && labelInsidePanel(child.bbox, float.bbox);
+        if (completesCaption(child, caption)) return true;
+        // Another complete legend on the same side is an independent figure.
+        // Only a copy of a native legend on the opposite side can be displaced.
+        return captionSide(child.bbox, float.bbox)
+            && captionSide(child.bbox, float.bbox) !== side
+            && captions.some(other => other !== caption && sameCaption(child, other));
+    });
+}
+
+function labelInsidePanel(label, panel) {
+    if (!validBox(label) || !validBox(panel)) return false;
+    const x = (label[0] + label[2]) / 2;
+    const y = (label[1] + label[3]) / 2;
+    return x >= panel[0] - EDGE_TOLERANCE && x <= panel[2] + EDGE_TOLERANCE
+        && y >= panel[1] - EDGE_TOLERANCE && y <= panel[3] + EDGE_TOLERANCE;
+}
+
+function intersectionArea(left, right) {
+    return Math.max(0, Math.min(left[2], right[2]) - Math.max(left[0], right[0]))
+        * Math.max(0, Math.min(left[3], right[3]) - Math.max(left[1], right[1]));
 }
 
 // A native caption, in one of the three shapes a journal prints it:
@@ -764,6 +944,8 @@ function wordsMatch(left, right) {
 function normalize(value) {
     return String(value || '').normalize('NFKC').toLowerCase()
         .replace(/[\s\p{Zs}]+/gu, ' ')
+        .replace(/([([{])\s+/gu, '$1')
+        .replace(/\s+([)\]}])/gu, '$1')
         .replace(/[.:：。|｜—–-]+$/u, '')
         .trim();
 }

@@ -23,6 +23,7 @@ import { MinerUPendingTaskStore } from '../src/mineru/pending-task-store.js';
 import {
     MINERU_COMPATIBLE_CACHE_PROFILE_IDS,
     MINERU_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID,
@@ -40,6 +41,7 @@ import {
 import {
     MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS,
     MISTRAL_FIGURE_REGION_V20_PARSER_PROFILE_ID,
+    MISTRAL_FIGURE_REGION_V21_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V19_PARSER_PROFILE_ID,
     MISTRAL_PARSER_PROFILE_ID,
     MISTRAL_PREVIOUS_PARSER_PROFILE_IDS,
@@ -1263,10 +1265,10 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
     assert.deepEqual(JSON.parse(MINERU_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
         file: { is_ocr: true },
-        document: 'mineru-document-ir-v16',
-        figureStructure: 'figure-region-v21',
+        document: 'mineru-document-ir-v17',
+        figureStructure: 'figure-region-v22',
     });
-    assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v21/);
+    assert.match(MISTRAL_PARSER_PROFILE_ID, /figure-region-v22/);
     assert.deepEqual(MINERU_COMPATIBLE_CACHE_PROFILE_IDS, []);
     // The raw-result identity names only what MinerU was asked to produce, so
     // a document-pipeline bump must leave it byte for byte.
@@ -1275,9 +1277,12 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
         file: { is_ocr: true },
     });
     assert.equal(MINERU_REQUEST_PROFILE_ID, '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true}}');
-    // The last shipped v15 profile carried figure-region-v20, so it is the
-    // first history entry after the v16 bump.
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID);
+    // The identity shipped before the shared-legend panel-label repair is the
+    // first history entry, kept as a literal so its corrections still open.
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
+    assert.equal(MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID, '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v16","figureStructure":"figure-region-v21"}');
+    // The v15 profile carried figure-region-v20 and follows the new entry.
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID);
     assert.equal(MINERU_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID, '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v15","figureStructure":"figure-region-v20"}');
     assert.deepEqual(JSON.parse(MINERU_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
@@ -1285,7 +1290,7 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
         document: 'mineru-document-ir-v15',
         figureStructure: 'figure-region-v20',
     });
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID);
     assert.equal(MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID, '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v14","figureStructure":"figure-region-v20"}');
     assert.deepEqual(JSON.parse(MINERU_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
@@ -1294,7 +1299,7 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
         figureStructure: 'figure-region-v20',
     });
     // The v13 profiles keep their own literals and their order after the bump.
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID);
     assert.equal(MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID, '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v20"}');
     assert.deepEqual(JSON.parse(MINERU_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID), {
         batch: { model_version: 'vlm', enable_formula: true, enable_table: true },
@@ -1302,32 +1307,37 @@ test('the MinerU profile names its document pipeline and reuses no earlier Markd
         document: 'mineru-document-ir-v13',
         figureStructure: 'figure-region-v20',
     });
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[4], MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID);
     assert.equal(MINERU_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID, '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[4], MINERU_DOCUMENT_IR_V12_FIGURE_V19_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[5], MINERU_DOCUMENT_IR_V12_FIGURE_V19_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MINERU_DOCUMENT_IR_V12_FIGURE_V19_PARSER_PROFILE_ID).figureStructure, 'figure-region-v19');
     assert.equal(JSON.parse(MINERU_DOCUMENT_IR_V12_FIGURE_V19_PARSER_PROFILE_ID).document, 'mineru-document-ir-v12');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[5], '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v12","figureStructure":"figure-region-v18"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[6], MINERU_DOCUMENT_IR_V12_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[6], '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v12","figureStructure":"figure-region-v18"}');
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[7], MINERU_DOCUMENT_IR_V12_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MINERU_DOCUMENT_IR_V12_PARSER_PROFILE_ID).figureStructure, 'figure-region-v17');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[7], MINERU_DOCUMENT_IR_V11_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[8], MINERU_DOCUMENT_IR_V11_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MINERU_DOCUMENT_IR_V11_PARSER_PROFILE_ID).document, 'mineru-document-ir-v11');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[8], MINERU_DOCUMENT_IR_V10_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[9], MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[9], MINERU_DOCUMENT_IR_V10_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[10], MINERU_DOCUMENT_IR_V9_PARSER_PROFILE_ID);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID), true);
     assert.equal(JSON.parse(MINERU_FIGURE_REGION_V17_PARSER_PROFILE_ID).sourceMap.figureStructure, 'figure-region-v17');
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID), true);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
-    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0], MISTRAL_FIGURE_REGION_V20_PARSER_PROFILE_ID);
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[0], MISTRAL_FIGURE_REGION_V21_PARSER_PROFILE_ID);
+    assert.equal(JSON.parse(MISTRAL_FIGURE_REGION_V21_PARSER_PROFILE_ID).figureStructure, 'figure-region-v21');
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[1], MISTRAL_FIGURE_REGION_V20_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MISTRAL_FIGURE_REGION_V20_PARSER_PROFILE_ID).figureStructure, 'figure-region-v20');
-    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[1], MISTRAL_FIGURE_REGION_V19_PARSER_PROFILE_ID);
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[2], MISTRAL_FIGURE_REGION_V19_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MISTRAL_FIGURE_REGION_V19_PARSER_PROFILE_ID).figureStructure, 'figure-region-v19');
-    assert.equal(JSON.parse(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[2]).figureStructure, 'figure-region-v18');
-    assert.equal(JSON.parse(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[3]).figureStructure, 'figure-region-v17');
-    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[4].includes('figure-region-v16'), true);
-    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[6].includes('figure-region-v14'), true);
+    assert.equal(JSON.parse(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[3]).figureStructure, 'figure-region-v18');
+    assert.equal(JSON.parse(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[4]).figureStructure, 'figure-region-v17');
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[5].includes('figure-region-v16'), true);
+    assert.equal(MISTRAL_PREVIOUS_PARSER_PROFILE_IDS[7].includes('figure-region-v14'), true);
     assert.equal(MINERU_COMPATIBLE_CACHE_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
     assert.equal(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.includes(MISTRAL_PARSER_PROFILE_ID), false);
+    // A figure-pipeline bump must not make the previous Markdown reusable: the
+    // older document carries the misfiled legend this repair corrects.
+    assert.equal(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.includes(MISTRAL_FIGURE_REGION_V21_PARSER_PROFILE_ID), false);
     assert.equal(MISTRAL_COMPATIBLE_CACHE_PROFILE_IDS.some(profile => (
         profile.includes('same-and-cross-page-column-continuation-v3')
     )), false);

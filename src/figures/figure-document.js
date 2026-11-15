@@ -42,7 +42,7 @@ export function resolveDocumentFigures(input, { limits = FIGURE_LIMITS, budget, 
             nativeFigure: true,
             panelBlockIds: panels.map(block => block.id),
             captionBlockIds: captions.map(block => block.id),
-            ownedTextBlockIds: [],
+            ownedTextBlockIds: blocks.filter(block => block.pdfFigurePart === 'text').map(block => block.id),
             visualBBox: usable ? union(panels.map(block => block.bbox)) : null,
             captionBBox: validBox(figure.bbox) ? [...figure.bbox] : null,
             evidence: ['pdf-caption', 'exact-source-ranges'],
@@ -64,7 +64,7 @@ export function documentFigureRequest(input, candidate, budget) {
     const caption = byID.get(candidate.captionBlockIds[0]);
     if (!caption?.pdfFigure || panels.some(block => !resolved(block) || !validBox(block.bbox)
         || !block.assetPath || block.pdfFigure?.id !== caption.pdfFigure.id)) return null;
-    const members = new Set([...candidate.panelBlockIds, ...candidate.captionBlockIds]);
+    const members = new Set([...candidate.panelBlockIds, ...candidate.captionBlockIds, ...candidate.ownedTextBlockIds]);
     const foreignLocations = [];
     for (const block of input.blocks) {
         if (block.pageIndex !== candidate.pageIndex || block.bboxKind === 'group' || members.has(block.id)) continue;

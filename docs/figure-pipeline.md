@@ -32,8 +32,10 @@ coordinates, and Markdown ranges agree. The generated local PNG preserves
 For a resolved MinerU figure, OCR coordinates can still miss a shared heading or
 an outer subplot. Mktero expands the crop to the original PDF image only when
 that image is unique, every panel matches its pixels, and its PDF caption
-matches. The full caption remains separate. Expansion cannot overlap other
-layout content or native PDF text outside the existing region; failed checks
+matches. A merged group is still provisional until that check passes; if it
+fails, the original fragments stay in place. The full caption remains separate.
+Expansion cannot overlap other layout content or native PDF text outside the
+existing region; failed checks
 keep the original safe crop. This does not infer relationships between
 independent images or extend the recovery to arbitrary vector figures.
 
@@ -70,6 +72,15 @@ outer frame rather than centred over the picture.
   the figure it should belong to has no caption of its own, and no body text or
   other figure stands between them. Ambiguous ownership keeps MinerU's
   placement.
+- Spacing inside brackets is ignored when comparing the PDF caption with the
+  OCR copy, so `( A )` and `(A)` name the same legend. The printed figure
+  number must still agree; similar wording cannot exchange different figures.
+- When OCR files the upper figure's legend under a row of lettered panels and
+  files one of those panel letters under the upper figure, Mktero plans both
+  moves together. This requires an explicit shared legend such as `(a)` and
+  `(b)`, a unique destination for every displaced caption, and a unique
+  geometric owner for each relocated panel letter. Missing evidence skips
+  this joint repair.
 - Text that merely mentions a figure inside a sentence is not a caption, and a
   real table heading is never taken from a table.
 - Without a PDF text layer the earlier OCR-only rules still apply, including the
@@ -98,7 +109,9 @@ recovery does not merge independent figures that merely sit next to each other.
    document from the same layout, keeping its source map exact.
 3. Unfinished restoration is not stored in the cache. After a restart, it runs
    again from the stored MinerU result. If that result is gone, the provisional
-   document stays readable.
+   document stays readable. A change to these caption rules is a parser-profile
+   change, so a cached document can be rebuilt offline when that stored result
+   is available, without another OCR upload.
 
 MinerU sometimes files a caption under the wrong float. Two figures stacked on
 one page can end up sharing a single float: the upper picture has no caption,

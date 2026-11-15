@@ -127,6 +127,9 @@ function nativeFigurePiece(source, piece) {
     const caption = piece.part === 'caption' || piece.key === `${source.id}:caption`;
     const tableBody = source.kind === 'table'
         && (piece.key === `${source.id}:body` || piece.key === source.children.find(child => child.kind === 'body')?.id);
+    if (caption && source.children.some(child => child.id === piece.key && child.pdfPanelLabel)) return {
+        pdfFigure: figure, pdfFigurePart: 'text', type: 'caption', role: 'caption',
+    };
     if (caption) return {
         pdfFigure: figure, pdfFigurePart: 'caption', type: 'caption', role: 'caption',
         bbox: [...figure.bbox], text: boundedText(figure.text),
