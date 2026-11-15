@@ -14,6 +14,7 @@ import {
     MINERU_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_PIPELINE,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
@@ -23,6 +24,7 @@ import {
     MINERU_PIPELINE_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
     MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_PREVIOUS_PARSER_PROFILE_IDS,
     MINERU_REQUEST_PROFILE_ID,
@@ -90,6 +92,7 @@ test('keeps the shipped IR v15 figure v20 Pipeline identity as an independent li
         figureStructure: 'figure-region-v20',
     });
     assert.deepEqual(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS, [
+        MINERU_PIPELINE_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
@@ -102,15 +105,18 @@ test('keeps the shipped IR v15 figure v20 Pipeline identity as an independent li
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v20"}');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}');
-    assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v23');
+    assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v24');
     assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).document, MINERU_DOCUMENT_PIPELINE);
-    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v18');
+    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v19');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0]).document, 'mineru-document-ir-v18');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0]).figureStructure, 'figure-region-v23');
     assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).document, 'mineru-document-ir-v17');
     assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).figureStructure, 'figure-region-v22');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v16","figureStructure":"figure-region-v21"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
 });
 
@@ -145,8 +151,8 @@ test('selects previous profiles only for the exact current cloud model identity'
 });
 
 for (const [modelVersion, previousProfile, otherPreviousProfile] of [
-    ['vlm', MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID],
-    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID],
+    ['vlm', MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0]],
+    ['pipeline', MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_PREVIOUS_PARSER_PROFILE_IDS[0]],
 ]) {
     const currentProfile = mineruCloudProfilesFor(modelVersion).cacheProfile;
     const fileData = new Uint8Array([1]);
@@ -193,12 +199,13 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
         });
     }
 
-    test(`${modelVersion} inherits v17 translations without accessing the other model`, async () => {
+    test(`${modelVersion} inherits every earlier translation without reading another model`, async () => {
         const currentKey = await keyFor(currentProfile);
-        const previousKey = await keyFor(previousProfile);
         const otherKey = await keyFor(otherPreviousProfile);
         const previousKeys = await Promise.all(mineruCloudPreviousParserProfilesFor(currentProfile).map(keyFor));
-        for (const availableKey of [previousKey, otherKey]) {
+        // The available identity is always the first of this model's history,
+        // so the loop also proves the search stops at the first hit.
+        for (const availableKey of [previousKeys[0]]) {
             const copies = [];
             const conversion = new MinerUConversion({
                 client: createSuccessfulClient('# Converted'),
@@ -228,10 +235,42 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
             });
 
             assert.deepEqual(result.warnings, []);
-            assert.deepEqual(copies, (availableKey === previousKey ? [previousKey] : previousKeys)
-                .map(key => [key, currentKey]));
+            // Every earlier identity of this model is tried in order, and the
+            // first one with a translation stops the search.
+            assert.deepEqual(copies, [[availableKey, currentKey]]);
             assert.equal(copies.some(([from]) => from === otherKey), false);
         }
+        // Another model's identity is never read, even when it is the only one
+        // that would have a translation.
+        const copies = [];
+        const conversion = new MinerUConversion({
+            client: createSuccessfulClient('# Converted'),
+            pendingTasks: createKeyedMemoryPendingTasks(),
+            cache: {
+                get: async () => null,
+                put: async () => {},
+                copyTranslations: async (from, to) => {
+                    copies.push([from, to]);
+                    return from === otherKey ? 1 : 0;
+                },
+            },
+            createTranslationSourceKeys: (bytes, { modelVersion: selected }) => Promise.all(
+                mineruCloudPreviousParserProfilesFor(mineruCloudProfilesFor(selected).cacheProfile)
+                    .map(parserProfile => createMarkdownCacheKey(bytes, { parserProfile }))
+            ),
+            createDataID: () => 'mktero-task-profile-upgrade',
+        });
+        const result = await conversion.convert({
+            key: currentKey,
+            apiKey: 'secret-token',
+            fileName: 'paper.pdf',
+            fileData,
+            cacheEnabled: true,
+            modelVersion,
+        });
+        assert.deepEqual(result.warnings, []);
+        assert.equal(copies.some(([from]) => from === otherKey), false);
+        assert.deepEqual(copies, previousKeys.map(key => [key, currentKey]));
     });
 }
 

@@ -64,7 +64,7 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
         // A footnote MinerU grouped into an image is figure text of that
         // figure, as in MinerU's own block; the resolver decides by distance
         // whether the crop owns it. A body note attached later stays body.
-        if (piece.part === 'note' && groups.has(source.id)) {
+        if ((piece.part === 'note' || piece.part === 'figure-text') && groups.has(source.id)) {
             push({
                 id: piece.key, pageIndex: source.pageIndex, type: 'text', role: 'figure-text',
                 bboxKind: 'text', bbox, parentId: source.id, text: boundedText(piece.text),
