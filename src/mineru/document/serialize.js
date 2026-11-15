@@ -257,6 +257,9 @@ function figureUnits(block) {
         units.push(imageUnit(block, body, body.assetPath, index === bodies.length - 1 ? caption : '',
             block.kind === BLOCK_KIND.CHART ? 'chart' : 'image', 'panel'));
     }
+    units.push(...block.children.filter(child => child.kind === 'figure-text')
+        .map(child => childUnit(block, [child], escapeLineStart(childInline(child)), {}, child.id,
+            'figure-text', childText(child))));
     units.push(...footnoteUnits(block, 'note'));
     if (block.kind === BLOCK_KIND.CHART) units.push(...chartDataUnits(block));
     return units;

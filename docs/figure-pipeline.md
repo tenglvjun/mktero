@@ -42,6 +42,28 @@ existing region; failed checks
 keep the original safe crop. This does not infer relationships between
 independent images or extend the recovery to arbitrary vector figures.
 
+### Captioned grids and misfiled legends
+
+A multi-row figure is often printed as independently detected subplots that
+share one legend. Before a native caption can change any ownership, Mktero
+builds whole picture components from the PDF geometry: projection overlap plus
+the panel gap budget, closed by a printed legend, body text, or another picture.
+Subplot letters may be listed individually (`(a)`, `(b)`) or as a range
+(`(a–f)`, `(a–i)`, also written with `to`). When the letters and the component
+agree, the legend stays with the complete component and the group takes the
+ordinary region path, so a composite figure does not have to be one native PDF
+image.
+
+A chart footer reported as a caption (an axis note printed inside the plot) is
+not a legend. Mktero confirms it against the PDF's own text at that place and
+keeps it as figure text: it leaves the reading flow only after a successful
+crop, and it never blocks the picture's real numbered legend. A misfiled legend
+whose destination or component is not unique retains its original ownership
+and fragments; dependent figures are not repaired in separate partial steps.
+
+Mixing a table with a chart still requires one native PDF image and verified
+panel pixels, as described below.
+
 ### Captions on the following page
 
 For MinerU results, a single figure occupying a full page can be restored even

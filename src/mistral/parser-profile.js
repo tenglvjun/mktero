@@ -66,9 +66,13 @@ export const MISTRAL_FIGURE_REGION_V20_PARSER_PROFILE_ID = '{"provider":"mistral
 // so corrections made under it stay reachable after the profile bump.
 export const MISTRAL_FIGURE_REGION_V21_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v21","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
 
+// The last shipped identity before the verified multi-row caption grid.
+export const MISTRAL_FIGURE_REGION_V23_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v23","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
+
 export const MISTRAL_FIGURE_REGION_V22_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v22","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
 
 export const MISTRAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MISTRAL_FIGURE_REGION_V23_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V22_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V21_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V20_PARSER_PROFILE_ID,
