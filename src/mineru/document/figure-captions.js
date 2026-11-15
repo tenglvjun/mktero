@@ -26,7 +26,7 @@ import { pdfLines, pdfTextItemsByPage } from './pdf-geometry.js';
 // one picture. That wider group is recorded as `pdfFigure` and merged later,
 // only after the PDF's own image container and pixels verify it.
 const MAX_CAPTION_LENGTH = 2_000;
-const MAX_CAPTION_WORDS = 60;
+const MAX_CAPTION_WORDS_PER_LINE = 60;
 const MAX_PAGE_CANDIDATES = 256;
 const MAX_LABEL_DESCRIPTION_GAP = 40;
 const MAX_CAPTION_LINES = 8;
@@ -82,7 +82,8 @@ export function restorePDFFigureCaptions(ir, pdfText) {
             report.skipped++;
             continue;
         }
-        const captions = findNativeCaptions(page, lines, pageBlocks);
+        const captions = findNativeCaptions(page, lines, pageBlocks)
+            .filter(caption => !shortensOCRCaption(caption, floats));
         if (!captions.length) continue;
         if (!withinBudget(lines.length, floats.length, blockCount, captions.length)) {
             report.skipped++;
@@ -123,6 +124,15 @@ function planIndependentCaptions(captions, floats, pageBlocks) {
     const plans = [];
     for (const { caption, float } of assignments) {
         const group = figureGroup(float, floats, pageBlocks, assigned);
+        // Complete OCR legends on a row of pictures already describe that
+        // row. Leave them to ordinary region restoration, which also supports
+        // vector charts; native-image recovery is only needed for a repair.
+        const legends = group.flatMap(captionChildren);
+        if (group.every(member => member.kind === BLOCK_KIND.IMAGE || member.kind === BLOCK_KIND.CHART)
+            && legends.length === 1 && sameCaption(legends[0], caption)
+            && coversCaption(captionText(legends[0]), caption.text)
+            && !captionCopies(floats, caption, legends[0], claimed).length
+            && !textCopies(pageBlocks, caption, group).length) continue;
         // A table's own legend stays the table's caption; only a figure legend
         // marks a picture as restored from the PDF.
         if (caption.kind === 'table' && group.every(member => member.kind === BLOCK_KIND.TABLE)) continue;
@@ -530,7 +540,7 @@ function continuesCaption(currentLine, nextLine, { lines = [], prose = { size: 0
     if (first ? !startsDescription(currentLine, nextLine, prose) : !sameType(currentLine, nextLine)) return false;
     if (readsAsBody({ line: nextLine, text }, lines, prose)) return false;
     if (Math.abs(nextLine.left - currentLine.left) > LABEL_ALIGNMENT) return false;
-    return text.split(/\s+/u).filter(Boolean).length <= MAX_CAPTION_WORDS;
+    return text.split(/\s+/u).filter(Boolean).length <= MAX_CAPTION_WORDS_PER_LINE;
 }
 
 // A printed label is often set smaller than its description (small capitals), so
@@ -558,13 +568,18 @@ function sameType(currentLine, nextLine) {
     return pitch >= MIN_LINE_PITCH && pitch <= MAX_LINE_PITCH;
 }
 
-// A caption line is short; running text fills the column. A line that belongs
-// to a body paragraph, or that is the column measure followed by another line
-// of the same measure, is prose that happened to be printed under a caption.
+// Full-width lines at the body's own type size may be running text. A line
+// inside a body paragraph, or followed by another body-sized line filling the
+// same column measure, ends the caption.
 function readsAsBody(line, lines, prose) {
     if (bodyBlockAt(line, prose.blocks)) return true;
     const width = (line.line.right || 0) - (line.line.left || 0);
     if (!(width > 0) || !(prose.size > 0)) return false;
+    // Line geometry is normalized to the page; item sizes and body fontSize
+    // are PDF points. Full-width captions can fill the column just like prose,
+    // so width alone only counts at the body's own type size.
+    const size = median((line.line.items || []).map(item => item.size).filter(value => value > 0));
+    if (!(size > 0) || Math.abs(size - prose.size) / prose.size > SAME_TYPE_SIZE_TOLERANCE) return false;
     const measure = columnMeasure(line.line, lines);
     if (!(measure > 0) || width / measure < MIN_PROSE_FILL) return false;
     const following = lines
@@ -611,9 +626,8 @@ function columnMeasure(line, lines) {
 }
 
 function withinLimits(text) {
-    if (typeof text !== 'string' || !text || text.length > MAX_CAPTION_LENGTH
-        || text.length > FIGURE_LIMITS.maxCaptionLength) return false;
-    return text.split(/\s+/u).filter(Boolean).length <= MAX_CAPTION_WORDS;
+    return typeof text === 'string' && Boolean(text) && text.length <= MAX_CAPTION_LENGTH
+        && text.length <= FIGURE_LIMITS.maxCaptionLength;
 }
 
 function figureMark(caption, grouped) {
@@ -864,6 +878,17 @@ function nativeFragment(caption) {
     };
 }
 
+// A bounded or ambiguous native reading must not introduce a second, shorter
+// copy of a complete OCR legend printed at the very same place.
+function shortensOCRCaption(caption, floats) {
+    return floats.some(float => captionChildren(float).some(child => {
+        const text = captionText(child);
+        return sameLabelNumber(text, caption.label) && boxMatches(child.bbox, caption.bbox)
+            && coversCaption(text, caption.text)
+            && normalize(text).split(' ').length > normalize(caption.text).split(' ').length;
+    }));
+}
+
 // The OCR copy reads the whole native caption: every printed word is there.
 function coversCaption(text, native) {
     const words = new Set(normalize(text).split(' '));
@@ -945,7 +970,8 @@ function normalize(value) {
     return String(value || '').normalize('NFKC').toLowerCase()
         .replace(/[\s\p{Zs}]+/gu, ' ')
         .replace(/([([{])\s+/gu, '$1')
-        .replace(/\s+([)\]}])/gu, '$1')
+        .replace(/\s+([)\]}.:;,!?])/gu, '$1')
+        .replace(/[‘’]/gu, "'")
         .replace(/[.:：。|｜—–-]+$/u, '')
         .trim();
 }

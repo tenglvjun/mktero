@@ -78,7 +78,7 @@ function groupPanels(blocks, panels, limits, budget) {
         }
         else remaining.push(panel);
     }
-    const groups = mergeAdjacentExplicitGroups([...explicit.values()], limits, budget);
+    const groups = mergeAdjacentExplicitGroups([...explicit.values()], blocks, limits, budget);
     const seen = new Set();
     for (const panel of remaining) {
         if (seen.has(panel.id)) continue;
@@ -123,7 +123,15 @@ function absorbUnmeasuredPanels(groups, panels, budget) {
     return groups.filter(group => group.panels.length);
 }
 
-function mergeAdjacentExplicitGroups(groups, limits, budget) {
+function mergeAdjacentExplicitGroups(groups, blocks, limits, budget) {
+    if (groups.length < 2) return groups;
+    // A printed legend closes the figure above it and opens the one below it.
+    // MinerU leaves a row of panels unattached often enough that geometry
+    // alone would absorb them into the figure whose caption they follow.
+    const captions = printedFigureCaptions(blocks, budget);
+    // An incomplete legend list cannot clear any band, so keep the groups
+    // apart and let each one preserve instead of merging two figures.
+    if (!captions) return groups.map(group => ({ ...group, exhausted: true }));
     const merged = [];
     const used = new Set();
     for (const group of groups) {
@@ -150,6 +158,10 @@ function mergeAdjacentExplicitGroups(groups, limits, budget) {
                 if (label && other.label && !sameFigureLabel(label, other.label)) continue;
                 const otherBox = groupBox(other);
                 if (!otherBox || !adjacent(box, otherBox, limits)) continue;
+                // A repeated legend of the same figure (a split caption printed
+                // on both halves) is part of that figure, not a boundary.
+                const shared = Boolean(label && other.label && sameFigureLabel(label, other.label));
+                if (!shared && captionSeparates(box, otherBox, captions, limits, budget)) continue;
                 used.add(other);
                 members.push(other);
                 if (!label) label = other.label || null;
@@ -174,6 +186,40 @@ function figureGroupLabel(blocks, parentId) {
         if (label) return label;
     }
     return null;
+}
+
+// Every numbered figure legend printed on the page, whatever it is attached
+// to. A legend that MinerU attached to one panel still separates the rows
+// above and below it.
+function printedFigureCaptions(blocks, budget) {
+    const captions = [];
+    for (const block of blocks) {
+        if (!consume(budget)) return null;
+        if (block.role !== 'caption' || !validBox(block.bbox)) continue;
+        if (!parseAcademicFigureCaption(block.text) && !parseLooseAcademicFigureCaption(block.text)) continue;
+        captions.push(block);
+    }
+    return captions;
+}
+
+// Whether a printed legend lies between two groups: one group ends above it
+// and the other starts below it. Panels printed beside the legend, in its own
+// band, are still the same figure.
+function captionSeparates(upper, lower, captions, limits, budget) {
+    const [top, bottom] = upper[1] <= lower[1] ? [upper, lower] : [lower, upper];
+    if (top[3] > bottom[1]) return false;
+    const band = [Math.min(top[0], bottom[0]), top[3],
+        Math.max(top[2], bottom[2]), bottom[1]];
+    for (const caption of captions) {
+        // Every pair of groups scans the page legends, so each caption costs
+        // one comparison. An unverified band never merges two figures.
+        if (!consume(budget)) return true;
+        if (caption.bbox[1] >= band[1] - limits.captionMinGap
+            && caption.bbox[3] <= band[3] + limits.captionMinGap
+            && overlap(caption.bbox[0], caption.bbox[2], band[0], band[2])
+                >= limits.captionProjectionOverlap) return true;
+    }
+    return false;
 }
 
 function sameFigureLabel(left, right) {

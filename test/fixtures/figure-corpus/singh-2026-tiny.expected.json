@@ -45,6 +45,32 @@
       ]
     },
     {
+      "pageIndex": 2,
+      "label": "Fig. 4.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        62,
+        80,
+        488,
+        207
+      ]
+    },
+    {
+      "pageIndex": 2,
+      "label": "Fig. 5.",
+      "panels": 1,
+      "captions": 1,
+      "owned": 0,
+      "bbox": [
+        60,
+        232,
+        481,
+        390
+      ]
+    },
+    {
       "pageIndex": 4,
       "label": "Fig. 6.",
       "panels": 1,
@@ -71,10 +97,5 @@
       ]
     }
   ],
-  "preserved": [
-    {
-      "pageIndex": 2,
-      "reason": "ambiguous-caption"
-    }
-  ]
+  "preserved": []
 }
