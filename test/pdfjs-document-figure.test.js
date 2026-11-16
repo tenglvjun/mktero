@@ -1,20 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import '../src/pdf/pdfjs-text-engine.js';
+import { createPDFJSTextEngine } from '../src/pdf/pdfjs-text-engine.js';
 import { createPDFFigureRegionRenderer } from '../src/pdf/pdfjs-figure-region.js';
 
-// One native PDF image at normalized x 140-760, y 110-560, with its caption
+// One native PDF image at normalized x 140-760, y 110-607.6, with its caption
 // printed outside it in the page's left margin. The OCR fragments may be one
 // picture or two halves of it; both must resolve to the same native container.
 const PAGE = { width: 1000, height: 900 };
-// The panel's normalized box and the rasterized image share one aspect ratio;
-// a mismatch is rejected by pixel verification, which is what a real crop must pass.
 // The panel box and the rasterized image share one aspect ratio, so pixel
 // verification sees the same picture; its bottom (607.6) stays above the
 // printed caption at y 620.
 const PICTURE = { left: 140, top: 110, width: 620, height: 497.6, pixels: { width: 900, height: 650 } };
 const CAPTION = { label: 'Figure 4', text: 'Figure 4. Sensitivity test in adults.', box: [90, 620, 400, 660] };
+const LONG_CAPTION = 'Figure 4. Estimated responses for each study population at baseline and follow up; '
+    + 'effect sizes with confidence intervals and sample weights are displayed together to compare '
+    + 'treatment groups across repeated observations and sensitivity analyses.';
 
 function points(value, axis) {
     return value * (axis === 'x' ? PAGE.width : PAGE.height) / 1000;
@@ -39,9 +40,24 @@ function placement() {
     return { left, width, height, bottom };
 }
 
+// Alternating font runs stop PDF.js coalescing a line into one text item.
+// Four runs per line exercise both the item budget and within-line continuation
+// after the first line has ended.
+function fragmentedCaption(text, left, top) {
+    const words = text.split(' ');
+    const commands = [`${left} ${top} Td`];
+    for (let index = 0; index < words.length; index += 2) {
+        const run = index / 2;
+        if (run > 0 && run % 4 === 0) commands.push('0 -17 Td');
+        commands.push(`/${run % 2 ? 'G' : 'F'} 14 Tf (${words.slice(index, index + 2).join(' ')} ) Tj`);
+    }
+    return `BT ${commands.join(' ')} ET`;
+}
+
 function fixture({ split = false, wrongPixels = false, duplicateImage = false,
     foreignText = false, nativeText = false, captionText = CAPTION.text,
-    captionLines = false, fullPage = false } = {}) {
+    captionLines = false, fullPage = false, captionItems = false,
+    vectorMargin = false } = {}) {
     const picture = createCanvas(PICTURE.pixels.width, PICTURE.pixels.height);
     const context = picture.getContext('2d');
     context.fillStyle = '#ffffff';
@@ -56,23 +72,62 @@ function fixture({ split = false, wrongPixels = false, duplicateImage = false,
         context.fillRect(120, 70 + row * 100, 240 + row * 60, 46);
         context.fillRect(560, 82 + row * 100, 120 + row * 40, 22);
     }
+    // The OCR boxes of the mixed figure. The default is the raster itself; the
+    // vector mode surrounds it with a printed axis label left of the raster
+    // and a legend to its right, which a native-container crop would cut off.
+    // The raster keeps its own aspect ratio on the page; only the OCR fragment
+    // and the vector paths are wider.
+    const regions = split ? [[0, 0, 500, 1000], [500, 0, 1000, 1000]]
+        : [[0, 0, 1000, 1000]];
     const panels = [];
-    const regions = split ? [[0, 0, 500, 1000], [500, 0, 1000, 1000]] : [[0, 0, 1000, 1000]];
+    const raster = {
+        left: PICTURE.left, top: PICTURE.top,
+        right: PICTURE.left + PICTURE.width, bottom: PICTURE.top + PICTURE.height,
+    };
+    const panelBoxes = split
+        ? [box(0, 0, 500, 1000), box(500, 0, 1000, 1000)]
+        : vectorMargin
+            ? [[raster.left - 50, raster.top, raster.right + 50, raster.bottom]]
+            : [[raster.left, raster.top, raster.right, raster.bottom]];
     for (const [index, region] of regions.entries()) {
-        const x = Math.round(region[0] * PICTURE.pixels.width / 1000);
-        const y = Math.round(region[1] * PICTURE.pixels.height / 1000);
-        const right = Math.round(region[2] * PICTURE.pixels.width / 1000);
-        const bottom = Math.round(region[3] * PICTURE.pixels.height / 1000);
-        const panelCanvas = createCanvas(right - x, bottom - y);
-        panelCanvas.getContext('2d').drawImage(picture, x, y, right - x, bottom - y, 0, 0, right - x, bottom - y);
+        const x = Math.round(Math.max(0, region[0]) * PICTURE.pixels.width / 1000);
+        const y = Math.round(Math.max(0, region[1]) * PICTURE.pixels.height / 1000);
+        const right = Math.round(Math.min(1000, region[2]) * PICTURE.pixels.width / 1000);
+        const bottom = Math.round(Math.min(1000, region[3]) * PICTURE.pixels.height / 1000);
+        const pictureWidth = Math.max(1, right - x);
+        const height = Math.max(1, bottom - y);
+        const width = vectorMargin ? Math.round(pictureWidth * (PICTURE.width + 100) / PICTURE.width) : pictureWidth;
+        const panelCanvas = createCanvas(width, height);
+        const panelContext = panelCanvas.getContext('2d');
+        panelContext.fillStyle = '#ffffff';
+        panelContext.fillRect(0, 0, width, height);
+        const margin = vectorMargin ? 50 * pictureWidth / PICTURE.width : 0;
+        panelContext.drawImage(picture, x, y, pictureWidth, height, margin, 0, pictureWidth, height);
+        if (vectorMargin) {
+            // The vector label and legend sit outside the raster container but
+            // inside the OCR fragment, so the expanded crop must keep them.
+            const panelContext = panelCanvas.getContext('2d');
+            panelContext.strokeStyle = '#000000';
+            panelContext.lineWidth = 2 * pictureWidth / points(PICTURE.width, 'x');
+            const [panelLeft, , panelRight] = panelBoxes[index];
+            const scaleX = width / (panelRight - panelLeft);
+            const leftX = Math.round((raster.left - 40 - panelLeft) * scaleX);
+            const rightX = Math.round((raster.right + 40 - panelLeft) * scaleX);
+            panelContext.beginPath();
+            panelContext.moveTo(leftX, Math.round(height * 0.35));
+            panelContext.lineTo(leftX, Math.round(height * 0.65));
+            panelContext.moveTo(rightX, Math.round(height * 0.35));
+            panelContext.lineTo(rightX, Math.round(height * 0.65));
+            panelContext.stroke();
+        }
         if (wrongPixels && index === 0) {
             panelCanvas.getContext('2d').fillStyle = '#ff0000';
-            panelCanvas.getContext('2d').fillRect(0, 0, right - x, bottom - y);
+            panelCanvas.getContext('2d').fillRect(0, 0, width, height);
         }
         const asset = { path: `images/document-${index}.png`, mimeType: 'image/png',
             data: new Uint8Array(panelCanvas.toBuffer('image/png')) };
         panelCanvas.width = panelCanvas.height = 0;
-        panels.push({ id: `p0-${index}:body0`, bbox: box(region[0], region[1], region[2], region[3]), asset });
+        panels.push({ id: `p0-${index}:body0`, bbox: panelBoxes[index], asset });
     }
     const jpeg = picture.toBuffer('image/jpeg');
     picture.width = picture.height = 0;
@@ -87,19 +142,31 @@ function fixture({ split = false, wrongPixels = false, duplicateImage = false,
     // A different or truncated printed caption must not verify.
     const captionLine = captionLines
         ? `BT /F 14 Tf ${captionX} ${captionY} Td (${CAPTION.label}) Tj /F 16 Tf 0 -17 Td (${CAPTION.text.slice(CAPTION.label.length + 1)}) Tj ET`
-        : `BT /F 14 Tf ${captionX} ${captionY} Td (${captionText}) Tj ET`;
-    const content = `q ${placementMatrix} cm /Im Do Q\n`
+        : captionItems
+            ? fragmentedCaption(LONG_CAPTION, captionX, captionY)
+            : `BT /F 14 Tf ${captionX} ${captionY} Td (${captionText}) Tj ET`;
+    // The vector paths sit outside the raster container but inside the OCR
+    // fragment, so only the expanded mode keeps them.
+    const vectors = vectorMargin
+        ? [raster.left - 40, raster.right + 40].map(x => (
+            `q 2 w 0 0 0 RG ${points(x, 'x')} ${PAGE.height - points(raster.top + PICTURE.height * 0.35, 'y')} m `
+            + `${points(x, 'x')} ${PAGE.height - points(raster.top + PICTURE.height * 0.65, 'y')} l S Q\n`
+        )).join('') : '';
+    const content = `q ${placementMatrix} cm /Im Do Q\n${vectors}`
         + (duplicateImage ? `q ${placementMatrix} cm /Im Do Q\n` : '')
         + `${captionLine}\n`
         + (nativeText ? 'BT /F 14 Tf 300 500 Td (Printed inside the image) Tj ET\n' : '')
-        + (foreignText ? 'BT /F 14 Tf 100 120 Td (Article body text below the image) Tj ET\n' : '');
+        + (foreignText ? vectorMargin
+            ? `BT /F 14 Tf 100 ${PAGE.height - points(300, 'y')} Td (Body) Tj ET\n`
+            : 'BT /F 14 Tf 100 120 Td (Article body text below the image) Tj ET\n' : '');
     const objects = [
         Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'),
         Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
-        Buffer.from('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1000 900] /Resources << /XObject << /Im 4 0 R >> /Font << /F 6 0 R >> >> /Contents 5 0 R >>'),
+        Buffer.from('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1000 900] /Resources << /XObject << /Im 4 0 R >> /Font << /F 6 0 R /G 7 0 R >> >> /Contents 5 0 R >>'),
         Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${PICTURE.pixels.width} /Height ${PICTURE.pixels.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`), jpeg, Buffer.from('\nendstream')]),
         Buffer.from(`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`),
         Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'),
+        Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >>'),
     ];
     const chunks = [Buffer.from('%PDF-1.4\n')];
     const offsets = [0];
@@ -115,7 +182,8 @@ function fixture({ split = false, wrongPixels = false, duplicateImage = false,
         + `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${size}\n%%EOF\n`));
     const request = {
         mode: 'document-figure', pageIndex: 0, panels,
-        caption: { label: CAPTION.label, text: CAPTION.text, bbox: [...CAPTION.box] },
+        caption: { label: CAPTION.label, text: captionItems ? LONG_CAPTION : CAPTION.text,
+            bbox: captionItems ? [90, 620, 900, 760] : [...CAPTION.box] },
         foreignLocations: [],
     };
     if (foreignText) request.foreignLocations.push({ bbox: [90, 675, 400, 700] });
@@ -204,6 +272,88 @@ test('restores a caption whose label and description are printed on separate lin
     assert.ok(h.released());
 });
 
+// A real journal caption can arrive as 16+ PDF text items over three lines.
+// The verifier must read all of it and must compare each item with the line it
+// continues, not with the box of the whole caption so far.
+test('restores a caption printed as many text items across several lines', async () => {
+    const sample = fixture({ captionItems: true });
+    const engine = createPDFJSTextEngine();
+    try {
+        const text = await engine.extract(sample.fileData);
+        const items = text.pages[0].items.filter(item => item.text.trim());
+        assert.ok(items.length > 12, 'The fixture must exceed the previous item limit');
+        assert.ok(new Set(items.map(item => Math.round(item.transform[5]))).size > 2,
+            'The caption must include within-line fragments after several line breaks');
+    }
+    finally { await engine.dispose(); }
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        const result = await session.recoverImageGroup(sample.request);
+        assert.ok(result, 'A complete multi-line caption must verify');
+        assert.ok(result.captionBBox[1] >= sample.request.caption.bbox[1] - 2
+            && result.captionBBox[3] <= sample.request.caption.bbox[3]);
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+// A mixed figure can be drawn partly as vector paths outside its raster
+// container. The explicit preservePanelBounds mode keeps the OCR boxes so
+// those paths survive, while the default keeps the native container crop.
+test('keeps vector margins outside the native container only when requested', async () => {
+    const sample = fixture({ vectorMargin: true });
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        const native = await session.recoverImageGroup(sample.request);
+        assert.ok(native);
+        assert.ok(native.bbox[0] >= PICTURE.left - 2,
+            'The default crop is the native image container');
+        assert.ok(native.bbox[2] <= PICTURE.left + PICTURE.width + 2);
+        const expanded = await session.recoverImageGroup({ ...sample.request, preservePanelBounds: true });
+        assert.ok(expanded);
+        const panel = sample.request.panels[0].bbox;
+        assert.ok(expanded.bbox[0] <= panel[0] + 2,
+            'The explicit mode keeps the OCR panel box beyond the raster edge');
+        assert.ok(expanded.bbox[2] >= panel[2] - 2);
+        assert.ok(expanded.captionBBox[1] >= expanded.bbox[3]);
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+test('rejects expanded panel bounds that would swallow foreign text', async () => {
+    const sample = fixture({ vectorMargin: true });
+    const panel = sample.request.panels[0].bbox;
+    // A body paragraph printed inside the vector margin, outside the raster.
+    const foreign = { bbox: [panel[0] + 4, panel[1] + 20, panel[0] + 40, panel[1] + 40] };
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        assert.equal(await session.recoverImageGroup({ ...sample.request,
+            preservePanelBounds: true, foreignLocations: [foreign] }), null);
+        // The native container stays clear of the foreign box, so the default
+        // mode is still allowed.
+        assert.ok(await session.recoverImageGroup({ ...sample.request,
+            foreignLocations: [foreign] }));
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+test('rejects an expanded crop that would swallow selectable article text', async () => {
+    const sample = fixture({ vectorMargin: true, foreignText: true });
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        assert.equal(await session.recoverImageGroup({ ...sample.request,
+            preservePanelBounds: true, foreignLocations: [] }), null);
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
 for (const kind of ['wrongPixels', 'duplicateImage', 'nativeText', 'foreignOverlap', 'wrongCaption', 'partialCaption', 'fullPage']) {
     test(`preserves OCR content when the native image evidence has ${kind}`, async () => {
         const sample = kind === 'wrongCaption'
@@ -223,12 +373,13 @@ for (const kind of ['wrongPixels', 'duplicateImage', 'nativeText', 'foreignOverl
 }
 
 test('rejects malformed document-figure requests before decoding any panel', async () => {
-    for (const kind of ['panels', 'caption', 'foreign', 'budget']) {
+    for (const kind of ['panels', 'caption', 'foreign', 'budget', 'panel-bounds-mode']) {
         const sample = fixture();
         const request = structuredClone(sample.request);
         if (kind === 'panels') request.panels[0].bbox = [300, 300, 200, 200];
         if (kind === 'caption') request.caption.text = '';
         if (kind === 'foreign') request.foreignLocations.push({ bbox: null });
+        if (kind === 'panel-bounds-mode') request.preservePanelBounds = 'true';
         const h = harness(kind === 'budget' ? { limits: { maxComparisons: 0 } } : {});
         try {
             const session = await h.renderer.open(sample.fileData);

@@ -469,8 +469,9 @@ function childText(child) {
 // pieces are one per MinerU caption block, as the region resolver expects.
 function imageUnit(block, body, assetPath, caption, type, part) {
     const panel = part === 'panel';
-    const captions = panel && caption ? captionPieces(block) : [];
-    const alt = panel ? captions.map(piece => piece.alt).join(' ') : caption ? escapeImageDescription(caption) : '';
+    const splitCaption = panel || Boolean(block.pdfFigureProposal);
+    const captions = splitCaption && caption ? captionPieces(block) : [];
+    const alt = splitCaption ? captions.map(piece => piece.alt).join(' ') : caption ? escapeImageDescription(caption) : '';
     const text = `![${alt}](${assetPath})`;
     const bbox = body?.bbox || block.bbox;
     const pieces = [{
