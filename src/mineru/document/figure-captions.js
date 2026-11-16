@@ -4,6 +4,7 @@ import {
     parseAcademicTableCaption,
     parseLooseAcademicFigureCaption,
 } from '../../markdown/markdown-figures.js';
+import { normalizePdfAnnotationText } from '../../markdown/pdf-annotation-text.js';
 import { BLOCK_KIND, BLOCK_ROLE, blockPlainText, fragmentText } from './ir.js';
 import { pdfLines, pdfTextItemsByPage } from './pdf-geometry.js';
 
@@ -143,13 +144,14 @@ function planPage(captions, floats, pageBlocks, ordinary) {
 // and figures made from several native images.
 function planVisualCaptionGroups(captions, floats, pageBlocks, lines) {
     const groups = visualComponents(floats, captions, pageBlocks);
-    const entries = sharedVisualCaptionGroups(groups, captions, floats, pageBlocks);
+    const entries = sharedVisualCaptionGroups(groups, captions, floats, pageBlocks, lines);
     addInteriorCaptionGroups(entries, groups, captions, floats, pageBlocks, lines);
     const accepted = validateVisualCaptionGroups(entries, floats);
     // Once an interior annotation exposes a displaced legend, its source
     // component must validate too. Do not let the weaker single-row fallback
     // apply half of a rejected repair to either component.
-    const rejected = entries.filter(entry => entry.internal.length && !accepted.includes(entry));
+    const rejected = entries.filter(entry => (entry.internal.length || entry.panelMoves?.length)
+        && !accepted.includes(entry));
     const withheld = groups.filter(group => rejected.some(entry => group.some(float =>
         entry.group.includes(float) || captionChildren(float).some(child => sameCaption(child, entry.caption)))));
     const withheldFloats = withheld.flat();
@@ -160,23 +162,34 @@ function planVisualCaptionGroups(captions, floats, pageBlocks, lines) {
                 .some(child => sameCaption(child, caption))))]) };
 }
 
-function sharedVisualCaptionGroups(groups, captions, floats, pageBlocks) {
+function sharedVisualCaptionGroups(groups, captions, floats, pageBlocks, lines) {
     const entries = [];
     for (const group of groups) {
         const box = unionOf(group.map(visualBodyBox));
-        const panels = group.reduce((count, float) => count
-            + float.children.filter(child => child.kind === 'body').length, 0);
+        // OCR images are fragments, not logical panels: one can already
+        // contain a+b, and several fragments can describe a single panel.
         const anchored = captions.filter(caption => caption.kind === 'figure'
             && captionSide(caption.bbox, box)
-            && group.some(float => captionChildren(float).some(child => sameCaption(child, caption)))
-            && (!panelLetters(caption.text).size || panelLetters(caption.text).size === panels));
+            && group.some(float => captionChildren(float).some(child => sameCaption(child, caption))));
         const shared = anchored.filter(caption => panelLetters(caption.text).size > 1);
         const owners = shared.length ? shared : anchored;
         if (group.length < 2 || owners.length !== 1) continue;
         const caption = owners[0];
         if (!panelLetters(caption.text).size && hasCloserVisualOwner(caption, group, groups)) continue;
         if (!closedVisualGroup(group, box, caption, floats, pageBlocks, captions)) continue;
-        entries.push({ group, caption, internal: [] });
+        const internal = group.flatMap(captionChildren).filter(child => group.some(float =>
+            interiorCaption(child, visualBodyBox(float), lines)));
+        const panelMoves = [];
+        for (const source of group) {
+            for (const child of captionChildren(source)) {
+                if (!panelLetter(child) || labelInsidePanel(child.bbox, visualBodyBox(source))) continue;
+                const owners = group.filter(float => labelNearPanel(child.bbox, visualBodyBox(float)));
+                if (owners.length === 1 && nativeInteriorText(child, lines)) {
+                    panelMoves.push({ source, target: owners[0], child });
+                }
+            }
+        }
+        entries.push({ group, caption, internal, panelMoves });
     }
     return entries.filter(entry => entries.filter(other => other.caption === entry.caption).length === 1);
 }
@@ -228,6 +241,7 @@ function validateVisualCaptionGroups(entries, floats) {
     while (changed) {
         const next = accepted.filter(entry => entry.group.every(float => captionChildren(float).every(child =>
             entry.internal.includes(child) || completesCaption(child, entry.caption)
+            || entry.panelMoves?.some(move => move.child === child)
             || panelLetter(child) && labelInsidePanel(child.bbox, visualBodyBox(float))
             || accepted.some(other => other !== entry && sameCaption(child, other.caption))))
             && floats.every(float => entry.group.includes(float)
@@ -239,16 +253,18 @@ function validateVisualCaptionGroups(entries, floats) {
     return accepted;
 }
 
-function ordinaryCaptionPlan({ group, caption, internal }, floats, pageBlocks) {
-    const destination = [...group].sort((left, right) =>
+function ordinaryCaptionPlan({ group, caption, internal, panelMoves = [] }, floats, pageBlocks) {
+    const complete = group.find(float => captionChildren(float).some(child =>
+        completesCaption(child, caption) && coversCaption(captionText(child), caption.text)));
+    const destination = complete || [...group].sort((left, right) =>
         visualBodyBox(left)[1] - visualBodyBox(right)[1]
         || visualBodyBox(left)[0] - visualBodyBox(right)[0]).at(-1);
     const match = captionChildren(destination).find(child => completesCaption(child, caption)) || null;
     const copies = captionCopies(floats, caption, match, new Set());
     const texts = textCopies(pageBlocks, caption, group);
-    if (!internal.length && match && coversCaption(captionText(match), caption.text)
+    if (!internal.length && !panelMoves.length && match && coversCaption(captionText(match), caption.text)
         && !copies.length && !texts.length) return null;
-    return { caption, group, destination, match, copies, texts, internal, ordinary: true };
+    return { caption, group, destination, match, copies, texts, internal, panelMoves, ordinary: true };
 }
 
 // Unlike the ordinary region path, this proposal may include OCR tables. It
@@ -360,10 +376,32 @@ function interiorCaption(child, box, lines) {
     if (!validBox(child.bbox) || !text || [...text].length > FIGURE_LIMITS.ownedTextCodePoints
         || parseAcademicFigureCaption(text) || parseAcademicTableCaption(text) || LABEL_ONLY.test(text)
         || panelLetter(child)) return false;
-    if (child.bbox[0] < box[0] - EDGE_TOLERANCE || child.bbox[2] > box[2] + EDGE_TOLERANCE
+    if (child.bbox[0] < box[0] - FIGURE_LIMITS.ownedTextPadding
+        || child.bbox[2] > box[2] + FIGURE_LIMITS.ownedTextPadding
         || child.bbox[1] < box[1] || child.bbox[3] > box[3] + FIGURE_LIMITS.ownedTextPadding) return false;
-    return lines.some(line => normalize(line.text) === normalize(text)
-        && boxMatches(child.bbox, unionOf(line.line.items.map(item => item.bbox))));
+    return nativeInteriorText(child, lines);
+}
+
+function labelNearPanel(label, panel) {
+    if (!validBox(label) || !validBox(panel)) return false;
+    const padding = FIGURE_LIMITS.ownedTextPadding;
+    return labelInsidePanel(label, [panel[0] - padding, panel[1] - padding,
+        panel[2] + padding, panel[3] + padding]);
+}
+
+function nativeInteriorText(child, lines) {
+    // Several axes can share one PDF baseline. Compare only the native runs
+    // at this child's location, not the text of the whole printed row.
+    return lines.some(({ line }) => {
+        const items = line.items.filter(item => {
+            const x = (item.bbox[0] + item.bbox[2]) / 2;
+            const y = (item.bbox[1] + item.bbox[3]) / 2;
+            return x >= child.bbox[0] - EDGE_TOLERANCE && x <= child.bbox[2] + EDGE_TOLERANCE
+                && y >= child.bbox[1] - EDGE_TOLERANCE && y <= child.bbox[3] + EDGE_TOLERANCE;
+        });
+        return items.length && normalize(lineText({ items })) === normalize(captionText(child))
+            && boxMatches(child.bbox, unionOf(items.map(item => item.bbox)));
+    });
 }
 
 function planIndependentCaptions(captions, floats, pageBlocks) {
@@ -646,7 +684,8 @@ function findNativeCaptions(page, lines, pageBlocks, { corroborateOCR = false } 
             continue;
         }
         const inline = inlineCaption(text);
-        if (!inline) continue;
+        if (!inline || bodyBlockAt({ line: { ...line, bbox: line.bbox
+            || [line.left, line.bottom - line.height, line.right, line.bottom] }, text }, prose.blocks)) continue;
         // A numbered caption that opens with a sentence is a reference in the
         // body ("Figure 6 shows ..."), not the legend printed under a picture.
         const parts = [{ line, text }];
@@ -1170,7 +1209,7 @@ function shortensOCRCaption(caption, floats) {
         return sameLabelNumber(text, caption.label) && boxMatches(child.bbox, caption.bbox)
             && (continuesHyphenatedCaption(text, caption.text)
                 || coversCaption(text, caption.text)
-                && normalize(text).split(' ').length > normalize(caption.text).split(' ').length);
+                && captionEvidence(text).split(' ').length > captionEvidence(caption.text).split(' ').length);
     }));
 }
 
@@ -1187,11 +1226,19 @@ function continuesHyphenatedCaption(text, native) {
         && /^[-\u00ad\u2010\u2011]?\p{L}/u.test(complete.slice(prefix.length));
 }
 
-// The OCR copy reads the whole native caption: every printed word is there.
+// Compare the ordered reading, including repeated words. The same formula can
+// be TeX in OCR and glyphs in the PDF; punctuation, ligatures and line-end
+// hyphenation must not turn one caption into two competing legends.
+function captionEvidence(text) {
+    return normalizePdfAnnotationText(text).normalize('NFKC').toLowerCase()
+        .replace(/(?<=\p{L})[-\u00ad\u2010\u2011]\s*(?=\p{L})/gu, '')
+        .match(/[\p{L}\p{N}]+|[=<>+−±×÷≈≠≤≥]/gu)?.join(' ') || '';
+}
+
 function coversCaption(text, native) {
-    const words = new Set(normalize(text).split(' '));
-    const printed = normalize(native).split(' ').filter(Boolean);
-    return printed.length > 0 && printed.every(word => words.has(word));
+    const complete = captionEvidence(text);
+    const printed = captionEvidence(native);
+    return Boolean(printed) && ` ${complete} `.includes(` ${printed} `);
 }
 
 // A misfiled child is moved off its float, keeping its id, box and text in the
@@ -1227,7 +1274,8 @@ function releaseTextCopies(ir, texts, destination, report) {
 function sameCaption(child, caption) {
     const text = captionText(child);
     if (!text || !sameLabelNumber(text, caption.label)) return false;
-    return wordsMatch(text, caption.text) && boxMatches(child.bbox, caption.bbox);
+    return wordsMatch(captionEvidence(text), captionEvidence(caption.text))
+        && boxMatches(child.bbox, caption.bbox);
 }
 
 // The OCR copy and the printed caption name the same number. Shared words are

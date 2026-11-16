@@ -78,7 +78,12 @@ export const MISTRAL_FIGURE_REGION_V22_PARSER_PROFILE_ID = '{"provider":"mistral
 // Keep the last figure profile literal so existing corrections stay reachable.
 export const MISTRAL_FIGURE_REGION_V25_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v25","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
 
+// The identity before the unified shared-group and complete-caption repair.
+// Kept as a literal so corrections made under it stay reachable.
+export const MISTRAL_FIGURE_REGION_V26_PARSER_PROFILE_ID = '{"provider":"mistral","model":"mistral-ocr-4-1","request":{"include_blocks":true,"include_image_base64":true,"table_format":"markdown"},"headerFooter":"edge-filter-v6-publisher-copyright","textFlow":"same-and-cross-page-column-continuation-v4","resultAdapter":"mistral-ocr-result-v11-retain-page-chrome-ranges-text-flow-figure-layouts","sourceMap":"pixel-bbox-0-1000-v1","figureStructure":"figure-region-v26","figureCoordinateFrame":"unverified-preserve-v1","figureLabelRecovery":"verified-pdf-image-v1","figureCaptions":"panel-pair-captions-v2","figureReadingOrder":"verified-pdf-title-order-v1"}';
+
 export const MISTRAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MISTRAL_FIGURE_REGION_V26_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V25_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V24_PARSER_PROFILE_ID,
     MISTRAL_FIGURE_REGION_V23_PARSER_PROFILE_ID,

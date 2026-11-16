@@ -52,12 +52,25 @@ Subplot letters may be listed individually (`(a)`, `(b)`) or as a range
 (`(a–f)`, `(a–i)`, also written with `to`). When the letters and the component
 agree, the legend stays with the complete component and the group takes the
 ordinary region path, so a composite figure does not have to be one native PDF
-image.
+image. An OCR image may already contain multiple lettered subfigures, or the
+same logical panel may be split between OCR images; image count is not a panel
+count. The printed caption is reconciled with the complete OCR caption before
+it is emitted once for the whole group.
+
+The OCR pictures are fragments, not logical panels: one picture can already
+hold several lettered subfigures, and one subfigure can be split across several
+pictures. The letter count therefore never has to equal the component's picture
+count; the letters have to describe the same printed figure the component
+covers. A complete legend anchored on any one fragment of a closed component
+belongs to the whole component, so a second fragment of the same row is not
+left behind as an uncaptioned figure.
 
 A chart footer reported as a caption (an axis note printed inside the plot) is
 not a legend. Mktero confirms it against the PDF's own text at that place and
 keeps it as figure text: it leaves the reading flow only after a successful
-crop, and it never blocks the picture's real numbered legend. A misfiled legend
+crop, and it never blocks the picture's real numbered legend. Two axis titles
+printed side by side share one PDF baseline, so each is matched against the
+native runs at its own box rather than against the whole printed row. A misfiled legend
 whose destination or component is not unique retains its original ownership
 and fragments; dependent figures are not repaired in separate partial steps.
 
@@ -106,8 +119,11 @@ outer frame rather than centred over the picture.
   other figure stands between them. Ambiguous ownership keeps MinerU's
   placement.
 - Spacing inside brackets is ignored when comparing the PDF caption with the
-  OCR copy, so `( A )` and `(A)` name the same legend. The printed figure
-  number must still agree; similar wording cannot exchange different figures.
+  OCR copy, so `( A )` and `(A)` name the same legend. Caption comparison keeps
+  word order and repeated words while normalizing line breaks, ligatures,
+  hyphenation and equivalent mathematical text such as TeX commands and PDF
+  glyphs. The printed figure number must still agree; similar wording cannot
+  exchange different figures.
 - When OCR files the upper figure's legend under a row of lettered panels and
   files one of those panel letters under the upper figure, Mktero plans both
   moves together. This requires an explicit shared legend such as `(a)` and
@@ -115,7 +131,11 @@ outer frame rather than centred over the picture.
   geometric owner for each relocated panel letter. Missing evidence skips
   this joint repair.
 - Text that merely mentions a figure inside a sentence is not a caption, and a
-  real table heading is never taken from a table.
+  real table heading is never taken from a table. A numbered sentence printed in
+the body's own type is never read as a native legend, even when it begins with
+the figure number the page also prints.
+- A legend longer than the eight-line read budget keeps the complete OCR copy;
+the bounded native read never truncates it to its first line.
 - Without a PDF text layer the earlier OCR-only rules still apply, including the
   same-page float repair described below.
 
