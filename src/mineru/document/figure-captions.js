@@ -84,12 +84,28 @@ export function restorePDFFigureCaptions(ir, pdfText) {
         }
         const captions = findNativeCaptions(page, lines, pageBlocks)
             .filter(caption => !shortensOCRCaption(caption, floats));
-        if (!captions.length) continue;
         if (!withinBudget(lines.length, floats.length, blockCount, captions.length)) {
             report.skipped++;
             continue;
         }
-        for (const plan of planPage(captions, floats, pageBlocks, lines)) applyPlan(ir, plan, report);
+        const mixedCaptions = floats.some(float => float.kind === BLOCK_KIND.TABLE)
+            && floats.some(float => float.kind === BLOCK_KIND.IMAGE || float.kind === BLOCK_KIND.CHART)
+            && withinBudget(lines.length * 2, floats.length * 2, blockCount * 2)
+            ? findNativeCaptions(page, lines, pageBlocks, { corroborateOCR: true })
+                .filter(caption => !shortensOCRCaption(caption, floats)) : [];
+        if (!captions.length && !mixedCaptions.length) continue;
+        const ordinary = planVisualCaptionGroups(captions, floats, pageBlocks, lines);
+        // A neighbouring uncaptioned table must not turn a resolved chart group
+        // into a tentative mixed group that might fail PDF verification.
+        if (withinBudget(lines.length, floats.length, blockCount, captions.length + mixedCaptions.length)) {
+            proposeMixedFigureGroups(mixedCaptions, floats, pageBlocks, ordinary.floats);
+        }
+        const proposed = floats.map(float => float.pdfFigureProposal).filter(Boolean);
+        const remainingCaptions = captions.filter(caption => !proposed.some(figure => (
+            figure.label === caption.label && boxMatches(figure.bbox, caption.bbox)
+        )));
+        const remainingFloats = floats.filter(float => !float.pdfFigureProposal);
+        for (const plan of planPage(remainingCaptions, remainingFloats, pageBlocks, ordinary)) applyPlan(ir, plan, report);
     }
     return ir;
 }
@@ -112,8 +128,7 @@ function withinBudget(lineCount, floatCount, blockCount, captionCount = floatCou
 // exactly one destination, the pictures grouped with it, the OCR copy it
 // completes, and the misfiled copies it consumes. A caption with no single
 // owner produces no plan, so the page keeps every child MinerU wrote.
-function planPage(captions, floats, pageBlocks, lines) {
-    const ordinary = planVisualCaptionGroups(captions, floats, pageBlocks, lines);
+function planPage(captions, floats, pageBlocks, ordinary) {
     const remainingCaptions = captions.filter(caption => !ordinary.captions.has(caption));
     const remainingFloats = floats.filter(float => !ordinary.floats.has(float));
     const fallback = planDisplacedPanelCaptions(remainingCaptions, remainingFloats, pageBlocks)
@@ -236,9 +251,46 @@ function ordinaryCaptionPlan({ group, caption, internal }, floats, pageBlocks) {
     return { caption, group, destination, match, copies, texts, internal, ordinary: true };
 }
 
-function visualComponents(floats, captions, pageBlocks) {
+// Unlike the ordinary region path, this proposal may include OCR tables. It
+// changes no caption or Markdown: only complete PDF-caption and pixel checks
+// can commit the mixed group later. OCR fragments need not match the number
+// of lettered panels: one fragment can contain several panels, or vice versa.
+function proposeMixedFigureGroups(captions, floats, pageBlocks, reserved) {
+    const available = floats.filter(float => !float.pdfFigure && !float.pdfFigureProposal);
+    const groups = visualComponents(available, captions, pageBlocks, true);
+    const proposals = [];
+    for (const group of groups) {
+        if (group.some(float => reserved.has(float)) || !group.some(float => float.kind === BLOCK_KIND.TABLE)
+            || !group.some(float => float.kind === BLOCK_KIND.IMAGE || float.kind === BLOCK_KIND.CHART)) continue;
+        const box = unionOf(group.map(visualBodyBox));
+        const owners = captions.filter(caption => caption.kind === 'figure'
+            && panelLetters(caption.text).size > 1 && captionSide(caption.bbox, box)
+            && group.some(float => captionChildren(float).some(child => sameCaption(child, caption)))
+            && closedVisualGroup(group, box, caption, floats, pageBlocks, captions));
+        if (owners.length !== 1) continue;
+        const caption = owners[0];
+        const expected = panelLetters(caption.text);
+        const children = group.flatMap(captionChildren);
+        const labels = children.filter(child => panelLetter(child));
+        if (!children.every(child => completesCaption(child, caption)
+            || expected.has(panelLetter(child)) && validBox(child.bbox)
+            && child.bbox[0] >= box[0] - EDGE_TOLERANCE && child.bbox[2] <= box[2] + EDGE_TOLERANCE
+            && child.bbox[1] >= box[1] - EDGE_TOLERANCE && child.bbox[3] <= box[3] + EDGE_TOLERANCE)) continue;
+        proposals.push({ group, caption, labels });
+    }
+    for (const proposal of proposals) {
+        if (proposals.filter(other => other.caption === proposal.caption).length !== 1) continue;
+        for (const float of proposal.group) float.pdfFigureProposal = {
+            ...figureMark(proposal.caption, true), preservePanelBounds: true,
+        };
+        for (const label of proposal.labels) label.pdfPanelLabel = true;
+    }
+}
+
+function visualComponents(floats, captions, pageBlocks, includeTables = false) {
     const visuals = floats.filter(float => !float.pdfFigure
-        && (float.kind === BLOCK_KIND.IMAGE || float.kind === BLOCK_KIND.CHART)
+        && (float.kind === BLOCK_KIND.IMAGE || float.kind === BLOCK_KIND.CHART
+            || includeTables && float.kind === BLOCK_KIND.TABLE)
         && visualBodyBox(float));
     const remaining = new Set(visuals);
     const groups = [];
@@ -568,9 +620,10 @@ function intersectionArea(left, right) {
 // - a bare number on its own line, with the description under it;
 // - a whole caption on one line ("Figure 4. Sensitivity test in adults.");
 // - a numbered caption whose description runs over several printed lines.
-function findNativeCaptions(page, lines, pageBlocks) {
+function findNativeCaptions(page, lines, pageBlocks, { corroborateOCR = false } = {}) {
     const captions = [];
     const prose = bodyType(pageBlocks);
+    const ocrCaptions = corroborateOCR ? pageBlocks.flatMap(captionChildren) : [];
     for (const [index, { line, text }] of lines.entries()) {
         if (captions.length >= MAX_PAGE_CANDIDATES) break;
         const bare = bareLabel(text);
@@ -597,10 +650,13 @@ function findNativeCaptions(page, lines, pageBlocks) {
         // A numbered caption that opens with a sentence is a reference in the
         // body ("Figure 6 shows ..."), not the legend printed under a picture.
         const parts = [{ line, text }];
+        const corroboration = corroborateOCR ? ocrCaptions.filter(child => sameLabelNumber(captionText(child), inline.label)
+            && normalize(captionText(child)).startsWith(normalize(text))
+            && boxMatches(child.bbox, line.bbox || unionOf(line.items.map(item => item.bbox)))) : [];
         let cursor = index;
         while (parts.length < MAX_CAPTION_LINES) {
             const following = nextLineInColumn(lines, cursor);
-            if (!following || !continuesCaption(parts.at(-1).line, following.line, { lines, prose })) break;
+            if (!following || !continuesCaption(parts.at(-1).line, following.line, { lines, prose, corroboration })) break;
             parts.push(following);
             cursor = lines.indexOf(following);
         }
@@ -749,14 +805,24 @@ function bodyType(pageBlocks) {
 
 // The next printed line of a caption: same left margin, no other caption
 // starting, set in the caption's own type, and not running text.
-function continuesCaption(currentLine, nextLine, { lines = [], prose = { size: 0, blocks: [] }, first = false } = {}) {
+function continuesCaption(currentLine, nextLine, { lines = [], prose = { size: 0, blocks: [] },
+    first = false, corroboration = [] } = {}) {
     const text = lineText(nextLine);
     if (!text || text.length > MAX_CAPTION_LENGTH || LABEL_ONLY.test(text)) return false;
     if (bareLabel(text) || inlineCaption(text)) return false;
     const gap = nextLine.bottom - currentLine.bottom;
     if (gap < -2 || gap > MAX_LABEL_DESCRIPTION_GAP) return false;
     if (first ? !startsDescription(currentLine, nextLine, prose) : !sameType(currentLine, nextLine)) return false;
-    if (readsAsBody({ line: nextLine, text }, lines, prose)) return false;
+    const located = { line: nextLine, text };
+    if (readsAsBody(located, lines, prose)
+        && (bodyBlockAt(located, prose.blocks) || !corroboration.some(child => {
+            const box = nextLine.bbox || unionOf(nextLine.items.map(item => item.bbox));
+            const outer = child.bbox;
+            return validBox(box) && validBox(outer)
+                && box[0] >= outer[0] - EDGE_TOLERANCE && box[2] <= outer[2] + EDGE_TOLERANCE
+                && box[1] >= outer[1] - EDGE_TOLERANCE && box[3] <= outer[3] + EDGE_TOLERANCE
+                && normalize(captionText(child)).includes(normalize(text));
+        }))) return false;
     if (Math.abs(nextLine.left - currentLine.left) > LABEL_ALIGNMENT) return false;
     return text.split(/\s+/u).filter(Boolean).length <= MAX_CAPTION_WORDS_PER_LINE;
 }

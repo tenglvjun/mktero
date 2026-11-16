@@ -121,17 +121,29 @@ outer frame rather than centred over the picture.
 
 ### Splitting a figure MinerU stored as a table
 
-MinerU sometimes stores one printed figure as a table fragment plus a chart
-fragment. For MinerU results, Mktero restores the complete figure only when a
-single native PDF image contains both fragments, every fragment's pixels match
-that image, the complete native caption is verified at its own PDF location,
-and no other layout content or body text falls inside the recovered bounds.
-The verified image replaces all fragments together and the caption stays
-selectable below it.
+MinerU sometimes splits one printed figure into several chart and table
+fragments. A unique, complete shared Figure caption can propose a mixed group,
+including when OCR stored the caption in the final fragment's image description
+or attached a panel letter to the wrong fragment. The number of OCR fragments
+need not equal the number of logical panels. A same-number OCR caption at the
+same location can corroborate native continuation lines set in the body's own
+font size; lines inside an article paragraph still end the caption.
 
-If any check fails, the table keeps its HTML and the chart keeps its image.
+The proposal keeps the original Markdown until verification succeeds. One
+unique native PDF image must anchor the group, every fragment must match the
+rendered page pixels, and the complete caption must match the PDF text at its
+own location. The crop keeps the union of that image and all original panel
+bounds so vector curves, axes and panel letters outside the bitmap survive.
+Expansion remains bounded and cannot cover another layout block, the caption
+or selectable article text. The verified page crop replaces all fragments
+together and the caption stays selectable below it.
+
+If any check fails, the tables keep their original HTML or image fallback and
+the charts keep their images.
 A table with its own table heading is never converted into a figure, and the
 recovery does not merge independent figures that merely sit next to each other.
+An already resolved chart group takes precedence over a mixed proposal, even
+when an uncaptioned table sits beside it.
 
 ### MinerU document rewrite
 

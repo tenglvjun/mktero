@@ -40,6 +40,7 @@ export function resolveDocumentFigures(input, { limits = FIGURE_LIMITS, budget, 
             pageIndex, label: figure.label, decision: 'preserve',
             reason: usable ? 'ambiguous-membership' : 'ambiguous-source-range',
             nativeFigure: true,
+            ...(figure.preservePanelBounds === true ? { preservePanelBounds: true } : {}),
             panelBlockIds: panels.map(block => block.id),
             captionBlockIds: captions.map(block => block.id),
             ownedTextBlockIds: blocks.filter(block => block.pdfFigurePart === 'text').map(block => block.id),
@@ -84,6 +85,7 @@ export function documentFigureRequest(input, candidate, budget) {
     if (requestPanels.some(panel => !panel.asset)) return null;
     return {
         mode: 'document-figure', pageIndex: candidate.pageIndex, panels: requestPanels,
+        ...(candidate.preservePanelBounds === true ? { preservePanelBounds: true } : {}),
         caption: { label: candidate.label, text: caption.pdfFigure.text, bbox: [...candidate.captionBBox] },
         foreignLocations,
     };
@@ -99,7 +101,8 @@ export function documentFigureCandidate(candidate, request, result, page) {
         const bbox = clip(panel.bbox, result.bbox);
         // Native-image evidence can trim OCR white margins and a caption baked
         // into an OCR crop. Preserve the original source box in provenance.
-        if (!validBox(bbox) || area(bbox) / area(panel.bbox) < 0.6) return null;
+        if (!validBox(bbox) || area(bbox) / area(panel.bbox) < 0.6
+            || request.preservePanelBounds === true && bbox.some((value, axis) => value !== panel.bbox[axis])) return null;
         panelBBoxes[panel.id] = bbox;
     }
     return {

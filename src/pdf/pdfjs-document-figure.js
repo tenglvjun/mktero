@@ -7,14 +7,22 @@ import { textBox, verifyPDFPanelPixels } from './pdfjs-figure-evidence.js';
 // Only this path may put them back together, and only after the page proves a
 // single image container owns every fragment, each fragment's own pixels match
 // the page, and the caption found in the PDF's own text is complete, unique,
-// and printed outside the image. The crop is the native container, never the
-// OCR boxes: an OCR box may include white margins and a baked-in caption.
+// and printed outside the image. By default the crop is the native container:
+// an OCR box may include white margins and a baked-in caption.
+//
+// A mixed figure can also be drawn partly as vector paths outside its raster
+// container (a table panel beside vector plots, or labels and axes drawn as
+// paths). `preservePanelBounds` keeps the union of the OCR boxes so those
+// paths stay in the crop, but only after the same container, caption, pixel,
+// foreign-text and selectable-text checks pass.
 const MIN_INSIDE_RATIO = 0.6;
 const MAX_CROP_GROWTH = 1.6;
 const MAX_IMAGE_AREA = 750_000;
 const CAPTION_PROXIMITY = 60;
 const CAPTION_LINE_GAP = 15;
-const MAX_CAPTION_ITEMS = 12;
+// Wrapped captions can contain many font runs and separate whitespace items.
+// Keep a bounded scan long enough to verify the complete requested caption.
+const MAX_CAPTION_ITEMS = 64;
 
 export async function inspectDocumentFigureImage(page, request, {
     createCanvas, decodeImage, signal, limits,
@@ -24,11 +32,13 @@ export async function inspectDocumentFigureImage(page, request, {
         || request.panels.some(panel => !validBox(panel?.bbox) || !panel.asset)
         || new Set(request.panels.map(panel => panel.id)).size !== request.panels.length
         || !validCaption(request.caption)
+        || !validPanelBoundsMode(request)
         || !Array.isArray(request.foreignLocations)
         || request.foreignLocations.length > limits.maxLayoutBlocks
         // An unusable foreign box cannot be proven disjoint from the crop, so it
         // rejects the request instead of being silently dropped.
         || request.foreignLocations.some(location => !validBox(location?.bbox))) return null;
+    const preservePanelBounds = request.preservePanelBounds === true;
     const setup = pageRenderSetup(page, limits);
     if (!setup) return null;
     const { viewport, renderViewport, width, height } = setup;
@@ -52,8 +62,8 @@ export async function inspectDocumentFigureImage(page, request, {
         const charge = count => (comparisons += count) <= limits.maxComparisons;
         if (!charge(boxes.length * (request.panels.length + blocked.length))) return null;
         // The container must own every fragment: each OCR box keeps at least
-        // MIN_INSIDE_RATIO of its area inside it. A fragment may extend outside
-        // only over a caption the OCR crop swallowed, which is checked below.
+        // MIN_INSIDE_RATIO of its area inside it. An OCR box may also contain
+        // vector margins or a caption; pixels are checked over its full extent.
         const union = unionBoxes(request.panels.map(panel => panel.bbox));
         const containers = boxes.filter(box => area(box) <= MAX_IMAGE_AREA
             && area(box) <= area(union) * MAX_CROP_GROWTH
@@ -61,6 +71,16 @@ export async function inspectDocumentFigureImage(page, request, {
             && !blocked.some(location => intersection(box, location) > 1));
         if (containers.length !== 1) return null;
         const container = containers[0];
+        // The OCR boxes can extend past the raster container over vector paths
+        // that belong to the same figure. Keep those paths only in the explicit
+        // mode, and only when the wider crop stays bounded and clear of every
+        // foreign box. The native container remains the evidence that this is
+        // one picture; the union is only the crop extent.
+        if (preservePanelBounds && !charge(request.panels.length + blocked.length)) return null;
+        const bbox = preservePanelBounds
+            ? expandedPanelBounds(container, request.panels, blocked)
+            : container;
+        if (!bbox) return null;
         const text = await waitForFigureOperation(page.getTextContent(), signal);
         if (!Array.isArray(text.items) || text.items.length > limits.maxLayoutBlocks) return null;
         if (!charge(text.items.length * MAX_CAPTION_ITEMS)) return null;
@@ -69,14 +89,16 @@ export async function inspectDocumentFigureImage(page, request, {
         const captionBox = captionBoxes[0];
         // The caption must be printed outside the picture and near it, not
         // inside the image or on another part of the page.
-        if (intersection(container, captionBox) > 1
-            || !nearContainer(container, captionBox)) return null;
+        if (intersection(bbox, captionBox) > 1
+            || !nearContainer(bbox, captionBox)) return null;
         // Real PDF text inside the container means the region is not one raster
         // image; consuming it would delete selectable article text. The verified
-        // caption and its first line are the only permitted native text.
+        // caption and its first line are the only permitted native text. In the
+        // expanded mode the whole crop is checked, not only the raster box, so
+        // the extra vector margins cannot swallow article text either.
         if (text.items.some(item => {
             const box = textBox(item, viewport);
-            return box && intersection(box, container) > 1
+            return box && intersection(box, bbox) > 1
                 && intersection(box, captionBox) <= 0;
         })) return null;
         // Verify every original OCR fragment against the page over its own
@@ -86,7 +108,7 @@ export async function inspectDocumentFigureImage(page, request, {
         if (!await verifyPDFPanelPixels(canvas, request.panels, viewport,
             { createCanvas, decodeImage, signal, limits })) return null;
         return {
-            bbox: container.map(value => Math.max(0, Math.min(1000, value))),
+            bbox: bbox.map(value => Math.max(0, Math.min(1000, value))),
             captionBBox: [...captionBox],
             rotation: page.rotate,
         };
@@ -95,6 +117,25 @@ export async function inspectDocumentFigureImage(page, request, {
         canvas.width = 0;
         canvas.height = 0;
     }
+}
+
+function validPanelBoundsMode(request) {
+    return request.preservePanelBounds === undefined
+        || request.preservePanelBounds === true
+        || request.preservePanelBounds === false;
+}
+
+// The union of the native container and every OCR panel box. The container
+// still proves the fragments are one picture; the panel boxes keep the vector
+// paths and labels that sit outside the raster but inside the OCR fragment.
+// The growth and area bounds are the same ones the container must satisfy, so
+// a hostile request cannot expand the crop across the page.
+function expandedPanelBounds(container, panels, blocked) {
+    const union = unionBoxes([container, ...panels.map(panel => panel.bbox)]);
+    if (!validBox(union) || area(union) > MAX_IMAGE_AREA
+        || area(union) > area(container) * MAX_CROP_GROWTH
+        || blocked.some(location => intersection(union, location) > 1)) return null;
+    return union;
 }
 
 function validCaption(caption) {
@@ -117,12 +158,20 @@ function captionBoxesIn(items, viewport, caption) {
         if (!/^(?:fig(?:ure)?[.\uFF0E]?|图)/iu.test(item.str?.trim() || '')) continue;
         let value = '';
         let box = null;
+        // `box` is the whole caption so far; `lineBox` is only the current
+        // printed line. A caption split into many PDF items per line must not
+        // compare the next item with the accumulated multi-line box: that
+        // would reject the rest of the line as soon as the first line ends.
+        let lineBox = null;
         for (const next of items.slice(index, index + MAX_CAPTION_ITEMS)) {
             if (!String(next.str || '').trim()) continue;
             const nextBox = textBox(next, viewport);
-            if (!nextBox || box && !continuesCaption(box, nextBox)) break;
+            if (!nextBox || lineBox && !continuesCaption(lineBox, nextBox)) break;
             value += ' ' + next.str;
             box = box ? unionBoxes([box, nextBox]) : nextBox;
+            lineBox = lineBox && Math.abs(nextBox[1] - lineBox[1]) <= 4
+                ? unionBoxes([lineBox, nextBox])
+                : nextBox;
             const actual = letters(value);
             if (actual.length > expected.length + 8) break;
             if (figureLabelKey(value) === label && actual === expected) {
