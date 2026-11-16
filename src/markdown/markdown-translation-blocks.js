@@ -12,6 +12,7 @@ import {
     analyzeMarkdownTableReferences,
 } from './markdown-table-references.js';
 import { normalizeChromeRanges } from './chrome-ranges.js';
+import { REFERENCE_HEADING_LABEL_PATTERN } from './reference-heading.js';
 
 const MARKDOWN_PARSER = markdownParser.configure(GFM);
 const HEADING_PATTERN = /^(?:ATXHeading[1-6]|SetextHeading[12])$/;
@@ -33,11 +34,6 @@ const PROTECTED_NODE_TYPES = new Set([
 ]);
 const PROTECTED_PLACEHOLDER_PATTERN = /MKTEROPROTECTED\d+PLACEHOLDER/g;
 const DOCUMENT_MARKER_PATTERN = /MKTEROBLOCK\d+(?:START|END)MARKER/g;
-// Reference lists are recognized the way citation analysis recognizes them
-// (see markdown-citations.js): a section number or a Roman numeral may
-// precede the label, and the label may end with punctuation. Bold and italic
-// markup is already stripped from the label before it is matched.
-const REFERENCE_HEADING_PATTERN = /^(?:(?:\d+(?:\.\d+)*)[.)]?[ \t]+|[IVX]+\.?[ \t]+)?(?:references?(?:[ \t]+and[ \t]+notes)?|reference[ \t]+list|bibliography|works[ \t]+cited|literature[ \t]+cited|参考文献|参考资料|参考书目|引用文献)[.:：]?$/iu;
 const NUMERIC_CITATION_PATTERN = /\[(?:\d{1,4}[a-z]?(?:[ \t]*[-–—,，;；][ \t]*\d{1,4}[a-z]?)*)(?:[ \t]*,[ \t]*)?\]/giu;
 export const BILINGUAL_LIST_BOUNDARY =
     '<!-- mktero-bilingual-list-boundary -->';
@@ -1292,7 +1288,7 @@ function isReferenceHeading(nodeName, markdown) {
         .replace(/[*_`]/g, '')
         .replace(/[：:][ \t]*$/, '')
         .trim();
-    return REFERENCE_HEADING_PATTERN.test(label);
+    return REFERENCE_HEADING_LABEL_PATTERN.test(label);
 }
 
 function topLevelNodes(markdown) {

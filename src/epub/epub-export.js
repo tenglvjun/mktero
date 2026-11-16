@@ -4,10 +4,10 @@ import { findMarkdownDirectives } from '../markdown/markdown-directives.js';
 import { analyzeMarkdownFootnotes } from '../markdown/markdown-footnotes.js';
 import { createMarkdownExportPlan } from '../markdown/markdown-export.js';
 import { findInlineMathMatches, renderMarkdownHTML } from '../markdown/markdown-html.js';
+import { EPUB_REFERENCE_HEADING_PATTERN as REFERENCE_HEADING } from '../markdown/reference-heading.js';
 import { buildEpubPackage, EPUB_PACKAGE_LIMITS } from './epub-package.js';
 
 const PARSER = markdownParser.configure(GFM);
-const REFERENCE_HEADING = /^(?:references?|bibliography|works\s+cited|literature\s+cited|参考文献|引用文献)$/iu;
 const REFERENCE_CITATION = /reference|citation/iu;
 const NUMERIC_CITATION_MATH_PATTERN = /^\s*\[\s*\d+(?:\s*(?:[,;，；]\s*\d+|[-–—]\s*\d+))*\s*\]\s*$/u;
 const NUMERIC_COMBINED_CITATION_PATTERN = /^\s*\[?\s*\d{1,4}(?:\s*[,;，；–—-]\s*\d{1,4})+\s*\]?\s*$/u;

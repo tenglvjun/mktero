@@ -1,4 +1,9 @@
 import { BLOCK_KIND, BLOCK_ROLE, blockPlainText, isFloatBlock } from './ir.js';
+import { MINERU_REFERENCE_HEADING_PATTERN } from '../../markdown/reference-heading.js';
+
+// The reference-heading vocabulary is shared with the Markdown pipeline; the
+// document IR matches it against a heading's plain text.
+export { MINERU_REFERENCE_HEADING_PATTERN as REFERENCE_HEADING };
 
 const SPAN_SHARE = 0.6;
 const COLUMN_GAP_SHARE = 0.25;
@@ -10,7 +15,6 @@ const MIN_REFERENCE_COLUMN_ENTRIES = 3;
 const ORDER_TOLERANCE = 2;
 const FLOAT_OVERLAP_SHARE = 0.5;
 const FLOW_ROLES = new Set([BLOCK_ROLE.BODY, BLOCK_ROLE.HEADING, BLOCK_ROLE.REFERENCE]);
-export const REFERENCE_HEADING = /^(?:[0-9IVX]+\.?\s+)?(?:references?|bibliography|literature cited|works cited|reference list|参考文献)$/iu;
 
 export function isFlowBlock(block) {
     return FLOW_ROLES.has(block?.role) && !isFloatBlock(block);
@@ -351,7 +355,7 @@ export function markReferenceSections(ir) {
             continue;
         }
         if (block.role === BLOCK_ROLE.HEADING) {
-            inReferences = REFERENCE_HEADING.test(blockPlainText(block).trim());
+            inReferences = MINERU_REFERENCE_HEADING_PATTERN.test(blockPlainText(block).trim());
             if (inReferences) block.referenceHeading = true;
             else delete block.referenceHeading;
             continue;
