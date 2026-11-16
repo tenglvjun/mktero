@@ -92,7 +92,7 @@ The column follows the window width up to the chosen maximum; text, figures, tab
 
 Once a complete translation exists, the `Translation` tab opens the language menu. `Retranslate document` at the end of that menu translates the whole document again in the current language.
 
-Mktero groups the article into bounded Markdown batches, protects formulas, citations, links, code, images, and structural placeholders, and runs at most five requests concurrently. Cache and correction rules are in [translation details](#translate-with-ai-1).
+Mktero groups the article into bounded Markdown batches, protects formulas, citations, links, code, images, and structural placeholders, and runs at most five requests concurrently. A reference list is left untranslated from its heading until the next heading of the same or a higher level, so back matter a journal sets after the references, such as Acknowledgements, Author contributions, or Data availability, is still translated. Cache and correction rules are in [translation details](#translate-with-ai-1).
 
 ### Translate a selection
 

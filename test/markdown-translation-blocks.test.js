@@ -525,6 +525,133 @@ test('resumes translation at a new H1 section after references', () => {
     ]);
 });
 
+test('resumes translation at a heading level equal to the reference list', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Body paragraph.',
+        '',
+        '## References',
+        '',
+        '[1] Author. Article title.',
+        '',
+        '## Acknowledgements',
+        '',
+        'We thank our funders.',
+        '',
+        '## Data availability',
+        '',
+        'Data are available on request.',
+    ].join('\n');
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const batches = collectMarkdownTranslationSections(markdown, blocks)
+        .flatMap(createMarkdownTranslationBatches);
+
+    assert.deepEqual(blocks.map(block => block.translatable), [
+        true,
+        true,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true,
+    ]);
+    const requestPayload = batches.map(batch => batch.requestPayload).join('');
+    assert.doesNotMatch(requestPayload, /References|Article title/);
+    assert.match(requestPayload, /Acknowledgements/);
+    assert.match(requestPayload, /Data are available on request\./);
+});
+
+test('keeps subheadings inside a reference list out of translation', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Body paragraph.',
+        '',
+        '## References',
+        '',
+        '### Primary sources',
+        '',
+        '[1] Author. Article title.',
+        '',
+        '## Appendix',
+        '',
+        'Additional analysis.',
+    ].join('\n');
+
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+
+    assert.deepEqual(blocks.map(block => block.translatable), [
+        true,
+        true,
+        false,
+        false,
+        false,
+        true,
+        true,
+    ]);
+});
+
+test('recognizes numbered, Roman, and extended reference headings', () => {
+    const headings = [
+        '6. References',
+        'VI. REFERENCES',
+        'REFERENCES AND NOTES',
+        'Reference list',
+        '参考文献',
+    ];
+    for (const heading of headings) {
+        const markdown = [
+            '# Paper',
+            '',
+            'Body paragraph.',
+            '',
+            `## ${heading}`,
+            '',
+            '[1] Author. Article title.',
+        ].join('\n');
+
+        const blocks = collectMarkdownTranslationBlocks(markdown);
+
+        assert.deepEqual(blocks.map(block => block.translatable), [
+            true,
+            true,
+            false,
+            false,
+        ], heading);
+    }
+});
+
+test('ends a reference list at a Setext heading of the same level', () => {
+    const markdown = [
+        '# Paper',
+        '',
+        'Body paragraph.',
+        '',
+        'References',
+        '----------',
+        '',
+        '[1] Author. Article title.',
+        '',
+        'Methods',
+        '-------',
+        '',
+        'We used these methods.',
+    ].join('\n');
+
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+
+    assert.deepEqual(blocks.map(block => block.translatable), [
+        true,
+        true,
+        false,
+        false,
+        true,
+        true,
+    ]);
+});
+
 test('translates Setext headings while preserving their heading level', () => {
     const markdown = 'Paper title\n===========';
     const [block] = collectMarkdownTranslationBlocks(markdown);

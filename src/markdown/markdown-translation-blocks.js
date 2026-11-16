@@ -33,7 +33,11 @@ const PROTECTED_NODE_TYPES = new Set([
 ]);
 const PROTECTED_PLACEHOLDER_PATTERN = /MKTEROPROTECTED\d+PLACEHOLDER/g;
 const DOCUMENT_MARKER_PATTERN = /MKTEROBLOCK\d+(?:START|END)MARKER/g;
-const REFERENCE_HEADING_PATTERN = /^(?:references?|bibliography|works cited|literature cited|参考文献|参考资料|参考书目|引用文献)$/iu;
+// Reference lists are recognized the way citation analysis recognizes them
+// (see markdown-citations.js): a section number or a Roman numeral may
+// precede the label, and the label may end with punctuation. Bold and italic
+// markup is already stripped from the label before it is matched.
+const REFERENCE_HEADING_PATTERN = /^(?:(?:\d+(?:\.\d+)*)[.)]?[ \t]+|[IVX]+\.?[ \t]+)?(?:references?(?:[ \t]+and[ \t]+notes)?|reference[ \t]+list|bibliography|works[ \t]+cited|literature[ \t]+cited|参考文献|参考资料|参考书目|引用文献)[.:：]?$/iu;
 const NUMERIC_CITATION_PATTERN = /\[(?:\d{1,4}[a-z]?(?:[ \t]*[-–—,，;；][ \t]*\d{1,4}[a-z]?)*)(?:[ \t]*,[ \t]*)?\]/giu;
 export const BILINGUAL_LIST_BOUNDARY =
     '<!-- mktero-bilingual-list-boundary -->';
@@ -57,17 +61,24 @@ export function collectMarkdownTranslationBlocks(markdown, { chromeRanges } = {}
     const createPlaceholder = createProtectedPlaceholderFactory(source);
     const createDocumentMarkers = createDocumentMarkerFactory(source);
     let ordinal = 0;
+    // A reference list runs from its heading until a heading of the same or a
+    // higher level. Ending it on an H1 alone skipped everything after the
+    // references in a paper whose sections are all H2 (Nature and Science set
+    // Acknowledgements, Author contributions, and Data availability after the
+    // reference list).
     let referenceSection = false;
+    let referenceLevel = 0;
     for (let node = MARKDOWN_PARSER.parse(source).topNode.firstChild;
         node;
         node = node.nextSibling) {
         const blockMarkdown = source.slice(node.from, node.to);
-        const referenceHeading = isReferenceHeading(node.name, blockMarkdown);
-        if (isTopLevelH1Node(node.name) && !referenceHeading) {
-            referenceSection = false;
-        }
-        if (referenceHeading) {
+        const headingLevel = headingNodeLevel(node.name);
+        if (isReferenceHeading(node.name, blockMarkdown)) {
             referenceSection = true;
+            referenceLevel = headingLevel || 6;
+        }
+        else if (referenceSection && headingLevel && headingLevel <= referenceLevel) {
+            referenceSection = false;
         }
         const type = translationBlockType(node.name);
         const protectedRanges = collectProtectedRanges(
@@ -1263,6 +1274,13 @@ function isTopLevelH1(block) {
 
 function isTopLevelH1Node(nodeName) {
     return nodeName === 'ATXHeading1' || nodeName === 'SetextHeading1';
+}
+
+function headingNodeLevel(nodeName) {
+    const match = /^(?:ATXHeading|SetextHeading)([1-6])$/.exec(
+        String(nodeName || '')
+    );
+    return match ? Number(match[1]) : 0;
 }
 
 function isReferenceHeading(nodeName, markdown) {
