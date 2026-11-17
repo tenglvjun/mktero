@@ -566,6 +566,27 @@ export function mapSourceRangeToComparison(range, blockRanges) {
     };
 }
 
+// Translation rewrites the text inside a block, so character offsets do not
+// survive the way they do on the verbatim comparison source side. Source
+// ranges therefore map at block granularity: the whole translated block.
+// That is exactly the source peek's granularity, whose entries are top-level
+// blocks.
+export function mapSourceRangeToTranslation(range, blockRanges) {
+    const sourceRange = normalizeDocumentRange(range);
+    if (!sourceRange || !Array.isArray(blockRanges)) return null;
+    const block = blockRanges.find(candidate => (
+        sourceRange.from >= candidate.sourceFrom
+        && sourceRange.to <= candidate.sourceTo
+    ));
+    if (!block
+        || !Number.isSafeInteger(block.translatedFrom)
+        || !Number.isSafeInteger(block.translatedTo)
+        || block.translatedTo <= block.translatedFrom) {
+        return null;
+    }
+    return { from: block.translatedFrom, to: block.translatedTo };
+}
+
 export function mapComparisonRangeToSource(range, blockRanges) {
     const comparisonRange = normalizeDocumentRange(range);
     if (!comparisonRange || !Array.isArray(blockRanges)) return null;

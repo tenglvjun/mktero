@@ -14,6 +14,7 @@ import {
     createProtectedTextTranslationPayload,
     createTranslationReadingPositionAnchor,
     mapSourceRangeToComparison,
+    mapSourceRangeToTranslation,
     mapTranslatedRangeToSourceBlock,
     mapTranslatedSentenceToSource,
     splitTranslatedBlockSentences,
@@ -1184,6 +1185,72 @@ test('maps original content ranges onto the source side of bilingual blocks', ()
         { from: 6, to: 12 },
         views.blockRanges
     ), null);
+});
+
+test('maps original content ranges onto the translated view', () => {
+    const markdown = '# Paper\n\nOriginal paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: '# \u8bba\u6587',
+    }, {
+        id: blocks[1].id,
+        markdown: '\u8bd1\u6587\u6bb5\u843d\u3002',
+    }]);
+
+    // Translation rewrites block text, so ranges map at block granularity:
+    // the whole translated block, not shifted character offsets.
+    assert.deepEqual(mapSourceRangeToTranslation(
+        { from: 12, to: 16 },
+        views.blockRanges
+    ), { from: 6, to: 11 });
+    assert.deepEqual(mapSourceRangeToTranslation(
+        { from: 0, to: 7 },
+        views.blockRanges
+    ), { from: 0, to: 4 });
+    assert.equal(mapSourceRangeToTranslation(
+        { from: 6, to: 12 },
+        views.blockRanges
+    ), null);
+    assert.equal(mapSourceRangeToTranslation(
+        { from: 0, to: 28 },
+        views.blockRanges
+    ), null);
+    assert.equal(mapSourceRangeToTranslation(
+        { from: 5, to: 5 },
+        views.blockRanges
+    ), null);
+    assert.equal(mapSourceRangeToTranslation({ from: 0, to: 7 }, null), null);
+    assert.equal(mapSourceRangeToTranslation(
+        { from: 0, to: 7 },
+        [{ sourceFrom: 0, sourceTo: 7 }]
+    ), null);
+});
+
+test('maps protected blocks onto the translated view without length change', () => {
+    const markdown = 'Before math.\n\n$$x = 1$$\n\nAfter math.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: '\u6570\u5b66\u4e4b\u524d\u3002',
+    }, {
+        id: blocks[2].id,
+        markdown: '\u6570\u5b66\u4e4b\u540e\u3002',
+    }]);
+
+    assert.equal(blocks[1].translatable, false);
+    assert.equal(
+        views.translatedMarkdown.indexOf('$$x = 1$$'),
+        7
+    );
+    assert.deepEqual(mapSourceRangeToTranslation(
+        { from: 14, to: 23 },
+        views.blockRanges
+    ), { from: 7, to: 16 });
+    assert.deepEqual(mapSourceRangeToTranslation(
+        { from: 16, to: 20 },
+        views.blockRanges
+    ), { from: 7, to: 16 });
 });
 
 test('keeps reading position in the same stable block across reading modes', () => {
