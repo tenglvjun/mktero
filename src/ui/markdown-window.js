@@ -122,6 +122,7 @@ import {
     createTranslationReadingPositionAnchor,
     mapComparisonRangeToSource,
     mapSourceRangeToComparison,
+    mapSourceRangeToTranslation,
     resolveTranslationReadingPosition,
 } from '../markdown/markdown-translation-blocks.js';
 import {
@@ -1014,7 +1015,16 @@ class MarkdownTabView {
                     annotationRanges: correctionAnnotationRanges,
                 });
                 this.renderedMarkdown = markdown;
-                this.renderedSourceMap = sourceMap;
+                // The peek follows the reading position in view coordinates;
+                // the editor keeps the untranslated (empty) map in the
+                // translated view because its text-quoted ranges would not
+                // match the translated text.
+                this.renderedSourceMap = translatedView
+                    ? mapSourceMapToTranslation(
+                        model.sourceMap,
+                        model.translationBlockRanges
+                    )
+                    : sourceMap;
                 this.renderedRenderMode = 'markdown';
                 this.renderedTranslationView = translationViewName(
                     translatedView,
@@ -8711,6 +8721,28 @@ function mapSourceMapToComparison(sourceMap, blockRanges) {
             markdownTo: range.to,
             ...(locationRanges === undefined ? {} : { locationRanges }),
         }];
+    });
+}
+
+// The source peek reads this map in translated-view coordinates. The PDF
+// locations are view-independent; matched text ranges quote the original
+// text and would point at different words after translation, so they do
+// not survive the remap.
+function mapSourceMapToTranslation(sourceMap, blockRanges) {
+    if (!Array.isArray(sourceMap)) return [];
+    return sourceMap.flatMap(entry => {
+        const range = mapSourceRangeToTranslation({
+            from: entry.markdownFrom,
+            to: entry.markdownTo,
+        }, blockRanges);
+        if (!range) return [];
+        const mapped = {
+            ...entry,
+            markdownFrom: range.from,
+            markdownTo: range.to,
+        };
+        delete mapped.locationRanges;
+        return [mapped];
     });
 }
 

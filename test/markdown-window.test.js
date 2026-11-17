@@ -7632,6 +7632,132 @@ test('hides the PDF source peek when the document has no mapping', async () => {
     }
 });
 
+test('keeps the PDF source peek across translation reading modes', async () => {
+    let editorOptions;
+    const editors = [];
+    const opened = [];
+    const rendered = [];
+    const markdown = '# Paper\n\nTranslate this paragraph.';
+    const headingLocation = { pageIndex: 0, bbox: [0, 0, 1000, 200] };
+    const paragraphLocation = { pageIndex: 2, bbox: [100, 200, 800, 360] };
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: 7,
+            locations: [headingLocation],
+        }, {
+            type: 'text',
+            markdownFrom: 9,
+            markdownTo: 34,
+            locations: [paragraphLocation],
+        }],
+        translationStatus: 'ready',
+        translationTargetLanguage: 'zh-CN',
+        translationView: 'translated',
+        translatedMarkdown: '# 论文\n\n翻译这一段。',
+        comparisonMarkdown: [
+            '# Paper',
+            '',
+            '# 论文',
+            '',
+            'Translate this paragraph.',
+            '',
+            '翻译这一段。',
+        ].join('\n'),
+        translationBlockRanges: [{
+            id: 'translation-0-0-7-heading',
+            type: 'heading',
+            sourceFrom: 0,
+            sourceTo: 7,
+            translatedFrom: 0,
+            translatedTo: 4,
+            comparisonSourceFrom: 0,
+            comparisonSourceTo: 7,
+            comparisonTranslationFrom: 9,
+            comparisonTranslationTo: 13,
+        }, {
+            id: 'translation-1-9-34-paragraph',
+            type: 'paragraph',
+            sourceFrom: 9,
+            sourceTo: 34,
+            translatedFrom: 6,
+            translatedTo: 12,
+            comparisonSourceFrom: 15,
+            comparisonSourceTo: 40,
+            comparisonTranslationFrom: 42,
+            comparisonTranslationTo: 48,
+        }],
+        onOpenSourceInPDF: target => opened.push(target),
+        onRenderSourcePeek: peek => {
+            rendered.push(peek);
+            return { dataURL: 'data:image/jpeg;base64,cGVlaw==' };
+        },
+    });
+    const { view, shadow } = createView(model, {}, {
+        sourcePeekDelay: 0,
+        editorFactory(options) {
+            editorOptions = options;
+            const editor = createTestInlineEditor(options);
+            const setDocument = editor.setDocument.bind(editor);
+            editor.renderedDocuments = [];
+            editor.setDocument = document => {
+                editor.renderedDocuments.push(document);
+                setDocument(document);
+            };
+            editors.push(editor);
+            return editor;
+        },
+    });
+    const peek = shadow.querySelector('#mktero-source-peek');
+    const caption = shadow.querySelector('.markdown-source-peek-caption');
+    const flushPeek = async () => {
+        for (let index = 0; index < 4; index++) await Promise.resolve();
+    };
+
+    try {
+        await flushPeek();
+        assert.equal(peek.hidden, false);
+        assert.equal(caption.textContent, 'Page 1');
+        assert.equal(rendered[0].pageIndex, 0);
+        assert.deepEqual(rendered[0].bbox, headingLocation.bbox);
+        // The editor still receives no source map in the translated view;
+        // only the peek reads the remapped one.
+        assert.deepEqual(editors[0].renderedDocuments.at(-1).sourceMap, []);
+
+        // Offset 6 is the translated paragraph start; the remapped entry
+        // must point at the same PDF page as the original paragraph.
+        editorOptions.onViewportChange(6);
+        await flushPeek();
+        assert.equal(peek.hidden, false);
+        assert.equal(caption.textContent, 'Page 3');
+        assert.equal(rendered.at(-1).pageIndex, 2);
+        assert.deepEqual(rendered.at(-1).bbox, paragraphLocation.bbox);
+        peek.click();
+        assert.deepEqual(opened, [paragraphLocation]);
+
+        view.render({ ...model, translationView: 'original' });
+        await flushPeek();
+        assert.equal(peek.hidden, false);
+        assert.equal(caption.textContent, 'Page 3');
+
+        view.render({ ...model, translationView: 'compare' });
+        await flushPeek();
+        assert.equal(peek.hidden, false);
+
+        view.render({ ...model, translationView: 'translated' });
+        await flushPeek();
+        assert.equal(peek.hidden, false);
+        assert.equal(caption.textContent, 'Page 3');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('toggles the PDF source peek from the reader toolbar', async () => {
     const persisted = [];
     const markdown = 'Mapped paragraph for source peek.';
