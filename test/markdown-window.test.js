@@ -1964,7 +1964,14 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         translationRanges: [],
         translationFailures: [],
         translationPairs: [],
+        translationView: 'original',
+        translateOriginalBlockText: updates[0].translateOriginalBlockText,
+        revealTranslationSource: updates[0].revealTranslationSource,
     }]);
+    // The two reading-path hooks are the window's own callbacks; their
+    // identity is not part of the contract this assertion guards.
+    assert.equal(typeof updates[0].translateOriginalBlockText, 'function');
+    assert.equal(typeof updates[0].revealTranslationSource, 'function');
     view.destroy();
 });
 

@@ -296,6 +296,9 @@ export const setTranslationRanges = StateEffect.define();
 export const setTranslationFailures = StateEffect.define();
 export const setTranslationPairs = StateEffect.define();
 export const setTranslationPairHighlight = StateEffect.define();
+// The block a current text selection sits in. Bilingual reading marks its
+// original side while the selection lives; the highlight is not a timed flash.
+export const setTranslationSelection = StateEffect.define();
 export const setInlineEditingRange = StateEffect.define();
 export const setCorrectionRenderingState = StateEffect.define();
 
@@ -1058,6 +1061,7 @@ export function createInlineRenderingExtension({
         translationPairs: [],
         translationPairsSource: null,
         highlightedTranslationBlockID: null,
+        selectedTranslationBlockID: null,
         annotationTargets: new Map(),
         editingRange: null,
         correctionManagementEnabled: false,
@@ -1112,6 +1116,7 @@ export function createInlineRenderingExtension({
             let translationRangesChanged = false;
             let translationFailuresChanged = false;
             let translationPairsChanged = false;
+            let translationSelectionChanged = false;
             let translationPairHighlightChanged = false;
             let editingRangeChanged = false;
             let correctionStateChanged = false;
@@ -1224,6 +1229,16 @@ export function createInlineRenderingExtension({
                     context.highlightedTranslationBlockID = highlighted;
                     translationPairHighlightChanged = true;
                 }
+                else if (effect.is(setTranslationSelection)) {
+                    const id = String(effect.value || '');
+                    const selected =
+                        context.translationPairs.some(pair => pair.id === id)
+                            ? id
+                            : null;
+                    if (selected === context.selectedTranslationBlockID) continue;
+                    context.selectedTranslationBlockID = selected;
+                    translationSelectionChanged = true;
+                }
                 else if (effect.is(setInlineEditingRange)) {
                     if (effect.value === context.editingRange) continue;
                     context.editingRange = effect.value;
@@ -1266,6 +1281,7 @@ export function createInlineRenderingExtension({
                     translationRangesChanged,
                     translationFailuresChanged,
                     translationPairsChanged,
+                    translationSelectionChanged,
                     translationPairHighlightChanged,
                     editingRangeChanged,
                     correctionStateChanged,
@@ -1295,6 +1311,7 @@ export function createInlineRenderingExtension({
                 || translationRangesChanged
                 || translationFailuresChanged
                 || translationPairsChanged
+                || translationSelectionChanged
                 || translationPairHighlightChanged
                 || editingRangeChanged
                 || correctionStateChanged
@@ -1629,13 +1646,19 @@ function buildDecorations(state, context) {
 
 function decorateTranslationPairs(state, decorations, context) {
     for (const pair of context.translationPairs) {
+        // The original side carries both states: a one-shot highlight from the
+        // untranslated-block navigation, and the selection-driven mark. The
+        // translated side never carries either. A reader testing whether a
+        // selection reached the right block looks at the original, and a lit
+        // translated row would make the feedback read as "the translation".
         decorateTranslationPairRange(
             state,
             decorations,
             pair.source,
             pair,
             'source',
-            context.highlightedTranslationBlockID === pair.id
+            context.highlightedTranslationBlockID === pair.id,
+            context.selectedTranslationBlockID === pair.id
         );
         decorateTranslationPairRange(
             state,
@@ -1643,7 +1666,8 @@ function decorateTranslationPairs(state, decorations, context) {
             pair.translated,
             pair,
             'translated',
-            context.highlightedTranslationBlockID === pair.id
+            false,
+            false
         );
     }
 }
@@ -1654,7 +1678,8 @@ function decorateTranslationPairRange(
     range,
     pair,
     side,
-    highlighted
+    highlighted,
+    selected = false
 ) {
     if (!range) return;
     const fromLine = state.doc.lineAt(range.from).number;
@@ -1665,9 +1690,11 @@ function decorateTranslationPairRange(
                 'cm-mktero-translation-pair',
                 `cm-mktero-translation-pair-${side}`,
                 highlighted ? 'is-translation-pair-active' : '',
+                selected ? 'is-translation-pair-selected' : '',
             ].filter(Boolean).join(' '),
             attributes: {
                 'data-translation-block-id': pair.id,
+                ...(selected ? { 'data-translation-pair-selected': 'true' } : {}),
             },
         }).range(state.doc.line(lineNumber).from));
     }
@@ -3284,7 +3311,7 @@ function renderedSelectionContainer(node, view) {
     return container && view.dom.contains(container) ? container : null;
 }
 
-function selectionNodeInEditor(view, node) {
+export function selectionNodeInEditor(view, node) {
     const element = node?.nodeType === 1 ? node : node?.parentElement;
     return Boolean(element && view.dom.contains(element));
 }

@@ -55,6 +55,8 @@ import {
     setTranslationFailures,
     setTranslationPairs,
     setTranslationPairHighlight,
+    setTranslationSelection,
+    selectionNodeInEditor,
 } from './inline-rendering.js';
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
@@ -66,6 +68,7 @@ import {
     figureCaptionOf,
 } from './caption-selection-clamp.js';
 import { createAnnotationPopup } from './annotation-popup.js';
+import { createTranslationSourcePopup } from './translation-source-popup.js';
 import {
     COPY_FAILED,
     createCopyDelivery,
@@ -296,6 +299,8 @@ export function createInlineMarkdownEditor({
     cancelSelectionTranslation,
     shouldAutoTranslateSelection,
     copySelectionTranslation,
+    revealTranslationSource = null,
+    translateOriginalBlockText = null,
     onCommitCorrection,
     onRestoreCorrection,
     onCorrectionError,
@@ -314,6 +319,10 @@ export function createInlineMarkdownEditor({
     };
     const imagePreview = createImagePreview(parent, { localization });
     const citationPopup = createCitationPopup(parent, { localization });
+    const translationSourcePopup = createTranslationSourcePopup(parent, {
+        localization,
+        revealSource: source => revealTranslationSource?.(source),
+    });
     const annotationPopup = createAnnotationPopup(parent, {
         localization,
         createMarkdownAnnotation: typeof createMarkdownAnnotation === 'function'
@@ -418,6 +427,7 @@ export function createInlineMarkdownEditor({
     const interactionPopups = [
         annotationPopup,
         imagePreview,
+        translationSourcePopup,
         ...referenceFeatureList.map(feature => feature.popup),
     ];
     const editingMode = new Compartment();
@@ -434,6 +444,8 @@ export function createInlineMarkdownEditor({
     let stalledViewportRepairFrame = null;
     let correctionViewportFallbackEnabled = false;
     let translationHighlightTimer = null;
+    let translationSelectionScheduled = false;
+    let currentTranslationView = 'original';
     let selectionFlashTimer = null;
     let captionGesture = null;
     let clampingCaptionSelection = false;
@@ -1203,6 +1215,132 @@ export function createInlineMarkdownEditor({
     };
     const onCaptionSelectionChange = () => {
         clampActiveCaptionSelection();
+        scheduleTranslationSelectionUpdate();
+    };
+    // A drag ends in a pointer-up, and a keyboard selection in a key-up. The
+    // document-level selectionchange above covers both in Gecko, but reading
+    // the selection needs the editor to have finished with the event first, so
+    // the gesture ends the same way here.
+    const onSelectionGestureEnd = () => {
+        scheduleTranslationSelectionUpdate();
+    };
+
+    // A selection inside a translated block is the reader asking which
+    // original block it belongs to. Bilingual reading marks that block, since
+    // the two sit together; the Translation view has no original on screen,
+    // so it raises the bubble instead. The mark follows the selection: no
+    // timer, because a flash that expires would say "you jumped here" when
+    // the reader is still holding the text.
+    const translationBlockForSelection = () => {
+        if (destroyed || !view) return null;
+        if (!['compare', 'translated'].includes(currentTranslationView)) {
+            return null;
+        }
+        if (!currentTranslationPairs.length) return null;
+        const selection = rootSelectionFor(parent);
+        if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
+            return null;
+        }
+        let range;
+        try {
+            range = selection.getRangeAt(0);
+        }
+        catch {
+            return null;
+        }
+        if (!selectionNodeInEditor(view, range.startContainer)
+            || !selectionNodeInEditor(view, range.endContainer)) {
+            return null;
+        }
+        let from;
+        let to;
+        try {
+            from = view.posAtDOM(range.startContainer, range.startOffset);
+            to = view.posAtDOM(range.endContainer, range.endOffset);
+        }
+        catch {
+            return null;
+        }
+        const start = Math.min(from, to);
+        const end = Math.max(from, to);
+        if (end <= start) return null;
+        const pair = currentTranslationPairs.find(candidate => (
+            start >= candidate.from && end <= candidate.to
+        ));
+        if (!pair) return null;
+        return {
+            id: pair.id,
+            from: pair.from,
+            to: pair.to,
+        };
+    };
+
+    // Which way the original block lies relative to the visible area, so the
+    // bubble can say where to look instead of pretending it is on screen.
+    const translationSourceDirection = block => {
+        if (!view || !Number.isFinite(block?.from)) return null;
+        try {
+            const target = view.lineBlockAt(block.from);
+            const scrollerTop = Number(view.scrollDOM?.scrollTop) || 0;
+            const scrollerHeight = Number(view.scrollDOM?.clientHeight) || 0;
+            if (!(scrollerHeight > 0)) return null;
+            const visibleTop = view.documentTop + scrollerTop;
+            const visibleBottom = visibleTop + scrollerHeight;
+            if (target.bottom <= visibleTop) return 'above';
+            if (target.top >= visibleBottom) return 'below';
+        }
+        catch {
+            return null;
+        }
+        return null;
+    };
+
+    const applyTranslationSelection = () => {
+        translationSelectionScheduled = false;
+        if (destroyed || !view) return;
+        const block = translationBlockForSelection();
+        view.dispatch({
+            effects: setTranslationSelection.of(block?.id || null),
+        });
+        if (currentTranslationView === 'compare') {
+            translationSourcePopup.close();
+            return;
+        }
+        if (!block) {
+            translationSourcePopup.close();
+            return;
+        }
+        // The original lives in the source Markdown, which this view is not
+        // rendering, so its text comes from the host rather than from the
+        // document in the editor.
+        const text = String(
+            translateOriginalBlockText?.(block.id) || ''
+        ).trim();
+        if (!text) {
+            translationSourcePopup.close();
+            return;
+        }
+        const selection = rootSelectionFor(parent);
+        translationSourcePopup.open({
+            anchor: selectionAnchor(selection, view.dom, null),
+            // The bubble shows the whole original block, not the selection: the
+            // pairing is block level, so showing a slice of the original would
+            // claim an alignment this data does not have.
+            source: { ...block, text },
+            offscreen: translationSourceDirection(block),
+        });
+    };
+
+    const scheduleTranslationSelectionUpdate = () => {
+        if (translationSelectionScheduled || destroyed) return;
+        translationSelectionScheduled = true;
+        // Selection changes fire per character of a drag. One read after the
+        // gesture settles keeps decoration rebuilds off that path.
+        if (typeof ownerWindow.requestAnimationFrame === 'function') {
+            ownerWindow.requestAnimationFrame(applyTranslationSelection);
+            return;
+        }
+        ownerWindow.setTimeout?.(applyTranslationSelection, 0);
     };
     const finishCaptionSelectionGesture = event => {
         if (event.button !== 0) return;
@@ -1382,6 +1520,8 @@ export function createInlineMarkdownEditor({
     );
     ownerWindow.addEventListener('mouseup', finishCaptionSelectionGesture);
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
+    parent.addEventListener('mouseup', onSelectionGestureEnd, true);
+    parent.addEventListener('keyup', onSelectionGestureEnd, true);
     const copyDelivery = typeof deliverCopy === 'function'
         && typeof ownerWindow.setTimeout === 'function'
         ? createCopyDelivery({
@@ -1492,6 +1632,8 @@ export function createInlineMarkdownEditor({
     let currentChromeRangesSource = null;
     let currentChromeRangesLength = -1;
     let currentSourceActionRanges = null;
+    let currentTranslationPairs = [];
+    let currentTranslationMarkdown = '';
     // Reused so that "no overlay" keeps one identity and the rendering field
     // can skip the rebuild it would otherwise trigger on every model update.
     let sharedEmptyAnnotationOverlay = null;
@@ -1515,6 +1657,7 @@ export function createInlineMarkdownEditor({
         translationRanges,
         translationFailures,
         translationPairs,
+        translationView = 'original',
     }) => {
         activateDOMGlobals(ownerWindow);
         if (translationHighlightTimer !== null) {
@@ -1575,6 +1718,26 @@ export function createInlineMarkdownEditor({
         currentSourceActionRanges = Array.isArray(sourceActionRanges)
             ? normalizeSourceActionRanges(sourceActionRanges, value.length)
             : null;
+        currentTranslationPairs = Array.isArray(translationPairs)
+            ? translationPairs.flatMap(pair => (
+                Number.isSafeInteger(pair?.translatedFrom)
+                    && Number.isSafeInteger(pair?.translatedTo)
+                    && pair.translatedTo > pair.translatedFrom
+                    ? [{
+                        id: String(pair.id || ''),
+                        from: pair.translatedFrom,
+                        to: pair.translatedTo,
+                    }]
+                    : []
+            ))
+            : [];
+        currentTranslationMarkdown = value;
+        currentTranslationView = ['compare', 'translated'].includes(translationView)
+            ? translationView
+            : 'original';
+        if (currentTranslationView !== 'translated') {
+            translationSourcePopup.close();
+        }
         const nextPendingFigures = pendingFigures instanceof Map
             ? pendingFigures
             : null;
@@ -1603,6 +1766,7 @@ export function createInlineMarkdownEditor({
             setTranslationFailures.of(translationFailures || NO_EDITOR_RANGES),
             setTranslationPairs.of(translationPairs || NO_EDITOR_RANGES),
             setTranslationPairHighlight.of(null),
+            setTranslationSelection.of(null),
             setDocumentSearchHighlight.of({
                 matches: [],
                 activeIndex: -1,
@@ -1853,6 +2017,16 @@ export function createInlineMarkdownEditor({
                 parent.removeEventListener(
                     'mouseup',
                     openSelectedMarkdownActions,
+                    true
+                );
+                parent.removeEventListener(
+                    'mouseup',
+                    onSelectionGestureEnd,
+                    true
+                );
+                parent.removeEventListener(
+                    'keyup',
+                    onSelectionGestureEnd,
                     true
                 );
                 parent.removeEventListener(

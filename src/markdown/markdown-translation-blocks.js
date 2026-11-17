@@ -582,6 +582,45 @@ export function mapComparisonRangeToSource(range, blockRanges) {
     };
 }
 
+// The whole original block a translated-side selection belongs to. Both the
+// Bilingual and the Translation view use this one function, so a selection of
+// any length inside a block gets the same answer: block granularity, never a
+// proportional slice of the original. A translated block has no character-level
+// counterpart, so interpolating one would land inside Markdown syntax or half a
+// sentence and would still pass the annotation text check.
+export function mapTranslatedRangeToSourceBlock(range, blockRanges, view) {
+    const translatedRange = normalizeDocumentRange(range);
+    if (!translatedRange || !Array.isArray(blockRanges)) return null;
+    const side = view === 'translated' ? 'translated' : 'comparison';
+    const bounds = block => (
+        side === 'translated'
+            ? { from: block.translatedFrom, to: block.translatedTo }
+            : {
+                from: block.comparisonTranslationFrom,
+                to: block.comparisonTranslationTo,
+            }
+    );
+    const block = blockRanges.find(candidate => {
+        const candidateRange = bounds(candidate);
+        return Number.isSafeInteger(candidateRange.from)
+            && Number.isSafeInteger(candidateRange.to)
+            && candidateRange.to > candidateRange.from
+            && translatedRange.from >= candidateRange.from
+            && translatedRange.to <= candidateRange.to;
+    });
+    if (!block
+        || !Number.isSafeInteger(block.sourceFrom)
+        || !Number.isSafeInteger(block.sourceTo)
+        || block.sourceTo <= block.sourceFrom) {
+        return null;
+    }
+    return {
+        id: block.id,
+        from: block.sourceFrom,
+        to: block.sourceTo,
+    };
+}
+
 export function createTranslationReadingPositionAnchor(
     offset,
     view,

@@ -675,9 +675,11 @@ test('pairs bilingual blocks without hover highlighting or per-block actions', (
     assert.equal(source.classList.contains('is-translation-pair-active'), false);
     assert.equal(translated.classList.contains('is-translation-pair-active'), false);
 
+    // Only the original side carries the state. A lit translated row would make
+    // the feedback read as belonging to the translation.
     editor.highlightTranslationBlock('translation-0');
     assert.equal(source.classList.contains('is-translation-pair-active'), true);
-    assert.equal(translated.classList.contains('is-translation-pair-active'), true);
+    assert.equal(translated.classList.contains('is-translation-pair-active'), false);
 
     editor.setMarkdown('Original only.');
     assert.equal(
@@ -11861,6 +11863,12 @@ function settle() {
     return new Promise(resolve => setImmediate(resolve));
 }
 
+// The reading path reads a selection once per animation frame, so a mark
+// driven by a selection is visible after one, not after a microtask.
+function settleFrame(window) {
+    return new Promise(resolve => window.requestAnimationFrame(() => resolve()));
+}
+
 test('keeps an open selection popup when an annotation refresh keeps the Markdown', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
@@ -12208,6 +12216,200 @@ test('does not italicise prose between formulas whose subscripts pair as emphasi
     );
     assert.deepEqual(emphasis.map(element => element.textContent), ['assigned']);
     assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('marks only the original block of a translated selection', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = 'Original paragraph.';
+    const translated = '\u8bd1\u6587\u6bb5\u843d\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'compare',
+        sourceActionRanges: [{ from: 0, to: source.length }],
+        translationPairs: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            translatedFrom,
+            translatedTo: markdown.length,
+        }],
+    });
+
+    selectEditorText(dom, document, '\u8bd1\u6587\u6bb5\u843d');
+    await settleFrame(dom.window);
+    await settle();
+
+    const sourceLine = document.querySelector(
+        '.cm-mktero-translation-pair-source'
+    );
+    const translatedLine = document.querySelector(
+        '.cm-mktero-translation-pair-translated'
+    );
+    assert.equal(
+        sourceLine.classList.contains('is-translation-pair-selected'),
+        true
+    );
+    assert.equal(
+        translatedLine.classList.contains('is-translation-pair-selected'),
+        false
+    );
+    // Bilingual reading has the original on screen, so it never raises text.
+    assert.equal(
+        document.querySelector('.mktero-translation-source'),
+        null
+    );
+
+    document.getSelection().removeAllRanges();
+    editor.setDocument({
+        markdown,
+        translationView: 'compare',
+        sourceActionRanges: [{ from: 0, to: source.length }],
+        translationPairs: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            translatedFrom,
+            translatedTo: markdown.length,
+        }],
+    });
+    await settle();
+
+    await settleFrame(dom.window);
+    assert.equal(
+        document.querySelector(
+            '.cm-mktero-translation-pair-source.is-translation-pair-selected'
+        ),
+        null,
+        'clearing the selection clears the mark'
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('shows the original block text when a translated selection has no original on screen', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = 'Original paragraph here.';
+    const translated = '\u8fd9\u91cc\u662f\u8bd1\u6587\u3002';
+    const markdown = translated;
+    const asked = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        translateOriginalBlockText: blockID => {
+            asked.push(blockID);
+            return source;
+        },
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'translated',
+        // A translation-only view has no source text to act on.
+        sourceActionRanges: [],
+        translationPairs: [{
+            id: 'translation-0',
+            translatedFrom: 0,
+            translatedTo: markdown.length,
+        }],
+    });
+
+    selectEditorText(dom, document, '\u8fd9\u91cc');
+    await settleFrame(dom.window);
+    await settle();
+
+    assert.deepEqual(asked, ['translation-0']);
+    const text = document.querySelector('.mktero-translation-source-text');
+    assert.equal(text?.textContent, source);
+    assert.ok(document.querySelector('.mktero-translation-source-action'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('shows no original block for a translated selection when none maps', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = '\u8fd9\u91cc\u662f\u8bd1\u6587\u3002';
+    let asked = 0;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        translateOriginalBlockText: () => {
+            asked += 1;
+            return 'Original paragraph.';
+        },
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'translated',
+        sourceActionRanges: [],
+        // No pair covers the rendered text, for example after a correction
+        // removed the block.
+        translationPairs: [],
+    });
+
+    selectEditorText(dom, document, '\u8fd9\u91cc');
+    await settleFrame(dom.window);
+    await settle();
+
+    assert.equal(asked, 0);
+    assert.equal(document.querySelector('.mktero-translation-source'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('does not mark a translated block while reading the original view', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = 'Original paragraph.';
+    const translated = '\u8bd1\u6587\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'original',
+        translationPairs: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            translatedFrom,
+            translatedTo: markdown.length,
+        }],
+    });
+
+    selectEditorText(dom, document, 'Original paragraph');
+    await settleFrame(dom.window);
+    await settle();
+
+    assert.equal(
+        document.querySelector('.is-translation-pair-selected'),
+        null
+    );
+    assert.equal(document.querySelector('.mktero-translation-source'), null);
 
     editor.destroy();
     dom.window.close();

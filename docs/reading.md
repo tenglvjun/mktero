@@ -105,6 +105,19 @@ Mktero groups the article into bounded Markdown batches, protects formulas, cita
 
 Each request sends only the selected text to your configured AI provider and may incur provider usage costs. The result stays in the popup: it does not change Markdown or comments and does not enter the full-document translation cache.
 
+### See the original behind a translation
+
+Translation is stored block by block, so every translated block has exactly one original block. Selecting translated text uses that block pairing. It does not infer sentence-, word-, or character-level alignment.
+
+- In `Bilingual`, selecting text on the translated side highlights the original block it belongs to. The highlight lasts as long as the selection and clears when the selection does. Only the original side is marked, not the translated side.
+- In `Translation`, selecting text on the translated side opens a bubble with the text of the corresponding original block. `Locate in Bilingual` switches to `Bilingual` and moves the reading position to that block.
+- A selection that spans several blocks marks, or lists, each block on its own. Nothing is joined across blocks.
+- A block with no translation, a failed translation, or no confirmable original shows no highlight and no bubble.
+
+If the block you selected, or the original block it maps to, is outside the visible area, Mktero tells you which direction it lies in and can scroll to it. It does not open a bubble in `Bilingual` instead.
+
+These actions only change what the reader shows. They do not modify Markdown, translations, or caches, and they send nothing to your AI provider. Selection translation is still available only on the original side, as described above.
+
 ## Details
 
 ### Move around the document
@@ -170,7 +183,7 @@ Translations are cached independently by source content, provider, protocol, mod
 
 | Change | Translation behavior |
 | --- | --- |
-| Delete a block with a local correction | Other blocks keep their translations; the deleted block disappears from `Bilingual` |
+| Delete a block with a local correction | Other blocks keep their translations; the deleted block disappears from `Bilingual`, and a selection in its former place highlights nothing |
 | Restore a deleted block | Earlier source versions are retained, so a complete translation can be reused even after the corrected document was translated |
 | Delete a citation marker | That block keeps its translation if protected placeholders can be mapped unambiguously; ambiguous changes remain pending for block-only retranslation |
 | Edit a translated block | Other translations stay; the changed block becomes pending and Mktero offers to retranslate only that block |

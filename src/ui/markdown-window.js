@@ -99,6 +99,7 @@ import {
 import {
     createVisibleMarkdownTextIndex,
     expandMarkdownRangeToMathBoundaries,
+    visibleMarkdownTextForRanges,
     imageDescriptionSource,
     legacyMathEmphasisVisibleTextForRanges,
     noteMathSegmentsForRanges,
@@ -977,8 +978,18 @@ class MarkdownTabView {
                         translatedView,
                         comparisonView
                     ),
-                    translationPairs: createVisibleTranslationPairs(
+                            translationPairs: createVisibleTranslationPairs(
                         model,
+                        translatedView,
+                        comparisonView
+                    ),
+                    translateOriginalBlockText: blockID => (
+                        this.originalBlockTextFor(blockID)
+                    ),
+                    revealTranslationSource: block => (
+                        this.revealTranslationSource(block)
+                    ),
+                    translationView: translationViewName(
                         translatedView,
                         comparisonView
                     ),
@@ -7842,6 +7853,43 @@ class MarkdownTabView {
         return host;
     }
 
+    // The original text of a translated block, for the reading view that does
+    // not render the source. Block granularity is the whole contract: the
+    // translated and source sides have no character-level counterparts, so a
+    // slice of the original would misrepresent the pairing.
+    originalBlockTextFor(blockID) {
+        const id = String(blockID || '');
+        if (!id) return '';
+        const range = (this.model?.translationBlockRanges || []).find(
+            candidate => candidate?.id === id
+        );
+        if (!Number.isSafeInteger(range?.sourceFrom)
+            || !Number.isSafeInteger(range?.sourceTo)
+            || range.sourceTo <= range.sourceFrom) {
+            return '';
+        }
+        const text = visibleMarkdownTextForRanges(
+            String(this.model?.markdown || ''),
+            [{ from: range.sourceFrom, to: range.sourceTo }]
+        );
+        return String(text || '').trim();
+    }
+
+    // Same route the PDF selection reveal uses: switch the view and the
+    // reading position in one model update, so the reader does not see an
+    // intermediate state.
+    revealTranslationSource(block) {
+        const from = Number(block?.from);
+        if (!Number.isFinite(from)) return;
+        const to = Number(block?.to);
+        if (typeof this.model.onSetTranslationView !== 'function') return;
+        this.model.onSetTranslationView('compare');
+        this.editor?.scrollToOffset?.(from);
+        if (Number.isFinite(to) && to > from) {
+            this.editor?.flashRange?.(from, to);
+        }
+    }
+
     revealRequestedMarkdown() {
         const requestedOffset = Number(this.model?.revealMarkdownOffset);
         const requestedEnd = Number(this.model?.revealMarkdownTo);
@@ -8510,6 +8558,9 @@ function createVisibleTranslationPairs(model, translatedView, comparisonView) {
     return (model.translationBlockRanges || []).flatMap(range => {
         const failed = failedIDs.has(range?.id);
         if (!translatedView && !comparisonView && !failed) return [];
+        // Paired ranges are document offsets of the view being rendered. The
+        // Translation view renders translated text only, so it has no source
+        // side to mark; its bubble asks for the original by block id instead.
         const sourceFrom = comparisonView
             ? range?.comparisonSourceFrom
             : !translatedView

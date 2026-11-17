@@ -3365,6 +3365,14 @@ blockquote.mktero-note,
     box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 48%, transparent);
 }
 
+/* The block a current selection maps to. It holds while the selection lives,
+   so it reads as "this is the original you are holding", not as a jump. */
+.markdown-editor-host > .cm-editor
+    .cm-mktero-translation-pair.is-translation-pair-selected {
+    background: color-mix(in srgb, var(--accent) 12%, var(--reader-background));
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
 .markdown-editor-host > .cm-editor
     .cm-mktero-translation-line.cm-mktero-heading-1 {
     padding-top: 0.25em;
@@ -5834,4 +5842,58 @@ blockquote.mktero-note,
     .mktero-shortcuts-dialog {
         transition: none;
     }
+}
+
+/* The original behind a translated block, for the view without source text. */
+.mktero-translation-source-popup {
+    display: flex;
+    max-width: min(520px, 80vw);
+    max-height: min(420px, 60vh);
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--reader-text);
+    background: color-mix(in srgb, var(--surface-raised) 98%, transparent);
+    box-shadow: var(--shadow-float);
+    font: 13px/1.55 var(--reader-font);
+}
+
+.mktero-translation-source {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+}
+
+.mktero-translation-source-label {
+    color: var(--muted);
+    font: 11px/1.3 var(--ui-font);
+}
+
+.mktero-translation-source-direction {
+    color: var(--muted);
+    font: 11px/1.4 var(--ui-font);
+}
+
+.mktero-translation-source-text {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.mktero-translation-source-action {
+    align-self: flex-start;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    background: transparent;
+    font: 12px/1.3 var(--ui-font);
+    cursor: pointer;
+}
+
+.mktero-translation-source-action:hover {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
 }
