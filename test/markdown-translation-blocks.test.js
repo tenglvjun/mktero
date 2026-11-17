@@ -14,6 +14,7 @@ import {
     createProtectedTextTranslationPayload,
     createTranslationReadingPositionAnchor,
     mapSourceRangeToComparison,
+    mapTranslatedRangeToSourceBlock,
     reconcileTranslatedBlockProtectedFragments,
     resolveTranslationReadingPosition,
     TRANSLATION_PROTECTED_CONTENT_CHANGED,
@@ -1337,4 +1338,127 @@ test('copies structural directives unchanged and translates the note quote', () 
     assert.match(translated, /引用注释/);
     assert.match(comparison, /Quoted note/);
     assert.match(comparison, /引用注释/);
+});
+
+test('maps a translated selection onto its whole original block', () => {
+    const markdown = '# Paper\n\nOriginal paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: '# \u8bba\u6587',
+    }, {
+        id: blocks[1].id,
+        markdown: '\u8fd9\u662f\u4e00\u6bb5\u5f88\u957f\u7684\u8bd1\u6587\u3002',
+    }]);
+    const paragraph = views.blockRanges[1];
+
+    // Any selection inside the block returns the same answer. The pairing is
+    // block level, so it must not interpolate a proportional slice.
+    const whole = mapTranslatedRangeToSourceBlock(
+        { from: paragraph.comparisonTranslationFrom, to: paragraph.comparisonTranslationTo },
+        views.blockRanges,
+        'compare'
+    );
+    const slice = mapTranslatedRangeToSourceBlock(
+        {
+            from: paragraph.comparisonTranslationFrom + 2,
+            to: paragraph.comparisonTranslationFrom + 4,
+        },
+        views.blockRanges,
+        'compare'
+    );
+    assert.deepEqual(whole, {
+        id: paragraph.id,
+        from: paragraph.sourceFrom,
+        to: paragraph.sourceTo,
+    });
+    assert.deepEqual(slice, whole);
+    assert.notEqual(slice.to - slice.from, 2);
+});
+
+test('maps a translated-view selection onto its whole original block', () => {
+    const markdown = 'Original paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: '\u8bd1\u6587\u3002',
+    }]);
+    const paragraph = views.blockRanges[0];
+
+    assert.deepEqual(
+        mapTranslatedRangeToSourceBlock(
+            { from: paragraph.translatedFrom, to: paragraph.translatedTo },
+            views.blockRanges,
+            'translated'
+        ),
+        { id: paragraph.id, from: paragraph.sourceFrom, to: paragraph.sourceTo }
+    );
+});
+
+test('returns no original block for a selection that leaves the block', () => {
+    const markdown = 'Original paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: '\u8bd1\u6587\u3002',
+    }]);
+    const paragraph = views.blockRanges[0];
+
+    // Straddling the block edge is not a partial answer; it is no answer.
+    assert.equal(mapTranslatedRangeToSourceBlock(
+        { from: paragraph.translatedTo - 1, to: paragraph.translatedTo + 1 },
+        views.blockRanges,
+        'translated'
+    ), null);
+    assert.equal(mapTranslatedRangeToSourceBlock(
+        { from: paragraph.translatedFrom, to: paragraph.translatedFrom },
+        views.blockRanges,
+        'translated'
+    ), null);
+    assert.equal(mapTranslatedRangeToSourceBlock(
+        { from: 0, to: 1 },
+        [],
+        'translated'
+    ), null);
+});
+
+test('never maps a translated selection onto a deleted original block', () => {
+    const markdown = 'First paragraph.\n\nSecond paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [
+        { id: blocks[0].id, markdown: '\u7b2c\u4e00\u6bb5\u3002' },
+        { id: blocks[1].id, markdown: '\u7b2c\u4e8c\u6bb5\u3002' },
+    ]);
+    const [first] = views.blockRanges;
+
+    // A local correction removed the first block from the rendered document,
+    // so the view keeps no translated range for it. Nothing may be reported,
+    // and nothing may fall back to the neighbouring block.
+    assert.equal(mapTranslatedRangeToSourceBlock(
+        { from: first.comparisonTranslationFrom, to: first.comparisonTranslationTo },
+        [views.blockRanges[1]],
+        'compare'
+    ), null);
+});
+
+test('leaves the existing comparison mapping unchanged', () => {
+    const markdown = '# Paper\n\nOriginal paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        markdown: '# \u8bba\u6587',
+    }, {
+        id: blocks[1].id,
+        markdown: '\u8bd1\u6587\u6bb5\u843d\u3002',
+    }]);
+
+    // The source-side mapping is a separate contract and keeps its offsets.
+    assert.deepEqual(mapSourceRangeToComparison(
+        { from: 12, to: 20 },
+        views.blockRanges
+    ), { from: 18, to: 26 });
+    assert.equal(mapSourceRangeToComparison(
+        { from: 6, to: 12 },
+        views.blockRanges
+    ), null);
 });
