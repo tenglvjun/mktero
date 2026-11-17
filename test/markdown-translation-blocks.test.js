@@ -15,6 +15,8 @@ import {
     createTranslationReadingPositionAnchor,
     mapSourceRangeToComparison,
     mapTranslatedRangeToSourceBlock,
+    mapTranslatedSentenceToSource,
+    splitTranslatedBlockSentences,
     reconcileTranslatedBlockProtectedFragments,
     resolveTranslationReadingPosition,
     TRANSLATION_PROTECTED_CONTENT_CHANGED,
@@ -1461,4 +1463,104 @@ test('leaves the existing comparison mapping unchanged', () => {
         { from: 6, to: 12 },
         views.blockRanges
     ), null);
+});
+
+test('splits a block into sentences on both scripts', () => {
+    assert.equal(
+        splitTranslatedBlockSentences('First one. Second one. Third one.').length,
+        3
+    );
+    assert.equal(
+        splitTranslatedBlockSentences('\u7b2c\u4e00\u53e5\u3002\u7b2c\u4e8c\u53e5\u3002\u7b2c\u4e09\u53e5\u3002').length,
+        3
+    );
+    // A list item is its own unit even without a final period.
+    assert.equal(
+        splitTranslatedBlockSentences('- one\n- two\n- three', {
+            listItems: true,
+        }).length,
+        3
+    );
+});
+
+test('does not split inside abbreviations or decimals', () => {
+    assert.deepEqual(
+        splitTranslatedBlockSentences('Smith et al. showed this. Next one.')
+            .map(span => 'Smith et al. showed this. Next one.'.slice(span.from, span.to)),
+        ['Smith et al. showed this.', 'Next one.']
+    );
+    assert.equal(
+        splitTranslatedBlockSentences('The value is 0.684 and 0.711. Next one.').length,
+        2
+    );
+    assert.equal(
+        splitTranslatedBlockSentences('See Fig. 2 for details. It shows results.').length,
+        2
+    );
+});
+
+test('maps a translated sentence to its own original sentence', () => {
+    const markdown = [
+        '- We develop inference-only RPMs, frozen-weight LLMs.',
+        '- We further propose agentic RPMs with pilot experiments.',
+        '- On AIRS-BENCH, agents yield state-of-the-art results.',
+    ].join('\n');
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const translations = [{
+        id: blocks[0].id,
+        markdown: [
+            '- \u6211\u4eec\u5f00\u53d1\u4e86\u4ec5\u63a8\u7406 RPM\u3002',
+            '- \u6211\u4eec\u8fdb\u4e00\u6b65\u63d0\u51fa\u667a\u80fd\u4f53\u5f0f RPM\u3002',
+            '- \u5728 AIRS-BENCH \u4e0a\u53d6\u5f97\u65b0\u7ed3\u679c\u3002',
+        ].join('\n'),
+    }];
+    const views = createDocumentTranslationViews(markdown, blocks, translations);
+    const block = views.blockRanges[0];
+    const translated = views.comparisonMarkdown.slice(
+        block.comparisonTranslationFrom,
+        block.comparisonTranslationTo
+    );
+    const [first, second] = translated.split('\n');
+    const from = block.comparisonTranslationFrom + first.length + 1;
+
+    const mapped = mapTranslatedSentenceToSource(
+        { from, to: from + second.length },
+        views.blockRanges,
+        'compare',
+        { markdown, comparisonMarkdown: views.comparisonMarkdown }
+    );
+
+    assert.equal(mapped.granularity, 'sentence');
+    assert.equal(
+        markdown.slice(mapped.from, mapped.to),
+        '- We further propose agentic RPMs with pilot experiments.'
+    );
+    // The neighbouring bullets are excluded, which is the complaint that
+    // started this: selecting one bullet must not mark the whole list.
+    assert.ok(!markdown.slice(mapped.from, mapped.to).includes('inference-only'));
+    assert.ok(!markdown.slice(mapped.from, mapped.to).includes('AIRS-BENCH'));
+});
+
+test('falls back to the whole block when the sentence counts disagree', () => {
+    const markdown = 'One. Two. Three.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: blocks[0].id,
+        // Two sentences for three: translation merged them.
+        markdown: '\u4e00\u3002\u4e8c\u3002',
+    }]);
+    const block = views.blockRanges[0];
+
+    const mapped = mapTranslatedSentenceToSource(
+        { from: block.comparisonTranslationFrom, to: block.comparisonTranslationFrom + 1 },
+        views.blockRanges,
+        'compare',
+        { markdown, comparisonMarkdown: views.comparisonMarkdown }
+    );
+
+    // A count mismatch means the order is unknown. Reporting a position anyway
+    // would point at words that do not correspond.
+    assert.equal(mapped.granularity, 'block');
+    assert.equal(mapped.from, block.sourceFrom);
+    assert.equal(mapped.to, block.sourceTo);
 });

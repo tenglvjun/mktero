@@ -983,8 +983,8 @@ class MarkdownTabView {
                         translatedView,
                         comparisonView
                     ),
-                    translateOriginalBlockText: blockID => (
-                        this.originalBlockTextFor(blockID)
+                    translateOriginalBlockText: (blockID, range) => (
+                        this.originalBlockTextFor(blockID, range)
                     ),
                     revealTranslationSource: block => (
                         this.revealTranslationSource(block)
@@ -993,6 +993,9 @@ class MarkdownTabView {
                         translatedView,
                         comparisonView
                     ),
+                    // Sentence pairing needs the source document even when the
+                    // view on screen is the translated one.
+                    sourceMarkdown: String(model.markdown || ''),
                 });
                 if (pendingFiguresReplaced) this.replayRetainedFigures();
                 this.renderedPendingFigures = nextPendingFigures;
@@ -7869,21 +7872,31 @@ class MarkdownTabView {
     // not render the source. Block granularity is the whole contract: the
     // translated and source sides have no character-level counterparts, so a
     // slice of the original would misrepresent the pairing.
-    originalBlockTextFor(blockID) {
+    originalBlockTextFor(blockID, requested = null) {
         const id = String(blockID || '');
         if (!id) return '';
-        const range = (this.model?.translationBlockRanges || []).find(
+        const block = (this.model?.translationBlockRanges || []).find(
             candidate => candidate?.id === id
         );
-        if (!Number.isSafeInteger(range?.sourceFrom)
-            || !Number.isSafeInteger(range?.sourceTo)
-            || range.sourceTo <= range.sourceFrom) {
-            return '';
-        }
-        const text = visibleMarkdownTextForRanges(
-            String(this.model?.markdown || ''),
-            [{ from: range.sourceFrom, to: range.sourceTo }]
-        );
+        const markdown = String(this.model?.markdown || '');
+        const blockLength = markdown.length;
+        const inBlock = range => Number.isSafeInteger(range?.from)
+            && Number.isSafeInteger(range?.to)
+            && range.to > range.from
+            && range.from >= 0
+            && range.to <= blockLength;
+        // A sentence inside the block wins over the whole block: the reader
+        // asked about one sentence and should see that sentence.
+        const range = inBlock(requested)
+            ? requested
+            : inBlock({
+                from: block?.sourceFrom,
+                to: block?.sourceTo,
+            })
+                ? { from: block.sourceFrom, to: block.sourceTo }
+                : null;
+        if (!range) return '';
+        const text = visibleMarkdownTextForRanges(markdown, [range]);
         return String(text || '').trim();
     }
 

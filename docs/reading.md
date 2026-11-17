@@ -107,16 +107,18 @@ Each request sends only the selected text to your configured AI provider and may
 
 ### See the original behind a translation
 
-Translation is stored block by block, so every translated block has exactly one original block. Selecting translated text uses that block pairing. It does not infer sentence-, word-, or character-level alignment.
+Translation is stored block by block, so every translated block has exactly one original block. Selecting translated text uses that block pairing, and then narrows it to the sentence you selected: Mktero splits both sides of the block at sentence boundaries and, when the counts agree, maps sentence N to sentence N. A bullet in a list therefore marks that bullet, not the whole list.
 
-- In `Bilingual`, selecting text on the translated side highlights the original block it belongs to. The highlight lasts as long as the selection and clears when the selection does. Only the original side is marked, not the translated side.
-- In `Translation`, selecting text on the translated side opens a bubble with the text of the corresponding original block. `Locate in Bilingual` switches to `Bilingual` and moves the reading position to that block.
+When the two sides have a different number of sentences -- a translation that merged or split sentences -- the pairing is unknown, so the whole block is used instead of guessing an order that would point at the wrong words.
+
+- In `Bilingual`, selecting text on the translated side highlights the original sentence it belongs to. The highlight lasts as long as the selection and clears when the selection does. Only the original side is marked, not the translated side.
+- In `Translation`, selecting text on the translated side opens a bubble with the text of the corresponding original sentence. `Locate in Bilingual` switches to `Bilingual` and moves the reading position to that block.
 - A selection that spans several blocks marks, or lists, each block on its own. Nothing is joined across blocks.
 - A block with no translation, a failed translation, or no confirmable original shows no highlight and no bubble.
 
 If the block you selected, or the original block it maps to, is outside the visible area, Mktero tells you which direction it lies in and can scroll to it. It does not open a bubble in `Bilingual` instead.
 
-The selection also offers to annotate the original block. In `Bilingual` the offer appears beside the highlighted block; in `Translation` it sits in the bubble. Either way the annotation covers the **whole original block**, because the two sides have no character-level counterparts and only the block pairing is known. A selection that spans several blocks annotates each block in full, up to eight blocks; beyond that only the reading mark and the locate action remain. The annotation itself is written to the original text, so it can still be located in the PDF.
+The selection also offers to annotate the original text. In `Bilingual` the offer appears beside the highlighted text; in `Translation` it sits in the bubble. The highlight and the bubble show the sentence you selected, but the annotation covers the **whole original block**: an annotation is stored against the block, and a sentence found by splitting punctuation is not a stable enough identity to save against. A selection that spans several blocks annotates each block in full, up to eight blocks; beyond that only the reading mark and the locate action remain. The annotation itself is written to the original text, so it can still be located in the PDF.
 
 Nothing here changes Markdown, translations, or caches, and nothing is sent to your AI provider. Selection translation is still available only on the original side, as described above, and annotating from a translated selection never moves the annotation onto the translated text.
 

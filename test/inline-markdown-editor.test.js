@@ -12696,3 +12696,224 @@ test('keeps a bilingual source selection on its original path', async () => {
     editor.destroy();
     dom.window.close();
 });
+
+test('opens one popup for a translated selection, not a hint beside it', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = 'Original paragraph here.';
+    const translated = '\u8fd9\u91cc\u662f\u4e00\u6bb5\u8bd1\u6587\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        translateOriginalBlockText: () => source,
+        createMarkdownAnnotation: async annotation => annotation,
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'compare',
+        sourceActionRanges: [{ from: 0, to: source.length }],
+        translationPairs: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            translatedFrom,
+            translatedTo: markdown.length,
+        }],
+    });
+
+    selectEditorText(dom, document, '\u8fd9\u91cc');
+    await settleFrame(dom.window);
+    await settle();
+
+    // One popup, and it is the source-block action. The "original text only"
+    // hint belongs to a selection that has no such action, so it must not
+    // appear here and must not share the row with it.
+    const popups = document.querySelectorAll('.mktero-annotation-popup');
+    assert.equal(popups.length, 1);
+    assert.equal(
+        document.querySelector('.mktero-annotation-selection-hint'),
+        null
+    );
+    assert.ok(document.querySelector('.mktero-related-source-create'));
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('reads no original text when a translated selection exceeds the block cap', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const parts = [];
+    const pairs = [];
+    let sourceOffset = 0;
+    for (let index = 0; index < 10; index++) {
+        const source = `Source ${index}.`;
+        const translated = `\u8bd1\u6587 ${index}.`;
+        pairs.push({
+            id: `translation-${index}`,
+            sourceFrom: sourceOffset,
+            sourceTo: sourceOffset + source.length,
+            translatedFrom: 0,
+            translatedTo: 0,
+        });
+        parts.push(source, translated);
+        sourceOffset += source.length + 2;
+    }
+    const markdown = parts.join('\n\n');
+    let cursor = 0;
+    for (let index = 0; index < pairs.length; index++) {
+        const translated = `\u8bd1\u6587 ${index}.`;
+        cursor = markdown.indexOf(translated, cursor);
+        pairs[index].translatedFrom = cursor;
+        pairs[index].translatedTo = cursor + translated.length;
+        cursor = pairs[index].translatedTo;
+    }
+    let asked = 0;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        translateOriginalBlockText: () => {
+            asked += 1;
+            return 'Source 0.';
+        },
+        createMarkdownAnnotation: async annotation => annotation,
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'compare',
+        sourceActionRanges: pairs.map(pair => ({
+            from: pair.sourceFrom,
+            to: pair.sourceTo,
+        })),
+        translationPairs: pairs,
+    });
+
+    selectEditorText(dom, document, '\u8bd1\u6587 0.', '\u8bd1\u6587 9.');
+    await settleFrame(dom.window);
+    await settle();
+
+    // The cap is checked before the host is asked for a block's original text.
+    assert.equal(asked, 0);
+    assert.equal(document.querySelector('.mktero-related-source-create'), null);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('marks only the original sentence of a selected list item', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const sourceLines = [
+        '- Alpha bullet sentence.',
+        '- Beta bullet sentence.',
+        '- Gamma bullet sentence.',
+    ];
+    const translatedLines = [
+        '- \u7b2c\u4e00\u9879\u3002',
+        '- \u7b2c\u4e8c\u9879\u3002',
+        '- \u7b2c\u4e09\u9879\u3002',
+    ];
+    const source = sourceLines.join('\n');
+    const translated = translatedLines.join('\n');
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        sourceMarkdown: source,
+        translateOriginalBlockText: (blockID, range) => source.slice(
+            range.from,
+            range.to
+        ),
+        createMarkdownAnnotation: async annotation => annotation,
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'compare',
+        sourceMarkdown: source,
+        sourceActionRanges: [{ from: 0, to: source.length }],
+        translationPairs: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            translatedFrom,
+            translatedTo: markdown.length,
+        }],
+    });
+
+    // Select the middle bullet only.
+    selectEditorText(dom, document, '\u7b2c\u4e8c\u9879');
+    await settleFrame(dom.window);
+    await settle();
+
+    const marked = [
+        ...document.querySelectorAll(
+            '.cm-mktero-translation-pair-source.is-translation-pair-selected'
+        ),
+    ].map(line => line.textContent.trim());
+    assert.equal(marked.length, 1);
+    assert.match(marked[0], /Beta bullet sentence/);
+    assert.doesNotMatch(marked[0], /Alpha|Gamma/);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('marks the whole list when the sentence counts disagree', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = '- Alpha bullet.\n- Beta bullet.\n- Gamma bullet.';
+    // Two bullets for three: the pairing is unknown.
+    const translated = '- \u7b2c\u4e00\u9879\u3002\n- \u7b2c\u4e8c\u9879\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        sourceMarkdown: source,
+        translateOriginalBlockText: (blockID, range) => source.slice(
+            range.from,
+            range.to
+        ),
+        createMarkdownAnnotation: async annotation => annotation,
+    });
+    editor.setDocument({
+        markdown,
+        translationView: 'compare',
+        sourceMarkdown: source,
+        sourceActionRanges: [{ from: 0, to: source.length }],
+        translationPairs: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            translatedFrom,
+            translatedTo: markdown.length,
+        }],
+    });
+
+    selectEditorText(dom, document, '\u7b2c\u4e00\u9879');
+    await settleFrame(dom.window);
+    await settle();
+
+    const marked = [
+        ...document.querySelectorAll(
+            '.cm-mktero-translation-pair-source.is-translation-pair-selected'
+        ),
+    ].map(line => line.textContent.trim());
+    // Falling back to the block is deliberate: guessing a pairing would point
+    // at the wrong words.
+    assert.equal(marked.length, 3);
+
+    editor.destroy();
+    dom.window.close();
+});

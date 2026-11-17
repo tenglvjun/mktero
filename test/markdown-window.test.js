@@ -1965,6 +1965,7 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         translationFailures: [],
         translationPairs: [],
         translationView: 'original',
+        sourceMarkdown: 'Important result.',
         translateOriginalBlockText: updates[0].translateOriginalBlockText,
         revealTranslationSource: updates[0].revealTranslationSource,
     }]);

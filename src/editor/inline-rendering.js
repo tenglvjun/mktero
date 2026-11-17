@@ -1062,6 +1062,7 @@ export function createInlineRenderingExtension({
         translationPairsSource: null,
         highlightedTranslationBlockID: null,
         selectedTranslationBlockID: null,
+        selectedTranslationSourceRange: null,
         annotationTargets: new Map(),
         editingRange: null,
         correctionManagementEnabled: false,
@@ -1230,13 +1231,36 @@ export function createInlineRenderingExtension({
                     translationPairHighlightChanged = true;
                 }
                 else if (effect.is(setTranslationSelection)) {
-                    const id = String(effect.value || '');
-                    const selected =
-                        context.translationPairs.some(pair => pair.id === id)
-                            ? id
-                            : null;
-                    if (selected === context.selectedTranslationBlockID) continue;
-                    context.selectedTranslationBlockID = selected;
+                    const value = effect.value || null;
+                    const id = String(value?.id || value || '');
+                    // A sentence selects part of the original block; the mark
+                    // covers exactly that part so a bullet inside a long list
+                    // does not light up its neighbours.
+                    const range = value && Number.isSafeInteger(value.from)
+                        && Number.isSafeInteger(value.to)
+                        && value.to > value.from
+                        ? { from: value.from, to: value.to }
+                        : null;
+                    const pair = context.translationPairs.find(
+                        candidate => candidate.id === id
+                    );
+                    if (!pair) {
+                        if (context.selectedTranslationBlockID === null
+                            && context.selectedTranslationSourceRange === null) {
+                            continue;
+                        }
+                        context.selectedTranslationBlockID = null;
+                        context.selectedTranslationSourceRange = null;
+                        translationSelectionChanged = true;
+                        continue;
+                    }
+                    const previous = context.selectedTranslationSourceRange;
+                    const same = context.selectedTranslationBlockID === id
+                        && (previous?.from === range?.from)
+                        && (previous?.to === range?.to);
+                    if (same) continue;
+                    context.selectedTranslationBlockID = id;
+                    context.selectedTranslationSourceRange = range;
                     translationSelectionChanged = true;
                 }
                 else if (effect.is(setInlineEditingRange)) {
@@ -1651,6 +1675,12 @@ function decorateTranslationPairs(state, decorations, context) {
         // translated side never carries either. A reader testing whether a
         // selection reached the right block looks at the original, and a lit
         // translated row would make the feedback read as "the translation".
+        // The selection mark may cover a sentence inside the block. When it
+        // does, only those lines are marked: a bullet in a long list must not
+        // light up the whole list.
+        const selectedRange = context.selectedTranslationBlockID === pair.id
+            ? context.selectedTranslationSourceRange || pair.source
+            : null;
         decorateTranslationPairRange(
             state,
             decorations,
@@ -1658,7 +1688,7 @@ function decorateTranslationPairs(state, decorations, context) {
             pair,
             'source',
             context.highlightedTranslationBlockID === pair.id,
-            context.selectedTranslationBlockID === pair.id
+            selectedRange
         );
         decorateTranslationPairRange(
             state,
@@ -1679,12 +1709,19 @@ function decorateTranslationPairRange(
     pair,
     side,
     highlighted,
-    selected = false
+    selectedRange = null
 ) {
     if (!range) return;
-    const fromLine = state.doc.lineAt(range.from).number;
-    const toLine = state.doc.lineAt(Math.max(range.from, range.to - 1)).number;
-    for (let lineNumber = fromLine; lineNumber <= toLine; lineNumber++) {
+    const lineFrom = state.doc.lineAt(range.from).number;
+    const lineTo = state.doc.lineAt(Math.max(range.from, range.to - 1)).number;
+    const selectedFrom = selectedRange
+        ? state.doc.lineAt(selectedRange.from).number
+        : -1;
+    const selectedTo = selectedRange
+        ? state.doc.lineAt(Math.max(selectedRange.from, selectedRange.to - 1)).number
+        : -1;
+    for (let lineNumber = lineFrom; lineNumber <= lineTo; lineNumber++) {
+        const selected = lineNumber >= selectedFrom && lineNumber <= selectedTo;
         decorations.push(Decoration.line({
             class: [
                 'cm-mktero-translation-pair',

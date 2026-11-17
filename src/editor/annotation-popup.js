@@ -340,18 +340,21 @@ export function createAnnotationPopup(parent, {
         blockCount = 1,
     }) => {
         if (!anchor || !annotation) return;
-        cancelScheduledOpen();
+        // This popup owns the selection: whatever was open for the previous one
+        // is replaced, not stacked. The anchored popup keeps a single element,
+        // so an un-closed predecessor could overwrite this content mid-render.
+        close();
         openPopup({
             anchor,
             label: t('annotation.selectionActions'),
             popupClassName: 'mktero-annotation-popup--actions',
             dismissOnMouseLeave: false,
-            renderContent({ document, close, reposition }) {
+            renderContent({ document, close: closeContent, reposition }) {
                 return createSourceBlockActions(document, annotation, t, {
                     blockCount,
                     createMarkdownAnnotation,
                     selectionContext,
-                    close,
+                    close: closeContent,
                     reposition,
                 });
             },
