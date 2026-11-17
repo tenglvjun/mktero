@@ -1358,14 +1358,26 @@ class MarkdownTabView {
     // the page hint, the OCR region, and the quote context. Highlights and
     // "Add to Note" locate a selection the same way.
     async prepareMarkdownAnnotationDraft(annotation, selectionContext) {
-        if (this.model.translationView === 'translated') {
+        // A translated-side selection reaches this point only after the reader
+        // resolved it to a whole original block and read the original text for
+        // that range. That flag is set by the editor's own translation
+        // selection path; it cannot be inferred from where a range happens to
+        // sit, or an ordinary source-side selection in Bilingual would be
+        // mistaken for one.
+        const alreadySource = selectionContext?.rangesAreSource === true;
+        if (!alreadySource && this.model.translationView === 'translated') {
             throw new Error('Markdown annotations require original text');
         }
-        if (this.model.translationView === 'compare'
+        if (!alreadySource
+            && this.model.translationView === 'compare'
             && selectionContext?.side !== 'source') {
             throw new Error('Markdown annotations require original text');
         }
-        const mappedAnnotation = this.model.translationView === 'compare'
+        // A range that is already the original must not be mapped again: the
+        // comparison mapping would shift it or return null, which shows up as
+        // a control that lights up and then fails to save.
+        const mappedAnnotation = !alreadySource
+            && this.model.translationView === 'compare'
             ? mapComparisonAnnotationToSource(
                 annotation,
                 this.model.translationBlockRanges

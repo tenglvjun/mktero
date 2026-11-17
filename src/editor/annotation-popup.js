@@ -330,6 +330,34 @@ export function createAnnotationPopup(parent, {
     };
     // A compare-mode selection that holds no original text gets no actions.
     // Say why instead of leaving the selection without any response.
+    // A translated-side selection that resolved to a whole original block. The
+    // action creates the annotation on that block, so the reader does not have
+    // to find and re-select the original text themselves.
+    const openSourceBlockActions = ({
+        anchor,
+        annotation,
+        selectionContext,
+        blockCount = 1,
+    }) => {
+        if (!anchor || !annotation) return;
+        cancelScheduledOpen();
+        openPopup({
+            anchor,
+            label: t('annotation.selectionActions'),
+            popupClassName: 'mktero-annotation-popup--actions',
+            dismissOnMouseLeave: false,
+            renderContent({ document, close, reposition }) {
+                return createSourceBlockActions(document, annotation, t, {
+                    blockCount,
+                    createMarkdownAnnotation,
+                    selectionContext,
+                    close,
+                    reposition,
+                });
+            },
+        });
+    };
+
     const openSelectionHint = ({ anchor }) => {
         if (!anchor) return;
         cancelScheduledOpen();
@@ -410,6 +438,7 @@ export function createAnnotationPopup(parent, {
         open: openNote,
         openNote,
         openSelection,
+        openSourceBlockActions,
         openSelectionHint,
         openActions,
         scheduleOpenActions,
@@ -1061,6 +1090,79 @@ function focusNoteInput(popup) {
     if (!input) return;
     input.focus();
     input.setSelectionRange?.(input.value.length, input.value.length);
+}
+
+// The only action here is the one this data can support: annotate the whole
+// original block. The pairing has no character-level counterpart, so the
+// wording says the annotation covers the block rather than the exact words the
+// reader selected on the translated side.
+function createSourceBlockActions(
+    document,
+    annotation,
+    translate,
+    {
+        blockCount,
+        createMarkdownAnnotation,
+        selectionContext,
+        close,
+        reposition,
+    }
+) {
+    const content = document.createElementNS(XHTML_NAMESPACE, 'div');
+    content.className = [
+        'mktero-annotation-actions',
+        'mktero-markdown-selection-actions',
+    ].join(' ');
+
+    const scope = document.createElementNS(XHTML_NAMESPACE, 'div');
+    scope.className = 'mktero-related-source-scope';
+    scope.textContent = blockCount > 1
+        ? translate('annotation.sourceBlockScopePlural', { count: blockCount })
+        : translate('annotation.sourceBlockScope');
+    content.appendChild(scope);
+
+    const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
+    actions.className = 'mktero-markdown-selection-toolbar';
+    content.appendChild(actions);
+
+    const error = document.createElementNS(XHTML_NAMESPACE, 'div');
+    error.className = 'mktero-annotation-action-error';
+    error.setAttribute('role', 'status');
+    error.setAttribute('aria-live', 'polite');
+    error.hidden = true;
+
+    const canCreate = typeof createMarkdownAnnotation === 'function';
+    const button = document.createElementNS(XHTML_NAMESPACE, 'button');
+    button.type = 'button';
+    button.className = 'mktero-related-source-create';
+    button.textContent = blockCount > 1
+        ? translate('annotation.sourceBlockHighlightPlural', { count: blockCount })
+        : translate('annotation.sourceBlockHighlight');
+    button.disabled = !canCreate;
+    button.addEventListener('click', async () => {
+        if (!canCreate) return;
+        button.disabled = true;
+        error.hidden = true;
+        try {
+            await createMarkdownAnnotation(annotation, selectionContext);
+            close?.();
+        }
+        catch (cause) {
+            error.textContent = annotationErrorMessage(
+                cause,
+                translate,
+                'annotation.createFailed'
+            );
+            error.hidden = false;
+            reposition?.();
+        }
+        finally {
+            button.disabled = false;
+        }
+    });
+    actions.appendChild(button);
+    content.appendChild(error);
+    return content;
 }
 
 function createAnnotationActions(

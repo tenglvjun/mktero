@@ -18,7 +18,7 @@ export function createTranslationSourcePopup(parent, {
     });
 
     return {
-        open({ anchor, source, offscreen = null }) {
+        open({ anchor, source, offscreen = null, onAnnotate = null }) {
             const text = String(source?.text || '').trim();
             if (!anchor || !text) {
                 anchoredPopup.close();
@@ -38,7 +38,10 @@ export function createTranslationSourcePopup(parent, {
                             }
                             : null,
                         t,
-                        offscreen
+                        offscreen,
+                        typeof onAnnotate === 'function'
+                            ? () => onAnnotate(source)
+                            : null
                     );
                 },
             });
@@ -49,7 +52,7 @@ export function createTranslationSourcePopup(parent, {
     };
 }
 
-function createContent(document, text, reveal, t, offscreen) {
+function createContent(document, text, reveal, t, offscreen, annotate) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
     content.className = 'mktero-translation-source';
 
@@ -77,13 +80,30 @@ function createContent(document, text, reveal, t, offscreen) {
     body.textContent = text;
     content.appendChild(body);
 
+    const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
+    actions.className = 'mktero-translation-source-actions';
+
+    // Annotating the original block is the action this pairing supports: the
+    // reader keeps reading the translation and the annotation still lands on
+    // the source the PDF can locate.
+    if (annotate) {
+        const create = document.createElementNS(XHTML_NAMESPACE, 'button');
+        create.type = 'button';
+        create.className = 'mktero-translation-source-action';
+        create.textContent = t('annotation.sourceBlockHighlight');
+        create.addEventListener('click', annotate);
+        actions.appendChild(create);
+    }
+
     if (reveal) {
         const action = document.createElementNS(XHTML_NAMESPACE, 'button');
         action.type = 'button';
         action.className = 'mktero-translation-source-action';
         action.textContent = t('ai.translationSourceLocate');
         action.addEventListener('click', reveal);
-        content.appendChild(action);
+        actions.appendChild(action);
     }
+
+    if (actions.childNodes.length) content.appendChild(actions);
     return content;
 }

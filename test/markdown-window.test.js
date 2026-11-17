@@ -10991,3 +10991,73 @@ test('localizes the notes column and annotation segment in Simplified Chinese', 
         view.destroy();
     }
 });
+
+test('saves a translated selection as its original block without remapping it', async () => {
+    const source = 'Original paragraph here.';
+    const translated = '\u8fd9\u91cc\u662f\u8bd1\u6587\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown,
+        translationView: 'compare',
+        translationBlockRanges: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            comparisonSourceFrom: 0,
+            comparisonSourceTo: source.length,
+            comparisonTranslationFrom: translatedFrom,
+            comparisonTranslationTo: markdown.length,
+        }],
+    });
+    view.render(model);
+
+    // The editor resolved the translated selection to the whole original block
+    // and read the original text for it. The window must save exactly that.
+    await editorOptions.createMarkdownAnnotation({
+        text: source,
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: source.length }],
+    }, { side: 'source', rangesAreSource: true });
+
+    assert.equal(created.length, 1);
+    assert.deepEqual(created[0].ranges, [{ from: 0, to: source.length }]);
+    assert.equal(created[0].text, source);
+    view.destroy();
+});
+
+test('still refuses a translated-side draft that was not resolved to source', async () => {
+    const source = 'Original paragraph here.';
+    const translated = '\u8fd9\u91cc\u662f\u8bd1\u6587\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown,
+        translationView: 'compare',
+        translationBlockRanges: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            comparisonSourceFrom: 0,
+            comparisonSourceTo: source.length,
+            comparisonTranslationFrom: translatedFrom,
+            comparisonTranslationTo: markdown.length,
+        }],
+    });
+    view.render(model);
+
+    // No flag: this is a translated-side range that never reached the source,
+    // so it must be refused rather than saved against the wrong text.
+    await assert.rejects(
+        () => editorOptions.createMarkdownAnnotation({
+            text: '\u8fd9\u91cc',
+            comment: '',
+            color: '#ffd400',
+            ranges: [{ from: translatedFrom, to: translatedFrom + 2 }],
+        }, { side: 'translation' }),
+        /original text/
+    );
+    assert.equal(created.length, 0);
+    view.destroy();
+});

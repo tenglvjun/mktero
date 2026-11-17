@@ -116,7 +116,9 @@ Translation is stored block by block, so every translated block has exactly one 
 
 If the block you selected, or the original block it maps to, is outside the visible area, Mktero tells you which direction it lies in and can scroll to it. It does not open a bubble in `Bilingual` instead.
 
-These actions only change what the reader shows. They do not modify Markdown, translations, or caches, and they send nothing to your AI provider. Selection translation is still available only on the original side, as described above.
+The selection also offers to annotate the original block. In `Bilingual` the offer appears beside the highlighted block; in `Translation` it sits in the bubble. Either way the annotation covers the **whole original block**, because the two sides have no character-level counterparts and only the block pairing is known. A selection that spans several blocks annotates each block in full, up to eight blocks; beyond that only the reading mark and the locate action remain. The annotation itself is written to the original text, so it can still be located in the PDF.
+
+Nothing here changes Markdown, translations, or caches, and nothing is sent to your AI provider. Selection translation is still available only on the original side, as described above, and annotating from a translated selection never moves the annotation onto the translated text.
 
 ## Details
 

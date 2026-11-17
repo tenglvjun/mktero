@@ -5883,6 +5883,36 @@ blockquote.mktero-note,
     white-space: pre-wrap;
 }
 
+.mktero-translation-source-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.mktero-related-source-scope {
+    color: var(--muted);
+    font: 11px/1.4 var(--ui-font);
+}
+
+.mktero-related-source-create {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    background: transparent;
+    font: 12px/1.3 var(--ui-font);
+    cursor: pointer;
+}
+
+.mktero-related-source-create:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.mktero-related-source-create:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 .mktero-translation-source-action {
     align-self: flex-start;
     padding: 4px 10px;
