@@ -15,6 +15,7 @@ import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.j
 import {
     collectMarkdownTranslationBlocks,
     createDocumentTranslationViews,
+    mapSourceRangeToComparison,
 } from '../src/markdown/markdown-translation-blocks.js';
 
 const MARKDOWN_STYLES = readFileSync(
@@ -1938,6 +1939,92 @@ test('offers to retranslate only the translated block changed by a correction', 
     }
     finally {
         view.destroy();
+    }
+});
+
+test('locates the original sentence in comparison coordinates before switching views', () => {
+    const source = [
+        'Lead paragraph sentence.',
+        '',
+        'Original first sentence. Original second sentence.',
+    ].join('\n');
+    const blocks = collectMarkdownTranslationBlocks(source);
+    const translations = blocks.filter(block => block.translatable).map((block, index) => ({
+        id: block.id,
+        markdown: index === 0
+            ? '\u5f15\u5bfc\u6bb5\u8bd1\u6587\u3002'
+            : '\u7b2c\u4e00\u53e5\u8bd1\u6587\u3002\u7b2c\u4e8c\u53e5\u8bd1\u6587\u3002',
+    }));
+    const views = createDocumentTranslationViews(source, blocks, translations);
+    const target = views.blockRanges[1];
+    const sentenceFrom = target.sourceFrom + 'Original first sentence. '.length;
+    const sentenceTo = target.sourceTo;
+    const expected = mapSourceRangeToComparison(
+        { from: sentenceFrom, to: sentenceTo },
+        views.blockRanges
+    );
+    assert.ok(expected);
+
+    const updates = [];
+    const scrolled = [];
+    const flashed = [];
+    const switches = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: source,
+        sourceKind: 'markdown',
+        translationStatus: 'ready',
+        translationView: 'translated',
+        translationBlocks: translations,
+        translationFailedBlocks: [],
+        translationBlockRanges: views.blockRanges,
+        translatedMarkdown: views.translatedMarkdown,
+        comparisonMarkdown: views.comparisonMarkdown,
+        comparisonSourceRanges: views.comparisonSourceRanges,
+        comparisonTranslationRanges: views.comparisonTranslationRanges,
+    });
+    model.onSetTranslationView = view => {
+        // The presenter renders synchronously inside this callback, so the
+        // reveal target must already be on the model when it fires.
+        switches.push([view, model.revealMarkdownOffset, model.revealMarkdownTo]);
+        model.translationView = view;
+        tabView.render(model);
+    };
+    const { view: tabView } = createView(model, {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            const setDocument = editor.setDocument.bind(editor);
+            editor.setDocument = documentUpdate => {
+                updates.push(documentUpdate);
+                setDocument(documentUpdate);
+            };
+            const scrollToOffset = editor.scrollToOffset.bind(editor);
+            editor.scrollToOffset = offset => {
+                scrolled.push(offset);
+                scrollToOffset(offset);
+            };
+            editor.flashRange = (from, to) => flashed.push([from, to]);
+            return editor;
+        },
+    });
+
+    try {
+        updates.at(-1).revealTranslationSource({
+            id: target.id,
+            from: target.translatedFrom,
+            to: target.translatedTo,
+            sourceFrom: sentenceFrom,
+            sourceTo: sentenceTo,
+            sourceBlockFrom: target.sourceFrom,
+            sourceBlockTo: target.sourceTo,
+        });
+        assert.deepEqual(switches, [['compare', expected.from, expected.to]]);
+        assert.ok(scrolled.includes(expected.from));
+        assert.deepEqual(flashed, [[expected.from, expected.to]]);
+    }
+    finally {
+        tabView.destroy();
     }
 });
 

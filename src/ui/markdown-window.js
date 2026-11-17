@@ -7904,27 +7904,39 @@ class MarkdownTabView {
     // reading position in one model update, so the reader does not see an
     // intermediate state.
     revealTranslationSource(block) {
+        // The bubble hands over canonical source coordinates. The comparison
+        // document renders the original at different offsets, so map before
+        // jumping; a translated-document offset must never be used here.
+        const canonical = Number.isSafeInteger(block?.sourceFrom)
+            && Number.isSafeInteger(block?.sourceTo)
+            && block.sourceTo > block.sourceFrom
+            ? { from: block.sourceFrom, to: block.sourceTo }
+            : null;
+        const mapped = canonical
+            ? mapSourceRangeToComparison(
+                canonical,
+                this.model?.translationBlockRanges || []
+            )
+            : null;
         const from = Number(
-            block?.comparisonSourceFrom
+            mapped?.from
+            ?? block?.comparisonSourceFrom
             ?? block?.sourceViewFrom
-            ?? block?.from
+        );
+        const to = Number(
+            mapped?.to
+            ?? block?.comparisonSourceTo
+            ?? block?.sourceViewTo
         );
         if (!Number.isFinite(from)) return;
-        const to = Number(
-            block?.comparisonSourceTo
-            ?? block?.sourceViewTo
-            ?? block?.to
-        );
         if (typeof this.model.onSetTranslationView !== 'function') return;
-        this.model.onSetTranslationView('compare');
+        // The presenter renders synchronously inside the view switch and that
+        // render consumes the reveal target, so set it before switching.
         this.model.revealMarkdownOffset = from;
         if (Number.isFinite(to) && to > from) {
             this.model.revealMarkdownTo = to;
         }
-        this.editor?.scrollToOffset?.(from);
-        if (Number.isFinite(to) && to > from) {
-            this.editor?.flashRange?.(from, to);
-        }
+        this.model.onSetTranslationView('compare');
     }
 
     revealRequestedMarkdown() {

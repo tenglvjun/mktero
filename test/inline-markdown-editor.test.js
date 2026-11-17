@@ -13002,6 +13002,183 @@ test('opens a source bubble in the real translated-view pair path', async () => 
     dom.window.close();
 });
 
+test('opens the source bubble when the host callbacks arrive with the document', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = 'Original first sentence. Original second sentence.';
+    const revealed = [];
+    const blocks = collectMarkdownTranslationBlocks(source);
+    const translations = blocks.filter(block => block.translatable).map(block => ({
+        id: block.id,
+        markdown: '\u7b2c\u4e00\u53e5\u8bd1\u6587\u3002\u7b2c\u4e8c\u53e5\u8bd1\u6587\u3002',
+    }));
+    const views = createDocumentTranslationViews(source, blocks, translations);
+    const pairs = createVisibleTranslationPairs({
+        translationBlocks: translations,
+        translationFailedBlocks: [],
+        translationBlockRanges: views.blockRanges,
+    }, true, false);
+
+    // The window constructs the editor without these two hosts and supplies
+    // them with every document, exactly like markdown-window.js does. A
+    // constructor-only wiring would leave the bubble without original text.
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown: views.translatedMarkdown,
+        sourceMarkdown: source,
+        translationView: 'translated',
+        sourceActionRanges: [],
+        translationPairs: pairs,
+        translateOriginalBlockText: (_id, range) => (
+            source.slice(range.from, range.to)
+        ),
+        revealTranslationSource: block => revealed.push(block),
+    });
+
+    selectEditorText(dom, document, '\u7b2c\u4e8c\u53e5\u8bd1\u6587');
+    await settleFrame(dom.window);
+    await settle();
+
+    assert.equal(
+        document.querySelector('.mktero-translation-source-text')?.textContent,
+        'Original second sentence.'
+    );
+    const actions = [
+        ...document.querySelectorAll('.mktero-translation-source-action'),
+    ];
+    assert.equal(actions.length, 2);
+    actions[1].click();
+    await settle();
+    assert.equal(revealed.length, 1);
+    assert.equal(revealed[0].sourceFrom, source.indexOf('Original second'));
+    assert.equal(revealed[0].sourceTo, source.length);
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('opens the source bubble from a selectionchange without a pointer gesture', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = 'Original first sentence. Original second sentence.';
+    const blocks = collectMarkdownTranslationBlocks(source);
+    const translations = blocks.filter(block => block.translatable).map(block => ({
+        id: block.id,
+        markdown: '\u7b2c\u4e00\u53e5\u8bd1\u6587\u3002\u7b2c\u4e8c\u53e5\u8bd1\u6587\u3002',
+    }));
+    const views = createDocumentTranslationViews(source, blocks, translations);
+    const pairs = createVisibleTranslationPairs({
+        translationBlocks: translations,
+        translationFailedBlocks: [],
+        translationBlockRanges: views.blockRanges,
+    }, true, false);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+    });
+    editor.setDocument({
+        markdown: views.translatedMarkdown,
+        sourceMarkdown: source,
+        translationView: 'translated',
+        sourceActionRanges: [],
+        translationPairs: pairs,
+        translateOriginalBlockText: (_id, range) => (
+            source.slice(range.from, range.to)
+        ),
+    });
+
+    const content = document.querySelector('.cm-content');
+    const node = textNodeContaining(content, '\u7b2c\u4e8c\u53e5\u8bd1\u6587');
+    const range = document.createRange();
+    range.setStart(node, node.textContent.indexOf('\u7b2c\u4e8c\u53e5\u8bd1\u6587'));
+    range.setEnd(
+        node,
+        node.textContent.indexOf('\u7b2c\u4e8c\u53e5\u8bd1\u6587')
+            + '\u7b2c\u4e8c\u53e5\u8bd1\u6587'.length
+    );
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(range);
+    // Keyboard and assistive selections arrive as selectionchange alone.
+    document.dispatchEvent(new dom.window.Event('selectionchange'));
+    await settleFrame(dom.window);
+    await settle();
+
+    assert.equal(
+        document.querySelector('.mktero-translation-source-text')?.textContent,
+        'Original second sentence.'
+    );
+
+    editor.destroy();
+    dom.window.close();
+});
+
+test('opens bilingual source actions when the host callbacks arrive with the document', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const source = 'Original first sentence. Original second sentence.';
+    const created = [];
+    const blocks = collectMarkdownTranslationBlocks(source);
+    const translations = blocks.filter(block => block.translatable).map(block => ({
+        id: block.id,
+        markdown: '\u7b2c\u4e00\u53e5\u8bd1\u6587\u3002\u7b2c\u4e8c\u53e5\u8bd1\u6587\u3002',
+    }));
+    const views = createDocumentTranslationViews(source, blocks, translations);
+    const pairs = createVisibleTranslationPairs({
+        translationBlocks: translations,
+        translationFailedBlocks: [],
+        translationBlockRanges: views.blockRanges,
+    }, false, true);
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '',
+        createMarkdownAnnotation: async (annotation, selectionContext) => {
+            created.push({ annotation, selectionContext });
+            return annotation;
+        },
+    });
+    editor.setDocument({
+        markdown: views.comparisonMarkdown,
+        sourceMarkdown: source,
+        translationView: 'compare',
+        sourceActionRanges: [],
+        translationPairs: pairs,
+        translateOriginalBlockText: (_id, range) => (
+            source.slice(range.from, range.to)
+        ),
+        revealTranslationSource: () => {},
+    });
+
+    selectEditorText(dom, document, '\u7b2c\u4e8c\u53e5\u8bd1\u6587');
+    await settleFrame(dom.window);
+    await settle();
+
+    const create = document.querySelector('.mktero-related-source-create');
+    assert.ok(create);
+    create.click();
+    await settle();
+    await settle();
+    assert.deepEqual(created[0]?.annotation.ranges, [{
+        from: 0,
+        to: source.length,
+    }]);
+    assert.deepEqual(created[0]?.selectionContext, {
+        side: 'source',
+        rangesAreSource: true,
+    });
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('uses canonical and comparison coordinates separately for a punctuation-free list', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

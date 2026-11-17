@@ -312,6 +312,10 @@ export function createInlineMarkdownEditor({
     analysisCache = null,
 }) {
     const t = localization.t.bind(localization);
+    // The window supplies these two hosts with every document rather than at
+    // construction; keep them mutable so setDocument can refresh them.
+    let hostTranslateOriginalBlockText = translateOriginalBlockText;
+    let hostRevealTranslationSource = revealTranslationSource;
     if (!parent) throw new Error(t('error.editorParentRequired'));
     const ownerWindow = parent.ownerDocument?.defaultView;
     if (!ownerWindow) throw new Error(t('error.editorWindowRequired'));
@@ -324,7 +328,7 @@ export function createInlineMarkdownEditor({
     const citationPopup = createCitationPopup(parent, { localization });
     const translationSourcePopup = createTranslationSourcePopup(parent, {
         localization,
-        revealSource: source => revealTranslationSource?.(source),
+        revealSource: source => hostRevealTranslationSource?.(source),
     });
     const annotationPopup = createAnnotationPopup(parent, {
         localization,
@@ -1473,13 +1477,13 @@ export function createInlineMarkdownEditor({
             };
             const annotationRange = { from: sourceFrom, to: sourceTo };
             const displayText = String(
-                translateOriginalBlockText?.(block.id, displayRange) || ''
+                hostTranslateOriginalBlockText?.(block.id, displayRange) || ''
             ).trim();
             const annotationText = displayRange.from === annotationRange.from
                 && displayRange.to === annotationRange.to
                 ? displayText
                 : String(
-                    translateOriginalBlockText?.(block.id, annotationRange)
+                    hostTranslateOriginalBlockText?.(block.id, annotationRange)
                     || ''
                 ).trim();
             if (!displayText || !annotationText) return null;
@@ -1847,8 +1851,16 @@ export function createInlineMarkdownEditor({
         translationPairs,
         translationView = 'original',
         sourceMarkdown = '',
+        translateOriginalBlockText: nextTranslateOriginalBlockText,
+        revealTranslationSource: nextRevealTranslationSource,
     }) => {
         activateDOMGlobals(ownerWindow);
+        if (typeof nextTranslateOriginalBlockText === 'function') {
+            hostTranslateOriginalBlockText = nextTranslateOriginalBlockText;
+        }
+        if (typeof nextRevealTranslationSource === 'function') {
+            hostRevealTranslationSource = nextRevealTranslationSource;
+        }
         if (translationHighlightTimer !== null) {
             ownerWindow.clearTimeout?.(translationHighlightTimer);
             translationHighlightTimer = null;

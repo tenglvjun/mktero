@@ -5850,8 +5850,12 @@ blockquote.mktero-note,
     }
 }
 
-/* The original behind a translated block, for the view without source text. */
+/* The original behind a translated block, for the view without source text.
+   Fixed like the other reader popups: the editor host clips overflow, so a
+   static-position bubble would be cut away and its left/top ignored. */
 .mktero-translation-source-popup {
+    position: fixed;
+    z-index: 900;
     display: flex;
     max-width: min(520px, 80vw);
     max-height: min(420px, 60vh);
