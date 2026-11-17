@@ -983,8 +983,8 @@ class MarkdownTabView {
                         translatedView,
                         comparisonView
                     ),
-                    translateOriginalBlockText: blockID => (
-                        this.originalBlockTextFor(blockID)
+                    translateOriginalBlockText: (blockID, range) => (
+                        this.originalBlockTextFor(blockID, range)
                     ),
                     revealTranslationSource: block => (
                         this.revealTranslationSource(block)
@@ -993,6 +993,9 @@ class MarkdownTabView {
                         translatedView,
                         comparisonView
                     ),
+                    // Sentence pairing needs the source document even when the
+                    // view on screen is the translated one.
+                    sourceMarkdown: String(model.markdown || ''),
                 });
                 if (pendingFiguresReplaced) this.replayRetainedFigures();
                 this.renderedPendingFigures = nextPendingFigures;
@@ -1358,14 +1361,26 @@ class MarkdownTabView {
     // the page hint, the OCR region, and the quote context. Highlights and
     // "Add to Note" locate a selection the same way.
     async prepareMarkdownAnnotationDraft(annotation, selectionContext) {
-        if (this.model.translationView === 'translated') {
+        // A translated-side selection reaches this point only after the reader
+        // resolved it to a whole original block and read the original text for
+        // that range. That flag is set by the editor's own translation
+        // selection path; it cannot be inferred from where a range happens to
+        // sit, or an ordinary source-side selection in Bilingual would be
+        // mistaken for one.
+        const alreadySource = selectionContext?.rangesAreSource === true;
+        if (!alreadySource && this.model.translationView === 'translated') {
             throw new Error('Markdown annotations require original text');
         }
-        if (this.model.translationView === 'compare'
+        if (!alreadySource
+            && this.model.translationView === 'compare'
             && selectionContext?.side !== 'source') {
             throw new Error('Markdown annotations require original text');
         }
-        const mappedAnnotation = this.model.translationView === 'compare'
+        // A range that is already the original must not be mapped again: the
+        // comparison mapping would shift it or return null, which shows up as
+        // a control that lights up and then fails to save.
+        const mappedAnnotation = !alreadySource
+            && this.model.translationView === 'compare'
             ? mapComparisonAnnotationToSource(
                 annotation,
                 this.model.translationBlockRanges
@@ -7853,25 +7868,35 @@ class MarkdownTabView {
         return host;
     }
 
-    // The original text of a translated block, for the reading view that does
-    // not render the source. Block granularity is the whole contract: the
-    // translated and source sides have no character-level counterparts, so a
-    // slice of the original would misrepresent the pairing.
-    originalBlockTextFor(blockID) {
+    // The original text behind the selected translated sentence. The canonical
+    // source range is used even in the Translation view, where the source is
+    // not rendered; a missing range refuses the bubble rather than guessing a
+    // neighboring block.
+    originalBlockTextFor(blockID, requested = null) {
         const id = String(blockID || '');
         if (!id) return '';
-        const range = (this.model?.translationBlockRanges || []).find(
+        const block = (this.model?.translationBlockRanges || []).find(
             candidate => candidate?.id === id
         );
-        if (!Number.isSafeInteger(range?.sourceFrom)
-            || !Number.isSafeInteger(range?.sourceTo)
-            || range.sourceTo <= range.sourceFrom) {
-            return '';
-        }
-        const text = visibleMarkdownTextForRanges(
-            String(this.model?.markdown || ''),
-            [{ from: range.sourceFrom, to: range.sourceTo }]
-        );
+        const markdown = String(this.model?.markdown || '');
+        const blockLength = markdown.length;
+        const inBlock = range => Number.isSafeInteger(range?.from)
+            && Number.isSafeInteger(range?.to)
+            && range.to > range.from
+            && range.from >= 0
+            && range.to <= blockLength;
+        // A sentence inside the block wins over the whole block: the reader
+        // asked about one sentence and should see that sentence.
+        const range = inBlock(requested)
+            ? requested
+            : inBlock({
+                from: block?.sourceFrom,
+                to: block?.sourceTo,
+            })
+                ? { from: block.sourceFrom, to: block.sourceTo }
+                : null;
+        if (!range) return '';
+        const text = visibleMarkdownTextForRanges(markdown, [range]);
         return String(text || '').trim();
     }
 
@@ -7879,15 +7904,39 @@ class MarkdownTabView {
     // reading position in one model update, so the reader does not see an
     // intermediate state.
     revealTranslationSource(block) {
-        const from = Number(block?.from);
+        // The bubble hands over canonical source coordinates. The comparison
+        // document renders the original at different offsets, so map before
+        // jumping; a translated-document offset must never be used here.
+        const canonical = Number.isSafeInteger(block?.sourceFrom)
+            && Number.isSafeInteger(block?.sourceTo)
+            && block.sourceTo > block.sourceFrom
+            ? { from: block.sourceFrom, to: block.sourceTo }
+            : null;
+        const mapped = canonical
+            ? mapSourceRangeToComparison(
+                canonical,
+                this.model?.translationBlockRanges || []
+            )
+            : null;
+        const from = Number(
+            mapped?.from
+            ?? block?.comparisonSourceFrom
+            ?? block?.sourceViewFrom
+        );
+        const to = Number(
+            mapped?.to
+            ?? block?.comparisonSourceTo
+            ?? block?.sourceViewTo
+        );
         if (!Number.isFinite(from)) return;
-        const to = Number(block?.to);
         if (typeof this.model.onSetTranslationView !== 'function') return;
-        this.model.onSetTranslationView('compare');
-        this.editor?.scrollToOffset?.(from);
+        // The presenter renders synchronously inside the view switch and that
+        // render consumes the reveal target, so set it before switching.
+        this.model.revealMarkdownOffset = from;
         if (Number.isFinite(to) && to > from) {
-            this.editor?.flashRange?.(from, to);
+            this.model.revealMarkdownTo = to;
         }
+        this.model.onSetTranslationView('compare');
     }
 
     revealRequestedMarkdown() {
@@ -8548,7 +8597,7 @@ function createVisibleTranslationFailures(
     return translationFailureRangesForView(model, view);
 }
 
-function createVisibleTranslationPairs(model, translatedView, comparisonView) {
+export function createVisibleTranslationPairs(model, translatedView, comparisonView) {
     const translatableIDs = new Set(
         (model.translationBlocks || []).map(translation => translation.id)
     );
@@ -8558,19 +8607,20 @@ function createVisibleTranslationPairs(model, translatedView, comparisonView) {
     return (model.translationBlockRanges || []).flatMap(range => {
         const failed = failedIDs.has(range?.id);
         if (!translatedView && !comparisonView && !failed) return [];
-        // Paired ranges are document offsets of the view being rendered. The
-        // Translation view renders translated text only, so it has no source
-        // side to mark; its bubble asks for the original by block id instead.
-        const sourceFrom = comparisonView
+        // Keep canonical source coordinates in every translated view. The
+        // Translation view does not render them, but its bubble and annotation
+        // action still need to resolve back into the source Markdown.
+        const sourceFrom = range?.sourceFrom;
+        const sourceTo = range?.sourceTo;
+        // These coordinates are only for decorations in the current document.
+        // In Bilingual the source side is comparisonMarkdown; in Translation
+        // there is no source side to decorate.
+        const sourceViewFrom = comparisonView
             ? range?.comparisonSourceFrom
-            : !translatedView
-                ? range?.sourceFrom
-                : null;
-        const sourceTo = comparisonView
+            : null;
+        const sourceViewTo = comparisonView
             ? range?.comparisonSourceTo
-            : !translatedView
-                ? range?.sourceTo
-                : null;
+            : null;
         const translatedFrom = translatedView
             ? range?.translatedFrom
             : comparisonView
@@ -8584,6 +8634,9 @@ function createVisibleTranslationPairs(model, translatedView, comparisonView) {
         const validSource = Number.isSafeInteger(sourceFrom)
             && Number.isSafeInteger(sourceTo)
             && sourceTo > sourceFrom;
+        const validSourceView = Number.isSafeInteger(sourceViewFrom)
+            && Number.isSafeInteger(sourceViewTo)
+            && sourceViewTo > sourceViewFrom;
         const validTranslation = Number.isSafeInteger(translatedFrom)
             && Number.isSafeInteger(translatedTo)
             && translatedTo > translatedFrom;
@@ -8594,7 +8647,9 @@ function createVisibleTranslationPairs(model, translatedView, comparisonView) {
         }
         return [{
             id: range.id,
+            type: range.type,
             ...(validSource ? { sourceFrom, sourceTo } : {}),
+            ...(validSourceView ? { sourceViewFrom, sourceViewTo } : {}),
             ...(validTranslation ? { translatedFrom, translatedTo } : {}),
         }];
     });

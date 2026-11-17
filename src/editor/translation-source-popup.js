@@ -3,9 +3,10 @@ import { createLocalization } from '../i18n/localization.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
-// The original text behind a translated block, for the view where the original
-// is not on screen. Bilingual reading has the original beside the translation,
-// so it marks that block instead of repeating its text in a floating panel.
+// The original text behind the selected translated sentence, for the view where
+// the original is not on screen. Bilingual reading has the original beside the
+// translation, so it marks that sentence instead of repeating its text in a
+// floating panel.
 export function createTranslationSourcePopup(parent, {
     localization = createLocalization(),
     revealSource = null,
@@ -18,7 +19,13 @@ export function createTranslationSourcePopup(parent, {
     });
 
     return {
-        open({ anchor, source, offscreen = null }) {
+        open({
+            anchor,
+            source,
+            offscreen = null,
+            onAnnotate = null,
+            annotationUnavailable = null,
+        }) {
             const text = String(source?.text || '').trim();
             if (!anchor || !text) {
                 anchoredPopup.close();
@@ -38,7 +45,11 @@ export function createTranslationSourcePopup(parent, {
                             }
                             : null,
                         t,
-                        offscreen
+                        offscreen,
+                        typeof onAnnotate === 'function'
+                            ? () => onAnnotate(source)
+                            : null,
+                        annotationUnavailable
                     );
                 },
             });
@@ -49,7 +60,15 @@ export function createTranslationSourcePopup(parent, {
     };
 }
 
-function createContent(document, text, reveal, t, offscreen) {
+function createContent(
+    document,
+    text,
+    reveal,
+    t,
+    offscreen,
+    annotate,
+    annotationUnavailable
+) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
     content.className = 'mktero-translation-source';
 
@@ -77,13 +96,37 @@ function createContent(document, text, reveal, t, offscreen) {
     body.textContent = text;
     content.appendChild(body);
 
+    if (annotationUnavailable) {
+        const unavailable = document.createElementNS(XHTML_NAMESPACE, 'div');
+        unavailable.className = 'mktero-translation-source-unavailable';
+        unavailable.setAttribute('role', 'status');
+        unavailable.textContent = annotationUnavailable;
+        content.appendChild(unavailable);
+    }
+
+    const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
+    actions.className = 'mktero-translation-source-actions';
+
+    // The annotation covers the whole original block even though the bubble
+    // shows only the corresponding sentence selected for reading.
+    if (annotate) {
+        const create = document.createElementNS(XHTML_NAMESPACE, 'button');
+        create.type = 'button';
+        create.className = 'mktero-translation-source-action';
+        create.textContent = t('annotation.sourceBlockHighlight');
+        create.addEventListener('click', annotate);
+        actions.appendChild(create);
+    }
+
     if (reveal) {
         const action = document.createElementNS(XHTML_NAMESPACE, 'button');
         action.type = 'button';
         action.className = 'mktero-translation-source-action';
         action.textContent = t('ai.translationSourceLocate');
         action.addEventListener('click', reveal);
-        content.appendChild(action);
+        actions.appendChild(action);
     }
+
+    if (actions.childNodes.length) content.appendChild(actions);
     return content;
 }

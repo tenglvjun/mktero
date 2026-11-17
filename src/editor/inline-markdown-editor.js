@@ -58,6 +58,9 @@ import {
     setTranslationSelection,
     selectionNodeInEditor,
 } from './inline-rendering.js';
+import {
+    mapTranslatedSentenceToSource,
+} from '../markdown/markdown-translation-blocks.js';
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
 import { clearReaderTextSelection, rootSelectionFor } from './root-selection.js';
@@ -309,6 +312,10 @@ export function createInlineMarkdownEditor({
     analysisCache = null,
 }) {
     const t = localization.t.bind(localization);
+    // The window supplies these two hosts with every document rather than at
+    // construction; keep them mutable so setDocument can refresh them.
+    let hostTranslateOriginalBlockText = translateOriginalBlockText;
+    let hostRevealTranslationSource = revealTranslationSource;
     if (!parent) throw new Error(t('error.editorParentRequired'));
     const ownerWindow = parent.ownerDocument?.defaultView;
     if (!ownerWindow) throw new Error(t('error.editorWindowRequired'));
@@ -321,7 +328,7 @@ export function createInlineMarkdownEditor({
     const citationPopup = createCitationPopup(parent, { localization });
     const translationSourcePopup = createTranslationSourcePopup(parent, {
         localization,
-        revealSource: source => revealTranslationSource?.(source),
+        revealSource: source => hostRevealTranslationSource?.(source),
     });
     const annotationPopup = createAnnotationPopup(parent, {
         localization,
@@ -1231,6 +1238,13 @@ export function createInlineMarkdownEditor({
     // so it raises the bubble instead. The mark follows the selection: no
     // timer, because a flash that expires would say "you jumped here" when
     // the reader is still holding the text.
+    // True while the current selection sits on translated text. The source
+    // action ranges never cover those blocks, so the generic selection handler
+    // would otherwise answer with the "original text only" hint at the same
+    // time this path opens its own popup, and the two would land on top of
+    // each other.
+    const selectionIsTranslated = () => Boolean(translationBlockForSelection());
+
     const translationBlockForSelection = () => {
         if (destroyed || !view) return null;
         if (!['compare', 'translated'].includes(currentTranslationView)) {
@@ -1264,15 +1278,70 @@ export function createInlineMarkdownEditor({
         const start = Math.min(from, to);
         const end = Math.max(from, to);
         if (end <= start) return null;
-        const pair = currentTranslationPairs.find(candidate => (
-            start >= candidate.from && end <= candidate.to
+        return translationBlocksInRange(start, end, start, end);
+    };
+
+    // Every translated block the selection touches, in document order. A
+    // selection that straddles two blocks is two annotations, never one
+    // invented range that spans the gap between them.
+    // The original range a translated selection points at. A selection that
+    // stays inside one sentence resolves to that sentence's original; anything
+    // else resolves to the whole block, because a count mismatch during
+    // translation means the pairing is unknown and a guess would point at the
+    // wrong words.
+    const translationBlocksInRange = (start, end) => {
+        const touched = currentTranslationPairs.filter(candidate => (
+            start < candidate.to && end > candidate.from
         ));
-        if (!pair) return null;
-        return {
-            id: pair.id,
-            from: pair.from,
-            to: pair.to,
-        };
+        if (!touched.length) return null;
+        return touched.map(candidate => {
+            // The mapper wants one block plus the document its offsets belong
+            // to. The editor's pairs already carry view offsets, so the block
+            // is rebuilt to expose them under both naming schemes and the
+            // rendered document is passed as-is.
+            const view = currentTranslationView === 'translated'
+                ? 'translated'
+                : 'compare';
+            const mapped = mapTranslatedSentenceToSource(
+                {
+                    from: Math.max(start, candidate.from),
+                    to: Math.min(end, candidate.to),
+                },
+                [{
+                    id: candidate.id,
+                    type: candidate.type,
+                    sourceFrom: candidate.sourceFrom,
+                    sourceTo: candidate.sourceTo,
+                    comparisonSourceFrom: candidate.sourceViewFrom,
+                    comparisonSourceTo: candidate.sourceViewTo,
+                    comparisonTranslationFrom: candidate.from,
+                    comparisonTranslationTo: candidate.to,
+                    translatedFrom: candidate.from,
+                    translatedTo: candidate.to,
+                }],
+                view,
+                {
+                    markdown: currentTranslationSourceMarkdown,
+                    comparisonMarkdown: currentTranslationMarkdown,
+                    translatedMarkdown: currentTranslationMarkdown,
+                }
+            );
+            return {
+                id: candidate.id,
+                from: candidate.from,
+                to: candidate.to,
+                sourceFrom: mapped?.from ?? candidate.sourceFrom,
+                sourceTo: mapped?.to ?? candidate.sourceTo,
+                sourceBlockFrom: mapped?.sourceBlockFrom
+                    ?? candidate.sourceFrom,
+                sourceBlockTo: mapped?.sourceBlockTo
+                    ?? candidate.sourceTo,
+                viewSourceFrom: mapped?.viewFrom ?? candidate.sourceViewFrom,
+                viewSourceTo: mapped?.viewTo ?? candidate.sourceViewTo,
+                granularity: mapped?.granularity || 'block',
+                sentenceCount: mapped?.sentenceCount || 0,
+            };
+        });
     };
 
     // Which way the original block lies relative to the visible area, so the
@@ -1298,37 +1367,154 @@ export function createInlineMarkdownEditor({
     const applyTranslationSelection = () => {
         translationSelectionScheduled = false;
         if (destroyed || !view) return;
-        const block = translationBlockForSelection();
+        const blocks = translationBlockForSelection();
+        // Only the original side is marked, and only the part of it the
+        // selection resolved to. A bullet inside a list marks that bullet, not
+        // its neighbours. The first block is the mark's anchor: a selection
+        // that straddles blocks has no single span to draw.
+        const first = blocks?.[0];
         view.dispatch({
-            effects: setTranslationSelection.of(block?.id || null),
+            effects: setTranslationSelection.of(first
+                ? {
+                    id: first.id,
+                    from: first.viewSourceFrom,
+                    to: first.viewSourceTo,
+                }
+                : null),
         });
+        const selection = rootSelectionFor(parent);
+        const anchor = selectionAnchor(selection, view.dom, null);
+        const resolved = blocks ? resolveSourceBlocks(blocks) : null;
         if (currentTranslationView === 'compare') {
             translationSourcePopup.close();
+            if (!resolved) {
+                closeTranslationSourceActions();
+                return;
+            }
+            translationActionsOpen = true;
+            annotationPopup.openSourceBlockActions({
+                anchor,
+                annotation: resolved.annotation,
+                annotationUnavailable: resolved.annotationUnavailable,
+                selectionContext: resolved.selectionContext,
+                blockCount: resolved.blocks.length,
+            });
             return;
         }
-        if (!block) {
+        closeTranslationSourceActions();
+        if (!resolved) {
             translationSourcePopup.close();
             return;
         }
         // The original lives in the source Markdown, which this view is not
         // rendering, so its text comes from the host rather than from the
         // document in the editor.
-        const text = String(
-            translateOriginalBlockText?.(block.id) || ''
-        ).trim();
-        if (!text) {
-            translationSourcePopup.close();
-            return;
-        }
-        const selection = rootSelectionFor(parent);
         translationSourcePopup.open({
-            anchor: selectionAnchor(selection, view.dom, null),
-            // The bubble shows the whole original block, not the selection: the
-            // pairing is block level, so showing a slice of the original would
-            // claim an alignment this data does not have.
-            source: { ...block, text },
-            offscreen: translationSourceDirection(block),
+            anchor,
+            // A selected translated sentence is what the reader sees; the
+            // annotation action, when available, still uses every block.
+            source: {
+                ...resolved.blocks[0],
+                text: resolved.text,
+                blocks: resolved.blocks,
+            },
+            offscreen: translationSourceDirection(resolved.blocks[0]),
+            annotationUnavailable: resolved.annotationUnavailable,
+            onAnnotate: resolved.annotation
+                ? () => {
+                    translationActionsOpen = true;
+                    annotationPopup.openSourceBlockActions({
+                        anchor,
+                        annotation: resolved.annotation,
+                        annotationUnavailable: resolved.annotationUnavailable,
+                        selectionContext: resolved.selectionContext,
+                        blockCount: resolved.blocks.length,
+                    });
+                }
+                : null,
         });
+    };
+
+    // Well under the store's 512-segment limit. That limit stops a corrupt
+    // annotation, not a selection a reader can actually make sense of.
+    const MAX_TRANSLATED_SELECTION_BLOCKS = 8;
+
+    let translationActionsOpen = false;
+    const closeTranslationSourceActions = () => {
+        if (!translationActionsOpen) return;
+        translationActionsOpen = false;
+        // The source-block popup belongs to the translated selection; a new
+        // selection replaces it rather than stacking another one.
+        annotationPopup.close();
+    };
+
+    // The annotation this selection would create: every touched block's whole
+    // original range, with the sentence text kept separately for the reading
+    // bubble. The flag tells the window the ranges are already original, so it
+    // must not map them again.
+    const resolveSourceBlocks = blocks => {
+        if (!blocks.length) return null;
+        const canAnnotate = blocks.length <= MAX_TRANSLATED_SELECTION_BLOCKS;
+        const ranges = [];
+        const displayTexts = [];
+        const annotationTexts = [];
+        for (const block of blocks) {
+            const sourceFrom = Number.isSafeInteger(block.sourceBlockFrom)
+                ? block.sourceBlockFrom
+                : block.sourceFrom;
+            const sourceTo = Number.isSafeInteger(block.sourceBlockTo)
+                ? block.sourceBlockTo
+                : block.sourceTo;
+            if (!Number.isSafeInteger(sourceFrom)
+                || !Number.isSafeInteger(sourceTo)
+                || sourceTo <= sourceFrom) {
+                return null;
+            }
+            ranges.push({ from: sourceFrom, to: sourceTo });
+            const displayRange = {
+                from: block.sourceFrom,
+                to: block.sourceTo,
+            };
+            const annotationRange = { from: sourceFrom, to: sourceTo };
+            const displayText = String(
+                hostTranslateOriginalBlockText?.(block.id, displayRange) || ''
+            ).trim();
+            const annotationText = displayRange.from === annotationRange.from
+                && displayRange.to === annotationRange.to
+                ? displayText
+                : String(
+                    hostTranslateOriginalBlockText?.(block.id, annotationRange)
+                    || ''
+                ).trim();
+            if (!displayText || !annotationText) return null;
+            displayTexts.push(displayText);
+            annotationTexts.push(annotationText);
+        }
+        const text = displayTexts.join('\n\n');
+        const annotationText = annotationTexts.join('\n\n');
+        return {
+            blocks,
+            text,
+            annotation: canAnnotate
+                ? {
+                    source: 'markdown',
+                    type: 'highlight',
+                    comment: '',
+                    color: '#ffd400',
+                    text: annotationText,
+                    ranges,
+                }
+                : null,
+            annotationUnavailable: canAnnotate
+                ? null
+                : t('annotation.sourceBlockUnavailable', {
+                    count: MAX_TRANSLATED_SELECTION_BLOCKS,
+                }),
+            selectionContext: {
+                side: 'source',
+                rangesAreSource: true,
+            },
+        };
     };
 
     const scheduleTranslationSelectionUpdate = () => {
@@ -1382,6 +1568,11 @@ export function createInlineMarkdownEditor({
             currentSourceActionRanges
         )) {
             openSelectionKey = null;
+            // A translated-side selection has its own answer: the reading mark
+            // in Bilingual and the bubble in Translation. Explaining that
+            // annotations need the original would contradict the action that
+            // same selection now offers.
+            if (selectionIsTranslated()) return;
             // A translation-only view has no source text anywhere; only a
             // comparison selection of translated text needs explaining.
             if (!currentSourceActionRanges?.length) {
@@ -1634,6 +1825,7 @@ export function createInlineMarkdownEditor({
     let currentSourceActionRanges = null;
     let currentTranslationPairs = [];
     let currentTranslationMarkdown = '';
+    let currentTranslationSourceMarkdown = '';
     // Reused so that "no overlay" keeps one identity and the rendering field
     // can skip the rebuild it would otherwise trigger on every model update.
     let sharedEmptyAnnotationOverlay = null;
@@ -1658,8 +1850,17 @@ export function createInlineMarkdownEditor({
         translationFailures,
         translationPairs,
         translationView = 'original',
+        sourceMarkdown = '',
+        translateOriginalBlockText: nextTranslateOriginalBlockText,
+        revealTranslationSource: nextRevealTranslationSource,
     }) => {
         activateDOMGlobals(ownerWindow);
+        if (typeof nextTranslateOriginalBlockText === 'function') {
+            hostTranslateOriginalBlockText = nextTranslateOriginalBlockText;
+        }
+        if (typeof nextRevealTranslationSource === 'function') {
+            hostRevealTranslationSource = nextRevealTranslationSource;
+        }
         if (translationHighlightTimer !== null) {
             ownerWindow.clearTimeout?.(translationHighlightTimer);
             translationHighlightTimer = null;
@@ -1719,19 +1920,43 @@ export function createInlineMarkdownEditor({
             ? normalizeSourceActionRanges(sourceActionRanges, value.length)
             : null;
         currentTranslationPairs = Array.isArray(translationPairs)
-            ? translationPairs.flatMap(pair => (
-                Number.isSafeInteger(pair?.translatedFrom)
-                    && Number.isSafeInteger(pair?.translatedTo)
-                    && pair.translatedTo > pair.translatedFrom
-                    ? [{
-                        id: String(pair.id || ''),
-                        from: pair.translatedFrom,
-                        to: pair.translatedTo,
-                    }]
-                    : []
-            ))
+            ? translationPairs.flatMap(pair => {
+                if (!Number.isSafeInteger(pair?.translatedFrom)
+                    || !Number.isSafeInteger(pair?.translatedTo)
+                    || pair.translatedTo <= pair.translatedFrom) {
+                    return [];
+                }
+                const sourceKnown = Number.isSafeInteger(pair.sourceFrom)
+                    && Number.isSafeInteger(pair.sourceTo)
+                    && pair.sourceTo > pair.sourceFrom;
+                const sourceViewKnown = Number.isSafeInteger(pair.sourceViewFrom)
+                    && Number.isSafeInteger(pair.sourceViewTo)
+                    && pair.sourceViewTo > pair.sourceViewFrom;
+                const comparisonSourceFallback = translationView === 'compare'
+                    && sourceKnown;
+                return [{
+                    id: String(pair.id || ''),
+                    type: pair.type,
+                    from: pair.translatedFrom,
+                    to: pair.translatedTo,
+                    ...(sourceKnown
+                        ? { sourceFrom: pair.sourceFrom, sourceTo: pair.sourceTo }
+                        : {}),
+                    ...(sourceViewKnown || comparisonSourceFallback
+                        ? {
+                            sourceViewFrom: sourceViewKnown
+                                ? pair.sourceViewFrom
+                                : pair.sourceFrom,
+                            sourceViewTo: sourceViewKnown
+                                ? pair.sourceViewTo
+                                : pair.sourceTo,
+                        }
+                        : {}),
+                }];
+            })
             : [];
         currentTranslationMarkdown = value;
+        currentTranslationSourceMarkdown = String(sourceMarkdown || '');
         currentTranslationView = ['compare', 'translated'].includes(translationView)
             ? translationView
             : 'original';
@@ -1764,7 +1989,27 @@ export function createInlineMarkdownEditor({
                 : []),
             setTranslationRanges.of(translationRanges || NO_EDITOR_RANGES),
             setTranslationFailures.of(translationFailures || NO_EDITOR_RANGES),
-            setTranslationPairs.of(translationPairs || NO_EDITOR_RANGES),
+            setTranslationPairs.of(currentTranslationPairs.map(pair => {
+                const sourceFrom = translationView === 'compare'
+                    ? pair.sourceViewFrom
+                    : translationView === 'original'
+                        ? pair.sourceFrom
+                        : null;
+                const sourceTo = translationView === 'compare'
+                    ? pair.sourceViewTo
+                    : translationView === 'original'
+                        ? pair.sourceTo
+                        : null;
+                return {
+                    id: pair.id,
+                    type: pair.type,
+                    ...(Number.isSafeInteger(sourceFrom)
+                        ? { sourceFrom, sourceTo }
+                        : {}),
+                    translatedFrom: pair.from,
+                    translatedTo: pair.to,
+                };
+            })),
             setTranslationPairHighlight.of(null),
             setTranslationSelection.of(null),
             setDocumentSearchHighlight.of({

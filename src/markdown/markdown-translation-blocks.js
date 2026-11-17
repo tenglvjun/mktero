@@ -582,12 +582,182 @@ export function mapComparisonRangeToSource(range, blockRanges) {
     };
 }
 
-// The whole original block a translated-side selection belongs to. Both the
-// Bilingual and the Translation view use this one function, so a selection of
-// any length inside a block gets the same answer: block granularity, never a
-// proportional slice of the original. A translated block has no character-level
-// counterpart, so interpolating one would land inside Markdown syntax or half a
-// sentence and would still pass the annotation text check.
+// A translated selection is paired at block level first, then narrowed to a
+// sentence when both sides can be split into the same number of units. The
+// result carries canonical source coordinates for text and annotation, plus
+// comparison-view source coordinates for decorations. A count mismatch returns
+// the full block rather than guessing a sentence order.
+// A sentence ends at punctuation. The trailing boundary is deliberately not
+// required to be whitespace: Chinese writes the next sentence directly after
+// the full stop (。第二句), so requiring a space here would treat a whole
+// Chinese paragraph as one sentence and make every count mismatch.
+const SENTENCE_END = /[.!?\u3002\uff01\uff1f]+["'\u201d\u2019)\]]*/gu;
+// A period inside "et al.", "Fig. 2", "e.g.", or "0.684" is not a sentence end.
+// Splitting there would inflate the English count and make every paragraph a
+// mismatch, which would quietly disable sentence-level mapping everywhere.
+// Only the character immediately before the period matters: "0.711." ends a
+// sentence because that period follows another period, not a digit.
+const ABBREVIATION_BEFORE = /\b(?:et\s+al|e\.g|i\.e|fig|figs|eq|eqs|ref|refs|sec|secs|no|nos|vs|cf|approx|ca|resp|dr|prof|st|vol|vols|pp|ch|tab)$/iu;
+const DECIMAL_BEFORE = /\d$/u;
+const NEXT_WORD = /^\s*\p{Ll}/u;
+
+export function splitTranslatedBlockSentences(text, { listItems = false } = {}) {
+    const source = String(text || '');
+    if (!source.trim()) return [];
+    // List items are their own units: a bullet without a final period is still
+    // one sentence, and merging two bullets would hide the boundary the reader
+    // sees on screen.
+    if (listItems) {
+        const items = [];
+        let offset = 0;
+        for (const line of source.split('\n')) {
+            const start = offset;
+            offset += line.length + 1;
+            if (!line.trim()) continue;
+            items.push({
+                from: start + (line.length - line.trimStart().length),
+                to: start + line.trimEnd().length,
+            });
+        }
+        if (items.length) return items;
+    }
+    const sentences = [];
+    SENTENCE_END.lastIndex = 0;
+    let cursor = 0;
+    let match;
+    while ((match = SENTENCE_END.exec(source)) !== null) {
+        const end = match.index + match[0].length;
+        // A period that follows an abbreviation, a number, or a lowercase word
+        // is not the end of a sentence; keep scanning from the same sentence.
+        if (match[0] === '.') {
+            const before = source.slice(cursor, match.index);
+            // A digit before the period is a decimal unless this period is the
+            // second of a pair ("0.711." ), which is why the check looks at the
+            // character directly before it.
+            const decimal = DECIMAL_BEFORE.test(before)
+                && !DECIMAL_BEFORE.test(before.slice(0, -1).slice(-1));
+            if (decimal
+                || ABBREVIATION_BEFORE.test(before)
+                || NEXT_WORD.test(source.slice(end))) {
+                continue;
+            }
+        }
+        pushSentenceSpan(sentences, source, cursor, end);
+        cursor = end;
+    }
+    pushSentenceSpan(sentences, source, cursor, source.length);
+    return sentences;
+}
+
+function pushSentenceSpan(spans, source, from, to) {
+    const slice = source.slice(from, to);
+    const leading = slice.length - slice.trimStart().length;
+    const trimmedEnd = slice.trimEnd().length;
+    if (!slice.trim()) return;
+    spans.push({
+        from: from + leading,
+        to: from + trimmedEnd,
+    });
+}
+
+// The original sentence a translated sentence belongs to. Both sides are
+// split the same way; when the counts match, sentence N maps to sentence N.
+// When they do not, the pairing is unknown and the caller falls back to the
+// whole block rather than guessing an order that would point at the wrong
+// words.
+export function mapTranslatedSentenceToSource(range, blockRanges, view, {
+    markdown = '',
+    comparisonMarkdown = '',
+    translatedMarkdown = '',
+} = {}) {
+    const translatedRange = normalizeDocumentRange(range);
+    if (!translatedRange || !Array.isArray(blockRanges)) return null;
+    const side = view === 'translated' ? 'translated' : 'comparison';
+    const viewMarkdown = side === 'translated'
+        ? String(translatedMarkdown || '')
+        : String(comparisonMarkdown || '');
+    const bounds = block => (
+        side === 'translated'
+            ? { from: block.translatedFrom, to: block.translatedTo }
+            : {
+                from: block.comparisonTranslationFrom,
+                to: block.comparisonTranslationTo,
+            }
+    );
+    const block = blockRanges.find(candidate => {
+        const candidateRange = bounds(candidate);
+        return Number.isSafeInteger(candidateRange.from)
+            && Number.isSafeInteger(candidateRange.to)
+            && candidateRange.to > candidateRange.from
+            && translatedRange.from >= candidateRange.from
+            && translatedRange.to <= candidateRange.to;
+    });
+    if (!block
+        || !Number.isSafeInteger(block.sourceFrom)
+        || !Number.isSafeInteger(block.sourceTo)
+        || block.sourceTo <= block.sourceFrom
+        || !viewMarkdown) {
+        return null;
+    }
+    const listItems = block.type === 'list';
+    const translatedBounds = bounds(block);
+    const translatedSentences = splitTranslatedBlockSentences(
+        viewMarkdown.slice(translatedBounds.from, translatedBounds.to),
+        { listItems }
+    );
+    const sourceSentences = splitTranslatedBlockSentences(
+        String(markdown || '').slice(block.sourceFrom, block.sourceTo),
+        { listItems }
+    );
+    const wholeBlock = {
+        id: block.id,
+        from: block.sourceFrom,
+        to: block.sourceTo,
+        sourceBlockFrom: block.sourceFrom,
+        sourceBlockTo: block.sourceTo,
+        viewFrom: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceFrom)
+            ? block.comparisonSourceFrom
+            : null,
+        viewTo: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceTo)
+            ? block.comparisonSourceTo
+            : null,
+        granularity: 'block',
+        sentenceCount: sourceSentences.length,
+    };
+    if (!translatedSentences.length
+        || translatedSentences.length !== sourceSentences.length) {
+        // A count mismatch means the two sides were merged or split during
+        // translation. Reporting a position from one side to the other would
+        // point at words that do not correspond.
+        return wholeBlock;
+    }
+    const index = translatedSentences.findIndex(sentence => (
+        translatedRange.from >= sentence.from + translatedBounds.from
+        && translatedRange.to <= sentence.to + translatedBounds.from
+    ));
+    if (index < 0) return wholeBlock;
+    const sentence = sourceSentences[index];
+    return {
+        id: block.id,
+        from: block.sourceFrom + sentence.from,
+        to: block.sourceFrom + sentence.to,
+        sourceBlockFrom: block.sourceFrom,
+        sourceBlockTo: block.sourceTo,
+        viewFrom: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceFrom)
+            ? block.comparisonSourceFrom + sentence.from
+            : null,
+        viewTo: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceFrom)
+            ? block.comparisonSourceFrom + sentence.to
+            : null,
+        granularity: 'sentence',
+        sentenceCount: sourceSentences.length,
+    };
+}
+
 export function mapTranslatedRangeToSourceBlock(range, blockRanges, view) {
     const translatedRange = normalizeDocumentRange(range);
     if (!translatedRange || !Array.isArray(blockRanges)) return null;

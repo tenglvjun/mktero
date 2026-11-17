@@ -1486,3 +1486,13 @@ test('styles figure references, previews, and target highlights', () => {
     );
     assert.match(highlight, /animation:\s*mktero-figure-target-highlight 3s ease-out/);
 });
+
+test('positions the translation source popup above the clipped reader host', () => {
+    const popup = ruleBody('.mktero-translation-source-popup');
+    assert.match(popup, /position:\s*fixed/);
+    assert.match(popup, /z-index:\s*900/);
+
+    // The host clips its overflow; only a fixed popup escapes that clip.
+    const host = ruleBody('.markdown-editor-host');
+    assert.match(host, /overflow:\s*hidden/);
+});

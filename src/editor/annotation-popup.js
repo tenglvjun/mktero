@@ -330,6 +330,39 @@ export function createAnnotationPopup(parent, {
     };
     // A compare-mode selection that holds no original text gets no actions.
     // Say why instead of leaving the selection without any response.
+    // A translated-side selection that resolved to a whole original block. The
+    // action creates the annotation on that block, so the reader does not have
+    // to find and re-select the original text themselves.
+    const openSourceBlockActions = ({
+        anchor,
+        annotation,
+        annotationUnavailable = null,
+        selectionContext,
+        blockCount = 1,
+    }) => {
+        if (!anchor || (!annotation && !annotationUnavailable)) return;
+        // This popup owns the selection: whatever was open for the previous one
+        // is replaced, not stacked. The anchored popup keeps a single element,
+        // so an un-closed predecessor could overwrite this content mid-render.
+        close();
+        openPopup({
+            anchor,
+            label: t('annotation.selectionActions'),
+            popupClassName: 'mktero-annotation-popup--actions',
+            dismissOnMouseLeave: false,
+            renderContent({ document, close: closeContent, reposition }) {
+                return createSourceBlockActions(document, annotation, t, {
+                    annotationUnavailable,
+                    blockCount,
+                    createMarkdownAnnotation,
+                    selectionContext,
+                    close: closeContent,
+                    reposition,
+                });
+            },
+        });
+    };
+
     const openSelectionHint = ({ anchor }) => {
         if (!anchor) return;
         cancelScheduledOpen();
@@ -410,6 +443,7 @@ export function createAnnotationPopup(parent, {
         open: openNote,
         openNote,
         openSelection,
+        openSourceBlockActions,
         openSelectionHint,
         openActions,
         scheduleOpenActions,
@@ -1061,6 +1095,88 @@ function focusNoteInput(popup) {
     if (!input) return;
     input.focus();
     input.setSelectionRange?.(input.value.length, input.value.length);
+}
+
+// The only action here is the one this data can support: annotate the whole
+// original block. The bubble may show one corresponding sentence, but the
+// annotation remains anchored to the complete source block.
+function createSourceBlockActions(
+    document,
+    annotation,
+    translate,
+    {
+        blockCount,
+        annotationUnavailable,
+        createMarkdownAnnotation,
+        selectionContext,
+        close,
+        reposition,
+    }
+) {
+    const content = document.createElementNS(XHTML_NAMESPACE, 'div');
+    content.className = [
+        'mktero-annotation-actions',
+        'mktero-markdown-selection-actions',
+    ].join(' ');
+
+    const scope = document.createElementNS(XHTML_NAMESPACE, 'div');
+    scope.className = 'mktero-related-source-scope';
+    scope.textContent = blockCount > 1
+        ? translate('annotation.sourceBlockScopePlural', { count: blockCount })
+        : translate('annotation.sourceBlockScope');
+    content.appendChild(scope);
+
+    if (annotationUnavailable) {
+        const unavailable = document.createElementNS(XHTML_NAMESPACE, 'div');
+        unavailable.className = 'mktero-related-source-unavailable';
+        unavailable.setAttribute('role', 'status');
+        unavailable.textContent = annotationUnavailable;
+        content.appendChild(unavailable);
+        return content;
+    }
+
+    const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
+    actions.className = 'mktero-markdown-selection-toolbar';
+    content.appendChild(actions);
+
+    const error = document.createElementNS(XHTML_NAMESPACE, 'div');
+    error.className = 'mktero-annotation-action-error';
+    error.setAttribute('role', 'status');
+    error.setAttribute('aria-live', 'polite');
+    error.hidden = true;
+
+    const canCreate = typeof createMarkdownAnnotation === 'function';
+    const button = document.createElementNS(XHTML_NAMESPACE, 'button');
+    button.type = 'button';
+    button.className = 'mktero-related-source-create';
+    button.textContent = blockCount > 1
+        ? translate('annotation.sourceBlockHighlightPlural', { count: blockCount })
+        : translate('annotation.sourceBlockHighlight');
+    button.disabled = !canCreate;
+    button.addEventListener('click', async () => {
+        if (!canCreate) return;
+        button.disabled = true;
+        error.hidden = true;
+        try {
+            await createMarkdownAnnotation(annotation, selectionContext);
+            close?.();
+        }
+        catch (cause) {
+            error.textContent = annotationErrorMessage(
+                cause,
+                translate,
+                'annotation.createFailed'
+            );
+            error.hidden = false;
+            reposition?.();
+        }
+        finally {
+            button.disabled = false;
+        }
+    });
+    actions.appendChild(button);
+    content.appendChild(error);
+    return content;
 }
 
 function createAnnotationActions(

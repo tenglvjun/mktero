@@ -15,6 +15,7 @@ import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.j
 import {
     collectMarkdownTranslationBlocks,
     createDocumentTranslationViews,
+    mapSourceRangeToComparison,
 } from '../src/markdown/markdown-translation-blocks.js';
 
 const MARKDOWN_STYLES = readFileSync(
@@ -1050,6 +1051,24 @@ test('translates the document and switches between three reading modes', async (
             editors[0].renderedDocuments.at(-1).markdown,
             '# \u8bba\u6587\n\n\u7ffb\u8bd1\u8fd9\u4e00\u6bb5\u3002'
         );
+        assert.deepEqual(
+            editors[0].renderedDocuments.at(-1).translationPairs,
+            [{
+                id: 'translation-0-0-7-heading',
+                type: 'heading',
+                sourceFrom: 0,
+                sourceTo: 7,
+                translatedFrom: 0,
+                translatedTo: 4,
+            }, {
+                id: 'translation-1-9-34-paragraph',
+                type: 'paragraph',
+                sourceFrom: 9,
+                sourceTo: 34,
+                translatedFrom: 6,
+                translatedTo: 12,
+            }]
+        );
 
         view.render({
             ...translatedModel,
@@ -1126,8 +1145,11 @@ test('translates the document and switches between three reading modes', async (
             editors[0].renderedDocuments.at(-1).translationPairs,
             translatedModel.translationBlockRanges.map(range => ({
                 id: range.id,
-                sourceFrom: range.comparisonSourceFrom,
-                sourceTo: range.comparisonSourceTo,
+                type: range.type,
+                sourceFrom: range.sourceFrom,
+                sourceTo: range.sourceTo,
+                sourceViewFrom: range.comparisonSourceFrom,
+                sourceViewTo: range.comparisonSourceTo,
                 translatedFrom: range.comparisonTranslationFrom,
                 translatedTo: range.comparisonTranslationTo,
             }))
@@ -1183,14 +1205,20 @@ test('translates the document and switches between three reading modes', async (
             editors[0].renderedDocuments.at(-1).translationPairs,
             [{
                 id: 'translation-0-0-7-heading',
+                type: 'heading',
                 sourceFrom: 0,
                 sourceTo: 7,
+                sourceViewFrom: 0,
+                sourceViewTo: 7,
                 translatedFrom: 9,
                 translatedTo: 13,
             }, {
                 id: 'translation-1-9-34-paragraph',
-                sourceFrom: 15,
-                sourceTo: 40,
+                type: 'paragraph',
+                sourceFrom: 9,
+                sourceTo: 34,
+                sourceViewFrom: 15,
+                sourceViewTo: 40,
                 translatedFrom: 42,
                 translatedTo: 48,
             }]
@@ -1914,6 +1942,92 @@ test('offers to retranslate only the translated block changed by a correction', 
     }
 });
 
+test('locates the original sentence in comparison coordinates before switching views', () => {
+    const source = [
+        'Lead paragraph sentence.',
+        '',
+        'Original first sentence. Original second sentence.',
+    ].join('\n');
+    const blocks = collectMarkdownTranslationBlocks(source);
+    const translations = blocks.filter(block => block.translatable).map((block, index) => ({
+        id: block.id,
+        markdown: index === 0
+            ? '\u5f15\u5bfc\u6bb5\u8bd1\u6587\u3002'
+            : '\u7b2c\u4e00\u53e5\u8bd1\u6587\u3002\u7b2c\u4e8c\u53e5\u8bd1\u6587\u3002',
+    }));
+    const views = createDocumentTranslationViews(source, blocks, translations);
+    const target = views.blockRanges[1];
+    const sentenceFrom = target.sourceFrom + 'Original first sentence. '.length;
+    const sentenceTo = target.sourceTo;
+    const expected = mapSourceRangeToComparison(
+        { from: sentenceFrom, to: sentenceTo },
+        views.blockRanges
+    );
+    assert.ok(expected);
+
+    const updates = [];
+    const scrolled = [];
+    const flashed = [];
+    const switches = [];
+    const model = createModel({
+        status: 'ready',
+        progress: 100,
+        markdown: source,
+        sourceKind: 'markdown',
+        translationStatus: 'ready',
+        translationView: 'translated',
+        translationBlocks: translations,
+        translationFailedBlocks: [],
+        translationBlockRanges: views.blockRanges,
+        translatedMarkdown: views.translatedMarkdown,
+        comparisonMarkdown: views.comparisonMarkdown,
+        comparisonSourceRanges: views.comparisonSourceRanges,
+        comparisonTranslationRanges: views.comparisonTranslationRanges,
+    });
+    model.onSetTranslationView = view => {
+        // The presenter renders synchronously inside this callback, so the
+        // reveal target must already be on the model when it fires.
+        switches.push([view, model.revealMarkdownOffset, model.revealMarkdownTo]);
+        model.translationView = view;
+        tabView.render(model);
+    };
+    const { view: tabView } = createView(model, {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            const setDocument = editor.setDocument.bind(editor);
+            editor.setDocument = documentUpdate => {
+                updates.push(documentUpdate);
+                setDocument(documentUpdate);
+            };
+            const scrollToOffset = editor.scrollToOffset.bind(editor);
+            editor.scrollToOffset = offset => {
+                scrolled.push(offset);
+                scrollToOffset(offset);
+            };
+            editor.flashRange = (from, to) => flashed.push([from, to]);
+            return editor;
+        },
+    });
+
+    try {
+        updates.at(-1).revealTranslationSource({
+            id: target.id,
+            from: target.translatedFrom,
+            to: target.translatedTo,
+            sourceFrom: sentenceFrom,
+            sourceTo: sentenceTo,
+            sourceBlockFrom: target.sourceFrom,
+            sourceBlockTo: target.sourceTo,
+        });
+        assert.deepEqual(switches, [['compare', expected.from, expected.to]]);
+        assert.ok(scrolled.includes(expected.from));
+        assert.deepEqual(flashed, [[expected.from, expected.to]]);
+    }
+    finally {
+        tabView.destroy();
+    }
+});
+
 test('updates Markdown and PDF annotations as one editor document', () => {
     const updates = [];
     const sourceMap = [{
@@ -1965,6 +2079,7 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         translationFailures: [],
         translationPairs: [],
         translationView: 'original',
+        sourceMarkdown: 'Important result.',
         translateOriginalBlockText: updates[0].translateOriginalBlockText,
         revealTranslationSource: updates[0].revealTranslationSource,
     }]);
@@ -10990,4 +11105,74 @@ test('localizes the notes column and annotation segment in Simplified Chinese', 
     finally {
         view.destroy();
     }
+});
+
+test('saves a translated selection as its original block without remapping it', async () => {
+    const source = 'Original paragraph here.';
+    const translated = '\u8fd9\u91cc\u662f\u8bd1\u6587\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown,
+        translationView: 'compare',
+        translationBlockRanges: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            comparisonSourceFrom: 0,
+            comparisonSourceTo: source.length,
+            comparisonTranslationFrom: translatedFrom,
+            comparisonTranslationTo: markdown.length,
+        }],
+    });
+    view.render(model);
+
+    // The editor resolved the translated selection to the whole original block
+    // and read the original text for it. The window must save exactly that.
+    await editorOptions.createMarkdownAnnotation({
+        text: source,
+        comment: '',
+        color: '#ffd400',
+        ranges: [{ from: 0, to: source.length }],
+    }, { side: 'source', rangesAreSource: true });
+
+    assert.equal(created.length, 1);
+    assert.deepEqual(created[0].ranges, [{ from: 0, to: source.length }]);
+    assert.equal(created[0].text, source);
+    view.destroy();
+});
+
+test('still refuses a translated-side draft that was not resolved to source', async () => {
+    const source = 'Original paragraph here.';
+    const translated = '\u8fd9\u91cc\u662f\u8bd1\u6587\u3002';
+    const markdown = `${source}\n\n${translated}`;
+    const translatedFrom = markdown.indexOf(translated);
+    const { view, model, created, editorOptions } = createAnnotationWindow({
+        markdown,
+        translationView: 'compare',
+        translationBlockRanges: [{
+            id: 'translation-0',
+            sourceFrom: 0,
+            sourceTo: source.length,
+            comparisonSourceFrom: 0,
+            comparisonSourceTo: source.length,
+            comparisonTranslationFrom: translatedFrom,
+            comparisonTranslationTo: markdown.length,
+        }],
+    });
+    view.render(model);
+
+    // No flag: this is a translated-side range that never reached the source,
+    // so it must be refused rather than saved against the wrong text.
+    await assert.rejects(
+        () => editorOptions.createMarkdownAnnotation({
+            text: '\u8fd9\u91cc',
+            comment: '',
+            color: '#ffd400',
+            ranges: [{ from: translatedFrom, to: translatedFrom + 2 }],
+        }, { side: 'translation' }),
+        /original text/
+    );
+    assert.equal(created.length, 0);
+    view.destroy();
 });
