@@ -3365,8 +3365,14 @@ blockquote.mktero-note,
     box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 48%, transparent);
 }
 
-/* The block a current selection maps to. It holds while the selection lives,
-   so it reads as "this is the original you are holding", not as a jump. */
+/* The sentence-level selection mark is character-ranged; the line class is
+   retained only for full-line compatibility and list-row affordances. */
+.markdown-editor-host > .cm-editor
+    .cm-mktero-translation-pair-selected-text {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
 .markdown-editor-host > .cm-editor
     .cm-mktero-translation-pair.is-translation-pair-selected {
     background: color-mix(in srgb, var(--accent) 12%, var(--reader-background));

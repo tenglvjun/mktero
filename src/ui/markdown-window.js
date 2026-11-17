@@ -7868,10 +7868,10 @@ class MarkdownTabView {
         return host;
     }
 
-    // The original text of a translated block, for the reading view that does
-    // not render the source. Block granularity is the whole contract: the
-    // translated and source sides have no character-level counterparts, so a
-    // slice of the original would misrepresent the pairing.
+    // The original text behind the selected translated sentence. The canonical
+    // source range is used even in the Translation view, where the source is
+    // not rendered; a missing range refuses the bubble rather than guessing a
+    // neighboring block.
     originalBlockTextFor(blockID, requested = null) {
         const id = String(blockID || '');
         if (!id) return '';
@@ -7904,11 +7904,23 @@ class MarkdownTabView {
     // reading position in one model update, so the reader does not see an
     // intermediate state.
     revealTranslationSource(block) {
-        const from = Number(block?.from);
+        const from = Number(
+            block?.comparisonSourceFrom
+            ?? block?.sourceViewFrom
+            ?? block?.from
+        );
         if (!Number.isFinite(from)) return;
-        const to = Number(block?.to);
+        const to = Number(
+            block?.comparisonSourceTo
+            ?? block?.sourceViewTo
+            ?? block?.to
+        );
         if (typeof this.model.onSetTranslationView !== 'function') return;
         this.model.onSetTranslationView('compare');
+        this.model.revealMarkdownOffset = from;
+        if (Number.isFinite(to) && to > from) {
+            this.model.revealMarkdownTo = to;
+        }
         this.editor?.scrollToOffset?.(from);
         if (Number.isFinite(to) && to > from) {
             this.editor?.flashRange?.(from, to);
@@ -8573,7 +8585,7 @@ function createVisibleTranslationFailures(
     return translationFailureRangesForView(model, view);
 }
 
-function createVisibleTranslationPairs(model, translatedView, comparisonView) {
+export function createVisibleTranslationPairs(model, translatedView, comparisonView) {
     const translatableIDs = new Set(
         (model.translationBlocks || []).map(translation => translation.id)
     );
@@ -8583,19 +8595,20 @@ function createVisibleTranslationPairs(model, translatedView, comparisonView) {
     return (model.translationBlockRanges || []).flatMap(range => {
         const failed = failedIDs.has(range?.id);
         if (!translatedView && !comparisonView && !failed) return [];
-        // Paired ranges are document offsets of the view being rendered. The
-        // Translation view renders translated text only, so it has no source
-        // side to mark; its bubble asks for the original by block id instead.
-        const sourceFrom = comparisonView
+        // Keep canonical source coordinates in every translated view. The
+        // Translation view does not render them, but its bubble and annotation
+        // action still need to resolve back into the source Markdown.
+        const sourceFrom = range?.sourceFrom;
+        const sourceTo = range?.sourceTo;
+        // These coordinates are only for decorations in the current document.
+        // In Bilingual the source side is comparisonMarkdown; in Translation
+        // there is no source side to decorate.
+        const sourceViewFrom = comparisonView
             ? range?.comparisonSourceFrom
-            : !translatedView
-                ? range?.sourceFrom
-                : null;
-        const sourceTo = comparisonView
+            : null;
+        const sourceViewTo = comparisonView
             ? range?.comparisonSourceTo
-            : !translatedView
-                ? range?.sourceTo
-                : null;
+            : null;
         const translatedFrom = translatedView
             ? range?.translatedFrom
             : comparisonView
@@ -8609,6 +8622,9 @@ function createVisibleTranslationPairs(model, translatedView, comparisonView) {
         const validSource = Number.isSafeInteger(sourceFrom)
             && Number.isSafeInteger(sourceTo)
             && sourceTo > sourceFrom;
+        const validSourceView = Number.isSafeInteger(sourceViewFrom)
+            && Number.isSafeInteger(sourceViewTo)
+            && sourceViewTo > sourceViewFrom;
         const validTranslation = Number.isSafeInteger(translatedFrom)
             && Number.isSafeInteger(translatedTo)
             && translatedTo > translatedFrom;
@@ -8619,7 +8635,9 @@ function createVisibleTranslationPairs(model, translatedView, comparisonView) {
         }
         return [{
             id: range.id,
+            type: range.type,
             ...(validSource ? { sourceFrom, sourceTo } : {}),
+            ...(validSourceView ? { sourceViewFrom, sourceViewTo } : {}),
             ...(validTranslation ? { translatedFrom, translatedTo } : {}),
         }];
     });

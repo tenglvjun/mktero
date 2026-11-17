@@ -582,17 +582,11 @@ export function mapComparisonRangeToSource(range, blockRanges) {
     };
 }
 
-// The whole original block a translated-side selection belongs to. Both the
-// Bilingual and the Translation view use this one function, so a selection of
-// any length inside a block gets the same answer: block granularity, never a
-// proportional slice of the original. A translated block has no character-level
-// counterpart, so interpolating one would land inside Markdown syntax or half a
-// sentence and would still pass the annotation text check.
-// Sentence spans inside one block. A translated block often holds several
-// sentences -- a list of bullets, a paragraph with three sentences -- and a
-// reader selecting one of them means that sentence, not the whole block.
-// Sentence-ending punctuation is the only signal both sides share, so this
-// returns the spans and lets the caller decide whether the counts agree.
+// A translated selection is paired at block level first, then narrowed to a
+// sentence when both sides can be split into the same number of units. The
+// result carries canonical source coordinates for text and annotation, plus
+// comparison-view source coordinates for decorations. A count mismatch returns
+// the full block rather than guessing a sentence order.
 // A sentence ends at punctuation. The trailing boundary is deliberately not
 // required to be whitespace: Chinese writes the next sentence directly after
 // the full stop (。第二句), so requiring a space here would treat a whole
@@ -606,7 +600,6 @@ const SENTENCE_END = /[.!?\u3002\uff01\uff1f]+["'\u201d\u2019)\]]*/gu;
 const ABBREVIATION_BEFORE = /\b(?:et\s+al|e\.g|i\.e|fig|figs|eq|eqs|ref|refs|sec|secs|no|nos|vs|cf|approx|ca|resp|dr|prof|st|vol|vols|pp|ch|tab)$/iu;
 const DECIMAL_BEFORE = /\d$/u;
 const NEXT_WORD = /^\s*\p{Ll}/u;
-const LIST_ITEM_PREFIX = /^(?:[-*+]|\d{1,4}[.)])\s+/u;
 
 export function splitTranslatedBlockSentences(text, { listItems = false } = {}) {
     const source = String(text || '');
@@ -720,6 +713,16 @@ export function mapTranslatedSentenceToSource(range, blockRanges, view, {
         id: block.id,
         from: block.sourceFrom,
         to: block.sourceTo,
+        sourceBlockFrom: block.sourceFrom,
+        sourceBlockTo: block.sourceTo,
+        viewFrom: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceFrom)
+            ? block.comparisonSourceFrom
+            : null,
+        viewTo: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceTo)
+            ? block.comparisonSourceTo
+            : null,
         granularity: 'block',
         sentenceCount: sourceSentences.length,
     };
@@ -740,6 +743,16 @@ export function mapTranslatedSentenceToSource(range, blockRanges, view, {
         id: block.id,
         from: block.sourceFrom + sentence.from,
         to: block.sourceFrom + sentence.to,
+        sourceBlockFrom: block.sourceFrom,
+        sourceBlockTo: block.sourceTo,
+        viewFrom: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceFrom)
+            ? block.comparisonSourceFrom + sentence.from
+            : null,
+        viewTo: side === 'comparison'
+            && Number.isSafeInteger(block.comparisonSourceFrom)
+            ? block.comparisonSourceFrom + sentence.to
+            : null,
         granularity: 'sentence',
         sentenceCount: sourceSentences.length,
     };

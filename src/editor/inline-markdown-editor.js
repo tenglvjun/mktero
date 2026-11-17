@@ -1305,8 +1305,11 @@ export function createInlineMarkdownEditor({
                 },
                 [{
                     id: candidate.id,
+                    type: candidate.type,
                     sourceFrom: candidate.sourceFrom,
                     sourceTo: candidate.sourceTo,
+                    comparisonSourceFrom: candidate.sourceViewFrom,
+                    comparisonSourceTo: candidate.sourceViewTo,
                     comparisonTranslationFrom: candidate.from,
                     comparisonTranslationTo: candidate.to,
                     translatedFrom: candidate.from,
@@ -1325,6 +1328,12 @@ export function createInlineMarkdownEditor({
                 to: candidate.to,
                 sourceFrom: mapped?.from ?? candidate.sourceFrom,
                 sourceTo: mapped?.to ?? candidate.sourceTo,
+                sourceBlockFrom: mapped?.sourceBlockFrom
+                    ?? candidate.sourceFrom,
+                sourceBlockTo: mapped?.sourceBlockTo
+                    ?? candidate.sourceTo,
+                viewSourceFrom: mapped?.viewFrom ?? candidate.sourceViewFrom,
+                viewSourceTo: mapped?.viewTo ?? candidate.sourceViewTo,
                 granularity: mapped?.granularity || 'block',
                 sentenceCount: mapped?.sentenceCount || 0,
             };
@@ -1364,8 +1373,8 @@ export function createInlineMarkdownEditor({
             effects: setTranslationSelection.of(first
                 ? {
                     id: first.id,
-                    from: first.sourceFrom,
-                    to: first.sourceTo,
+                    from: first.viewSourceFrom,
+                    to: first.viewSourceTo,
                 }
                 : null),
         });
@@ -1382,6 +1391,7 @@ export function createInlineMarkdownEditor({
             annotationPopup.openSourceBlockActions({
                 anchor,
                 annotation: resolved.annotation,
+                annotationUnavailable: resolved.annotationUnavailable,
                 selectionContext: resolved.selectionContext,
                 blockCount: resolved.blocks.length,
             });
@@ -1397,24 +1407,27 @@ export function createInlineMarkdownEditor({
         // document in the editor.
         translationSourcePopup.open({
             anchor,
-            // The bubble shows the whole original block, not the selection: the
-            // pairing is block level, so showing a slice of the original would
-            // claim an alignment this data does not have.
+            // A selected translated sentence is what the reader sees; the
+            // annotation action, when available, still uses every block.
             source: {
                 ...resolved.blocks[0],
                 text: resolved.text,
                 blocks: resolved.blocks,
             },
             offscreen: translationSourceDirection(resolved.blocks[0]),
-            onAnnotate: () => {
-                translationActionsOpen = true;
-                annotationPopup.openSourceBlockActions({
-                    anchor,
-                    annotation: resolved.annotation,
-                    selectionContext: resolved.selectionContext,
-                    blockCount: resolved.blocks.length,
-                });
-            },
+            annotationUnavailable: resolved.annotationUnavailable,
+            onAnnotate: resolved.annotation
+                ? () => {
+                    translationActionsOpen = true;
+                    annotationPopup.openSourceBlockActions({
+                        anchor,
+                        annotation: resolved.annotation,
+                        annotationUnavailable: resolved.annotationUnavailable,
+                        selectionContext: resolved.selectionContext,
+                        blockCount: resolved.blocks.length,
+                    });
+                }
+                : null,
         });
     };
 
@@ -1432,40 +1445,67 @@ export function createInlineMarkdownEditor({
     };
 
     // The annotation this selection would create: every touched block's whole
-    // original range, with the original text for those ranges. The flag tells
-    // the window the ranges are already original, so it must not map them
-    // again.
+    // original range, with the sentence text kept separately for the reading
+    // bubble. The flag tells the window the ranges are already original, so it
+    // must not map them again.
     const resolveSourceBlocks = blocks => {
         if (!blocks.length) return null;
-        // Checked before any text is read: an over-limit selection offers the
-        // reading mark and the locate action only, and asking the host for a
-        // block's original text for a selection that cannot be annotated would
-        // be work nobody uses.
-        if (blocks.length > MAX_TRANSLATED_SELECTION_BLOCKS) return null;
+        const canAnnotate = blocks.length <= MAX_TRANSLATED_SELECTION_BLOCKS;
         const ranges = [];
+        const displayTexts = [];
+        const annotationTexts = [];
         for (const block of blocks) {
-            if (!Number.isSafeInteger(block.sourceFrom)
-                || !Number.isSafeInteger(block.sourceTo)
-                || block.sourceTo <= block.sourceFrom) {
+            const sourceFrom = Number.isSafeInteger(block.sourceBlockFrom)
+                ? block.sourceBlockFrom
+                : block.sourceFrom;
+            const sourceTo = Number.isSafeInteger(block.sourceBlockTo)
+                ? block.sourceBlockTo
+                : block.sourceTo;
+            if (!Number.isSafeInteger(sourceFrom)
+                || !Number.isSafeInteger(sourceTo)
+                || sourceTo <= sourceFrom) {
                 return null;
             }
-            ranges.push({ from: block.sourceFrom, to: block.sourceTo });
+            ranges.push({ from: sourceFrom, to: sourceTo });
+            const displayRange = {
+                from: block.sourceFrom,
+                to: block.sourceTo,
+            };
+            const annotationRange = { from: sourceFrom, to: sourceTo };
+            const displayText = String(
+                translateOriginalBlockText?.(block.id, displayRange) || ''
+            ).trim();
+            const annotationText = displayRange.from === annotationRange.from
+                && displayRange.to === annotationRange.to
+                ? displayText
+                : String(
+                    translateOriginalBlockText?.(block.id, annotationRange)
+                    || ''
+                ).trim();
+            if (!displayText || !annotationText) return null;
+            displayTexts.push(displayText);
+            annotationTexts.push(annotationText);
         }
-        const text = String(
-            translateOriginalBlockText?.(blocks[0].id, ranges[0]) || ''
-        ).trim();
-        if (!text) return null;
+        const text = displayTexts.join('\n\n');
+        const annotationText = annotationTexts.join('\n\n');
         return {
             blocks,
             text,
-            annotation: {
-                source: 'markdown',
-                type: 'highlight',
-                comment: '',
-                color: '#ffd400',
-                text,
-                ranges,
-            },
+            annotation: canAnnotate
+                ? {
+                    source: 'markdown',
+                    type: 'highlight',
+                    comment: '',
+                    color: '#ffd400',
+                    text: annotationText,
+                    ranges,
+                }
+                : null,
+            annotationUnavailable: canAnnotate
+                ? null
+                : t('annotation.sourceBlockUnavailable', {
+                    count: MAX_TRANSLATED_SELECTION_BLOCKS,
+                }),
             selectionContext: {
                 side: 'source',
                 rangesAreSource: true,
@@ -1877,12 +1917,28 @@ export function createInlineMarkdownEditor({
                 const sourceKnown = Number.isSafeInteger(pair.sourceFrom)
                     && Number.isSafeInteger(pair.sourceTo)
                     && pair.sourceTo > pair.sourceFrom;
+                const sourceViewKnown = Number.isSafeInteger(pair.sourceViewFrom)
+                    && Number.isSafeInteger(pair.sourceViewTo)
+                    && pair.sourceViewTo > pair.sourceViewFrom;
+                const comparisonSourceFallback = translationView === 'compare'
+                    && sourceKnown;
                 return [{
                     id: String(pair.id || ''),
+                    type: pair.type,
                     from: pair.translatedFrom,
                     to: pair.translatedTo,
                     ...(sourceKnown
                         ? { sourceFrom: pair.sourceFrom, sourceTo: pair.sourceTo }
+                        : {}),
+                    ...(sourceViewKnown || comparisonSourceFallback
+                        ? {
+                            sourceViewFrom: sourceViewKnown
+                                ? pair.sourceViewFrom
+                                : pair.sourceFrom,
+                            sourceViewTo: sourceViewKnown
+                                ? pair.sourceViewTo
+                                : pair.sourceTo,
+                        }
                         : {}),
                 }];
             })
@@ -1921,7 +1977,27 @@ export function createInlineMarkdownEditor({
                 : []),
             setTranslationRanges.of(translationRanges || NO_EDITOR_RANGES),
             setTranslationFailures.of(translationFailures || NO_EDITOR_RANGES),
-            setTranslationPairs.of(translationPairs || NO_EDITOR_RANGES),
+            setTranslationPairs.of(currentTranslationPairs.map(pair => {
+                const sourceFrom = translationView === 'compare'
+                    ? pair.sourceViewFrom
+                    : translationView === 'original'
+                        ? pair.sourceFrom
+                        : null;
+                const sourceTo = translationView === 'compare'
+                    ? pair.sourceViewTo
+                    : translationView === 'original'
+                        ? pair.sourceTo
+                        : null;
+                return {
+                    id: pair.id,
+                    type: pair.type,
+                    ...(Number.isSafeInteger(sourceFrom)
+                        ? { sourceFrom, sourceTo }
+                        : {}),
+                    translatedFrom: pair.from,
+                    translatedTo: pair.to,
+                };
+            })),
             setTranslationPairHighlight.of(null),
             setTranslationSelection.of(null),
             setDocumentSearchHighlight.of({

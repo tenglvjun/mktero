@@ -1050,6 +1050,24 @@ test('translates the document and switches between three reading modes', async (
             editors[0].renderedDocuments.at(-1).markdown,
             '# \u8bba\u6587\n\n\u7ffb\u8bd1\u8fd9\u4e00\u6bb5\u3002'
         );
+        assert.deepEqual(
+            editors[0].renderedDocuments.at(-1).translationPairs,
+            [{
+                id: 'translation-0-0-7-heading',
+                type: 'heading',
+                sourceFrom: 0,
+                sourceTo: 7,
+                translatedFrom: 0,
+                translatedTo: 4,
+            }, {
+                id: 'translation-1-9-34-paragraph',
+                type: 'paragraph',
+                sourceFrom: 9,
+                sourceTo: 34,
+                translatedFrom: 6,
+                translatedTo: 12,
+            }]
+        );
 
         view.render({
             ...translatedModel,
@@ -1126,8 +1144,11 @@ test('translates the document and switches between three reading modes', async (
             editors[0].renderedDocuments.at(-1).translationPairs,
             translatedModel.translationBlockRanges.map(range => ({
                 id: range.id,
-                sourceFrom: range.comparisonSourceFrom,
-                sourceTo: range.comparisonSourceTo,
+                type: range.type,
+                sourceFrom: range.sourceFrom,
+                sourceTo: range.sourceTo,
+                sourceViewFrom: range.comparisonSourceFrom,
+                sourceViewTo: range.comparisonSourceTo,
                 translatedFrom: range.comparisonTranslationFrom,
                 translatedTo: range.comparisonTranslationTo,
             }))
@@ -1183,14 +1204,20 @@ test('translates the document and switches between three reading modes', async (
             editors[0].renderedDocuments.at(-1).translationPairs,
             [{
                 id: 'translation-0-0-7-heading',
+                type: 'heading',
                 sourceFrom: 0,
                 sourceTo: 7,
+                sourceViewFrom: 0,
+                sourceViewTo: 7,
                 translatedFrom: 9,
                 translatedTo: 13,
             }, {
                 id: 'translation-1-9-34-paragraph',
-                sourceFrom: 15,
-                sourceTo: 40,
+                type: 'paragraph',
+                sourceFrom: 9,
+                sourceTo: 34,
+                sourceViewFrom: 15,
+                sourceViewTo: 40,
                 translatedFrom: 42,
                 translatedTo: 48,
             }]

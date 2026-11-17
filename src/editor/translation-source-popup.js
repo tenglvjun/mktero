@@ -3,9 +3,10 @@ import { createLocalization } from '../i18n/localization.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
-// The original text behind a translated block, for the view where the original
-// is not on screen. Bilingual reading has the original beside the translation,
-// so it marks that block instead of repeating its text in a floating panel.
+// The original text behind the selected translated sentence, for the view where
+// the original is not on screen. Bilingual reading has the original beside the
+// translation, so it marks that sentence instead of repeating its text in a
+// floating panel.
 export function createTranslationSourcePopup(parent, {
     localization = createLocalization(),
     revealSource = null,
@@ -18,7 +19,13 @@ export function createTranslationSourcePopup(parent, {
     });
 
     return {
-        open({ anchor, source, offscreen = null, onAnnotate = null }) {
+        open({
+            anchor,
+            source,
+            offscreen = null,
+            onAnnotate = null,
+            annotationUnavailable = null,
+        }) {
             const text = String(source?.text || '').trim();
             if (!anchor || !text) {
                 anchoredPopup.close();
@@ -41,7 +48,8 @@ export function createTranslationSourcePopup(parent, {
                         offscreen,
                         typeof onAnnotate === 'function'
                             ? () => onAnnotate(source)
-                            : null
+                            : null,
+                        annotationUnavailable
                     );
                 },
             });
@@ -52,7 +60,15 @@ export function createTranslationSourcePopup(parent, {
     };
 }
 
-function createContent(document, text, reveal, t, offscreen, annotate) {
+function createContent(
+    document,
+    text,
+    reveal,
+    t,
+    offscreen,
+    annotate,
+    annotationUnavailable
+) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
     content.className = 'mktero-translation-source';
 
@@ -80,12 +96,19 @@ function createContent(document, text, reveal, t, offscreen, annotate) {
     body.textContent = text;
     content.appendChild(body);
 
+    if (annotationUnavailable) {
+        const unavailable = document.createElementNS(XHTML_NAMESPACE, 'div');
+        unavailable.className = 'mktero-translation-source-unavailable';
+        unavailable.setAttribute('role', 'status');
+        unavailable.textContent = annotationUnavailable;
+        content.appendChild(unavailable);
+    }
+
     const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
     actions.className = 'mktero-translation-source-actions';
 
-    // Annotating the original block is the action this pairing supports: the
-    // reader keeps reading the translation and the annotation still lands on
-    // the source the PDF can locate.
+    // The annotation covers the whole original block even though the bubble
+    // shows only the corresponding sentence selected for reading.
     if (annotate) {
         const create = document.createElementNS(XHTML_NAMESPACE, 'button');
         create.type = 'button';

@@ -1721,19 +1721,38 @@ function decorateTranslationPairRange(
         ? state.doc.lineAt(Math.max(selectedRange.from, selectedRange.to - 1)).number
         : -1;
     for (let lineNumber = lineFrom; lineNumber <= lineTo; lineNumber++) {
+        const line = state.doc.line(lineNumber);
         const selected = lineNumber >= selectedFrom && lineNumber <= selectedTo;
+        const selectedLine = selected
+            && selectedRange.from <= line.from
+            && selectedRange.to >= line.to;
         decorations.push(Decoration.line({
             class: [
                 'cm-mktero-translation-pair',
                 `cm-mktero-translation-pair-${side}`,
                 highlighted ? 'is-translation-pair-active' : '',
-                selected ? 'is-translation-pair-selected' : '',
+                selectedLine ? 'is-translation-pair-selected' : '',
             ].filter(Boolean).join(' '),
             attributes: {
                 'data-translation-block-id': pair.id,
-                ...(selected ? { 'data-translation-pair-selected': 'true' } : {}),
+                ...(selectedLine
+                    ? { 'data-translation-pair-selected': 'true' }
+                    : {}),
             },
-        }).range(state.doc.line(lineNumber).from));
+        }).range(line.from));
+    }
+    if (side === 'source'
+        && selectedRange
+        && selectedRange.from >= 0
+        && selectedRange.to <= state.doc.length
+        && selectedRange.to > selectedRange.from) {
+        decorations.push(Decoration.mark({
+            class: 'cm-mktero-translation-pair-selected-text',
+            attributes: {
+                'data-translation-block-id': pair.id,
+                'data-translation-pair-selected': 'true',
+            },
+        }).range(selectedRange.from, selectedRange.to));
     }
 }
 

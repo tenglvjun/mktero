@@ -336,10 +336,11 @@ export function createAnnotationPopup(parent, {
     const openSourceBlockActions = ({
         anchor,
         annotation,
+        annotationUnavailable = null,
         selectionContext,
         blockCount = 1,
     }) => {
-        if (!anchor || !annotation) return;
+        if (!anchor || (!annotation && !annotationUnavailable)) return;
         // This popup owns the selection: whatever was open for the previous one
         // is replaced, not stacked. The anchored popup keeps a single element,
         // so an un-closed predecessor could overwrite this content mid-render.
@@ -351,6 +352,7 @@ export function createAnnotationPopup(parent, {
             dismissOnMouseLeave: false,
             renderContent({ document, close: closeContent, reposition }) {
                 return createSourceBlockActions(document, annotation, t, {
+                    annotationUnavailable,
                     blockCount,
                     createMarkdownAnnotation,
                     selectionContext,
@@ -1096,15 +1098,15 @@ function focusNoteInput(popup) {
 }
 
 // The only action here is the one this data can support: annotate the whole
-// original block. The pairing has no character-level counterpart, so the
-// wording says the annotation covers the block rather than the exact words the
-// reader selected on the translated side.
+// original block. The bubble may show one corresponding sentence, but the
+// annotation remains anchored to the complete source block.
 function createSourceBlockActions(
     document,
     annotation,
     translate,
     {
         blockCount,
+        annotationUnavailable,
         createMarkdownAnnotation,
         selectionContext,
         close,
@@ -1123,6 +1125,15 @@ function createSourceBlockActions(
         ? translate('annotation.sourceBlockScopePlural', { count: blockCount })
         : translate('annotation.sourceBlockScope');
     content.appendChild(scope);
+
+    if (annotationUnavailable) {
+        const unavailable = document.createElementNS(XHTML_NAMESPACE, 'div');
+        unavailable.className = 'mktero-related-source-unavailable';
+        unavailable.setAttribute('role', 'status');
+        unavailable.textContent = annotationUnavailable;
+        content.appendChild(unavailable);
+        return content;
+    }
 
     const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
     actions.className = 'mktero-markdown-selection-toolbar';
