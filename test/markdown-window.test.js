@@ -1221,6 +1221,7 @@ test('translates the document and switches between three reading modes', async (
                 sourceViewTo: 40,
                 translatedFrom: 42,
                 translatedTo: 48,
+                sourceFallback: true,
             }]
         );
 
@@ -11266,6 +11267,76 @@ test('saves a translated selection as its original block without remapping it', 
     assert.deepEqual(created[0].ranges, [{ from: 0, to: source.length }]);
     assert.equal(created[0].text, source);
     view.destroy();
+});
+
+test('a whole-block annotation immediately appears in Translation and keeps its identity across views', async () => {
+    const markdown = 'A rather long introduction.\n\nThe annotated paragraph.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const translations = blocks.map(({ id }, i) => ({ id, markdown: i ? '注释段。' : '引言。' }));
+    const views = createDocumentTranslationViews(markdown, blocks, translations);
+    const block = views.blockRanges[1];
+    const sourceRange = { from: block.sourceFrom, to: block.sourceTo };
+    const quote = markdown.slice(sourceRange.from, sourceRange.to);
+    const model = createModel({
+        status: 'ready', markdown, ...views, translationView: 'translated', translationStatus: 'ready',
+        translationBlockRanges: views.blockRanges, translationBlocks: translations,
+        onCreateMarkdownAnnotation: draft => ({ ...draft, id: 'ann-1', source: 'markdown', type: 'highlight' }),
+    });
+    let rendered, actions;
+    const offsets = [];
+    const { view, shadow } = createView(model, {}, { editorFactory(options) {
+        actions = options;
+        return { ...createTestInlineEditor(options), setDocument(doc) { rendered = doc; },
+            scrollToOffset(offset) { offsets.push(offset); } };
+    } });
+    try {
+        await actions.createMarkdownAnnotation({ text: quote, ranges: [sourceRange], color: '#ffd400' },
+            { side: 'source', rangesAreSource: true });
+        for (const [mode, from, to] of [
+            ['translated', block.translatedFrom, block.translatedTo],
+            ['original', sourceRange.from, sourceRange.to],
+            ['compare', block.comparisonSourceFrom, block.comparisonSourceTo],
+            ['translated', block.translatedFrom, block.translatedTo],
+        ]) {
+            if (rendered.translationView !== mode) view.render({ ...model, translationView: mode });
+            const { matched } = rendered.annotationOverlay;
+            assert.equal(matched.length, 1, mode);
+            assert.equal(matched[0].id, 'ann-1');
+            assert.deepEqual(matched[0].ranges, [{ from, to }]);
+            const links = shadow.querySelectorAll('.markdown-note-link');
+            assert.equal(links.length, 1, mode);
+            assert.equal(links[0].getAttribute('data-annotation-id'), 'ann-1');
+            assert.match(links[0].textContent, /The annotated paragraph/);
+            links[0].click();
+            assert.equal(offsets.at(-1), from);
+        }
+        assert.equal(model.annotationOverlay.matched.length, 1);
+        assert.deepEqual(model.annotationOverlay.matched[0].ranges, [sourceRange]);
+    }
+    finally { view.destroy(); }
+});
+
+test('a translated sidebar retains unprojectable annotations without highlighting guessed text', () => {
+    const markdown = 'The sample was retained.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const translations = [{ id: blocks[0].id, markdown: '样本已保留。' }];
+    const views = createDocumentTranslationViews(markdown, blocks, translations);
+    const partial = { id: 'n1', type: 'highlight', text: 'sample', ranges: [{ from: 4, to: 10 }] };
+    const missing = { id: 'n2', type: 'highlight', text: 'other', reason: 'not-found' };
+    const { view, shadow } = createView(createModel({
+        status: 'ready', markdown, ...views, translationView: 'translated', translationStatus: 'ready',
+        translationBlockRanges: views.blockRanges, translationBlocks: translations,
+        annotationOverlay: { matched: [partial], unmatched: [missing] },
+    }));
+    try {
+        assert.equal(view.displayedAnnotationOverlay.matched.length, 0);
+        assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 2);
+        const link = shadow.querySelector('.markdown-note-link[data-annotation-id="n1"]');
+        assert.equal(link.hasAttribute('disabled'), true);
+        assert.match(link.textContent, /sample/);
+        assert.doesNotMatch(link.textContent, /Not found in Markdown/);
+    }
+    finally { view.destroy(); }
 });
 
 test('still refuses a translated-side draft that was not resolved to source', async () => {

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createAnnotationPopup } from '../src/editor/annotation-popup.js';
+import { createTranslationSourcePopup } from '../src/editor/translation-source-popup.js';
+import { createLocalization } from '../src/i18n/localization.js';
 
 function deferred() {
     let resolve;
@@ -34,7 +36,7 @@ function createPopupFixture(options = {}) {
         },
         selectionContext: { side: 'source' },
     });
-    return { dom, document, parent, popup, openSelection };
+    return { dom, document, parent, anchor, popup, openSelection };
 }
 
 const colorButtons = parent => [
@@ -300,6 +302,440 @@ function finishPopup(fixture) {
     fixture.popup.destroy();
     fixture.dom.window.close();
 }
+
+test('locates an offscreen original only on request and keeps the annotation action independent', async () => {
+    const calls = [];
+    const saving = deferred();
+    const fixture = createPopupFixture({
+        createMarkdownAnnotation: (...args) => {
+            calls.push(args);
+            return saving.promise;
+        },
+    });
+    const { anchor, parent, popup } = fixture;
+    const annotation = { text: 'Original passage', ranges: [{ from: 0, to: 16 }] };
+    const selectionContext = { side: 'source', rangesAreSource: true };
+    const open = () => popup.openSourceBlockActions({
+        anchor, annotation, selectionContext,
+        offscreen: 'above',
+        revealSource: (...args) => calls.push({
+            args,
+            closed: !parent.querySelector('[role="dialog"]'),
+        }),
+    });
+
+    open();
+    assert.match(parent.textContent, /above the visible area/);
+    const locate = parent.querySelector('[data-action="locate-source"]');
+    assert.equal(locate.textContent, 'Locate original text');
+    assert.deepEqual(calls, []);
+    locate.click();
+    assert.deepEqual(calls, [{ args: [], closed: true }]);
+
+    open();
+    const nextLocate = parent.querySelector('[data-action="locate-source"]');
+    parent.querySelector('.mktero-related-source-create').click();
+    assert.equal(nextLocate.disabled, true);
+    nextLocate.click();
+    saving.resolve();
+    await flush();
+    assert.deepEqual(calls, [
+        { args: [], closed: true }, [annotation, selectionContext],
+    ]);
+    assert.equal(parent.querySelector('[role="dialog"]'), null);
+    finishPopup(fixture);
+});
+
+test('keeps localized source navigation available above the eight-block annotation limit', () => {
+    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
+    const calls = [];
+    const fixture = createPopupFixture({
+        localization,
+        createMarkdownAnnotation: () => calls.push('annotate'),
+    });
+    const { anchor, parent, popup } = fixture;
+    const reason = localization.t('annotation.sourceBlockUnavailable', { count: 8 });
+    popup.openSourceBlockActions({
+        anchor,
+        blockCount: 9,
+        annotation: null,
+        annotationUnavailable: reason,
+        offscreen: 'below',
+        revealSource: () => calls.push('locate'),
+    });
+
+    const unavailable = parent.querySelector('.mktero-related-source-unavailable');
+    assert.equal(unavailable.textContent, reason);
+    assert.match(parent.textContent, /\u53ef\u89c1\u533a\u57df\u4e0b\u65b9/u);
+    const buttons = [...parent.querySelectorAll('button')];
+    assert.deepEqual(buttons.map(button => button.textContent), ['\u5b9a\u4f4d\u539f\u6587']);
+    assert.deepEqual(calls, []);
+    buttons[0].click();
+    assert.deepEqual(calls, ['locate']);
+    assert.equal(parent.querySelector('[role="dialog"]'), null);
+    finishPopup(fixture);
+});
+
+test('omits offscreen controls without both a direction and a locate callback', () => {
+    const fixture = createPopupFixture();
+    const { anchor, parent, popup } = fixture;
+    const revealSource = () => assert.fail('no navigation was requested');
+    for (const options of [
+        {},
+        { revealSource },
+        { offscreen: 'above' },
+        { offscreen: 'unknown', revealSource },
+    ]) {
+        popup.openSourceBlockActions({
+            anchor, annotation: { text: 'Original' }, ...options,
+        });
+        assert.doesNotMatch(parent.textContent, /visible area/);
+        const buttons = [...parent.querySelectorAll('button')];
+        assert.deepEqual(buttons.map(button => button.textContent), [
+            'Annotate the whole original block',
+        ]);
+    }
+    finishPopup(fixture);
+});
+
+test('full translation shows the original and locates it in Bilingual without a direction', async () => {
+    const dom = new JSDOM('<!doctype html><main><span></span></main>');
+    const parent = dom.window.document.querySelector('main');
+    const calls = [];
+    const popup = createTranslationSourcePopup(parent, {
+        createMarkdownAnnotation: annotation => calls.push(['annotate', annotation]),
+        revealSource: source => calls.push(['locate', source]),
+    });
+    const source = { text: 'Original sentence.' };
+    const annotation = { text: 'Whole original block.' };
+    const open = () => popup.open({
+        anchor: parent.querySelector('span'),
+        source,
+        offscreen: 'above',
+        annotation,
+    });
+    open();
+
+    const original = parent.querySelector('.mktero-translation-source-text');
+    assert.equal(original.textContent, source.text);
+    assert.doesNotMatch(parent.textContent, /visible area/);
+    const buttons = [...parent.querySelectorAll('button')];
+    assert.deepEqual(buttons.map(button => button.textContent), [
+        'Annotate the whole original block', 'Locate in Bilingual',
+    ]);
+    buttons[0].click();
+    await flush();
+    assert.equal(parent.querySelector('[role="dialog"]'), null);
+    open();
+    parent.querySelector('[data-action="locate-source"]').click();
+    assert.deepEqual(calls, [['annotate', annotation], ['locate', source]]);
+    assert.equal(parent.querySelector('[role="dialog"]'), null);
+    popup.destroy();
+    dom.window.close();
+});
+
+function createLegacyPopupFixture(mode, options = {}) {
+    const fixture = createPopupFixture(options);
+    const { parent, anchor, popup } = fixture;
+    const sourcePopup = createTranslationSourcePopup(parent, options);
+    const open = args => (mode === 'bilingual'
+        ? popup.openSourceBlockActions({ anchor, ...args })
+        : sourcePopup.open({ anchor, ...args }));
+    const action = (name, within = parent) => within.querySelector(`[data-action="${name}"]`);
+    const dialog = () => parent.querySelector('[role="dialog"]');
+    return {
+        ...fixture, open, action, dialog, sourcePopup,
+        finish() {
+            sourcePopup.destroy();
+            finishPopup(fixture);
+        },
+    };
+}
+
+for (const mode of ['bilingual', 'translated']) {
+    test(`${mode}: unaligned blocks have independent controls without automatically showing source or requesting AI`, () => {
+        const calls = [];
+        const fixture = createLegacyPopupFixture(mode, {
+            revealSource: () => assert.fail('no exact source to locate'),
+            createMarkdownAnnotation: () => assert.fail('no annotation requested'),
+        });
+        const { open, action, dialog } = fixture;
+        const first = {
+            id: 'first',
+            onShowBlock: () => {
+                calls.push('show first');
+                return 'Original <first> block.';
+            },
+            onEnableAlignment: () => assert.fail('do not request alignment'),
+        };
+        const second = {
+            id: 'second',
+            onShowBlock: () => calls.push('show second'),
+        };
+        open({ legacyActions: [first, second, first] });
+
+        assert.deepEqual(calls, []);
+        const rows = [...dialog().querySelectorAll('[data-translation-block-id]')];
+        assert.deepEqual(rows.map(row => row.dataset.translationBlockId), ['first', 'second']);
+        assert.ok(action('enable-alignment', rows[0]));
+        assert.equal(action('enable-alignment', rows[1]), null);
+        assert.equal(action('locate-source'), null);
+        assert.equal(dialog().querySelector('.mktero-related-source-scope'), null);
+        assert.equal(dialog().querySelector('.mktero-translation-source-text'), null);
+        assert.match(rows[0].textContent, /only this original block to your configured AI provider/);
+        assert.match(rows[0].textContent, /may incur charges.*replaces this block/);
+
+        action('show-source-block', rows[0]).click();
+        assert.equal(rows[0].querySelector('.mktero-translation-source-text').textContent,
+            'Original <first> block.');
+        assert.equal(rows[0].querySelector('first'), null);
+        assert.equal(rows[1].querySelector('.mktero-translation-source-text'), null);
+        action('show-source-block', rows[1]).click();
+        assert.deepEqual(calls, ['show first', 'show second']);
+        assert.equal(fixture.parent.querySelectorAll('[role="dialog"]').length, 1);
+        fixture.finish();
+    });
+
+    test(`${mode}: cancellation ignores a late request and failures can be retried`, async () => {
+        const requests = [];
+        const fixture = createLegacyPopupFixture(mode);
+        const { open, action, dialog } = fixture;
+        open({ legacyActions: [{
+            id: 'first',
+            onShowBlock: () => assert.fail('not viewing source'),
+            onEnableAlignment: ({ signal }) => {
+                const request = deferred();
+                requests.push({ signal, ...request });
+                return request.promise;
+            },
+        }] });
+        const enable = action('enable-alignment');
+        const cancel = action('cancel-alignment');
+        enable.focus();
+        enable.click();
+        enable.click();
+        assert.equal(requests.length, 1);
+        assert.equal(enable.disabled, true);
+        assert.equal(cancel.hidden, false);
+        assert.equal(fixture.document.activeElement, cancel);
+        cancel.click();
+        assert.equal(requests[0].signal.aborted, true);
+        assert.match(dialog().textContent, /Cancelled.*existing translation was kept/);
+        assert.equal(fixture.document.activeElement, enable);
+        enable.click();
+        requests[0].resolve(true);
+        await flush();
+        assert.match(dialog().textContent, /Retranslating this block/);
+        requests[1].reject(new Error('private provider details'));
+        await flush();
+        assert.match(dialog().textContent, /Could not align this block.*existing translation was kept/);
+        assert.doesNotMatch(dialog().textContent, /private provider details/);
+        assert.equal(enable.textContent, 'Retry sentence alignment');
+        assert.equal(enable.disabled, false);
+        assert.equal(cancel.hidden, true);
+        enable.click();
+        requests[2].resolve(true);
+        await flush();
+        assert.match(dialog().textContent, /Sentence alignment enabled for this block/);
+        assert.equal(enable.disabled, true);
+        enable.click();
+        assert.equal(requests.length, 3);
+        fixture.finish();
+    });
+
+    test(`${mode}: Escape aborts a pending block and the next popup ignores its failure`, async () => {
+        const request = deferred();
+        let signal;
+        const fixture = createLegacyPopupFixture(mode);
+        const { dom, open, action, dialog } = fixture;
+        open({ legacyActions: [{
+            id: 'old',
+            onShowBlock: () => {},
+            onEnableAlignment: options => {
+                signal = options.signal;
+                return request.promise;
+            },
+        }] });
+        action('enable-alignment').click();
+        dialog().dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+            key: 'Escape', bubbles: true,
+        }));
+        assert.equal(signal.aborted, true);
+        assert.equal(dialog(), null);
+        const nextAnchor = fixture.document.createElement('span');
+        fixture.parent.append(nextAnchor);
+        open({ anchor: nextAnchor, legacyActions: [{ id: 'new', onShowBlock() {} }] });
+        request.reject(new Error('request aborted'));
+        await flush();
+        assert.equal(dialog().querySelector('[data-translation-block-id]').dataset.translationBlockId, 'new');
+        assert.doesNotMatch(dialog().textContent, /Could not align/);
+        fixture.finish();
+    });
+}
+
+test('refreshing a bilingual selection updates source actions without interrupting its pending alignment', async () => {
+    const fixture = createLegacyPopupFixture('bilingual');
+    const { open, action, dialog } = fixture;
+    const request = deferred();
+    const calls = [];
+    let signal;
+    const legacyActions = [{
+        id: 'legacy',
+        onShowBlock: () => assert.fail('stale original callback'),
+        onEnableAlignment: options => {
+            signal = options.signal;
+            return request.promise;
+        },
+    }];
+    open({ legacyActions });
+    const initialDialog = dialog();
+    action('enable-alignment').click();
+    open({
+        legacyActions: [{ ...legacyActions[0], onShowBlock: () => calls.push('show source') }],
+        offscreen: 'above',
+        revealSource: () => calls.push('locate'),
+    });
+    assert.equal(dialog(), initialDialog);
+    assert.equal(signal.aborted, false);
+    assert.equal(action('enable-alignment').disabled, true);
+    assert.match(dialog().textContent, /above the visible area/);
+    action('show-source-block').click();
+    request.resolve(true);
+    await flush();
+    assert.match(dialog().textContent, /Sentence alignment enabled/);
+    assert.deepEqual(calls, ['show source']);
+    fixture.finish();
+});
+
+test('bilingual scroll refresh cannot submit a duplicate while a whole-block save is pending', async () => {
+    const request = deferred();
+    const calls = [];
+    const fixture = createLegacyPopupFixture('bilingual', {
+        createMarkdownAnnotation: annotation => {
+            calls.push(annotation);
+            return request.promise;
+        },
+    });
+    const { open, parent, dialog } = fixture;
+    const annotation = { text: 'Original.' };
+    open({ annotation });
+    const initialDialog = dialog();
+    parent.querySelector('.mktero-related-source-create').click();
+    open({ annotation, offscreen: 'above', revealSource() {} });
+    assert.equal(dialog(), initialDialog);
+    const save = parent.querySelector('.mktero-related-source-create');
+    assert.equal(save.disabled, true);
+    assert.equal(parent.querySelector('[data-action="locate-source"]').disabled, true);
+    save.click();
+    assert.deepEqual(calls, [annotation]);
+    request.resolve();
+    await flush();
+    assert.equal(dialog(), null);
+    fixture.finish();
+});
+
+test('translated annotation is disabled without a save handler but source actions are still available', () => {
+    const shown = [];
+    const fixture = createLegacyPopupFixture('translated');
+    const { open, action } = fixture;
+    open({
+        source: { text: 'Aligned sentence.' },
+        annotation: { text: 'Aligned block.' },
+        legacyActions: [{ id: 'legacy', onShowBlock: () => shown.push('legacy') }],
+    });
+    assert.equal(action('annotate-source').disabled, true);
+    action('show-source-block').click();
+    assert.deepEqual(shown, ['legacy']);
+    fixture.finish();
+});
+
+test('a late translated annotation failure leaves the next popup alone', async () => {
+    const request = deferred();
+    const fixture = createLegacyPopupFixture('translated', {
+        createMarkdownAnnotation: () => request.promise,
+    });
+    const { open, action, dialog, sourcePopup } = fixture;
+    open({ annotation: { text: 'Previous block.' } });
+    action('annotate-source').click();
+    sourcePopup.close();
+    open({ source: { text: 'New sentence.' }, annotation: { text: 'New block.' } });
+    const nextDialog = dialog();
+    request.reject(new Error('late save failure'));
+    await flush();
+    assert.equal(dialog(), nextDialog);
+    assert.equal(dialog().querySelector('.mktero-annotation-action-error').hidden, true);
+    assert.equal(action('annotate-source').disabled, false);
+    fixture.finish();
+});
+
+test('mixed translated selection saves whole blocks on the first click without interrupting a pending alignment on failure', async () => {
+    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
+    const calls = [];
+    const failure = deferred();
+    const alignment = deferred();
+    let signal;
+    const fixture = createLegacyPopupFixture('translated', {
+        localization,
+        createMarkdownAnnotation: (...args) => {
+            calls.push(args);
+            return calls.length === 1 ? failure.promise : Promise.resolve();
+        },
+        revealSource: () => assert.fail('no navigation requested'),
+    });
+    const { open, action, dialog, parent } = fixture;
+    const annotation = { text: 'Both whole blocks.' };
+    const selectionContext = { side: 'source', rangesAreSource: true };
+    const sourceLabel = localization.t('ai.translationSourceCell');
+    const blockCount = 2;
+    open({
+        source: { text: 'Exact source cell.' },
+        sourceLabel,
+        blockCount,
+        annotation,
+        selectionContext,
+        legacyActions: [{
+            id: 'legacy',
+            onShowBlock: () => assert.fail('mixed selection must not read the whole block'),
+            onEnableAlignment: options => {
+                signal = options.signal;
+                return alignment.promise;
+            },
+        }],
+    });
+    assert.equal(dialog().querySelector('.mktero-translation-source-label').textContent, sourceLabel);
+    assert.equal(dialog().querySelector('.mktero-translation-source-text').textContent, 'Exact source cell.');
+    assert.match(dialog().textContent, /\u4ec5\u5c06\u672c\u5757\u539f\u6587.*\u53ef\u80fd\u4ea7\u751f\u8d39\u7528/u);
+    assert.equal(action('annotate-source').textContent,
+        localization.t('annotation.sourceBlockHighlightPlural', { count: blockCount }));
+    assert.equal(dialog().querySelector('.mktero-related-source-scope').textContent,
+        localization.t('annotation.sourceBlockScopePlural', { count: blockCount }));
+    action('enable-alignment').click();
+    const originalDialog = dialog();
+    const save = action('annotate-source');
+    save.click();
+    save.click();
+    assert.deepEqual(calls, [[annotation, selectionContext]]);
+    assert.equal(save.disabled, true);
+    assert.equal(action('locate-source').disabled, true);
+    assert.equal(dialog(), originalDialog);
+    assert.equal(signal.aborted, false);
+    failure.reject(new Error('private details'));
+    await flush();
+    assert.equal(parent.querySelectorAll('[role="dialog"]').length, 1);
+    assert.equal(dialog(), originalDialog);
+    const error = dialog().querySelector('.mktero-annotation-action-error');
+    assert.equal(error.hidden, false);
+    assert.equal(error.textContent, localization.t('annotation.createFailed'));
+    assert.equal(save.disabled, false);
+    assert.equal(action('locate-source').disabled, false);
+    assert.equal(signal.aborted, false);
+    save.click();
+    await flush();
+    assert.deepEqual(calls, [[annotation, selectionContext], [annotation, selectionContext]]);
+    assert.equal(dialog(), null);
+    assert.equal(signal.aborted, true);
+    fixture.finish();
+});
 
 function openAddToNotePopup(kind, options) {
     const fixture = createPopupFixture(options);

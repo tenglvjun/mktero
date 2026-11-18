@@ -152,7 +152,7 @@ test('reuses one session id for every request in a document translation', async 
                     text: translateBatchRequest(
                         request.messages[1].content,
                         sourceMarkdown => sourceMarkdown
-                            .replace('# One section', '# 一个章节')
+                            .replace('One section', '一个章节')
                             .replace(/Paragraph (\d+)\./g, '译文段落 $1。')
                     ),
                 };
@@ -194,7 +194,7 @@ test('translates a complete Markdown document in one provider request', async ()
                 return {
                     text: translateBatchRequest(requestMarkdown, source => (
                         source
-                            .replace('# Paper', '# 论文')
+                            .replace('Paper', '论文')
                             .replace('Original paragraph.', '译文段落。')
                     )),
                     model: 'provider-model',
@@ -217,9 +217,9 @@ test('translates a complete Markdown document in one provider request', async ()
     });
 
     assert.equal(requests.length, 1);
-    assert.deepEqual(parseTranslationRequest(requests[0]).map(entry => (
-        entry.sourceMarkdown
-    )), ['# Paper', 'Original paragraph.']);
+    assert.deepEqual(requestSources(parseTranslationRequest(requests[0])).map(entry =>
+        entry.sourceMarkdown.replace(/^# /, '')
+    ), ['Paper', 'Original paragraph.']);
     assert.doesNotMatch(requests[0], /code\(\)/);
     assert.equal(
         result.translatedMarkdown,
@@ -284,7 +284,7 @@ test('does not send OCR chrome paragraphs to the translation provider', async ()
         chromeRanges: [{ from: chromeFrom, to: chromeTo }],
     });
 
-    assert.deepEqual(parseTranslationRequest(requests[0]).map(entry => (
+    assert.deepEqual(requestSources(parseTranslationRequest(requests[0])).map(entry => (
         entry.sourceMarkdown
     )), ['Hello', 'World']);
     assert.doesNotMatch(requests[0], /(^|\n)12(\n|$)/);
@@ -642,7 +642,7 @@ test('continues translating when reading the Markdown translation cache fails', 
     });
 
     assert.equal(result.translatedMarkdown, '# 论文');
-    assert.deepEqual(cacheErrors, ['cache unreadable']);
+    assert.deepEqual(cacheErrors, ['cache unreadable', 'cache unreadable']);
 });
 
 test('always stores completed translations with the Markdown cache entry', async () => {
@@ -1324,7 +1324,7 @@ test('reuses the original translation after a deleted block is retranslated',
                     text: translateBatchRequest(
                         request.messages[1].content,
                         source => source
-                            .replace('# Paper', '# 论文')
+                            .replace('Paper', '论文')
                             .replace('Deleted article block', '已删除文章段。')
                             .replace('Persistent paragraph.', '持久段落。')
                     ),
@@ -1692,10 +1692,7 @@ test('reuses unchanged translations and retranslates only an edited block', asyn
                 );
                 requests.push(entries);
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: '修改后的第一段。',
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, () => '修改后的第一段。'))),
                 };
             },
         },
@@ -1730,8 +1727,8 @@ test('reuses unchanged translations and retranslates only an edited block', asyn
     );
     assert.equal(writes[0][1], 'c'.repeat(64));
     assert.deepEqual(writes[0][2].sourceBlocks, oldTranslation.sourceBlocks);
-    assert.deepEqual(requests, [[{
-        id: 'translation-0-0-23-paragraph',
+    assert.deepEqual(requests.map(requestSources), [[{
+        id: 'b1',
         sourceMarkdown: 'Edited first paragraph.',
     }]]);
     assert.equal(
@@ -1772,9 +1769,7 @@ test('rejects caches from the previous reference protection protocol', async () 
     });
 
     assert.equal(result, null);
-    assert.deepEqual(cacheErrors, [
-        'The cached document translation identity changed',
-    ]);
+    assert.deepEqual(cacheErrors, []);
 });
 
 test('reuses a complete cache when the visible translation uses another language', async () => {
@@ -1934,8 +1929,8 @@ test('resumes a selected partial language while another language is visible', as
     assert.equal(requests.length, 1);
     assert.match(requests[0].messages[0].content, /French/);
     assert.deepEqual(
-        parseTranslationRequest(requests[0].messages[1].content),
-        [{ id: paragraphID, sourceMarkdown: 'Paragraph.' }]
+        requestSources(parseTranslationRequest(requests[0].messages[1].content)),
+        [{ id: 'b1', sourceMarkdown: 'Paragraph.' }]
     );
     assert.equal(result.partial, false);
     assert.equal(result.targetLanguage, 'fr-FR');
@@ -1965,10 +1960,7 @@ test('treats a cached translation with a missing block as partial and repairs it
                 );
                 requests.push(entries);
                 return {
-                    text: JSON.stringify([{
-                        id: paragraphID,
-                        translatedMarkdown: '\u6bb5\u843d\u3002',
-                    }]),
+                    text: JSON.stringify([translateEntry(entries[0], () => '\u6bb5\u843d\u3002')]),
                 };
             },
         },
@@ -1994,8 +1986,8 @@ test('treats a cached translation with a missing block as partial and repairs it
         id: paragraphID,
         message: 'Cached translation is incomplete',
     }]);
-    assert.deepEqual(requests, [[{
-        id: paragraphID,
+    assert.deepEqual(requests.map(requestSources), [[{
+        id: 'b1',
         sourceMarkdown: 'Paragraph.',
     }]]);
     assert.equal(repaired.partial, false);
@@ -2039,10 +2031,7 @@ test('retries only failed cached blocks and preserves successful translations', 
                 );
                 requests.push(entries);
                 return {
-                    text: JSON.stringify([{
-                        id: entries[0].id,
-                        translatedMarkdown: '译文。',
-                    }]),
+                    text: JSON.stringify([translateEntry(entries[0], () => '译文。')]),
                 };
             },
         },
@@ -2060,12 +2049,12 @@ test('retries only failed cached blocks and preserves successful translations', 
     });
 
     assert.equal(requests.length, 1);
-    assert.deepEqual(requests[0], [{
-        id: paragraphID,
+    assert.deepEqual(requestSources(requests[0]), [{
+        id: 'b1',
         sourceMarkdown: 'Paragraph.',
     }]);
     assert.equal(result.translatedMarkdown, '# 论文\n\n译文。');
-    assert.deepEqual(result.blocks, [{
+    assert.deepEqual(result.blocks.map(({ id, markdown }) => ({ id, markdown })), [{
         id: headingID,
         markdown: '# 论文',
     }, {
@@ -2091,10 +2080,7 @@ test('retries one failed block from the visible result without a cache read', as
                 );
                 requests.push(entries);
                 return {
-                    text: JSON.stringify([{
-                        id: entries[0].id,
-                        translatedMarkdown: '\u7b2c\u4e00\u6bb5\u3002',
-                    }]),
+                    text: JSON.stringify([translateEntry(entries[0], () => '\u7b2c\u4e00\u6bb5\u3002')]),
                 };
             },
         },
@@ -2127,8 +2113,8 @@ test('retries one failed block from the visible result without a cache read', as
         },
     });
 
-    assert.deepEqual(requests, [[{
-        id: firstID,
+    assert.deepEqual(requests.map(requestSources), [[{
+        id: 'b1',
         sourceMarkdown: 'First paragraph.',
     }]]);
     assert.equal(
@@ -2158,10 +2144,7 @@ test('retranslates one successful block and preserves the other visible translat
                 );
                 requests.push(entries);
                 return {
-                    text: JSON.stringify([{
-                        id: firstID,
-                        translatedMarkdown: '\u91cd\u8bd1\u7b2c\u4e00\u6bb5\u3002',
-                    }]),
+                    text: JSON.stringify([translateEntry(entries[0], () => '\u91cd\u8bd1\u7b2c\u4e00\u6bb5\u3002')]),
                 };
             },
         },
@@ -2192,8 +2175,8 @@ test('retranslates one successful block and preserves the other visible translat
         onProgress: value => progress.push(value),
     });
 
-    assert.deepEqual(requests, [[{
-        id: firstID,
+    assert.deepEqual(requests.map(requestSources), [[{
+        id: 'b1',
         sourceMarkdown: 'First paragraph.',
     }]]);
     assert.equal(
@@ -2226,17 +2209,12 @@ test('retranslates one successful block when cache hashing is unavailable', asyn
                 requests.push(entries);
                 const secondRequest = requests.length === 2;
                 const translated = new Map([
-                    [headingID, '# \u8bba\u6587'],
-                    [firstID, secondRequest
-                        ? '\u91cd\u8bd1\u7b2c\u4e00\u6bb5\u3002'
-                        : '\u7b2c\u4e00\u6bb5\u3002'],
-                    [secondID, '\u7b2c\u4e8c\u6bb5\u3002'],
+                    ['Paper', '论文'],
+                    ['First paragraph.', secondRequest ? '重译第一段。' : '第一段。'],
+                    ['Second paragraph.', '第二段。'],
                 ]);
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: translated.get(entry.id),
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, source => translated.get(source)))),
                 };
             },
         },
@@ -2258,8 +2236,8 @@ test('retranslates one successful block when cache hashing is unavailable', asyn
         existingTranslation: first,
     });
 
-    assert.deepEqual(requests[1], [{
-        id: firstID,
+    assert.deepEqual(requestSources(requests[1]), [{
+        id: 'b1',
         sourceMarkdown: 'First paragraph.',
     }]);
     assert.equal(
@@ -2296,12 +2274,8 @@ test('forces a fresh full translation instead of returning a complete cache hit'
                 );
                 requests.push(entries);
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: entry.id.includes('heading')
-                            ? '# \u65b0\u8bba\u6587'
-                            : '\u65b0\u6bb5\u843d\u3002',
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, source => source === 'Paper'
+                        ? '新论文' : '新段落。'))),
                 };
             },
         },
@@ -2324,10 +2298,7 @@ test('forces a fresh full translation instead of returning a complete cache hit'
         onProgress: value => progress.push(value),
     });
 
-    assert.deepEqual(requests.flat().map(entry => entry.id), [
-        'translation-0-0-7-heading',
-        'translation-1-9-19-paragraph',
-    ]);
+    assert.deepEqual(requests.flat().map(entry => entry.id), ['b1', 'b2']);
     assert.equal(result.translatedMarkdown, '# \u65b0\u8bba\u6587\n\n\u65b0\u6bb5\u843d\u3002');
     assert.equal(result.cacheHit, false);
     assert.deepEqual(progress[0], {
@@ -2403,15 +2374,12 @@ test('retranslates every block when a visible retry uses changed settings', asyn
                 );
                 requests.push(entries);
                 const translations = new Map([
-                    [headingID, '# Article français'],
-                    [firstID, 'Premier paragraphe.'],
-                    [secondID, 'Deuxième paragraphe.'],
+                    ['Paper', 'Article français'],
+                    ['First paragraph.', 'Premier paragraphe.'],
+                    ['Second paragraph.', 'Deuxième paragraphe.'],
                 ]);
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: translations.get(entry.id),
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, source => translations.get(source)))),
                 };
             },
         },
@@ -2445,11 +2413,7 @@ test('retranslates every block when a visible retry uses changed settings', asyn
         },
     });
 
-    assert.deepEqual(requests.flat().map(entry => entry.id), [
-        headingID,
-        firstID,
-        secondID,
-    ]);
+    assert.deepEqual(requests.flat().map(entry => entry.id), ['b1', 'b2', 'b3']);
     assert.equal(result.targetLanguage, 'fr-FR');
     assert.equal(result.translationKey, 'd'.repeat(64));
     assert.equal(result.partial, false);
@@ -2597,9 +2561,7 @@ test('translates H1 sections with at most five concurrent requests and restores 
                 active++;
                 maximumActive = Math.max(maximumActive, active);
                 const requestMarkdown = request.messages[1].content;
-                const title = parseTranslationRequest(requestMarkdown)
-                    .find(entry => entry.sourceMarkdown.startsWith('# '))
-                    ?.sourceMarkdown || '';
+                const title = requestSources(parseTranslationRequest(requestMarkdown))[0].sourceMarkdown;
                 const index = Number(title.match(/Section (\d+)/)?.[1] || 0);
                 requests.push({ index, requestMarkdown });
                 notifyRequest();
@@ -2664,7 +2626,7 @@ test('splits a long H1 section into bounded batches and restores paragraph order
                     text: translateBatchRequest(
                         request.messages[1].content,
                         sourceMarkdown => sourceMarkdown
-                            .replace('# One section', '# 一个章节')
+                            .replace('One section', '一个章节')
                             .replace(/Paragraph (\d+)\./g, '译文段落 $1。')
                     ),
                     model: 'provider-model',
@@ -2713,17 +2675,11 @@ test('retries only a missing block from an otherwise valid batch', async () => {
                 requests.push(entries);
                 if (requests.length === 1) {
                     return {
-                        text: JSON.stringify([{
-                            id: entries[0].id,
-                            translatedMarkdown: '# 论文',
-                        }]),
+                        text: JSON.stringify([translateEntry(entries[0], () => '论文')]),
                     };
                 }
                 return {
-                    text: JSON.stringify([{
-                        id: entries[0].id,
-                        translatedMarkdown: '译文。',
-                    }]),
+                    text: JSON.stringify([translateEntry(entries[0], () => '译文。')]),
                 };
             },
         },
@@ -2737,7 +2693,7 @@ test('retries only a missing block from an otherwise valid batch', async () => {
     });
 
     assert.deepEqual(requests.map(entries => entries.length), [2, 1]);
-    assert.equal(requests[1][0].sourceMarkdown, 'Paragraph.');
+    assert.equal(requestSources(requests[1])[0].sourceMarkdown, 'Paragraph.');
     assert.equal(result.translatedMarkdown, '# 论文\n\n译文。');
 });
 
@@ -2773,17 +2729,8 @@ test('falls back to translating only text segments after protected content retri
                     };
                 }
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: entry.sourceMarkdown.includes(
-                            'Gram matrices'
-                        )
-                            ? entry.sourceMarkdown.replace(
-                                /MKTEROPROTECTED\d+PLACEHOLDER/,
-                                ''
-                            )
-                            : entry.sourceMarkdown,
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, source => source.includes('Gram matrices')
+                        ? source.replace(/MKTEROPROTECTED\d+PLACEHOLDER/, '') : source))),
                 };
             },
         },
@@ -2863,13 +2810,7 @@ for (const { name, fallbackResponse, messagePattern } of [{
                         return { text: JSON.stringify(fallbackResponse(entries)) };
                     }
                     return {
-                        text: JSON.stringify(entries.map(entry => ({
-                            id: entry.id,
-                            translatedMarkdown: entry.sourceMarkdown.replace(
-                                /MKTEROPROTECTED\d+PLACEHOLDER/,
-                                ''
-                            ),
-                        }))),
+                        text: JSON.stringify(entries.map(entry => translateEntry(entry, source => source.replace(/MKTEROPROTECTED\d+PLACEHOLDER/, '')))),
                     };
                 },
             },
@@ -2909,13 +2850,7 @@ test('keeps the source when the protected text fallback reaches its output limit
                     };
                 }
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: entry.sourceMarkdown.replace(
-                            /MKTEROPROTECTED\d+PLACEHOLDER/,
-                            ''
-                        ),
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, source => source.replace(/MKTEROPROTECTED\d+PLACEHOLDER/, '')))),
                 };
             },
         },
@@ -2949,13 +2884,7 @@ test('propagates cancellation from the protected text fallback', async () => {
                     return { text: '[]' };
                 }
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: entry.sourceMarkdown.replace(
-                            /MKTEROPROTECTED\d+PLACEHOLDER/,
-                            ''
-                        ),
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, source => source.replace(/MKTEROPROTECTED\d+PLACEHOLDER/, '')))),
                 };
             },
         },
@@ -2981,10 +2910,7 @@ test('does not use the protected text fallback for ordinary structure errors', a
                 );
                 requests.push(entries);
                 return {
-                    text: JSON.stringify(entries.map(entry => ({
-                        id: entry.id,
-                        translatedMarkdown: '# Wrong structure',
-                    }))),
+                    text: JSON.stringify(entries.map(entry => translateEntry(entry, () => '# Wrong structure'))),
                 };
             },
         },
@@ -2998,7 +2924,7 @@ test('does not use the protected text fallback for ordinary structure errors', a
     });
 
     assert.equal(requests.length, 3);
-    assert.ok(requests.flat().every(entry => 'sourceMarkdown' in entry));
+    assert.ok(requests.flat().every(entry => Array.isArray(entry.units)));
     assert.equal(result.partial, true);
     assert.equal(result.translatedMarkdown, 'One paragraph.');
 });
@@ -3372,27 +3298,33 @@ function createBoundaryService({ output, onProviderCall = () => {} }) {
 function translateSingleBlockRequest(requestMarkdown, translatedMarkdown) {
     const entries = parseTranslationRequest(requestMarkdown);
     if (entries.length !== 1) throw new Error('A single-block request is required');
-    return JSON.stringify([{
-        id: entries[0].id,
-        translatedMarkdown,
-    }]);
+    return JSON.stringify([translateEntry(entries[0], () => entries[0].units
+        ? translatedMarkdown.replace(/^#+ /, '') : translatedMarkdown)]);
+}
+
+function translateEntry(entry, translate) {
+    if (!entry.units) return { id: entry.id, translatedMarkdown: translate(entry.sourceMarkdown) };
+    return { id: entry.id, units: entry.units.map(unit => ({
+        id: unit.id,
+        translatedMarkdown: translate(unit.sourceMarkdown),
+    })) };
+}
+
+function requestSources(entries) {
+    return entries.map(({ id, units, sourceMarkdown }) => ({
+        id, sourceMarkdown: units ? units.map(unit => unit.sourceMarkdown).join(' ') : sourceMarkdown,
+    }));
 }
 
 function translateMarkedSection(requestMarkdown, translatedHeading) {
     const index = translatedHeading.match(/(\d+)$/)?.[1] || 0;
-    return JSON.stringify(parseTranslationRequest(requestMarkdown).map(entry => ({
-        id: entry.id,
-        translatedMarkdown: entry.sourceMarkdown
-            .replace(`# Section ${index}`, translatedHeading)
-            .replace(`Paragraph ${index}.`, `译文段落 ${index}。`),
-    })));
+    return translateBatchRequest(requestMarkdown, source => source
+        .replace(`Section ${index}`, translatedHeading.slice(2))
+        .replace(`Paragraph ${index}.`, `译文段落 ${index}。`));
 }
 
 function translateBatchRequest(requestMarkdown, translate) {
-    return JSON.stringify(parseTranslationRequest(requestMarkdown).map(entry => ({
-        id: entry.id,
-        translatedMarkdown: translate(entry.sourceMarkdown),
-    })));
+    return JSON.stringify(parseTranslationRequest(requestMarkdown).map(entry => translateEntry(entry, translate)));
 }
 
 function parseTranslationRequest(request) {

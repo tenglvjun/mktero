@@ -1,4 +1,3 @@
-import { GFM, parser as markdownParser } from '@lezer/markdown';
 import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     findDisplayMathMatches,
@@ -13,8 +12,20 @@ import {
 } from './markdown-table-references.js';
 import { normalizeChromeRanges } from './chrome-ranges.js';
 import { REFERENCE_HEADING_LABEL_PATTERN } from './reference-heading.js';
+import {
+    projectMarkdownRanges,
+    PROTECTED_PLACEHOLDER_PATTERN,
+    protectedContentChangedError,
+    TRANSLATION_MARKDOWN_PARSER as MARKDOWN_PARSER,
+    trimmedRange,
+    validateTranslatedBlock,
+    verifyAlignedBlock,
+} from './translation-alignment.js';
 
-const MARKDOWN_PARSER = markdownParser.configure(GFM);
+export {
+    TRANSLATION_PROTECTED_CONTENT_CHANGED,
+    validateTranslatedBlock,
+} from './translation-alignment.js';
 const HEADING_PATTERN = /^(?:ATXHeading[1-6]|SetextHeading[12])$/;
 const TRANSLATABLE_NODE_TYPES = new Map([
     ['Paragraph', 'paragraph'],
@@ -32,13 +43,10 @@ const PROTECTED_NODE_TYPES = new Set([
     'FencedCode',
     'CodeBlock',
 ]);
-const PROTECTED_PLACEHOLDER_PATTERN = /MKTEROPROTECTED\d+PLACEHOLDER/g;
 const DOCUMENT_MARKER_PATTERN = /MKTEROBLOCK\d+(?:START|END)MARKER/g;
 const NUMERIC_CITATION_PATTERN = /\[(?:\d{1,4}[a-z]?(?:[ \t]*[-–—,，;；][ \t]*\d{1,4}[a-z]?)*)(?:[ \t]*,[ \t]*)?\]/giu;
 export const BILINGUAL_LIST_BOUNDARY =
     '<!-- mktero-bilingual-list-boundary -->';
-export const TRANSLATION_PROTECTED_CONTENT_CHANGED =
-    'TRANSLATION_PROTECTED_CONTENT_CHANGED';
 export const MAX_TRANSLATION_BATCH_BLOCKS = 8;
 export const MAX_TRANSLATION_BATCH_SOURCE_TOKENS = 2_000;
 // A sentence continued across display math ("…is given by" $$…$$ "where …")
@@ -147,6 +155,7 @@ function linkEquationContinuations(blocks) {
         const head = block.markdown.trimEnd();
         if (CLOSED_SENTENCE_END.test(head) || !OPEN_SENTENCE_END.test(head) || TRAILING_IMAGE.test(head)) continue;
         if (!/^\p{Ll}/u.test(following.markdown.trimStart())) continue;
+        block.continuesAcrossEquation = true;
         following.continuesFrom = block.id;
         for (let between = index + 1; between < next; between++) blocks[between].continuationOf = block.id;
         index = next - 1;
@@ -450,12 +459,17 @@ export function createComparisonMarkdown(markdown, blocks, translations) {
 }
 
 export function createComparisonMarkdownView(markdown, blocks, translations) {
+    return createComparisonView(markdown, blocks, translations);
+}
+
+function createComparisonView(markdown, blocks, translations, alignedByID) {
     const source = String(markdown || '');
     const translatedByID = validateTranslationSet(blocks, translations);
     const chunks = [];
     const sourceRanges = [];
     const translationRanges = [];
     const blockRanges = [];
+    const alignmentRanges = new Map();
     let comparisonOffset = 0;
     let cursor = 0;
     for (const block of blocks) {
@@ -485,10 +499,12 @@ export function createComparisonMarkdownView(markdown, blocks, translations) {
                 cursor = block.to;
                 continue;
             }
-            const translated = removeRepeatedComparisonImages(
+            const { markdown: translated, ranges } = removeRepeatedComparisonImages(
                 restored,
-                block
+                block,
+                alignedByID?.get(block.id)?.restoredRanges
             );
+            if (ranges) alignmentRanges.set(block.id, ranges);
             if (translated.trim()) {
                 const boundary = block.type === 'list'
                     ? `\n${BILINGUAL_LIST_BOUNDARY}\n\n`
@@ -514,27 +530,32 @@ export function createComparisonMarkdownView(markdown, blocks, translations) {
         sourceRanges,
         translationRanges,
         blockRanges,
+        ...(alignedByID ? { alignmentRanges } : {}),
     };
 }
 
-export function createDocumentTranslationViews(markdown, blocks, translations, { figureMap = null } = {}) {
-    const translated = createTranslatedMarkdownView(
-        markdown,
-        blocks,
-        translations
-    );
-    const comparison = createComparisonMarkdownView(
-        markdown,
-        blocks,
-        translations
-    );
-    const comparisonByID = new Map(
-        comparison.blockRanges.map(range => [range.id, range])
-    );
-    const blockRanges = translated.blockRanges.map(range => ({
-        ...range,
-        ...comparisonByID.get(range.id),
-    }));
+export function createDocumentTranslationViews(markdown, blocks, translations, { figureMap = null, targetLanguage } = {}) {
+    const translated = createTranslatedMarkdownView(markdown, blocks, translations);
+    const source = String(markdown || '');
+    const blocksByID = new Map(blocks.map(block => [block.id, block]));
+    const alignedByID = new Map();
+    for (const translation of translations) {
+        if (!translation?.alignment) continue;
+        const block = blocksByID.get(translation.id);
+        if (!block?.translatable || source.slice(block.from, block.to) !== block.markdown) continue;
+        const verified = verifyAlignedBlock(block, translation, targetLanguage);
+        if (verified) alignedByID.set(block.id, verified);
+    }
+    const comparison = createComparisonView(markdown, blocks, translations, alignedByID);
+    const comparisonByID = new Map(comparison.blockRanges.map(range => [range.id, range]));
+    const blockRanges = translated.blockRanges.map(range => {
+        const combined = { ...range, ...comparisonByID.get(range.id) };
+        const aligned = alignedByID.get(range.id);
+        if (aligned) combined.alignmentUnits = projectAlignmentUnits(
+            combined, aligned, comparison.alignmentRanges.get(range.id)
+        );
+        return combined;
+    });
     return {
         translatedMarkdown: translated.markdown,
         comparisonMarkdown: comparison.markdown,
@@ -548,6 +569,38 @@ export function createDocumentTranslationViews(markdown, blocks, translations, {
             figureMap, viewRanges: blockRanges, viewKind: 'comparison',
         }),
     };
+}
+
+function projectAlignmentUnits(block, aligned, comparisonRanges) {
+    return aligned.units.map(({ id }, index) => {
+        const translated = aligned.restoredRanges[index];
+        const comparison = Number.isSafeInteger(block.comparisonTranslationFrom) ? comparisonRanges?.[index] : null;
+        return {
+            id,
+            sourceRanges: aligned.sourceRanges[index].map(range => offsetRange(range, block.sourceFrom)),
+            comparisonSourceRanges: aligned.sourceRanges[index].map(range => offsetRange(range, block.comparisonSourceFrom)),
+            translatedFrom: translated.from + block.translatedFrom,
+            translatedTo: translated.to + block.translatedFrom,
+            comparisonTranslationFrom: comparison ? comparison.from + block.comparisonTranslationFrom : null,
+            comparisonTranslationTo: comparison ? comparison.to + block.comparisonTranslationFrom : null,
+        };
+    });
+}
+
+function offsetRange({ from, to }, offset) {
+    return { from: from + offset, to: to + offset };
+}
+
+export function mapAlignedTranslationSelection(range, blockRanges, view) {
+    const selection = normalizeDocumentRange(range);
+    if (!selection || !Array.isArray(blockRanges) || (view !== 'translated' && view !== 'compare')) return [];
+    const translated = view === 'translated';
+    return blockRanges.flatMap(block => (block.alignmentUnits || []).filter(unit => {
+        const from = translated ? unit.translatedFrom : unit.comparisonTranslationFrom;
+        const to = translated ? unit.translatedTo : unit.comparisonTranslationTo;
+        return Number.isSafeInteger(from) && Number.isSafeInteger(to)
+            && from < selection.to && to > selection.from;
+    }));
 }
 
 export function mapSourceRangeToComparison(range, blockRanges) {
@@ -603,44 +656,16 @@ export function mapComparisonRangeToSource(range, blockRanges) {
     };
 }
 
-// A translated selection is paired at block level first, then narrowed to a
-// sentence when both sides can be split into the same number of units. The
-// result carries canonical source coordinates for text and annotation, plus
-// comparison-view source coordinates for decorations. A count mismatch returns
-// the full block rather than guessing a sentence order.
-// A sentence ends at punctuation. The trailing boundary is deliberately not
-// required to be whitespace: Chinese writes the next sentence directly after
-// the full stop (。第二句), so requiring a space here would treat a whole
-// Chinese paragraph as one sentence and make every count mismatch.
+// Chinese need not put whitespace between a full stop and the next sentence.
 const SENTENCE_END = /[.!?\u3002\uff01\uff1f]+["'\u201d\u2019)\]]*/gu;
-// A period inside "et al.", "Fig. 2", "e.g.", or "0.684" is not a sentence end.
-// Splitting there would inflate the English count and make every paragraph a
-// mismatch, which would quietly disable sentence-level mapping everywhere.
-// Only the character immediately before the period matters: "0.711." ends a
-// sentence because that period follows another period, not a digit.
 const ABBREVIATION_BEFORE = /\b(?:et\s+al|e\.g|i\.e|fig|figs|eq|eqs|ref|refs|sec|secs|no|nos|vs|cf|approx|ca|resp|dr|prof|st|vol|vols|pp|ch|tab)$/iu;
-const DECIMAL_BEFORE = /\d$/u;
 const NEXT_WORD = /^\s*\p{Ll}/u;
 
 export function splitTranslatedBlockSentences(text, { listItems = false } = {}) {
     const source = String(text || '');
     if (!source.trim()) return [];
-    // List items are their own units: a bullet without a final period is still
-    // one sentence, and merging two bullets would hide the boundary the reader
-    // sees on screen.
     if (listItems) {
-        const items = [];
-        let offset = 0;
-        for (const line of source.split('\n')) {
-            const start = offset;
-            offset += line.length + 1;
-            if (!line.trim()) continue;
-            items.push({
-                from: start + (line.length - line.trimStart().length),
-                to: start + line.trimEnd().length,
-            });
-        }
-        if (items.length) return items;
+        return translationSelectionStructure(source, 'list')?.ranges || [];
     }
     const sentences = [];
     SENTENCE_END.lastIndex = 0;
@@ -648,17 +673,11 @@ export function splitTranslatedBlockSentences(text, { listItems = false } = {}) 
     let match;
     while ((match = SENTENCE_END.exec(source)) !== null) {
         const end = match.index + match[0].length;
-        // A period that follows an abbreviation, a number, or a lowercase word
-        // is not the end of a sentence; keep scanning from the same sentence.
         if (match[0] === '.') {
-            const before = source.slice(cursor, match.index);
-            // A digit before the period is a decimal unless this period is the
-            // second of a pair ("0.711." ), which is why the check looks at the
-            // character directly before it.
-            const decimal = DECIMAL_BEFORE.test(before)
-                && !DECIMAL_BEFORE.test(before.slice(0, -1).slice(-1));
-            if (decimal
-                || ABBREVIATION_BEFORE.test(before)
+            if (/\d/u.test(source.charAt(match.index - 1))) {
+                if (/\d/u.test(source.charAt(end))) continue;
+            }
+            else if (ABBREVIATION_BEFORE.test(source.slice(cursor, match.index))
                 || NEXT_WORD.test(source.slice(end))) {
                 continue;
             }
@@ -681,11 +700,57 @@ function pushSentenceSpan(spans, source, from, to) {
     });
 }
 
-// The original sentence a translated sentence belongs to. Both sides are
-// split the same way; when the counts match, sentence N maps to sentence N.
-// When they do not, the pairing is unknown and the caller falls back to the
-// whole block rather than guessing an order that would point at the wrong
-// words.
+function translationSelectionStructure(text, type) {
+    if (type && type !== 'list' && type !== 'table') return null;
+    const node = MARKDOWN_PARSER.parse(text).topNode.firstChild;
+    if (!node || node.nextSibling) return null;
+    const parsedType = translationBlockType(node.name);
+    if (type && type !== parsedType) return null;
+    if (parsedType === 'list') return listSelectionStructure(node);
+    if (parsedType === 'table') return tableSelectionStructure(node);
+    return null;
+}
+
+function listSelectionStructure(list) {
+    const shape = [];
+    const ranges = [];
+    list.cursor().iterate(node => {
+        if (node.name === 'ListItem') ranges.push({ from: node.from, to: node.to });
+        else if (node.name !== 'BulletList' && node.name !== 'OrderedList'
+            && node.name !== 'Blockquote') return false;
+        // Keep both ends of each container: moving a sublist to another item
+        // must not match, even when the total number of items stays the same.
+        shape.push(node.name);
+    }, () => shape.push('/'));
+    return { type: 'list', shape: shape.join(' '), ranges };
+}
+
+function tableSelectionStructure(table) {
+    const widths = [];
+    const ranges = [];
+    for (let row = table.firstChild; row; row = row.nextSibling) {
+        if (row.name !== 'TableHeader' && row.name !== 'TableRow') continue;
+        const cells = [];
+        let cell = null;
+        for (let child = row.firstChild; child; child = child.nextSibling) {
+            if (child.name === 'TableCell') cell = { from: child.from, to: child.to };
+            // Lezer omits empty TableCell nodes but keeps their delimiters.
+            else if (child.name === 'TableDelimiter' && child.prevSibling) {
+                cells.push(cell);
+                cell = null;
+            }
+        }
+        if (cell) cells.push(cell);
+        widths.push(cells.length);
+        // GFM does not render columns beyond the header. They count towards
+        // the structure check but cannot be selected as a source cell.
+        for (let i = 0; i < Math.min(widths[0], cells.length); i++) ranges.push(cells[i]);
+    }
+    return { type: 'table', shape: widths.join(','), ranges };
+}
+
+// A stored translation identifies a block, not the order of sentences in it.
+// Only a matching Markdown structure supplies finer original coordinates.
 export function mapTranslatedSentenceToSource(range, blockRanges, view, {
     markdown = '',
     comparisonMarkdown = '',
@@ -720,16 +785,9 @@ export function mapTranslatedSentenceToSource(range, blockRanges, view, {
         || !viewMarkdown) {
         return null;
     }
-    const listItems = block.type === 'list';
     const translatedBounds = bounds(block);
-    const translatedSentences = splitTranslatedBlockSentences(
-        viewMarkdown.slice(translatedBounds.from, translatedBounds.to),
-        { listItems }
-    );
-    const sourceSentences = splitTranslatedBlockSentences(
-        String(markdown || '').slice(block.sourceFrom, block.sourceTo),
-        { listItems }
-    );
+    const source = String(markdown || '').slice(block.sourceFrom, block.sourceTo);
+    const original = translationSelectionStructure(source, block.type);
     const wholeBlock = {
         id: block.id,
         from: block.sourceFrom,
@@ -745,37 +803,28 @@ export function mapTranslatedSentenceToSource(range, blockRanges, view, {
             ? block.comparisonSourceTo
             : null,
         granularity: 'block',
-        sentenceCount: sourceSentences.length,
+        sentenceCount: original?.type === 'list' ? original.ranges.length
+            : original ? 0 : splitTranslatedBlockSentences(source).length,
     };
-    if (!translatedSentences.length
-        || translatedSentences.length !== sourceSentences.length) {
-        // A count mismatch means the two sides were merged or split during
-        // translation. Reporting a position from one side to the other would
-        // point at words that do not correspond.
-        return wholeBlock;
-    }
-    const index = translatedSentences.findIndex(sentence => (
-        translatedRange.from >= sentence.from + translatedBounds.from
-        && translatedRange.to <= sentence.to + translatedBounds.from
+    if (!original) return wholeBlock;
+    const translated = translationSelectionStructure(
+        viewMarkdown.slice(translatedBounds.from, translatedBounds.to), original.type
+    );
+    if (translated?.shape !== original.shape) return wholeBlock;
+    // In a nested list, prefer the innermost item containing the selection.
+    const index = translated.ranges.findLastIndex(unit => unit && (
+        translatedRange.from >= unit.from + translatedBounds.from
+        && translatedRange.to <= unit.to + translatedBounds.from
     ));
-    if (index < 0) return wholeBlock;
-    const sentence = sourceSentences[index];
+    const unit = original.ranges[index];
+    if (!unit) return wholeBlock;
     return {
-        id: block.id,
-        from: block.sourceFrom + sentence.from,
-        to: block.sourceFrom + sentence.to,
-        sourceBlockFrom: block.sourceFrom,
-        sourceBlockTo: block.sourceTo,
-        viewFrom: side === 'comparison'
-            && Number.isSafeInteger(block.comparisonSourceFrom)
-            ? block.comparisonSourceFrom + sentence.from
-            : null,
-        viewTo: side === 'comparison'
-            && Number.isSafeInteger(block.comparisonSourceFrom)
-            ? block.comparisonSourceFrom + sentence.to
-            : null,
-        granularity: 'sentence',
-        sentenceCount: sourceSentences.length,
+        ...wholeBlock,
+        from: block.sourceFrom + unit.from,
+        to: block.sourceFrom + unit.to,
+        viewFrom: wholeBlock.viewFrom === null ? null : wholeBlock.viewFrom + unit.from,
+        viewTo: wholeBlock.viewFrom === null ? null : wholeBlock.viewFrom + unit.to,
+        granularity: original.type === 'table' ? 'cell' : 'sentence',
     };
 }
 
@@ -850,33 +899,6 @@ export function resolveTranslationReadingPosition(anchor, view, blockRanges) {
     const length = Math.max(0, candidate.to - candidate.from);
     const progress = Math.max(0, Math.min(1, Number(anchor.progress) || 0));
     return candidate.from + Math.round(length * progress);
-}
-
-export function validateTranslatedBlock(block, translatedMarkdown) {
-    if (!block?.translatable) {
-        throw new TypeError('Only translatable Markdown blocks can be validated');
-    }
-    const translated = String(translatedMarkdown || '').trim();
-    if (!translated) throw new Error('The translated Markdown block is empty');
-    validateProtectedPlaceholders(block, translated);
-    const nodes = topLevelNodes(translated);
-    if (nodes.length !== 1 || nodes[0].name !== block.nodeType) {
-        throw new Error('The translated Markdown block changed its structure');
-    }
-    let unsafe = false;
-    MARKDOWN_PARSER.parse(translated).iterate({
-        enter(node) {
-            if (node.name === 'HTMLBlock'
-                || node.name === 'HTMLTag'
-                || node.name === 'Image') {
-                unsafe = true;
-            }
-        },
-    });
-    if (unsafe) {
-        throw new Error('The translated Markdown block contains unsafe structure');
-    }
-    return restoreProtectedFragments(block, translated);
 }
 
 export function reconcileTranslatedBlockProtectedFragments({
@@ -1302,26 +1324,6 @@ function createDocumentMarkerFactory(source) {
     };
 }
 
-function validateProtectedPlaceholders(block, translated) {
-    const expected = (block.protectedFragments || [])
-        .map(fragment => fragment.placeholder);
-    const actual = translated.match(PROTECTED_PLACEHOLDER_PATTERN) || [];
-    if (actual.length !== expected.length
-        || actual.some((placeholder, index) => placeholder !== expected[index])) {
-        throw protectedContentChangedError();
-    }
-    const originalTree = MARKDOWN_PARSER.parse(block.requestMarkdown);
-    const translatedTree = MARKDOWN_PARSER.parse(translated);
-    for (const placeholder of expected) {
-        if (placeholderNodePath(originalTree, block.requestMarkdown, placeholder)
-            !== placeholderNodePath(translatedTree, translated, placeholder)) {
-            throw new Error(
-                'The translated Markdown block changed protected structure'
-            );
-        }
-    }
-}
-
 function normalizeCachedProtectedPlaceholders(block, markdown) {
     const value = String(markdown || '');
     const cachedPlaceholders = value.match(PROTECTED_PLACEHOLDER_PATTERN) || [];
@@ -1404,14 +1406,6 @@ function removeProtectedPlaceholder(markdown, placeholder) {
     return before + after;
 }
 
-function protectedContentChangedError() {
-    const error = new Error(
-        'The translated Markdown block changed protected content'
-    );
-    error.code = TRANSLATION_PROTECTED_CONTENT_CHANGED;
-    return error;
-}
-
 function protectedTextTranslationParts(block) {
     if (!block?.translatable) {
         throw new TypeError(
@@ -1451,27 +1445,6 @@ function protectedTextTranslationParts(block) {
     }
     appendText(source.slice(cursor));
     return parts;
-}
-
-function placeholderNodePath(tree, source, placeholder) {
-    const from = source.indexOf(placeholder);
-    if (from < 0) return '';
-    const to = from + placeholder.length;
-    const path = [];
-    for (let node = tree.resolveInner(from, 1); node; node = node.parent) {
-        if (node.from <= from && node.to >= to) path.push(node.name);
-    }
-    return path.reverse().join('/');
-}
-
-function restoreProtectedFragments(block, translated) {
-    return (block.protectedFragments || []).reduce(
-        (value, fragment) => value.replace(
-            fragment.placeholder,
-            () => fragment.markdown
-        ),
-        translated
-    );
 }
 
 function hasTranslatableContent(markdown) {
@@ -1521,23 +1494,18 @@ function isReferenceHeading(nodeName, markdown) {
     return REFERENCE_HEADING_LABEL_PATTERN.test(label);
 }
 
-function topLevelNodes(markdown) {
-    const nodes = [];
-    for (let node = MARKDOWN_PARSER.parse(markdown).topNode.firstChild;
-        node;
-        node = node.nextSibling) {
-        nodes.push(node);
-    }
-    return nodes;
-}
-
-function removeRepeatedComparisonImages(markdown, block) {
+function removeRepeatedComparisonImages(markdown, block, ranges) {
     let value = String(markdown || '');
     for (const fragment of block.protectedFragments || []) {
         if (!/^\s*(?:!\[[^\]]*\]\(|<img\b)/iu.test(fragment.markdown)) {
             continue;
         }
-        value = value.replace(fragment.markdown, '');
+        const from = value.indexOf(fragment.markdown);
+        if (from >= 0) {
+            const to = from + fragment.markdown.length;
+            if (ranges) ranges = projectMarkdownRanges(ranges, [{ from, to, text: '' }]);
+            value = value.slice(0, from) + value.slice(to);
+        }
     }
     const imageEdits = [];
     MARKDOWN_PARSER.parse(value).iterate({
@@ -1554,10 +1522,19 @@ function removeRepeatedComparisonImages(markdown, block) {
             return false;
         },
     });
+    if (ranges) ranges = projectMarkdownRanges(ranges, imageEdits);
     for (const edit of imageEdits.reverse()) {
         value = value.slice(0, edit.from) + edit.text + value.slice(edit.to);
     }
-    return value.trim();
+    const contentStart = value.length - value.trimStart().length;
+    const trimmed = value.trim();
+    return {
+        markdown: trimmed,
+        ranges: ranges?.map(range => {
+            const inner = trimmedRange(value, range);
+            return inner ? offsetRange(inner, -contentStart) : null;
+        }),
+    };
 }
 
 function markdownImageAltRange(image) {

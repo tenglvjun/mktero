@@ -5857,8 +5857,9 @@ blockquote.mktero-note,
     position: fixed;
     z-index: 900;
     display: flex;
-    max-width: min(520px, 80vw);
-    max-height: min(420px, 60vh);
+    width: max-content;
+    max-width: min(420px, var(--anchored-popup-available-width, 80vw));
+    max-height: min(260px, var(--anchored-popup-available-height, 60vh));
     flex-direction: column;
     gap: 8px;
     overflow: auto;
@@ -5873,9 +5874,22 @@ blockquote.mktero-note,
 .mktero-translation-source {
     display: flex;
     min-width: 0;
+    min-height: 0;
     flex-direction: column;
-    gap: 6px;
-    padding: 10px 12px;
+    gap: 4px;
+    padding: 8px 10px;
+}
+
+.mktero-translation-source > .mktero-related-source-scope {
+    max-width: 38ch;
+}
+
+.mktero-translation-source > .mktero-translation-source-text {
+    max-height: 7.5em;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    line-height: 1.5;
 }
 
 .mktero-translation-source-label {

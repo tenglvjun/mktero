@@ -473,6 +473,92 @@ test('finds the current cached translation by target language', async t => {
     );
 });
 
+test('upgrades only the selected v7 block on disk and restores both exact views offline', async t => {
+    const { cache, ioUtils, rootPath } = await createCacheFixture(t);
+    const doc = { documentKey: CACHE_KEY, markdown: 'Accuracy improved. Latency fell.\n\nKeep this old block.' };
+    const settings = { enabled: true, apiKey: 'fixture', model: 'offline-test', provider: 'custom',
+        protocol: 'openai-chat-completions', apiBase: 'https://invalid.example/v1', targetLanguage: 'zh-CN' };
+    const blocks = collectMarkdownTranslationBlocks(doc.markdown);
+    const hash = value => sha256Hex(new TextEncoder().encode(value), { crypto: webcrypto });
+    const identity = { provider: settings.provider, protocol: settings.protocol, apiBase: settings.apiBase,
+        model: settings.model, reasoning: 'none', targetLanguage: settings.targetLanguage, promptVersion: 'mktero-translation-v7' };
+    const oldKey = await hash(JSON.stringify({ documentKey: doc.documentKey, source: doc.markdown, ...identity }));
+    const original = { translatedMarkdown: '旧译。\n\n旧段。', comparisonMarkdown: '', blocks: [
+        { id: blocks[0].id, markdown: '旧译。' }, { id: blocks[1].id, markdown: '旧段。' },
+    ], sourceBlocks: blocks.map(({ id, markdown }) => ({ id, markdown })), settingsIdentity: JSON.stringify(identity),
+    model: settings.model, targetLanguage: settings.targetLanguage, promptVersion: identity.promptVersion,
+    partial: false, failedBlocks: [] };
+    await cache.put(CACHE_KEY, { markdown: doc.markdown });
+    await cache.putTranslation(CACHE_KEY, oldKey, original);
+    const dir = path.join(rootPath, 'entries', CACHE_KEY);
+    const meta = JSON.parse(await readFile(path.join(dir, 'entry.json'), 'utf8'));
+    const oldPath = path.join(dir, meta.translations[0].translationFile);
+    const oldBytes = (await readFile(oldPath, 'utf8')).replace('"schemaVersion":2', '"schemaVersion":1');
+    await writeFile(oldPath, oldBytes);
+    let requests = 0;
+    const service = () => new MarkdownTranslationService({
+        getSettings: () => settings, createCacheKey: hash,
+        cache: new MarkdownCache({ rootPath, ioUtils, pathUtils: { join: path.join, filename: path.basename } }),
+        aiGateway: { async generateText({ messages }) {
+            requests++;
+            const entries = JSON.parse(messages[1].content);
+            assert.equal(entries.length, 1);
+            const [{ id, units }] = entries;
+            assert.deepEqual(units.map(unit => unit.sourceMarkdown), ['Accuracy improved.', 'Latency fell.']);
+            return { text: JSON.stringify([{ id, units: units.map((unit, i) => ({
+                id: unit.id, translatedMarkdown: ['准确率提高了。', '延迟下降了。'][i],
+            })).reverse() }]) };
+        } },
+    });
+    const baseline = await service().getCachedDocumentTranslation(doc);
+    assert.equal(baseline.promptVersion, identity.promptVersion);
+    assert.equal(requests, 0);
+    const updated = await service().translateDocument({ ...doc, existingTranslation: baseline, alignmentBlockID: blocks[0].id });
+    assert.equal(requests, 1);
+    assert.equal(await readFile(oldPath, 'utf8'), oldBytes);
+    const fresh = await service().getCachedDocumentTranslation(doc);
+    assert.deepEqual(fresh.blockRanges, updated.blockRanges);
+    assert.equal(fresh.blocks[1].markdown, '旧段。');
+    assert.equal(fresh.blockRanges[1].alignmentUnits, undefined);
+    const unit = fresh.blockRanges[0].alignmentUnits[1];
+    assert.deepEqual(unit.sourceRanges, [{ from: 19, to: 32 }]);
+    assert.deepEqual([unit.translatedFrom, unit.translatedTo], [7, 13]);
+    assert.equal(fresh.translatedMarkdown.slice(9, 11), '下降');
+    assert.equal(fresh.comparisonMarkdown.slice(unit.comparisonTranslationFrom, unit.comparisonTranslationTo), '延迟下降了。');
+    assert.deepEqual(fresh.blocks[0].alignment.units[1].sourceRanges, [{ from: 19, to: 32 }]);
+    // Keep the valid text but damage a legal-looking offset without changing the file size.
+    const latest = JSON.parse(await readFile(path.join(dir, 'entry.json'), 'utf8')).translations.at(-1);
+    const sidecar = path.join(dir, latest.translationFile);
+    const stored = JSON.parse(await readFile(sidecar, 'utf8'));
+    stored.blocks[0].alignment.units[1].sourceRanges[0].from = 18;
+    await writeFile(sidecar, JSON.stringify(stored));
+    const damaged = await service().getCachedDocumentTranslation(doc);
+    assert.equal(damaged.translatedMarkdown, fresh.translatedMarkdown);
+    assert.equal(damaged.blockRanges[0].alignmentUnits, undefined);
+    assert.equal(requests, 1);
+});
+
+test('a canceled translation write keeps the previous record even after staging the replacement', async t => {
+    const { cache, ioUtils, rootPath } = await createCacheFixture(t);
+    const key = 'c'.repeat(64);
+    const old = { translatedMarkdown: 'old', comparisonMarkdown: '', blocks: [{ id: 'b', markdown: 'old' }],
+        model: 'local', targetLanguage: 'zh-CN', promptVersion: 'mktero-translation-v8', partial: false, failedBlocks: [] };
+    await cache.put(CACHE_KEY, { markdown: 'source' });
+    await cache.putTranslation(CACHE_KEY, key, old);
+    const dir = path.join(rootPath, 'entries', CACHE_KEY);
+    const before = await snapshotEntry(dir);
+    const controller = new AbortController();
+    const write = ioUtils.writeUTF8;
+    ioUtils.writeUTF8 = async (file, data, options) => {
+        await write(file, data, options);
+        if (path.basename(file).startsWith('translation-')) controller.abort();
+    };
+    await assert.rejects(cache.putTranslation(CACHE_KEY, key, { ...old, translatedMarkdown: 'new' },
+        { signal: controller.signal }), { name: 'AbortError' });
+    assert.deepEqual(await snapshotEntry(dir), before);
+    assert.deepEqual(await cache.getTranslation(CACHE_KEY, key), old);
+});
+
 test('stores independent translations per target language', async t => {
     const rootPath = await mkdtemp(path.join(os.tmpdir(), 'mktero-cache-'));
     t.after(() => rm(rootPath, { recursive: true, force: true }));
@@ -542,6 +628,7 @@ test('retains prior source translations for the same language', async t => {
     await cache.putTranslation(CACHE_KEY, oldChineseKey, {
         ...base,
         targetLanguage: 'zh-CN',
+        settingsIdentity: 'previous settings',
     });
     await cache.putTranslation(CACHE_KEY, japaneseKey, {
         ...base,
@@ -552,7 +639,15 @@ test('retains prior source translations for the same language', async t => {
         ...base,
         model: 'new-model',
         targetLanguage: 'zh-CN',
+        settingsIdentity: 'new settings',
     });
+
+    assert.equal((await cache.getTranslationByLanguage(CACHE_KEY, 'zh-CN', {
+        promptVersion: base.promptVersion, settingsIdentity: 'previous settings',
+    })).model, 'example-model');
+    assert.equal(await cache.getTranslationByLanguage(CACHE_KEY, 'zh-CN', {
+        promptVersion: 'unknown', settingsIdentity: 'previous settings',
+    }), null);
 
     assert.equal(
         (await cache.getTranslation(CACHE_KEY, oldChineseKey)).model,

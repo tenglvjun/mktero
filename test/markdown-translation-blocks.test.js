@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { assembleAlignedBlock, createAlignmentPlan } from '../src/markdown/translation-alignment.js';
 import {
     assembleTranslatedMarkdown,
     collectMarkdownTranslationBlocks,
@@ -13,6 +14,7 @@ import {
     createMarkdownTranslationRequest,
     createProtectedTextTranslationPayload,
     createTranslationReadingPositionAnchor,
+    mapAlignedTranslationSelection,
     mapSourceRangeToComparison,
     mapSourceRangeToTranslation,
     mapTranslatedRangeToSourceBlock,
@@ -1566,7 +1568,92 @@ test('does not split inside abbreviations or decimals', () => {
     );
 });
 
-test('maps a translated sentence to its own original sentence', () => {
+test('keeps a multi-digit decimal intact and ends a sentence after an integer', () => {
+    const text = 'The mean was 12.34. The count was 7. Results follow.';
+    assert.deepEqual(splitTranslatedBlockSentences(text).map(({ from, to }) => (
+        text.slice(from, to)
+    )), ['The mean was 12.34.', 'The count was 7.', 'Results follow.']);
+});
+
+function assertSelectionMappings(source, translation, cases) {
+    // A translated heading puts the source, translated, and comparison blocks
+    // at three different offsets.
+    const markdown = `# Context\n\n${source}`;
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [
+        { id: blocks[0].id, markdown: '# 前言' },
+        { id: blocks[1].id, markdown: translation },
+    ]);
+    const block = views.blockRanges[1];
+    for (const [selection, original = source, granularity = 'block'] of cases) {
+        const selectedAt = translation.indexOf(selection);
+        const originalAt = source.indexOf(original);
+        assert.notEqual(selectedAt, -1);
+        assert.notEqual(originalAt, -1);
+        for (const view of ['translated', 'compare']) {
+            const compare = view === 'compare';
+            const from = selectedAt + (compare ? block.comparisonTranslationFrom : block.translatedFrom);
+            const mapped = mapTranslatedSentenceToSource(
+                { from, to: from + selection.length }, views.blockRanges, view, { markdown, ...views }
+            );
+            const label = `${view}: ${selection}`;
+            assert.equal(mapped?.granularity, granularity, label);
+            assert.equal(mapped.id, block.id, label);
+            assert.deepEqual([mapped.sourceBlockFrom, mapped.sourceBlockTo], [block.sourceFrom, block.sourceTo], label);
+            const sourceFrom = block.sourceFrom + originalAt;
+            assert.deepEqual([mapped.from, mapped.to], [sourceFrom, sourceFrom + original.length], label);
+            const viewFrom = block.comparisonSourceFrom + originalAt;
+            assert.deepEqual([mapped.viewFrom, mapped.viewTo], compare ? [viewFrom, viewFrom + original.length] : [null, null], label);
+        }
+    }
+}
+
+test('returns the whole prose block even if reordered sentences have equal counts', () => {
+    assertSelectionMappings('Samples cooled. Pressure rose.', '压力上升。样品冷却。', [
+        ['压力'], ['样品冷却。'],
+    ]);
+});
+
+test('maps wrapped ordered list items by their markers, not their physical lines', () => {
+    const first = '1. First item\n   continues here.';
+    const second = '2. Second item.';
+    const source = `${first}\n${second}`;
+    const translation = '1. 第一项。\n2. 第二项\n   接着写。';
+    assertSelectionMappings(source, translation, [
+        ['第一项', first, 'sentence'], ['接着写', second, 'sentence'], ['第一项。\n2. 第二项'],
+    ]);
+    assert.deepEqual(splitTranslatedBlockSentences(source, { listItems: true }).map(({ from, to }) => (
+        source.slice(from, to)
+    )), [first, second]);
+});
+
+test('requires matching list item counts and nesting, even with equal line counts', () => {
+    assertSelectionMappings('- First\n  continued\n- Second', '- 甲\n- 乙\n- 丙', [['乙']]);
+    const nested = '- Parent\n  - Child\n- Peer';
+    assertSelectionMappings(nested, '- 甲\n- 乙\n  - 子项', [['子项']]);
+    assertSelectionMappings(nested, '- 甲\n  1. 子项\n- 乙', [['子项']]);
+    assertSelectionMappings(nested, '- 甲\n  - 子项\n- 乙', [['子项', '- Child', 'sentence']]);
+});
+
+test('maps a selection inside one matching GFM header or body cell, not table syntax', () => {
+    const source = '| Method | Detail | Score |\n| --- | --- | --- |\n| First | left \\| right | 12.34 |\n| Last | | 7 |';
+    const translation = '方法 | 说明 | 分数\n--- | --- | ---\n第一种 | 左\\|右 | 十二\n最后一种 | | 七分';
+    assertSelectionMappings(source, translation, [
+        ['说明', 'Detail', 'cell'], ['右', 'left \\| right', 'cell'], ['七分', '7', 'cell'],
+        ['第一种 | 左'], ['---'], [' | | '],
+    ]);
+});
+
+test('returns the whole table for a row or column mismatch anywhere or an empty source cell', () => {
+    const source = '| A | B |\n| --- | --- |\n| First | |\n| Last | Value |';
+    const translation = '| 甲 | 乙 |\n| --- | --- |\n| 第一 | 新增 |';
+    for (const lastRow of ['', '\n| 末尾 |', '\n| 末尾 | 值 | 多余 |']) {
+        assertSelectionMappings(source, translation + lastRow, [['甲']]);
+    }
+    assertSelectionMappings(source, `${translation}\n| 末尾 | 值 |`, [['新增']]);
+});
+
+test('maps a translated bullet to its own original list item', () => {
     const markdown = [
         '- We develop inference-only RPMs, frozen-weight LLMs.',
         '- We further propose agentic RPMs with pilot experiments.',
@@ -1630,4 +1717,130 @@ test('falls back to the whole block when the sentence counts disagree', () => {
     assert.equal(mapped.granularity, 'block');
     assert.equal(mapped.from, block.sourceFrom);
     assert.equal(mapped.to, block.sourceTo);
+});
+
+function alignedResponse(block, texts, language = 'zh-CN') {
+    const { units } = createAlignmentPlan(block);
+    assert.equal(units.length, texts.length);
+    return assembleAlignedBlock(block, units.map(({ id }, i) => ({
+        id, translatedMarkdown: texts[i],
+    })), language);
+}
+
+function assertUnitProjection(markdown, views, unit, original, translated, comparison = translated) {
+    assert.deepEqual(unit.sourceRanges.map(({ from, to }) => markdown.slice(from, to)), [original]);
+    assert.deepEqual(unit.comparisonSourceRanges.map(({ from, to }) => views.comparisonMarkdown.slice(from, to)), [original]);
+    assert.equal(views.translatedMarkdown.slice(unit.translatedFrom, unit.translatedTo), translated);
+    assert.equal(views.comparisonMarkdown.slice(unit.comparisonTranslationFrom, unit.comparisonTranslationTo), comparison);
+}
+
+test('both views hit ID-bound units by half-open ranges, not duplicate translated wording', () => {
+    const markdown = 'Accuracy improved.  Latency fell. Then throughput rose.\n\nLatency fell again.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const translations = [
+        alignedResponse(blocks[0], ['准确率提高了。', '下降。', '下降。'], 'fr-FR'),
+        alignedResponse(blocks[1], ['再次下降。'], 'fr-FR'),
+    ];
+    const views = createDocumentTranslationViews(markdown, blocks, translations, { targetLanguage: 'fr-FR' });
+    const [first, second, third, last] = views.blockRanges.flatMap(block => block.alignmentUnits);
+    assert.equal(new Set([first.id, second.id, third.id, last.id]).size, 4);
+    assertUnitProjection(markdown, views, second, 'Latency fell.', '下降。');
+    assertUnitProjection(markdown, views, third, 'Then throughput rose.', '下降。');
+    assertUnitProjection(markdown, views, last, 'Latency fell again.', '再次下降。');
+    for (const [view, fromKey, toKey] of [
+        ['translated', 'translatedFrom', 'translatedTo'],
+        ['compare', 'comparisonTranslationFrom', 'comparisonTranslationTo'],
+    ]) {
+        const hits = (from, to) => mapAlignedTranslationSelection({ from, to }, views.blockRanges, view).map(unit => unit.id);
+        assert.deepEqual(hits(second[fromKey], second[toKey]), [second.id]);
+        assert.deepEqual(hits(second[toKey], third[fromKey]), []);
+        assert.deepEqual(hits(second[toKey] - 1, third[fromKey]), [second.id]);
+        assert.deepEqual(hits(second[toKey] - 1, third[fromKey] + 1), [second.id, third.id]);
+        assert.deepEqual(hits(third[fromKey] + 1, last[toKey]), [third.id, last.id]);
+    }
+});
+
+test('projects restored placeholders and bilingual image edits independently', () => {
+    const markdown = '![Chart](chart.png) Value is $12.34$. Then `run()`.\n\nNext block.';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const [image, math, code] = blocks[0].protectedFragments.map(fragment => fragment.placeholder);
+    const translations = [
+        alignedResponse(blocks[0], [`${image} 数值是 ${math}。`, `然后 ${code}。`]),
+        alignedResponse(blocks[1], ['下一段。']),
+    ];
+    const views = createDocumentTranslationViews(markdown, blocks, translations);
+    const [first, second, last] = views.blockRanges.flatMap(block => block.alignmentUnits);
+    assertUnitProjection(markdown, views, first, '![Chart](chart.png) Value is $12.34$.', '![Chart](chart.png) 数值是 $12.34$。', '数值是 $12.34$。');
+    assertUnitProjection(markdown, views, second, 'Then `run()`.', '然后 `run()`。');
+    assertUnitProjection(markdown, views, last, 'Next block.', '下一段。');
+    assert.doesNotMatch(`${views.translatedMarkdown}\n${views.comparisonMarkdown}`, /MKTEROPROTECTED|:s\d+:/u);
+});
+
+test('projects list sentences and table cells without indexing their delimiters', () => {
+    const markdown = '- One. Two.\n  - Nested.\n\n| Field | Other |\n| --- | --- |\n| Repeat. Repeat. | Repeat. |';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const [list, table] = blocks;
+    const views = createDocumentTranslationViews(markdown, blocks, [
+        alignedResponse(list, ['一。', '二。', '嵌套。']),
+        alignedResponse(table, ['字段', '其他', '相同。', '相同。', '相同。']),
+    ]);
+    const [[one, two, nested], [, , first, second, other]] = views.blockRanges.map(block => block.alignmentUnits);
+    assertUnitProjection(markdown, views, two, 'Two.', '二。');
+    assertUnitProjection(markdown, views, nested, 'Nested.', '嵌套。');
+    assertUnitProjection(markdown, views, first, 'Repeat.', '相同。');
+    assertUnitProjection(markdown, views, second, 'Repeat.', '相同。');
+    assertUnitProjection(markdown, views, other, 'Repeat.', '相同。');
+    const listRange = views.blockRanges[0];
+    assert.deepEqual(mapAlignedTranslationSelection({ from: listRange.comparisonSourceTo, to: listRange.comparisonTranslationFrom }, views.blockRanges, 'compare'), []);
+    assert.deepEqual(mapAlignedTranslationSelection({ from: listRange.translatedFrom, to: one.translatedFrom }, views.blockRanges, 'translated'), []);
+    assert.deepEqual(mapAlignedTranslationSelection({ from: second.translatedTo, to: other.translatedFrom }, views.blockRanges, 'translated'), []);
+});
+
+test('keeps readable Markdown but discards stale or corrupt sentence indexes', () => {
+    const source = 'First. Second.';
+    const [block] = collectMarkdownTranslationBlocks(source);
+    const translation = alignedResponse(block, ['一。', '二。']);
+    const variants = [
+        { ...translation, alignment: { ...translation.alignment, version: 2 } },
+        { ...translation, markdown: '一。另一句。' },
+        { ...translation, alignment: { ...translation.alignment, units: [
+            { ...translation.alignment.units[0], id: 'wrong-id' }, translation.alignment.units[1],
+        ] } },
+        { ...translation, alignment: { ...translation.alignment, units: [
+            { ...translation.alignment.units[0], sourceRanges: [{ from: 1, to: 6 }] }, translation.alignment.units[1],
+        ] } },
+        { ...translation, alignment: { ...translation.alignment, units: [
+            { ...translation.alignment.units[0], sourceRanges: undefined }, translation.alignment.units[1],
+        ] } },
+    ];
+    for (const variant of variants) {
+        const views = createDocumentTranslationViews(source, [block], [variant]);
+        assert.equal(views.translatedMarkdown, variant.markdown);
+        assert.equal(views.blockRanges[0].alignmentUnits, undefined);
+    }
+    const revised = 'Third. Second.';
+    const [revisedBlock] = collectMarkdownTranslationBlocks(revised);
+    assert.equal(revisedBlock.id, block.id);
+    const updated = createDocumentTranslationViews(revised, [revisedBlock], [translation]);
+    assert.equal(updated.translatedMarkdown, translation.markdown);
+    assert.equal(updated.blockRanges[0].alignmentUnits, undefined);
+    const stale = createDocumentTranslationViews(revised, [block], [translation]);
+    assert.equal(stale.blockRanges[0].alignmentUnits, undefined);
+    const wrongLanguage = createDocumentTranslationViews(source, [block], [translation], { targetLanguage: 'fr-FR' });
+    assert.equal(wrongLanguage.blockRanges[0].alignmentUnits, undefined);
+});
+
+test('does not index legacy fallback or non-rendered comparison text', () => {
+    const markdown = 'Same.\n\nUnsupported legacy.\n\n$$x$$';
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const views = createDocumentTranslationViews(markdown, blocks, [
+        alignedResponse(blocks[0], ['Same.']),
+        { id: blocks[1].id, markdown: blocks[1].requestMarkdown },
+    ]);
+    const [unit] = views.blockRanges[0].alignmentUnits;
+    assert.equal(unit.comparisonTranslationFrom, null);
+    assert.equal(unit.comparisonTranslationTo, null);
+    assert.equal(views.blockRanges[1].alignmentUnits, undefined);
+    assert.equal(views.blockRanges[2].alignmentUnits, undefined);
+    assert.deepEqual(mapAlignedTranslationSelection({ from: 0, to: markdown.length }, views.blockRanges, 'compare'), []);
 });

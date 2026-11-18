@@ -17,7 +17,7 @@ import {
     resolvePageMarkerSourceLocation,
 } from '../core/markdown-page-markers.js';
 import { createLocalization } from '../i18n/localization.js';
-import { normalizeChromeRanges } from '../markdown/chrome-ranges.js';
+import { normalizeChromeRanges, subtractChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
     noteSegmentTextKey,
@@ -72,6 +72,7 @@ import {
 } from './caption-selection-clamp.js';
 import { createAnnotationPopup } from './annotation-popup.js';
 import { createTranslationSourcePopup } from './translation-source-popup.js';
+import { selectedTableCellRanges } from './rendered-source-alignment.js';
 import {
     COPY_FAILED,
     createCopyDelivery,
@@ -150,6 +151,71 @@ const NAVIGATION_SAME_POSITION_PX = 24;
 // Ctrl/Cmd+C reaches the copy event in the same task on Windows and macOS.
 // The wait only has to outlast that, not a slow machine's paint.
 const COPY_SHORTCUT_GRACE_MS = 200;
+
+function overlaps(left, right) {
+    return left.from < right.to && left.to > right.from;
+}
+
+function validReaderRange(range, bounds) {
+    return Number.isSafeInteger(range?.from) && Number.isSafeInteger(range?.to)
+        && range.from >= bounds.from && range.to <= bounds.to && range.from < range.to;
+}
+
+function translatedSelectionRanges(view, range) {
+    // A replacement widget has no character positions in CodeMirror. Map
+    // selected cells independently, leaving unconfirmed cells out of the hit.
+    const tables = [...view.contentDOM.querySelectorAll(
+        '.cm-mktero-table[data-table-source-from], .cm-mktero-html-table[data-markdown-from]'
+    )].filter(table => range.intersectsNode(table));
+    const containingTable = node => tables.find(table => table.contains(node));
+    const tableBounds = table => ({
+        from: Number(table.dataset.markdownFrom), to: Number(table.dataset.markdownTo),
+    });
+    const start = containingTable(range.startContainer);
+    const end = containingTable(range.endContainer);
+    let from = start ? tableBounds(start).from
+        : view.posAtDOM(range.startContainer, range.startOffset);
+    const to = end ? tableBounds(end).to
+        : view.posAtDOM(range.endContainer, range.endOffset);
+    const selected = [];
+    for (const table of tables) {
+        const bounds = tableBounds(table);
+        if (!validReaderRange(bounds, { from: 0, to: view.state.doc.length })) continue;
+        if (from < bounds.from) selected.push({ from, to: bounds.from });
+        from = Math.max(from, bounds.to);
+        const cells = table.querySelectorAll('caption, td, th');
+        if (!cells.length) continue;
+        const clipped = range.cloneRange();
+        if (table !== start) clipped.setStart(cells[0], 0);
+        if (table !== end) clipped.setEnd(cells[cells.length - 1], cells[cells.length - 1].childNodes.length);
+        const cellRanges = selectedTableCellRanges(table, clipped,
+            view.state.sliceDoc(bounds.from, bounds.to));
+        for (const cell of cellRanges || []) {
+            selected.push({ from: bounds.from + cell.from, to: bounds.from + cell.to });
+        }
+    }
+    if (from < to) selected.push({ from, to });
+    return selected;
+}
+
+function normalizeReaderAlignmentUnits(pair, translatedBounds, compare, sourceLength, viewLength) {
+    if (!Array.isArray(pair.alignmentUnits)) return [];
+    return pair.alignmentUnits.flatMap(unit => {
+        const translated = compare
+            ? { from: unit?.comparisonTranslationFrom, to: unit?.comparisonTranslationTo }
+            : { from: unit?.translatedFrom, to: unit?.translatedTo };
+        const source = unit?.sourceRanges;
+        const comparison = unit?.comparisonSourceRanges;
+        if (!unit?.id || !validReaderRange(translated, translatedBounds)
+            || !Array.isArray(source) || !source.length
+            || source.some(range => !validReaderRange(range, { from: 0, to: sourceLength }))
+            || (compare && (!Array.isArray(comparison) || comparison.length !== source.length
+                || comparison.some(range => !validReaderRange(range, { from: 0, to: viewLength }))))) {
+            return [];
+        }
+        return [{ ...translated, id: unit.id, source, comparison }];
+    }).sort((left, right) => left.from - right.from);
+}
 // The fallback copy below asks CodeMirror for the text it would have copied.
 // That dispatch is not a reader copy, so the verification ignores it.
 let syntheticCopyDispatch = false;
@@ -304,6 +370,7 @@ export function createInlineMarkdownEditor({
     copySelectionTranslation,
     revealTranslationSource = null,
     translateOriginalBlockText = null,
+    enableSentenceAlignment = null,
     onCommitCorrection,
     onRestoreCorrection,
     onCorrectionError,
@@ -312,10 +379,10 @@ export function createInlineMarkdownEditor({
     analysisCache = null,
 }) {
     const t = localization.t.bind(localization);
-    // The window supplies these two hosts with every document rather than at
-    // construction; keep them mutable so setDocument can refresh them.
+    // The window can supply the hosts with each document.
     let hostTranslateOriginalBlockText = translateOriginalBlockText;
     let hostRevealTranslationSource = revealTranslationSource;
+    let hostEnableSentenceAlignment = enableSentenceAlignment;
     if (!parent) throw new Error(t('error.editorParentRequired'));
     const ownerWindow = parent.ownerDocument?.defaultView;
     if (!ownerWindow) throw new Error(t('error.editorWindowRequired'));
@@ -324,30 +391,40 @@ export function createInlineMarkdownEditor({
     const clearRetainedSelectionHighlight = () => {
         view?.dispatch({ effects: setRetainedSelection.of(null) });
     };
+    const saveSelectionAnnotation = typeof createMarkdownAnnotation === 'function'
+        ? async (annotation, selectionContext) => {
+            const epoch = annotationSelectionClearEpoch;
+            const doc = view.state.doc;
+            const translated = selectionContext?.rangesAreSource === true
+                ? activeTranslationSelection : null;
+            const saved = await createMarkdownAnnotation(
+                withSelectionTextQuote(annotation, selectionSources.get(selectionContext)),
+                withoutSelectionTranslationContext(selectionContext)
+            );
+            clearFinishedAnnotationSelection(epoch, () => {
+                if (view.state.doc !== doc) return false;
+                // Keyboard or native selection changes may arrive before the next frame.
+                const selection = translated && rootSelectionFor(parent);
+                return !selection || selection.isCollapsed || (
+                    activeTranslationSelection === translated
+                    && translationSelectionForDOM()?.key === translated.key
+                );
+            });
+            return saved;
+        }
+        : undefined;
     const imagePreview = createImagePreview(parent, { localization });
     const citationPopup = createCitationPopup(parent, { localization });
     const translationSourcePopup = createTranslationSourcePopup(parent, {
         localization,
-        revealSource: source => hostRevealTranslationSource?.(source),
+        createMarkdownAnnotation: saveSelectionAnnotation,
+        revealSource: source => {
+            if (source?.isCurrent?.()) hostRevealTranslationSource?.(source);
+        },
     });
     const annotationPopup = createAnnotationPopup(parent, {
         localization,
-        createMarkdownAnnotation: typeof createMarkdownAnnotation === 'function'
-            ? async (annotation, selectionContext) => {
-                // A selection started while this one saves bumps the epoch;
-                // reading it after the await would clear that new selection.
-                const epoch = annotationSelectionClearEpoch;
-                const saved = await createMarkdownAnnotation(
-                    withSelectionTextQuote(
-                        annotation,
-                        selectionSources.get(selectionContext)
-                    ),
-                    withoutSelectionTranslationContext(selectionContext)
-                );
-                clearFinishedAnnotationSelection(epoch);
-                return saved;
-            }
-            : undefined,
+        createMarkdownAnnotation: saveSelectionAnnotation,
         changeAnnotationColor,
         updateAnnotationComment,
         deleteAnnotation,
@@ -653,6 +730,8 @@ export function createInlineMarkdownEditor({
         centerOffset,
         correctionViewportFallbackEnabled
     );
+    let activeTranslationSelection = null;
+    let translationPopupEpoch = 0;
     const removeDOMActivation = installDOMActivation(
         parent,
         ownerWindow,
@@ -675,7 +754,10 @@ export function createInlineMarkdownEditor({
                     && editorClock() - sameTextRefreshAt
                         < SAME_TEXT_REFRESH_SCROLL_MS;
                 const keepAnnotation = annotationPopup.isNoteOpen()
-                    || restoringAfterRefresh;
+                    || restoringAfterRefresh
+                    || (activeTranslationSelection?.view === 'compare'
+                        && annotationPopup.isSelectionOpen()
+                        && view.scrollDOM.contains(event.target));
                 for (const popup of interactionPopups) {
                     if (!(keepAnnotation && popup === annotationPopup)) {
                         popup.close();
@@ -1232,131 +1314,128 @@ export function createInlineMarkdownEditor({
         scheduleTranslationSelectionUpdate();
     };
 
-    // A selection inside a translated block is the reader asking which
-    // original block it belongs to. Bilingual reading marks that block, since
-    // the two sit together; the Translation view has no original on screen,
-    // so it raises the bubble instead. The mark follows the selection: no
-    // timer, because a flash that expires would say "you jumped here" when
-    // the reader is still holding the text.
-    // True while the current selection sits on translated text. The source
-    // action ranges never cover those blocks, so the generic selection handler
-    // would otherwise answer with the "original text only" hint at the same
-    // time this path opens its own popup, and the two would land on top of
-    // each other.
-    const selectionIsTranslated = () => Boolean(translationBlockForSelection());
-
-    const translationBlockForSelection = () => {
-        if (destroyed || !view) return null;
-        if (!['compare', 'translated'].includes(currentTranslationView)) {
-            return null;
-        }
-        if (!currentTranslationPairs.length) return null;
+    // The generic action popup must not also explain that this selection is
+    // translated. Only the bilingual source-action path owns its result.
+    const translationSelectionForDOM = () => {
+        if (destroyed || !view || currentTranslationView === 'original'
+            || !currentTranslationPairs.length) return null;
         const selection = rootSelectionFor(parent);
-        if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
-            return null;
-        }
-        let range;
+        if (!selection || selection.isCollapsed || selection.rangeCount !== 1
+            || !/\S/u.test(selection.toString())) return null;
         try {
-            range = selection.getRangeAt(0);
+            const range = selection.getRangeAt(0);
+            if (!selectionNodeInEditor(view, range.startContainer)
+                || !selectionNodeInEditor(view, range.endContainer)) return null;
+            const ranges = translatedSelectionRanges(view, range).flatMap(part => (
+                subtractChromeRanges(part, currentChromeRanges)
+            ));
+            const blocks = [];
+            const hits = [];
+            const legacy = [];
+            const compare = currentTranslationView === 'compare';
+            for (const pair of currentTranslationPairs) {
+                if (pair.sourceFallback) continue;
+                const selected = ranges.flatMap(range => {
+                    if (!overlaps(range, pair)) return [];
+                    const from = Math.max(range.from, pair.from);
+                    const to = Math.min(range.to, pair.to);
+                    return /\S/u.test(currentTranslationMarkdown.slice(from, to))
+                        ? [{ from, to }] : [];
+                });
+                if (!selected.length) continue;
+                blocks.push(pair);
+                if (pair.sourceFrom == null) continue;
+                if (pair.units.length) {
+                    const seen = new Set();
+                    for (const unit of pair.units) {
+                        if (seen.has(unit.id) || !selected.some(part => overlaps(unit, part)
+                            && /\S/u.test(currentTranslationMarkdown.slice(
+                                Math.max(unit.from, part.from), Math.min(unit.to, part.to)
+                            )))) continue;
+                        seen.add(unit.id);
+                        unit.source.forEach((source, index) => {
+                            hits.push(sourceExcerpt(pair, source, unit.comparison?.[index]));
+                        });
+                    }
+                    continue;
+                }
+                const structural = structuralTranslationHits(pair, selected, compare);
+                if (structural.length) hits.push(...structural);
+                else legacy.push(pair);
+            }
+            if (!blocks.length) return null;
+            return {
+                key: ranges.map(range => `${range.from}:${range.to}`).join(','),
+                blocks, hits, legacy,
+            };
         }
         catch {
             return null;
         }
-        if (!selectionNodeInEditor(view, range.startContainer)
-            || !selectionNodeInEditor(view, range.endContainer)) {
-            return null;
-        }
-        let from;
-        let to;
-        try {
-            from = view.posAtDOM(range.startContainer, range.startOffset);
-            to = view.posAtDOM(range.endContainer, range.endOffset);
-        }
-        catch {
-            return null;
-        }
-        const start = Math.min(from, to);
-        const end = Math.max(from, to);
-        if (end <= start) return null;
-        return translationBlocksInRange(start, end, start, end);
     };
 
-    // Every translated block the selection touches, in document order. A
-    // selection that straddles two blocks is two annotations, never one
-    // invented range that spans the gap between them.
-    // The original range a translated selection points at. A selection that
-    // stays inside one sentence resolves to that sentence's original; anything
-    // else resolves to the whole block, because a count mismatch during
-    // translation means the pairing is unknown and a guess would point at the
-    // wrong words.
-    const translationBlocksInRange = (start, end) => {
-        const touched = currentTranslationPairs.filter(candidate => (
-            start < candidate.to && end > candidate.from
-        ));
-        if (!touched.length) return null;
-        return touched.map(candidate => {
-            // The mapper wants one block plus the document its offsets belong
-            // to. The editor's pairs already carry view offsets, so the block
-            // is rebuilt to expose them under both naming schemes and the
-            // rendered document is passed as-is.
-            const view = currentTranslationView === 'translated'
-                ? 'translated'
-                : 'compare';
-            const mapped = mapTranslatedSentenceToSource(
-                {
-                    from: Math.max(start, candidate.from),
-                    to: Math.min(end, candidate.to),
-                },
-                [{
-                    id: candidate.id,
-                    type: candidate.type,
-                    sourceFrom: candidate.sourceFrom,
-                    sourceTo: candidate.sourceTo,
-                    comparisonSourceFrom: candidate.sourceViewFrom,
-                    comparisonSourceTo: candidate.sourceViewTo,
-                    comparisonTranslationFrom: candidate.from,
-                    comparisonTranslationTo: candidate.to,
-                    translatedFrom: candidate.from,
-                    translatedTo: candidate.to,
-                }],
-                view,
-                {
+    const sourceExcerpt = (pair, source, comparison, structuralKind = null) => ({
+        id: pair.id,
+        sourceFrom: source.from,
+        sourceTo: source.to,
+        viewSourceFrom: comparison?.from,
+        viewSourceTo: comparison?.to,
+        structuralKind,
+    });
+    const wholeSourceExcerpt = pair => sourceExcerpt(pair,
+        { from: pair.sourceFrom, to: pair.sourceTo },
+        { from: pair.sourceViewFrom, to: pair.sourceViewTo });
+
+    const structuralTranslationHits = (pair, ranges, compare) => {
+        if (!['list', 'table'].includes(pair.type)) return [];
+        const bounds = {
+            id: pair.id,
+            type: pair.type,
+            sourceFrom: pair.sourceFrom,
+            sourceTo: pair.sourceTo,
+            comparisonSourceFrom: pair.sourceViewFrom,
+            comparisonSourceTo: pair.sourceViewTo,
+            comparisonTranslationFrom: pair.from,
+            comparisonTranslationTo: pair.to,
+            translatedFrom: pair.from,
+            translatedTo: pair.to,
+        };
+        return ranges.flatMap(range => {
+            const mapped = mapTranslatedSentenceToSource(range, [bounds],
+                compare ? 'compare' : 'translated', {
                     markdown: currentTranslationSourceMarkdown,
                     comparisonMarkdown: currentTranslationMarkdown,
                     translatedMarkdown: currentTranslationMarkdown,
-                }
-            );
-            return {
-                id: candidate.id,
-                from: candidate.from,
-                to: candidate.to,
-                sourceFrom: mapped?.from ?? candidate.sourceFrom,
-                sourceTo: mapped?.to ?? candidate.sourceTo,
-                sourceBlockFrom: mapped?.sourceBlockFrom
-                    ?? candidate.sourceFrom,
-                sourceBlockTo: mapped?.sourceBlockTo
-                    ?? candidate.sourceTo,
-                viewSourceFrom: mapped?.viewFrom ?? candidate.sourceViewFrom,
-                viewSourceTo: mapped?.viewTo ?? candidate.sourceViewTo,
-                granularity: mapped?.granularity || 'block',
-                sentenceCount: mapped?.sentenceCount || 0,
-            };
+                });
+            if (!mapped || mapped.granularity === 'block') return [];
+            return [sourceExcerpt(pair, mapped,
+                { from: mapped.viewFrom, to: mapped.viewTo }, pair.type)];
         });
     };
 
-    // Which way the original block lies relative to the visible area, so the
-    // bubble can say where to look instead of pretending it is on screen.
+    const markedSourceCell = block => Array.from(view.contentDOM.querySelectorAll(
+        '.cm-mktero-table [data-translation-source-from]'
+    )).find(element => element.dataset.translationBlockId === block.id
+        && Number(element.dataset.translationSourceFrom) === block.viewSourceFrom
+        && Number(element.dataset.translationSourceTo) === block.viewSourceTo);
+
     const translationSourceDirection = block => {
-        if (!view || !Number.isFinite(block?.from)) return null;
+        if (!Number.isSafeInteger(block.viewSourceFrom)
+            || !Number.isSafeInteger(block.viewSourceTo)) return null;
         try {
-            const target = view.lineBlockAt(block.from);
-            const scrollerTop = Number(view.scrollDOM?.scrollTop) || 0;
-            const scrollerHeight = Number(view.scrollDOM?.clientHeight) || 0;
-            if (!(scrollerHeight > 0)) return null;
-            const visibleTop = view.documentTop + scrollerTop;
-            const visibleBottom = visibleTop + scrollerHeight;
-            if (target.bottom <= visibleTop) return 'above';
-            if (target.top >= visibleBottom) return 'below';
+            const viewport = view.scrollDOM.getBoundingClientRect();
+            if (!(viewport.bottom > viewport.top)) return null;
+            const rect = markedSourceCell(block)?.getBoundingClientRect();
+            if (rect && rect.bottom > rect.top) {
+                if (rect.bottom <= viewport.top) return 'above';
+                if (rect.top >= viewport.bottom) return 'below';
+                return null;
+            }
+            const origin = view.documentTop;
+            const last = view.lineBlockAt(block.viewSourceTo - 1);
+            if (origin + last.bottom <= viewport.top) return 'above';
+            const first = view.lineBlockAt(block.viewSourceFrom);
+            if (origin + first.top >= viewport.bottom) return 'below';
         }
         catch {
             return null;
@@ -1364,156 +1443,181 @@ export function createInlineMarkdownEditor({
         return null;
     };
 
+    const firstOffscreenSource = blocks => {
+        for (const block of blocks) {
+            const direction = translationSourceDirection(block);
+            if (direction) return { block, direction };
+        }
+        return null;
+    };
+    const onTranslationSelectionScroll = () => {
+        const active = activeTranslationSelection;
+        if (active?.view !== 'compare' || !annotationPopup.isSelectionOpen()) return;
+        const next = firstOffscreenSource(active.excerpts);
+        const previous = active.offscreen;
+        if (next?.block !== previous?.block || next?.direction !== previous?.direction) {
+            renderTranslationSelection(active, next);
+        }
+    };
+    view.scrollDOM.addEventListener('scroll', onTranslationSelectionScroll, { passive: true });
+
     const applyTranslationSelection = () => {
         translationSelectionScheduled = false;
         if (destroyed || !view) return;
-        const blocks = translationBlockForSelection();
-        // Only the original side is marked, and only the part of it the
-        // selection resolved to. A bullet inside a list marks that bullet, not
-        // its neighbours. The first block is the mark's anchor: a selection
-        // that straddles blocks has no single span to draw.
-        const first = blocks?.[0];
-        view.dispatch({
-            effects: setTranslationSelection.of(first
-                ? {
-                    id: first.id,
-                    from: first.viewSourceFrom,
-                    to: first.viewSourceTo,
+        const resolved = translationSelectionForDOM();
+        if (!resolved) {
+            invalidateTranslationSelection();
+            view.dispatch({ effects: setTranslationSelection.of(null) });
+            return;
+        }
+        if (activeTranslationSelection?.key === resolved.key) return;
+        invalidateTranslationSelection();
+        const active = {
+            ...resolved,
+            doc: view.state.doc,
+            view: currentTranslationView,
+            anchor: selectionAnchor(rootSelectionFor(parent), view.dom, null, {
+                wholeSelection: currentTranslationView === 'translated',
+            }),
+            shown: new Set(),
+        };
+        activeTranslationSelection = active;
+        updateTranslationSelection(active);
+    };
+
+    const updateTranslationSelection = active => {
+        const excerpts = [...active.hits,
+            ...active.legacy.filter(pair => active.shown.has(pair.id)).map(wholeSourceExcerpt)];
+        const unique = new Map(excerpts.map(excerpt => [
+            `${excerpt.sourceFrom}:${excerpt.sourceTo}`, excerpt,
+        ]));
+        active.excerpts = [...unique.values()].sort((left, right) => left.sourceFrom - right.sourceFrom);
+        const included = new Set(excerpts.map(excerpt => excerpt.id));
+        active.source = resolveSourceBlocks(active.blocks.filter(pair => included.has(pair.id)),
+            active.excerpts);
+        if (active.view === 'compare') {
+            view.dispatch({ effects: setTranslationSelection.of(active.excerpts.map(excerpt => ({
+                id: excerpt.id, from: excerpt.viewSourceFrom, to: excerpt.viewSourceTo,
+            }))) });
+        }
+        renderTranslationSelection(active,
+            active.view === 'compare' ? firstOffscreenSource(active.excerpts) : null);
+    };
+
+    const renderTranslationSelection = (active, offscreen) => {
+        const epoch = ++translationPopupEpoch;
+        const isCurrent = () => !destroyed && translationPopupEpoch === epoch
+            && activeTranslationSelection === active && view.state.doc === active.doc;
+        active.offscreen = offscreen;
+        const { anchor, source: resolved } = active;
+        const legacyActions = active.legacy.map(pair => ({
+            id: pair.id,
+            onShowBlock: () => {
+                if (!isCurrent()) return;
+                if (active.view === 'translated') {
+                    return sourceExcerptText(pair.id, pair.sourceFrom, pair.sourceTo);
                 }
-                : null),
-        });
-        const selection = rootSelectionFor(parent);
-        const anchor = selectionAnchor(selection, view.dom, null);
-        const resolved = blocks ? resolveSourceBlocks(blocks) : null;
-        if (currentTranslationView === 'compare') {
-            translationSourcePopup.close();
-            if (!resolved) {
+                if (!active.shown.has(pair.id)) {
+                    active.shown.add(pair.id);
+                    updateTranslationSelection(active);
+                }
+            },
+            ...(typeof hostEnableSentenceAlignment === 'function' ? {
+                onEnableAlignment: async ({ signal } = {}) => {
+                    if (!isCurrent() || signal?.aborted) return false;
+                    return hostEnableSentenceAlignment(pair.id, { signal });
+                },
+            } : {}),
+        }));
+        const structuralKinds = new Set(active.excerpts.map(excerpt => excerpt.structuralKind));
+        const sourceLabel = structuralKinds.has('list') || structuralKinds.has('table')
+            ? t(structuralKinds.size > 1 ? 'ai.translationSourceStructure'
+                : structuralKinds.has('table') ? 'ai.translationSourceCell' : 'ai.translationSourceItem')
+            : null;
+        const annotationActions = {
+            anchor,
+            annotation: resolved.annotation,
+            annotationUnavailable: resolved.annotationUnavailable,
+            selectionContext: resolved.selectionContext,
+            blockCount: resolved.blockCount,
+            isCurrent,
+        };
+        if (active.view === 'compare') {
+            const revealSource = offscreen ? () => {
+                if (!isCurrent()) return;
+                const cell = markedSourceCell(offscreen.block);
+                if (cell?.scrollIntoView) cell.scrollIntoView({ block: 'center' });
+                else requestEditorScroll(view, offscreen.block.viewSourceFrom,
+                    active.doc, true, 'center');
+            } : null;
+            if (!revealSource && !resolved.annotation && !resolved.annotationUnavailable
+                && !legacyActions.length && !sourceLabel) {
                 closeTranslationSourceActions();
                 return;
             }
             translationActionsOpen = true;
             annotationPopup.openSourceBlockActions({
-                anchor,
-                annotation: resolved.annotation,
-                annotationUnavailable: resolved.annotationUnavailable,
-                selectionContext: resolved.selectionContext,
-                blockCount: resolved.blocks.length,
+                ...annotationActions, legacyActions, sourceLabel,
+                offscreen: offscreen?.direction, revealSource,
             });
             return;
         }
-        closeTranslationSourceActions();
-        if (!resolved) {
-            translationSourcePopup.close();
-            return;
-        }
-        // The original lives in the source Markdown, which this view is not
-        // rendering, so its text comes from the host rather than from the
-        // document in the editor.
+        translationSourcePopup.close();
         translationSourcePopup.open({
-            anchor,
-            // A selected translated sentence is what the reader sees; the
-            // annotation action, when available, still uses every block.
-            source: {
-                ...resolved.blocks[0],
-                text: resolved.text,
-                blocks: resolved.blocks,
-            },
-            offscreen: translationSourceDirection(resolved.blocks[0]),
-            annotationUnavailable: resolved.annotationUnavailable,
-            onAnnotate: resolved.annotation
-                ? () => {
-                    translationActionsOpen = true;
-                    annotationPopup.openSourceBlockActions({
-                        anchor,
-                        annotation: resolved.annotation,
-                        annotationUnavailable: resolved.annotationUnavailable,
-                        selectionContext: resolved.selectionContext,
-                        blockCount: resolved.blocks.length,
-                    });
-                }
-                : null,
+            ...annotationActions, legacyActions, sourceLabel,
+            source: active.excerpts.length ? {
+                ...active.excerpts[0], text: resolved.text, blocks: active.excerpts, isCurrent,
+            } : null,
         });
     };
 
-    // Well under the store's 512-segment limit. That limit stops a corrupt
-    // annotation, not a selection a reader can actually make sense of.
+    // The cap concerns deduplicated whole original blocks, not sentence hits.
     const MAX_TRANSLATED_SELECTION_BLOCKS = 8;
 
     let translationActionsOpen = false;
     const closeTranslationSourceActions = () => {
         if (!translationActionsOpen) return;
         translationActionsOpen = false;
-        // The source-block popup belongs to the translated selection; a new
-        // selection replaces it rather than stacking another one.
-        annotationPopup.close();
+        if (annotationPopup.isSelectionOpen()) annotationPopup.close();
+    };
+    const invalidateTranslationSelection = () => {
+        translationPopupEpoch++;
+        activeTranslationSelection = null;
+        translationSourcePopup.close();
+        closeTranslationSourceActions();
     };
 
-    // The annotation this selection would create: every touched block's whole
-    // original range, with the sentence text kept separately for the reading
-    // bubble. The flag tells the window the ranges are already original, so it
-    // must not map them again.
-    const resolveSourceBlocks = blocks => {
-        if (!blocks.length) return null;
-        const canAnnotate = blocks.length <= MAX_TRANSLATED_SELECTION_BLOCKS;
-        const ranges = [];
-        const displayTexts = [];
-        const annotationTexts = [];
-        for (const block of blocks) {
-            const sourceFrom = Number.isSafeInteger(block.sourceBlockFrom)
-                ? block.sourceBlockFrom
-                : block.sourceFrom;
-            const sourceTo = Number.isSafeInteger(block.sourceBlockTo)
-                ? block.sourceBlockTo
-                : block.sourceTo;
-            if (!Number.isSafeInteger(sourceFrom)
-                || !Number.isSafeInteger(sourceTo)
-                || sourceTo <= sourceFrom) {
-                return null;
-            }
-            ranges.push({ from: sourceFrom, to: sourceTo });
-            const displayRange = {
-                from: block.sourceFrom,
-                to: block.sourceTo,
-            };
-            const annotationRange = { from: sourceFrom, to: sourceTo };
-            const displayText = String(
-                hostTranslateOriginalBlockText?.(block.id, displayRange) || ''
-            ).trim();
-            const annotationText = displayRange.from === annotationRange.from
-                && displayRange.to === annotationRange.to
-                ? displayText
-                : String(
-                    hostTranslateOriginalBlockText?.(block.id, annotationRange)
-                    || ''
-                ).trim();
-            if (!displayText || !annotationText) return null;
-            displayTexts.push(displayText);
-            annotationTexts.push(annotationText);
-        }
-        const text = displayTexts.join('\n\n');
-        const annotationText = annotationTexts.join('\n\n');
+    const sourceExcerptText = (id, from, to) => String(hostTranslateOriginalBlockText
+        ? hostTranslateOriginalBlockText(id, { from, to }) || ''
+        : currentTranslationSourceMarkdown.slice(from, to)).trim();
+    const resolveSourceBlocks = (blocks, excerpts) => {
+        const ranges = [...new Map(blocks.map(pair => [
+            `${pair.sourceFrom}:${pair.sourceTo}`, { id: pair.id, from: pair.sourceFrom, to: pair.sourceTo },
+        ])).values()];
+        const display = excerpts.map(({ id, sourceFrom, sourceTo }) => sourceExcerptText(id, sourceFrom, sourceTo));
+        const overCap = ranges.length > MAX_TRANSLATED_SELECTION_BLOCKS;
+        const annotationText = overCap ? [] : ranges.map(({ id, from, to }) => {
+            const index = excerpts.findIndex(excerpt => excerpt.id === id
+                && excerpt.sourceFrom === from && excerpt.sourceTo === to);
+            return index >= 0 ? display[index] : sourceExcerptText(id, from, to);
+        });
         return {
-            blocks,
-            text,
-            annotation: canAnnotate
+            blockCount: ranges.length,
+            text: display.filter(Boolean).join('\n\n'),
+            annotation: ranges.length && !overCap && annotationText.every(Boolean)
                 ? {
                     source: 'markdown',
                     type: 'highlight',
                     comment: '',
                     color: '#ffd400',
-                    text: annotationText,
-                    ranges,
+                    text: annotationText.join('\n\n'),
+                    ranges: ranges.map(({ from, to }) => ({ from, to })),
                 }
                 : null,
-            annotationUnavailable: canAnnotate
-                ? null
-                : t('annotation.sourceBlockUnavailable', {
-                    count: MAX_TRANSLATED_SELECTION_BLOCKS,
-                }),
-            selectionContext: {
-                side: 'source',
-                rangesAreSource: true,
-            },
+            annotationUnavailable: overCap ? t('annotation.sourceBlockUnavailable', {
+                count: MAX_TRANSLATED_SELECTION_BLOCKS,
+            }) : null,
+            selectionContext: { side: 'source', rangesAreSource: true },
         };
     };
 
@@ -1572,7 +1676,8 @@ export function createInlineMarkdownEditor({
             // in Bilingual and the bubble in Translation. Explaining that
             // annotations need the original would contradict the action that
             // same selection now offers.
-            if (selectionIsTranslated()) return;
+            if (translationSelectionForDOM()) return;
+            invalidateTranslationSelection();
             // A translation-only view has no source text anywhere; only a
             // comparison selection of translated text needs explaining.
             if (!currentSourceActionRanges?.length) {
@@ -1592,6 +1697,7 @@ export function createInlineMarkdownEditor({
             && openSelectionKey === selectionKey) {
             return;
         }
+        invalidateTranslationSelection();
         openSelectionKey = selectionKey;
         const copyTarget = { kind: 'selection', ...selection };
         const evidence = createSourcedEvidence(
@@ -1629,12 +1735,10 @@ export function createInlineMarkdownEditor({
     // CodeMirror copies a drag into its own selection and paints Highlight
     // over the text. Clearing only the window selection leaves that layer,
     // and in the shadow root it may not even be the selection CodeMirror reads.
-    const clearFinishedAnnotationSelection = (
-        epoch = annotationSelectionClearEpoch
-    ) => {
+    const clearFinishedAnnotationSelection = (epoch, canClear) => {
         if (destroyed) return;
         const clear = () => {
-            if (destroyed || epoch !== annotationSelectionClearEpoch) return;
+            if (destroyed || epoch !== annotationSelectionClearEpoch || !canClear()) return;
             clearReaderTextSelection(parent, view?.root);
             // The note input keeps a retained highlight of its own. Collapsing
             // the editor selection while that input is open can steal its focus.
@@ -1853,6 +1957,7 @@ export function createInlineMarkdownEditor({
         sourceMarkdown = '',
         translateOriginalBlockText: nextTranslateOriginalBlockText,
         revealTranslationSource: nextRevealTranslationSource,
+        enableSentenceAlignment: nextEnableSentenceAlignment = enableSentenceAlignment,
     }) => {
         activateDOMGlobals(ownerWindow);
         if (typeof nextTranslateOriginalBlockText === 'function') {
@@ -1865,6 +1970,7 @@ export function createInlineMarkdownEditor({
             ownerWindow.clearTimeout?.(translationHighlightTimer);
             translationHighlightTimer = null;
         }
+        hostEnableSentenceAlignment = nextEnableSentenceAlignment;
         const value = String(markdown || '');
         const documentChanged = value !== view.state.doc.toString();
         const viewportCenterOffset = Number.isSafeInteger(
@@ -1919,26 +2025,27 @@ export function createInlineMarkdownEditor({
         currentSourceActionRanges = Array.isArray(sourceActionRanges)
             ? normalizeSourceActionRanges(sourceActionRanges, value.length)
             : null;
-        currentTranslationPairs = Array.isArray(translationPairs)
+        const sourceValue = String(sourceMarkdown || '');
+        const nextPairs = Array.isArray(translationPairs)
             ? translationPairs.flatMap(pair => {
-                if (!Number.isSafeInteger(pair?.translatedFrom)
-                    || !Number.isSafeInteger(pair?.translatedTo)
-                    || pair.translatedTo <= pair.translatedFrom) {
-                    return [];
-                }
+                const translated = { from: pair?.translatedFrom, to: pair?.translatedTo };
+                if (!validReaderRange(translated, { from: 0, to: value.length })) return [];
                 const sourceKnown = Number.isSafeInteger(pair.sourceFrom)
                     && Number.isSafeInteger(pair.sourceTo)
-                    && pair.sourceTo > pair.sourceFrom;
-                const sourceViewKnown = Number.isSafeInteger(pair.sourceViewFrom)
-                    && Number.isSafeInteger(pair.sourceViewTo)
-                    && pair.sourceViewTo > pair.sourceViewFrom;
+                    && pair.sourceFrom >= 0 && pair.sourceTo > pair.sourceFrom
+                    && (!sourceValue || pair.sourceTo <= sourceValue.length);
+                const sourceViewKnown = validReaderRange({
+                    from: pair.sourceViewFrom, to: pair.sourceViewTo,
+                }, { from: 0, to: value.length });
                 const comparisonSourceFallback = translationView === 'compare'
-                    && sourceKnown;
+                    && sourceKnown && pair.sourceTo <= value.length;
                 return [{
                     id: String(pair.id || ''),
                     type: pair.type,
-                    from: pair.translatedFrom,
-                    to: pair.translatedTo,
+                    sourceFallback: Boolean(pair.sourceFallback),
+                    ...translated,
+                    units: normalizeReaderAlignmentUnits(pair, translated,
+                        translationView === 'compare', sourceValue.length, value.length),
                     ...(sourceKnown
                         ? { sourceFrom: pair.sourceFrom, sourceTo: pair.sourceTo }
                         : {}),
@@ -1953,16 +2060,19 @@ export function createInlineMarkdownEditor({
                         }
                         : {}),
                 }];
-            })
+            }).sort((left, right) => left.from - right.from)
             : [];
+        const nextTranslationView = ['compare', 'translated'].includes(translationView)
+            ? translationView : 'original';
+        const keepTranslationSelection = activeTranslationSelection && !documentChanged
+            && currentTranslationView === nextTranslationView
+            && currentTranslationSourceMarkdown === sourceValue
+            && JSON.stringify(currentTranslationPairs) === JSON.stringify(nextPairs);
+        if (!keepTranslationSelection) invalidateTranslationSelection();
+        currentTranslationPairs = nextPairs;
         currentTranslationMarkdown = value;
-        currentTranslationSourceMarkdown = String(sourceMarkdown || '');
-        currentTranslationView = ['compare', 'translated'].includes(translationView)
-            ? translationView
-            : 'original';
-        if (currentTranslationView !== 'translated') {
-            translationSourcePopup.close();
-        }
+        currentTranslationSourceMarkdown = sourceValue;
+        currentTranslationView = nextTranslationView;
         const nextPendingFigures = pendingFigures instanceof Map
             ? pendingFigures
             : null;
@@ -2011,7 +2121,7 @@ export function createInlineMarkdownEditor({
                 };
             })),
             setTranslationPairHighlight.of(null),
-            setTranslationSelection.of(null),
+            ...(!keepTranslationSelection ? [setTranslationSelection.of(null)] : []),
             setDocumentSearchHighlight.of({
                 matches: [],
                 activeIndex: -1,
@@ -2219,6 +2329,7 @@ export function createInlineMarkdownEditor({
                     'scroll',
                     scheduleScrollProgress
                 );
+                view.scrollDOM.removeEventListener('scroll', onTranslationSelectionScroll);
                 interactionRoot.removeEventListener(
                     'mousedown',
                     closeSelectionActions,

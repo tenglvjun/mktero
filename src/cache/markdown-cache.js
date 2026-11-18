@@ -20,7 +20,7 @@ import { throwIfFigureAborted } from '../figures/figure-async.js';
 const CACHE_SCHEMA_VERSION = 1;
 const METADATA_FILE = 'entry.json';
 const MARKDOWN_FILE = 'document.md';
-const TRANSLATION_SCHEMA_VERSION = 1;
+const TRANSLATION_SCHEMA_VERSION = 2;
 export const DEFAULT_MAX_SOURCE_MAP_BYTES = 20 * 1024 * 1024;
 export const DEFAULT_MAX_SOURCE_LOCATIONS = 100_000;
 export const DEFAULT_MAX_TRANSLATION_BYTES = 16 * 1024 * 1024;
@@ -302,16 +302,17 @@ export class MarkdownCache {
         }
     }
 
-    getTranslationByLanguage(cacheKey, targetLanguage) {
+    getTranslationByLanguage(cacheKey, targetLanguage, identity = null) {
         validateCacheKey(cacheKey);
         validateTargetLanguage(targetLanguage);
         return this.#withOperation(() => this.#getTranslationByLanguage(
             cacheKey,
-            targetLanguage
+            targetLanguage,
+            identity
         ));
     }
 
-    async #getTranslationByLanguage(cacheKey, targetLanguage) {
+    async #getTranslationByLanguage(cacheKey, targetLanguage, identity) {
         const entryPath = this.#entryPath(cacheKey);
         const metadataPath = this.path.join(entryPath, METADATA_FILE);
         if (!(await this.io.exists(metadataPath))) return null;
@@ -335,40 +336,33 @@ export class MarkdownCache {
             return null;
         }
         const descriptors = metadata.translations || [];
-        let descriptor = null;
         for (let index = descriptors.length - 1; index >= 0; index--) {
-            if (descriptors[index].targetLanguage === targetLanguage) {
-                descriptor = descriptors[index];
-                break;
+            const descriptor = descriptors[index];
+            if (descriptor.targetLanguage !== targetLanguage) continue;
+            try {
+                const record = await this.#readTranslationRecord(entryPath, descriptor);
+                if (identity && (record.promptVersion !== identity.promptVersion
+                    || record.settingsIdentity !== identity.settingsIdentity)) continue;
+                return translationValue(record);
+            }
+            catch {
+                metadata = await this.#removeTranslationReference(
+                    entryPath, metadataPath, metadata, descriptor.translationKey
+                );
             }
         }
-        if (!descriptor) return null;
-        try {
-            const record = await this.#readTranslationRecord(
-                entryPath,
-                descriptor
-            );
-            return translationValue(record);
-        }
-        catch {
-            await this.#removeTranslationReference(
-                entryPath,
-                metadataPath,
-                metadata,
-                descriptor.translationKey
-            ).catch(() => {});
-            return null;
-        }
+        return null;
     }
 
-    putTranslation(cacheKey, translationKey, translation) {
+    putTranslation(cacheKey, translationKey, translation, { signal } = {}) {
         validateCacheKey(cacheKey);
         validateCacheKey(translationKey);
         validateTranslationValue(translation);
         return this.#withOperation(() => this.#putTranslation(
             cacheKey,
             translationKey,
-            translation
+            translation,
+            signal
         ));
     }
 
@@ -429,7 +423,8 @@ export class MarkdownCache {
         return true;
     }
 
-    async #putTranslation(cacheKey, translationKey, translation) {
+    async #putTranslation(cacheKey, translationKey, translation, signal) {
+        checkTranslationSignal(signal);
         const entryPath = this.#entryPath(cacheKey);
         const metadataPath = this.path.join(entryPath, METADATA_FILE);
         const metadata = await this.#readMetadata(
@@ -438,6 +433,7 @@ export class MarkdownCache {
             cacheKey
         );
         if (!metadata) throw new Error('The Markdown cache entry is unavailable');
+        checkTranslationSignal(signal);
         const generation = createGenerationID(this.now());
         const translationFile = `translation-${generation}.json`;
         const translationPath = this.path.join(entryPath, translationFile);
@@ -477,6 +473,7 @@ export class MarkdownCache {
                     ), 0),
                 lastAccessedAt: this.now(),
             };
+            checkTranslationSignal(signal);
             await this.#writeMetadata(metadataPath, nextMetadata);
             const retainedFiles = new Set(retainedTranslations.map(
                 descriptor => descriptor.translationFile
@@ -1346,8 +1343,14 @@ function withoutTranslationReferences(metadata) {
     return withTranslationReferences(metadata, []);
 }
 
+function checkTranslationSignal(signal) {
+    if (signal?.aborted) {
+        throw signal.reason || Object.assign(new Error('Translation canceled'), { name: 'AbortError' });
+    }
+}
+
 function validateTranslationRecord(record, translationKey, maxBytes) {
-    if (record?.schemaVersion !== TRANSLATION_SCHEMA_VERSION
+    if (![1, TRANSLATION_SCHEMA_VERSION].includes(record?.schemaVersion)
         || record.translationKey !== translationKey
         || new TextEncoder().encode(JSON.stringify(record)).length > maxBytes) {
         throw new Error('Invalid cached translation metadata');
@@ -1422,10 +1425,10 @@ function translationValue(value) {
         translatedMarkdown: value.translatedMarkdown,
         // The comparison view is rebuilt from source and translated blocks.
         comparisonMarkdown: sourceBlocks ? '' : value.comparisonMarkdown,
-        blocks: value.blocks.map(block => ({
-            id: block.id,
-            markdown: block.markdown,
-        })),
+        blocks: value.blocks.map(block => {
+            const alignment = value.schemaVersion !== 1 && copyTranslationAlignment(block.alignment);
+            return { id: block.id, markdown: block.markdown, ...(alignment ? { alignment } : {}) };
+        }),
         ...(sourceBlocks ? {
             sourceBlocks: sourceBlocks.map(block => ({
                 id: block.id,
@@ -1445,6 +1448,26 @@ function translationValue(value) {
             message: failure.message,
         })),
     };
+}
+
+// A damaged index does not invalidate readable translated text. Source and
+// translation identity are checked again when building the current views.
+function copyTranslationAlignment(alignment) {
+    if (alignment?.version !== 1 || !Array.isArray(alignment.units)
+        || !alignment.units.length || alignment.units.length > 100_000) return null;
+    const ids = new Set();
+    const units = [];
+    for (const unit of alignment.units) {
+        if (typeof unit?.id !== 'string' || !unit.id || unit.id.length > 512 || ids.has(unit.id)
+            || typeof unit.translatedMarkdown !== 'string' || !unit.translatedMarkdown.trim()) return null;
+        if (!Array.isArray(unit.sourceRanges) || !unit.sourceRanges.length
+            || unit.sourceRanges.some(range => !Number.isSafeInteger(range?.from) || range.from < 0
+                || !Number.isSafeInteger(range.to) || range.to <= range.from)) return null;
+        ids.add(unit.id);
+        units.push({ id: unit.id, translatedMarkdown: unit.translatedMarkdown,
+            sourceRanges: unit.sourceRanges.map(({ from, to }) => ({ from, to })) });
+    }
+    return { version: 1, units };
 }
 
 function validateTargetLanguage(targetLanguage) {

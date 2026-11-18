@@ -1641,7 +1641,9 @@ async function openItemAsMarkdown(itemID, {
         onCommitCorrection: correction => commitCorrection(itemID, correction),
         onRestoreCorrection: blockID => restoreCorrection(itemID, blockID),
         onRestoreAllCorrections: () => restoreAllCorrections(itemID),
-        onTranslateDocument: options => translateDocument(itemID, options),
+        onTranslateDocument: options => options?.alignmentBlockID !== undefined
+            ? enableSentenceAlignment(itemID, options.alignmentBlockID, options.signal)
+            : translateDocument(itemID, options),
         onCancelDocumentTranslation: () => cancelDocumentTranslation(itemID),
         onTranslateSelection: ({ text, onTextDelta } = {}) => (
             translateSelection(itemID, { text, onTextDelta })
@@ -3246,6 +3248,7 @@ async function translateDocument(documentID, {
         error.code = 'AI_CONFIGURATION_ERROR';
         throw error;
     }
+    requests.cancelBlock(documentID, 'alignment');
     presentation.translationLanguageSelection = null;
     // A started translation is the signal, not a finished one: a reader whose
     // provider then fails still wanted the translation, and that intent is what
@@ -3379,6 +3382,43 @@ async function translateDocument(documentID, {
         if (error?.name !== 'AbortError') logMkteroError(error);
         throw error;
     }
+}
+
+function enableSentenceAlignment(documentID, blockID, popupSignal) {
+    const presentation = runtime.presenter?.get(documentID);
+    const model = presentation?.model;
+    const documentKey = model?.cacheKey;
+    const markdown = model?.markdown;
+    const language = model?.translationTargetLanguage;
+    const current = () => runtime.presenter?.get(documentID) === presentation
+        && presentation?.model.status === 'ready'
+        && ['ready', 'partial'].includes(presentation.model.translationStatus)
+        && presentation.model.cacheKey === documentKey
+        && presentation.model.markdown === markdown
+        && presentation.model.translationTargetLanguage === language;
+    if (!documentKey || !current() || !blockID || !runtime.translationRequests) {
+        throw new Error('Translation is no longer available');
+    }
+    return runtime.translationRequests.enqueue(documentID, 'alignment', blockID, async signal => {
+        if (!current()) throw new Error('Translation changed');
+        const baseline = currentTranslationResult(presentation.model);
+        const result = await runtime.translationService.translateDocument({
+            documentKey, markdown, targetLanguage: language, signal,
+            chromeRanges: presentation.model.chromeRanges,
+            figureMap: presentation.model.figureMap,
+            alignmentBlockID: blockID,
+            existingTranslation: baseline,
+        });
+        if (signal.aborted || !current()) {
+            throw Object.assign(new Error('Translation changed'), { name: 'AbortError' });
+        }
+        runtime.presenter.update(presentation, documentTranslationChanges(result, {
+            translationView: presentation.model.translationView,
+            configuredTargetLanguage: presentation.model.translationConfiguredTargetLanguage,
+            ...cachedLanguageStateAfterTranslation(presentation.model, result),
+        }));
+        return result;
+    }, popupSignal);
 }
 
 async function translateSelection(documentID, {
@@ -3743,6 +3783,7 @@ async function selectTranslationLanguage(documentID, targetLanguage) {
         || presentation.model.translationStatus === 'loading') {
         return false;
     }
+    runtime.translationRequests?.cancelBlock(documentID, 'alignment');
     const currentComplete = presentation.model.translationStatus === 'ready'
         && presentation.model.translationTargetLanguage === targetLanguage;
     if (currentComplete) {

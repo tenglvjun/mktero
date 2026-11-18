@@ -1053,12 +1053,7 @@ test('uses the language menu without changing the default translation language',
     await waitFor(() => frenchRequest.signal.aborted);
     await waitFor(() => languageOptions().every(option => !option.disabled));
 
-    providerReplies.push(body => JSON.stringify(
-        JSON.parse(body.messages.at(-1).content).map(entry => ({
-            id: entry.id,
-            translatedMarkdown: '# 한국어 논문',
-        }))
-    ));
+    providerReplies.push(headingTranslationReply('한국어 논문'));
     translatedMode.click();
     languageOptions().find(option => (
         option.getAttribute('data-translation-language') === 'ko-KR'
@@ -1068,12 +1063,7 @@ test('uses the language menu without changing the default translation language',
     assert.equal(preferences.get('extensions.mktero.aiTargetLanguage'), 'es-ES');
     assert.equal(translate.hidden, true);
 
-    const invalidReply = body => JSON.stringify(
-        JSON.parse(body.messages.at(-1).content).map(entry => ({
-            id: entry.id,
-            translatedMarkdown: '<script>invalid</script>',
-        }))
-    );
+    const invalidReply = headingTranslationReply('<script>invalid</script>');
     providerReplies.push(invalidReply, invalidReply, invalidReply);
     translatedMode.click();
     shadow.querySelector('#mktero-retranslate-document').click();
@@ -1089,12 +1079,7 @@ test('uses the language menu without changing the default translation language',
     assert.ok(errors.some(error => error?.name === 'AbortError'));
     assert.ok(errors.every(error => !String(error).includes('test-token')));
 
-    providerReplies.push(body => JSON.stringify(
-        JSON.parse(body.messages.at(-1).content).map(entry => ({
-            id: entry.id,
-            translatedMarkdown: '# 수정된 논문',
-        }))
-    ));
+    providerReplies.push(headingTranslationReply('수정된 논문'));
     shadow.querySelector('[data-translation-view="original"]').click();
     shadow.querySelector('#mktero-correction-toggle').click();
     const editorElement = shadow.querySelector('.cm-editor');
@@ -1133,9 +1118,9 @@ test('uses the language menu without changing the default translation language',
     const correctionRequest = await waitFor(() => providerRequests[6]);
     assert.deepEqual(
         JSON.parse(correctionRequest.body.messages.at(-1).content).map(
-            entry => entry.sourceMarkdown
+            entry => entry.units.map(unit => unit.sourceMarkdown)
         ),
-        ['# Study']
+        [['Study']]
     );
     await waitFor(() => shadow.querySelector(
         '#mktero-translate-document'
@@ -1481,6 +1466,15 @@ function createZoteroNotifier() {
             return Number(Boolean(observer));
         },
     };
+}
+
+function headingTranslationReply(translatedMarkdown) {
+    return body => JSON.stringify(
+        JSON.parse(body.messages.at(-1).content).map(({ id, units }) => ({
+            id,
+            units: units.map(unit => ({ id: unit.id, translatedMarkdown })),
+        }))
+    );
 }
 
 async function putCachedTranslation(cache, documentKey, source, {

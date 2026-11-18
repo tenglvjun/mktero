@@ -9,6 +9,11 @@ import {
 } from '../icons/lucide-icon.js';
 import { createLocalization } from '../i18n/localization.js';
 import {
+    createLegacyActions,
+    normalizeLegacyActions,
+    sourceBlockAnnotationLabels,
+} from './translation-legacy-actions.js';
+import {
     annotationPageLabel,
     safeAnnotationColor,
 } from './pdf-annotations.js';
@@ -328,39 +333,81 @@ export function createAnnotationPopup(parent, {
             activeSelectionTranslationCancel = cancelSelectionPopup;
         }
     };
-    // A compare-mode selection that holds no original text gets no actions.
-    // Say why instead of leaving the selection without any response.
-    // A translated-side selection that resolved to a whole original block. The
-    // action creates the annotation on that block, so the reader does not have
-    // to find and re-select the original text themselves.
+    let sourceBlockPopup = null;
     const openSourceBlockActions = ({
         anchor,
         annotation,
         annotationUnavailable = null,
         selectionContext,
         blockCount = 1,
+        offscreen = null,
+        revealSource = null,
+        sourceLabel = null,
+        legacyActions = [],
+        isCurrent = null,
     }) => {
-        if (!anchor || (!annotation && !annotationUnavailable)) return;
-        // This popup owns the selection: whatever was open for the previous one
-        // is replaced, not stacked. The anchored popup keeps a single element,
-        // so an un-closed predecessor could overwrite this content mid-render.
+        const legacy = normalizeLegacyActions(legacyActions);
+        const direction = typeof revealSource === 'function'
+            && (offscreen === 'above' || offscreen === 'below') ? offscreen : null;
+        if (!anchor || (!annotation && !annotationUnavailable
+            && !sourceLabel && !direction && !legacy.length)) return;
+        const buildSourceActions = ({ document, close, reposition }, save) => (
+            createSourceBlockActions(document, annotation, t, {
+                annotationUnavailable,
+                blockCount,
+                direction,
+                revealSource,
+                sourceLabel,
+                createMarkdownAnnotation,
+                selectionContext,
+                close,
+                reposition,
+                isCurrent,
+                save,
+            })
+        );
+        // Scrolling or revealing an original can refresh the same selection.
+        // Keep both the annotation save and alignment requests in flight.
+        if (sourceBlockPopup?.anchor === anchor
+            && (sourceBlockPopup.legacy ? sourceBlockPopup.legacy.refresh(legacy) : !legacy.length)) {
+            anchoredPopup.cancelClose();
+            sourceBlockPopup.refresh(buildSourceActions);
+            return;
+        }
         close();
         openPopup({
             anchor,
             label: t('annotation.selectionActions'),
             popupClassName: 'mktero-annotation-popup--actions',
             dismissOnMouseLeave: false,
-            renderContent({ document, close: closeContent, reposition }) {
-                return createSourceBlockActions(document, annotation, t, {
-                    annotationUnavailable,
-                    blockCount,
-                    createMarkdownAnnotation,
-                    selectionContext,
-                    close: closeContent,
-                    reposition,
-                });
+            onClose: () => {
+                const previous = sourceBlockPopup;
+                sourceBlockPopup = null;
+                previous?.legacy?.dispose();
             },
-        });
+            renderContent(context) {
+                const save = createSourceBlockAnnotationAction(context.document, t);
+                const content = buildSourceActions(context, save);
+                const controls = legacy.length ? createLegacyActions(
+                    context.document, legacy, t, context.reposition
+                ) : null;
+                if (controls) content.appendChild(controls.element);
+                sourceBlockPopup = {
+                    anchor,
+                    legacy: controls,
+                    refresh(build) {
+                        const next = build(context, save);
+                        for (const child of [...content.childNodes]) {
+                            if (child !== controls?.element) child.remove();
+                        }
+                        if (controls) controls.element.before(...next.childNodes);
+                        else content.append(...next.childNodes);
+                        context.reposition();
+                    },
+                };
+                return content;
+            },
+        }, { lockSelection: true });
     };
 
     const openSelectionHint = ({ anchor }) => {
@@ -1097,9 +1144,7 @@ function focusNoteInput(popup) {
     input.setSelectionRange?.(input.value.length, input.value.length);
 }
 
-// The only action here is the one this data can support: annotate the whole
-// original block. The bubble may show one corresponding sentence, but the
-// annotation remains anchored to the complete source block.
+// Locating follows the matched passage; annotating covers whole source blocks.
 function createSourceBlockActions(
     document,
     annotation,
@@ -1107,10 +1152,15 @@ function createSourceBlockActions(
     {
         blockCount,
         annotationUnavailable,
+        direction,
+        revealSource,
+        sourceLabel,
         createMarkdownAnnotation,
         selectionContext,
         close,
         reposition,
+        isCurrent,
+        save,
     }
 ) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
@@ -1119,49 +1169,89 @@ function createSourceBlockActions(
         'mktero-markdown-selection-actions',
     ].join(' ');
 
-    const scope = document.createElementNS(XHTML_NAMESPACE, 'div');
-    scope.className = 'mktero-related-source-scope';
-    scope.textContent = blockCount > 1
-        ? translate('annotation.sourceBlockScopePlural', { count: blockCount })
-        : translate('annotation.sourceBlockScope');
-    content.appendChild(scope);
-
-    if (annotationUnavailable) {
-        const unavailable = document.createElementNS(XHTML_NAMESPACE, 'div');
-        unavailable.className = 'mktero-related-source-unavailable';
-        unavailable.setAttribute('role', 'status');
-        unavailable.textContent = annotationUnavailable;
-        content.appendChild(unavailable);
-        return content;
+    if (sourceLabel) {
+        const label = document.createElementNS(XHTML_NAMESPACE, 'div');
+        label.className = 'mktero-translation-source-label';
+        label.textContent = sourceLabel;
+        content.appendChild(label);
+    }
+    const labels = sourceBlockAnnotationLabels(translate, blockCount);
+    const showAnnotation = annotation && !annotationUnavailable;
+    if (showAnnotation || annotationUnavailable) {
+        const scope = document.createElementNS(XHTML_NAMESPACE, 'div');
+        scope.className = annotationUnavailable
+            ? 'mktero-related-source-unavailable'
+            : 'mktero-related-source-scope';
+        if (annotationUnavailable) scope.setAttribute('role', 'status');
+        scope.textContent = annotationUnavailable || labels.scope;
+        content.appendChild(scope);
     }
 
     const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
     actions.className = 'mktero-markdown-selection-toolbar';
-    content.appendChild(actions);
+    let locate = null;
+    if (direction) {
+        const hint = document.createElementNS(XHTML_NAMESPACE, 'div');
+        hint.className = 'mktero-translation-source-direction';
+        hint.textContent = translate('ai.translationSourceOffscreen', {
+            direction: translate(direction === 'above'
+                ? 'ai.translationSourceAbove'
+                : 'ai.translationSourceBelow'),
+        });
+        content.appendChild(hint);
 
+        locate = document.createElementNS(XHTML_NAMESPACE, 'button');
+        locate.type = 'button';
+        locate.className = 'mktero-translation-source-action mktero-related-source-locate';
+        locate.dataset.action = 'locate-source';
+        locate.textContent = translate('annotation.sourceBlockLocate');
+        locate.addEventListener('click', () => {
+            if (locate.disabled || !locate.isConnected) return;
+            close();
+            revealSource();
+        });
+        actions.appendChild(locate);
+    }
+    if (locate || showAnnotation) content.appendChild(actions);
+    if (!showAnnotation) return content;
+
+    save.update({
+        annotation, selectionContext, createMarkdownAnnotation, close, reposition, locate,
+        isCurrent, label: labels.action,
+    });
+    actions.prepend(save.button);
+    content.appendChild(save.error);
+    return content;
+}
+
+export function createSourceBlockAnnotationAction(document, translate) {
     const error = document.createElementNS(XHTML_NAMESPACE, 'div');
     error.className = 'mktero-annotation-action-error';
     error.setAttribute('role', 'status');
     error.setAttribute('aria-live', 'polite');
     error.hidden = true;
 
-    const canCreate = typeof createMarkdownAnnotation === 'function';
     const button = document.createElementNS(XHTML_NAMESPACE, 'button');
     button.type = 'button';
     button.className = 'mktero-related-source-create';
-    button.textContent = blockCount > 1
-        ? translate('annotation.sourceBlockHighlightPlural', { count: blockCount })
-        : translate('annotation.sourceBlockHighlight');
-    button.disabled = !canCreate;
+    let options;
+    let pending = false;
+    const updateDisabled = () => {
+        button.disabled = pending || typeof options.createMarkdownAnnotation !== 'function';
+        if (options.locate) options.locate.disabled = pending;
+    };
     button.addEventListener('click', async () => {
-        if (!canCreate) return;
-        button.disabled = true;
+        if (button.disabled || !button.isConnected || options.isCurrent?.() === false) return;
+        const { annotation, selectionContext, createMarkdownAnnotation, close, reposition } = options;
+        pending = true;
+        updateDisabled();
         error.hidden = true;
         try {
             await createMarkdownAnnotation(annotation, selectionContext);
-            close?.();
+            if (button.isConnected) close();
         }
         catch (cause) {
+            if (!button.isConnected) return;
             error.textContent = annotationErrorMessage(
                 cause,
                 translate,
@@ -1171,12 +1261,19 @@ function createSourceBlockActions(
             reposition?.();
         }
         finally {
-            button.disabled = false;
+            pending = false;
+            updateDisabled();
         }
     });
-    actions.appendChild(button);
-    content.appendChild(error);
-    return content;
+    return {
+        button,
+        error,
+        update(next) {
+            options = next;
+            button.textContent = next.label;
+            updateDisabled();
+        },
+    };
 }
 
 function createAnnotationActions(

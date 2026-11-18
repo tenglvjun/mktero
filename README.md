@@ -25,8 +25,9 @@ and parser profile.
 > sends the complete PDF to the Mktero service for your account. Sign in from
 > `Settings -> Mktero`; no separate OCR key is required. If you choose
 > [MinerU](https://mineru.net/) or [Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1),
-> the PDF goes there instead and is not sent to Mktero. Optional AI translation
-> sends protected Markdown batches to your configured provider. Read
+> the PDF goes there instead and is not sent to Mktero. Optional full-document AI
+> translation sends protected Markdown with sentence IDs to your configured AI
+> provider, not to the Mktero translation service. Read
 > [Privacy and data handling](./docs/privacy.md) before processing sensitive documents.
 
 ![Mktero converting, reading, and annotating an academic PDF in Zotero](./docs/assets/mktero-demo.gif)
@@ -42,9 +43,9 @@ and parser profile.
 
 ### Annotations and translation
 
-- Display and edit PDF highlights and underlines, and write item or standalone notes with Zotero's native editor. [Annotations and notes](./docs/annotations.md)
+- Display and edit PDF highlights and underlines, and write item or standalone notes with Zotero's native editor. Select translated text to annotate its whole original block in one click. Original, Translation, and Bilingual show the same annotation. [Annotations and notes](./docs/annotations.md)
 - Correct paragraphs, headings, and GFM table cells while preserving the immutable OCR result. [Corrections](./docs/annotations.md#correct-recognition-errors)
-- Translate an article or a selection through a Vercel AI SDK provider; read `Original`, `Translation`, or `Bilingual`. [AI translation](./docs/reading.md#translate-with-ai)
+- Translate an article or a selection with your configured AI provider. In `Bilingual` or `Translation`, select part of an aligned sentence to see its original without a network request. Older translations remain readable; you can enable sentence alignment one block at a time by retranslating that block, which may incur a provider charge. [AI translation](./docs/reading.md#translate-with-ai)
 
 ### Library and export
 
@@ -102,7 +103,7 @@ The [workflow index](./docs/workflows.md) links to each task.
   upload the PDF; an explicit reparse may also upload it. Import failure, corruption,
   read errors, or cancellation do not trigger conversion.
 - Credentials, cached Markdown and figures, raw MinerU results without the PDF,
-  corrections, translations, reading positions, local highlights not yet in the
+  corrections, translations and their sentence mappings, reading positions, local highlights not yet in the
   PDF, and cross-page highlight annotation keys stay unencrypted in the Zotero
   profile. Mktero does not sync them.
 - Sign-in sends your email and password; registration also emails a verification
