@@ -107,20 +107,20 @@ Each request sends only the selected text to your configured AI provider and may
 
 ### See the original behind a translation
 
-Translation is stored block by block, so every translated block has exactly one original block. Selecting translated text uses that block pairing, and then narrows it to the sentence you selected: Mktero splits both sides of the block at sentence boundaries and, when the counts agree, maps sentence N to sentence N. A bullet in a list therefore marks that bullet, not the whole list.
+Select even one word in an aligned translation to see the **original sentence** it came from. Full-document translation (v8) assigns IDs to the source sentences before sending them in batches to your configured AI provider. Mktero checks the returned IDs and Markdown structure. This identifies the source the model was asked to translate; it does not certify that the translation is correct.
 
-When the two sides have a different number of sentences -- a translation that merged or split sentences -- the pairing is unknown, so the whole block is used instead of guessing an order that would point at the wrong words.
+- In `Bilingual`, only the matching original sentences are highlighted. The highlights clear with the selection. If the original is offscreen, the selection actions indicate its direction and offer to scroll to it.
+- In `Translation`, the bubble lists the matching originals once each, in reading order. `Locate in Bilingual` switches views and scrolls to the original.
+- You can select across sentences or blocks. Ending in the space before the next sentence does not include it. Hidden text, separators, and source text shown in place of a failed translation do not count as translated text.
 
-- In `Bilingual`, selecting text on the translated side highlights the original sentence it belongs to. The highlight lasts as long as the selection and clears when the selection does. Only the original side is marked, not the translated side.
-- In `Translation`, selecting text on the translated side opens a bubble with the text of the corresponding original sentence. `Locate in Bilingual` switches to `Bilingual` and moves the reading position to that block.
-- A selection that spans several blocks marks, or lists, each block on its own. Nothing is joined across blocks.
-- A block with no translation, a failed translation, or no confirmable original shows no highlight and no bubble.
+**When a sentence match is unavailable:** Older (v7) translations remain readable offline. Opening a saved translation, selecting translated text, or locating its original does not start a translation request. Selecting an unaligned passage does not automatically show the whole paragraph. You have two choices:
 
-If the block you selected, or the original block it maps to, is outside the visible area, Mktero tells you which direction it lies in and can scroll to it. It does not open a bubble in `Bilingual` instead.
+- `Show the whole original block` displays that block locally, without sending anything.
+- `Enable sentence alignment for this block` sends only that source block to your configured AI provider for retranslation in the current language. The provider may charge for it. Success replaces only that block's displayed translation; if you cancel or the request fails, the old text stays.
 
-The selection also offers to annotate the original text. In `Bilingual` the offer appears beside the highlighted text; in `Translation` it sits in the bubble. The highlight and the bubble show the sentence you selected, but the annotation covers the **whole original block**: an annotation is stored against the block, and a sentence found by splitting punctuation is not a stable enough identity to save against. A selection that spans several blocks annotates each block in full, up to eight blocks; beyond that only the reading mark and the locate action remain. The annotation itself is written to the original text, so it can still be located in the PDF.
+In a list or Markdown table, sometimes only the original item or cell can be identified. A link or emphasis spanning sentences, or a sentence interrupted by a formula, may also prevent a safe match. Mktero does not present a whole block, item, or cell as an exact sentence. If your selection includes both aligned and unaligned blocks, it shows the known sentences and indicates which blocks lack alignment.
 
-Nothing here changes Markdown, translations, or caches, and nothing is sent to your AI provider. Selection translation is still available only on the original side, as described above, and annotating from a translated selection never moves the annotation onto the translated text.
+**Annotations still cover whole original blocks**, not the sentences highlighted for reading. Click **Annotate the whole original block** once to save. Translation highlights the corresponding passage and lists the same annotation in the left sidebar; switching views does not create another copy. A selection can annotate up to eight blocks, each in full. Beyond eight, you can still read and locate the original. Annotations stay anchored to the source for PDF location. An existing annotation without a reliable match in the translation stays in the sidebar, but no translated text is highlighted for it.
 
 ## Details
 
@@ -183,7 +183,7 @@ An application that reads clipboard HTML, such as a word processor or browser ed
 
 #### Cache and corrections
 
-Translations are cached independently by source content, provider, protocol, model, language, reasoning effort, and prompt version. This lets partial work resume. When an update rereads a MinerU result, unchanged blocks keep their translations; changed blocks become pending.
+Translations are cached independently by source content, provider, protocol, model, language, reasoning effort, and prompt version. This lets partial work resume. When an update rereads a MinerU result, unchanged blocks keep their translations; changed blocks become pending. Sentence mappings are cached unencrypted with the translation in your Zotero profile. After a correction, a block may still be readable even if its sentence mappings can no longer be verified against the current text.
 
 | Change | Translation behavior |
 | --- | --- |

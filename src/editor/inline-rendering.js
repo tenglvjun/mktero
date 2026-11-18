@@ -1061,8 +1061,7 @@ export function createInlineRenderingExtension({
         translationPairs: [],
         translationPairsSource: null,
         highlightedTranslationBlockID: null,
-        selectedTranslationBlockID: null,
-        selectedTranslationSourceRange: null,
+        selectedTranslationRanges: [],
         annotationTargets: new Map(),
         editingRange: null,
         correctionManagementEnabled: false,
@@ -1231,36 +1230,17 @@ export function createInlineRenderingExtension({
                     translationPairHighlightChanged = true;
                 }
                 else if (effect.is(setTranslationSelection)) {
-                    const value = effect.value || null;
-                    const id = String(value?.id || value || '');
-                    // A sentence selects part of the original block; the mark
-                    // covers exactly that part so a bullet inside a long list
-                    // does not light up its neighbours.
-                    const range = value && Number.isSafeInteger(value.from)
-                        && Number.isSafeInteger(value.to)
-                        && value.to > value.from
-                        ? { from: value.from, to: value.to }
-                        : null;
-                    const pair = context.translationPairs.find(
-                        candidate => candidate.id === id
-                    );
-                    if (!pair) {
-                        if (context.selectedTranslationBlockID === null
-                            && context.selectedTranslationSourceRange === null) {
-                            continue;
-                        }
-                        context.selectedTranslationBlockID = null;
-                        context.selectedTranslationSourceRange = null;
-                        translationSelectionChanged = true;
-                        continue;
-                    }
-                    const previous = context.selectedTranslationSourceRange;
-                    const same = context.selectedTranslationBlockID === id
-                        && (previous?.from === range?.from)
-                        && (previous?.to === range?.to);
-                    if (same) continue;
-                    context.selectedTranslationBlockID = id;
-                    context.selectedTranslationSourceRange = range;
+                    const pairIDs = new Set(context.translationPairs.map(pair => pair.id));
+                    const next = (effect.value || []).filter(range => pairIDs.has(range.id)
+                        && Number.isSafeInteger(range.from) && Number.isSafeInteger(range.to)
+                        && range.from >= 0 && range.to <= transaction.state.doc.length
+                        && range.to > range.from);
+                    const previous = context.selectedTranslationRanges;
+                    if (previous.length === next.length && next.every((range, index) => {
+                        const old = previous[index];
+                        return old.id === range.id && old.from === range.from && old.to === range.to;
+                    })) continue;
+                    context.selectedTranslationRanges = next;
                     translationSelectionChanged = true;
                 }
                 else if (effect.is(setInlineEditingRange)) {
@@ -1669,36 +1649,23 @@ function buildDecorations(state, context) {
 }
 
 function decorateTranslationPairs(state, decorations, context) {
+    const selectedByPair = new Map();
+    for (const range of context.selectedTranslationRanges) {
+        if (!selectedByPair.has(range.id)) selectedByPair.set(range.id, []);
+        selectedByPair.get(range.id).push(range);
+        decorations.push(Decoration.mark({
+            class: 'cm-mktero-translation-pair-selected-text',
+            attributes: {
+                'data-translation-block-id': range.id,
+                'data-translation-pair-selected': 'true',
+            },
+        }).range(range.from, range.to));
+    }
     for (const pair of context.translationPairs) {
-        // The original side carries both states: a one-shot highlight from the
-        // untranslated-block navigation, and the selection-driven mark. The
-        // translated side never carries either. A reader testing whether a
-        // selection reached the right block looks at the original, and a lit
-        // translated row would make the feedback read as "the translation".
-        // The selection mark may cover a sentence inside the block. When it
-        // does, only those lines are marked: a bullet in a long list must not
-        // light up the whole list.
-        const selectedRange = context.selectedTranslationBlockID === pair.id
-            ? context.selectedTranslationSourceRange || pair.source
-            : null;
-        decorateTranslationPairRange(
-            state,
-            decorations,
-            pair.source,
-            pair,
-            'source',
-            context.highlightedTranslationBlockID === pair.id,
-            selectedRange
-        );
-        decorateTranslationPairRange(
-            state,
-            decorations,
-            pair.translated,
-            pair,
-            'translated',
-            false,
-            false
-        );
+        // Only source text carries the navigation or selection highlight.
+        decorateTranslationPairRange(state, decorations, pair.source, pair, 'source',
+            context.highlightedTranslationBlockID === pair.id, selectedByPair.get(pair.id));
+        decorateTranslationPairRange(state, decorations, pair.translated, pair, 'translated', false);
     }
 }
 
@@ -1709,23 +1676,15 @@ function decorateTranslationPairRange(
     pair,
     side,
     highlighted,
-    selectedRange = null
+    selectedRanges = []
 ) {
     if (!range) return;
     const lineFrom = state.doc.lineAt(range.from).number;
     const lineTo = state.doc.lineAt(Math.max(range.from, range.to - 1)).number;
-    const selectedFrom = selectedRange
-        ? state.doc.lineAt(selectedRange.from).number
-        : -1;
-    const selectedTo = selectedRange
-        ? state.doc.lineAt(Math.max(selectedRange.from, selectedRange.to - 1)).number
-        : -1;
     for (let lineNumber = lineFrom; lineNumber <= lineTo; lineNumber++) {
         const line = state.doc.line(lineNumber);
-        const selected = lineNumber >= selectedFrom && lineNumber <= selectedTo;
-        const selectedLine = selected
-            && selectedRange.from <= line.from
-            && selectedRange.to >= line.to;
+        const selectedLine = selectedRanges.some(selected => selected.from <= line.from
+            && selected.to >= line.to);
         decorations.push(Decoration.line({
             class: [
                 'cm-mktero-translation-pair',
@@ -1740,19 +1699,6 @@ function decorateTranslationPairRange(
                     : {}),
             },
         }).range(line.from));
-    }
-    if (side === 'source'
-        && selectedRange
-        && selectedRange.from >= 0
-        && selectedRange.to <= state.doc.length
-        && selectedRange.to > selectedRange.from) {
-        decorations.push(Decoration.mark({
-            class: 'cm-mktero-translation-pair-selected-text',
-            attributes: {
-                'data-translation-block-id': pair.id,
-                'data-translation-pair-selected': 'true',
-            },
-        }).range(selectedRange.from, selectedRange.to));
     }
 }
 
@@ -3372,8 +3318,24 @@ export function selectionNodeInEditor(view, node) {
     return Boolean(element && view.dom.contains(element));
 }
 
-export function selectionAnchor(selection, fallback, pointer) {
+export function selectionAnchor(selection, fallback, pointer, { wholeSelection = false } = {}) {
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (wholeSelection && range?.getBoundingClientRect) {
+        // A column resize can rewrap the selection while its source popup is open.
+        const live = range.cloneRange();
+        let lastRect = live.getBoundingClientRect();
+        if (lastRect.height > 0) {
+            return {
+                getBoundingClientRect() {
+                    if (!live.collapsed && fallback?.contains(live.commonAncestorContainer)) {
+                        const next = live.getBoundingClientRect();
+                        if (next.height > 0) lastRect = next;
+                    }
+                    return lastRect;
+                },
+            };
+        }
+    }
     const rect = pointerSelectionRect(range, pointer)
         || firstVisibleSelectionRect(range, fallback)
         || fallback?.getBoundingClientRect?.()
@@ -4028,6 +3990,9 @@ function renderedRange(node, state, display, context) {
         return Decoration.replace({
             widget: new RenderedTableWidget({
                 source,
+                sourceSelections: context.selectedTranslationRanges.filter(range => (
+                    range.from < tableTo && range.to > tableFrom
+                )),
                 annotationSource: state.sliceDoc(node.from, node.to),
                 annotationSourceFrom: node.from,
                 caption: node.caption,

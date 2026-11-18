@@ -22,7 +22,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 > Mktero 目前处于 Beta 阶段。主动请求未缓存的转换且使用默认转换服务时，完整 PDF 会发送到你账号所使用的 Mktero 服务。
 > 在 `设置 -> Mktero` 登录即可，无需另外的 OCR 密钥。若改用
 > [MinerU](https://mineru.net/) 或 [Mistral OCR 4.1](https://docs.mistral.ai/models/ocr-4-1)，PDF 改发到那里，不再发到 Mktero。
-> 可选的 AI 翻译会把受保护的 Markdown 批次发送给你配置的模型厂商或服务。处理敏感文档前，请阅读[数据与隐私](./docs/privacy.zh-CN.md)。
+> 可选的 AI 全文翻译会把带原句编号的受保护 Markdown 发送给你配置的 AI 服务商，不经过 Mktero 翻译服务。处理敏感文档前，请阅读[数据与隐私](./docs/privacy.zh-CN.md)。
 
 ![Mktero 在 Zotero 中转换、阅读并为学术 PDF 添加注释](./docs/assets/mktero-demo.gif)
 
@@ -37,9 +37,9 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 
 ### 注释、校对和翻译
 
-- 显示和编辑 PDF 高亮、下划线，并用 Zotero 原生编辑器写条目笔记或独立笔记。[注释与笔记](./docs/annotations.zh-CN.md)
+- 显示和编辑 PDF 高亮、下划线，并用 Zotero 原生编辑器写条目笔记或独立笔记。选中译文后，可一键标注对应的整个原文块；原文、译文和双语视图共用这条注释。[注释与笔记](./docs/annotations.zh-CN.md)
 - 校对段落、标题和 GFM 表格单元格，保留不可变的 OCR 结果。[校对](./docs/annotations.zh-CN.md#校对识别错误)
-- 通过配置的 Vercel AI SDK 厂商翻译全文或选区，在`原文`、`译文`和`双语`之间切换。[AI 翻译](./docs/reading.zh-CN.md#使用-ai-翻译)
+- 通过你配置的 AI 服务商翻译全文或选区。在`双语`或`译文`视图中，选中已对齐译句中的几个字，就能离线查看原句。旧译文仍可阅读；可以按需重译单个内容块来启用逐句对照，服务商可能收费。[AI 翻译](./docs/reading.zh-CN.md#使用-ai-翻译)
 
 ### 文库与导出
 
@@ -85,7 +85,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 - 若改选 MinerU 云端、本地 MinerU 服务或 Mistral，完整 PDF 改发到那里，不再发到 Mktero。直连 MinerU 云端的请求还会带上该次操作开始时固定的解析模型。
 - 导入 llm-for-zotero 本地结果时不改动源缓存，另存未加密的副本和导入选择。导入及本地重开不上传 PDF 或结果；
   如果本地内容全部缺失，之后普通打开可能上传 PDF。主动重新解析也可能上传。导入失败、内容损坏、读取错误或取消不会触发转换。
-- 凭据、缓存的 Markdown 和图片、MinerU 原始结果（不含 PDF）、校对、译文、阅读位置、尚未写入 PDF 的本地高亮，
+- 凭据、缓存的 Markdown 和图片、MinerU 原始结果（不含 PDF）、校对、译文及其与原句的对应关系、阅读位置、尚未写入 PDF 的本地高亮，
   以及跨页高亮的注释 key，均未加密地保存在 Zotero 配置文件中。Mktero 不同步这些数据。
 - 登录会发送邮箱和密码，注册还会向邮箱发送验证码。令牌保存在配置文件中。账号面板会读取资料、转换计数与服务支持的每日额度；
   服务端保留关联账号的使用聚合，用于服务运行与容量规划。本地待处理批次不会上传。

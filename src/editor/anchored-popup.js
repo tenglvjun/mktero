@@ -5,6 +5,7 @@ export function createAnchoredPopup(parent, {
     className,
     idPrefix,
     viewportPadding = 12,
+    constrainToParent = false,
 }) {
     const document = parent.ownerDocument;
     const ownerWindow = document.defaultView;
@@ -13,6 +14,7 @@ export function createAnchoredPopup(parent, {
     let ignoredOpenAnchor = null;
     let closeTimer = null;
     let closeHandler = null;
+    let boundaryObserver = null;
     // Where each anchor element last was. An editor rebuild can replace the
     // rendered element an open popup points at, and a detached element
     // reports an empty rect at the window origin.
@@ -39,6 +41,8 @@ export function createAnchoredPopup(parent, {
     // undefined when its owner calls close().
     const close = reason => {
         cancelClose();
+        boundaryObserver?.disconnect();
+        boundaryObserver = null;
         const onClose = closeHandler;
         closeHandler = null;
         if (anchor && popup
@@ -64,8 +68,9 @@ export function createAnchoredPopup(parent, {
         positionPopup(
             popup,
             anchorRect(anchor),
-            popupBoundary(parent, ownerWindow),
-            viewportPadding
+            popupBoundary(parent, ownerWindow, constrainToParent),
+            viewportPadding,
+            constrainToParent
         );
     };
 
@@ -138,6 +143,10 @@ export function createAnchoredPopup(parent, {
         parent.appendChild(popup);
         anchor.setAttribute?.('aria-describedby', popup.id);
         reposition();
+        if (constrainToParent && ownerWindow.ResizeObserver) {
+            boundaryObserver = new ownerWindow.ResizeObserver(reposition);
+            boundaryObserver.observe(parent);
+        }
         focusContent?.(popup);
     };
 
@@ -160,7 +169,7 @@ export function createAnchoredPopup(parent, {
 // the shadow host that holds the reader. Zotero lays the item pane and other
 // chrome over the window beside the tab, so clamping to the window alone lets
 // a popup slide underneath them.
-function popupBoundary(parent, ownerWindow) {
+function popupBoundary(parent, ownerWindow, constrainToParent) {
     const viewport = {
         left: 0,
         top: 0,
@@ -168,31 +177,46 @@ function popupBoundary(parent, ownerWindow) {
         bottom: ownerWindow.innerHeight || 768,
     };
     const host = parent.getRootNode?.()?.host;
-    const rect = host?.getBoundingClientRect?.();
-    if (!rect || !(rect.width > 0) || !(rect.height > 0)) return viewport;
-    const boundary = {
-        left: Math.max(viewport.left, rect.left),
-        top: Math.max(viewport.top, rect.top),
-        right: Math.min(viewport.right, rect.right),
-        bottom: Math.min(viewport.bottom, rect.bottom),
-    };
-    if (boundary.right <= boundary.left || boundary.bottom <= boundary.top) {
-        return viewport;
+    let boundary = viewport;
+    for (const element of constrainToParent ? [host, parent] : [host]) {
+        const rect = element?.getBoundingClientRect?.();
+        if (!rect || !(rect.width > 0) || !(rect.height > 0)) continue;
+        const intersection = {
+            left: Math.max(boundary.left, rect.left),
+            top: Math.max(boundary.top, rect.top),
+            right: Math.min(boundary.right, rect.right),
+            bottom: Math.min(boundary.bottom, rect.bottom),
+        };
+        if (intersection.right > intersection.left && intersection.bottom > intersection.top) {
+            boundary = intersection;
+        }
     }
     return boundary;
 }
 
-function positionPopup(popup, anchorRect, boundary, viewportPadding) {
+function positionPopup(popup, anchorRect, boundary, viewportPadding, constrainToParent) {
     const gap = 10;
     const available = Math.max(
         0,
         boundary.right - boundary.left - viewportPadding * 2
     );
-    popup.style.maxWidth = `${Math.floor(available)}px`;
+    const minTop = boundary.top + viewportPadding;
+    const maxBottom = boundary.bottom - viewportPadding;
+    const below = anchorRect.bottom + gap;
+    if (constrainToParent) {
+        // Let the component keep its own size cap inside the available space.
+        const room = Math.max(anchorRect.top - gap - minTop, maxBottom - below);
+        // An entire page can be selected. Keep the actions reachable even
+        // when neither side of the selection has room to avoid it entirely.
+        const usableHeight = Math.max(0, maxBottom - minTop);
+        popup.style.setProperty('--anchored-popup-available-width', `${Math.floor(available)}px`);
+        popup.style.setProperty('--anchored-popup-available-height',
+            `${Math.floor(Math.min(usableHeight, Math.max(room, 160)))}px`);
+    }
+    else popup.style.maxWidth = `${Math.floor(available)}px`;
     const popupRect = popup.getBoundingClientRect();
     const width = Math.min(popupRect.width, available);
     const minLeft = boundary.left + viewportPadding;
-    const minTop = boundary.top + viewportPadding;
     const preferredLeft = anchorRect.left + anchorRect.width / 2 - width / 2;
     const left = clamp(
         preferredLeft,
@@ -200,9 +224,8 @@ function positionPopup(popup, anchorRect, boundary, viewportPadding) {
         Math.max(minLeft, boundary.right - width - viewportPadding)
     );
     const above = anchorRect.top - popupRect.height - gap;
-    const below = anchorRect.bottom + gap;
     const placeAbove = above >= minTop
-        || below + popupRect.height > boundary.bottom;
+        || below + popupRect.height > (constrainToParent ? maxBottom : boundary.bottom);
     const arrowLeft = clamp(
         anchorRect.left + anchorRect.width / 2 - left,
         12,
@@ -214,9 +237,9 @@ function positionPopup(popup, anchorRect, boundary, viewportPadding) {
         `${Math.round(arrowLeft)}px`
     );
     popup.style.left = `${Math.round(left)}px`;
-    popup.style.top = `${Math.round(
-        placeAbove ? Math.max(minTop, above) : below
-    )}px`;
+    const top = placeAbove ? Math.max(minTop, above) : below;
+    popup.style.top = `${Math.round(constrainToParent
+        ? clamp(top, minTop, Math.max(minTop, maxBottom - popupRect.height)) : top)}px`;
 }
 
 // Gecko and Blink blur a focused control that becomes disabled or hidden and

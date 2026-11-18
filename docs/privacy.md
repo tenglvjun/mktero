@@ -35,7 +35,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
 | Anonymous models.dev catalog request on Zotero startup | models.dev, kept only in memory until Zotero quits | No |
-| Protected Markdown translation batches | AI provider configured by you | Not by Mktero |
+| Protected Markdown with block and sentence IDs for full-document translation; only the chosen block when you enable sentence alignment for an older translation | AI provider configured by you, not the Mktero translation service | Not by Mktero |
 | Selected Markdown text for selection translation | AI provider configured by you | Not by Mktero |
 
 ## Stored in your Zotero profile
@@ -44,7 +44,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | --- | --- | --- |
 | MinerU cloud token, the MinerU cloud parsing model, local MinerU address, Mistral API key, and AI credentials | Active Zotero profile, unencrypted | No |
 | Mktero access token and refresh token | Active Zotero profile, unencrypted | No |
-| Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations, and reading positions | Active Zotero profile, unencrypted; see [local retention](#local-retention) | No |
+| Cached Markdown, figures, figure metadata including OCR fragments, source maps, PDF indexes, corrections, translations with mappings between original and translated sentences, and reading positions | Active Zotero profile, unencrypted; see [local retention](#local-retention) | No |
 | Stored MinerU results from Mktero, MinerU cloud, or a local MinerU service (the result's Markdown, content list, layout or middle JSON, and images; not the PDF copy), kept so a Mktero update can re-read a paper without converting it again | Active Zotero profile, unencrypted; see [local retention](#local-retention) | No |
 | Explicitly imported llm-for-zotero results: text, structure, original or supported cropped figures, and locally restored figures; no PDF copy | A separate copy in the active Zotero profile, unencrypted | No |
 | Import selection index: library ID, attachment key, PDF and imported-result hashes, cache keys, adapter version, import time, source-format category, and confirmation state; no source paths | Active Zotero profile, unencrypted, in `mktero-imports/v1` | No |
@@ -96,7 +96,11 @@ Reference import requests are local-first:
 - A unique high-confidence match continues automatically; uncertain matches require candidate confirmation.
 - Citation and reference requests use anonymous provider access. They contain only the bounded citation text, normalized identifiers, and confirmed metadata listed above, never Zotero keys or PDF bytes.
 
-Translation requests contain protected Markdown and instructions. If placeholder validation repeatedly fails, the final retry contains only the affected block's ordinary text segments. Selection translation requests contain only the selected text and are not written to the full-document translation cache.
+Full-document translation (v8) sends instructions and batches of protected Markdown to your configured AI provider. Block and sentence IDs let the provider return each translation with its source ID. Mktero builds the mapping used for reading locally, rather than asking the provider for character positions. If Markdown validation fails, a retry may send ordinary text segments from the affected block to the same provider. Enabling sentence alignment for an older translation sends only the block you confirm for retranslation. Both operations may incur provider charges; neither uses Mktero's server translation API.
+
+Selecting **translated text** to see its source, showing the whole original block, or jumping to an offscreen original makes no network request. Mktero saves the sentence mappings with the translation, unencrypted in your Zotero profile, so they work after reopening. The IDs, hashes, and text ranges used for alignment are not included in Markdown, clipboard content, snapshots, or Obsidian exports.
+
+Translating a selection of **original text** is a separate AI request: the only paper content sent is the selected text. The result is not written to the full-document translation cache.
 
 ## Diagnostics and logs
 

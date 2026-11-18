@@ -1,4 +1,5 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
+import { projectSourceAnnotationRanges } from '../editor/translation-presentation.js';
 import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
 import { navigationShortcutLabels } from './reader-shortcuts.js';
 import {
@@ -894,7 +895,7 @@ class MarkdownTabView {
                     )
                     : null;
                 const annotationOverlay = translatedView
-                    ? createEmptyAnnotationOverlay()
+                    ? translatedAnnotationOverlay(model, markdown)
                     : comparisonView
                         ? mapAnnotationOverlayToComparison(
                             model.annotationOverlay,
@@ -979,11 +980,16 @@ class MarkdownTabView {
                         translatedView,
                         comparisonView
                     ),
-                            translationPairs: createVisibleTranslationPairs(
+                    translationPairs: createVisibleTranslationPairs(
                         model,
                         translatedView,
                         comparisonView
                     ),
+                    ...((comparisonView || translatedView) && typeof model.onTranslateDocument === 'function'
+                        ? { enableSentenceAlignment: (id, { signal } = {}) => (
+                            model.onTranslateDocument({ alignmentBlockID: id, signal })
+                        ) }
+                        : {}),
                     translateOriginalBlockText: (blockID, range) => (
                         this.originalBlockTextFor(blockID, range)
                     ),
@@ -7897,15 +7903,8 @@ class MarkdownTabView {
             && range.to <= blockLength;
         // A sentence inside the block wins over the whole block: the reader
         // asked about one sentence and should see that sentence.
-        const range = inBlock(requested)
-            ? requested
-            : inBlock({
-                from: block?.sourceFrom,
-                to: block?.sourceTo,
-            })
-                ? { from: block.sourceFrom, to: block.sourceTo }
-                : null;
-        if (!range) return '';
+        const range = requested ?? { from: block?.sourceFrom, to: block?.sourceTo };
+        if (!block || !inBlock(range) || range.from < block.sourceFrom || range.to > block.sourceTo) return '';
         const text = visibleMarkdownTextForRanges(markdown, [range]);
         return String(text || '').trim();
     }
@@ -8118,6 +8117,11 @@ class MarkdownTabView {
     }
 
     annotationQuoteText(annotation, markdownLength, markdown = '') {
+        if (this.renderedTranslationView === 'translated') {
+            // Display offsets locate the translation, but the sidebar quotes
+            // the same original annotation whichever view is open.
+            return String(annotation?.text || '');
+        }
         if (typeof markdown !== 'string' || !Number.isInteger(markdownLength)) {
             return String(annotation?.text || '');
         }
@@ -8631,6 +8635,8 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
         const sourceViewTo = comparisonView
             ? range?.comparisonSourceTo
             : null;
+        // A failure still needs its range for retry navigation, but the
+        // fallback is original text, not a translated selection target.
         const translatedFrom = translatedView
             ? range?.translatedFrom
             : comparisonView
@@ -8661,8 +8667,28 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
             ...(validSource ? { sourceFrom, sourceTo } : {}),
             ...(validSourceView ? { sourceViewFrom, sourceViewTo } : {}),
             ...(validTranslation ? { translatedFrom, translatedTo } : {}),
+            ...(!failed && Array.isArray(range.alignmentUnits)
+                ? { alignmentUnits: range.alignmentUnits } : {}),
+            ...(failed ? { sourceFallback: true } : {}),
         }];
     });
+}
+
+function translatedAnnotationOverlay(model, translatedMarkdown) {
+    const source = model.annotationOverlay || createEmptyAnnotationOverlay();
+    const matched = [];
+    const unmatched = (source.unmatched || []).map(annotation => ({ ...annotation, ranges: [] }));
+    const projection = {
+        sourceMarkdown: model.markdown,
+        translatedMarkdown,
+        blockRanges: model.translationBlockRanges,
+    };
+    for (const annotation of source.matched || []) {
+        const ranges = projectSourceAnnotationRanges(annotation.ranges, projection);
+        if (ranges.length) matched.push({ ...annotation, ranges });
+        else unmatched.push({ ...annotation, ranges: [], reason: 'translation-unmapped' });
+    }
+    return { matched, unmatched };
 }
 
 function mapAnnotationOverlayToComparison(overlay, blockRanges) {
@@ -8924,6 +8950,7 @@ function isMarkdownAnnotation(annotation) {
 }
 
 function annotationUnavailableLabelKey(annotation) {
+    if (annotation?.reason === 'translation-unmapped') return 'viewer.noteUnmappedTranslation';
     return annotation?.reason === 'ambiguous'
         ? 'viewer.noteAmbiguous'
         : 'viewer.noteUnavailable';

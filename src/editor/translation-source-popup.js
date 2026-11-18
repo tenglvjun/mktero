@@ -1,14 +1,19 @@
 import { createAnchoredPopup } from './anchored-popup.js';
+import { createSourceBlockAnnotationAction } from './annotation-popup.js';
 import { createLocalization } from '../i18n/localization.js';
+import {
+    createLegacyActions,
+    normalizeLegacyActions,
+    sourceBlockAnnotationLabels,
+} from './translation-legacy-actions.js';
 
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
-// The original text behind the selected translated sentence, for the view where
-// the original is not on screen. Bilingual reading has the original beside the
-// translation, so it marks that sentence instead of repeating its text in a
-// floating panel.
+// Translation view shows the matched passage here because the original is not
+// in its document. Bilingual view can mark the original in place instead.
 export function createTranslationSourcePopup(parent, {
     localization = createLocalization(),
+    createMarkdownAnnotation,
     revealSource = null,
 } = {}) {
     const t = localization.t.bind(localization);
@@ -16,41 +21,58 @@ export function createTranslationSourcePopup(parent, {
         className: 'mktero-translation-source-popup',
         idPrefix: 'mktero-translation-source-popup',
         viewportPadding: 16,
+        constrainToParent: true,
     });
 
     return {
         open({
             anchor,
             source,
-            offscreen = null,
-            onAnnotate = null,
+            annotation = null,
+            selectionContext,
             annotationUnavailable = null,
+            blockCount = 1,
+            sourceLabel = null,
+            legacyActions = [],
+            isCurrent = null,
         }) {
             const text = String(source?.text || '').trim();
-            if (!anchor || !text) {
+            const legacy = normalizeLegacyActions(legacyActions);
+            const showAnnotation = annotation && !annotationUnavailable;
+            if (!anchor || (!text && !showAnnotation && !annotationUnavailable && !legacy.length)) {
                 anchoredPopup.close();
                 return;
             }
+            let legacyControls;
             anchoredPopup.open({
                 anchor,
-                label: t('ai.translationSourceLabel'),
-                renderContent({ document }) {
-                    return createContent(
-                        document,
+                label: (text && sourceLabel) || t(text
+                    ? 'ai.translationSourceLabel'
+                    : 'ai.translationSourceActions'),
+                dismissOnMouseLeave: false,
+                onClose: () => legacyControls?.dispose(),
+                renderContent({ document, close, reposition }) {
+                    const content = createContent(document, t, {
                         text,
-                        typeof revealSource === 'function'
+                        sourceLabel,
+                        reveal: text && typeof revealSource === 'function'
                             ? () => {
-                                anchoredPopup.close();
+                                close();
                                 revealSource(source);
                             }
                             : null,
-                        t,
-                        offscreen,
-                        typeof onAnnotate === 'function'
-                            ? () => onAnnotate(source)
-                            : null,
-                        annotationUnavailable
-                    );
+                        save: showAnnotation ? {
+                            annotation, selectionContext, createMarkdownAnnotation,
+                            close, reposition, isCurrent,
+                        } : null,
+                        annotationUnavailable,
+                        blockCount,
+                    });
+                    if (legacy.length) {
+                        legacyControls = createLegacyActions(document, legacy, t, reposition);
+                        content.appendChild(legacyControls.element);
+                    }
+                    return content;
                 },
             });
         },
@@ -60,41 +82,25 @@ export function createTranslationSourcePopup(parent, {
     };
 }
 
-function createContent(
-    document,
-    text,
-    reveal,
-    t,
-    offscreen,
-    annotate,
-    annotationUnavailable
-) {
+function createContent(document, t, {
+    text, sourceLabel, reveal, save, annotationUnavailable, blockCount,
+}) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
     content.className = 'mktero-translation-source';
 
-    const label = document.createElementNS(XHTML_NAMESPACE, 'div');
-    label.className = 'mktero-translation-source-label';
-    label.textContent = t('ai.translationSourceLabel');
-    content.appendChild(label);
+    if (text) {
+        const label = document.createElementNS(XHTML_NAMESPACE, 'div');
+        label.className = 'mktero-translation-source-label';
+        label.textContent = sourceLabel || t('ai.translationSourceLabel');
+        content.appendChild(label);
 
-    // The original is not beside the translation in this view, so say which
-    // way it lies rather than leaving the reader to hunt for it.
-    if (offscreen === 'above' || offscreen === 'below') {
-        const direction = document.createElementNS(XHTML_NAMESPACE, 'div');
-        direction.className = 'mktero-translation-source-direction';
-        direction.textContent = t('ai.translationSourceOffscreen', {
-            direction: t(`ai.translationSource${
-                offscreen === 'above' ? 'Above' : 'Below'
-            }`),
-        });
-        content.appendChild(direction);
+        const body = document.createElementNS(XHTML_NAMESPACE, 'div');
+        body.className = 'mktero-translation-source-text';
+        body.setAttribute('dir', 'auto');
+        body.tabIndex = 0;
+        body.textContent = text;
+        content.appendChild(body);
     }
-
-    const body = document.createElementNS(XHTML_NAMESPACE, 'div');
-    body.className = 'mktero-translation-source-text';
-    body.setAttribute('dir', 'auto');
-    body.textContent = text;
-    content.appendChild(body);
 
     if (annotationUnavailable) {
         const unavailable = document.createElementNS(XHTML_NAMESPACE, 'div');
@@ -107,26 +113,33 @@ function createContent(
     const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
     actions.className = 'mktero-translation-source-actions';
 
-    // The annotation covers the whole original block even though the bubble
-    // shows only the corresponding sentence selected for reading.
-    if (annotate) {
-        const create = document.createElementNS(XHTML_NAMESPACE, 'button');
-        create.type = 'button';
-        create.className = 'mktero-translation-source-action';
-        create.textContent = t('annotation.sourceBlockHighlight');
-        create.addEventListener('click', annotate);
-        actions.appendChild(create);
-    }
-
+    let locate = null;
     if (reveal) {
-        const action = document.createElementNS(XHTML_NAMESPACE, 'button');
-        action.type = 'button';
-        action.className = 'mktero-translation-source-action';
-        action.textContent = t('ai.translationSourceLocate');
-        action.addEventListener('click', reveal);
-        actions.appendChild(action);
+        locate = document.createElementNS(XHTML_NAMESPACE, 'button');
+        locate.type = 'button';
+        locate.dataset.action = 'locate-source';
+        locate.className = 'mktero-translation-source-action';
+        locate.textContent = t('ai.translationSourceLocate');
+        locate.addEventListener('click', () => {
+            if (!locate.disabled && locate.isConnected) reveal();
+        });
+        actions.appendChild(locate);
     }
 
-    if (actions.childNodes.length) content.appendChild(actions);
+    if (save) {
+        const labels = sourceBlockAnnotationLabels(t, blockCount);
+        const scope = document.createElementNS(XHTML_NAMESPACE, 'div');
+        scope.className = 'mktero-related-source-scope';
+        scope.textContent = labels.scope;
+        content.appendChild(scope);
+        const action = createSourceBlockAnnotationAction(document, t);
+        action.update({ ...save, locate, label: labels.action });
+        action.button.dataset.action = 'annotate-source';
+        action.button.classList.add('mktero-translation-source-action');
+        actions.prepend(action.button);
+        content.append(actions, action.error);
+    }
+    else if (locate) content.appendChild(actions);
+
     return content;
 }

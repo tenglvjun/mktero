@@ -1,6 +1,7 @@
 import { WidgetType } from '@codemirror/view';
 import { parseGFMTable } from '../markdown/markdown-tables.js';
 import { renderTableCaptionContent } from '../markdown/markdown-html.js';
+import { createVisibleMarkdownTextIndex } from '../markdown/markdown-visible-text.js';
 import {
     appendRenderedMarkdown,
     installRenderedCitations,
@@ -36,6 +37,7 @@ export class RenderedTableWidget extends WidgetType {
         renderVersion,
         citations = [],
         highlighted = false,
+        sourceSelections = [],
         annotations = [],
         correctionBlock = null,
         correctionManagementEnabled = false,
@@ -61,6 +63,8 @@ export class RenderedTableWidget extends WidgetType {
         this.citations = citations;
         this.citationKey = citations.map(citation => citation.key).join('|');
         this.highlighted = highlighted;
+        this.sourceSelections = sourceSelections;
+        this.sourceSelectionKey = JSON.stringify(sourceSelections);
         this.annotations = annotations;
         this.annotationKey = JSON.stringify(annotations);
         this.correctionBlock = correctionBlock;
@@ -97,6 +101,7 @@ export class RenderedTableWidget extends WidgetType {
             && this.renderVersion === other.renderVersion
             && this.citationKey === other.citationKey
             && this.highlighted === other.highlighted
+            && this.sourceSelectionKey === other.sourceSelectionKey
             && this.annotationKey === other.annotationKey
             && this.correctionBlock?.id === other.correctionBlock?.id
             && this.correctionManagementEnabled
@@ -141,6 +146,10 @@ export class RenderedTableWidget extends WidgetType {
             this.translate
         );
         const table = container.querySelector('table');
+        if (table && tableFrom >= 0 && this.sourceSelections.length) {
+            markTableSourceSelections(table, this.source, this.annotationSourceFrom + tableFrom,
+                this.sourceSelections);
+        }
         if (table && this.caption) {
             table.prepend(createTableCaption(document, this.caption));
         }
@@ -447,6 +456,78 @@ export function createTableCaption(document, caption) {
         document.importNode(node, true)
     )));
     return element;
+}
+
+function markTableSourceSelections(table, source, base, selections) {
+    const cellRanges = parseGFMTable(source)?.cellRanges;
+    const cells = [...table.querySelectorAll('th, td')];
+    if (!cellRanges || cellRanges.length !== cells.length) return;
+    const visible = createVisibleMarkdownTextIndex(source);
+    cells.forEach((cell, index) => {
+        const bounds = cellRanges[index];
+        if (!bounds) return;
+        const hits = selections.filter(range => range.from < base + bounds.to
+            && range.to > base + bounds.from);
+        if (!hits.length) return;
+        const whole = hits.find(range => range.from <= base + bounds.from
+            && range.to >= base + bounds.to);
+        if (whole) {
+            markSourceElement(cell, whole);
+            return;
+        }
+        markTableCellText(cell, visible, bounds, hits, base);
+    });
+}
+
+function markTableCellText(cell, visible, bounds, selections, base) {
+    // Only place a partial mark when the rendered text lines up with the
+    // source. Compare within this cell, never search for its text in the table.
+    const offsets = [];
+    const text = [];
+    const end = visible.visibleOffsetAt(bounds.to);
+    for (let index = visible.visibleOffsetAt(bounds.from); index < end; index++) {
+        if (/\s/u.test(visible.text[index])) continue;
+        text.push(visible.text[index]);
+        offsets.push(base + visible.sourceOffsetAt(index));
+    }
+    const document = cell.ownerDocument;
+    const walker = document.createTreeWalker(cell, document.defaultView.NodeFilter.SHOW_TEXT);
+    const parts = [];
+    let cursor = 0;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const value = node.textContent || '';
+        let hit = null;
+        let part = null;
+        for (let offset = 0; offset < value.length; offset++) {
+            if (/\s/u.test(value[offset])) continue;
+            if (value[offset] !== text[cursor]) return;
+            const sourceOffset = offsets[cursor++];
+            const next = selections.find(range => sourceOffset >= range.from && sourceOffset < range.to);
+            if (next && next === hit) part.to = offset + 1;
+            else if (next) {
+                part = { node, from: offset, to: offset + 1, range: next };
+                parts.push(part);
+            }
+            hit = next;
+        }
+    }
+    if (cursor !== text.length) return;
+    for (const { node, from, to, range } of parts.reverse()) {
+        const run = node.splitText(from);
+        run.splitText(to - from);
+        const mark = createHTMLNode(document, 'span');
+        markSourceElement(mark, range);
+        run.replaceWith(mark);
+        mark.append(run);
+    }
+}
+
+function markSourceElement(element, range) {
+    element.classList.add('cm-mktero-translation-pair-selected-text');
+    element.dataset.translationPairSelected = 'true';
+    element.dataset.translationBlockId = range.id;
+    element.dataset.translationSourceFrom = String(range.from);
+    element.dataset.translationSourceTo = String(range.to);
 }
 
 function serializeGFMTable(table) {
