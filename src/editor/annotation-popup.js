@@ -9,8 +9,8 @@ import {
 } from '../icons/lucide-icon.js';
 import { createLocalization } from '../i18n/localization.js';
 import {
-    createLegacyActions,
-    normalizeLegacyActions,
+    createWholeBlockActions,
+    normalizeWholeBlockActions,
     sourceBlockAnnotationLabels,
 } from './translation-legacy-actions.js';
 import {
@@ -342,22 +342,19 @@ export function createAnnotationPopup(parent, {
         blockCount = 1,
         offscreen = null,
         revealSource = null,
-        sourceLabel = null,
-        legacyActions = [],
+        wholeBlockActions = [],
         isCurrent = null,
     }) => {
-        const legacy = normalizeLegacyActions(legacyActions);
+        const wholeBlocks = normalizeWholeBlockActions(wholeBlockActions);
         const direction = typeof revealSource === 'function'
             && (offscreen === 'above' || offscreen === 'below') ? offscreen : null;
-        if (!anchor || (!annotation && !annotationUnavailable
-            && !sourceLabel && !direction && !legacy.length)) return;
+        if (!anchor || (!annotation && !annotationUnavailable && !direction && !wholeBlocks.length)) return;
         const buildSourceActions = ({ document, close, reposition }, save) => (
             createSourceBlockActions(document, annotation, t, {
                 annotationUnavailable,
                 blockCount,
                 direction,
                 revealSource,
-                sourceLabel,
                 createMarkdownAnnotation,
                 selectionContext,
                 close,
@@ -367,9 +364,9 @@ export function createAnnotationPopup(parent, {
             })
         );
         // Scrolling or revealing an original can refresh the same selection.
-        // Keep both the annotation save and alignment requests in flight.
+        // Keep the annotation save in flight and update the show callbacks.
         if (sourceBlockPopup?.anchor === anchor
-            && (sourceBlockPopup.legacy ? sourceBlockPopup.legacy.refresh(legacy) : !legacy.length)) {
+            && (sourceBlockPopup.controls ? sourceBlockPopup.controls.refresh(wholeBlocks) : !wholeBlocks.length)) {
             anchoredPopup.cancelClose();
             sourceBlockPopup.refresh(buildSourceActions);
             return;
@@ -380,21 +377,17 @@ export function createAnnotationPopup(parent, {
             label: t('annotation.selectionActions'),
             popupClassName: 'mktero-annotation-popup--actions',
             dismissOnMouseLeave: false,
-            onClose: () => {
-                const previous = sourceBlockPopup;
-                sourceBlockPopup = null;
-                previous?.legacy?.dispose();
-            },
+            onClose: () => { sourceBlockPopup = null; },
             renderContent(context) {
                 const save = createSourceBlockAnnotationAction(context.document, t);
                 const content = buildSourceActions(context, save);
-                const controls = legacy.length ? createLegacyActions(
-                    context.document, legacy, t, context.reposition
+                const controls = wholeBlocks.length ? createWholeBlockActions(
+                    context.document, wholeBlocks, t, context.reposition
                 ) : null;
                 if (controls) content.appendChild(controls.element);
                 sourceBlockPopup = {
                     anchor,
-                    legacy: controls,
+                    controls,
                     refresh(build) {
                         const next = build(context, save);
                         for (const child of [...content.childNodes]) {
@@ -1154,7 +1147,6 @@ function createSourceBlockActions(
         annotationUnavailable,
         direction,
         revealSource,
-        sourceLabel,
         createMarkdownAnnotation,
         selectionContext,
         close,
@@ -1169,12 +1161,6 @@ function createSourceBlockActions(
         'mktero-markdown-selection-actions',
     ].join(' ');
 
-    if (sourceLabel) {
-        const label = document.createElementNS(XHTML_NAMESPACE, 'div');
-        label.className = 'mktero-translation-source-label';
-        label.textContent = sourceLabel;
-        content.appendChild(label);
-    }
     const labels = sourceBlockAnnotationLabels(translate, blockCount);
     const showAnnotation = annotation && !annotationUnavailable;
     if (showAnnotation || annotationUnavailable) {

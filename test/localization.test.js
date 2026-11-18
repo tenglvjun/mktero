@@ -22,6 +22,15 @@ test('maps supported Zotero locales and falls back to English', () => {
     assert.equal(resolveLanguage(''), LANGUAGE_ENGLISH);
 });
 
+test('localizes the outdated document translation hint', () => {
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const chinese = createLocalization({ zoteroLocale: 'zh-CN' });
+    assert.equal(english.t('ai.translationOutdated', { language: 'Korean' }),
+        'Outdated Korean translation. Translate again to read it.');
+    assert.equal(chinese.t('ai.translationOutdated', { language: '韩语' }),
+        '本地的韩语译文已过时，请重新翻译后阅读。');
+});
+
 test('creates a fixed localization from the Zotero locale', () => {
     const localization = createLocalization({ zoteroLocale: 'en-GB' });
     const chinese = createLocalization({ zoteroLocale: 'zh-CN' });

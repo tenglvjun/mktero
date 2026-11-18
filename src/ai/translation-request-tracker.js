@@ -5,7 +5,6 @@ export class TranslationRequestTracker {
         }
         this.createAbortController = createAbortController;
         this.requests = new Map();
-        this.queues = new WeakMap();
     }
 
     async run(documentID, blockID, operation) {
@@ -38,48 +37,6 @@ export class TranslationRequestTracker {
         controller.abort();
         if (!requests.size) this.requests.delete(documentID);
         return true;
-    }
-
-    // Each upgrade replaces a document-sized record. Read its baseline only
-    // after the preceding upgrade commits, while sharing duplicate clicks.
-    enqueue(documentID, group, itemID, operation, signal) {
-        validateIdentifier(itemID, 'A translation block ID is required');
-        const requests = this.#requestsForDocument(documentID);
-        let controller = requests.get(group);
-        if (!controller) {
-            controller = this.createAbortController();
-            validateController(controller);
-            requests.set(group, controller);
-            this.queues.set(controller, { items: new Map(), tail: Promise.resolve() });
-        }
-        const queue = this.queues.get(controller);
-        if (!queue) throw new Error('Translation request group is already in use');
-        if (queue.items.has(itemID)) return queue.items.get(itemID);
-        const item = this.createAbortController();
-        const abort = () => item.abort();
-        for (const input of [controller.signal, signal]) {
-            if (input?.aborted) abort();
-            else input?.addEventListener('abort', abort, { once: true });
-        }
-        const result = queue.tail.then(() => {
-            if (item.signal.aborted) {
-                throw Object.assign(new Error('Translation canceled'), { name: 'AbortError' });
-            }
-            return operation(item.signal);
-        }).finally(() => {
-            controller.signal.removeEventListener('abort', abort);
-            signal?.removeEventListener('abort', abort);
-            queue.items.delete(itemID);
-            if (!queue.items.size && requests.get(group) === controller) {
-                requests.delete(group);
-                if (!requests.size && this.requests.get(documentID) === requests) {
-                    this.requests.delete(documentID);
-                }
-            }
-        });
-        queue.items.set(itemID, result);
-        queue.tail = result.catch(() => {});
-        return result;
     }
 
     cancelDocument(documentID) {

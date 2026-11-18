@@ -65,6 +65,7 @@ import { createOpenAccessResolver } from './citations/open-access-resolver.js';
 import { AISDKGateway } from './ai/ai-sdk-gateway.js';
 import {
     MarkdownTranslationService,
+    TRANSLATION_PROFILE_ID,
 } from './ai/markdown-translation-service.js';
 import {
     TranslationRequestTracker,
@@ -1641,9 +1642,7 @@ async function openItemAsMarkdown(itemID, {
         onCommitCorrection: correction => commitCorrection(itemID, correction),
         onRestoreCorrection: blockID => restoreCorrection(itemID, blockID),
         onRestoreAllCorrections: () => restoreAllCorrections(itemID),
-        onTranslateDocument: options => options?.alignmentBlockID !== undefined
-            ? enableSentenceAlignment(itemID, options.alignmentBlockID, options.signal)
-            : translateDocument(itemID, options),
+        onTranslateDocument: options => translateDocument(itemID, options),
         onCancelDocumentTranslation: () => cancelDocumentTranslation(itemID),
         onTranslateSelection: ({ text, onTextDelta } = {}) => (
             translateSelection(itemID, { text, onTextDelta })
@@ -3213,6 +3212,7 @@ function setTranslationView(documentID, view) {
     if (!presentation
         || presentation.model.status !== 'ready'
         || presentation.model.renderMode === 'html'
+        || !hasCurrentTranslationProfile(presentation.model)
         || !translationAvailable) {
         return false;
     }
@@ -3227,11 +3227,18 @@ function setTranslationView(documentID, view) {
 }
 
 async function translateDocument(documentID, {
+    alignmentBlockID,
     retryBlockIDs = null,
     forceRetranslate = false,
     targetLanguage: selectedTargetLanguage,
     translationView: completedTranslationView,
 } = {}) {
+    // A stale block-upgrade request must never start a document translation.
+    if (alignmentBlockID !== undefined) {
+        const error = new Error('Per-block alignment upgrades are unavailable');
+        error.code = 'AI_INVALID_REQUEST';
+        throw error;
+    }
     const presentation = runtime.presenter?.get(documentID);
     const service = runtime.translationService;
     if (!presentation
@@ -3248,7 +3255,6 @@ async function translateDocument(documentID, {
         error.code = 'AI_CONFIGURATION_ERROR';
         throw error;
     }
-    requests.cancelBlock(documentID, 'alignment');
     presentation.translationLanguageSelection = null;
     // A started translation is the signal, not a finished one: a reader whose
     // provider then fails still wanted the translation, and that intent is what
@@ -3283,6 +3289,7 @@ async function translateDocument(documentID, {
             || '',
         translationConfiguredTargetLanguage: configuredTargetLanguage,
         translationRequestedTargetLanguage: targetLanguage,
+        translationHintTargetLanguage: '',
         translationError: '',
     });
     try {
@@ -3316,6 +3323,9 @@ async function translateDocument(documentID, {
                 },
             })
         );
+        if (!hasCurrentTranslationProfile(result)) {
+            throw new Error('The document translation profile is unavailable');
+        }
         if (runtime.presenter?.get(documentID) !== presentation) return result;
         if (presentation.model.translationRequestedTargetLanguage
             !== targetLanguage) return result;
@@ -3328,8 +3338,7 @@ async function translateDocument(documentID, {
         if (preservePrevious) {
             runtime.presenter.update(presentation, {
                 ...restoreTranslationResult(previousTranslation),
-                translationConfiguredTargetLanguage:
-                    presentation.model.translationConfiguredTargetLanguage,
+                translationHintTargetLanguage: targetLanguage,
                 ...languageState,
             });
             return result;
@@ -3351,74 +3360,36 @@ async function translateDocument(documentID, {
         if (runtime.presenter?.get(documentID) === presentation
             && presentation.model.translationRequestedTargetLanguage
                 === targetLanguage) {
-            runtime.presenter.update(
-                presentation,
-                previousTranslation
+            const {
+                translationConfiguredTargetLanguage,
+                translationCachedLanguages,
+                translationPartialLanguages,
+                translationOutdatedLanguages,
+            } = presentation.model;
+            const cancelled = error?.name === 'AbortError';
+            runtime.presenter.update(presentation, {
+                ...(previousTranslation
                     ? restoreTranslationResult(previousTranslation, {
-                        error: error?.name === 'AbortError'
+                        error: cancelled
                             ? previousTranslation.error
                             : localizeTranslationError(error),
                     })
                     : {
-                        translationStatus: 'none',
-                        translationProgress: 0,
-                        translationCompletedBlocks: 0,
-                        translationTotalBlocks: 0,
-                        translationStage: '',
-                        translationView: 'original',
-                        translationTargetLanguage: '',
-                        translationRequestedTargetLanguage: '',
-                        translationKey: null,
-                        translationSettingsIdentity: '',
-                        translationBlocks: [],
-                        translationFailedBlocks: [],
-                        translationBlockRanges: [],
-                        translationError: error?.name === 'AbortError'
+                        ...createEmptyTranslationState(),
+                        translationConfiguredTargetLanguage,
+                        translationCachedLanguages,
+                        translationPartialLanguages,
+                        translationOutdatedLanguages,
+                        translationError: cancelled
                             ? ''
                             : localizeTranslationError(error),
-                    }
-            );
+                    }),
+                translationHintTargetLanguage: targetLanguage,
+            });
         }
         if (error?.name !== 'AbortError') logMkteroError(error);
         throw error;
     }
-}
-
-function enableSentenceAlignment(documentID, blockID, popupSignal) {
-    const presentation = runtime.presenter?.get(documentID);
-    const model = presentation?.model;
-    const documentKey = model?.cacheKey;
-    const markdown = model?.markdown;
-    const language = model?.translationTargetLanguage;
-    const current = () => runtime.presenter?.get(documentID) === presentation
-        && presentation?.model.status === 'ready'
-        && ['ready', 'partial'].includes(presentation.model.translationStatus)
-        && presentation.model.cacheKey === documentKey
-        && presentation.model.markdown === markdown
-        && presentation.model.translationTargetLanguage === language;
-    if (!documentKey || !current() || !blockID || !runtime.translationRequests) {
-        throw new Error('Translation is no longer available');
-    }
-    return runtime.translationRequests.enqueue(documentID, 'alignment', blockID, async signal => {
-        if (!current()) throw new Error('Translation changed');
-        const baseline = currentTranslationResult(presentation.model);
-        const result = await runtime.translationService.translateDocument({
-            documentKey, markdown, targetLanguage: language, signal,
-            chromeRanges: presentation.model.chromeRanges,
-            figureMap: presentation.model.figureMap,
-            alignmentBlockID: blockID,
-            existingTranslation: baseline,
-        });
-        if (signal.aborted || !current()) {
-            throw Object.assign(new Error('Translation changed'), { name: 'AbortError' });
-        }
-        runtime.presenter.update(presentation, documentTranslationChanges(result, {
-            translationView: presentation.model.translationView,
-            configuredTargetLanguage: presentation.model.translationConfiguredTargetLanguage,
-            ...cachedLanguageStateAfterTranslation(presentation.model, result),
-        }));
-        return result;
-    }, popupSignal);
 }
 
 async function translateSelection(documentID, {
@@ -3572,7 +3543,7 @@ async function updateRevisionSession(itemID, mutate, {
         || runtime.presenter?.get(itemID) !== presentation) {
         return { snapshot, translation: null };
     }
-    const recoveredTranslationChanges = translationState.recovered ? {
+    const recoveredTranslationChanges = translationState.recoveredSnapshot ? {
         ...translationState.recoveredSnapshot,
         translationView: translationState.view,
     } : null;
@@ -3596,7 +3567,15 @@ async function updateRevisionSession(itemID, mutate, {
                     presentation.model.translationConfiguredTargetLanguage,
                 ...languageState,
             }
-        ) : recoveredTranslationChanges || createEmptyTranslationState()),
+        ) : {
+            ...createEmptyTranslationState(),
+            translationConfiguredTargetLanguage:
+                presentation.model.translationConfiguredTargetLanguage,
+            translationOutdatedLanguages: snapshot.cacheKey === presentation.model.cacheKey
+                ? presentation.model.translationOutdatedLanguages
+                : [],
+            ...recoveredTranslationChanges,
+        }),
     });
     let annotationResult;
     try {
@@ -3639,7 +3618,7 @@ async function resolveTranslationAfterRevision(snapshot, {
     let reconciled = null;
     if (previousTranslation && snapshot.markdown.trim()) {
         try {
-                reconciled = await runtime.translationService
+            reconciled = await runtime.translationService
                 ?.reconcileDocumentTranslation?.({
                     documentKey: String(snapshot.cacheKey || ''),
                     markdown: snapshot.markdown,
@@ -3653,6 +3632,7 @@ async function resolveTranslationAfterRevision(snapshot, {
             logMkteroError(error);
         }
     }
+    if (!hasCurrentTranslationProfile(reconciled)) reconciled = null;
     let recoveredSnapshot = null;
     if (!reconciled
         && recoverCachedTranslation
@@ -3669,7 +3649,6 @@ async function resolveTranslationAfterRevision(snapshot, {
     const view = previousTranslation?.view || recovered?.view || 'original';
     return {
         reconciled,
-        recovered,
         recoveredSnapshot,
         result: active ? { ...active, view } : null,
         view,
@@ -3728,12 +3707,14 @@ async function requestItemReparse(itemID, entryPoint) {
 
 async function attachCachedDocumentTranslation(result, signal) {
     if (!result?.cacheKey || !result.markdown) return result;
+    if (signal?.aborted) throw signal.reason || new Error('Aborted');
+    const outdatedLanguages = await listOutdatedTranslationLanguages(result.cacheKey);
     let targetLanguage;
     let variants;
     do {
         if (signal?.aborted) throw signal.reason || new Error('Aborted');
         targetLanguage = getAISettings(Zotero).targetLanguage;
-            variants = await runtime.translationService
+        variants = await runtime.translationService
             ?.listCachedDocumentTranslationVariants?.({
                 documentKey: result.cacheKey,
                 markdown: result.markdown,
@@ -3742,15 +3723,14 @@ async function attachCachedDocumentTranslation(result, signal) {
             });
         if (signal?.aborted) throw signal.reason || new Error('Aborted');
     } while (getAISettings(Zotero).targetLanguage !== targetLanguage);
-    const completeTranslations = (variants || []).filter(
-        translation => !translation.partial
-    );
-    const languageState = cachedTranslationLanguageState(variants);
-    const visibleTranslation = completeTranslations[0]
-        || (variants || []).find(translation => (
-            translation.targetLanguage === targetLanguage
-        ))
-        || variants?.[0];
+    variants = (variants || []).filter(hasCurrentTranslationProfile);
+    const languageState = {
+        ...cachedTranslationLanguageState(variants),
+        translationOutdatedLanguages: outdatedLanguages,
+    };
+    const visibleTranslation = variants.find(translation => !translation.partial)
+        || variants.find(translation => translation.targetLanguage === targetLanguage)
+        || variants[0];
     if (!visibleTranslation) {
         return {
             ...result,
@@ -3760,18 +3740,35 @@ async function attachCachedDocumentTranslation(result, signal) {
     }
     return {
         ...result,
+        ...languageState,
         ...documentTranslationChanges(visibleTranslation, {
             translationView: 'original',
             configuredTargetLanguage: targetLanguage,
-            ...languageState,
         }),
     };
+}
+
+async function listOutdatedTranslationLanguages(documentKey) {
+    try {
+        const languages = await runtime.cache?.listOutdatedTranslationLanguages?.(
+            documentKey,
+            TRANSLATION_PROFILE_ID
+        );
+        return Array.isArray(languages)
+            ? AI_TARGET_LANGUAGES.filter(language => languages.includes(language))
+            : [];
+    }
+    catch (error) {
+        logMkteroError(error);
+        return [];
+    }
 }
 
 function updateOpenDocumentTranslationLanguage(targetLanguage) {
     for (const presentation of runtime.presenter?.list?.() || []) {
         runtime.presenter.update(presentation, {
             translationConfiguredTargetLanguage: targetLanguage,
+            translationHintTargetLanguage: '',
         });
     }
 }
@@ -3783,8 +3780,8 @@ async function selectTranslationLanguage(documentID, targetLanguage) {
         || presentation.model.translationStatus === 'loading') {
         return false;
     }
-    runtime.translationRequests?.cancelBlock(documentID, 'alignment');
-    const currentComplete = presentation.model.translationStatus === 'ready'
+    const currentComplete = hasCurrentTranslationProfile(presentation.model)
+        && presentation.model.translationStatus === 'ready'
         && presentation.model.translationTargetLanguage === targetLanguage;
     if (currentComplete) {
         return setTranslationView(documentID, 'translated');
@@ -3830,7 +3827,7 @@ async function activateCachedTranslationLanguage(
         || String(presentation.model.cacheKey || '') !== documentKey
         || String(presentation.model.markdown || '') !== markdown
         || selection && presentation.translationLanguageSelection !== selection
-        || !cached
+        || !hasCurrentTranslationProfile(cached)
         || cached.partial
         || cached.targetLanguage !== targetLanguage) {
         return false;
@@ -3912,6 +3909,7 @@ function documentTranslationChanges(cached, {
         translationTargetLanguage: cached.targetLanguage,
         translationConfiguredTargetLanguage: configuredTargetLanguage,
         translationRequestedTargetLanguage: '',
+        translationHintTargetLanguage: '',
         ...(Array.isArray(translationCachedLanguages) ? {
             translationCachedLanguages: [...translationCachedLanguages],
         } : {}),
@@ -3919,6 +3917,7 @@ function documentTranslationChanges(cached, {
             translationPartialLanguages: [...translationPartialLanguages],
         } : {}),
         translationKey: cached.translationKey,
+        translationProfile: cached.translationProfile,
         translationSettingsIdentity: cached.settingsIdentity || '',
         translationBlocks: cached.blocks,
         translationSourceBlocks: cached.sourceBlocks || [],
@@ -3932,8 +3931,13 @@ function documentTranslationChanges(cached, {
     };
 }
 
+function hasCurrentTranslationProfile(translation) {
+    return translation?.translationProfile === TRANSLATION_PROFILE_ID;
+}
+
 function currentTranslationResult(model) {
-    if (!['ready', 'partial'].includes(model?.translationStatus)
+    if (!hasCurrentTranslationProfile(model)
+        || !['ready', 'partial'].includes(model.translationStatus)
         || !Array.isArray(model.translationBlocks)
         || !model.translationBlocks.length) {
         return null;
@@ -3951,6 +3955,7 @@ function currentTranslationResult(model) {
         totalBlocks,
         targetLanguage: model.translationTargetLanguage,
         translationKey: model.translationKey,
+        translationProfile: model.translationProfile,
         documentKey: String(model.cacheKey || ''),
         sourceMarkdown: String(model.markdown || ''),
         settingsIdentity: model.translationSettingsIdentity,
@@ -3977,6 +3982,7 @@ function restoreTranslationResult(result, { error = result.error } = {}) {
         translationTargetLanguage: result.targetLanguage,
         translationRequestedTargetLanguage: '',
         translationKey: result.translationKey,
+        translationProfile: result.translationProfile,
         translationSettingsIdentity: result.settingsIdentity || '',
         translationBlocks: result.blocks,
         translationSourceBlocks: result.sourceBlocks || [],
@@ -4189,7 +4195,9 @@ async function exportMarkdownForModel(model, { ownerWindow } = {}) {
     const result = await runtime.markdownExporter.export({
         ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
         title: model.title,
-        markdown: selectExportMarkdown(model),
+        markdown: hasCurrentTranslationProfile(model)
+            ? selectExportMarkdown(model)
+            : model.markdown || '',
         assets: model.assets,
         assetBasePath: model.assetBasePath,
     });
@@ -4204,13 +4212,14 @@ async function exportEpubForModel(model, { ownerWindow } = {}) {
     if (!runtime.epubExporter?.export) {
         throw new Error('EPUB export is unavailable');
     }
+    const translated = hasCurrentTranslationProfile(model);
     const result = await runtime.epubExporter.export({
         ownerWindow: ownerWindow || Zotero.getMainWindow?.(),
         title: model.title,
-        markdown: selectExportMarkdown(model),
+        markdown: translated ? selectExportMarkdown(model) : model.markdown || '',
         assets: model.assets,
         assetBasePath: model.assetBasePath,
-        language: selectExportMarkdownLanguage(model),
+        language: translated ? selectExportMarkdownLanguage(model) : 'und',
     });
     recordExportCompleted();
     return result;
@@ -4253,7 +4262,8 @@ async function obsidianTranslationsForModel(model) {
     const translations = [];
     const seen = new Set();
     for (const item of listed) {
-        if (!item || item.partial || typeof item.translatedMarkdown !== 'string'
+        if (!hasCurrentTranslationProfile(item)
+            || item.partial || typeof item.translatedMarkdown !== 'string'
             || !item.translatedMarkdown
             || !isSupportedAITargetLanguage(item.targetLanguage)
             || seen.has(item.targetLanguage)) {
@@ -4265,7 +4275,8 @@ async function obsidianTranslationsForModel(model) {
             markdown: item.translatedMarkdown,
         });
     }
-    if (model?.translationStatus === 'ready'
+    if (hasCurrentTranslationProfile(model)
+        && model.translationStatus === 'ready'
         && isSupportedAITargetLanguage(model.translationTargetLanguage)
         && typeof model.translatedMarkdown === 'string'
         && model.translatedMarkdown

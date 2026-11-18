@@ -22,9 +22,10 @@ import {
 
 import { assembleAlignedBlock, createAlignmentPlan, verifyAlignedBlock } from '../markdown/translation-alignment.js';
 
+import { TRANSLATION_PROFILE_ID } from './translation-profile.js';
+
+export { TRANSLATION_PROFILE_ID };
 export const TRANSLATION_PROMPT_VERSION = 'mktero-translation-v8';
-const LEGACY_PROMPT_VERSION = 'mktero-translation-v7';
-const READABLE_PROMPT_VERSIONS = [TRANSLATION_PROMPT_VERSION, LEGACY_PROMPT_VERSION];
 
 const MAX_DOCUMENT_TRANSLATION_BLOCKS = 2_000;
 const MAX_TRANSLATION_IDENTIFIER_LENGTH = 512;
@@ -183,7 +184,7 @@ export class MarkdownTranslationService {
             source,
             blocks,
             settings,
-            await this.#visibleTranslationKey(normalizedDocumentKey, source, settings, existingTranslation, translationKey),
+            translationKey,
             normalizedDocumentKey,
             figureMap
         );
@@ -205,37 +206,37 @@ export class MarkdownTranslationService {
         settings,
         value
     ) {
-        const previousKey = String(value?.translationKey || '');
-        const previousSource = String(value?.sourceMarkdown || '');
-        const settingsIdentity = createDocumentTranslationSettingsIdentity(
-            settings
-        );
-        const sourceBlocks = visibleTranslationSourceBlocks(value);
         if (!this.cache?.putTranslation
-            || !CACHE_KEY_PATTERN.test(previousKey)
+            || !matchesVisibleTranslationIdentity(value, settings)) {
+            return;
+        }
+        const previousKey = String(value.translationKey || '');
+        const previousSource = String(value.sourceMarkdown || '');
+        const sourceBlocks = visibleTranslationSourceBlocks(value);
+        if (!CACHE_KEY_PATTERN.test(previousKey)
             || previousKey === translationKey
             || !previousSource
             || previousSource === source
-            || String(value?.documentKey || '') !== documentKey
-            || String(value?.settingsIdentity || '') !== settingsIdentity
-            || String(value?.targetLanguage || '') !== settings.targetLanguage
-            || !Array.isArray(value?.blocks)
+            || String(value.documentKey || '') !== documentKey
+            || !Array.isArray(value.blocks)
             || !sourceBlocks
             || value.blocks.length !== sourceBlocks.length) {
             return;
         }
+        const failedBlocks = value.failedBlocks || [];
         try {
             await this.cache.putTranslation(documentKey, previousKey, {
                 translatedMarkdown: String(value.translatedMarkdown || ''),
                 comparisonMarkdown: String(value.comparisonMarkdown || ''),
                 blocks: value.blocks,
                 sourceBlocks,
-                settingsIdentity,
+                settingsIdentity: value.settingsIdentity,
                 model: String(value.model || settings.model),
                 targetLanguage: settings.targetLanguage,
                 promptVersion: TRANSLATION_PROMPT_VERSION,
-                partial: Boolean(value.partial),
-                failedBlocks: value.failedBlocks || [],
+                translationProfile: TRANSLATION_PROFILE_ID,
+                partial: failedBlocks.length > 0,
+                failedBlocks,
             });
         }
         catch (error) {
@@ -256,6 +257,10 @@ export class MarkdownTranslationService {
         chromeRanges,
         figureMap = null,
     }) {
+        // A stale block-upgrade request must not implicitly send the whole document.
+        if (alignmentBlockID !== undefined) {
+            throw aiError('Per-block alignment upgrades are unavailable', 'AI_INVALID_REQUEST');
+        }
         const configuredSettings = this.getSettings();
         const selectedLanguage = targetLanguage === undefined
             ? configuredSettings.targetLanguage
@@ -291,15 +296,10 @@ export class MarkdownTranslationService {
             source,
             settings
         );
-        const upgrade = alignmentBlockID !== undefined;
-        if (upgrade && (typeof alignmentBlockID !== 'string' || !alignmentBlockID
-            || retryBlockIDs !== null || forceRetranslate || !translationKey || !this.cache?.putTranslation)) {
-            throw aiError('This block cannot be upgraded', 'AI_INVALID_REQUEST');
-        }
         let cached = await this.#readExactDocumentTranslation(
             normalizedDocumentKey, translationKey, source, settings, chromeRanges, figureMap
         );
-        if (!cached && !upgrade) {
+        if (!cached) {
             cached = await this.#readCompatibleDocumentTranslation(
                 normalizedDocumentKey,
                 translationKey,
@@ -309,50 +309,26 @@ export class MarkdownTranslationService {
                 figureMap
             );
         }
-        if (cached
-            && !upgrade
-            && !forceRetranslate
-            && retryBlockIDs === null) {
-            if (!cached.partial) {
-                reportProgress('complete', {
-                    completed: cached.completedBlocks,
-                    total: cached.totalBlocks,
-                });
-                return cached;
-            }
+        if (cached && !cached.partial && !forceRetranslate && retryBlockIDs === null) {
+            reportProgress('complete', {
+                completed: cached.completedBlocks,
+                total: cached.totalBlocks,
+            });
+            return cached;
         }
         const blocks = collectSourceTranslationBlocks(source, chromeRanges);
         const translatableBlocks = blocks.filter(block => block.translatable);
         validateDocumentTranslationInput(translatableBlocks);
-        const visibleKey = await this.#visibleTranslationKey(normalizedDocumentKey, source, settings, existingTranslation, translationKey);
         const visible = normalizeVisibleTranslation(
             existingTranslation,
             source,
             blocks,
             settings,
-            visibleKey,
+            translationKey,
             normalizedDocumentKey,
             figureMap
         );
         const baseline = visible || cached;
-        if (upgrade) {
-            const target = translatableBlocks.find(block => block.id === alignmentBlockID);
-            const original = existingTranslation ?? cached;
-            const version = matchingPromptVersion(original, settings);
-            const baselineKey = existingTranslation ? visibleKey : cached?.translationKey;
-            if (!target || !createAlignmentPlan(target) || !version
-                || !baselineKey || original?.translationKey !== baselineKey
-                || original.documentKey !== normalizedDocumentKey || original.sourceMarkdown !== source
-                || original.targetLanguage !== settings.targetLanguage || !baseline
-                || (existingTranslation && !visible)
-                || baseline.failedBlocks.some(block => block.id === alignmentBlockID)
-                || original.translatedMarkdown !== baseline.translatedMarkdown
-                || original.blocks?.length !== translatableBlocks.length
-                || !translatableBlocks.every((block, i) => original.blocks[i]?.id === block.id)
-                || !sameTranslationSources(original.sourceBlocks, translatableBlocks)) {
-                throw aiError('The source or settings for this block have changed', 'AI_INVALID_REQUEST');
-            }
-        }
         const visibleTranslationChanged = Boolean(existingTranslation)
             && !visible;
         const {
@@ -364,7 +340,7 @@ export class MarkdownTranslationService {
             blocks,
             translatableBlocks,
             baseline,
-            retryBlockIDs: upgrade ? [alignmentBlockID] : visibleTranslationChanged ? null : retryBlockIDs,
+            retryBlockIDs: visibleTranslationChanged ? null : retryBlockIDs,
             forceRetranslate,
         });
         reportProgress('preparing', {
@@ -394,14 +370,9 @@ export class MarkdownTranslationService {
                 signal,
                 onProgress: reportProgress,
                 createAbortController: this.createAbortController,
-                requireAlignment: upgrade,
                 initialCompletedBlocks: retainedCompletedBlocks,
                 progressTotalBlocks: translatableBlocks.length,
             });
-        if (upgrade && (failures.length || requestedTranslations.length !== 1
-            || requestedTranslations[0].id !== alignmentBlockID || !requestedTranslations[0].alignment)) {
-            throw aiError('The block translation could not be aligned', 'AI_INVALID_RESPONSE');
-        }
         const translations = mergeDocumentTranslations(
             translatableBlocks,
             retainedTranslations,
@@ -427,6 +398,7 @@ export class MarkdownTranslationService {
             model: String(model || settings.model),
             targetLanguage: settings.targetLanguage,
             promptVersion: TRANSLATION_PROMPT_VERSION,
+            translationProfile: TRANSLATION_PROFILE_ID,
             partial: mergedFailures.length > 0,
             failedBlocks: mergedFailures,
         };
@@ -440,16 +412,12 @@ export class MarkdownTranslationService {
             );
         if (translationKey
             && this.cache?.putTranslation
-            && (!preservesCompleteCache || upgrade)) {
+            && !preservesCompleteCache) {
             try {
-                if (upgrade && !matchingPromptVersion(value, { ...this.getSettings(), targetLanguage: selectedLanguage })) {
-                    throw aiError('Translation settings changed', 'AI_INVALID_REQUEST');
-                }
                 await this.cache.putTranslation(normalizedDocumentKey, translationKey, value, { signal });
                 cacheStatus = value.partial ? 'partial' : 'complete';
             }
             catch (error) {
-                if (upgrade) throw error;
                 this.onCacheError(error);
             }
         }
@@ -535,52 +503,30 @@ export class MarkdownTranslationService {
         };
     }
 
-    async #visibleTranslationKey(documentKey, source, settings, value, currentKey) {
-        return matchingPromptVersion(value, settings) === LEGACY_PROMPT_VERSION
-            ? this.#safeCreateDocumentTranslationKey(documentKey, source, settings, LEGACY_PROMPT_VERSION)
-            : currentKey;
-    }
-
-    #createDocumentTranslationKey(documentKey, source, settings, promptVersion) {
+    #createDocumentTranslationKey(documentKey, source, settings) {
         return this.createCacheKey(JSON.stringify({
             documentKey,
             source,
-            ...documentTranslationSettingsIdentity(settings, promptVersion),
+            ...documentTranslationSettingsIdentity(settings),
         }));
     }
 
-    async #readExactDocumentTranslation(documentKey, currentKey, source, settings, chromeRanges, figureMap) {
-        if (!currentKey || !this.cache?.getTranslation) return null;
-        for (const promptVersion of READABLE_PROMPT_VERSIONS) {
-            const key = promptVersion === TRANSLATION_PROMPT_VERSION ? currentKey
-                : await this.#safeCreateDocumentTranslationKey(documentKey, source, settings, promptVersion);
-            if (!key) continue;
-            const cached = await this.#readCachedDocumentTranslation(
-                documentKey, key, source, settings, chromeRanges, figureMap, promptVersion
-            );
-            if (cached) return cached;
-        }
-        return null;
-    }
-
-    async #readCachedDocumentTranslation(
+    async #readExactDocumentTranslation(
         documentKey,
         translationKey,
         source,
         settings,
         chromeRanges,
-        figureMap,
-        promptVersion
+        figureMap
     ) {
+        if (!translationKey || !this.cache?.getTranslation) return null;
         try {
             const cached = await this.cache.getTranslation(
                 documentKey,
                 translationKey
             );
-            const settingsIdentity = createDocumentTranslationSettingsIdentity(settings, promptVersion);
-            if (!cached || cached.promptVersion !== promptVersion
-                || cached.targetLanguage !== settings.targetLanguage
-                || (cached.settingsIdentity !== undefined && cached.settingsIdentity !== settingsIdentity)) return null;
+            const settingsIdentity = createDocumentTranslationSettingsIdentity(settings);
+            if (!matchesCachedTranslationIdentity(cached, settings, settingsIdentity)) return null;
             const blocks = collectSourceTranslationBlocks(source, chromeRanges);
             const translatableBlocks = blocks.filter(block => block.translatable);
             const cachedTranslationsByID = new Map(cached.blocks.map(block => [
@@ -593,8 +539,7 @@ export class MarkdownTranslationService {
             const translations = translatableBlocks.map(block => {
                 const translation = cachedTranslationsByID.get(block.id);
                 if (translation) return verifiedTranslation(block, translation, settings.targetLanguage,
-                    promptVersion === TRANSLATION_PROMPT_VERSION && !failedIDs.has(block.id)
-                        && sourceByID.get(block.id) === block.markdown);
+                    !failedIDs.has(block.id) && sourceByID.get(block.id) === block.markdown);
                 missingFailures.push({
                     id: block.id,
                     message: 'Cached translation is incomplete',
@@ -654,22 +599,16 @@ export class MarkdownTranslationService {
         figureMap
     ) {
         if (!this.cache?.getTranslationByLanguage) return null;
-        for (const promptVersion of READABLE_PROMPT_VERSIONS) {
-            const result = await this.#reconcileCachedVersion(documentKey, translationKey, source, settings,
-                chromeRanges, figureMap, promptVersion);
-            if (result) return result;
-        }
-        return null;
-    }
-
-    async #reconcileCachedVersion(documentKey, translationKey, source, settings, chromeRanges, figureMap, promptVersion) {
-        const settingsIdentity = createDocumentTranslationSettingsIdentity(settings, promptVersion);
+        const settingsIdentity = createDocumentTranslationSettingsIdentity(settings);
         try {
             const cached = await this.cache.getTranslationByLanguage(
-                documentKey, settings.targetLanguage, { promptVersion, settingsIdentity }
+                documentKey, settings.targetLanguage, {
+                    promptVersion: TRANSLATION_PROMPT_VERSION,
+                    translationProfile: TRANSLATION_PROFILE_ID,
+                    settingsIdentity,
+                }
             );
-            if (!cached || cached.targetLanguage !== settings.targetLanguage
-                || cached.promptVersion !== promptVersion || cached.settingsIdentity !== settingsIdentity
+            if (!matchesCachedTranslationIdentity(cached, settings, settingsIdentity)
                 || !Array.isArray(cached.sourceBlocks)) return null;
             const blocks = collectSourceTranslationBlocks(source, chromeRanges);
             const reconciled = reconcileTranslationBlocks(
@@ -702,8 +641,7 @@ export class MarkdownTranslationService {
                 partial,
                 failedBlocks: reconciled.failedBlocks,
                 pendingBlockIDs: reconciled.pendingBlockIDs,
-                translationKey: promptVersion === TRANSLATION_PROMPT_VERSION ? translationKey
-                    : await this.#safeCreateDocumentTranslationKey(documentKey, source, settings, promptVersion),
+                translationKey,
                 cacheHit: true,
                 cacheStatus: partial ? 'partial' : 'complete',
                 totalBlocks,
@@ -742,13 +680,12 @@ export class MarkdownTranslationService {
         );
     }
 
-    async #safeCreateDocumentTranslationKey(documentKey, source, settings, promptVersion) {
+    async #safeCreateDocumentTranslationKey(documentKey, source, settings) {
         try {
             return await this.#createDocumentTranslationKey(
                 documentKey,
                 source,
-                settings,
-                promptVersion
+                settings
             );
         }
         catch (error) {
@@ -936,7 +873,6 @@ async function requestDocumentTranslationBatches({
     onProgress,
     createAbortController,
     initialCompletedBlocks = 0,
-    requireAlignment = false,
     progressTotalBlocks,
 }) {
     const translatableBatches = batches.filter(
@@ -979,7 +915,6 @@ async function requestDocumentTranslationBatches({
                     aiGateway,
                     settings,
                     batch,
-                    requireAlignment,
                     sessionId,
                     signal: controller.signal,
                     onProgress,
@@ -1037,7 +972,6 @@ async function requestDocumentTranslationBatch({
     aiGateway,
     settings,
     batch,
-    requireAlignment,
     sessionId,
     signal,
     onProgress,
@@ -1104,7 +1038,6 @@ async function requestDocumentTranslationBatch({
         settings,
         batch,
         sessionId,
-        requireAlignment,
         failures: response.failures,
         signal,
         onProgress,
@@ -1139,7 +1072,6 @@ async function translateFailedBlocks({
     settings,
     batch,
     sessionId,
-    requireAlignment,
     failures,
     signal,
     onProgress,
@@ -1159,7 +1091,6 @@ async function translateFailedBlocks({
             settings,
             block,
             sessionId,
-            requireAlignment,
             initialFailure: failure,
             signal,
             onProgress,
@@ -1191,7 +1122,6 @@ async function translateBlockWithRetries({
     settings,
     block,
     sessionId,
-    requireAlignment,
     initialFailure,
     signal,
     onProgress,
@@ -1252,7 +1182,7 @@ async function translateBlockWithRetries({
             );
         }
     }
-    if (!requireAlignment && failure.code === TRANSLATION_PROTECTED_CONTENT_CHANGED) {
+    if (failure.code === TRANSLATION_PROTECTED_CONTENT_CHANGED) {
         const fallback = await translateProtectedTextSegments({
             aiGateway,
             settings,
@@ -1510,11 +1440,9 @@ function normalizeVisibleTranslation(
     documentKey,
     figureMap
 ) {
-    if (!value || !Array.isArray(value.blocks)) return null;
-    const version = matchingPromptVersion(value, settings);
-    if ((!version && value.settingsIdentity) || (value.promptVersion && !READABLE_PROMPT_VERSIONS.includes(value.promptVersion))) return null;
-    const promptVersion = version || value.promptVersion || TRANSLATION_PROMPT_VERSION;
-    const settingsIdentity = createDocumentTranslationSettingsIdentity(settings, promptVersion);
+    const settingsIdentity = createDocumentTranslationSettingsIdentity(settings);
+    if (!matchesVisibleTranslationIdentity(value, settings, settingsIdentity)
+        || !Array.isArray(value.blocks)) return null;
     const previousSourceBlocks = visibleTranslationSourceBlocks(value);
     const keyedIdentityMatches = Boolean(translationKey)
         && String(value.translationKey || '') === translationKey
@@ -1522,25 +1450,17 @@ function normalizeVisibleTranslation(
         && (!value.documentKey || value.documentKey === documentKey);
     const explicitIdentityMatches = !value.translationKey
         && String(value.documentKey || '') === documentKey
-        && String(value.sourceMarkdown || '') === source
-        && String(value.settingsIdentity || '') === settingsIdentity;
-    const compatibleIdentityMatches = String(value.documentKey || '')
-        === documentKey
-        && Boolean(version) && previousSourceBlocks !== null;
-    const exactIdentityMatches = keyedIdentityMatches
-        || explicitIdentityMatches;
-    if (!exactIdentityMatches
-        && !compatibleIdentityMatches
-        || String(value.targetLanguage || '') !== settings.targetLanguage) {
-        return null;
-    }
+        && String(value.sourceMarkdown || '') === source;
+    const compatibleIdentityMatches = String(value.documentKey || '') === documentKey
+        && previousSourceBlocks !== null;
+    const exactIdentityMatches = keyedIdentityMatches || explicitIdentityMatches;
+    if (!exactIdentityMatches && !compatibleIdentityMatches) return null;
     try {
         const translatableBlocks = blocks.filter(block => block.translatable);
         const reconciled = exactIdentityMatches
-            ? reconcileTranslationBlocksByID(blocks, { ...value, promptVersion })
+            ? reconcileTranslationBlocksByID(blocks, value)
             : reconcileTranslationBlocks(blocks, {
                 ...value,
-                promptVersion,
                 sourceBlocks: previousSourceBlocks,
             }, source);
         validateDocumentTranslationOutput(
@@ -1560,7 +1480,7 @@ function normalizeVisibleTranslation(
             documentKey,
             sourceMarkdown: source,
             settingsIdentity,
-            promptVersion,
+            promptVersion: TRANSLATION_PROMPT_VERSION,
             blocks: reconciled.translations,
             sourceBlocks: reconciled.sourceBlocks,
             partial: failedBlocks.length > 0,
@@ -1630,8 +1550,7 @@ function reconcileTranslationBlocksByID(blocks, value) {
         sourceBlocks.push({ id: block.id, markdown: block.markdown });
         if (translation && typeof translation.markdown === 'string') {
             translations.push(verifiedTranslation(block, translation, value.targetLanguage,
-                value.promptVersion === TRANSLATION_PROMPT_VERSION && !failuresByID.has(block.id)
-                    && originals.get(block.id) === block.markdown));
+                !failuresByID.has(block.id) && originals.get(block.id) === block.markdown));
             matchedBlocks++;
             const failure = failuresByID.get(block.id);
             if (failure) failedBlocks.push(failure);
@@ -1782,7 +1701,7 @@ function reconcileTranslationBlocks(blocks, value, source) {
             && currentCountsBySource.get(block.markdown) === 1 && previousCountsBySource.get(block.markdown) === 1
             && translatedMarkdown === candidate.translation.markdown;
         translations.push(verifiedTranslation(block, { ...candidate.translation, markdown: translatedMarkdown },
-            value.targetLanguage, value.promptVersion === TRANSLATION_PROMPT_VERSION && uniqueExact && !candidate.failure));
+            value.targetLanguage, uniqueExact && !candidate.failure));
         if (candidate.failure) {
             failedBlocks.push({
                 id: block.id,
@@ -1888,22 +1807,27 @@ function verifiedTranslation(block, translation, targetLanguage, allowAlignment)
     return { id: block.id, markdown: translation.markdown };
 }
 
-function sameTranslationSources(sourceBlocks, blocks) {
-    return Array.isArray(sourceBlocks) && sourceBlocks.length === blocks.length
-        && blocks.every((block, i) => sourceBlocks[i]?.id === block.id && sourceBlocks[i]?.markdown === block.markdown);
+function matchesTranslationIdentity(value, settings, settingsIdentity) {
+    return value?.translationProfile === TRANSLATION_PROFILE_ID
+        && value.settingsIdentity === settingsIdentity
+        && value.targetLanguage === settings.targetLanguage;
 }
 
-function matchingPromptVersion(value, settings) {
-    if (!value?.settingsIdentity) return null;
-    return READABLE_PROMPT_VERSIONS.find(version => (!value.promptVersion || value.promptVersion === version)
-        && value.settingsIdentity === createDocumentTranslationSettingsIdentity(settings, version)) || null;
+function matchesCachedTranslationIdentity(value, settings, settingsIdentity) {
+    return matchesTranslationIdentity(value, settings, settingsIdentity)
+        && value.promptVersion === TRANSLATION_PROMPT_VERSION;
 }
 
-function createDocumentTranslationSettingsIdentity(settings, promptVersion) {
-    return JSON.stringify(documentTranslationSettingsIdentity(settings, promptVersion));
+function matchesVisibleTranslationIdentity(value, settings, settingsIdentity = createDocumentTranslationSettingsIdentity(settings)) {
+    return matchesTranslationIdentity(value, settings, settingsIdentity)
+        && (value.promptVersion === undefined || value.promptVersion === TRANSLATION_PROMPT_VERSION);
 }
 
-function documentTranslationSettingsIdentity(settings, promptVersion = TRANSLATION_PROMPT_VERSION) {
+function createDocumentTranslationSettingsIdentity(settings) {
+    return JSON.stringify(documentTranslationSettingsIdentity(settings));
+}
+
+function documentTranslationSettingsIdentity(settings) {
     return {
         provider: settings.provider,
         protocol: settings.protocol,
@@ -1911,7 +1835,8 @@ function documentTranslationSettingsIdentity(settings, promptVersion = TRANSLATI
         model: settings.model,
         reasoning: normalizeReasoning(settings.reasoning),
         targetLanguage: settings.targetLanguage,
-        promptVersion,
+        promptVersion: TRANSLATION_PROMPT_VERSION,
+        translationProfile: TRANSLATION_PROFILE_ID,
     };
 }
 

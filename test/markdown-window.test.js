@@ -1201,6 +1201,10 @@ test('translates the document and switches between three reading modes', async (
                 to: 40,
             }]
         );
+        assert.equal(
+            typeof editors[0].renderedDocuments.at(-1).enableSentenceAlignment,
+            'undefined'
+        );
         assert.deepEqual(
             editors[0].renderedDocuments.at(-1).translationPairs,
             [{
@@ -1263,6 +1267,76 @@ test('translates the document and switches between three reading modes', async (
         view.destroy();
         assert.equal(editors.length, 1);
         assert.equal(editors.every(editor => editor.destroyed), true);
+    }
+});
+
+test('shows an outdated translation hint without making the old language readable', () => {
+    const requests = [];
+    const model = createModel({
+        status: 'ready',
+        markdown: '# Paper',
+        translationStatus: 'none',
+        translationConfiguredTargetLanguage: 'ko-KR',
+        translationOutdatedLanguages: ['ko-KR', 'ja-JP'],
+        onTranslateDocument: options => requests.push(options),
+    });
+    const { shadow, view } = createView(model);
+    const status = shadow.querySelector('.markdown-translation-status');
+    const controls = shadow.querySelector('.markdown-translation-controls');
+    const mode = shadow.querySelector('[data-translation-view="translated"]');
+    const translate = shadow.querySelector('#mktero-translate-document');
+
+    try {
+        assert.equal(controls.hidden, false);
+        assert.equal(mode.disabled, true);
+        assert.equal(translate.hidden, false);
+        assert.match(status.textContent, /Outdated Korean translation/);
+        assert.deepEqual(requests, []);
+
+        translate.click();
+        assert.deepEqual(requests, [undefined]);
+        view.render({
+            ...model,
+            translationHintTargetLanguage: 'ja-JP',
+            translationError: 'Translation failed',
+        });
+        assert.match(status.textContent, /Outdated Japanese translation/);
+        assert.equal(mode.disabled, true);
+        translate.click();
+        assert.deepEqual(requests, [undefined, { targetLanguage: 'ja-JP' }]);
+
+        view.render({
+            ...model,
+            translationPartialLanguages: ['ko-KR'],
+        });
+        assert.equal(status.hidden, true);
+
+        view.render({
+            ...model,
+            translationStatus: 'ready',
+            translationTargetLanguage: 'ko-KR',
+            translationView: 'translated',
+            translatedMarkdown: '# 논문',
+        });
+        assert.equal(status.hidden, true);
+        assert.equal(mode.disabled, false);
+
+        view.render({
+            ...model,
+            translationStatus: 'partial',
+            translationTargetLanguage: 'fr-FR',
+            translatedMarkdown: '# Étude',
+            onSelectTranslationLanguage: targetLanguage => requests.push({ targetLanguage }),
+        });
+        assert.match(status.textContent, /Outdated Korean translation/);
+        mode.click();
+        const korean = shadow.querySelector('[data-translation-language="ko-KR"]');
+        assert.equal(korean.getAttribute('data-translation-status'), 'missing');
+        korean.click();
+        assert.deepEqual(requests.at(-1), { targetLanguage: 'ko-KR' });
+    }
+    finally {
+        view.destroy();
     }
 });
 

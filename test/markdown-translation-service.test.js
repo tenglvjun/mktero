@@ -5,6 +5,7 @@ import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js
 import { mapFigureMapThroughEdits } from '../src/figures/figure-map-transforms.js';
 import {
     MarkdownTranslationService,
+    TRANSLATION_PROFILE_ID,
     TRANSLATION_PROMPT_VERSION,
 } from '../src/ai/markdown-translation-service.js';
 import {
@@ -36,8 +37,9 @@ test('retains Figure identity across translation, cache variants and corrected s
         createCacheKey: async value => createHash('sha256').update(value).digest('hex'),
         cache: {
             getTranslation: async (_documentKey, key) => cache.get(key),
-            getTranslationByLanguage: async (_documentKey, language) => [...cache.values()]
-                .find(value => value.targetLanguage === language),
+            getTranslationByLanguage: async (_documentKey, language, identity) => (
+                findCachedTranslation([...cache.values()], language, identity)
+            ),
             putTranslation: async (_documentKey, key, value) => cache.set(key, structuredClone(value)),
         },
     });
@@ -247,7 +249,12 @@ test('translates a complete Markdown document in one provider request', async ()
     assert.equal(cached.length, 1);
     assert.equal(cached[0][0], 'a'.repeat(64));
     assert.equal(cached[0][1], 'c'.repeat(64));
+    assert.equal(result.translationProfile, TRANSLATION_PROFILE_ID);
+    assert.equal(result.promptVersion, 'mktero-translation-v8');
+    assert.equal(JSON.parse(result.settingsIdentity).translationProfile, TRANSLATION_PROFILE_ID);
     assert.equal(cached[0][2].translatedMarkdown, result.translatedMarkdown);
+    assert.equal(cached[0][2].translationProfile, TRANSLATION_PROFILE_ID);
+    assert.equal(cached[0][2].settingsIdentity, result.settingsIdentity);
 });
 
 test('does not send OCR chrome paragraphs to the translation provider', async () => {
@@ -445,6 +452,7 @@ test('isolates document translations by reasoning and source content', async () 
 
     assert.equal(cacheInputs[0].source, '# Paper');
     assert.equal(cacheInputs[0].reasoning, 'high');
+    assert.equal(cacheInputs[0].translationProfile, TRANSLATION_PROFILE_ID);
 });
 
 test('keeps a completed document translation when caching fails', async () => {
@@ -572,6 +580,14 @@ test('lists complete and partial cached translations for every language', async 
             failedBlocks: [],
         }],
     ]);
+    const documentKey = 'a'.repeat(64);
+    const source = '# Paper';
+    const hash = value => createHash('sha256').update(value).digest('hex');
+    const records = new Map([...cachedByLanguage].map(([targetLanguage, record]) => {
+        const identity = currentTranslationIdentity(targetLanguage);
+        const key = hash(JSON.stringify({ documentKey, source, ...JSON.parse(identity.settingsIdentity) }));
+        return [key, { ...record, ...identity }];
+    }));
     const providerCalls = [];
     const service = new MarkdownTranslationService({
         aiGateway: {
@@ -581,12 +597,12 @@ test('lists complete and partial cached translations for every language', async 
             },
         },
         cache: {
-            getTranslation: async (_documentKey, language) => (
-                cachedByLanguage.get(language) || null
+            getTranslation: async (key, translationKey) => (
+                key === documentKey ? records.get(translationKey) || null : null
             ),
         },
-        getSettings: () => ({ ...SETTINGS, targetLanguage: 'zh-CN' }),
-        createCacheKey: async value => JSON.parse(value).targetLanguage,
+        getSettings: () => SETTINGS,
+        createCacheKey: hash,
     });
 
     const japanese = await service.getCachedDocumentTranslation({
@@ -642,7 +658,7 @@ test('continues translating when reading the Markdown translation cache fails', 
     });
 
     assert.equal(result.translatedMarkdown, '# 论文');
-    assert.deepEqual(cacheErrors, ['cache unreadable', 'cache unreadable']);
+    assert.deepEqual(cacheErrors, ['cache unreadable']);
 });
 
 test('always stores completed translations with the Markdown cache entry', async () => {
@@ -749,8 +765,7 @@ test('loads a complete document translation without calling the provider', async
         comparisonMarkdown: '# Paper\n\n> # 论文',
         blocks: [{ id: 'translation-0-0-7-heading', markdown: '# 论文' }],
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: false,
         failedBlocks: [],
     };
@@ -827,10 +842,8 @@ test('restores unchanged block translations after deleting a source block', asyn
             id: 'translation-1-11-31-paragraph',
             markdown: 'Keep this paragraph.',
         }],
-        settingsIdentity: documentSettingsIdentity(),
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: false,
         failedBlocks: [],
     };
@@ -838,8 +851,8 @@ test('restores unchanged block translations after deleting a source block', asyn
         aiGateway: { generateText: assert.fail },
         cache: {
             getTranslation: async () => null,
-            getTranslationByLanguage: async (_documentKey, language) => (
-                language === 'zh-CN' ? cached : null
+            getTranslationByLanguage: async (_documentKey, language, identity) => (
+                findCachedTranslation([cached], language, identity)
             ),
             putTranslation: assert.fail,
         },
@@ -1163,6 +1176,7 @@ test('does not reuse an ambiguous translation after deleting a duplicate block',
             id: 'translation-4-39-43-paragraph',
             markdown: 'End.',
         }],
+        translationProfile: TRANSLATION_PROFILE_ID,
         targetLanguage: 'zh-CN',
         model: 'cached-model',
         promptVersion: TRANSLATION_PROMPT_VERSION,
@@ -1213,10 +1227,8 @@ test('preserves an exact complete cache when a correction is restored', async ()
             id: 'translation-0-0-7-heading',
             markdown: baseSource,
         }],
-        settingsIdentity: documentSettingsIdentity(),
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: false,
         failedBlocks: [],
     };
@@ -1239,7 +1251,9 @@ test('preserves an exact complete cache when a correction is restored', async ()
             getTranslation: async (_key, translationKey) => (
                 stored.key === translationKey ? stored.value : null
             ),
-            getTranslationByLanguage: async () => stored.value,
+            getTranslationByLanguage: async (_key, language, identity) => (
+                findCachedTranslation([stored.value], language, identity)
+            ),
             putTranslation: async (_key, translationKey, value) => {
                 writes.push(translationKey);
                 stored = { key: translationKey, value };
@@ -1254,6 +1268,7 @@ test('preserves an exact complete cache when a correction is restored', async ()
         documentKey,
         sourceMarkdown: correctedSource,
         translationKey: correctedKey,
+        translationProfile: TRANSLATION_PROFILE_ID,
         settingsIdentity: documentSettingsIdentity(),
         translatedMarkdown: correctedSource,
         comparisonMarkdown: '',
@@ -1335,8 +1350,8 @@ test('reuses the original translation after a deleted block is retranslated',
             getTranslation: async (_key, translationKey) => (
                 stored.get(translationKey)?.value || null
             ),
-            getTranslationByLanguage: async () => (
-                [...stored.values()].at(-1)?.value || null
+            getTranslationByLanguage: async (_key, language, identity) => (
+                findCachedTranslation([...stored.values()].reverse().map(entry => entry.value), language, identity)
             ),
             putTranslation: async (_key, translationKey, value) => {
                 stored.delete(translationKey);
@@ -1396,6 +1411,7 @@ test('keeps a single edited translation block available for targeted retry', asy
             documentKey: 'a'.repeat(64),
             sourceMarkdown: '# Paper',
             translationKey: 'c'.repeat(64),
+            translationProfile: TRANSLATION_PROFILE_ID,
             settingsIdentity: documentSettingsIdentity(),
             translatedMarkdown: '# 论文',
             comparisonMarkdown: '# Paper\n\n# 论文',
@@ -1443,7 +1459,7 @@ test('preserves a translated block after deleting a non-semantic marker', async 
             documentKey: 'a'.repeat(64),
             sourceMarkdown: originalSource,
             translationKey: 'c'.repeat(64),
-            settingsIdentity: documentSettingsIdentity(),
+            ...currentTranslationIdentity(),
             translatedMarkdown: '腕戴设备可识别排卵。',
             comparisonMarkdown: '',
             blocks: [{
@@ -1454,7 +1470,6 @@ test('preserves a translated block after deleting a non-semantic marker', async 
                 id: originalBlockID,
                 markdown: originalSource,
             }],
-            targetLanguage: 'zh-CN',
             partial: false,
             failedBlocks: [],
         },
@@ -1496,7 +1511,7 @@ test('requires targeted retranslation after deleting semantic text', async () =>
             documentKey: 'a'.repeat(64),
             sourceMarkdown: originalSource,
             translationKey: 'c'.repeat(64),
-            settingsIdentity: documentSettingsIdentity(),
+            ...currentTranslationIdentity(),
             translatedMarkdown: '腕戴设备可识别排卵。',
             comparisonMarkdown: '',
             blocks: [{
@@ -1507,7 +1522,6 @@ test('requires targeted retranslation after deleting semantic text', async () =>
                 id: originalBlockID,
                 markdown: originalSource,
             }],
-            targetLanguage: 'zh-CN',
             partial: false,
             failedBlocks: [],
         },
@@ -1540,6 +1554,7 @@ test('reserves an exact translation while matching a deleted marker', async () =
             sourceMarkdown: originalSource,
             translationKey: 'c'.repeat(64),
             settingsIdentity: documentSettingsIdentity(),
+            translationProfile: TRANSLATION_PROFILE_ID,
             translatedMarkdown: '标记一。\n\n标记二。',
             comparisonMarkdown: '',
             blocks: [{
@@ -1588,6 +1603,7 @@ test('rebuilds missing visible translation sources before reconciling a correcti
             sourceMarkdown: originalSource,
             translationKey: 'c'.repeat(64),
             settingsIdentity: documentSettingsIdentity(),
+            translationProfile: TRANSLATION_PROFILE_ID,
             translatedMarkdown: '# 论文\n\n未修改段落。',
             comparisonMarkdown: '',
             blocks: [{
@@ -1633,6 +1649,7 @@ test('does not reuse source blocks across translation setting identities', async
                     }),
                     model: 'previous-model',
                     targetLanguage: 'zh-CN',
+                    translationProfile: TRANSLATION_PROFILE_ID,
                     promptVersion: TRANSLATION_PROMPT_VERSION,
                     partial: false,
                     failedBlocks: [],
@@ -1660,6 +1677,7 @@ test('reuses unchanged translations and retranslates only an edited block', asyn
         sourceMarkdown: oldSource,
         translationKey: 'c'.repeat(64),
         settingsIdentity: documentSettingsIdentity(),
+        translationProfile: TRANSLATION_PROFILE_ID,
         translatedMarkdown: '第一段。\n\n第二段。',
         comparisonMarkdown: '',
         blocks: [{
@@ -1726,6 +1744,7 @@ test('reuses unchanged translations and retranslates only an edited block', asyn
         'Edited first paragraph.\n\n第二段。'
     );
     assert.equal(writes[0][1], 'c'.repeat(64));
+    assert.equal(writes[0][2].translationProfile, TRANSLATION_PROFILE_ID);
     assert.deepEqual(writes[0][2].sourceBlocks, oldTranslation.sourceBlocks);
     assert.deepEqual(requests.map(requestSources), [[{
         id: 'b1',
@@ -1751,8 +1770,9 @@ test('rejects caches from the previous reference protection protocol', async () 
                     markdown: '# 论文',
                 }],
                 model: 'cached-model',
-                targetLanguage: 'zh-CN',
+                ...currentTranslationIdentity(),
                 promptVersion: 'mktero-translation-v6',
+                settingsIdentity: documentSettingsIdentity({ promptVersion: 'mktero-translation-v6' }),
                 partial: false,
                 failedBlocks: [],
             }),
@@ -1781,8 +1801,7 @@ test('reuses a complete cache when the visible translation uses another language
             markdown: '# Article français',
         }],
         model: 'cached-model',
-        targetLanguage: 'fr-FR',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity('fr-FR'),
         partial: false,
         failedBlocks: [],
     };
@@ -1822,8 +1841,7 @@ test('reports cached partial translations but retries them on explicit translati
         comparisonMarkdown: '# Paper\n\n> # Paper',
         blocks: [{ id: blockID, markdown: '# Paper' }],
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: true,
         failedBlocks: [{ id: blockID, message: 'Invalid response' }],
     };
@@ -1879,8 +1897,7 @@ test('resumes a selected partial language while another language is visible', as
             markdown: 'Paragraph.',
         }],
         model: 'cached-model',
-        targetLanguage: 'fr-FR',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity('fr-FR'),
         partial: true,
         failedBlocks: [{
             id: paragraphID,
@@ -1946,8 +1963,7 @@ test('treats a cached translation with a missing block as partial and repairs it
         comparisonMarkdown: '',
         blocks: [{ id: headingID, markdown: '# \u8bba\u6587' }],
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: false,
         failedBlocks: [],
     };
@@ -2016,8 +2032,7 @@ test('retries only failed cached blocks and preserves successful translations', 
             markdown: 'Paragraph.',
         }],
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: true,
         failedBlocks: [{ id: paragraphID, message: 'Invalid response' }],
     };
@@ -2098,6 +2113,10 @@ test('retries one failed block from the visible result without a cache read', as
         retryBlockIDs: [firstID],
         existingTranslation: {
             translationKey: 'c'.repeat(64),
+            documentKey: 'a'.repeat(64),
+            sourceMarkdown: markdown,
+            translationProfile: TRANSLATION_PROFILE_ID,
+            settingsIdentity: documentSettingsIdentity(),
             blocks: [{ id: headingID, markdown: '# \u8bba\u6587' }, {
                 id: firstID,
                 markdown: 'First paragraph.',
@@ -2162,6 +2181,10 @@ test('retranslates one successful block and preserves the other visible translat
         retryBlockIDs: [firstID],
         existingTranslation: {
             translationKey: 'c'.repeat(64),
+            documentKey: 'a'.repeat(64),
+            sourceMarkdown: markdown,
+            translationProfile: TRANSLATION_PROFILE_ID,
+            settingsIdentity: documentSettingsIdentity(),
             blocks: [{ id: headingID, markdown: '# \u8bba\u6587' }, {
                 id: firstID,
                 markdown: '\u7b2c\u4e00\u6bb5\u3002',
@@ -2261,8 +2284,7 @@ test('forces a fresh full translation instead of returning a complete cache hit'
             markdown: '\u6bb5\u843d\u3002',
         }],
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: false,
         failedBlocks: [],
     };
@@ -2316,8 +2338,7 @@ test('does not replace a complete cache with a partial retranslation', async () 
             markdown: '# \u8bba\u6587',
         }],
         model: 'cached-model',
-        targetLanguage: 'zh-CN',
-        promptVersion: TRANSLATION_PROMPT_VERSION,
+        ...currentTranslationIdentity(),
         partial: false,
         failedBlocks: [],
     };
@@ -2401,6 +2422,10 @@ test('retranslates every block when a visible retry uses changed settings', asyn
         retryBlockIDs: [firstID],
         existingTranslation: {
             translationKey: 'c'.repeat(64),
+            documentKey: 'a'.repeat(64),
+            sourceMarkdown: markdown,
+            translationProfile: TRANSLATION_PROFILE_ID,
+            settingsIdentity: documentSettingsIdentity(),
             blocks: [{ id: headingID, markdown: '# \u8bba\u6587' }, {
                 id: firstID,
                 markdown: 'First paragraph.',
@@ -3342,18 +3367,36 @@ function documentSettingsIdentity(overrides = {}) {
         reasoning: 'none',
         targetLanguage: SETTINGS.targetLanguage,
         promptVersion: TRANSLATION_PROMPT_VERSION,
+        translationProfile: TRANSLATION_PROFILE_ID,
         ...overrides,
     });
 }
 
+function currentTranslationIdentity(targetLanguage = SETTINGS.targetLanguage) {
+    return {
+        targetLanguage,
+        promptVersion: TRANSLATION_PROMPT_VERSION,
+        translationProfile: TRANSLATION_PROFILE_ID,
+        settingsIdentity: documentSettingsIdentity({ targetLanguage }),
+    };
+}
+
+function findCachedTranslation(records, language, identity) {
+    return records.find(record => record.targetLanguage === language
+        && record.promptVersion === identity.promptVersion
+        && record.translationProfile === identity.translationProfile
+        && record.settingsIdentity === identity.settingsIdentity) || null;
+}
+
 function createCompatibleCacheService(cached) {
+    const record = { translationProfile: TRANSLATION_PROFILE_ID, ...cached };
     const cacheErrors = [];
     const service = new MarkdownTranslationService({
         aiGateway: { generateText: assert.fail },
         cache: {
             getTranslation: async () => null,
-            getTranslationByLanguage: async (_documentKey, language) => (
-                language === 'zh-CN' ? cached : null
+            getTranslationByLanguage: async (_documentKey, language, identity) => (
+                findCachedTranslation([record], language, identity)
             ),
             putTranslation: assert.fail,
         },

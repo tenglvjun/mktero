@@ -45,7 +45,7 @@ and parser profile.
 
 - Display and edit PDF highlights and underlines, and write item or standalone notes with Zotero's native editor. Select translated text to annotate its whole original block in one click. Original, Translation, and Bilingual show the same annotation. [Annotations and notes](./docs/annotations.md)
 - Correct paragraphs, headings, and GFM table cells while preserving the immutable OCR result. [Corrections](./docs/annotations.md#correct-recognition-errors)
-- Translate an article or a selection with your configured AI provider. In `Bilingual` or `Translation`, select part of an aligned sentence to see its original without a network request. Older translations remain readable; you can enable sentence alignment one block at a time by retranslating that block, which may incur a provider charge. [AI translation](./docs/reading.md#translate-with-ai)
+- Translate an article or a selection with your configured AI provider. In `Bilingual` or `Translation`, select part of an aligned sentence to see its original without a network request. When the translation rules change, choose `Translate document` to generate a new translation. Your provider may charge for retranslation. [AI translation](./docs/reading.md#translate-with-ai)
 
 ### Library and export
 

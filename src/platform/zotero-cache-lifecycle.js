@@ -262,7 +262,7 @@ export function createZoteroCacheLifecycle({ zotero, ioUtils, pathUtils, pdfInde
     };
     for (const [name, store] of Object.entries(stores)) {
         wrap(store, ['get', 'put', 'load', 'save', 'delete', 'hasReadable', 'getTranslation',
-            'getTranslationByLanguage', 'putTranslation', 'copyTranslations', 'deleteTranslation', 'clear', 'prune', 'setAside'],
+            'getTranslationByLanguage', 'listOutdatedTranslationLanguages', 'putTranslation', 'copyTranslations', 'deleteTranslation', 'clear', 'prune', 'setAside'],
         (method, args) => ['clear', 'prune'].includes(method) ? null : {
             artifacts: (method === 'copyTranslations' ? args.slice(0, 2) : args.slice(0, 1))
                 .map(key => ({ store: name, key })),

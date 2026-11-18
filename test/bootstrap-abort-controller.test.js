@@ -27,8 +27,10 @@ import {
 } from '../src/cache/markdown-cache.js';
 import {
     MarkdownTranslationService,
+    TRANSLATION_PROFILE_ID,
     TRANSLATION_PROMPT_VERSION,
 } from '../src/ai/markdown-translation-service.js';
+import { getAISettings } from '../src/config/ai-preferences.js';
 
 test('owns citation graph requests across refresh, window unload, and shutdown', {
     timeout: 15_000,
@@ -780,6 +782,7 @@ test('uses the language menu without changing the default translation language',
     const preferenceObservers = new Map();
     const unregisteredObservers = [];
     const errors = [];
+    const readerOpenCounts = [];
     let toolbarHandler;
     const providerRequests = [];
     const providerReplies = [];
@@ -830,7 +833,12 @@ test('uses the language menu without changing the default translation language',
             },
         },
         getMainWindow: () => activeMainWindow,
-        debug() {},
+        debug(message) {
+            const prefix = 'Mktero reading activity: opened -> reporter running, ';
+            if (message.startsWith(prefix)) {
+                readerOpenCounts.push(JSON.parse(message.slice(prefix.length)));
+            }
+        },
         logError(error) { errors.push(error); },
     };
     globalThis.IOUtils = ioUtils;
@@ -916,7 +924,22 @@ test('uses the language menu without changing the default translation language',
         translatedMarkdown: '# Paper',
         partial: true,
     });
+    await putOutdatedTranslation(cache, cacheKey, markdown, 'ko-KR');
+    await putOutdatedTranslation(cache, cacheKey, markdown, 'zh-CN');
+    assert.deepEqual((await cache.listOutdatedTranslationLanguages(
+        cacheKey, TRANSLATION_PROFILE_ID
+    )).sort(), ['ko-KR', 'zh-CN']);
 
+    const { MarkdownTabPresenter } = await import('../src/ui/markdown-tab-presenter.js');
+    const update = MarkdownTabPresenter.prototype.update;
+    let translationAction;
+    t.mock.method(MarkdownTabPresenter.prototype, 'update', function (presentation, changes) {
+        const result = update.call(this, presentation, changes);
+        if (changes.status === 'ready' && presentation.model.documentID === 42) {
+            translationAction = presentation.model.onTranslateDocument;
+        }
+        return result;
+    });
     await import('../src/bootstrap.js?translation-language-cache-regression');
     await globalThis.startup({
         id: 'mktero@tenglvjun.github.io',
@@ -935,7 +958,28 @@ test('uses the language menu without changing the default translation language',
         '[data-translation-view="translated"]'
     );
     const translate = shadow.querySelector('#mktero-translate-document');
+    const status = shadow.querySelector('.markdown-translation-status');
+    const koreanHint = 'Outdated Korean translation. Translate again to read it.';
     await waitFor(() => translatedMode.textContent === 'Simplified Chinese');
+    assert.equal(status.textContent, koreanHint);
+    assert.equal(status.hidden, false);
+    assert.doesNotMatch(shadow.textContent, /Outdated fixture text/);
+    assert.equal(providerRequests.length, 0);
+    await t.test('rejects stale block-upgrade calls before sending the document', async () => {
+        providerReplies.push(headingTranslationReply('한국어 논문'));
+        try {
+            await assert.rejects(translationAction({
+                alignmentBlockID: 'translation-0-0-7-heading',
+                targetLanguage: 'ko-KR',
+            }), { code: 'AI_INVALID_REQUEST' });
+            assert.equal(providerRequests.length, 0);
+            assert.equal(translate.getAttribute('aria-busy'), 'false');
+            assert.equal(status.textContent, koreanHint);
+        }
+        finally {
+            providerReplies.pop();
+        }
+    });
     assert.equal(
         shadow.querySelector('[data-translation-view="original"]')
             .getAttribute('aria-checked'),
@@ -976,6 +1020,7 @@ test('uses the language menu without changing the default translation language',
         'extensions.mktero.aiTargetLanguage'
     ).callback('zh-CN');
     await chineseChange;
+    assert.equal(status.hidden, true);
     assert.equal(translatedMode.textContent, 'Japanese');
     assert.match(shadow.textContent, /\u8ad6\u6587/);
     assert.equal(translate.hidden, true);
@@ -995,6 +1040,7 @@ test('uses the language menu without changing the default translation language',
     );
     await waitFor(() => secondTranslatedMode.textContent
         === 'Simplified Chinese');
+    assert.deepEqual(readerOpenCounts.map(counts => counts.translations), [0, 0]);
     secondTranslatedMode.click();
     secondShadow.querySelector(
         '[data-translation-language="zh-CN"]'
@@ -1038,6 +1084,18 @@ test('uses the language menu without changing the default translation language',
     await waitFor(() => koreanRequest.signal.aborted);
     await waitFor(() => translatedMode.getAttribute('aria-expanded') === 'false');
     await waitFor(() => languageOptions().every(option => !option.disabled));
+    assert.equal(status.textContent, koreanHint);
+    assert.equal(preferences.get('extensions.mktero.aiTargetLanguage'), 'es-ES');
+
+    preferences.set('extensions.mktero.aiApiKey', '');
+    translatedMode.click();
+    languageOptions().find(option => (
+        option.getAttribute('data-translation-language') === 'ko-KR'
+    )).click();
+    await waitFor(() => shadow.textContent.includes('Configure and enable AI translation'));
+    assert.equal(status.textContent, koreanHint);
+    assert.equal(providerRequests.length, 1);
+    preferences.set('extensions.mktero.aiApiKey', 'test-token');
 
     translatedMode.click();
     languageOptions().find(option => (
@@ -1059,9 +1117,15 @@ test('uses the language menu without changing the default translation language',
         option.getAttribute('data-translation-language') === 'ko-KR'
     )).click();
     await waitFor(() => translatedMode.textContent === 'Korean');
+    assert.equal(status.hidden, true);
     assert.match(shadow.textContent, /한국어 논문/);
     assert.equal(preferences.get('extensions.mktero.aiTargetLanguage'), 'es-ES');
     assert.equal(translate.hidden, true);
+    preferences.set('extensions.mktero.aiTargetLanguage', 'ko-KR');
+    await preferenceObservers.get(
+        'extensions.mktero.aiTargetLanguage'
+    ).callback('ko-KR');
+    assert.equal(status.hidden, true);
 
     const invalidReply = headingTranslationReply('<script>invalid</script>');
     providerReplies.push(invalidReply, invalidReply, invalidReply);
@@ -1129,6 +1193,7 @@ test('uses the language menu without changing the default translation language',
         cacheKey,
         'ko-KR'
     );
+    assert.equal(correctedCached.translationProfile, TRANSLATION_PROFILE_ID);
     assert.equal(correctedCached.translatedMarkdown, '# 수정된 논문',
         JSON.stringify(errors.slice(errorsBeforeCorrection).map(error => (
             error?.message || String(error)
@@ -1482,6 +1547,26 @@ async function putCachedTranslation(cache, documentKey, source, {
     translatedMarkdown,
     partial = false,
 }) {
+    const service = new MarkdownTranslationService({
+        cache,
+        getSettings: () => getAISettings(globalThis.Zotero),
+        aiGateway: {
+            generateText: async ({ messages }) => ({
+                text: partial ? '[]' : headingTranslationReply(
+                    translatedMarkdown.replace(/^# /u, '')
+                )({ messages }),
+            }),
+        },
+    });
+    const result = await service.translateDocument({
+        documentKey, markdown: source, targetLanguage, forceRetranslate: true,
+    });
+    assert.equal(result.partial, partial);
+    assert.equal(result.translatedMarkdown, translatedMarkdown);
+    assert.equal(result.translationProfile, TRANSLATION_PROFILE_ID);
+}
+
+async function putOutdatedTranslation(cache, documentKey, source, targetLanguage) {
     const translationKey = await sha256Hex(new TextEncoder().encode(
         JSON.stringify({
             documentKey,
@@ -1495,18 +1580,16 @@ async function putCachedTranslation(cache, documentKey, source, {
             promptVersion: TRANSLATION_PROMPT_VERSION,
         })
     ));
-    const blockID = 'translation-0-0-7-heading';
+    const translatedMarkdown = '# Outdated fixture text';
     await cache.putTranslation(documentKey, translationKey, {
         translatedMarkdown,
         comparisonMarkdown: `${source}\n\n${translatedMarkdown}`,
-        blocks: [{ id: blockID, markdown: translatedMarkdown }],
+        blocks: [{ id: 'translation-0-0-7-heading', markdown: translatedMarkdown }],
         model: 'test-chat',
         targetLanguage,
         promptVersion: TRANSLATION_PROMPT_VERSION,
-        partial,
-        failedBlocks: partial
-            ? [{ id: blockID, message: 'Incomplete translation' }]
-            : [],
+        partial: false,
+        failedBlocks: [],
     });
 }
 

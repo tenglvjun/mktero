@@ -35,7 +35,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | Bounded citation text after the user chooses `Import reference` for a title-only reference | OpenAlex | Not by Mktero |
 | A normalized DOI, arXiv ID, PMID, or OpenAlex work ID plus confirmed metadata after the user clicks the import action; optional open-access PDF request | The selected metadata/PDF provider | Not by Mktero |
 | Anonymous models.dev catalog request on Zotero startup | models.dev, kept only in memory until Zotero quits | No |
-| Protected Markdown with block and sentence IDs for full-document translation; only the chosen block when you enable sentence alignment for an older translation | AI provider configured by you, not the Mktero translation service | Not by Mktero |
+| Protected Markdown with block and sentence IDs when you request full-document translation or retranslation | AI provider configured by you, not the Mktero translation service | Not by Mktero |
 | Selected Markdown text for selection translation | AI provider configured by you | Not by Mktero |
 
 ## Stored in your Zotero profile
@@ -96,7 +96,7 @@ Reference import requests are local-first:
 - A unique high-confidence match continues automatically; uncertain matches require candidate confirmation.
 - Citation and reference requests use anonymous provider access. They contain only the bounded citation text, normalized identifiers, and confirmed metadata listed above, never Zotero keys or PDF bytes.
 
-Full-document translation (v8) sends instructions and batches of protected Markdown to your configured AI provider. Block and sentence IDs let the provider return each translation with its source ID. Mktero builds the mapping used for reading locally, rather than asking the provider for character positions. If Markdown validation fails, a retry may send ordinary text segments from the affected block to the same provider. Enabling sentence alignment for an older translation sends only the block you confirm for retranslation. Both operations may incur provider charges; neither uses Mktero's server translation API.
+Full-document translation (v8) sends instructions and batches of protected Markdown to your configured AI provider. Block and sentence IDs let the provider return each translation with its source ID. Mktero builds the mapping used for reading locally, rather than asking the provider for character positions. If Markdown validation fails, a retry may send ordinary text segments from the affected block to the same provider. When translation rules change, the reader waits for you to request full-document translation again. Your configured provider receives those batches and may charge for the request.
 
 Selecting **translated text** to see its source, showing the whole original block, or jumping to an offscreen original makes no network request. Mktero saves the sentence mappings with the translation, unencrypted in your Zotero profile, so they work after reopening. The IDs, hashes, and text ranges used for alignment are not included in Markdown, clipboard content, snapshots, or Obsidian exports.
 

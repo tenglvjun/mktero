@@ -36,9 +36,8 @@ export async function runSmoke(config) {
     for (const fixture of config.fixtures) {
         await stage(`opening ${fixture.kind} synthetic PDF via product menu`);
         const pdf = await Zotero.Attachments.importFromFile({ file: fixture.pdfPath, libraryID });
-        const items = await wait(() => win.ZoteroPane.itemsView, 'Zotero item tree');
-        await items.waitForLoad();
-        await items.selectItems([pdf.id]);
+        await wait(() => win.ZoteroPane.collectionsView, 'Zotero collections tree');
+        await win.ZoteroPane.selectItem(pdf.id, { inLibraryRoot: true });
         check(win.ZoteroPane.getSelectedItems().map(item => item.id).join() === String(pdf.id), 'Synthetic PDF not selected');
         menu.parentNode.dispatchEvent(new win.Event('popupshowing', { bubbles: true }));
         check(!menu.hidden, 'Product menu unavailable for synthetic PDF');
@@ -58,6 +57,8 @@ export async function runSmoke(config) {
             selection().removeAllRanges();
             await changeView(view);
             await selectExcerpt();
+            const wholeBlock = '[data-action="show-source-block"]';
+            const oldAlignmentActions = '[data-action="enable-alignment"], [data-action="cancel-alignment"]';
             if (fixture.kind === 'aligned') {
                 if (view === 'translated') {
                     await wait(() => sourceText(), 'source sentence bubble');
@@ -73,12 +74,15 @@ export async function runSmoke(config) {
                     check(marks().join('') === fixture.sentences[1], `Expected only original sentence highlight; got ${marks().join('')}`);
                     check(!sourceText(), 'Unexpected source bubble in bilingual view');
                 }
-                check(!root.querySelector('[data-action="show-source-block"]'), 'Aligned selection was treated as legacy');
+                check(!root.querySelector(wholeBlock), 'Verified selection should show the matched sentence');
             }
             else {
-                const show = await wait(() => root.querySelector('[data-action="show-source-block"]'), 'legacy show-source-block action');
-                check(!sourceText() && !marks().length, 'Legacy text was incorrectly presented as a matched sentence');
-                check(!root.querySelector('[data-action="locate-source"], .mktero-related-source-locate'), 'Legacy text was given a sentence locate action');
+                const show = await wait(() => root.querySelector(wholeBlock), 'show entire original block action');
+                const controls = [...show.closest('section').querySelectorAll('button')];
+                check(controls.length === 1 && controls[0] === show, 'Unaligned selection must offer only the whole-block action');
+                check(!sourceText() && !marks().length, 'Unaligned text was incorrectly presented as a matched sentence');
+                check(!root.querySelector('[data-action="locate-source"], .mktero-related-source-locate'), 'Unaligned text was given a sentence locate action');
+                check(!root.querySelector('[data-action="annotate-source"], .mktero-related-source-create'), 'Unaligned text was given an immediate annotation action');
                 show.click();
                 if (view === 'translated') {
                     await wait(() => sourceText(), 'explicit original block popup');
@@ -91,6 +95,7 @@ export async function runSmoke(config) {
                     check(!sourceText(), 'Unexpected source bubble in bilingual view');
                 }
             }
+            check(!root.querySelector(oldAlignmentActions), 'Obsolete alignment upgrade action was rendered');
             check(Services.io.offline, 'Gecko went online during reader validation');
             report.push({ fixture: fixture.kind, view, passed: true });
         }
