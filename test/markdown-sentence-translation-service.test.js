@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { MarkdownTranslationService } from '../src/ai/markdown-translation-service.js';
+import {
+    MarkdownTranslationService,
+    TRANSLATION_PROFILE_ID,
+    TRANSLATION_PROMPT_VERSION,
+} from '../src/ai/markdown-translation-service.js';
 import { collectMarkdownTranslationBlocks } from '../src/markdown/markdown-translation-blocks.js';
+import { assembleAlignedBlock, createAlignmentPlan } from '../src/markdown/translation-alignment.js';
 
 const settings = {
     enabled: true, streaming: false, provider: 'custom', protocol: 'openai-chat-completions',
@@ -23,12 +28,12 @@ function response(entries) {
     } : { id: entry.id, translatedMarkdown: entry.sourceMarkdown }).reverse();
 }
 
-function fixture({ generate = response, put, getSettings = () => settings } = {}) {
+function fixture({ generate = response, unfilteredLanguageLookup = false } = {}) {
     const records = new Map();
     const calls = [];
     const writes = [];
     const service = new MarkdownTranslationService({
-        getSettings,
+        getSettings: () => settings,
         createCacheKey: hash,
         aiGateway: { async generateText(request) {
             const entries = JSON.parse(request.messages[1].content);
@@ -37,156 +42,184 @@ function fixture({ generate = response, put, getSettings = () => settings } = {}
             return { text: JSON.stringify(await generate(entries, calls.length)) };
         } },
         cache: {
-            getTranslation: async (_, key) => records.has(key) ? structuredClone(records.get(key)) : null,
-            getTranslationByLanguage: async (_, language, identity) => [...records.values()].reverse().find(value =>
-                value.targetLanguage === language && value.settingsIdentity === identity.settingsIdentity),
-            async putTranslation(_, key, value, { signal } = {}) {
-                if (put) await put(signal);
+            getTranslation: async (key, translationKey) => (
+                key === documentKey ? structuredClone(records.get(translationKey) || null) : null
+            ),
+            getTranslationByLanguage: async (key, language, identity) => {
+                if (key !== documentKey) return null;
+                assert.equal(identity.promptVersion, v8);
+                assert.equal(identity.translationProfile, TRANSLATION_PROFILE_ID);
+                assert.equal(identity.settingsIdentity, JSON.stringify(settingsIdentity(language)));
+                const record = [...records.values()].reverse().find(value => value.targetLanguage === language
+                    && (unfilteredLanguageLookup || (value.promptVersion === identity.promptVersion
+                        && value.translationProfile === identity.translationProfile
+                        && value.settingsIdentity === identity.settingsIdentity)));
+                return structuredClone(record || null);
+            },
+            async putTranslation(key, translationKey, value, { signal } = {}) {
+                assert.equal(key, documentKey);
+                assert.equal(value.partial, value.failedBlocks.length > 0);
                 signal?.throwIfAborted();
-                writes.push(key);
-                records.set(key, structuredClone(value));
+                writes.push(translationKey);
+                records.delete(translationKey);
+                records.set(translationKey, structuredClone(value));
             },
         },
     });
     return { service, records, calls, writes };
 }
 
-function installLegacy(records, source = markdown) {
-    const identity = {
-        provider: 'custom', protocol: 'openai-chat-completions', apiBase: 'https://example.invalid/v1',
-        model: 'example', reasoning: 'none', targetLanguage: 'zh-CN', promptVersion: v7,
+function settingsIdentity(targetLanguage = settings.targetLanguage) {
+    return {
+        provider: settings.provider, protocol: settings.protocol, apiBase: settings.apiBase,
+        model: settings.model, reasoning: 'none', targetLanguage, promptVersion: v8,
+        translationProfile: TRANSLATION_PROFILE_ID,
     };
-    const key = hash(JSON.stringify({ documentKey, source, ...identity }));
-    const blocks = collectMarkdownTranslationBlocks(source).filter(block => block.translatable);
-    records.set(key, {
-        blocks: blocks.map(({ id }, i) => ({ id, markdown: ['# 旧标题', '旧段落。', '保留的译文。'][i] })),
-        sourceBlocks: blocks.map(({ id, markdown }) => ({ id, markdown })),
-        translatedMarkdown: '# 旧标题\n\n旧段落。\n\n保留的译文。', comparisonMarkdown: '',
-        settingsIdentity: JSON.stringify(identity), targetLanguage: 'zh-CN', model: 'example',
-        promptVersion: v7, partial: false, failedBlocks: [],
-    });
-    return key;
 }
 
-test('v7 exact, language variants, reconciliation and export Markdown remain offline and v7', async () => {
-    const { service, records, calls, writes } = fixture();
-    const key = installLegacy(records);
-    const cached = await service.getCachedDocumentTranslation(options);
-    const [variant] = await service.listCachedDocumentTranslationVariants(options);
-    const translated = await service.translateDocument(options);
-    const revised = await service.reconcileDocumentTranslation({ ...options, markdown: markdown.replace('Keep this paragraph.', 'Edited.') });
-    for (const result of [cached, variant, translated, revised]) {
-        assert.equal(result.promptVersion, v7);
-        assert.equal(JSON.parse(result.settingsIdentity).promptVersion, v7);
-        assert.ok(result.blocks.every(block => !block.alignment));
-        assert.match(result.translatedMarkdown, /旧标题\n\n旧段落。/);
-        assert.doesNotMatch(result.translatedMarkdown + result.comparisonMarkdown, /translation-|alignment|\.s1/);
-    }
-    assert.equal(translated.translationKey, key);
-    assert.equal(revised.partial, true);
-    assert.deepEqual([calls, writes], [[], []]);
-});
+function translationKey(source, identity = settingsIdentity()) {
+    return hash(JSON.stringify({ documentKey, source, ...identity }));
+}
 
-test('upgrade replaces only the explicitly requested paragraph, keeps v7 immutable, and reopens v8 units', async () => {
-    const { service, records, calls, writes } = fixture();
-    const oldKey = installLegacy(records);
-    const old = structuredClone(records.get(oldKey));
-    const baseline = await service.getCachedDocumentTranslation(options);
-    delete baseline.promptVersion; // The tab carries the version in settingsIdentity.
-    const upgraded = await service.translateDocument({ ...options, alignmentBlockID: old.blocks[1].id, existingTranslation: baseline });
-    assert.deepEqual(calls, [[{ id: 'b1', units: [
-        { id: 'b1.s1', sourceMarkdown: 'Accuracy improved.' }, { id: 'b1.s2', sourceMarkdown: 'Latency fell.' },
-    ] }]]);
-    assert.deepEqual(writes, [upgraded.translationKey]);
-    assert.notEqual(writes[0], oldKey);
-    assert.deepEqual(records.get(oldKey), old);
-    assert.equal(upgraded.promptVersion, v8);
-    assert.equal(upgraded.translatedMarkdown, '# 旧标题\n\n准确率提高了。延迟下降了。\n\n保留的译文。');
-    assert.deepEqual(upgraded.blocks[0], old.blocks[0]);
-    assert.deepEqual(upgraded.blocks[2], old.blocks[2]);
-    const reopened = await service.getCachedDocumentTranslation(options);
-    assert.deepEqual(reopened.blocks, upgraded.blocks);
-    assert.equal(reopened.blocks[1].alignment.units[1].translatedMarkdown, '延迟下降了。');
-    assert.equal(calls.length, 1);
-});
+function installLegacy(records, { promptVersion, alignedIndices = [], partial = false }) {
+    const identity = { ...settingsIdentity(), promptVersion };
+    delete identity.translationProfile;
+    const key = translationKey(markdown, identity);
+    const sourceBlocks = collectMarkdownTranslationBlocks(markdown).filter(block => block.translatable);
+    const written = ['# 旧标题', '旧准确率。旧延迟。', '旧保留段落。'];
+    const unitsByBlock = [['旧标题'], ['旧准确率。', '旧延迟。'], ['旧保留段落。']];
+    const blocks = sourceBlocks.map((block, i) => {
+        if (!alignedIndices.includes(i)) return { id: block.id, markdown: written[i] };
+        const plan = createAlignmentPlan(block);
+        return assembleAlignedBlock(block, plan.units.map(({ id }, j) => ({ id, translatedMarkdown: unitsByBlock[i][j] })), settings.targetLanguage);
+    });
+    const failedBlocks = partial ? [{ id: blocks[2].id, message: 'Interrupted' }] : [];
+    if (partial) blocks[2].markdown = sourceBlocks[2].markdown;
+    const record = {
+        blocks,
+        sourceBlocks: sourceBlocks.map(({ id, markdown }) => ({ id, markdown })),
+        translatedMarkdown: blocks.map(block => block.markdown).join('\n\n'), comparisonMarkdown: '',
+        settingsIdentity: JSON.stringify(identity), targetLanguage: settings.targetLanguage, model: settings.model,
+        promptVersion, partial, failedBlocks,
+    };
+    records.set(key, record);
+    return { key, record };
+}
 
-test('resuming a partial v7 result writes a mixed v8 record, not a rewrite of the previous key', async () => {
-    const { service, records, calls, writes } = fixture();
-    const key = installLegacy(records);
-    const legacy = records.get(key);
-    legacy.partial = true;
-    legacy.failedBlocks = [{ id: legacy.blocks[1].id, message: 'Interrupted' }];
-    const old = structuredClone(legacy);
-    const [variant] = await service.listCachedDocumentTranslationVariants(options);
-    assert.equal(variant.partial, true);
-    assert.equal(calls.length, 0);
-    const result = await service.translateDocument(options);
-    assert.deepEqual(records.get(key), old);
-    assert.deepEqual(writes, [result.translationKey]);
-    assert.deepEqual(calls.map(entries => entries.length), [1]);
-    assert.equal(result.partial, false);
-    assert.equal(result.promptVersion, v8);
-    assert.deepEqual(result.blocks.map(block => Boolean(block.alignment)), [false, true, false]);
-    assert.deepEqual(result.blocks[2], old.blocks[2]);
-});
+function visibleResult(record, key) {
+    const { promptVersion, partial, ...value } = record;
+    return { ...value, sourceMarkdown: markdown, translationKey: key, documentKey };
+}
 
-test('a changed provider model cannot use v7 exact or compatible cache or an old visible upgrade baseline', async () => {
-    let model = settings.model;
-    const { service, records, calls, writes } = fixture({ getSettings: () => ({ ...settings, model }) });
-    installLegacy(records);
-    const old = await service.getCachedDocumentTranslation(options);
-    model = 'different-model';
-    assert.equal(await service.getCachedDocumentTranslation(options), null);
-    assert.deepEqual(await service.listCachedDocumentTranslationVariants({ ...options, markdown: markdown.replace(' fell', ' rose') }), []);
-    assert.equal(await service.reconcileDocumentTranslation({ ...options, existingTranslation: old }), null);
-    await assert.rejects(service.translateDocument({ ...options, existingTranslation: old, alignmentBlockID: old.blocks[1].id }),
-        { code: 'AI_INVALID_REQUEST' });
-    assert.deepEqual([calls, writes], [[], []]);
-});
-
-test('explicit upgrade stops before sending if source, settings, target, ID, or visible baseline no longer match', async () => {
-    const { service, records, calls, writes } = fixture();
-    installLegacy(records);
-    const baseline = await service.getCachedDocumentTranslation(options);
-    const valid = { ...options, existingTranslation: baseline, alignmentBlockID: baseline.blocks[1].id };
-    for (const change of [
-        { alignmentBlockID: 'missing' }, { alignmentBlockID: '' }, { alignmentBlockID: null }, { forceRetranslate: true },
-        { retryBlockIDs: [] }, { targetLanguage: 'fr-FR' }, { markdown: markdown.replace('fell', 'rose') },
-        { existingTranslation: { ...baseline, settingsIdentity: baseline.settingsIdentity.replace('example.invalid', 'other.invalid') } },
-        { existingTranslation: { ...baseline, translationKey: 'b'.repeat(64) } },
-        { existingTranslation: { ...baseline, sourceMarkdown: 'stale source' } },
-        { existingTranslation: { ...baseline, translatedMarkdown: 'stale translation' } },
-    ]) {
-        await assert.rejects(service.translateDocument({ ...valid, ...change }), { code: 'AI_INVALID_REQUEST' });
-    }
-    records.clear();
-    await assert.rejects(service.translateDocument({ ...valid, existingTranslation: null }), { code: 'AI_INVALID_REQUEST' });
-    assert.deepEqual([calls, writes], [[], []]);
-});
-
-for (const failure of ['provider', 'save', 'queued abort']) {
-    test(`explicit upgrade leaves the old translation intact after ${failure} failure`, async () => {
-        const controller = new AbortController();
-        const { service, records, calls, writes } = fixture({
-            generate: entries => failure === 'provider' ? [] : response(entries),
-            put(signal) {
-                assert.equal(signal, controller.signal);
-                if (failure === 'save') throw new Error('disk unavailable');
-                if (failure === 'queued abort') controller.abort();
-            },
-        });
-        const key = installLegacy(records);
-        const old = structuredClone(records.get(key));
-        const baseline = await service.getCachedDocumentTranslation(options);
-        await assert.rejects(service.translateDocument({ ...options, existingTranslation: baseline,
-            alignmentBlockID: baseline.blocks[1].id, signal: controller.signal }));
-        assert.equal(calls.length, failure === 'provider' ? 3 : 1);
-        assert.ok(calls.every(entries => entries.length === 1 && entries[0].units.length === 2));
-        assert.deepEqual(writes, []);
-        assert.deepEqual([...records], [[key, old]]);
-        assert.deepEqual((await service.getCachedDocumentTranslation(options)).blocks, baseline.blocks);
+for (const [name, legacy] of [
+    ['v7', { promptVersion: v7 }],
+    ['original fully aligned v8', { promptVersion: v8, alignedIndices: [0, 1, 2] }],
+    ['original mixed partial v8', { promptVersion: v8, alignedIndices: [1], partial: true }],
+]) {
+    test(`${name} is skipped for exact reads, correction reuse and visible block retries`, async () => {
+        const { service, records, calls, writes } = fixture();
+        const { key, record } = installLegacy(records, legacy);
+        const old = structuredClone(record);
+        const existingTranslation = visibleResult(record, key);
+        const corrected = { ...options, markdown: `Added.\n\n${markdown}` };
+        for (const source of [options, corrected]) {
+            assert.equal(await service.getCachedDocumentTranslation(source), null);
+            assert.deepEqual(await service.listCachedDocumentTranslationVariants(source), []);
+            assert.equal(await service.reconcileDocumentTranslation({ ...source, existingTranslation }), null);
+        }
+        assert.deepEqual([calls, writes], [[], []]);
+        const result = await service.translateDocument({ ...options, existingTranslation, retryBlockIDs: [record.blocks[2].id] });
+        assert.equal(result.cacheHit, false);
+        assert.equal(result.partial, false);
+        assert.equal(result.promptVersion, TRANSLATION_PROMPT_VERSION);
+        assert.equal(result.translationProfile, TRANSLATION_PROFILE_ID);
+        assert.equal(result.translationKey, translationKey(markdown));
+        assert.notEqual(result.translationKey, key);
+        assert.deepEqual(writes, [result.translationKey]);
+        assert.deepEqual(records.get(key), old);
+        assert.deepEqual(calls.map(entries => entries.length), [3]);
+        assert.ok(result.blocks.every(block => block.alignment));
+        assert.doesNotMatch(result.translatedMarkdown, /旧/);
+        const reopened = await service.getCachedDocumentTranslation(options);
+        assert.deepEqual(reopened.blocks, result.blocks);
+        assert.equal(reopened.translationProfile, TRANSLATION_PROFILE_ID);
     });
 }
+
+for (const [name, changes] of [
+    ['missing explicit profile', { translationProfile: undefined }],
+    ['different explicit profile', { translationProfile: 'mktero-translation-profile-v2' }],
+    ['non-exact profile', { translationProfile: `${TRANSLATION_PROFILE_ID} ` }],
+    ['different prompt', { promptVersion: v7 }],
+    ['different settings identity', { settingsIdentity: JSON.stringify({ ...settingsIdentity(), model: 'previous-model' }) }],
+]) {
+    test(`rejects a record under the current key or visible state with ${name}`, async () => {
+        const { service, records, calls, writes } = fixture({ unfilteredLanguageLookup: true });
+        const { record } = installLegacy(records, { promptVersion: v8, alignedIndices: [1], partial: true });
+        const key = translationKey(markdown);
+        const mismatched = { ...record, settingsIdentity: JSON.stringify(settingsIdentity()),
+            translationProfile: TRANSLATION_PROFILE_ID, ...changes };
+        records.set(key, mismatched);
+        const existingTranslation = { ...visibleResult(mismatched, key), promptVersion: mismatched.promptVersion };
+        assert.equal(await service.getCachedDocumentTranslation(options), null);
+        assert.deepEqual(await service.listCachedDocumentTranslationVariants(options), []);
+        assert.equal(await service.reconcileDocumentTranslation({ ...options, existingTranslation }), null);
+        const corrected = { ...options, markdown: `Added.\n\n${markdown}` };
+        assert.equal(await service.getCachedDocumentTranslation(corrected), null);
+        assert.equal(await service.reconcileDocumentTranslation({ ...corrected, existingTranslation }), null);
+        assert.deepEqual([calls, writes], [[], []]);
+        const result = await service.translateDocument({ ...options, existingTranslation, retryBlockIDs: [record.blocks[2].id] });
+        assert.deepEqual(calls.map(entries => entries.length), [3]);
+        assert.equal(result.translationProfile, TRANSLATION_PROFILE_ID);
+        assert.doesNotMatch(result.translatedMarkdown, /旧/);
+    });
+}
+
+test('skips newer legacy records while reusing a partial current profile on correction and retry', async () => {
+    let failLastBlock = true;
+    const { service, records, calls, writes } = fixture({ generate(entries) {
+        return response(entries).filter(block => !failLastBlock
+            || !block.units?.some(unit => unit.translatedMarkdown === 'Keep this paragraph.'));
+    } });
+    const partial = await service.translateDocument(options);
+    assert.equal(partial.partial, true);
+    assert.equal(partial.translationProfile, TRANSLATION_PROFILE_ID);
+    const completedCalls = calls.length;
+    failLastBlock = false;
+    installLegacy(records, { promptVersion: v8, alignedIndices: [1], partial: true });
+    const corrected = { ...options, markdown: `Added.\n\n${markdown}` };
+    const [cached] = await service.listCachedDocumentTranslationVariants(corrected);
+    assert.equal(cached.translationProfile, TRANSLATION_PROFILE_ID);
+    assert.equal(cached.partial, true);
+    assert.equal(cached.blocks[2].markdown, partial.blocks[1].markdown);
+    assert.equal(cached.blocks[2].alignment.units.length, 2);
+    records.delete(partial.translationKey);
+    const visible = await service.reconcileDocumentTranslation({
+        ...corrected,
+        existingTranslation: visibleResult(partial, partial.translationKey),
+    });
+    assert.deepEqual(visible.failedBlocks, cached.failedBlocks);
+    assert.equal(records.get(partial.translationKey).partial, true);
+    assert.equal(records.get(partial.translationKey).translationProfile, TRANSLATION_PROFILE_ID);
+    const retried = await service.translateDocument(corrected);
+    assert.equal(retried.partial, false);
+    assert.equal(retried.translationProfile, TRANSLATION_PROFILE_ID);
+    const retriedSources = calls.slice(completedCalls).flatMap(entries => (
+        entries.flatMap(entry => entry.units.map(unit => unit.sourceMarkdown))
+    ));
+    assert.deepEqual(retriedSources.sort(), ['Added.', 'Keep this paragraph.']);
+    assert.deepEqual(writes, [partial.translationKey, partial.translationKey, retried.translationKey]);
+    assert.doesNotMatch(retried.translatedMarkdown + retried.comparisonMarkdown, /旧|translation-|alignment|\.s1/);
+});
+
+test('rejects a removed per-block alignment upgrade before sending source text', async () => {
+    const { service, records, calls, writes } = fixture();
+    const { record, key } = installLegacy(records, { promptVersion: v7 });
+    await assert.rejects(service.translateDocument({
+        ...options, alignmentBlockID: record.blocks[1].id, existingTranslation: visibleResult(record, key),
+    }), { code: 'AI_INVALID_REQUEST' });
+    assert.deepEqual([calls, writes], [[], []]);
+});
 
 for (const invalid of ['missing', 'duplicate', 'foreign']) {
     test(`reordered blocks and units are accepted; a ${invalid} unit retries only its own block`, async () => {

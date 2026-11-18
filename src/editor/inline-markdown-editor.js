@@ -58,9 +58,6 @@ import {
     setTranslationSelection,
     selectionNodeInEditor,
 } from './inline-rendering.js';
-import {
-    mapTranslatedSentenceToSource,
-} from '../markdown/markdown-translation-blocks.js';
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
 import { clearReaderTextSelection, rootSelectionFor } from './root-selection.js';
@@ -370,7 +367,6 @@ export function createInlineMarkdownEditor({
     copySelectionTranslation,
     revealTranslationSource = null,
     translateOriginalBlockText = null,
-    enableSentenceAlignment = null,
     onCommitCorrection,
     onRestoreCorrection,
     onCorrectionError,
@@ -382,7 +378,6 @@ export function createInlineMarkdownEditor({
     // The window can supply the hosts with each document.
     let hostTranslateOriginalBlockText = translateOriginalBlockText;
     let hostRevealTranslationSource = revealTranslationSource;
-    let hostEnableSentenceAlignment = enableSentenceAlignment;
     if (!parent) throw new Error(t('error.editorParentRequired'));
     const ownerWindow = parent.ownerDocument?.defaultView;
     if (!ownerWindow) throw new Error(t('error.editorWindowRequired'));
@@ -1331,8 +1326,7 @@ export function createInlineMarkdownEditor({
             ));
             const blocks = [];
             const hits = [];
-            const legacy = [];
-            const compare = currentTranslationView === 'compare';
+            const unaligned = [];
             for (const pair of currentTranslationPairs) {
                 if (pair.sourceFallback) continue;
                 const selected = ranges.flatMap(range => {
@@ -1345,28 +1339,27 @@ export function createInlineMarkdownEditor({
                 if (!selected.length) continue;
                 blocks.push(pair);
                 if (pair.sourceFrom == null) continue;
-                if (pair.units.length) {
-                    const seen = new Set();
-                    for (const unit of pair.units) {
-                        if (seen.has(unit.id) || !selected.some(part => overlaps(unit, part)
-                            && /\S/u.test(currentTranslationMarkdown.slice(
-                                Math.max(unit.from, part.from), Math.min(unit.to, part.to)
-                            )))) continue;
-                        seen.add(unit.id);
-                        unit.source.forEach((source, index) => {
-                            hits.push(sourceExcerpt(pair, source, unit.comparison?.[index]));
-                        });
-                    }
+                // Only the projected alignment units identify a precise source passage.
+                if (!pair.units.length) {
+                    unaligned.push(pair);
                     continue;
                 }
-                const structural = structuralTranslationHits(pair, selected, compare);
-                if (structural.length) hits.push(...structural);
-                else legacy.push(pair);
+                const seen = new Set();
+                for (const unit of pair.units) {
+                    if (seen.has(unit.id) || !selected.some(part => overlaps(unit, part)
+                        && /\S/u.test(currentTranslationMarkdown.slice(
+                            Math.max(unit.from, part.from), Math.min(unit.to, part.to)
+                        )))) continue;
+                    seen.add(unit.id);
+                    unit.source.forEach((source, index) => {
+                        hits.push(sourceExcerpt(pair, source, unit.comparison?.[index]));
+                    });
+                }
             }
             if (!blocks.length) return null;
             return {
                 key: ranges.map(range => `${range.from}:${range.to}`).join(','),
-                blocks, hits, legacy,
+                blocks, hits, unaligned,
             };
         }
         catch {
@@ -1374,44 +1367,16 @@ export function createInlineMarkdownEditor({
         }
     };
 
-    const sourceExcerpt = (pair, source, comparison, structuralKind = null) => ({
+    const sourceExcerpt = (pair, source, comparison) => ({
         id: pair.id,
         sourceFrom: source.from,
         sourceTo: source.to,
         viewSourceFrom: comparison?.from,
         viewSourceTo: comparison?.to,
-        structuralKind,
     });
     const wholeSourceExcerpt = pair => sourceExcerpt(pair,
         { from: pair.sourceFrom, to: pair.sourceTo },
         { from: pair.sourceViewFrom, to: pair.sourceViewTo });
-
-    const structuralTranslationHits = (pair, ranges, compare) => {
-        if (!['list', 'table'].includes(pair.type)) return [];
-        const bounds = {
-            id: pair.id,
-            type: pair.type,
-            sourceFrom: pair.sourceFrom,
-            sourceTo: pair.sourceTo,
-            comparisonSourceFrom: pair.sourceViewFrom,
-            comparisonSourceTo: pair.sourceViewTo,
-            comparisonTranslationFrom: pair.from,
-            comparisonTranslationTo: pair.to,
-            translatedFrom: pair.from,
-            translatedTo: pair.to,
-        };
-        return ranges.flatMap(range => {
-            const mapped = mapTranslatedSentenceToSource(range, [bounds],
-                compare ? 'compare' : 'translated', {
-                    markdown: currentTranslationSourceMarkdown,
-                    comparisonMarkdown: currentTranslationMarkdown,
-                    translatedMarkdown: currentTranslationMarkdown,
-                });
-            if (!mapped || mapped.granularity === 'block') return [];
-            return [sourceExcerpt(pair, mapped,
-                { from: mapped.viewFrom, to: mapped.viewTo }, pair.type)];
-        });
-    };
 
     const markedSourceCell = block => Array.from(view.contentDOM.querySelectorAll(
         '.cm-mktero-table [data-translation-source-from]'
@@ -1487,7 +1452,7 @@ export function createInlineMarkdownEditor({
 
     const updateTranslationSelection = active => {
         const excerpts = [...active.hits,
-            ...active.legacy.filter(pair => active.shown.has(pair.id)).map(wholeSourceExcerpt)];
+            ...active.unaligned.filter(pair => active.shown.has(pair.id)).map(wholeSourceExcerpt)];
         const unique = new Map(excerpts.map(excerpt => [
             `${excerpt.sourceFrom}:${excerpt.sourceTo}`, excerpt,
         ]));
@@ -1510,7 +1475,7 @@ export function createInlineMarkdownEditor({
             && activeTranslationSelection === active && view.state.doc === active.doc;
         active.offscreen = offscreen;
         const { anchor, source: resolved } = active;
-        const legacyActions = active.legacy.map(pair => ({
+        const wholeBlockActions = active.unaligned.map(pair => ({
             id: pair.id,
             onShowBlock: () => {
                 if (!isCurrent()) return;
@@ -1522,18 +1487,7 @@ export function createInlineMarkdownEditor({
                     updateTranslationSelection(active);
                 }
             },
-            ...(typeof hostEnableSentenceAlignment === 'function' ? {
-                onEnableAlignment: async ({ signal } = {}) => {
-                    if (!isCurrent() || signal?.aborted) return false;
-                    return hostEnableSentenceAlignment(pair.id, { signal });
-                },
-            } : {}),
         }));
-        const structuralKinds = new Set(active.excerpts.map(excerpt => excerpt.structuralKind));
-        const sourceLabel = structuralKinds.has('list') || structuralKinds.has('table')
-            ? t(structuralKinds.size > 1 ? 'ai.translationSourceStructure'
-                : structuralKinds.has('table') ? 'ai.translationSourceCell' : 'ai.translationSourceItem')
-            : null;
         const annotationActions = {
             anchor,
             annotation: resolved.annotation,
@@ -1551,20 +1505,20 @@ export function createInlineMarkdownEditor({
                     active.doc, true, 'center');
             } : null;
             if (!revealSource && !resolved.annotation && !resolved.annotationUnavailable
-                && !legacyActions.length && !sourceLabel) {
+                && !wholeBlockActions.length) {
                 closeTranslationSourceActions();
                 return;
             }
             translationActionsOpen = true;
             annotationPopup.openSourceBlockActions({
-                ...annotationActions, legacyActions, sourceLabel,
+                ...annotationActions, wholeBlockActions,
                 offscreen: offscreen?.direction, revealSource,
             });
             return;
         }
         translationSourcePopup.close();
         translationSourcePopup.open({
-            ...annotationActions, legacyActions, sourceLabel,
+            ...annotationActions, wholeBlockActions,
             source: active.excerpts.length ? {
                 ...active.excerpts[0], text: resolved.text, blocks: active.excerpts, isCurrent,
             } : null,
@@ -1957,7 +1911,6 @@ export function createInlineMarkdownEditor({
         sourceMarkdown = '',
         translateOriginalBlockText: nextTranslateOriginalBlockText,
         revealTranslationSource: nextRevealTranslationSource,
-        enableSentenceAlignment: nextEnableSentenceAlignment = enableSentenceAlignment,
     }) => {
         activateDOMGlobals(ownerWindow);
         if (typeof nextTranslateOriginalBlockText === 'function') {
@@ -1970,7 +1923,6 @@ export function createInlineMarkdownEditor({
             ownerWindow.clearTimeout?.(translationHighlightTimer);
             translationHighlightTimer = null;
         }
-        hostEnableSentenceAlignment = nextEnableSentenceAlignment;
         const value = String(markdown || '');
         const documentChanged = value !== view.state.doc.toString();
         const viewportCenterOffset = Number.isSafeInteger(

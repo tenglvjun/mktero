@@ -113,12 +113,7 @@ Select even one word in an aligned translation to see the **original sentence** 
 - In `Translation`, the bubble lists the matching originals once each, in reading order. `Locate in Bilingual` switches views and scrolls to the original.
 - You can select across sentences or blocks. Ending in the space before the next sentence does not include it. Hidden text, separators, and source text shown in place of a failed translation do not count as translated text.
 
-**When a sentence match is unavailable:** Older (v7) translations remain readable offline. Opening a saved translation, selecting translated text, or locating its original does not start a translation request. Selecting an unaligned passage does not automatically show the whole paragraph. You have two choices:
-
-- `Show the whole original block` displays that block locally, without sending anything.
-- `Enable sentence alignment for this block` sends only that source block to your configured AI provider for retranslation in the current language. The provider may charge for it. Success replaces only that block's displayed translation; if you cancel or the request fails, the old text stays.
-
-In a list or Markdown table, sometimes only the original item or cell can be identified. A link or emphasis spanning sentences, or a sentence interrupted by a formula, may also prevent a safe match. Mktero does not present a whole block, item, or cell as an exact sentence. If your selection includes both aligned and unaligned blocks, it shows the known sentences and indicates which blocks lack alignment.
+**When a sentence match is unavailable**, choose `Show the whole original block` to read the source locally. Mktero requires verified sentence IDs for a precise match, including in lists and tables where a translation may reorder items or cells. If your selection spans aligned and unaligned blocks, you can see the verified sentences and open the remaining blocks individually.
 
 **Annotations still cover whole original blocks**, not the sentences highlighted for reading. Click **Annotate the whole original block** once to save. Translation highlights the corresponding passage and lists the same annotation in the left sidebar; switching views does not create another copy. A selection can annotate up to eight blocks, each in full. Beyond eight, you can still read and locate the original. Annotations stay anchored to the source for PDF location. An existing annotation without a reliable match in the translation stays in the sidebar, but no translated text is highlighted for it.
 
@@ -183,7 +178,9 @@ An application that reads clipboard HTML, such as a word processor or browser ed
 
 #### Cache and corrections
 
-Translations are cached independently by source content, provider, protocol, model, language, reasoning effort, and prompt version. This lets partial work resume. When an update rereads a MinerU result, unchanged blocks keep their translations; changed blocks become pending. Sentence mappings are cached unencrypted with the translation in your Zotero profile. After a correction, a block may still be readable even if its sentence mappings can no longer be verified against the current text.
+When Mktero updates its full-document translation rules, open the article and choose `Translate document` to create a translation under the new rules. Only that action sends the article to your configured provider and may incur charges. The update leaves earlier translations on disk and excludes them from the reader’s available languages.
+
+Within the same translation profile, translations are cached independently by source content, provider, protocol, model, language, reasoning effort, and prompt version. This lets partial work resume. When an update rereads a MinerU result, unchanged blocks keep their translations; changed blocks become pending. Sentence mappings are cached unencrypted with the translation in your Zotero profile. After a correction, a block may still be readable even if its sentence mappings can no longer be verified against the current text.
 
 | Change | Translation behavior |
 | --- | --- |

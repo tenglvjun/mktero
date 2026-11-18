@@ -2,8 +2,8 @@ import { createAnchoredPopup } from './anchored-popup.js';
 import { createSourceBlockAnnotationAction } from './annotation-popup.js';
 import { createLocalization } from '../i18n/localization.js';
 import {
-    createLegacyActions,
-    normalizeLegacyActions,
+    createWholeBlockActions,
+    normalizeWholeBlockActions,
     sourceBlockAnnotationLabels,
 } from './translation-legacy-actions.js';
 
@@ -32,29 +32,23 @@ export function createTranslationSourcePopup(parent, {
             selectionContext,
             annotationUnavailable = null,
             blockCount = 1,
-            sourceLabel = null,
-            legacyActions = [],
+            wholeBlockActions = [],
             isCurrent = null,
         }) {
             const text = String(source?.text || '').trim();
-            const legacy = normalizeLegacyActions(legacyActions);
+            const wholeBlocks = normalizeWholeBlockActions(wholeBlockActions);
             const showAnnotation = annotation && !annotationUnavailable;
-            if (!anchor || (!text && !showAnnotation && !annotationUnavailable && !legacy.length)) {
+            if (!anchor || (!text && !showAnnotation && !annotationUnavailable && !wholeBlocks.length)) {
                 anchoredPopup.close();
                 return;
             }
-            let legacyControls;
             anchoredPopup.open({
                 anchor,
-                label: (text && sourceLabel) || t(text
-                    ? 'ai.translationSourceLabel'
-                    : 'ai.translationSourceActions'),
+                label: t(text ? 'ai.translationSourceLabel' : 'ai.translationSourceActions'),
                 dismissOnMouseLeave: false,
-                onClose: () => legacyControls?.dispose(),
                 renderContent({ document, close, reposition }) {
                     const content = createContent(document, t, {
                         text,
-                        sourceLabel,
                         reveal: text && typeof revealSource === 'function'
                             ? () => {
                                 close();
@@ -68,9 +62,8 @@ export function createTranslationSourcePopup(parent, {
                         annotationUnavailable,
                         blockCount,
                     });
-                    if (legacy.length) {
-                        legacyControls = createLegacyActions(document, legacy, t, reposition);
-                        content.appendChild(legacyControls.element);
+                    if (wholeBlocks.length) {
+                        content.appendChild(createWholeBlockActions(document, wholeBlocks, t, reposition).element);
                     }
                     return content;
                 },
@@ -83,7 +76,7 @@ export function createTranslationSourcePopup(parent, {
 }
 
 function createContent(document, t, {
-    text, sourceLabel, reveal, save, annotationUnavailable, blockCount,
+    text, reveal, save, annotationUnavailable, blockCount,
 }) {
     const content = document.createElementNS(XHTML_NAMESPACE, 'div');
     content.className = 'mktero-translation-source';
@@ -91,7 +84,7 @@ function createContent(document, t, {
     if (text) {
         const label = document.createElementNS(XHTML_NAMESPACE, 'div');
         label.className = 'mktero-translation-source-label';
-        label.textContent = sourceLabel || t('ai.translationSourceLabel');
+        label.textContent = t('ai.translationSourceLabel');
         content.appendChild(label);
 
         const body = document.createElementNS(XHTML_NAMESPACE, 'div');

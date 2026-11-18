@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createMarkdownCacheKey, MarkdownCache } from '../../src/cache/markdown-cache.js';
-import { MarkdownTranslationService } from '../../src/ai/markdown-translation-service.js';
+import {
+    MarkdownTranslationService, TRANSLATION_PROFILE_ID, TRANSLATION_PROMPT_VERSION,
+} from '../../src/ai/markdown-translation-service.js';
 import { getAISettings } from '../../src/config/ai-preferences.js';
 import {
     collectMarkdownTranslationBlocks, createDocumentTranslationViews,
@@ -43,7 +45,7 @@ export async function prepareFixtures(run, profile) {
     const getSettings = () => getAISettings({ Prefs: { get: key => fixturePrefs[key] } });
     const { provider, protocol, apiBase, model, reasoning, targetLanguage } = getSettings();
     const fixtures = [];
-    for (const kind of ['aligned', 'legacy']) {
+    for (const kind of ['aligned', 'unaligned']) {
         const aligned = kind === 'aligned';
         const sentences = aligned
             ? ['The amber lamp is steady.', 'The violet dial is silent.']
@@ -57,11 +59,10 @@ export async function prepareFixtures(run, profile) {
         await writeFile(pdfPath, pdf);
         const documentKey = await createMarkdownCacheKey(pdf, { parserProfile: MISTRAL_PARSER_PROFILE_ID });
         await cache.put(documentKey, { markdown, assets: [], parserProfile: MISTRAL_PARSER_PROFILE_ID });
-        const promptVersion = aligned ? 'mktero-translation-v8' : 'mktero-translation-v7';
         let mockedRequests = 0;
         const service = new MarkdownTranslationService({
             aiGateway: { async generateText({ messages }) {
-                assert.ok(aligned, 'Reading the legacy cache must not call the gateway');
+                assert.ok(aligned, 'Reading an unaligned block must not call the gateway');
                 mockedRequests++;
                 const [entry] = JSON.parse(messages.at(-1).content);
                 assert.deepEqual(entry.units.map(unit => unit.sourceMarkdown), sentences);
@@ -71,6 +72,7 @@ export async function prepareFixtures(run, profile) {
             } },
             getSettings: () => ({ ...getSettings(), apiKey: 'synthetic-mock-only', streaming: false }),
             cache,
+            onCacheError: error => { throw error; },
         });
         if (aligned) {
             const generated = await service.translateDocument({ documentKey, markdown });
@@ -81,16 +83,20 @@ export async function prepareFixtures(run, profile) {
             const [block] = collectMarkdownTranslationBlocks(markdown);
             const blocks = [{ id: block.id, markdown: units.join('') }];
             const views = createDocumentTranslationViews(markdown, [block], blocks, { targetLanguage });
-            const identity = { provider, protocol, apiBase, model, reasoning, targetLanguage, promptVersion };
+            // A current-profile translation can contain a block without a verified index.
+            const identity = { provider, protocol, apiBase, model, reasoning, targetLanguage,
+                promptVersion: TRANSLATION_PROMPT_VERSION, translationProfile: TRANSLATION_PROFILE_ID };
             const translationKey = createHash('sha256')
                 .update(JSON.stringify({ documentKey, source: markdown, ...identity })).digest('hex');
             await cache.putTranslation(documentKey, translationKey, {
                 ...views, blocks, sourceBlocks: [{ id: block.id, markdown }],
-                settingsIdentity: JSON.stringify(identity), model, targetLanguage, promptVersion,
+                settingsIdentity: JSON.stringify(identity), model, targetLanguage,
+                promptVersion: TRANSLATION_PROMPT_VERSION, translationProfile: TRANSLATION_PROFILE_ID,
             });
         }
         const loaded = await service.getCachedDocumentTranslation({ documentKey, markdown, targetLanguage });
-        assert.equal(loaded?.promptVersion, promptVersion, `${kind}: cached translation not readable`);
+        assert.equal(loaded?.translationProfile, TRANSLATION_PROFILE_ID, `${kind}: cached translation not readable`);
+        assert.equal(loaded.promptVersion, TRANSLATION_PROMPT_VERSION);
         assert.equal(loaded.translatedMarkdown, units.join(''));
         assert.equal(loaded.blockRanges[0].alignmentUnits?.length ?? 0, aligned ? 2 : 0);
         fixtures.push({ kind, pdfPath, markdown, sentences, units });

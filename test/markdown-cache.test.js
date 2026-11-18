@@ -29,7 +29,7 @@ import { finalizeRestoredDocument } from '../src/figures/figure-finalization.js'
 import { prepareFigureFixture } from './helpers/figure-preparer.js';
 import { createMarkdownTabView } from '../src/ui/markdown-window.js';
 import { parseHTML } from 'linkedom';
-import { MarkdownTranslationService, TRANSLATION_PROMPT_VERSION } from '../src/ai/markdown-translation-service.js';
+import { MarkdownTranslationService, TRANSLATION_PROFILE_ID, TRANSLATION_PROMPT_VERSION } from '../src/ai/markdown-translation-service.js';
 import { collectMarkdownTranslationBlocks } from '../src/markdown/markdown-translation-blocks.js';
 
 const CACHE_KEY = 'a'.repeat(64);
@@ -473,7 +473,7 @@ test('finds the current cached translation by target language', async t => {
     );
 });
 
-test('upgrades only the selected v7 block on disk and restores both exact views offline', async t => {
+test('retranslates a previous profile only on request and restores verified sentence ranges offline', async t => {
     const { cache, ioUtils, rootPath } = await createCacheFixture(t);
     const doc = { documentKey: CACHE_KEY, markdown: 'Accuracy improved. Latency fell.\n\nKeep this old block.' };
     const settings = { enabled: true, apiKey: 'fixture', model: 'offline-test', provider: 'custom',
@@ -502,24 +502,25 @@ test('upgrades only the selected v7 block on disk and restores both exact views 
         aiGateway: { async generateText({ messages }) {
             requests++;
             const entries = JSON.parse(messages[1].content);
-            assert.equal(entries.length, 1);
-            const [{ id, units }] = entries;
-            assert.deepEqual(units.map(unit => unit.sourceMarkdown), ['Accuracy improved.', 'Latency fell.']);
-            return { text: JSON.stringify([{ id, units: units.map((unit, i) => ({
-                id: unit.id, translatedMarkdown: ['准确率提高了。', '延迟下降了。'][i],
-            })).reverse() }]) };
+            const translated = new Map([
+                ['Accuracy improved.', '准确率提高了。'], ['Latency fell.', '延迟下降了。'],
+                ['Keep this old block.', '重新翻译的段落。'],
+            ]);
+            return { text: JSON.stringify(entries.map(({ id, units }) => ({ id, units: units.map(unit => ({
+                id: unit.id, translatedMarkdown: translated.get(unit.sourceMarkdown),
+            })).reverse() }))) };
         } },
     });
     const baseline = await service().getCachedDocumentTranslation(doc);
-    assert.equal(baseline.promptVersion, identity.promptVersion);
+    assert.equal(baseline, null);
     assert.equal(requests, 0);
-    const updated = await service().translateDocument({ ...doc, existingTranslation: baseline, alignmentBlockID: blocks[0].id });
+    const updated = await service().translateDocument(doc);
     assert.equal(requests, 1);
     assert.equal(await readFile(oldPath, 'utf8'), oldBytes);
     const fresh = await service().getCachedDocumentTranslation(doc);
     assert.deepEqual(fresh.blockRanges, updated.blockRanges);
-    assert.equal(fresh.blocks[1].markdown, '旧段。');
-    assert.equal(fresh.blockRanges[1].alignmentUnits, undefined);
+    assert.equal(fresh.blocks[1].markdown, '重新翻译的段落。');
+    assert.equal(fresh.blockRanges[1].alignmentUnits.length, 1);
     const unit = fresh.blockRanges[0].alignmentUnits[1];
     assert.deepEqual(unit.sourceRanges, [{ from: 19, to: 32 }]);
     assert.deepEqual([unit.translatedFrom, unit.translatedTo], [7, 13]);
@@ -665,6 +666,36 @@ test('retains prior source translations for the same language', async t => {
         (await cache.getTranslation(CACHE_KEY, japaneseKey)).targetLanguage,
         'ja-JP'
     );
+});
+
+test('filters cached translations by profile without opening obsolete files or deleting them', async t => {
+    const { cache, ioUtils, rootPath } = await createCacheFixture(t);
+    const language = 'zh-CN';
+    const identity = { promptVersion: TRANSLATION_PROMPT_VERSION, settingsIdentity: 'same settings' };
+    const current = { ...identity, translationProfile: TRANSLATION_PROFILE_ID };
+    const translation = { ...identity, targetLanguage: language, model: 'example',
+        translatedMarkdown: '译文', comparisonMarkdown: '', blocks: [{ id: 'p', markdown: '译文' }] };
+    await cache.put(CACHE_KEY, { markdown: 'Original' });
+    await cache.putTranslation(CACHE_KEY, '1'.repeat(64), { ...translation, ...current });
+    await cache.putTranslation(CACHE_KEY, '2'.repeat(64), translation);
+    await cache.putTranslation(CACHE_KEY, '3'.repeat(64), { ...translation, translationProfile: 'previous-profile' });
+    const dir = path.join(rootPath, 'entries', CACHE_KEY);
+    const before = await snapshotEntry(dir);
+    const reads = [];
+    const read = ioUtils.readUTF8;
+    ioUtils.readUTF8 = file => {
+        if (path.basename(file).startsWith('translation-')) reads.push(file);
+        return read(file);
+    };
+    assert.deepEqual(await cache.listOutdatedTranslationLanguages(CACHE_KEY, TRANSLATION_PROFILE_ID), [language]);
+    assert.equal(reads.length, 0);
+    const cached = await cache.getTranslationByLanguage(CACHE_KEY, language, current);
+    assert.equal(cached?.translationProfile, TRANSLATION_PROFILE_ID);
+    assert.equal(reads.length, 1);
+    assert.deepEqual(await snapshotEntry(dir), before);
+    await cache.put(SECOND_CACHE_KEY, { markdown: 'Original' });
+    assert.equal(await cache.copyTranslations(CACHE_KEY, SECOND_CACHE_KEY), 1);
+    assert.deepEqual(await cache.listOutdatedTranslationLanguages(SECOND_CACHE_KEY, TRANSLATION_PROFILE_ID), []);
 });
 
 test('retains all cached translation variants and removes replaced files', async t => {
@@ -875,6 +906,7 @@ test('copies translations to a new profile entry of the same PDF', async t => {
         blocks: [{ id: 'translation-0', markdown: `# ${language}` }],
         sourceBlocks: [{ id: 'translation-0', markdown: '# Paper' }],
         settingsIdentity: 'settings',
+        translationProfile: TRANSLATION_PROFILE_ID,
         model: 'example-model',
         targetLanguage: language,
         promptVersion: 'translation-v1',
@@ -915,6 +947,7 @@ test('a copied translation reuses only the blocks whose source text is unchanged
     const settingsIdentity = JSON.stringify({
         provider: settings.provider, protocol: settings.protocol, apiBase: settings.apiBase,
         model: settings.model, reasoning: 'none', targetLanguage: 'zh-CN', promptVersion: TRANSLATION_PROMPT_VERSION,
+        translationProfile: TRANSLATION_PROFILE_ID,
     });
     const oldSource = 'First paragraph of the paper.\n\nA second paragraph split in two.';
     const newSource = 'First paragraph of the paper.\n\nA second paragraph joined across the page.';
@@ -929,6 +962,7 @@ test('a copied translation reuses only the blocks whose source text is unchanged
         model: settings.model,
         targetLanguage: 'zh-CN',
         promptVersion: TRANSLATION_PROMPT_VERSION,
+        translationProfile: TRANSLATION_PROFILE_ID,
         partial: false,
         failedBlocks: [],
     });

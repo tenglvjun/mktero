@@ -4,7 +4,7 @@ import { createVisibleTranslationPairs } from '../../src/ui/markdown-window.js';
 
 let root;
 let editor;
-const calls = { translation: 0, upgrades: [], annotations: [] };
+const calls = { translation: 0, annotations: [] };
 
 export function mount({ source, views, translations, view, css, locale }) {
     const host = document.querySelector('#reader');
@@ -53,6 +53,10 @@ export function mount({ source, views, translations, view, css, locale }) {
             return annotation;
         },
     });
+    setDocument({ source, views, translations, view });
+}
+
+export function setDocument({ source, views, translations, view }) {
     const compare = view === 'compare';
     editor.setDocument({
         markdown: compare ? views.comparisonMarkdown : views.translatedMarkdown,
@@ -64,7 +68,6 @@ export function mount({ source, views, translations, view, css, locale }) {
             translationBlocks: translations,
             translationBlockRanges: views.blockRanges,
         }, !compare, compare),
-        enableSentenceAlignment: id => { calls.upgrades.push(id); return true; },
     });
 }
 
@@ -72,11 +75,13 @@ function selection() {
     return root.getSelection?.() || document.getSelection();
 }
 
-// The fixture's plain paragraphs each render on a single CodeMirror line. Use
-// rendered text (not the alignment index) to find the native selection ends.
-export function select({ line, from, to, backward }) {
-    const element = [...root.querySelectorAll('.cm-line')].find(node => node.textContent === line);
-    if (!element) throw new Error(`Rendered paragraph not found: ${line}`);
+// Use rendered text to find the native selection ends, including in table
+// widgets where the selected characters are outside CodeMirror's text lines.
+export function select({ text, from, to, selector = '.cm-line', backward }) {
+    const matches = [...root.querySelectorAll(selector)].filter(node => node.textContent.includes(text));
+    if (matches.length !== 1) throw new Error(`Expected one rendered match for ${text}, got ${matches.length}`);
+    const [element] = matches;
+    const start = element.textContent.indexOf(text);
     function pointAt(offset) {
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
         while (walker.nextNode()) {
@@ -84,11 +89,11 @@ export function select({ line, from, to, backward }) {
             if (offset <= node.length) return [node, offset];
             offset -= node.length;
         }
-        throw new Error('Selection exceeds the rendered paragraph');
+        throw new Error('Selection exceeds the rendered element');
     }
     const range = document.createRange();
-    range.setStart(...pointAt(from));
-    range.setEnd(...pointAt(to));
+    range.setStart(...pointAt(start + from));
+    range.setEnd(...pointAt(start + to));
     const native = selection();
     native.removeAllRanges();
     if (backward) {

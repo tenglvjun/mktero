@@ -18,8 +18,6 @@ import {
     mapSourceRangeToComparison,
     mapSourceRangeToTranslation,
     mapTranslatedRangeToSourceBlock,
-    mapTranslatedSentenceToSource,
-    splitTranslatedBlockSentences,
     reconcileTranslatedBlockProtectedFragments,
     resolveTranslationReadingPosition,
     TRANSLATION_PROTECTED_CONTENT_CHANGED,
@@ -1534,189 +1532,31 @@ test('leaves the existing comparison mapping unchanged', () => {
     ), null);
 });
 
-test('splits a block into sentences on both scripts', () => {
-    assert.equal(
-        splitTranslatedBlockSentences('First one. Second one. Third one.').length,
-        3
-    );
-    assert.equal(
-        splitTranslatedBlockSentences('\u7b2c\u4e00\u53e5\u3002\u7b2c\u4e8c\u53e5\u3002\u7b2c\u4e09\u53e5\u3002').length,
-        3
-    );
-    // A list item is its own unit even without a final period.
-    assert.equal(
-        splitTranslatedBlockSentences('- one\n- two\n- three', {
-            listItems: true,
-        }).length,
-        3
-    );
-});
-
-test('does not split inside abbreviations or decimals', () => {
-    assert.deepEqual(
-        splitTranslatedBlockSentences('Smith et al. showed this. Next one.')
-            .map(span => 'Smith et al. showed this. Next one.'.slice(span.from, span.to)),
-        ['Smith et al. showed this.', 'Next one.']
-    );
-    assert.equal(
-        splitTranslatedBlockSentences('The value is 0.684 and 0.711. Next one.').length,
-        2
-    );
-    assert.equal(
-        splitTranslatedBlockSentences('See Fig. 2 for details. It shows results.').length,
-        2
-    );
-});
-
-test('keeps a multi-digit decimal intact and ends a sentence after an integer', () => {
-    const text = 'The mean was 12.34. The count was 7. Results follow.';
-    assert.deepEqual(splitTranslatedBlockSentences(text).map(({ from, to }) => (
-        text.slice(from, to)
-    )), ['The mean was 12.34.', 'The count was 7.', 'Results follow.']);
-});
-
-function assertSelectionMappings(source, translation, cases) {
-    // A translated heading puts the source, translated, and comparison blocks
-    // at three different offsets.
-    const markdown = `# Context\n\n${source}`;
-    const blocks = collectMarkdownTranslationBlocks(markdown);
-    const views = createDocumentTranslationViews(markdown, blocks, [
-        { id: blocks[0].id, markdown: '# 前言' },
-        { id: blocks[1].id, markdown: translation },
-    ]);
-    const block = views.blockRanges[1];
-    for (const [selection, original = source, granularity = 'block'] of cases) {
+test('unverified translations provide only whole-block coordinates for reordered prose, lists and tables', () => {
+    for (const [source, translation, selection] of [
+        ['Samples cooled. Pressure rose.', '压力上升。样品冷却。', '压力'],
+        ['- 第一项\n- 第二项', '- 第二项译文\n- 第一项译文', '第二项译文'],
+        ['| A | B |\n| --- | --- |\n| First | One |\n| Second | Two |',
+            '| 甲 | 乙 |\n| --- | --- |\n| 第二 | 二 |\n| 第一 | 一 |', '第二'],
+    ]) {
+        const markdown = `# Context\n\n${source}`;
+        const blocks = collectMarkdownTranslationBlocks(markdown);
+        const views = createDocumentTranslationViews(markdown, blocks, [
+            { id: blocks[0].id, markdown: '# 前言' },
+            { id: blocks[1].id, markdown: translation },
+        ]);
+        const block = views.blockRanges[1];
+        assert.equal(block.alignmentUnits, undefined);
         const selectedAt = translation.indexOf(selection);
-        const originalAt = source.indexOf(original);
-        assert.notEqual(selectedAt, -1);
-        assert.notEqual(originalAt, -1);
         for (const view of ['translated', 'compare']) {
-            const compare = view === 'compare';
-            const from = selectedAt + (compare ? block.comparisonTranslationFrom : block.translatedFrom);
-            const mapped = mapTranslatedSentenceToSource(
-                { from, to: from + selection.length }, views.blockRanges, view, { markdown, ...views }
-            );
-            const label = `${view}: ${selection}`;
-            assert.equal(mapped?.granularity, granularity, label);
-            assert.equal(mapped.id, block.id, label);
-            assert.deepEqual([mapped.sourceBlockFrom, mapped.sourceBlockTo], [block.sourceFrom, block.sourceTo], label);
-            const sourceFrom = block.sourceFrom + originalAt;
-            assert.deepEqual([mapped.from, mapped.to], [sourceFrom, sourceFrom + original.length], label);
-            const viewFrom = block.comparisonSourceFrom + originalAt;
-            assert.deepEqual([mapped.viewFrom, mapped.viewTo], compare ? [viewFrom, viewFrom + original.length] : [null, null], label);
+            const from = selectedAt + (view === 'compare' ? block.comparisonTranslationFrom : block.translatedFrom);
+            const range = { from, to: from + selection.length };
+            assert.deepEqual(mapAlignedTranslationSelection(range, views.blockRanges, view), []);
+            assert.deepEqual(mapTranslatedRangeToSourceBlock(range, views.blockRanges, view), {
+                id: block.id, from: block.sourceFrom, to: block.sourceTo,
+            });
         }
     }
-}
-
-test('returns the whole prose block even if reordered sentences have equal counts', () => {
-    assertSelectionMappings('Samples cooled. Pressure rose.', '压力上升。样品冷却。', [
-        ['压力'], ['样品冷却。'],
-    ]);
-});
-
-test('maps wrapped ordered list items by their markers, not their physical lines', () => {
-    const first = '1. First item\n   continues here.';
-    const second = '2. Second item.';
-    const source = `${first}\n${second}`;
-    const translation = '1. 第一项。\n2. 第二项\n   接着写。';
-    assertSelectionMappings(source, translation, [
-        ['第一项', first, 'sentence'], ['接着写', second, 'sentence'], ['第一项。\n2. 第二项'],
-    ]);
-    assert.deepEqual(splitTranslatedBlockSentences(source, { listItems: true }).map(({ from, to }) => (
-        source.slice(from, to)
-    )), [first, second]);
-});
-
-test('requires matching list item counts and nesting, even with equal line counts', () => {
-    assertSelectionMappings('- First\n  continued\n- Second', '- 甲\n- 乙\n- 丙', [['乙']]);
-    const nested = '- Parent\n  - Child\n- Peer';
-    assertSelectionMappings(nested, '- 甲\n- 乙\n  - 子项', [['子项']]);
-    assertSelectionMappings(nested, '- 甲\n  1. 子项\n- 乙', [['子项']]);
-    assertSelectionMappings(nested, '- 甲\n  - 子项\n- 乙', [['子项', '- Child', 'sentence']]);
-});
-
-test('maps a selection inside one matching GFM header or body cell, not table syntax', () => {
-    const source = '| Method | Detail | Score |\n| --- | --- | --- |\n| First | left \\| right | 12.34 |\n| Last | | 7 |';
-    const translation = '方法 | 说明 | 分数\n--- | --- | ---\n第一种 | 左\\|右 | 十二\n最后一种 | | 七分';
-    assertSelectionMappings(source, translation, [
-        ['说明', 'Detail', 'cell'], ['右', 'left \\| right', 'cell'], ['七分', '7', 'cell'],
-        ['第一种 | 左'], ['---'], [' | | '],
-    ]);
-});
-
-test('returns the whole table for a row or column mismatch anywhere or an empty source cell', () => {
-    const source = '| A | B |\n| --- | --- |\n| First | |\n| Last | Value |';
-    const translation = '| 甲 | 乙 |\n| --- | --- |\n| 第一 | 新增 |';
-    for (const lastRow of ['', '\n| 末尾 |', '\n| 末尾 | 值 | 多余 |']) {
-        assertSelectionMappings(source, translation + lastRow, [['甲']]);
-    }
-    assertSelectionMappings(source, `${translation}\n| 末尾 | 值 |`, [['新增']]);
-});
-
-test('maps a translated bullet to its own original list item', () => {
-    const markdown = [
-        '- We develop inference-only RPMs, frozen-weight LLMs.',
-        '- We further propose agentic RPMs with pilot experiments.',
-        '- On AIRS-BENCH, agents yield state-of-the-art results.',
-    ].join('\n');
-    const blocks = collectMarkdownTranslationBlocks(markdown);
-    const translations = [{
-        id: blocks[0].id,
-        markdown: [
-            '- \u6211\u4eec\u5f00\u53d1\u4e86\u4ec5\u63a8\u7406 RPM\u3002',
-            '- \u6211\u4eec\u8fdb\u4e00\u6b65\u63d0\u51fa\u667a\u80fd\u4f53\u5f0f RPM\u3002',
-            '- \u5728 AIRS-BENCH \u4e0a\u53d6\u5f97\u65b0\u7ed3\u679c\u3002',
-        ].join('\n'),
-    }];
-    const views = createDocumentTranslationViews(markdown, blocks, translations);
-    const block = views.blockRanges[0];
-    const translated = views.comparisonMarkdown.slice(
-        block.comparisonTranslationFrom,
-        block.comparisonTranslationTo
-    );
-    const [first, second] = translated.split('\n');
-    const from = block.comparisonTranslationFrom + first.length + 1;
-
-    const mapped = mapTranslatedSentenceToSource(
-        { from, to: from + second.length },
-        views.blockRanges,
-        'compare',
-        { markdown, comparisonMarkdown: views.comparisonMarkdown }
-    );
-
-    assert.equal(mapped.granularity, 'sentence');
-    assert.equal(
-        markdown.slice(mapped.from, mapped.to),
-        '- We further propose agentic RPMs with pilot experiments.'
-    );
-    // The neighbouring bullets are excluded, which is the complaint that
-    // started this: selecting one bullet must not mark the whole list.
-    assert.ok(!markdown.slice(mapped.from, mapped.to).includes('inference-only'));
-    assert.ok(!markdown.slice(mapped.from, mapped.to).includes('AIRS-BENCH'));
-});
-
-test('falls back to the whole block when the sentence counts disagree', () => {
-    const markdown = 'One. Two. Three.';
-    const blocks = collectMarkdownTranslationBlocks(markdown);
-    const views = createDocumentTranslationViews(markdown, blocks, [{
-        id: blocks[0].id,
-        // Two sentences for three: translation merged them.
-        markdown: '\u4e00\u3002\u4e8c\u3002',
-    }]);
-    const block = views.blockRanges[0];
-
-    const mapped = mapTranslatedSentenceToSource(
-        { from: block.comparisonTranslationFrom, to: block.comparisonTranslationFrom + 1 },
-        views.blockRanges,
-        'compare',
-        { markdown, comparisonMarkdown: views.comparisonMarkdown }
-    );
-
-    // A count mismatch means the order is unknown. Reporting a position anyway
-    // would point at words that do not correspond.
-    assert.equal(mapped.granularity, 'block');
-    assert.equal(mapped.from, block.sourceFrom);
-    assert.equal(mapped.to, block.sourceTo);
 });
 
 function alignedResponse(block, texts, language = 'zh-CN') {

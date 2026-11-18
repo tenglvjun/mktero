@@ -985,11 +985,6 @@ class MarkdownTabView {
                         translatedView,
                         comparisonView
                     ),
-                    ...((comparisonView || translatedView) && typeof model.onTranslateDocument === 'function'
-                        ? { enableSentenceAlignment: (id, { signal } = {}) => (
-                            model.onTranslateDocument({ alignmentBlockID: id, signal })
-                        ) }
-                        : {}),
                     translateOriginalBlockText: (blockID, range) => (
                         this.originalBlockTextFor(blockID, range)
                     ),
@@ -4185,9 +4180,16 @@ class MarkdownTabView {
         }
         let operation;
         try {
+            const targetLanguage = outdatedTranslationLanguage(this.model);
+            const retryOutdated = targetLanguage
+                && targetLanguage === this.model.translationHintTargetLanguage
+                && targetLanguage !== this.model.translationConfiguredTargetLanguage
+                && !hasAvailableTranslation(this.model);
             operation = this.model.translationStatus === 'loading'
                 ? this.model.onCancelDocumentTranslation?.()
-                : this.model.onTranslateDocument?.();
+                : this.model.onTranslateDocument?.(
+                    retryOutdated ? { targetLanguage } : undefined
+                );
         }
         catch (error) {
             this.reportTranslationError(error);
@@ -6403,8 +6405,9 @@ class MarkdownTabView {
         const translating = model.translationStatus === 'loading';
         const partial = model.translationStatus === 'partial'
             || translating && (model.translationFailedBlocks || []).length > 0;
+        const outdatedLanguage = outdatedTranslationLanguage(model);
         this.syncTranslatedViewLabel(model, translationReady);
-        this.syncTranslationLanguageOptions(model, translationReady);
+        this.syncTranslationLanguageOptions(model, translationReady, outdatedLanguage);
         this.elements.translationViewLabel.hidden = !translationReady;
         this.elements.translationView.hidden = !translationReady;
         this.elements.translationFailureNavigation.hidden = !partial;
@@ -6462,6 +6465,7 @@ class MarkdownTabView {
             translating,
             partial,
             translationReady,
+            outdatedLanguage,
         });
         this.elements.translationContext.hidden =
             this.elements.translationStatus.hidden;
@@ -6469,6 +6473,7 @@ class MarkdownTabView {
             || (
                 this.elements.translationView.hidden
                 && this.elements.translationFailureNavigation.hidden
+                && !outdatedLanguage
             );
         this.elements.restoreCorrections.disabled = !restoreAvailable
             || loadingView.visible
@@ -6545,7 +6550,7 @@ class MarkdownTabView {
         button.setAttribute('title', description);
     }
 
-    syncTranslationLanguageOptions(model, translationReady) {
+    syncTranslationLanguageOptions(model, translationReady, outdatedLanguage) {
         const button = this.translatedViewButton();
         if (!button) return;
         const completeLanguages = new Set(normalizedCachedTranslationLanguages(
@@ -6601,7 +6606,7 @@ class MarkdownTabView {
             if (optionHadFocus) button.focus?.();
         }
         const available = translationReady
-            && completeOptions.length > 0
+            && (completeOptions.length > 0 || Boolean(outdatedLanguage))
             && typeof model.onSelectTranslationLanguage === 'function';
         if (available) {
             button.setAttribute('aria-haspopup', 'menu');
@@ -6718,6 +6723,7 @@ class MarkdownTabView {
         translating,
         partial,
         translationReady,
+        outdatedLanguage,
     }) {
         const completed = Math.max(
             0,
@@ -6767,6 +6773,16 @@ class MarkdownTabView {
         }
         else if (partial) {
             status = this.t('ai.translationPartialCompact', { failed });
+        }
+        if (!translating && outdatedLanguage) {
+            const hint = this.t('ai.translationOutdated', {
+                language: this.t(translationLanguageMessageKey(outdatedLanguage)),
+            });
+            status = status ? `${hint} · ${status}` : hint;
+            this.elements.translationStatus.setAttribute('title', status);
+        }
+        else {
+            this.elements.translationStatus.removeAttribute('title');
         }
         this.elements.translationStatus.textContent = status;
         this.elements.translationStatus.hidden = !status;
@@ -9011,6 +9027,23 @@ function hasVisibleCompleteTranslation(model) {
             || model?.translationStatus === 'loading'
                 && (model.translationFailedBlocks || []).length === 0)
         && hasAvailableTranslation(model);
+}
+
+function outdatedTranslationLanguage(model) {
+    const outdated = normalizedCachedTranslationLanguages(
+        model.translationOutdatedLanguages
+    );
+    const requested = model.translationRequestedTargetLanguage
+        || model.translationHintTargetLanguage;
+    const visible = hasAvailableTranslation(model)
+        ? model.translationTargetLanguage
+        : '';
+    return [requested, model.translationConfiguredTargetLanguage].find(language => (
+        outdated.includes(language)
+        && language !== visible
+        && !model.translationCachedLanguages?.includes(language)
+        && !model.translationPartialLanguages?.includes(language)
+    )) || '';
 }
 
 function hasTranslationLanguageMismatch(model) {

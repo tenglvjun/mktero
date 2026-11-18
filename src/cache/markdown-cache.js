@@ -1,3 +1,4 @@
+import { TRANSLATION_PROFILE_ID } from '../ai/translation-profile.js';
 import { toUint8Array } from '../mineru/binary.js';
 import { MINERU_PARSER_PROFILE_ID } from '../mineru/parser-profile.js';
 import {
@@ -302,6 +303,17 @@ export class MarkdownCache {
         }
     }
 
+    // A reader can explain a cache miss from the entry index alone.
+    listOutdatedTranslationLanguages(cacheKey, currentProfile = TRANSLATION_PROFILE_ID) {
+        validateCacheKey(cacheKey);
+        return this.#withOperation(async () => {
+            const entryPath = this.#entryPath(cacheKey);
+            const metadata = await this.#readMetadata(entryPath, this.path.join(entryPath, METADATA_FILE), cacheKey);
+            const outdated = (metadata?.translations || []).filter(entry => entry.translationProfile !== currentProfile);
+            return [...new Set(outdated.map(entry => entry.targetLanguage))];
+        });
+    }
+
     getTranslationByLanguage(cacheKey, targetLanguage, identity = null) {
         validateCacheKey(cacheKey);
         validateTargetLanguage(targetLanguage);
@@ -338,7 +350,8 @@ export class MarkdownCache {
         const descriptors = metadata.translations || [];
         for (let index = descriptors.length - 1; index >= 0; index--) {
             const descriptor = descriptors[index];
-            if (descriptor.targetLanguage !== targetLanguage) continue;
+            if (descriptor.targetLanguage !== targetLanguage
+                || (identity && descriptor.translationProfile !== identity.translationProfile)) continue;
             try {
                 const record = await this.#readTranslationRecord(entryPath, descriptor);
                 if (identity && (record.promptVersion !== identity.promptVersion
@@ -366,9 +379,8 @@ export class MarkdownCache {
         ));
     }
 
-    // Copies the translations of one entry to another entry of the same PDF
-    // that has none yet: a parser profile change writes a new entry, and its
-    // reader reuses each translated block whose source text is unchanged.
+    // A new parser profile can reuse translations of unchanged source blocks
+    // from the same PDF, but only within the current translation profile.
     // Returns the number of translations copied.
     copyTranslations(fromCacheKey, toCacheKey) {
         validateCacheKey(fromCacheKey);
@@ -380,12 +392,13 @@ export class MarkdownCache {
     async #copyTranslations(fromCacheKey, toCacheKey) {
         const toPath = this.#entryPath(toCacheKey);
         const target = await this.#readMetadata(toPath, this.path.join(toPath, METADATA_FILE), toCacheKey);
-        if (!target || target.translations?.length) return 0;
+        if (!target || target.translations?.some(entry => entry.translationProfile === TRANSLATION_PROFILE_ID)) return 0;
         const fromPath = this.#entryPath(fromCacheKey);
         const source = await this.#readMetadata(fromPath, this.path.join(fromPath, METADATA_FILE), fromCacheKey);
         const descriptors = source?.translations || [];
         let copied = 0;
         for (const descriptor of descriptors) {
+            if (descriptor.translationProfile !== TRANSLATION_PROFILE_ID) continue;
             let record;
             try {
                 record = await this.#readTranslationRecord(fromPath, descriptor);
@@ -462,6 +475,7 @@ export class MarkdownCache {
                     translationKey,
                     translationBytes,
                     targetLanguage: translation.targetLanguage,
+                    ...(translation.translationProfile && { translationProfile: translation.translationProfile }),
                 },
             ];
             const nextMetadata = {
@@ -1031,6 +1045,7 @@ export class MarkdownCache {
                 translationKey: descriptor.translationKey,
                 translationBytes: descriptor.translationBytes,
                 targetLanguage: descriptor.targetLanguage,
+                ...(descriptor.translationProfile && { translationProfile: descriptor.translationProfile }),
             });
             acceptedFiles.add(descriptor.translationFile);
             acceptedKeys.add(descriptor.translationKey);
@@ -1101,6 +1116,9 @@ export class MarkdownCache {
         if (descriptor.targetLanguage
             && record.targetLanguage !== descriptor.targetLanguage) {
             throw new Error('Cached translation language is inconsistent');
+        }
+        if (descriptor.translationProfile !== record.translationProfile) {
+            throw new Error('Cached translation profile is inconsistent');
         }
         return record;
     }
@@ -1368,6 +1386,8 @@ function validateTranslationValue(value) {
         || typeof value.model !== 'string'
         || typeof value.targetLanguage !== 'string'
         || typeof value.promptVersion !== 'string'
+        || (value.translationProfile !== undefined && (typeof value.translationProfile !== 'string'
+            || !value.translationProfile || value.translationProfile.length > 128))
         || (value.partial !== undefined && typeof value.partial !== 'boolean')
         || partial !== Boolean(failedBlocks.length)
         || !Array.isArray(failedBlocks)
@@ -1442,6 +1462,7 @@ function translationValue(value) {
         model: value.model,
         targetLanguage: value.targetLanguage,
         promptVersion: value.promptVersion,
+        ...(value.translationProfile && { translationProfile: value.translationProfile }),
         partial: Boolean(value.partial),
         failedBlocks: failedBlocks.map(failure => ({
             id: failure.id,

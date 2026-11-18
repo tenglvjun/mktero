@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     assembleAlignedBlock,
     createAlignmentPlan,
+    verifyAlignedBlock,
 } from '../src/markdown/translation-alignment.js';
 import {
     collectMarkdownTranslationBlocks,
@@ -101,6 +102,23 @@ test('keeps protected image-only lines outside prose units and attaches post-pun
     const plan = createAlignmentPlan(block);
     assert.match(plan.units[0].sourceMarkdown, /^Value rose\. MKTEROPROTECTED\d+PLACEHOLDER$/u);
     assert.doesNotMatch(plan.units[1].sourceMarkdown, /MKTEROPROTECTED/u);
+});
+
+test('rejects stored alignment when a same-shaped list or table was reordered after assembly', () => {
+    for (const block of [
+        blockFor('- First\n- Second'),
+        blockFor('| Group | Result |\n| --- | --- |\n| First | One |\n| Second | Two |'),
+    ]) {
+        const { units } = createAlignmentPlan(block);
+        const translation = assembleAlignedBlock(block, units.map(({ id }, index) => ({
+            id, translatedMarkdown: `Translated ${index + 1}`,
+        })).reverse(), 'en-US');
+        assert.ok(verifyAlignedBlock(block, translation, 'en-US'));
+        const lines = translation.markdown.split('\n');
+        const reordered = [...lines.slice(0, -2), lines.at(-1), lines.at(-2)].join('\n');
+        assert.equal(validateTranslatedBlock(block, reordered), reordered);
+        assert.equal(verifyAlignedBlock(block, { ...translation, markdown: reordered }, 'en-US'), null);
+    }
 });
 
 test('rejects missing, duplicate, foreign, empty, displaced, and structurally unsafe results', () => {

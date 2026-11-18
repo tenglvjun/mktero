@@ -71,6 +71,27 @@ test('keeps the current Markdown visible while a forced reparse is running', () 
     assert.equal(loading.translationStatus, 'none');
 });
 
+test('snapshots the visible translation profile and outdated language state', () => {
+    const snapshot = snapshotReadyResult({
+        status: 'ready',
+        translationStatus: 'ready',
+        translationProfile: 'mktero-translation-profile-v1',
+        translationOutdatedLanguages: ['ja-JP'],
+        translationHintTargetLanguage: 'ja-JP',
+        translatedMarkdown: '# 논문',
+    });
+    const ready = createConversionReadyChanges(snapshot);
+    assert.equal(ready.translationProfile, 'mktero-translation-profile-v1');
+    assert.deepEqual(ready.translationOutdatedLanguages, ['ja-JP']);
+    assert.equal(ready.translationHintTargetLanguage, 'ja-JP');
+    assert.equal(ready.translatedMarkdown, '# 논문');
+
+    const loading = createConversionLoadingChanges(snapshot);
+    assert.equal(loading.translationProfile, '');
+    assert.deepEqual(loading.translationOutdatedLanguages, []);
+    assert.equal(loading.translationHintTargetLanguage, '');
+});
+
 test('tracks whether loading progress belongs to a resumed task', () => {
     assert.deepEqual(createConversionProgressChanges(42, {
         resumingTask: true,
@@ -200,9 +221,12 @@ test('uses the normal empty and error states without a previous result', () => {
         translationTargetLanguage: '',
         translationConfiguredTargetLanguage: '',
         translationRequestedTargetLanguage: '',
+        translationHintTargetLanguage: '',
         translationCachedLanguages: [],
         translationPartialLanguages: [],
+        translationOutdatedLanguages: [],
         translationKey: null,
+        translationProfile: '',
         translationSettingsIdentity: '',
         translationBlocks: [],
         translationSourceBlocks: [],
@@ -261,9 +285,12 @@ test('clears figures when a successful reparse has no assets', () => {
         translationTargetLanguage: '',
         translationConfiguredTargetLanguage: '',
         translationRequestedTargetLanguage: '',
+        translationHintTargetLanguage: '',
         translationCachedLanguages: [],
         translationPartialLanguages: [],
+        translationOutdatedLanguages: [],
         translationKey: null,
+        translationProfile: '',
         translationSettingsIdentity: '',
         translationBlocks: [],
         translationSourceBlocks: [],

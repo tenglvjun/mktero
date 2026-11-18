@@ -26,44 +26,6 @@ test('replaces an in-flight translation for the same document block', async () =
     assert.equal(await first, 'stale');
 });
 
-test('serializes upgrades and shares duplicate clicks without losing a committed sibling', async () => {
-    const tracker = new TranslationRequestTracker({ createAbortController: () => new AbortController() });
-    const committed = [];
-    const gate = Promise.withResolvers();
-    const start = id => tracker.enqueue(9, 'alignment', id, async signal => {
-        if (id === 'a') await gate.promise;
-        assert.equal(signal.aborted, false);
-        committed.push(id);
-        return [...committed];
-    });
-    const a = start('a');
-    const b = start('b');
-    assert.equal(start('a'), a);
-    gate.resolve();
-    assert.deepEqual(await a, ['a']);
-    assert.deepEqual(await b, ['a', 'b']);
-});
-
-test('canceling one queued popup leaves its neighbor intact; closing the tab cancels all', async () => {
-    const tracker = new TranslationRequestTracker({ createAbortController: () => new AbortController() });
-    const popup = new AbortController();
-    const gate = Promise.withResolvers();
-    const active = tracker.enqueue(9, 'alignment', 'a', async signal => {
-        await gate.promise;
-        return signal.aborted;
-    });
-    const skipped = tracker.enqueue(9, 'alignment', 'b', () => assert.fail('canceled block sent'), popup.signal);
-    const alive = tracker.enqueue(9, 'alignment', 'c', () => 3);
-    popup.abort();
-    gate.resolve();
-    assert.equal(await active, false);
-    await assert.rejects(skipped, { name: 'AbortError' });
-    assert.equal(await alive, 3);
-    const queued = tracker.enqueue(9, 'alignment', 'd', () => assert.fail('closed tab sent'));
-    tracker.cancelDocument(9);
-    await assert.rejects(queued, { name: 'AbortError' });
-});
-
 test('cancels one block without aborting another block in the document', async () => {
     const tracker = new TranslationRequestTracker({
         createAbortController: () => new AbortController(),
