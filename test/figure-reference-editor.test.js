@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 import { createLocalization } from '../src/i18n/localization.js';
 import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js';
+import { hoverReference } from './helpers/reference-hover.js';
 
 test('keeps restored parent and panel highlights and PDF navigation tied to the current document', async () => {
     const source = await makeRestoredFigureDocument();
@@ -21,8 +22,7 @@ test('keeps restored parent and panel highlights and PDF navigation tied to the 
         assert.equal(references.length, 2);
         references[0].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
         assert.ok(document.querySelector('.cm-mktero-figure-target-highlight'));
-        document.querySelectorAll('.cm-mktero-figure-reference')[1]
-            .dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true }));
+        hoverReference(dom.window, document.querySelectorAll('.cm-mktero-figure-reference')[1]);
         const popup = document.querySelector('.mktero-figure-preview-popup');
         assert.equal(popup.querySelectorAll('img').length, 1);
         popup.querySelector('.mktero-figure-source-button').click();
@@ -57,9 +57,7 @@ test('previews a captioned image from its prose figure reference', () => {
     assert.equal(reference?.textContent, 'Figure 1');
     assert.equal(reference?.getAttribute('role'), 'link');
     assert.equal(reference?.getAttribute('tabindex'), '0');
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
 
     const popup = document.querySelector('.mktero-figure-preview-popup');
     assert.equal(popup?.getAttribute('aria-label'), 'Figure preview');
@@ -134,9 +132,7 @@ test('localizes figure reference controls', () => {
         reference.getAttribute('aria-label'),
         '预览并跳转到 Figure 1.'
     );
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
     assert.equal(
         document.querySelector('.mktero-figure-preview-popup')
             ?.getAttribute('aria-label'),
@@ -166,8 +162,9 @@ test('previews every panel in a referenced shared-caption figure', () => {
         resolveImageURL: path => `blob:mktero-${path}`,
     });
 
-    document.querySelector('.cm-mktero-figure-reference').dispatchEvent(
-        new dom.window.MouseEvent('mouseover', { bubbles: true })
+    hoverReference(
+        dom.window,
+        document.querySelector('.cm-mktero-figure-reference')
     );
 
     const popup = document.querySelector('.mktero-figure-preview-popup');
@@ -254,9 +251,7 @@ test('jumps to and highlights a clicked figure reference for three seconds', () 
     };
     view.scrollDOM.scrollTop = 0;
     const reference = document.querySelector('.cm-mktero-figure-reference');
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
     reference.dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
         cancelable: true,

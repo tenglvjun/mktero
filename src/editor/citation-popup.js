@@ -25,6 +25,7 @@ export function createCitationPopup(parent, {
     const anchoredPopup = createAnchoredPopup(parent, {
         className: 'mktero-citation-popup',
         idPrefix: 'mktero-citation-popup',
+        closeDelay: 200,
     });
     let activeAnchor = null;
     let activeController = null;
@@ -267,6 +268,7 @@ export function createCitationPopup(parent, {
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
         contains: anchoredPopup.contains,
+        isOpen: anchoredPopup.isOpen,
         destroy() {
             activeController?.abort?.();
             activeController = null;

@@ -10,6 +10,7 @@ export function createTablePreviewPopup(parent, {
     const anchoredPopup = createAnchoredPopup(parent, {
         className: 'mktero-table-preview-popup',
         idPrefix: 'mktero-table-preview-popup',
+        closeDelay: 200,
         viewportPadding: 24,
     });
 
@@ -33,6 +34,7 @@ export function createTablePreviewPopup(parent, {
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
         contains: anchoredPopup.contains,
+        isOpen: anchoredPopup.isOpen,
         destroy: anchoredPopup.destroy,
     };
 }

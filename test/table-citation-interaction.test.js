@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 import { RenderedTableWidget } from '../src/editor/rendered-table-widget.js';
+import { hoverReference } from './helpers/reference-hover.js';
 
 const MARKDOWN = [
     '# Paper',
@@ -79,7 +80,7 @@ for (const correctable of [false, true]) {
         try {
             const citation = document.querySelector('.cm-mktero-table .cm-mktero-citation');
 
-            dispatch(dom, citation, 'mouseover');
+            hoverReference(dom.window, citation, { cancelable: true, button: 0 });
 
             assert.match(
                 document.querySelector('.mktero-citation-popup')?.textContent || '',

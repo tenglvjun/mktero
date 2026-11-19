@@ -814,6 +814,9 @@ export function createInlineMarkdownEditor({
                     tablePreviewPopup,
                     figurePreviewPopup,
                     annotationPopup,
+                    isHoverLocked: () => Boolean(activeCorrection
+                        || tableCorrectionEditing
+                        || translationSourcePopup.isOpen()),
                     openPageMarker: offset => (
                         openPageMarkerSourceLocation(offset)
                     ),

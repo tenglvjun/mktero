@@ -71,6 +71,7 @@ export function createTranslationSourcePopup(parent, {
         },
         close: anchoredPopup.close,
         contains: anchoredPopup.contains,
+        isOpen: anchoredPopup.isOpen,
         destroy: anchoredPopup.destroy,
     };
 }

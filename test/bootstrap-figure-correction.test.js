@@ -8,6 +8,7 @@ import { EditorView } from '@codemirror/view';
 import { createMinerUCacheKey, createZoteroMarkdownCache } from '../src/cache/markdown-cache.js';
 import { createZoteroMarkdownRevisionStore } from '../src/platform/zotero-markdown-revision-store.js';
 import { makeRestoredFigureDocument } from './helpers/restored-figure-fixture.js';
+import { hoverReference } from './helpers/reference-hover.js';
 
 // Bootstrap owns process globals, so this integration runs in its own test file.
 test('preserves a restored figure through bootstrap correction save and reopen', async t => {
@@ -137,8 +138,7 @@ test('preserves a restored figure through bootstrap correction save and reopen',
     buttons[0].click();
     const reopened = await waitFor(() => tabs.get('tab-2')?.container.querySelector('.mktero-tab-host')?.shadowRoot);
     await waitFor(() => reopened.querySelector('.cm-content')?.textContent.includes('Corrected body'));
-    reopened.querySelector('.cm-mktero-figure-reference')
-        .dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
+    hoverReference(window, reopened.querySelector('.cm-mktero-figure-reference'));
     assert.ok(reopened.querySelector('.mktero-figure-source-button'));
     assert.deepEqual(errors, []);
     // Both opens were local cache reads, but each one did ask the service which

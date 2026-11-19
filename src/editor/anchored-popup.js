@@ -6,6 +6,7 @@ export function createAnchoredPopup(parent, {
     idPrefix,
     viewportPadding = 12,
     constrainToParent = false,
+    closeDelay = 120,
 }) {
     const document = parent.ownerDocument;
     const ownerWindow = document.defaultView;
@@ -60,7 +61,7 @@ export function createAnchoredPopup(parent, {
         const root = parent.getRootNode?.();
         const activeElement = root?.activeElement || document.activeElement;
         if (popup?.contains(activeElement)) return;
-        closeTimer = ownerWindow.setTimeout(() => close('dismiss'), 120);
+        closeTimer = ownerWindow.setTimeout(() => close('dismiss'), closeDelay);
     };
 
     const reposition = () => {

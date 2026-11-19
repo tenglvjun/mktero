@@ -22,6 +22,7 @@ import {
 import { createVisibleTranslationPairs } from '../src/ui/markdown-window.js';
 import { selectedMarkdownAnnotation } from '../src/editor/inline-rendering.js';
 import { createAnnotationPopup } from '../src/editor/annotation-popup.js';
+import { hoverReference } from './helpers/reference-hover.js';
 
 function enterTableCellEditing(cell, ownerWindow) {
     cell.dispatchEvent(new ownerWindow.MouseEvent('dblclick', {
@@ -204,7 +205,14 @@ function assertSemanticReferenceOutranksAnnotation({
     reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
         bubbles: true,
     }));
-    for (const timer of [...scheduled.values()]) timer.callback();
+    reference.dispatchEvent(new dom.window.MouseEvent('mousemove', {
+        bubbles: true,
+        buttons: 0,
+    }));
+    for (const [timerID, timer] of [...scheduled]) {
+        if (!scheduled.delete(timerID)) continue;
+        timer.callback();
+    }
 
     assert.ok(document.querySelector(popupSelector));
     assert.equal(document.querySelector('.mktero-annotation-popup'), null);
@@ -5013,9 +5021,7 @@ test('renders citations inside rendered tables as interactive references', () =>
     );
     assert.equal(markdownCitation?.textContent, '16');
     assert.equal(htmlCitation?.textContent, '41');
-    htmlCitation?.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, htmlCitation);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /Q\. Kong\. Piano transcription\. 2021\./
@@ -5059,9 +5065,7 @@ test('renders table citations in bilingual documents with numbered references', 
         '.cm-mktero-html-table .cm-mktero-citation'
     );
     assert.equal(citation?.textContent, '41');
-    citation?.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citation);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /Q\. Kong/
@@ -5182,9 +5186,7 @@ test('recognizes a referenced MinerU table with a split heading and description'
         ['Parameters', 'Inclusion Criteria', 'Exclusion Criteria']
     );
 
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
     assert.equal(
         document.querySelector('.mktero-table-preview-caption')?.textContent,
         'Table 2 PICO criteria for inclusion and exclusion in systematic review.'
@@ -5229,9 +5231,7 @@ test('recognizes a referenced MinerU table with a plain-text Roman label', () =>
         ['BCI Tasks', 'Datasets']
     );
 
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
     assert.equal(
         document.querySelector('.mktero-table-preview-caption')?.textContent,
         'TABLE I OVERVIEW OF DOWNSTREAM BCI TASKS AND DATASETS.'
@@ -5305,9 +5305,7 @@ test('previews a uniquely captioned table from its prose reference', () => {
     assert.equal(reference?.getAttribute('role'), 'link');
     assert.equal(reference?.getAttribute('tabindex'), '0');
 
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
 
     const popup = document.querySelector('.mktero-table-preview-popup');
     assert.equal(popup?.getAttribute('aria-label'), 'Table preview');
@@ -5365,9 +5363,7 @@ test('jumps to and highlights a clicked table reference for three seconds', () =
     };
     view.scrollDOM.scrollTop = 0;
     const reference = document.querySelector('.cm-mktero-table-reference');
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
 
     reference.dispatchEvent(new dom.window.MouseEvent('click', {
         bubbles: true,
@@ -5461,9 +5457,7 @@ test('previews and highlights a referenced raw HTML table', () => {
     });
     const reference = document.querySelector('.cm-mktero-table-reference');
 
-    reference.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, reference);
     assert.deepEqual(
         [...document.querySelectorAll(
             '.mktero-table-preview-popup th, .mktero-table-preview-popup td'
@@ -5768,9 +5762,7 @@ test('shows resolved reference text when a rendered citation is hovered', () => 
     assert.ok(citations.every(citation => citation.getAttribute('role') === 'link'));
     assert.ok(citations.every(citation => citation.getAttribute('tabindex') === '0'));
 
-    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[0]);
 
     const popup = document.querySelector('.mktero-citation-popup');
     assert.equal(popup?.getAttribute('role'), 'dialog');
@@ -5855,9 +5847,7 @@ test('renders dollar-wrapped numeric citations emitted by the PDF converter', ()
         document.querySelector('.cm-content')?.textContent || '',
         /external APIs \[34\],alongside related systems \[30, 33\]\./
     );
-    citation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citation);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /Timo Schick et al\. Toolformer\. 2023\./
@@ -5900,9 +5890,7 @@ test('renders CJK prose beside dollar-wrapped numeric citations', () => {
         ['55', '56', '58', '56', '60', '77', '130']
     );
     assert.equal(document.querySelector('.cm-mktero-math'), null);
-    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[0]);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /第五十五项研究。/
@@ -5958,9 +5946,7 @@ test('renders citations recovered after a misplaced references heading', () => {
         /Prior work \[1\] and related systems \[2–3\]\./
     );
 
-    citations[1].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[1]);
     assert.equal(
         document.querySelectorAll('.mktero-citation-popup-item').length,
         2
@@ -6015,9 +6001,7 @@ test('does not make superscript footnotes interactive in bracket-style papers', 
         null
     );
 
-    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[0]);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /ReAct: Synergizing reasoning and acting/
@@ -6057,9 +6041,7 @@ test('renders HTML superscript citations as interactive reference links', () => 
         /<\/?sup>/
     );
 
-    citation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citation);
     const popup = document.querySelector('.mktero-citation-popup');
     assert.equal(
         popup?.querySelectorAll('.mktero-citation-popup-item').length,
@@ -6106,9 +6088,7 @@ test('renders bracketed LaTeX superscripts as citation superscripts', () => {
         document.querySelector('.cm-content')?.textContent || '',
         /death \[1-4\] \. Studies \[5\] \./
     );
-    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[0]);
     assert.equal(
         document.querySelectorAll('.mktero-citation-popup-item').length,
         4
@@ -6149,9 +6129,7 @@ test('keeps LaTeX superscript citations interactive instead of rendering math', 
         /\$|\^|\{|\}/
     );
 
-    citation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citation);
     assert.equal(
         document.querySelectorAll('.mktero-citation-popup-item').length,
         3
@@ -6187,9 +6165,7 @@ test('hovers LaTeX superscript citations with bare numbered references', () => {
 
     const citation = document.querySelector('.cm-mktero-citation');
     assert.equal(citation?.textContent, '1');
-    citation?.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citation);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /World Health Organization\. Global action plan\. 2018\./
@@ -6310,9 +6286,7 @@ test('keeps Unicode superscript citation glyphs at their native position', () =>
     assert.equal(citation?.textContent, '²⁻⁴');
     assert.ok(!citation?.classList.contains('cm-mktero-citation-superscript'));
 
-    citation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citation);
     assert.equal(
         document.querySelectorAll('.mktero-citation-popup-item').length,
         3
@@ -6361,9 +6335,7 @@ test('shows author affiliations instead of references for front-matter superscri
         /<\/?sup>/
     );
 
-    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[0]);
     let popup = document.querySelector('.mktero-citation-popup');
     assert.equal(popup?.getAttribute('aria-label'), 'Author affiliations');
     assert.match(
@@ -6392,9 +6364,7 @@ test('shows author affiliations instead of references for front-matter superscri
         /Department of Psychology, Stanford University\./
     );
 
-    citations.at(-1).dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations.at(-1));
     popup = document.querySelector('.mktero-citation-popup');
     assert.equal(popup?.getAttribute('aria-label'), 'Citation details');
     assert.match(popup?.textContent || '', /Actual cited paper/);
@@ -6484,9 +6454,7 @@ test('does not offer reference import for author affiliation popups', () => {
     ));
     assert.ok(affiliation);
 
-    affiliation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, affiliation);
     const popup = document.querySelector('.mktero-citation-popup');
     assert.equal(popup?.getAttribute('aria-label'), 'Author affiliations');
     assert.match(popup?.textContent || '', /Purdue University Correspondence/);
@@ -6530,9 +6498,7 @@ test('links an author affiliation before a corresponding-author symbol', () => {
             .map(element => element.textContent),
         ['1', ',**']
     );
-    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[0]);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /College of Health Solutions, Arizona State University, USA/
@@ -6686,9 +6652,7 @@ test('renders alphabetic author affiliations as interactive superscripts', () =>
     );
     assert.equal(document.querySelector('.cm-mktero-math'), null);
 
-    citations[0].dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citations[0]);
     const popup = document.querySelector('.mktero-citation-popup');
     assert.equal(citations[0].getAttribute('aria-label'), 'View author affiliation a');
     assert.match(popup?.textContent || '', /\[a\]Department of Surgery/);
@@ -6729,9 +6693,7 @@ test('opens every reference in a grouped citation from its popup', () => {
     };
 
     const citation = document.querySelector('.cm-mktero-citation');
-    citation.dispatchEvent(
-        new dom.window.MouseEvent('mouseover', { bubbles: true })
-    );
+    hoverReference(dom.window, citation);
     const rows = [...document.querySelectorAll('.mktero-citation-popup-item')];
     const targets = [...document.querySelectorAll('.mktero-citation-popup-primary')];
     assert.equal(rows.length, 2);
@@ -7456,9 +7418,7 @@ test('shows resolved references cited inside a shared figure caption', () => {
     );
 
     assert.equal(citation?.textContent, '1');
-    citation.dispatchEvent(new dom.window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(dom.window, citation);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /Alpha A\. Figure method\. Journal\. 2024\./
@@ -11656,9 +11616,7 @@ test('a footnote mark is not also decorated as a reference citation', () => {
     assert.equal(back?.closest('.cm-mktero-math'), null);
     assert.deepEqual(citations.map(citation => citation.textContent), ['2']);
 
-    citations[0].dispatchEvent(new window.MouseEvent('mouseover', {
-        bubbles: true,
-    }));
+    hoverReference(window, citations[0]);
     assert.match(
         document.querySelector('.mktero-citation-popup')?.textContent || '',
         /Beta B\. Second paper\. 2021\./
