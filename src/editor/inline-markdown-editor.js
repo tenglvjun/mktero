@@ -243,7 +243,9 @@ function normalizeReaderAlignmentUnits(pair, translatedBounds, compare, sourceLe
                 || comparison.some(range => !validReaderRange(range, { from: 0, to: viewLength }))))) {
             return [];
         }
-        return [{ ...translated, id: unit.id, source, comparison }];
+        return [{ ...translated, id: unit.id, source, comparison,
+            ...(unit.sourceKind === 'sentence-group' ? { sourceKind: unit.sourceKind } : {}),
+        }];
     }).sort((left, right) => left.from - right.from);
 }
 // The fallback copy below asks CodeMirror for the text it would have copied.
@@ -1406,7 +1408,10 @@ export function createInlineMarkdownEditor({
                         )))) continue;
                     seen.add(unit.id);
                     unit.source.forEach((source, index) => {
-                        hits.push(sourceExcerpt(pair, source, unit.comparison?.[index]));
+                        hits.push({
+                            ...sourceExcerpt(pair, source, unit.comparison?.[index]),
+                            ...(unit.sourceKind === 'sentence-group' ? { sourceKind: unit.sourceKind } : {}),
+                        });
                     });
                 }
             }
@@ -1632,6 +1637,7 @@ export function createInlineMarkdownEditor({
         }));
         const source = active.excerpts.length ? {
             ...active.excerpts[0], text: resolved.text, blocks: active.excerpts, isCurrent,
+            hasSentenceGroup: active.excerpts.some(excerpt => excerpt.sourceKind === 'sentence-group'),
         } : null;
         annotationPopup.close();
         translationSourcePopup.open({

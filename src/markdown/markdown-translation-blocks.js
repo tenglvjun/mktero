@@ -572,11 +572,12 @@ export function createDocumentTranslationViews(markdown, blocks, translations, {
 }
 
 function projectAlignmentUnits(block, aligned, comparisonRanges) {
-    return aligned.units.map(({ id }, index) => {
+    return aligned.units.map(({ id, sourceKind }, index) => {
         const translated = aligned.restoredRanges[index];
         const comparison = Number.isSafeInteger(block.comparisonTranslationFrom) ? comparisonRanges?.[index] : null;
         return {
             id,
+            ...(sourceKind === 'sentence-group' ? { sourceKind } : {}),
             sourceRanges: aligned.sourceRanges[index].map(range => offsetRange(range, block.sourceFrom)),
             comparisonSourceRanges: aligned.sourceRanges[index].map(range => offsetRange(range, block.comparisonSourceFrom)),
             translatedFrom: translated.from + block.translatedFrom,

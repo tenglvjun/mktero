@@ -139,6 +139,20 @@ test('reveals the matched source on demand and closes before its selection locat
     assert.deepEqual(calls, [{ args: [], closed: true }]);
 });
 
+for (const [locale, groupLabel, sentenceLabel] of [
+    ['zh-CN', '原文（含句子组）', '本段对应的原文'],
+    ['en-US', 'Original text (includes a sentence group)', 'Original for this passage'],
+]) {
+    test(`${locale}: identifies conservative sentence groups and clears the label on a new selection`, t => {
+        const f = fixture(t, { localization: createLocalization({ zoteroLocale: locale }) });
+        f.open({ source: { ...source, hasSentenceGroup: true }, previewExpanded: true });
+        assert.equal(f.query('.mktero-translation-source-label').textContent, groupLabel);
+        assert.equal(f.query('.mktero-translation-source-text').textContent, source.text);
+        f.open({ source });
+        assert.equal(f.query('.mktero-translation-source-label').textContent, sentenceLabel);
+    });
+}
+
 test('keeps the constructor revealSource fallback and passes the current source after closing', t => {
     const calls = [];
     const f = fixture(t, {

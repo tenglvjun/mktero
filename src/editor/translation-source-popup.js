@@ -45,6 +45,7 @@ export function createTranslationSourcePopup(parent, {
             const options = {
                 source,
                 text: String(source?.text || ''),
+                hasSentenceGroup: source?.hasSentenceGroup === true,
                 translatedText: typeof translatedText === 'string' ? translatedText : '',
                 locateSource,
                 annotation,
@@ -211,6 +212,8 @@ function createContent(document, t, initialOptions, {
         if (!preview) return;
         const { body, label, actions, locate, unavailable } = preview;
         const hasText = Boolean(options.text.trim());
+        label.textContent = t(options.hasSentenceGroup
+            ? 'ai.translationSourceGroupLabel' : 'ai.translationSourceLabel');
         if (body.textContent !== options.text) previewNeedsScrollReset = true;
         body.textContent = options.text;
         if (hasText) {

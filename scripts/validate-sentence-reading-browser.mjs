@@ -54,6 +54,14 @@ for (const block of [aligned, longAligned]) {
         'The document view must project the verified IDs');
 }
 
+const groupedSentences = ['Known result.', 'Chen et al. Smith repeated the trial.', 'Final observation.'];
+const groupedChinese = ['已确认的结果。', '句组对应的译文证据。', '最终观察结果。'];
+const groupedSource = groupedSentences.join(' ');
+const groupedBlocks = collectMarkdownTranslationBlocks(groupedSource);
+const groupedTranslations = [align(groupedBlocks[0], groupedSentences, groupedChinese)];
+const groupedViews = createDocumentTranslationViews(groupedSource, groupedBlocks, groupedTranslations, { targetLanguage: 'zh-CN' });
+const groupedDocument = { source: groupedSource, translations: groupedTranslations, views: groupedViews };
+
 const disjointViews = {
     ...views,
     blockRanges: views.blockRanges.map(range => {
@@ -934,6 +942,22 @@ async function checkView(browser, view, locale, capture) {
                 view, locale, source: fixture.source, label: 'verified table native original save',
             });
         }
+        await page.evaluate(options => reader.setDocument(options), { ...groupedDocument, view });
+        await settle(page);
+        const groupedParagraph = groupedChinese.join('');
+        const groupStart = groupedParagraph.indexOf('对应');
+        await selection(groupedParagraph, groupStart, groupStart + 2, true);
+        await clickAction(page, 'preview-source');
+        await expectReading(groupedSentences[1]);
+        assert.equal(await page.locator('.mktero-translation-source-label:visible').textContent(),
+            locale === 'zh-CN' ? '原文（含句子组）' : 'Original text (includes a sentence group)');
+        const firstStart = groupedParagraph.indexOf(groupedChinese[0]);
+        await selection(groupedParagraph, firstStart, firstStart + 2);
+        await clickAction(page, 'preview-source');
+        await expectReading(groupedSentences[0]);
+        assert.equal(await page.locator('.mktero-translation-source-label:visible').textContent(),
+            locale === 'zh-CN' ? '本段对应的原文' : 'Original for this passage');
+        console.log(`${view} ${locale}：保守句组局部反向选区、完整组原文及精度标签切换通过`);
         const savedAnnotations = (await page.evaluate(() => reader.counters())).annotations;
         for (const options of [{}, { table: true }, { virtual: true }, { disjoint: true }]) {
             try { await checkNavigation(page, view, options); }
