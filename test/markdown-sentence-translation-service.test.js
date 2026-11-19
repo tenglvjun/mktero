@@ -148,7 +148,7 @@ for (const [name, legacy] of [
 
 for (const [name, changes] of [
     ['missing explicit profile', { translationProfile: undefined }],
-    ['different explicit profile', { translationProfile: 'mktero-translation-profile-v2' }],
+    ['previous sentence segmentation profile', { translationProfile: 'mktero-translation-profile-v1' }],
     ['non-exact profile', { translationProfile: `${TRANSLATION_PROFILE_ID} ` }],
     ['different prompt', { promptVersion: v7 }],
     ['different settings identity', { settingsIdentity: JSON.stringify({ ...settingsIdentity(), model: 'previous-model' }) }],

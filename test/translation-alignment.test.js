@@ -32,6 +32,24 @@ test('plans canonical half-open spans around academic abbreviations and opaque M
     assert.equal(plan.units[0].sourceMarkdown.match(/MKTEROPROTECTED\d+PLACEHOLDER/gu).length, 4);
 });
 
+test('keeps sentence IDs across list items when a sentence ends with a lettered appendix reference', () => {
+    const sentences = [
+        'Inference with Qwen3.6-27B took 0.660 hours.',
+        'The score fell from 0.711 to 0.708.',
+        'We report the results in Appendix D.',
+        'However, the improvement was small.',
+    ];
+    const block = blockFor(`- ${sentences[0]} ${sentences[1]}\n- ${sentences[2]} ${sentences[3]}`);
+    assert.deepEqual(plannedSource(block), sentences);
+    const translations = ['推理耗时。', '得分略降。', '结果见附录 D。', '然而提升很小。'];
+    const response = createAlignmentPlan(block).units.map(({ id }, index) => ({ id, translatedMarkdown: translations[index] }));
+    const aligned = assembleAlignedBlock(block, response.reverse(), 'zh-CN');
+    const verified = verifyAlignedBlock(block, aligned, 'zh-CN');
+    assert.deepEqual(verified.sourceRanges.map(([{ from, to }]) => block.markdown.slice(from, to)), sentences);
+    assert.deepEqual(verified.restoredRanges.map(({ from, to }) => verified.markdown.slice(from, to)), translations);
+    assert.equal(plannedSource(blockFor('We thank D. Smith for the data.')), null);
+});
+
 test('attaches Chinese closing punctuation and Markdown closers to the preceding unit', () => {
     const block = blockFor('她说：“第一句！”**第二句。**「第三句？」最后一句。');
     assert.deepEqual(plannedSource(block), ['她说：“第一句！”', '**第二句。**', '「第三句？」', '最后一句。']);
