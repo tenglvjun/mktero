@@ -73,6 +73,8 @@ A selection split into more than 512 separate parts is refused with a message ra
 
 Common MinerU LaTeX math symbols and simple subscripts are normalized to the PDF's extracted text. Matching tolerates a few characters mangled by the PDF text layer, so selections containing formulas can still be located. A display formula whose LaTeX does not survive extraction falls back to that block's recorded OCR region.
 
+When loading a PDF annotation back into Markdown, Mktero uses its PDF position and surrounding text to distinguish repeated passages. If a page header or a different PDF reading order prevents one side from matching anywhere, a unique match on the other side is enough. Conflicting contexts or multiple remaining matches stay marked as ambiguous.
+
 A cross-page selection becomes one single-page Zotero highlight per page, keeping the whole Markdown selection navigable. A paragraph that resumes a page or two later is located the same way, across a full-page figure or running footer in between.
 
 #### Cross-page groups

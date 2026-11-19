@@ -209,6 +209,187 @@ test('uses PDF text context to disambiguate repeated text on one page', async ()
     assert.deepEqual(result.unmatched, []);
 });
 
+test('uses the unique following context when a PDF page header precedes a highlight', async () => {
+    const target = 'Phase 4: the final product.';
+    const summary = `<table><tr><td>${target} Identify a precise question.</td></tr></table>`;
+    const body = `${target} Finally, you can ask yourself which option to choose.`;
+    const markdown = `${summary}\n\n${body}`;
+    const annotation = {
+        id: 'PAGEHEAD',
+        type: 'highlight',
+        text: target,
+        pageIndex: 1,
+        sortIndex: '00001|000076|00360',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+        locateTextQuote: async () => ({
+            prefix: 'Journal running header | Page 2 | Comment ',
+            suffix: ' Finally, you can ask yourself which option to choose.',
+        }),
+    });
+
+    const result = await overlay.resolve(42, markdown, {
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 1, bbox: [0, 0, 1000, 1000] }],
+        }],
+    });
+    const from = markdown.lastIndexOf(target);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.matched[0].ranges, [{
+        from,
+        to: from + target.length,
+    }]);
+});
+
+test('uses the unique preceding context when the following PDF text changes reading order', async () => {
+    const target = 'repeated result';
+    const first = `Earlier summary before ${target} and summary after.`;
+    const second = `Study findings before ${target} and body after.`;
+    const markdown = `${first}\n\n${second}`;
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [{ id: 'ORDER001', text: target }] },
+        locateTextQuote: async () => ({
+            prefix: 'Study findings before ',
+            suffix: ' A floating caption follows in PDF text order.',
+        }),
+    });
+
+    const result = await overlay.resolve(42, markdown);
+    const from = markdown.lastIndexOf(target);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.matched[0].ranges, [{
+        from,
+        to: from + target.length,
+    }]);
+});
+
+test('does not choose between conflicting preceding and following PDF contexts', async () => {
+    const target = 'repeated result';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [{ id: 'CONFLICT', text: target }] },
+        locateTextQuote: async () => ({
+            prefix: 'First finding before ',
+            suffix: ' and second finding after.',
+        }),
+    });
+    const result = await overlay.resolve(42, [
+        `First finding before ${target} and first finding after.`,
+        '',
+        `Second finding before ${target} and second finding after.`,
+    ].join('\n'));
+
+    assert.deepEqual(result.matched, []);
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+});
+
+test('does not choose when the only matching side of the PDF context is repeated', async () => {
+    const target = 'repeated result';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [{ id: 'ONESIDE1', text: target }] },
+        locateTextQuote: async () => ({
+            prefix: 'Journal running header | Page 2 ',
+            suffix: ' and the same conclusion.',
+        }),
+    });
+    const result = await overlay.resolve(42, [
+        `First finding before ${target} and the same conclusion.`,
+        '',
+        `Second finding before ${target} and the same conclusion.`,
+    ].join('\n'));
+
+    assert.deepEqual(result.matched, []);
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+});
+
+test('keeps single-side evidence ambiguous when hyphen folding reveals a conflicting side', async () => {
+    const target = 'repeated result';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [{ id: 'FOLDCON1', text: target }] },
+        locateTextQuote: async () => ({
+            prefix: 'A specific introduction ',
+            suffix: ' and evidencebased conclusions.',
+        }),
+    });
+    const result = await overlay.resolve(42, [
+        `A specific introduction ${target} and a different ending.`,
+        '',
+        `A different introduction ${target} and evidence-based conclusions.`,
+    ].join('\n'));
+
+    assert.deepEqual(result.matched, []);
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+});
+
+test('does not use short single-side context beside an unmatched page header', async () => {
+    const target = 'repeated result';
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [{ id: 'SHORTCTX', text: target }] },
+        locateTextQuote: async () => ({
+            prefix: 'Journal running header | Page 2 ',
+            suffix: ' End.',
+        }),
+    });
+    const result = await overlay.resolve(42, `${target} End.\n\n${target} Other.`);
+
+    assert.deepEqual(result.matched, []);
+    assert.equal(result.unmatched[0].reason, 'ambiguous');
+});
+
+test('uses unique single-side PDF context after normalizing the annotation text', async () => {
+    const target = "participant's response";
+    const markdown = [
+        `Summary ${target} in an earlier finding.`,
+        '',
+        `Study ${target} supported the final conclusion.`,
+    ].join('\n');
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: {
+            extract: async () => [{ id: 'NORMCTX1', text: 'participant’s response' }],
+        },
+        locateTextQuote: async () => ({
+            prefix: 'Journal running header | Page 2 ',
+            suffix: ' supported the final conclusion.',
+        }),
+    });
+
+    const result = await overlay.resolve(42, markdown);
+    const from = markdown.lastIndexOf(target);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.equal(result.matched[0].matchKind, 'normalized');
+    assert.deepEqual(result.matched[0].ranges, [{ from, to: from + target.length }]);
+});
+
+test('uses the unique shared candidate when each PDF context matches several places', async () => {
+    const target = 'repeated result';
+    const markdown = [
+        `Shared introduction ${target} first conclusion.`,
+        '',
+        `Shared introduction ${target} shared conclusion.`,
+        '',
+        `Different introduction ${target} shared conclusion.`,
+    ].join('\n');
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [{ id: 'BOTHCTX1', text: target }] },
+        locateTextQuote: async () => ({
+            prefix: 'Shared introduction ',
+            suffix: ' shared conclusion.',
+        }),
+    });
+
+    const result = await overlay.resolve(42, markdown);
+    const from = markdown.indexOf(target, markdown.indexOf(target) + target.length);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.matched[0].ranges, [{ from, to: from + target.length }]);
+});
+
 test('uses folded PDF hyphen context to disambiguate Markdown text', async () => {
     const target = 'repeated result';
     const first = `self-esteem context before ${target}.`;

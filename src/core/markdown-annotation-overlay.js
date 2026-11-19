@@ -384,12 +384,15 @@ function selectTextQuoteCandidateRange(
     textQuote
 ) {
     if (!textQuote) return null;
-    const exactMatches = ranges.filter(range => textQuoteMatchesRange(
+    const exactContexts = ranges.map(range => textQuoteContextMatchesRange(
         normalizedIndex,
         range,
         textQuote,
         normalizePdfAnnotationText,
         MAX_PDF_ANNOTATION_TEXT_QUOTE_CONTEXT_CODE_POINTS
+    ));
+    const exactMatches = ranges.filter((_, index) => (
+        exactContexts[index].complete
     ));
     if (exactMatches.length) {
         return exactMatches.length === 1 ? exactMatches[0] : null;
@@ -397,17 +400,34 @@ function selectTextQuoteCandidateRange(
     const foldHyphens = value => (
         createHyphenFoldedPdfAnnotationTextIndex(value).text.trim()
     );
-    const foldedMatches = ranges.filter(range => textQuoteMatchesRange(
+    const foldedContexts = ranges.map(range => textQuoteContextMatchesRange(
         normalizedIndex,
         range,
         textQuote,
         foldHyphens,
         MAX_FOLDED_TEXT_QUOTE_CONTEXT_CODE_POINTS
     ));
-    return foldedMatches.length === 1 ? foldedMatches[0] : null;
+    const foldedMatches = ranges.filter((_, index) => (
+        foldedContexts[index].complete
+    ));
+    if (foldedMatches.length) {
+        return foldedMatches.length === 1 ? foldedMatches[0] : null;
+    }
+    // PDF text can put a page header or another column beside the quote.
+    // Keep a unique surviving side only when the other side finds no place;
+    // conflicting evidence, including after hyphen folding, stays ambiguous.
+    const prefixMatches = ranges.filter((_, index) => (
+        exactContexts[index].prefix || foldedContexts[index].prefix
+    ));
+    const suffixMatches = ranges.filter((_, index) => (
+        exactContexts[index].suffix || foldedContexts[index].suffix
+    ));
+    if (prefixMatches.length && suffixMatches.length) return null;
+    const matches = prefixMatches.length ? prefixMatches : suffixMatches;
+    return matches.length === 1 ? matches[0] : null;
 }
 
-function textQuoteMatchesRange(
+function textQuoteContextMatchesRange(
     normalizedIndex,
     range,
     textQuote,
@@ -420,6 +440,7 @@ function textQuoteMatchesRange(
     );
     const prefix = normalizeContext(textQuote.prefix);
     const suffix = normalizeContext(textQuote.suffix);
+    const matches = { prefix: false, suffix: false, complete: false };
     const comparisons = [];
     if (prefix.length >= MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH) {
         const before = normalizeContext(trailingCodePoints(
@@ -427,7 +448,8 @@ function textQuoteMatchesRange(
             contextCodePoints,
             normalizedRange.from
         ));
-        comparisons.push(before.endsWith(prefix));
+        matches.prefix = before.endsWith(prefix);
+        comparisons.push(matches.prefix);
     }
     if (suffix.length >= MIN_TEXT_QUOTE_CONTEXT_MATCH_LENGTH) {
         const after = normalizeContext(leadingCodePoints(
@@ -435,9 +457,11 @@ function textQuoteMatchesRange(
             contextCodePoints,
             normalizedRange.to
         ));
-        comparisons.push(after.startsWith(suffix));
+        matches.suffix = after.startsWith(suffix);
+        comparisons.push(matches.suffix);
     }
-    return comparisons.length > 0 && comparisons.every(Boolean);
+    matches.complete = comparisons.length > 0 && comparisons.every(Boolean);
+    return matches;
 }
 
 function selectPageCandidates(ranges, pageIndex, sourceMap, documentLength) {
