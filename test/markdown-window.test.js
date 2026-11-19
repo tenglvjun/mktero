@@ -15,7 +15,6 @@ import { selectExportMarkdown } from '../src/markdown/export-markdown-selector.j
 import {
     collectMarkdownTranslationBlocks,
     createDocumentTranslationViews,
-    mapSourceRangeToComparison,
 } from '../src/markdown/markdown-translation-blocks.js';
 
 const MARKDOWN_STYLES = readFileSync(
@@ -2017,32 +2016,28 @@ test('offers to retranslate only the translated block changed by a correction', 
     }
 });
 
-test('locates the original sentence in comparison coordinates before switching views', () => {
+function createTranslationSourceRevealView(t, { supportsFlashRanges = true } = {}) {
     const source = [
         'Lead paragraph sentence.',
         '',
-        'Original first sentence. Original second sentence.',
+        'Original first sentence. Intervening original stays clear. Original second sentence.',
     ].join('\n');
     const blocks = collectMarkdownTranslationBlocks(source);
     const translations = blocks.filter(block => block.translatable).map((block, index) => ({
         id: block.id,
-        markdown: index === 0
-            ? '\u5f15\u5bfc\u6bb5\u8bd1\u6587\u3002'
-            : '\u7b2c\u4e00\u53e5\u8bd1\u6587\u3002\u7b2c\u4e8c\u53e5\u8bd1\u6587\u3002',
+        markdown: index === 0 ? '引导段译文。' : '第一句译文。中间译文。第二句译文。',
     }));
     const views = createDocumentTranslationViews(source, blocks, translations);
     const target = views.blockRanges[1];
-    const sentenceFrom = target.sourceFrom + 'Original first sentence. '.length;
-    const sentenceTo = target.sourceTo;
-    const expected = mapSourceRangeToComparison(
-        { from: sentenceFrom, to: sentenceTo },
-        views.blockRanges
-    );
-    assert.ok(expected);
-
+    const ranges = ['Original first sentence.', 'Original second sentence.'].map(text => ({
+        from: source.indexOf(text), to: source.indexOf(text) + text.length,
+    }));
+    assert.notEqual(target.sourceFrom, target.comparisonSourceFrom,
+        'the fixture distinguishes canonical source from comparison offsets');
     const updates = [];
     const scrolled = [];
     const flashed = [];
+    const flashedRanges = [];
     const switches = [];
     const model = createModel({
         status: 'ready',
@@ -2060,9 +2055,11 @@ test('locates the original sentence in comparison coordinates before switching v
         comparisonTranslationRanges: views.comparisonTranslationRanges,
     });
     model.onSetTranslationView = view => {
-        // The presenter renders synchronously inside this callback, so the
-        // reveal target must already be on the model when it fires.
-        switches.push([view, model.revealMarkdownOffset, model.revealMarkdownTo]);
+        // The presenter consumes the canonical reveal during this synchronous render.
+        switches.push({
+            view, from: model.revealMarkdownOffset, to: model.revealMarkdownTo,
+            ranges: model.revealMarkdownRanges,
+        });
         model.translationView = view;
         tabView.render(model);
     };
@@ -2080,28 +2077,113 @@ test('locates the original sentence in comparison coordinates before switching v
                 scrollToOffset(offset);
             };
             editor.flashRange = (from, to) => flashed.push([from, to]);
+            if (supportsFlashRanges) {
+                editor.flashRanges = ranges => flashedRanges.push(ranges.map(range => ({ ...range })));
+            }
             return editor;
         },
     });
+    t.after(() => tabView.destroy());
+    const request = {
+        id: target.id,
+        from: target.translatedFrom,
+        to: target.translatedTo,
+        sourceFrom: ranges[1].from,
+        sourceTo: ranges[1].to,
+        sourceBlockFrom: target.sourceFrom,
+        sourceBlockTo: target.sourceTo,
+        comparisonSourceFrom: target.comparisonSourceFrom,
+        comparisonSourceTo: target.comparisonSourceTo,
+    };
+    return { source, target, views, ranges, request, updates, scrolled, flashed, flashedRanges, switches, model };
+}
 
-    try {
-        updates.at(-1).revealTranslationSource({
-            id: target.id,
-            from: target.translatedFrom,
-            to: target.translatedTo,
-            sourceFrom: sentenceFrom,
-            sourceTo: sentenceTo,
-            sourceBlockFrom: target.sourceFrom,
-            sourceBlockTo: target.sourceTo,
-        });
-        assert.deepEqual(switches, [['compare', expected.from, expected.to]]);
-        assert.ok(scrolled.includes(expected.from));
-        assert.deepEqual(flashed, [[expected.from, expected.to]]);
+test('locates the original sentence in canonical coordinates and returns to the full translation', t => {
+    const { source, views, ranges, request, updates, scrolled, flashed, flashedRanges, switches, model } =
+        createTranslationSourceRevealView(t);
+    const expected = ranges[1];
+
+    updates.at(-1).revealTranslationSource(request);
+    assert.deepEqual(switches, [{
+        view: 'original', from: expected.from, to: expected.to, ranges: [expected],
+    }]);
+    assert.deepEqual(scrolled, [expected.from]);
+    assert.deepEqual(flashedRanges, [[expected]]);
+    assert.deepEqual(flashed, [], 'an editor with flashRanges uses the precise-range API');
+    assert.equal(updates.at(-1).translationView, 'original');
+    assert.equal(updates.at(-1).markdown, source);
+    assert.deepEqual(updates.at(-1).translationPairs, []);
+    for (const key of ['revealMarkdownOffset', 'revealMarkdownTo', 'revealMarkdownRanges']) {
+        assert.equal(key in model, false, `${key} is consumed by the original render`);
     }
-    finally {
-        tabView.destroy();
-    }
+    updates.at(-1).setTranslationView('translated');
+    assert.deepEqual(switches, [
+        { view: 'original', from: expected.from, to: expected.to, ranges: [expected] },
+        { view: 'translated', from: undefined, to: undefined, ranges: undefined },
+    ]);
+    assert.equal(updates.at(-1).translationView, 'translated');
+    assert.equal(updates.at(-1).markdown, views.translatedMarkdown);
+    assert.deepEqual(flashedRanges, [[expected]], 'returning does not repeat the source flash');
 });
+
+test('locates disjoint canonical originals without flashing the intervening source', t => {
+    const { source, target, ranges, request, updates, scrolled, flashed, flashedRanges, switches } =
+        createTranslationSourceRevealView(t);
+    updates.at(-1).revealTranslationSource({
+        ...request,
+        blocks: ranges.map(range => ({
+            id: target.id, sourceFrom: range.from, sourceTo: range.to,
+        })),
+    });
+
+    assert.deepEqual(switches, [{
+        view: 'original', from: ranges[0].from, to: ranges[0].to, ranges,
+    }]);
+    assert.deepEqual(scrolled, [ranges[0].from]);
+    assert.deepEqual(flashedRanges, [ranges]);
+    assert.deepEqual(flashed, []);
+    assert.equal(updates.at(-1).markdown, source);
+    assert.ok(ranges[0].to < source.indexOf('Intervening original stays clear.'));
+    assert.ok(source.indexOf('Original second sentence.') === ranges[1].from);
+});
+
+test('falls back to flashing the first canonical range for editors without flashRanges', t => {
+    const { target, ranges, request, updates, flashed, flashedRanges } =
+        createTranslationSourceRevealView(t, { supportsFlashRanges: false });
+    updates.at(-1).revealTranslationSource({
+        ...request,
+        blocks: ranges.map(range => ({
+            id: target.id, sourceFrom: range.from, sourceTo: range.to,
+        })),
+    });
+    assert.deepEqual(flashed, [[ranges[0].from, ranges[0].to]]);
+    assert.deepEqual(flashedRanges, []);
+    assert.equal(updates.at(-1).translationView, 'original');
+});
+
+for (const [label, invalid] of [
+    ['missing canonical coordinates', { sourceFrom: undefined, sourceTo: undefined }],
+    ['negative canonical start', { sourceFrom: -1 }],
+    ['canonical end outside the document', { sourceTo: Number.MAX_SAFE_INTEGER }],
+    ['empty canonical range', { sourceFrom: 0, sourceTo: 0 }],
+    ['fractional canonical coordinates', { sourceFrom: 1.5 }],
+]) {
+    test(`refuses to locate a translated source with ${label}`, t => {
+        const { request, updates, scrolled, flashed, flashedRanges, switches, model } =
+            createTranslationSourceRevealView(t);
+        const count = updates.length;
+        updates.at(-1).revealTranslationSource({ ...request, ...invalid });
+        assert.deepEqual(switches, []);
+        assert.deepEqual(scrolled, []);
+        assert.deepEqual(flashed, []);
+        assert.deepEqual(flashedRanges, []);
+        assert.equal(updates.length, count);
+        assert.equal(model.translationView, 'translated');
+        for (const key of ['revealMarkdownOffset', 'revealMarkdownTo', 'revealMarkdownRanges']) {
+            assert.equal(key in model, false);
+        }
+    });
+}
 
 test('updates Markdown and PDF annotations as one editor document', () => {
     const updates = [];
@@ -2157,12 +2239,45 @@ test('updates Markdown and PDF annotations as one editor document', () => {
         sourceMarkdown: 'Important result.',
         translateOriginalBlockText: updates[0].translateOriginalBlockText,
         revealTranslationSource: updates[0].revealTranslationSource,
+        setTranslationView: updates[0].setTranslationView,
     }]);
-    // The two reading-path hooks are the window's own callbacks; their
+    // The reading-path hooks are the window's own callbacks; their
     // identity is not part of the contract this assertion guards.
     assert.equal(typeof updates[0].translateOriginalBlockText, 'function');
     assert.equal(typeof updates[0].revealTranslationSource, 'function');
+    assert.equal(typeof updates[0].setTranslationView, 'function');
     view.destroy();
+});
+
+test('forwards the editor document translation view host to the current tab model', () => {
+    const updates = [];
+    const switches = [];
+    const model = createModel({
+        status: 'ready',
+        markdown: 'Original paragraph.',
+        onSetTranslationView: next => switches.push(['initial', next]),
+    });
+    const { view } = createView(model, {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            const setDocument = editor.setDocument.bind(editor);
+            editor.setDocument = documentUpdate => {
+                updates.push(documentUpdate);
+                setDocument(documentUpdate);
+            };
+            return editor;
+        },
+    });
+    try {
+        const host = updates.at(-1).setTranslationView;
+        host('compare');
+        view.render({ ...model, onSetTranslationView: next => switches.push(['current', next]) });
+        host('translated');
+        assert.deepEqual(switches, [['initial', 'compare'], ['current', 'translated']]);
+    }
+    finally {
+        view.destroy();
+    }
 });
 
 test('forwards mapped source locations to the current tab model', async () => {
@@ -11308,40 +11423,49 @@ test('localizes the notes column and annotation segment in Simplified Chinese', 
     }
 });
 
-test('saves a translated selection as its original block without remapping it', async () => {
-    const source = 'Original paragraph here.';
-    const translated = '\u8fd9\u91cc\u662f\u8bd1\u6587\u3002';
-    const markdown = `${source}\n\n${translated}`;
-    const translatedFrom = markdown.indexOf(translated);
-    const { view, model, created, editorOptions } = createAnnotationWindow({
-        markdown,
-        translationView: 'compare',
-        translationBlockRanges: [{
-            id: 'translation-0',
-            sourceFrom: 0,
-            sourceTo: source.length,
-            comparisonSourceFrom: 0,
-            comparisonSourceTo: source.length,
-            comparisonTranslationFrom: translatedFrom,
-            comparisonTranslationTo: markdown.length,
-        }],
+for (const translationView of ['compare', 'translated']) {
+    test(`saves a ${translationView} selection as its canonical original block without remapping it`, async t => {
+        const paragraph = 'Original first sentence. Original second sentence.';
+        const source = `A source introduction.\n\n${paragraph}`;
+        const blocks = collectMarkdownTranslationBlocks(source);
+        const translations = blocks.filter(block => block.translatable).map((block, index) => ({
+            id: block.id,
+            markdown: index ? '第一句译文。第二句译文。' : '引言。',
+        }));
+        const views = createDocumentTranslationViews(source, blocks, translations);
+        const target = views.blockRanges[1];
+        const sourceRange = { from: target.sourceFrom, to: target.sourceTo };
+        assert.notEqual(sourceRange.from, target.comparisonSourceFrom);
+        assert.notEqual(sourceRange.from, target.translatedFrom);
+        const { view, model, created, editorOptions } = createAnnotationWindow({
+            markdown: source,
+            translationView,
+            translationStatus: 'ready',
+            translationBlocks: translations,
+            translationBlockRanges: views.blockRanges,
+            translatedMarkdown: views.translatedMarkdown,
+            comparisonMarkdown: views.comparisonMarkdown,
+            comparisonSourceRanges: views.comparisonSourceRanges,
+            comparisonTranslationRanges: views.comparisonTranslationRanges,
+        });
+        t.after(() => view.destroy());
+        view.render(model);
+
+        // Both preview save actions resolve the selection to complete original
+        // blocks. The window must preserve their canonical source coordinates.
+        await editorOptions.createMarkdownAnnotation({
+            text: paragraph,
+            comment: '',
+            color: '#ffd400',
+            ranges: [sourceRange],
+        }, { side: 'source', rangesAreSource: true });
+
+        assert.equal(created.length, 1);
+        assert.deepEqual(created[0].ranges, [sourceRange]);
+        assert.equal(created[0].text, paragraph);
+        assert.equal(source.slice(created[0].ranges[0].from, created[0].ranges[0].to), paragraph);
     });
-    view.render(model);
-
-    // The editor resolved the translated selection to the whole original block
-    // and read the original text for it. The window must save exactly that.
-    await editorOptions.createMarkdownAnnotation({
-        text: source,
-        comment: '',
-        color: '#ffd400',
-        ranges: [{ from: 0, to: source.length }],
-    }, { side: 'source', rangesAreSource: true });
-
-    assert.equal(created.length, 1);
-    assert.deepEqual(created[0].ranges, [{ from: 0, to: source.length }]);
-    assert.equal(created[0].text, source);
-    view.destroy();
-});
+}
 
 test('a whole-block annotation immediately appears in Translation and keeps its identity across views', async () => {
     const markdown = 'A rather long introduction.\n\nThe annotated paragraph.';

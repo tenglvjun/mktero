@@ -991,6 +991,7 @@ class MarkdownTabView {
                     revealTranslationSource: block => (
                         this.revealTranslationSource(block)
                     ),
+                    setTranslationView: next => this.model.onSetTranslationView?.(next),
                     translationView: translationViewName(
                         translatedView,
                         comparisonView
@@ -7929,49 +7930,39 @@ class MarkdownTabView {
     // reading position in one model update, so the reader does not see an
     // intermediate state.
     revealTranslationSource(block) {
-        // The bubble hands over canonical source coordinates. The comparison
-        // document renders the original at different offsets, so map before
-        // jumping; a translated-document offset must never be used here.
-        const canonical = Number.isSafeInteger(block?.sourceFrom)
-            && Number.isSafeInteger(block?.sourceTo)
-            && block.sourceTo > block.sourceFrom
-            ? { from: block.sourceFrom, to: block.sourceTo }
-            : null;
-        const mapped = canonical
-            ? mapSourceRangeToComparison(
-                canonical,
-                this.model?.translationBlockRanges || []
-            )
-            : null;
-        const from = Number(
-            mapped?.from
-            ?? block?.comparisonSourceFrom
-            ?? block?.sourceViewFrom
-        );
-        const to = Number(
-            mapped?.to
-            ?? block?.comparisonSourceTo
-            ?? block?.sourceViewTo
-        );
-        if (!Number.isFinite(from)) return;
+        // The translated popup carries canonical source ranges. Keep disjoint
+        // sentence hits separate when revealing the original document.
+        const length = String(this.model?.markdown || '').length;
+        const excerpts = Array.isArray(block?.blocks) && block.blocks.length
+            ? block.blocks : [block];
+        const ranges = excerpts.map(excerpt => ({
+            from: excerpt?.sourceFrom, to: excerpt?.sourceTo,
+        }));
+        if (!ranges.length || ranges.some(range => !Number.isSafeInteger(range.from)
+            || !Number.isSafeInteger(range.to) || range.from < 0
+            || range.to <= range.from || range.to > length)) return;
         if (typeof this.model.onSetTranslationView !== 'function') return;
-        // The presenter renders synchronously inside the view switch and that
-        // render consumes the reveal target, so set it before switching.
-        this.model.revealMarkdownOffset = from;
-        if (Number.isFinite(to) && to > from) {
-            this.model.revealMarkdownTo = to;
-        }
-        this.model.onSetTranslationView('compare');
+        // The presenter consumes these targets synchronously while switching.
+        this.model.revealMarkdownOffset = ranges[0].from;
+        this.model.revealMarkdownTo = ranges[0].to;
+        this.model.revealMarkdownRanges = ranges;
+        this.model.onSetTranslationView('original');
     }
 
     revealRequestedMarkdown() {
         const requestedOffset = Number(this.model?.revealMarkdownOffset);
         const requestedEnd = Number(this.model?.revealMarkdownTo);
+        const requestedRanges = this.model?.revealMarkdownRanges;
         if (!Number.isFinite(requestedOffset)) return;
         delete this.model.revealMarkdownOffset;
         delete this.model.revealMarkdownTo;
+        delete this.model.revealMarkdownRanges;
         this.restoreReadingPosition(requestedOffset);
-        if (Number.isFinite(requestedEnd) && requestedEnd > requestedOffset) {
+        if (Array.isArray(requestedRanges) && requestedRanges.length
+            && typeof this.editor?.flashRanges === 'function') {
+            this.editor.flashRanges(requestedRanges);
+        }
+        else if (Number.isFinite(requestedEnd) && requestedEnd > requestedOffset) {
             this.editor?.flashRange?.(requestedOffset, requestedEnd);
         }
     }

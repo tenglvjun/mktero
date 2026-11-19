@@ -43,11 +43,28 @@ export function createSelectionFlashExtension() {
     });
 }
 
+export function selectionFlashRanges(value, documentLength) {
+    const ranges = (Array.isArray(value) ? value : [value]).filter(range => (
+        Number.isSafeInteger(range?.from) && Number.isSafeInteger(range?.to)
+        && range.from >= 0 && range.to <= documentLength && range.to > range.from
+    )).sort((left, right) => left.from - right.from || left.to - right.to);
+    const merged = [];
+    for (const { from, to } of ranges) {
+        const previous = merged.at(-1);
+        if (previous && from <= previous.to) previous.to = Math.max(previous.to, to);
+        else merged.push({ from, to });
+    }
+    let remaining = MAX_FLASH_LENGTH;
+    return merged.flatMap(({ from, to }) => {
+        if (!remaining) return [];
+        const end = Math.min(to, from + remaining);
+        remaining -= end - from;
+        return [{ from, to: end }];
+    });
+}
+
 function decorationForRange(value, documentLength, mark) {
-    const from = Number.isSafeInteger(value?.from) ? value.from : -1;
-    const to = Number.isSafeInteger(value?.to) ? value.to : -1;
-    if (from < 0 || to > documentLength || to <= from) return Decoration.none;
-    return Decoration.set([
-        mark.range(from, Math.min(to, from + MAX_FLASH_LENGTH)),
-    ]);
+    const ranges = selectionFlashRanges(value, documentLength);
+    return ranges.length ? Decoration.set(ranges.map(range => mark.range(range.from, range.to)))
+        : Decoration.none;
 }

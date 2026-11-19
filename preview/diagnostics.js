@@ -149,7 +149,16 @@ export function createSelfTest(context) {
             // Hover opens the reference card; a click jumps to the reference.
             const citation = await waitFor(window, () => query('.cm-mktero-citation[data-citation-kind="reference"]'));
             if (!citation) throw new Error('Citation is not decorated');
-            citation.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true, composed: true }));
+            const box = citation.getBoundingClientRect();
+            const hover = {
+                bubbles: true,
+                composed: true,
+                clientX: box.left + box.width / 2,
+                clientY: box.top + box.height / 2,
+            };
+            citation.dispatchEvent(new window.MouseEvent('mouseover', hover));
+            // Scrolling suppresses previews until the pointer moves again.
+            citation.dispatchEvent(new window.MouseEvent('mousemove', hover));
             const popup = await waitFor(window, () => {
                 const node = query('.mktero-citation-popup');
                 return node && !node.hidden && node.getBoundingClientRect().height > 0 ? node : null;

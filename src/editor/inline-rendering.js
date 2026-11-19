@@ -56,6 +56,7 @@ import {
 } from './rendered-markdown-dom.js';
 import { replacePendingFigureImages } from './figure-placeholder.js';
 import { rootSelectionFor } from './root-selection.js';
+import { selectionFlashRanges, setSelectionFlash } from './selection-flash.js';
 import { createReferenceHoverController } from './reference-hover.js';
 import {
     blockHeightRecorder,
@@ -1064,6 +1065,7 @@ export function createInlineRenderingExtension({
         translationPairsSource: null,
         highlightedTranslationBlockID: null,
         selectedTranslationRanges: [],
+        selectionFlashRanges: [],
         annotationTargets: new Map(),
         editingRange: null,
         correctionManagementEnabled: false,
@@ -1106,6 +1108,8 @@ export function createInlineRenderingExtension({
             // document replacement always wins: the length-dependent ranges
             // have to be re-clipped even when the caller passes the same array.
             const documentChanged = transaction.docChanged;
+            if (documentChanged) context.selectionFlashRanges = [];
+            let selectionFlashChanged = false;
             let referenceHighlightChanged = false;
             let tableHighlightChanged = false;
             let figureHighlightChanged = false;
@@ -1245,6 +1249,12 @@ export function createInlineRenderingExtension({
                     context.selectedTranslationRanges = next;
                     translationSelectionChanged = true;
                 }
+                else if (effect.is(setSelectionFlash)) {
+                    context.selectionFlashRanges = selectionFlashRanges(
+                        effect.value, transaction.state.doc.length
+                    );
+                    selectionFlashChanged = true;
+                }
                 else if (effect.is(setInlineEditingRange)) {
                     if (effect.value === context.editingRange) continue;
                     context.editingRange = effect.value;
@@ -1288,6 +1298,7 @@ export function createInlineRenderingExtension({
                     translationFailuresChanged,
                     translationPairsChanged,
                     translationSelectionChanged,
+                    selectionFlashChanged,
                     translationPairHighlightChanged,
                     editingRangeChanged,
                     correctionStateChanged,
@@ -1318,6 +1329,7 @@ export function createInlineRenderingExtension({
                 || translationFailuresChanged
                 || translationPairsChanged
                 || translationSelectionChanged
+                || selectionFlashChanged
                 || translationPairHighlightChanged
                 || editingRangeChanged
                 || correctionStateChanged
@@ -4011,9 +4023,10 @@ function renderedRange(node, state, display, context) {
         return Decoration.replace({
             widget: new RenderedTableWidget({
                 source,
-                sourceSelections: context.selectedTranslationRanges.filter(range => (
-                    range.from < tableTo && range.to > tableFrom
-                )),
+                sourceSelections: [
+                    ...context.selectedTranslationRanges,
+                    ...context.selectionFlashRanges.map(range => ({ ...range, flash: true })),
+                ].filter(range => range.from < tableTo && range.to > tableFrom),
                 annotationSource: state.sliceDoc(node.from, node.to),
                 annotationSourceFrom: node.from,
                 caption: node.caption,
