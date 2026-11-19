@@ -113,6 +113,8 @@ Each request sends only the selected text to your configured AI provider and may
 
 Select even one word in a reliably aligned translation to look up the **original sentence** it came from. Full-document translation (v8) assigns IDs to the source sentences before sending them in batches to your configured AI provider. Mktero checks the returned IDs and Markdown structure. This identifies the source the model was asked to translate; it does not certify that the translation is correct or establish a word-by-word match.
 
+Dotted identifiers such as section numbers, model versions and decimals stay together during segmentation. When a sentence boundary is uncertain, Mktero conservatively groups the nearby sentences rather than discarding the other mappings in the block. Selecting any part of that translation shows the complete corresponding source group, labeled `Original text (includes a sentence group)`. The reader does not infer a sentence match inside the group. Lists and table cells keep their own boundaries; structures that cannot be safely aligned still require whole-block access.
+
 In `Translation` and on the translated side of `Bilingual`:
 
 1. Select translated text. Both views use the same compact toolbar with only `View original` and `Copy translation`.

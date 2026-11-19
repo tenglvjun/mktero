@@ -149,6 +149,7 @@ for (const [name, legacy] of [
 for (const [name, changes] of [
     ['missing explicit profile', { translationProfile: undefined }],
     ['previous sentence segmentation profile', { translationProfile: 'mktero-translation-profile-v1' }],
+    ['previous appendix segmentation profile', { translationProfile: 'mktero-translation-profile-v2' }],
     ['non-exact profile', { translationProfile: `${TRANSLATION_PROFILE_ID} ` }],
     ['different prompt', { promptVersion: v7 }],
     ['different settings identity', { settingsIdentity: JSON.stringify({ ...settingsIdentity(), model: 'previous-model' }) }],
@@ -241,6 +242,32 @@ for (const invalid of ['missing', 'duplicate', 'foreign']) {
         assert.deepEqual(result.blocks[1].alignment.units.map(unit => unit.translatedMarkdown), [...words.values()]);
     });
 }
+
+test('persists locally planned sentence groups through reordered responses, reopening and correction reuse', async () => {
+    const { service, records, calls } = fixture();
+    const group = 'Chen et al. Smith repeated the trial.';
+    const source = `Known result. ${group} Final observation.\n\nMore details are in Section A.1.2. Replication used model v2.3.`;
+    const result = await service.translateDocument({ documentKey, markdown: source });
+    assert.equal(result.partial, false);
+    assert.deepEqual(calls[0].map(entry => entry.units.length), [3, 2]);
+    assert.doesNotMatch(JSON.stringify(calls), /sourceKind|sentence-group/);
+    assert.deepEqual(result.blocks[0].alignment.units.map(unit => unit.sourceKind),
+        [undefined, 'sentence-group', undefined]);
+    assert.equal(result.blocks[0].alignment.units[1].translatedMarkdown, group);
+    assert.deepEqual(result.blockRanges[0].alignmentUnits.map(unit => unit.sourceKind),
+        [undefined, 'sentence-group', undefined]);
+    const stored = records.get(result.translationKey);
+    stored.blocks[0].alignment.units[0].sourceKind = 'sentence-group';
+    delete stored.blocks[0].alignment.units[1].sourceKind;
+    const reopened = await service.getCachedDocumentTranslation({ documentKey, markdown: source });
+    assert.deepEqual(reopened.blocks[0].alignment.units.map(unit => unit.sourceKind),
+        [undefined, 'sentence-group', undefined], 'source precision is reconstructed locally, never trusted from cache');
+    const corrected = await service.getCachedDocumentTranslation({ documentKey, markdown: `Preface.\n\n${source}` });
+    assert.deepEqual(corrected.blocks[1].alignment.units.map(unit => unit.sourceKind),
+        [undefined, 'sentence-group', undefined]);
+    assert.equal(corrected.blocks[1].alignment.units[1].translatedMarkdown, group);
+    assert.equal(calls.length, 1, 'reopening and relocating verified groups stays offline');
+});
 
 test('v8 corruption drops sentence provenance without marking the readable translation as failed', async () => {
     const { service, records, calls, writes } = fixture();

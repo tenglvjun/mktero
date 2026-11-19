@@ -13307,6 +13307,33 @@ for (const view of ['compare', 'translated']) {
         assert.deepEqual(created[0].annotation.ranges, [{ from: 0, to: source.length }]);
     });
 
+    test(`preserves a local sentence group and its label for a backward selection in ${view}`, async t => {
+        const group = 'Chen et al. Smith repeated the trial.';
+        const source = `Known result. ${group} Final observation.`;
+        const translated = ['First translated result.', 'Grouped translated evidence.', 'Final translated observation.'];
+        const { dom, document, views } = openTranslationSelectionEditor(t, source, [translated], view);
+        assert.deepEqual(views.blockRanges[0].alignmentUnits.map(unit => unit.sourceKind),
+            [undefined, 'sentence-group', undefined]);
+        const node = textNodeContaining(document.querySelector('.cm-content'), translated[1]);
+        const start = node.textContent.indexOf(translated[1]) + 8;
+        document.getSelection().setBaseAndExtent(node, start + 8, node, start);
+        document.dispatchEvent(new dom.window.Event('selectionchange'));
+        await settleFrame(dom.window);
+        openTranslationSourcePreview(document);
+        assert.equal(document.querySelector('.mktero-translation-source-label').textContent,
+            'Original text (includes a sentence group)');
+        assert.equal(document.querySelector('.mktero-translation-source-text').textContent, group);
+        if (view === 'compare') {
+            assert.deepEqual(selectedSourceMarks(document).map(mark => mark.textContent), [group]);
+        }
+        selectEditorText(dom, document, translated[2]);
+        await settleFrame(dom.window);
+        openTranslationSourcePreview(document);
+        assert.equal(document.querySelector('.mktero-translation-source-label').textContent,
+            'Original for this passage');
+        assert.equal(document.querySelector('.mktero-translation-source-text').textContent, 'Final observation.');
+    });
+
     test(`requires explicit whole-block access in legacy ${view} and ignores detached actions`, async t => {
         const source = 'Accuracy increased. Latency decreased.';
         const reads = [];

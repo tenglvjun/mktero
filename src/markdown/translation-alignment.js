@@ -11,7 +11,7 @@ const NUMBERED_ABBREVIATION = /\b(?:figs?|eqs?|refs?|secs?|nos?|vols?|pp|ch|tabs
 const ABBREVIATION = /\b(?:e\.g|i\.e|viz|vs|cf|approx|et[ \t]+al|dept|inc|ltd|etc|ph\.d|a\.m|p\.m)$/iu;
 const TITLE_ABBREVIATION = /\b(?:dr|prof|mr|mrs|ms|st)$/iu;
 const INITIALS = /(?:^|[^\p{L}\p{N}.])(?:[A-Z]\.)*[A-Z]$/u;
-const LETTERED_APPENDIX = /\b[Aa]ppendix[ \t]+[A-Z]$/u;
+const DOTTED_ABBREVIATION = /(?:^|[^\p{L}\p{N}.])(?:\p{L}+\.)+\p{L}+$/u;
 const UNIT_ABBREVIATION = /\d[\d.,]*[ \t]*(?:ms|s|min|h|sec|hrs?|cm|mm|km|g|kg|mol|mL)$/iu;
 const WRAPPERS = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'Link', 'Image']);
 const OPAQUE = new Set(['InlineCode', 'URL', 'Autolink', 'Escape', 'Entity']);
@@ -31,8 +31,8 @@ function planAlignment(block) {
     const protection = readProtection(block, block.requestMarkdown);
     const layout = typeof source === 'string' && readLayout(source, block.nodeType);
     if (!protection || protection.markdown !== source || !layout) return null;
-    // Reject partial overlap with a parser-owned marker or line break. There is
-    // no safe place to reconstruct it from an independently translated unit.
+    // Reject partial overlap with a parser-owned marker. There is no safe
+    // place to reconstruct it from an independently translated unit.
     const opaque = mergeOverlappingRanges([...layout.opaque, ...protection.edits.map(({ restoredFrom, restoredTo }) => ({
         from: restoredFrom, to: restoredTo,
     }))]);
@@ -40,13 +40,13 @@ function planAlignment(block) {
     const preservedImages = layout.images.filter(image => fullyProtected.has(`${image.from}:${image.to}`));
     // A partly protected image has a translatable alt or caption. Do not
     // claim that its image wrapper and its description are one sentence.
-    if (preservedImages.length !== layout.images.length) return null;
+    if (preservedImages.length !== layout.images.length
+        || layout.sections.some(section => hasHardBreak(source, section, opaque))) return null;
     const candidates = [];
     for (const [index, section] of layout.sections.entries()) {
         for (const prose of excludeImageLines(source, section, preservedImages)) {
-            const spans = sentenceRanges(source, prose, opaque, layout.closers);
-            if (!spans) return null;
-            for (const range of spans) candidates.push({ index, range });
+            const spans = sentenceRanges(source, prose, opaque, layout.closers, layout.wrappers);
+            for (const span of spans) candidates.push({ index, ...span });
         }
     }
     const reverseEdits = protection.edits.map(edit => ({
@@ -59,16 +59,15 @@ function planAlignment(block) {
     const sourceRanges = [];
     const sections = [];
     const ranges = [];
-    for (const [i, { index, range }] of candidates.entries()) {
+    for (const [i, { index, range, sourceKind }] of candidates.entries()) {
         const prose = protectedRanges[i];
-        if (!prose || /[\r\n]/u.test(source.slice(range.from, range.to))
-            || crossesWrapper(range, layout.wrappers)) return null;
-        const sourceMarkdown = block.requestMarkdown.slice(prose.from, prose.to);
+        if (!prose || crossesWrapper(range, layout.wrappers)) return null;
+        const sourceMarkdown = normalizeSoftNewlines(block.requestMarkdown.slice(prose.from, prose.to));
         if (!/\p{L}/u.test(sourceMarkdown.replace(PROTECTED_PLACEHOLDER_PATTERN, ''))) continue;
         sourceRanges.push([range]);
         ranges.push(prose);
         sections.push(index);
-        units.push({ id: '', sourceMarkdown });
+        units.push({ id: '', sourceMarkdown, ...(sourceKind ? { sourceKind } : {}) });
     }
     if (!units.length) return null;
     const stamp = sourceStamp(source);
@@ -104,7 +103,8 @@ function readLayout(source, nodeType) {
         const { from, to, name } = cursor;
         const node = cursor.node;
         const parent = node.parent?.name;
-        if (name === 'HTMLBlock' || name === 'HTMLTag' || name === 'Blockquote') unsupported = true;
+        if (name === 'HTMLBlock' || name === 'HTMLTag' || name === 'Comment'
+            || name === 'Blockquote' || name === 'HardBreak') unsupported = true;
         if (STRUCTURE.has(name)) {
             shape.push(node.firstChild || !/Mark(?:er)?$|Delimiter$|Break$/u.test(name)
                 ? name : `${name}:${source.slice(from, to)}`);
@@ -191,27 +191,46 @@ function mergeOverlappingRanges(ranges) {
     return merged;
 }
 
+function normalizeSoftNewlines(markdown) {
+    return markdown.replace(/\r\n?|\n/gu, ' ');
+}
+
+function hasHardBreak(source, section, opaque) {
+    let index = firstRangeEndingAfter(opaque, section.from);
+    // The parser does not consistently expose CR and CRLF hard breaks.
+    // Protected text and escaped backslashes still belong to their tokens.
+    for (const match of source.slice(section.from, section.to).matchAll(/(?: {2,}|\\)(?=\r\n?|\n)/gu)) {
+        const from = section.from + match.index;
+        while (index < opaque.length && opaque[index].to <= from) index++;
+        if (!opaque[index] || from < opaque[index].from) return true;
+    }
+    return false;
+}
+
 function* excludeImageLines(source, section, images) {
     let from = section.from;
     for (let i = firstRangeEndingAfter(images, from); i < images.length; i++) {
         const image = images[i];
         if (image.from >= section.to) break;
         if (image.from < from || image.to > section.to) continue;
-        const lineStart = Math.max(from, source.lastIndexOf('\n', image.from - 1) + 1);
-        const newline = source.indexOf('\n', image.to);
-        const lineEnd = newline < 0 ? section.to : Math.min(newline, section.to);
+        const lineStart = Math.max(from, source.lastIndexOf('\n', image.from - 1) + 1,
+            source.lastIndexOf('\r', image.from - 1) + 1);
+        const lf = source.indexOf('\n', image.to);
+        const cr = source.indexOf('\r', image.to);
+        const lineEnd = Math.min(lf < 0 ? section.to : lf, cr < 0 ? section.to : cr, section.to);
         if (source.slice(lineStart, image.from).trim() || source.slice(image.to, lineEnd).trim()) continue;
         if (lineStart > from) yield { from, to: lineStart };
-        from = lineEnd + 1;
+        from = lineEnd + (source[lineEnd] === '\r' && source[lineEnd + 1] === '\n' ? 2 : 1);
     }
     if (from < section.to) yield { from, to: section.to };
 }
 
-function sentenceRanges(source, section, opaque, closers) {
+function sentenceRanges(source, section, opaque, closers, wrappers) {
     const value = source.slice(section.from, section.to);
     const ranges = [];
     let start = section.from;
     let skipUntil = section.from;
+    let grouped = false;
     let opaqueIndex = firstRangeEndingAfter(opaque, start);
     for (const match of value.matchAll(SENTENCE_END)) {
         const from = section.from + match.index;
@@ -219,27 +238,37 @@ function sentenceRanges(source, section, opaque, closers) {
         while (opaqueIndex < opaque.length && opaque[opaqueIndex].to <= from) opaqueIndex++;
         if (opaque[opaqueIndex]?.from <= from) continue;
         let end = from + match[0].length;
+        let kind = 'end';
         if (match[0] === '.') {
-            const kind = periodKind(source, start, from, end, section.to);
-            if (kind === 'ambiguous') return null;
+            const lexicalStart = Math.max(start, opaque[opaqueIndex - 1]?.to ?? start);
+            kind = periodKind(source, lexicalStart, from, end, section.to, closers);
             if (kind === 'internal') continue;
         }
         end = sentenceSuffixEnd(source, end, section.to, closers);
-        if (match[0] === '.' && /^[ \t]*[a-z]/u.test(source.slice(end, Math.min(end + 32, section.to)))) return null;
         // Citation markers placed immediately after terminal punctuation
         // belong to the cited sentence, not the prose that follows them.
-        const citation = /^[ \t]*\[\d{1,4}[a-z]?(?:[ \t]*[-–—,;][ \t]*\d{1,4}[a-z]?)*\]/iu
+        const citation = /^[ \t\r\n]*\[\d{1,4}[a-z]?(?:[ \t]*[-–—,;][ \t]*\d{1,4}[a-z]?)*\]/iu
             .exec(source.slice(end, Math.min(section.to, end + 128)));
         if (citation) {
             const closingBracket = end + citation[0].length - 1;
             end = sentenceSuffixEnd(source, closingBracket, section.to, closers);
         }
         const range = trimmedRange(source, { from: start, to: end });
-        if (range) ranges.push(range);
+        // Keep uncertainty local: a later reliable boundary can still close
+        // this group. Never split a parser-owned wrapper between units.
+        if (kind === 'ambiguous'
+            || match[0] === '.' && /^[ \t\r\n]*\p{Ll}/u.test(source.slice(end, section.to))
+            || range && crossesWrapper(range, wrappers)) {
+            grouped = true;
+            skipUntil = end;
+            continue;
+        }
+        if (range) ranges.push({ range, ...(grouped ? { sourceKind: 'sentence-group' } : {}) });
         start = skipUntil = end;
+        grouped = false;
     }
     const tail = trimmedRange(source, { from: start, to: section.to });
-    if (tail) ranges.push(tail);
+    if (tail) ranges.push({ range: tail, ...(grouped ? { sourceKind: 'sentence-group' } : {}) });
     return ranges;
 }
 
@@ -265,22 +294,23 @@ function firstRangeEndingAfter(ranges, position) {
     return left;
 }
 
-function periodKind(source, start, from, end, limit) {
-    const before = source.slice(Math.max(start, from - 32), from);
-    const next = source.slice(end, Math.min(end + 64, limit));
-    if (/\d$/u.test(before) && /^\d/u.test(next)) return 'internal';
-    if (/(?:^|[^\p{L}\p{N}.])(?:[A-Za-z]\.)*[A-Za-z]$/u.test(before)
-        && /^[A-Za-z]\./u.test(next)) return 'internal';
+function periodKind(source, start, from, end, limit, closers) {
+    const before = normalizeSoftNewlines(source.slice(Math.max(start, from - 64), from));
+    const after = source.slice(end, Math.min(end + 64, limit));
+    // Dots joining lexical segments belong to the token. The trailing dot
+    // remains available as punctuation, independent of the token's spelling.
+    if (/[\p{L}\p{N}]$/u.test(before) && /^[\p{L}\p{N}]/u.test(after)) return 'internal';
+    const suffixEnd = sentenceSuffixEnd(source, end, limit, closers);
+    const next = normalizeSoftNewlines(source.slice(suffixEnd, Math.min(suffixEnd + 64, limit)));
     if (!next.trim()) return 'end';
     if (NUMBERED_ABBREVIATION.test(before) && /^[ \t]*(?:\(?\d|[IVXLCDM]+\b)/u.test(next)) return 'internal';
     if (TITLE_ABBREVIATION.test(before) && /^[ \t]+\p{Lu}/u.test(next)) return 'internal';
-    if (LETTERED_APPENDIX.test(before) && /^[ \t]+\p{Lu}/u.test(next)) return 'end';
     const abbreviated = ABBREVIATION.test(before) || UNIT_ABBREVIATION.test(before) || INITIALS.test(before);
     if (abbreviated && /^[ \t]*[\p{Ll},;:]/u.test(next)) return 'internal';
-    if (abbreviated && next.startsWith('](')) return 'internal';
-    if ((abbreviated || NUMBERED_ABBREVIATION.test(before) || TITLE_ABBREVIATION.test(before))
+    if ((abbreviated || DOTTED_ABBREVIATION.test(before)
+        || NUMBERED_ABBREVIATION.test(before) || TITLE_ABBREVIATION.test(before))
         && /^["'\p{Pe}\p{Pf}\s]*[\p{L}\p{N}]/u.test(next)) return 'ambiguous';
-    if (/^\s*[a-z]/u.test(next)) return 'ambiguous';
+    if (/^\s*\p{Ll}/u.test(next)) return 'ambiguous';
     return 'end';
 }
 
@@ -328,10 +358,11 @@ function assemble(block, planned, returnedUnits, separator) {
     let markdown = '';
     let cursor = 0;
     const protectedRanges = [];
-    const units = planned.plan.units.map(({ id, sourceMarkdown }, index) => {
-        const translatedMarkdown = typeof byID.get(id) === 'string' ? byID.get(id).trim() : '';
+    const units = planned.plan.units.map(({ id, sourceMarkdown, sourceKind }, index) => {
+        const returnedMarkdown = byID.get(id);
+        const translatedMarkdown = typeof returnedMarkdown === 'string' ? returnedMarkdown.trim() : '';
         if (!/[\p{L}\p{N}]/u.test(translatedMarkdown.replace(PROTECTED_PLACEHOLDER_PATTERN, ''))
-            || /[\r\n]|MKTEROBLOCK\d+(?:START|END)MARKER/u.test(translatedMarkdown)) {
+            || /[\r\n]|MKTEROBLOCK\d+(?:START|END)MARKER/u.test(returnedMarkdown)) {
             throw new Error('The Markdown alignment unit is missing, empty, or structurally invalid');
         }
         if (!sameItems(placeholders(sourceMarkdown), placeholders(translatedMarkdown))) throw protectedContentChangedError();
@@ -342,7 +373,7 @@ function assemble(block, planned, returnedUnits, separator) {
         protectedRanges.push({ from: markdown.length, to: markdown.length + translatedMarkdown.length });
         markdown += translatedMarkdown;
         cursor = to;
-        return { id, translatedMarkdown, sourceRanges: planned.plan.sourceRanges[index] };
+        return { id, translatedMarkdown, sourceRanges: planned.plan.sourceRanges[index], ...(sourceKind ? { sourceKind } : {}) };
     });
     markdown += block.requestMarkdown.slice(cursor);
     const protection = inspectTranslatedBlock(block, markdown);
