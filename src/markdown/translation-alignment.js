@@ -11,6 +11,7 @@ const NUMBERED_ABBREVIATION = /\b(?:figs?|eqs?|refs?|secs?|nos?|vols?|pp|ch|tabs
 const ABBREVIATION = /\b(?:e\.g|i\.e|viz|vs|cf|approx|et[ \t]+al|dept|inc|ltd|etc|ph\.d|a\.m|p\.m)$/iu;
 const TITLE_ABBREVIATION = /\b(?:dr|prof|mr|mrs|ms|st)$/iu;
 const INITIALS = /(?:^|[^\p{L}\p{N}.])(?:[A-Z]\.)*[A-Z]$/u;
+const LETTERED_APPENDIX = /\b[Aa]ppendix[ \t]+[A-Z]$/u;
 const UNIT_ABBREVIATION = /\d[\d.,]*[ \t]*(?:ms|s|min|h|sec|hrs?|cm|mm|km|g|kg|mol|mL)$/iu;
 const WRAPPERS = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'Link', 'Image']);
 const OPAQUE = new Set(['InlineCode', 'URL', 'Autolink', 'Escape', 'Entity']);
@@ -273,6 +274,7 @@ function periodKind(source, start, from, end, limit) {
     if (!next.trim()) return 'end';
     if (NUMBERED_ABBREVIATION.test(before) && /^[ \t]*(?:\(?\d|[IVXLCDM]+\b)/u.test(next)) return 'internal';
     if (TITLE_ABBREVIATION.test(before) && /^[ \t]+\p{Lu}/u.test(next)) return 'internal';
+    if (LETTERED_APPENDIX.test(before) && /^[ \t]+\p{Lu}/u.test(next)) return 'end';
     const abbreviated = ABBREVIATION.test(before) || UNIT_ABBREVIATION.test(before) || INITIALS.test(before);
     if (abbreviated && /^[ \t]*[\p{Ll},;:]/u.test(next)) return 'internal';
     if (abbreviated && next.startsWith('](')) return 'internal';
