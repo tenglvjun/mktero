@@ -195,6 +195,39 @@ function translatedSelectionRanges(view, range) {
     return selected;
 }
 
+function translationSelectionPoint(view, node, offset) {
+    const element = (node.nodeType === 1 ? node : node.parentElement)?.closest(
+        '.cm-mktero-table[data-markdown-from], .cm-mktero-html-table[data-markdown-from], .cm-line'
+    );
+    if (!element || !view.contentDOM.contains(element)) return null;
+    const table = element.hasAttribute('data-markdown-from');
+    const from = table ? Number(element.dataset.markdownFrom) : view.posAtDOM(element, 0);
+    const range = element.ownerDocument.createRange();
+    range.selectNodeContents(element);
+    range.setEnd(node, offset);
+    return { from, table, text: element.textContent, offset: range.toString().length };
+}
+
+function restoredTranslationDOMPoint(view, point) {
+    if (!point) return null;
+    const selector = point.table
+        ? '.cm-mktero-table[data-markdown-from], .cm-mktero-html-table[data-markdown-from]'
+        : '.cm-line';
+    const element = [...view.contentDOM.querySelectorAll(selector)].find(candidate => (
+        (point.table ? Number(candidate.dataset.markdownFrom) : view.posAtDOM(candidate, 0)) === point.from
+    ));
+    // Character offsets are reusable across decoration wrappers only while the
+    // rendered text is unchanged. Never relocate a selection by text search.
+    if (!element || element.textContent !== point.text) return null;
+    const walker = element.ownerDocument.createTreeWalker(element, 4);
+    let offset = point.offset;
+    while (walker.nextNode()) {
+        if (offset <= walker.currentNode.length) return { node: walker.currentNode, offset };
+        offset -= walker.currentNode.length;
+    }
+    return null;
+}
+
 function normalizeReaderAlignmentUnits(pair, translatedBounds, compare, sourceLength, viewLength) {
     if (!Array.isArray(pair.alignmentUnits)) return [];
     return pair.alignmentUnits.flatMap(unit => {
@@ -366,6 +399,7 @@ export function createInlineMarkdownEditor({
     shouldAutoTranslateSelection,
     copySelectionTranslation,
     revealTranslationSource = null,
+    setTranslationView = null,
     translateOriginalBlockText = null,
     onCommitCorrection,
     onRestoreCorrection,
@@ -378,6 +412,7 @@ export function createInlineMarkdownEditor({
     // The window can supply the hosts with each document.
     let hostTranslateOriginalBlockText = translateOriginalBlockText;
     let hostRevealTranslationSource = revealTranslationSource;
+    let hostSetTranslationView = setTranslationView;
     if (!parent) throw new Error(t('error.editorParentRequired'));
     const ownerWindow = parent.ownerDocument?.defaultView;
     if (!ownerWindow) throw new Error(t('error.editorWindowRequired'));
@@ -413,9 +448,7 @@ export function createInlineMarkdownEditor({
     const translationSourcePopup = createTranslationSourcePopup(parent, {
         localization,
         createMarkdownAnnotation: saveSelectionAnnotation,
-        revealSource: source => {
-            if (source?.isCurrent?.()) hostRevealTranslationSource?.(source);
-        },
+        copyTranslation: copySelectionTranslation,
     });
     const annotationPopup = createAnnotationPopup(parent, {
         localization,
@@ -613,7 +646,7 @@ export function createInlineMarkdownEditor({
         navigationForwardStack,
         navigationBackStack
     );
-    const flashEditorRange = (from, to) => {
+    const flashEditorRanges = ranges => {
         activateDOMGlobals(ownerWindow);
         if (!view) return;
         if (selectionFlashTimer !== null) {
@@ -621,12 +654,17 @@ export function createInlineMarkdownEditor({
             selectionFlashTimer = null;
         }
         const length = view.state.doc.length;
-        const start = Math.max(0, Math.trunc(Number(from) || 0));
-        const end = Math.min(length, Math.trunc(Number(to) || 0));
-        if (end <= start) return;
-        const effects = [setSelectionFlash.of({ from: start, to: end })];
-        const expand = markdownSectionExpandEffect(view.state, start);
-        if (expand) effects.push(expand);
+        const valid = ranges.flatMap(range => {
+            const start = Math.max(0, Math.trunc(Number(range?.from) || 0));
+            const end = Math.min(length, Math.trunc(Number(range?.to) || 0));
+            return end > start ? [{ from: start, to: end }] : [];
+        });
+        if (!valid.length) return;
+        const effects = [setSelectionFlash.of(valid)];
+        for (const range of valid) {
+            const expand = markdownSectionExpandEffect(view.state, range.from);
+            if (expand) effects.push(expand);
+        }
         view.dispatch({ effects });
         if (typeof ownerWindow.setTimeout !== 'function') return;
         selectionFlashTimer = ownerWindow.setTimeout(() => {
@@ -635,6 +673,7 @@ export function createInlineMarkdownEditor({
             view.dispatch({ effects: setSelectionFlash.of(null) });
         }, 1200);
     };
+    const flashEditorRange = (from, to) => flashEditorRanges([{ from, to }]);
     const activateCitation = (editorView, target) => {
         recordNavigationPoint();
         referenceFeatures.citation.highlight.activate(editorView, target);
@@ -727,6 +766,10 @@ export function createInlineMarkdownEditor({
     );
     let activeTranslationSelection = null;
     let translationPopupEpoch = 0;
+    let translationReturnPoint = null;
+    let translationReturnElement = null;
+    let translationReturnFrame = null;
+    let translationNavigationInProgress = false;
     const removeDOMActivation = installDOMActivation(
         parent,
         ownerWindow,
@@ -749,15 +792,21 @@ export function createInlineMarkdownEditor({
                     && editorClock() - sameTextRefreshAt
                         < SAME_TEXT_REFRESH_SCROLL_MS;
                 const keepAnnotation = annotationPopup.isNoteOpen()
-                    || restoringAfterRefresh
-                    || (activeTranslationSelection?.view === 'compare'
-                        && annotationPopup.isSelectionOpen()
-                        && view.scrollDOM.contains(event.target));
+                    || restoringAfterRefresh;
+                // Resizing can make CodeMirror correct its scroll anchor a
+                // frame later. Keep the same source preview through that
+                // layout adjustment. A wheel in the body still dismisses it.
+                const keepTranslation = event.type === 'scroll'
+                    && event.target === view.scrollDOM
+                    && activeTranslationSelection?.doc === view.state.doc
+                    && translationSourcePopup.isOpen();
                 for (const popup of interactionPopups) {
-                    if (!(keepAnnotation && popup === annotationPopup)) {
+                    if (!(keepAnnotation && popup === annotationPopup)
+                        && !(keepTranslation && popup === translationSourcePopup)) {
                         popup.close();
                     }
                 }
+                if (keepTranslation) renderTranslationSelection(activeTranslationSelection);
             }
             const isEditorScroll = event.type === 'scroll'
                 && event.target === view.scrollDOM;
@@ -1330,6 +1379,7 @@ export function createInlineMarkdownEditor({
             const blocks = [];
             const hits = [];
             const unaligned = [];
+            const translatedRanges = [];
             for (const pair of currentTranslationPairs) {
                 if (pair.sourceFallback) continue;
                 const selected = ranges.flatMap(range => {
@@ -1340,6 +1390,7 @@ export function createInlineMarkdownEditor({
                         ? [{ from, to }] : [];
                 });
                 if (!selected.length) continue;
+                translatedRanges.push(...selected);
                 blocks.push(pair);
                 if (pair.sourceFrom == null) continue;
                 // Only the projected alignment units identify a precise source passage.
@@ -1362,6 +1413,12 @@ export function createInlineMarkdownEditor({
             if (!blocks.length) return null;
             return {
                 key: ranges.map(range => `${range.from}:${range.to}`).join(','),
+                ranges,
+                domPoints: [
+                    translationSelectionPoint(view, range.startContainer, range.startOffset),
+                    translationSelectionPoint(view, range.endContainer, range.endOffset),
+                ],
+                translatedText: visibleMarkdownTextForRanges(currentTranslationMarkdown, translatedRanges),
                 blocks, hits, unaligned,
             };
         }
@@ -1387,47 +1444,122 @@ export function createInlineMarkdownEditor({
         && Number(element.dataset.translationSourceFrom) === block.viewSourceFrom
         && Number(element.dataset.translationSourceTo) === block.viewSourceTo);
 
-    const translationSourceDirection = block => {
-        if (!Number.isSafeInteger(block.viewSourceFrom)
-            || !Number.isSafeInteger(block.viewSourceTo)) return null;
+    const clearTranslationReturn = () => {
+        translationReturnPoint = null;
+        translationReturnElement?.remove();
+        translationReturnElement = null;
+        if (translationReturnFrame !== null) {
+            ownerWindow.cancelAnimationFrame?.(translationReturnFrame);
+            translationReturnFrame = null;
+        }
+    };
+    const returnToTranslation = () => {
+        const point = translationReturnPoint;
+        if (!point || destroyed || point.sourceMarkdown !== currentTranslationSourceMarkdown) {
+            clearTranslationReturn();
+            return;
+        }
+        translationNavigationInProgress = true;
         try {
-            const viewport = view.scrollDOM.getBoundingClientRect();
-            if (!(viewport.bottom > viewport.top)) return null;
-            const rect = markedSourceCell(block)?.getBoundingClientRect();
-            if (rect && rect.bottom > rect.top) {
-                if (rect.bottom <= viewport.top) return 'above';
-                if (rect.top >= viewport.bottom) return 'below';
-                return null;
+            if (currentTranslationView !== point.view) hostSetTranslationView?.(point.view);
+        }
+        finally {
+            translationNavigationInProgress = false;
+        }
+        if (view.state.doc.toString() !== point.markdown || currentTranslationView !== point.view) {
+            clearTranslationReturn();
+            return;
+        }
+        clearTranslationReturn();
+        invalidateTranslationSelection();
+        activateDOMGlobals(ownerWindow);
+        const from = point.ranges[0].from;
+        const to = point.ranges.at(-1).to;
+        view.dispatch({ selection: { anchor: from, head: to } });
+        view.focus();
+        const selectionEpoch = annotationSelectionClearEpoch;
+        const restoredDocument = view.state.doc;
+        const isCurrent = () => !destroyed && view.state.doc === restoredDocument
+            && currentTranslationView === point.view
+            && currentTranslationSourceMarkdown === point.sourceMarkdown
+            && annotationSelectionClearEpoch === selectionEpoch;
+        holdNavigationReveal(view, point.scrollTop);
+        view.scrollDOM.scrollTop = point.scrollTop;
+        view.scrollDOM.scrollLeft = point.scrollLeft;
+        const restore = attempt => {
+            if (!isCurrent()) return;
+            // Read only after CodeMirror has rendered the returned viewport.
+            // The saved DOM descriptors also cover table replacement widgets,
+            // whose characters domAtPos() cannot address.
+            view.requestMeasure({
+                read: () => isCurrent() ? point.domPoints.map(saved => (
+                    restoredTranslationDOMPoint(view, saved)
+                )) : null,
+                write: points => {
+                    if (!isCurrent() || !points) return;
+                    if (points.every(Boolean)) {
+                        const range = ownerWindow.document.createRange();
+                        range.setStart(points[0].node, points[0].offset);
+                        range.setEnd(points[1].node, points[1].offset);
+                        const selection = rootSelectionFor(parent);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                        scheduleTranslationSelectionUpdate();
+                    }
+                    else if (attempt < 2 && typeof ownerWindow.requestAnimationFrame === 'function') {
+                        translationReturnFrame = ownerWindow.requestAnimationFrame(() => {
+                            translationReturnFrame = null;
+                            restore(attempt + 1);
+                        });
+                    }
+                    else flashEditorRange(from, to);
+                    view.scrollDOM.scrollTop = point.scrollTop;
+                    view.scrollDOM.scrollLeft = point.scrollLeft;
+                },
+            });
+        };
+        restore(0);
+    };
+    const locateTranslationSource = (active, source) => {
+        if (destroyed || activeTranslationSelection !== active || view.state.doc !== active.doc) return;
+        if (active.view === 'translated' && (typeof hostRevealTranslationSource !== 'function'
+            || typeof hostSetTranslationView !== 'function')) return;
+        clearTranslationReturn();
+        translationReturnPoint = {
+            view: active.view,
+            markdown: view.state.doc.toString(),
+            sourceMarkdown: currentTranslationSourceMarkdown,
+            ranges: active.ranges,
+            domPoints: active.domPoints,
+            scrollTop: view.scrollDOM.scrollTop,
+            scrollLeft: view.scrollDOM.scrollLeft,
+        };
+        recordNavigationPoint();
+        if (active.view === 'compare') {
+            const cell = markedSourceCell(source);
+            if (cell?.scrollIntoView) cell.scrollIntoView({ block: 'center' });
+            else requestEditorScroll(view, source.viewSourceFrom, active.doc, true, 'center');
+        }
+        else {
+            translationNavigationInProgress = true;
+            try {
+                hostRevealTranslationSource(source);
             }
-            const origin = view.documentTop;
-            const last = view.lineBlockAt(block.viewSourceTo - 1);
-            if (origin + last.bottom <= viewport.top) return 'above';
-            const first = view.lineBlockAt(block.viewSourceFrom);
-            if (origin + first.top >= viewport.bottom) return 'below';
+            finally {
+                translationNavigationInProgress = false;
+            }
         }
-        catch {
-            return null;
-        }
-        return null;
+        if (!translationReturnPoint) return;
+        const button = ownerWindow.document.createElementNS(XHTML_NAMESPACE, 'button');
+        button.type = 'button';
+        button.className = 'mktero-translation-return';
+        button.dataset.action = 'return-to-translation';
+        button.textContent = t('ai.translationSourceReturn');
+        button.addEventListener('mousedown', event => event.preventDefault());
+        button.addEventListener('click', returnToTranslation);
+        parent.appendChild(button);
+        translationReturnElement = button;
     };
-
-    const firstOffscreenSource = blocks => {
-        for (const block of blocks) {
-            const direction = translationSourceDirection(block);
-            if (direction) return { block, direction };
-        }
-        return null;
-    };
-    const onTranslationSelectionScroll = () => {
-        const active = activeTranslationSelection;
-        if (active?.view !== 'compare' || !annotationPopup.isSelectionOpen()) return;
-        const next = firstOffscreenSource(active.excerpts);
-        const previous = active.offscreen;
-        if (next?.block !== previous?.block || next?.direction !== previous?.direction) {
-            renderTranslationSelection(active, next);
-        }
-    };
-    view.scrollDOM.addEventListener('scroll', onTranslationSelectionScroll, { passive: true });
 
     const applyTranslationSelection = () => {
         translationSelectionScheduled = false;
@@ -1445,7 +1577,7 @@ export function createInlineMarkdownEditor({
             doc: view.state.doc,
             view: currentTranslationView,
             anchor: selectionAnchor(rootSelectionFor(parent), view.dom, null, {
-                wholeSelection: currentTranslationView === 'translated',
+                wholeSelection: true,
             }),
             shown: new Set(),
         };
@@ -1467,81 +1599,66 @@ export function createInlineMarkdownEditor({
             view.dispatch({ effects: setTranslationSelection.of(active.excerpts.map(excerpt => ({
                 id: excerpt.id, from: excerpt.viewSourceFrom, to: excerpt.viewSourceTo,
             }))) });
+            // Marking the source can rebuild table replacement widgets on both
+            // sides. Put a cell selection onto the fresh translated widget
+            // before its queued selectionchange sees detached text nodes.
+            if (active.domPoints.some(point => point?.table)) {
+                const points = active.domPoints.map(point => restoredTranslationDOMPoint(view, point));
+                if (points.every(Boolean)) {
+                    const range = ownerWindow.document.createRange();
+                    range.setStart(points[0].node, points[0].offset);
+                    range.setEnd(points[1].node, points[1].offset);
+                    const selection = rootSelectionFor(parent);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+            }
         }
-        renderTranslationSelection(active,
-            active.view === 'compare' ? firstOffscreenSource(active.excerpts) : null);
+        renderTranslationSelection(active);
     };
 
-    const renderTranslationSelection = (active, offscreen) => {
+    const renderTranslationSelection = active => {
         const epoch = ++translationPopupEpoch;
         const isCurrent = () => !destroyed && translationPopupEpoch === epoch
             && activeTranslationSelection === active && view.state.doc === active.doc;
-        active.offscreen = offscreen;
         const { anchor, source: resolved } = active;
-        const wholeBlockActions = active.unaligned.map(pair => ({
+        const wholeBlockActions = active.unaligned.filter(pair => !active.shown.has(pair.id)).map(pair => ({
             id: pair.id,
             onShowBlock: () => {
                 if (!isCurrent()) return;
-                if (active.view === 'translated') {
-                    return sourceExcerptText(pair.id, pair.sourceFrom, pair.sourceTo);
-                }
-                if (!active.shown.has(pair.id)) {
-                    active.shown.add(pair.id);
-                    updateTranslationSelection(active);
-                }
+                active.shown.add(pair.id);
+                updateTranslationSelection(active);
             },
         }));
-        const annotationActions = {
+        const source = active.excerpts.length ? {
+            ...active.excerpts[0], text: resolved.text, blocks: active.excerpts, isCurrent,
+        } : null;
+        annotationPopup.close();
+        translationSourcePopup.open({
             anchor,
+            source,
+            translatedText: active.translatedText,
             annotation: resolved.annotation,
             annotationUnavailable: resolved.annotationUnavailable,
             selectionContext: resolved.selectionContext,
             blockCount: resolved.blockCount,
+            wholeBlockActions,
             isCurrent,
-        };
-        if (active.view === 'compare') {
-            const revealSource = offscreen ? () => {
-                if (!isCurrent()) return;
-                const cell = markedSourceCell(offscreen.block);
-                if (cell?.scrollIntoView) cell.scrollIntoView({ block: 'center' });
-                else requestEditorScroll(view, offscreen.block.viewSourceFrom,
-                    active.doc, true, 'center');
-            } : null;
-            if (!revealSource && !resolved.annotation && !resolved.annotationUnavailable
-                && !wholeBlockActions.length) {
-                closeTranslationSourceActions();
-                return;
-            }
-            translationActionsOpen = true;
-            annotationPopup.openSourceBlockActions({
-                ...annotationActions, wholeBlockActions,
-                offscreen: offscreen?.direction, revealSource,
-            });
-            return;
-        }
-        translationSourcePopup.close();
-        translationSourcePopup.open({
-            ...annotationActions, wholeBlockActions,
-            source: active.excerpts.length ? {
-                ...active.excerpts[0], text: resolved.text, blocks: active.excerpts, isCurrent,
-            } : null,
+            locateSource: source && (active.view === 'compare'
+                || (typeof hostRevealTranslationSource === 'function'
+                    && typeof hostSetTranslationView === 'function'))
+                ? () => { if (isCurrent()) locateTranslationSource(active, source); }
+                : null,
         });
     };
 
     // The cap concerns deduplicated whole original blocks, not sentence hits.
     const MAX_TRANSLATED_SELECTION_BLOCKS = 8;
 
-    let translationActionsOpen = false;
-    const closeTranslationSourceActions = () => {
-        if (!translationActionsOpen) return;
-        translationActionsOpen = false;
-        if (annotationPopup.isSelectionOpen()) annotationPopup.close();
-    };
     const invalidateTranslationSelection = () => {
         translationPopupEpoch++;
         activeTranslationSelection = null;
         translationSourcePopup.close();
-        closeTranslationSourceActions();
     };
 
     const sourceExcerptText = (id, from, to) => String(hostTranslateOriginalBlockText
@@ -1719,13 +1836,11 @@ export function createInlineMarkdownEditor({
         });
     };
     const closeSelectionActions = event => {
-        const targetsPopup = annotationPopup.contains(event.target)
-            || event.composedPath?.().some(target => (
-                target?.nodeType && annotationPopup.contains(target)
-            ));
-        if (event.button === 0 && !targetsPopup) {
-            annotationPopup.close({ saveNote: true });
-        }
+        if (event.button !== 0) return;
+        const targetsPopup = popup => popup.contains(event.target)
+            || event.composedPath?.().some(target => target?.nodeType && popup.contains(target));
+        if (!targetsPopup(annotationPopup)) annotationPopup.close({ saveNote: true });
+        if (!targetsPopup(translationSourcePopup)) translationSourcePopup.close();
     };
     const interactionRoot = parent.getRootNode?.() || ownerWindow.document;
     const closeSelectionActionsOutsideRoot = event => {
@@ -1736,6 +1851,7 @@ export function createInlineMarkdownEditor({
             return;
         }
         annotationPopup.close({ saveNote: true });
+        translationSourcePopup.close();
     };
     interactionRoot.addEventListener(
         'mousedown',
@@ -1752,12 +1868,14 @@ export function createInlineMarkdownEditor({
     const closeSelectionActionsOnEscape = event => {
         if (event.key !== 'Escape'
             || !(annotationPopup.isSelectionOpen()
-                || annotationPopup.isSelectionHintOpen())) {
+                || annotationPopup.isSelectionHintOpen()
+                || translationSourcePopup.isOpen())) {
             return;
         }
         event.preventDefault();
         event.stopPropagation();
         annotationPopup.close();
+        translationSourcePopup.close();
     };
     ownerWindow.document.addEventListener(
         'keydown',
@@ -1914,6 +2032,7 @@ export function createInlineMarkdownEditor({
         sourceMarkdown = '',
         translateOriginalBlockText: nextTranslateOriginalBlockText,
         revealTranslationSource: nextRevealTranslationSource,
+        setTranslationView: nextSetTranslationView,
     }) => {
         activateDOMGlobals(ownerWindow);
         if (typeof nextTranslateOriginalBlockText === 'function') {
@@ -1921,6 +2040,9 @@ export function createInlineMarkdownEditor({
         }
         if (typeof nextRevealTranslationSource === 'function') {
             hostRevealTranslationSource = nextRevealTranslationSource;
+        }
+        if (typeof nextSetTranslationView === 'function') {
+            hostSetTranslationView = nextSetTranslationView;
         }
         if (translationHighlightTimer !== null) {
             ownerWindow.clearTimeout?.(translationHighlightTimer);
@@ -1937,6 +2059,10 @@ export function createInlineMarkdownEditor({
         if (activeCorrection) correctionViewportFallbackEnabled = true;
         if (documentChanged) {
             clearNavigationHistory();
+            if (selectionFlashTimer !== null) {
+                ownerWindow.clearTimeout?.(selectionFlashTimer);
+                selectionFlashTimer = null;
+            }
         }
         activeTableCorrection?.cancel?.({
             focus: false,
@@ -2019,6 +2145,11 @@ export function createInlineMarkdownEditor({
             : [];
         const nextTranslationView = ['compare', 'translated'].includes(translationView)
             ? translationView : 'original';
+        if (!translationNavigationInProgress && (documentChanged
+            || currentTranslationView !== nextTranslationView
+            || currentTranslationSourceMarkdown !== sourceValue)) {
+            clearTranslationReturn();
+        }
         const keepTranslationSelection = activeTranslationSelection && !documentChanged
             && currentTranslationView === nextTranslationView
             && currentTranslationSourceMarkdown === sourceValue
@@ -2042,6 +2173,7 @@ export function createInlineMarkdownEditor({
         }
         const effects = [
             ...referenceFeatureList.map(feature => feature.effect.of(null)),
+            ...(documentChanged ? [setSelectionFlash.of(null)] : []),
             setAnnotationOverlay.of(
                 annotationOverlay || emptyAnnotationOverlay()
             ),
@@ -2235,6 +2367,9 @@ export function createInlineMarkdownEditor({
         flashRange(from, to) {
             flashEditorRange(from, to);
         },
+        flashRanges(ranges) {
+            if (Array.isArray(ranges)) flashEditorRanges(ranges);
+        },
         highlightTranslationBlock(blockID) {
             activateDOMGlobals(ownerWindow);
             if (translationHighlightTimer !== null) {
@@ -2284,7 +2419,8 @@ export function createInlineMarkdownEditor({
                     'scroll',
                     scheduleScrollProgress
                 );
-                view.scrollDOM.removeEventListener('scroll', onTranslationSelectionScroll);
+                clearTranslationReturn();
+                translationSourcePopup.destroy();
                 interactionRoot.removeEventListener(
                     'mousedown',
                     closeSelectionActions,

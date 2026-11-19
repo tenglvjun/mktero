@@ -111,15 +111,26 @@ Each request sends only the selected text to your configured AI provider and may
 
 ### See the original behind a translation
 
-Select even one word in an aligned translation to see the **original sentence** it came from. Full-document translation (v8) assigns IDs to the source sentences before sending them in batches to your configured AI provider. Mktero checks the returned IDs and Markdown structure. This identifies the source the model was asked to translate; it does not certify that the translation is correct.
+Select even one word in a reliably aligned translation to look up the **original sentence** it came from. Full-document translation (v8) assigns IDs to the source sentences before sending them in batches to your configured AI provider. Mktero checks the returned IDs and Markdown structure. This identifies the source the model was asked to translate; it does not certify that the translation is correct or establish a word-by-word match.
 
-- In `Bilingual`, only the matching original sentences are highlighted. The highlights clear with the selection. If the original is offscreen, the selection actions indicate its direction and offer to scroll to it.
-- In `Translation`, the bubble lists the matching originals once each, in reading order. `Locate in Bilingual` switches views and scrolls to the original.
-- You can select across sentences or blocks. Ending in the space before the next sentence does not include it. Hidden text, separators, and source text shown in place of a failed translation do not count as translated text.
+In `Translation` and on the translated side of `Bilingual`:
 
-**When a sentence match is unavailable**, choose `Show the whole original block` to read the source locally. Mktero requires verified sentence IDs for a precise match, including in lists and tables where a translation may reorder items or cells. If your selection spans aligned and unaligned blocks, you can see the verified sentences and open the remaining blocks individually.
+1. Select translated text. Both views use the same compact toolbar with only `View original` and `Copy translation`.
+2. Choose `View original` to expand a preview beside the selection. It lists the matched original sentences once each, in reading order, while keeping temporary markers in the body that show the source relationship. Long previews have a limited height and scroll within the panel. Previewing and these temporary markers do not create annotations.
+3. Choose `Locate original text` to read the source in context. From `Translation`, this switches directly to `Original` and scrolls to the corresponding sentences; from `Bilingual`, it locates the original in the current view. Only verified original sentence ranges receive a temporary highlight. Separate fragments stay separate, without highlighting the text between them; Mktero does not guess source positions.
+4. Use the on-screen `Return to translation` action to restore the view, reading position, and translated text selection you started with.
 
-**Annotations still cover whole original blocks**, not the sentences highlighted for reading. Click **Annotate the whole original block** once to save. Translation highlights the corresponding passage and lists the same annotation in the left sidebar; switching views does not create another copy. A selection can annotate up to eight blocks, each in full. Beyond eight, you can still read and locate the original. Annotations stay anchored to the source for PDF location. An existing annotation without a reliable match in the translation stays in the sidebar, but no translated text is highlighted for it.
+Viewing the original, copying the translation, and navigating there and back all work locally, without a network request or retranslation. You can select across sentences or blocks. Ending in the space before the next sentence does not include it. Hidden text, separators, and source text shown in place of a failed translation do not count as translated text.
+
+**When reliable sentence IDs are unavailable**, explicitly choose `Show the whole original block` to read that block locally. Mktero does not guess which source words or characters correspond to the selection. Verified sentence IDs are also required in lists and tables, where a translation may reorder items or cells. If your selection spans aligned and unaligned blocks, you can see the verified sentences and open the remaining blocks individually.
+
+**Saving an annotation covers complete original blocks.**
+
+In both views, the original preview has `Save to Annotations` beside `Locate original text` on the same action row. When saving is available, expand the collapsed save-scope section to review all the original text that will be saved. The sentence preview still shows just the matched original sentences.
+
+Saving uses the complete blocks of the current original text, up to eight per selection; it does not save translated wording or just the matched sentences. Beyond eight blocks, you can still read and locate the original. Only `Save to Annotations` creates an annotation; opening the preview or save scope, or locating the original, does not. Saving works locally and neither creates a Zotero note nor adds content to an existing note.
+
+After saving, the corresponding translated passage is highlighted, and the left column's `Annotations` segment lists the same annotation. Switching between Original, Translation, and Bilingual does not create another copy. Annotations stay anchored to the source for PDF location. An existing annotation without a reliable match in the translation stays in the sidebar, but no translated text is highlighted for it.
 
 ## Details
 

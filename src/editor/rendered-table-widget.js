@@ -523,6 +523,10 @@ function markTableCellText(cell, visible, bounds, selections, base) {
 }
 
 function markSourceElement(element, range) {
+    if (range.flash) {
+        element.classList.add('cm-mktero-selection-flash');
+        return;
+    }
     element.classList.add('cm-mktero-translation-pair-selected-text');
     element.dataset.translationPairSelected = 'true';
     element.dataset.translationBlockId = range.id;

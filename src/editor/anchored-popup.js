@@ -6,6 +6,9 @@ export function createAnchoredPopup(parent, {
     idPrefix,
     viewportPadding = 12,
     constrainToParent = false,
+    stableContentPosition = false,
+    stableContentWidth = 0,
+    stableContentHeight = 160,
     closeDelay = 120,
 }) {
     const document = parent.ownerDocument;
@@ -16,6 +19,7 @@ export function createAnchoredPopup(parent, {
     let closeTimer = null;
     let closeHandler = null;
     let boundaryObserver = null;
+    let contentPosition = null;
     // Where each anchor element last was. An editor rebuild can replace the
     // rendered element an open popup points at, and a detached element
     // reports an empty rect at the window origin.
@@ -44,6 +48,8 @@ export function createAnchoredPopup(parent, {
         cancelClose();
         boundaryObserver?.disconnect();
         boundaryObserver = null;
+        if (stableContentPosition) ownerWindow.removeEventListener('resize', reposition);
+        contentPosition = null;
         const onClose = closeHandler;
         closeHandler = null;
         if (anchor && popup
@@ -66,13 +72,20 @@ export function createAnchoredPopup(parent, {
 
     const reposition = () => {
         if (!popup || !anchor) return;
-        positionPopup(
-            popup,
-            anchorRect(anchor),
-            popupBoundary(parent, ownerWindow, constrainToParent),
-            viewportPadding,
-            constrainToParent
-        );
+        // Content may request positioning while renderContent is still building
+        // the detached popup. Its empty rect must not become the stable baseline.
+        if (stableContentPosition && popup.parentNode !== parent) return;
+        const rect = anchorRect(anchor);
+        const boundary = popupBoundary(parent, ownerWindow, constrainToParent);
+        if (stableContentPosition) {
+            contentPosition = positionStablePopup(
+                popup, rect, boundary, viewportPadding, constrainToParent,
+                stableContentWidth, stableContentHeight, contentPosition
+            );
+        }
+        else {
+            positionPopup(popup, rect, boundary, viewportPadding, constrainToParent);
+        }
     };
 
     const open = ({
@@ -112,6 +125,7 @@ export function createAnchoredPopup(parent, {
         }
         popup.appendChild(content);
         popup.addEventListener('mousedown', event => {
+            cancelClose();
             event.stopPropagation();
         });
         popup.addEventListener('mouseenter', cancelClose);
@@ -144,10 +158,13 @@ export function createAnchoredPopup(parent, {
         parent.appendChild(popup);
         anchor.setAttribute?.('aria-describedby', popup.id);
         reposition();
-        if (constrainToParent && ownerWindow.ResizeObserver) {
+        if ((constrainToParent || stableContentPosition) && ownerWindow.ResizeObserver) {
             boundaryObserver = new ownerWindow.ResizeObserver(reposition);
             boundaryObserver.observe(parent);
+            const host = parent.getRootNode?.()?.host;
+            if (stableContentPosition && host && host !== parent) boundaryObserver.observe(host);
         }
+        if (stableContentPosition) ownerWindow.addEventListener('resize', reposition);
         focusContent?.(popup);
     };
 
@@ -195,7 +212,7 @@ function popupBoundary(parent, ownerWindow, constrainToParent) {
     return boundary;
 }
 
-function positionPopup(popup, anchorRect, boundary, viewportPadding, constrainToParent) {
+function positionPopup(popup, anchorRect, boundary, viewportPadding, constrainToParent, contentSize) {
     const gap = 10;
     const available = Math.max(
         0,
@@ -215,7 +232,7 @@ function positionPopup(popup, anchorRect, boundary, viewportPadding, constrainTo
             `${Math.floor(Math.min(usableHeight, Math.max(room, 160)))}px`);
     }
     else popup.style.maxWidth = `${Math.floor(available)}px`;
-    const popupRect = popup.getBoundingClientRect();
+    const popupRect = contentSize || popup.getBoundingClientRect();
     const width = Math.min(popupRect.width, available);
     const minLeft = boundary.left + viewportPadding;
     const preferredLeft = anchorRect.left + anchorRect.width / 2 - width / 2;
@@ -241,6 +258,82 @@ function positionPopup(popup, anchorRect, boundary, viewportPadding, constrainTo
     const top = placeAbove ? Math.max(minTop, above) : below;
     popup.style.top = `${Math.round(constrainToParent
         ? clamp(top, minTop, Math.max(minTop, maxBottom - popupRect.height)) : top)}px`;
+}
+
+function positionStablePopup(
+    popup, anchorRect, boundary, viewportPadding, constrainToParent,
+    stableContentWidth, stableContentHeight, position
+) {
+    const geometry = [
+        anchorRect.left, anchorRect.top, anchorRect.right, anchorRect.bottom,
+        boundary.left, boundary.top, boundary.right, boundary.bottom,
+    ];
+    const horizontalPadding = Math.min(viewportPadding, (boundary.right - boundary.left) / 2);
+    const verticalPadding = Math.min(viewportPadding, (boundary.bottom - boundary.top) / 2);
+    const availableWidth = boundary.right - boundary.left - horizontalPadding * 2;
+    const minTop = boundary.top + verticalPadding;
+    const maxBottom = boundary.bottom - verticalPadding;
+    if (!position || geometry.some((value, index) => value !== position.geometry[index])) {
+        // Rebase using the first mounted size, even if a panel is now expanded.
+        // Otherwise moving the anchor would position the toolbar using that panel's height.
+        positionPopup(popup, anchorRect, boundary, viewportPadding, constrainToParent, position?.size);
+        const rect = position?.size || popup.getBoundingClientRect();
+        const above = anchorRect.top - 10;
+        const below = anchorRect.bottom + 10;
+        const aboveRoom = above - minTop;
+        const belowRoom = maxBottom - below;
+        // Choose the side for expanded content before placing the compact toolbar.
+        // Prefer above when both sides fit, and keep the toolbar beside the selection.
+        const requestedHeight = Number.isFinite(stableContentHeight) && stableContentHeight > 0
+            ? stableContentHeight : 160;
+        const expansion = aboveRoom >= requestedHeight
+            || (belowRoom < requestedHeight && aboveRoom >= belowRoom) ? 'up' : 'down';
+        // Reserve enough height at the initial edge to keep expanded actions reachable,
+        // even when a large selection leaves no usable space on either side.
+        const minimumHeight = Math.min(Math.max(rect.height, requestedHeight), maxBottom - minTop);
+        const edge = expansion === 'up'
+            ? clamp(above, minTop + minimumHeight, maxBottom)
+            : clamp(below, minTop, maxBottom - minimumHeight);
+        popup.dataset.placement = expansion === 'up' ? 'top' : 'bottom';
+        // Keep room for wider panels before the toolbar becomes visible.
+        const reservedWidth = Math.min(availableWidth, Math.max(
+            rect.width,
+            Number.isFinite(stableContentWidth) && stableContentWidth > 0 ? stableContentWidth : 0
+        ));
+        position = {
+            geometry,
+            size: { width: rect.width, height: rect.height },
+            left: clamp(Number.parseFloat(popup.style.left), boundary.left + horizontalPadding,
+                boundary.right - horizontalPadding - reservedWidth),
+            edge,
+            expansion,
+        };
+    }
+    const availableHeight = position.expansion === 'down'
+        ? maxBottom - position.edge : position.edge - minTop;
+    popup.dataset.expansion = position.expansion;
+    popup.style.setProperty('--anchored-popup-available-width', `${Math.floor(availableWidth)}px`);
+    popup.style.setProperty('--anchored-popup-available-height', `${Math.floor(availableHeight)}px`);
+    if (!constrainToParent) {
+        popup.style.maxWidth = `${Math.floor(availableWidth)}px`;
+        popup.style.maxHeight = `${Math.floor(availableHeight)}px`;
+    }
+    const width = Math.min(popup.getBoundingClientRect().width, availableWidth);
+    const minLeft = boundary.left + horizontalPadding;
+    const left = clamp(position.left, minLeft, boundary.right - horizontalPadding - width);
+    const arrowLeft = clamp(anchorRect.left + anchorRect.width / 2 - left, 12, Math.max(12, width - 12));
+    popup.style.left = `${left}px`;
+    popup.style.setProperty('--anchored-popup-arrow-left', `${Math.round(arrowLeft)}px`);
+    if (position.expansion === 'down') {
+        popup.style.removeProperty('bottom');
+        popup.style.top = `${position.edge}px`;
+    }
+    else {
+        popup.style.removeProperty('top');
+        const viewportHeight = popup.ownerDocument.defaultView.innerHeight || 768;
+        popup.style.bottom = `${viewportHeight - position.edge}px`;
+    }
+    return position;
 }
 
 // Gecko and Blink blur a focused control that becomes disabled or hidden and
