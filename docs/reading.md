@@ -13,6 +13,10 @@ Adjacent inline formulas in algorithm steps render separately, preserving their 
 - Press `Cmd/Ctrl+F` to find text in the body.
 - Watch the thin progress bar at the bottom of the reading pane. It appears when the document is long enough to scroll and is hidden in focus mode.
 
+To preview a figure, table, or cited paper, hold the pointer steady over its reference in the body for 450 ms. Quick passes, holding a mouse button, dragging to select text, or an existing body text selection prevent automatic previews. Moving away before a preview opens cancels the wait.
+
+Move into the preview to keep it open; leaving both the reference and preview closes it after about 200 ms. Scrolling the body closes the preview and cancels any pending opening; a fresh, steady mouse hover is needed to open one again. Press `Esc` to close a preview without it automatically reopening on the same reference. Clicking to jump and keyboard controls remain available.
+
 After a jump, use the arrows at the start of the toolbar to return or go forward. The keyboard shortcuts are:
 
 | Action | Windows / Linux | macOS |

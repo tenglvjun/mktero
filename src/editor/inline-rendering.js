@@ -1,6 +1,6 @@
 import { syntaxTree } from '@codemirror/language';
 import { EditorState, Prec, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import {
     createEmptyAnnotationOverlay,
 } from '../core/markdown-annotation-overlay.js';
@@ -56,6 +56,7 @@ import {
 } from './rendered-markdown-dom.js';
 import { replacePendingFigureImages } from './figure-placeholder.js';
 import { rootSelectionFor } from './root-selection.js';
+import { createReferenceHoverController } from './reference-hover.js';
 import {
     blockHeightRecorder,
     createBlockHeightIdentity,
@@ -1002,6 +1003,7 @@ export function createInlineRenderingExtension({
     tablePreviewPopup,
     figurePreviewPopup,
     annotationPopup,
+    isHoverLocked = () => false,
     openPageMarker = null,
     activateCitation,
     activateTableReference,
@@ -1331,17 +1333,29 @@ export function createInlineRenderingExtension({
         markdownSectionField,
         EditorState.transactionExtender.of(markdownSectionTransactionExtender),
         renderingField,
+        ViewPlugin.define(view => {
+            const hover = createReferenceHoverController(view, {
+                interactionAt: event => referenceInteraction(event, view, context),
+                isLocked: () => selectionActionsLocked(context) || isHoverLocked(),
+                popups: [citationPopup, tablePreviewPopup, figurePreviewPopup],
+                cancelOtherHover: () => annotationPopup?.cancelScheduledOpen?.(),
+            });
+            context.referenceHover = hover;
+            return hover;
+        }),
         blockHeightRecorder(context.blockHeights),
         Prec.highest(EditorView.domEventHandlers({
             mouseover(event, view) {
                 if (selectionActionsLocked(context)) return false;
-                referenceInteraction(event, view, context)?.open();
+                const interaction = referenceInteraction(event, view, context);
+                if (!interaction?.hoverPreview) interaction?.open();
                 return false;
             },
             mouseout(event, view) {
                 if (selectionActionsLocked(context)) return false;
                 const interaction = referenceInteraction(event, view, context);
                 if (!interaction
+                    || interaction.hoverPreview
                     || interaction.element.contains(event.relatedTarget)
                     || interaction.popup?.contains(event.relatedTarget)) {
                     return false;
@@ -1359,7 +1373,10 @@ export function createInlineRenderingExtension({
                     && !focusIsVisible(interaction.element)) {
                     return false;
                 }
-                if (interaction?.openImmediately) {
+                if (interaction?.hoverPreview) {
+                    context.referenceHover.focus(interaction);
+                }
+                else if (interaction?.openImmediately) {
                     interaction.openImmediately();
                 }
                 else {
@@ -1409,6 +1426,7 @@ export function createInlineRenderingExtension({
                         return false;
                     }
                     event.preventDefault();
+                    context.referenceHover.reset();
                     interaction.activate();
                     return true;
                 }
@@ -2423,6 +2441,7 @@ function referenceInteraction(event, view, context) {
         return {
             element: citation,
             popup: context.citationPopup,
+            hoverPreview: true,
             open() {
                 closeReferencePopupsExcept(context, context.citationPopup);
                 openCitationPopup(citation, view, context);
@@ -3449,6 +3468,7 @@ function closeReferencePopupsExcept(context, retainedPopup) {
 // Hover must not replace selection actions or a note the reader is typing.
 function selectionActionsLocked(context) {
     return Boolean(context.annotationPopup?.isSelectionOpen?.()
+        || context.annotationPopup?.isSelectionHintOpen?.()
         || context.annotationPopup?.isNoteOpen?.());
 }
 
@@ -3522,6 +3542,7 @@ function previewReferenceInteraction(event, view, context) {
         return {
             element,
             popup: type.popup,
+            hoverPreview: true,
             open() {
                 closeReferencePopupsExcept(context, type.popup);
                 type.popup?.open({ anchor: element, target });

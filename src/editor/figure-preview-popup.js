@@ -15,6 +15,7 @@ export function createFigurePreviewPopup(parent, {
     const anchoredPopup = createAnchoredPopup(parent, {
         className: 'mktero-figure-preview-popup',
         idPrefix: 'mktero-figure-preview-popup',
+        closeDelay: 200,
         viewportPadding: 24,
     });
 
@@ -49,6 +50,7 @@ export function createFigurePreviewPopup(parent, {
         scheduleClose: anchoredPopup.scheduleClose,
         cancelClose: anchoredPopup.cancelClose,
         contains: anchoredPopup.contains,
+        isOpen: anchoredPopup.isOpen,
         destroy: anchoredPopup.destroy,
     };
 }
