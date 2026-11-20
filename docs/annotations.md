@@ -82,11 +82,17 @@ The saved text follows what the reader shows:
 - A link's title is excluded.
 - Formulas are saved as TeX, including formulas in figure captions and table cells; their highlights appear over the rendered formulas.
 
+A drag that starts in a figure caption stays within that caption while the pointer remains there or over its image. Dragging into other selectable text releases that boundary. The selection toolbar keeps the selected text and source ranges together when saving a highlight or comment.
+
 A selection split into more than 512 separate parts is refused with a message rather than saved incompletely. When a highlight overlaps a citation, table reference, or figure reference, that reference keeps interaction priority. Annotation actions remain available from surrounding highlighted text or its comment marker.
 
 Common MinerU LaTeX math symbols and simple subscripts are normalized to the PDF's extracted text. Matching tolerates a few characters mangled by the PDF text layer, so selections containing formulas can still be located. A display formula whose LaTeX does not survive extraction falls back to that block's recorded OCR region.
 
-When loading a PDF annotation back into Markdown, Mktero uses its PDF position and surrounding text to distinguish repeated passages. If a page header or a different PDF reading order prevents one side from matching anywhere, a unique match on the other side is enough. Conflicting contexts or multiple remaining matches stay marked as ambiguous.
+When loading a PDF annotation back into Markdown, Mktero handles line-end hyphens that either join a split word or remain part of a compound word, including both forms in one annotation. Each complete candidate must retain ordinary word boundaries and unwrapped lexical hyphens; conflicting candidates stay ambiguous. Its PDF position and surrounding text help distinguish repeated passages. If a page header or a different PDF reading order prevents one side from matching anywhere, a unique match on the other side is enough. Conflicting contexts or multiple remaining matches stay marked as ambiguous.
+
+Cross-page matching can leave out repeated notices at the physical top or bottom of a page when their visual position and separation from the body confirm that they are page furniture. This also covers long notices whose PDF text fragments arrive out of order. Body text, unique edge text, and uncertain lines remain part of the search; an ambiguous selection is still refused.
+
+When the PDF character stream differs from the two-column reading order, Mktero can try a derived reading order when clear column, running-header, or floating-figure evidence supports it, then map the match back to the original characters and coordinates. A caption in the body font can also use an independent caption map bound to the current PDF and Markdown, after its complete text, unique match, full region, and separation from the body have been verified. OCR text that omits body passages is not treated as one continuous selection, and a figure number alone does not justify skipping ordinary prose. A floating block without enough evidence can still prevent cross-page matching; select each page separately, or choose the exact location in Zotero's PDF reader.
 
 A cross-page selection becomes one single-page Zotero highlight per page, keeping the whole Markdown selection navigable. A paragraph that resumes a page or two later is located the same way, across a full-page figure or running footer in between.
 

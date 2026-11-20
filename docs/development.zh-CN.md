@@ -153,6 +153,39 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # 输出部分论
 因此改动 `ui/markdown.css` 或渲染器，等于要求每个下游客户端在自己的构建里跟上。请
 在 PR 描述里写明这一点；本仓库没有需要重新生成的共享产物。
 
+## 原生图注选区验收
+
+在 macOS 中，用隔离的 Zotero/Gecko 进程验证当前编辑器源码：
+
+```bash
+node scripts/validate-caption-selection-zotero.mjs --fixtures
+node scripts/validate-caption-selection-zotero.mjs --preflight
+node scripts/validate-caption-selection-zotero.mjs
+node scripts/validate-caption-selection-zotero.mjs --corpus /path/to/corpus.json
+```
+
+可选语料清单是 `{ "label": "sample", "markdownPath": "paper.md", "figureIndex": 0 }` 对象组成的数组；Markdown 路径相对于清单解析。只把选中的图片和图注传入隔离阅读器，私有论文与清单应留在仓库外。
+
+脚本使用未插桩的编辑器 bundle、当前阅读器样式和 shadow root，发送真实鼠标事件。覆盖正向、反向、跨行选择、科学单位、公式、共享图注、多种阅读宽度、取消、普通正文、两个同时存在的编辑器以及销毁清理。等待选区事件稳定后，原生选区、弹窗快照和恰好一次保存回调的文本及源码范围必须一致。
+
+Seatbelt 预检会拒绝网络和真实 Zotero profile 访问，报告与诊断保留在打印出的临时目录，成功要求进程正常退出。这是编辑器集成验收，不代表已完成安装 XPI 后的 PDF 持久化端到端验收；请记录实际测试的 Zotero 版本。
+
+## 已安装 XPI 的注释持久化验收
+
+macOS 安装了 `/Applications/Zotero.app` 后，运行：
+
+```bash
+node scripts/validate-annotation-persistence-zotero.mjs --fixtures
+node scripts/validate-annotation-persistence-zotero.mjs --preflight
+node scripts/validate-annotation-persistence-zotero.mjs build/mktero-<version>.xpi
+```
+
+完整验收把产品 XPI 复制到临时 profile 后安装，通过真实菜单、选区、评论保存、重试、改色和删除控件执行，并在每次操作后读取 Zotero 注释 item 和两份本地注释 store。合成 PDF 分别覆盖保留的双页组、通过第二页成员删除整组、损坏的夹具 PDF 恢复后重试成功的失败本地记录，以及在真实 widget 中反向选择的单页图注。保留组还覆盖内容流在正文后输出、视觉位置却在页边的跨页重复声明，并先通过产品编辑已有首段评论，再核对改色和重启结果。
+
+三次正常启动依次验证创建和失败记录保留、恢复环境后的自动重试，以及再次重启后的持久化。核对注释 key、文本、坐标、排序、颜色、首段评论、组成员和本地记录清理；关闭重开标签页不能产生重复 PDF item。恢复后的跨页组改色仍应影响两页，已删除组不能重新出现。图注必须持久化为恰好一个 PDF item，且没有跨页 group 或未同步的本地记录。失败状态本身只存在于会话内，同步前的本地 id 也不是永久的 PDF id。
+
+只在两次进程之间恢复合成 PDF，保留已保存的本地注释不变，并明确记录这次受控环境恢复。Seatbelt 禁止网络及真实 profile 访问，所有进程必须正常退出，强制终止视为失败。报告、XPI 身份和合成数据保留在打印出的临时运行目录；请记录实际验收的 Zotero 版本。
+
 ## 原生研究笔记验收
 
 macOS 安装了 `/Applications/Zotero.app` 后，可以用合成 PDF 和普通独立笔记验证构建出的 XPI：
