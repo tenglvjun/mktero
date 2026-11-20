@@ -45,6 +45,7 @@ and parser profile.
 ### Annotations and translation
 
 - Display and edit PDF highlights and underlines, using their PDF positions and surrounding text to distinguish repeated passages, and write item or standalone notes with Zotero's native editor. In `Translation` and on the translated side of `Bilingual`, choose `View original`, then use `Save to Annotations` beside `Locate original text` in the preview. Expand the collapsed save-scope section to review the complete original blocks to be saved, up to eight per selection. Saving creates an annotation without creating or adding to a Zotero note. All three views show the same annotation. [Annotations and notes](./docs/annotations.md)
+- Keep a standalone Zotero note as your research note while reading several papers in the same library. Continue with that target in new reading tabs and after restarting Zotero; add source-linked passages, then write your questions and reflections in the native note editor. [Research notes](./docs/annotations.md#read-several-papers-with-one-research-note)
 - Correct paragraphs, headings, and GFM table cells while preserving the immutable OCR result. [Corrections](./docs/annotations.md#correct-recognition-errors)
 - Translate an article or a selection with your configured AI provider. In `Translation` and on the translated side of `Bilingual`, selecting reliably aligned translated text opens the same compact toolbar with only `View original` and `Copy translation`. Preview matched original sentences beside the selection; uncertain sentence boundaries are kept in explicitly labeled sentence groups while other mappings remain available; `Locate original text` locates them in the current `Bilingual` view or switches directly from `Translation` to `Original`, temporarily highlighting the corresponding sentences. `Return to translation` restores your previous view, reading position, and selection. These reading actions need no network request or retranslation. When the translation rules change, choose `Translate document` to generate a new translation. Your provider may charge for retranslation. [AI translation](./docs/reading.md#translate-with-ai)
 
@@ -107,6 +108,10 @@ The [workflow index](./docs/workflows.md) links to each task.
   corrections, translations and their sentence mappings, reading positions, local highlights not yet in the
   PDF, and cross-page highlight annotation keys stay unencrypted in the Zotero
   profile. Mktero does not sync them.
+- The research-note preference stores only the library ID and note key in the
+  local Zotero profile, unencrypted. Mktero neither sends nor syncs this
+  preference. The note remains an ordinary Zotero note, saved and synced by
+  Zotero according to your settings.
 - Sign-in sends your email and password; registration also emails a verification
   code. Tokens stay in the profile. The account pane reads your profile, conversion
   counts, and supported daily quota; the service keeps account-linked usage

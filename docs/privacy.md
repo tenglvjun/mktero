@@ -9,7 +9,7 @@ This page lists what Mktero sends, where it keeps data, and what local cleanup r
 - A cache miss sends the complete PDF to your account's Mktero service, or to your selected MinerU or Mistral converter instead.
 - Before reusing a hosted cache, Mktero sends the PDF SHA-256, byte size, and content type to confirm the applicable parser profile. This lookup sends no PDF bytes and uses no conversion allowance.
 - Local llm-for-zotero imports leave the source unchanged. Import and reopening upload neither the PDF nor the result.
-- Credentials, tokens, caches, corrections, translations, reading positions, and local highlights are unencrypted in the active Zotero profile. Mktero does not sync them.
+- Credentials, tokens, caches, corrections, translations, reading positions, local highlights, and the research-note target preference are unencrypted in the active Zotero profile. Mktero does not sync them.
 - PDF annotations, Zotero notes, and snapshots sync according to Zotero settings. Mktero does not send notes anywhere.
 - Reference, citation, and translation requests are bounded and local-first. Logs exclude API tokens, presigned URLs, PDF bytes, and authenticated responses.
 - Problem reports stay on this computer. Copying or saving creates a redacted file; this version does not upload it.
@@ -53,6 +53,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | Local Markdown highlights not yet in the PDF, and the Zotero annotation keys of the page parts of a cross-page highlight | Active Zotero profile, unencrypted | No |
 | Pending MinerU cloud task record: a cache key derived from the PDF content hash and the parser profile, the batch ID, the task data ID, the submission time, and the parsing model fixed when that operation started; no PDF bytes or result | Active Zotero profile, unencrypted, in `mktero-conversions/v1`; not sent to any service | No |
 | Reader layout preferences: which columns are open, their widths, and the selected left segment | Active Zotero profile, unencrypted | No |
+| Research-note target preference: a library ID and its pinned note key; no note title or content | Active Zotero profile, unencrypted, in `extensions.mktero.researchNoteTargets`; not sent to any service | No |
 | Obsidian export index: library ID, item key, note folder name, and content hash; the vault path preference | Active Zotero profile, unencrypted | No |
 
 ## Kept in your Zotero library
@@ -60,7 +61,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
 | Zotero PDF annotations | Local Zotero library | According to Zotero settings |
-| Zotero notes written in the Notes column, and passages added with `Add to Note` or `Add Note from Annotations` | Zotero note items in the local Zotero library | According to Zotero settings |
+| Zotero notes written in the Notes column, including research notes and passages added with `Add to Note` or `Add Note from Annotations` | Zotero note items in the local Zotero library; Mktero keeps no separate note copy | According to Zotero settings |
 | Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
 | Imported reference metadata and PDF attachments | Active Zotero profile, unencrypted | According to Zotero settings |
 
@@ -85,6 +86,10 @@ The hosted service stores the PDF identity and parser route for the signed-in ac
 A converted paper can be read from retained local content while offline, but the current hosted model cannot be confirmed offline. Authentication failures and invalid or inconsistent target metadata are reported instead of silently using an unverified result. Explicit local imports keep their independent offline behavior.
 
 This route belongs to the Mktero service alone. With your own MinerU cloud key, the `Parsing model` choice is a local preference that names a model in your own MinerU requests; each operation fixes it when it starts, so a later change only affects later operations. It is never sent to the Mktero service and does not change which hosted model a PDF follows. A pending MinerU cloud task record stays in your Zotero profile and is not uploaded.
+
+## Research-note targets
+
+Pinning a research note saves only the library ID and note key in the local `extensions.mktero.researchNoteTargets` preference. It lets new reading tabs and later Zotero sessions find the same note. Mktero does not send or sync this preference, or save a separate copy of the note's title or contents. The note itself remains a Zotero note item and syncs according to Zotero settings. Replacing or clearing a pinned target leaves the note and its contents intact.
 
 ## References and translation
 

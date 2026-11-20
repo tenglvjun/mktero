@@ -88,6 +88,82 @@ class ZoteroNotesPanel {
         return Boolean(this.handle?.editable) && this.mode === 'editor';
     }
 
+    get canPrepareInsert() {
+        if (this.mode === 'editor') return this.canInsert;
+        return !this.openingNote
+            && this.state.researchNote?.status === 'ready'
+            && this.adapter?.canHostEditor?.(this.hostContext()) === true;
+    }
+
+    get insertTargetIdentity() {
+        if (this.mode === 'editor') {
+            if (!this.handle) return null;
+            return this.handle.noteID
+                ? `note:${this.handle.noteID}`
+                : `editor:${this.editorToken}`;
+        }
+        const id = this.state.researchNote?.note?.id;
+        return this.state.researchNote?.status === 'ready' && id ? `note:${id}` : null;
+    }
+
+    get insertTargetTitle() {
+        if (this.mode === 'editor') {
+            return this.handle?.title
+                || this.state.notes.find(note => note.id === this.handle?.noteID)?.title
+                || '';
+        }
+        return this.state.researchNote?.status === 'ready'
+            ? this.state.researchNote.note?.title || this.t('notes.untitled')
+            : '';
+    }
+
+    async pinResearchNote(noteID = this.handle?.noteID) {
+        if (!noteID || !this.adapter?.pinResearchNote) return;
+        await this.adapter.pinResearchNote(noteID);
+        await this.refresh();
+    }
+
+    async clearResearchNote() {
+        if (!this.adapter?.clearResearchNote) return;
+        await this.adapter.clearResearchNote();
+        await this.refresh();
+    }
+
+    async continueResearchNote() {
+        const adapter = this.adapter;
+        const token = this.editorToken;
+        const expected = this.state.researchNote?.note?.id;
+        if (!expected || !adapter?.getResearchNote) throw unavailableNote();
+        const target = await adapter.getResearchNote();
+        if (this.destroyed || adapter !== this.adapter || token !== this.editorToken
+            || target?.note?.id !== expected
+            || !['ready', 'readonly'].includes(target.status)) {
+            throw unavailableNote();
+        }
+        if (this.handle?.noteID === expected && this.mode === 'editor') return;
+        await this.openNote(expected);
+    }
+
+    // Capture one editor before PDF location starts. A user switching notes
+    // during that asynchronous lookup must never receive a delayed insertion.
+    async prepareInsert() {
+        if (!this.canPrepareInsert) throw unavailableNote();
+        if (this.mode !== 'editor') await this.continueResearchNote();
+        const handle = this.handle;
+        const adapter = this.adapter;
+        const token = this.editorToken;
+        if (!this.canInsert || !handle) throw unavailableNote();
+        return {
+            insertAnnotations: async (annotations, options) => {
+                if (this.destroyed || this.handle !== handle || this.adapter !== adapter
+                    || this.editorToken !== token || !handle.editable || handle.isGone?.()) {
+                    throw unavailableNote();
+                }
+                await handle.insertAnnotations(annotations, options);
+            },
+        };
+    }
+
     get annotationCount() {
         return this.state.annotationCount || 0;
     }
@@ -167,6 +243,7 @@ class ZoteroNotesPanel {
             canCreateStandaloneNote: state?.canCreateStandaloneNote === undefined
                 ? state?.editable === true
                 : state.canCreateStandaloneNote === true,
+            researchNote: state?.researchNote || { status: 'none' },
             annotationCount: Number.isSafeInteger(state?.annotationCount)
                 ? state.annotationCount
                 : 0,
@@ -338,6 +415,11 @@ class ZoteroNotesPanel {
                         ...this.hostContext(),
                     })),
                 },
+                ...(note?.kind === 'standalone' && adapter.pinResearchNote ? [{
+                    label: this.t('notes.pinResearchNote'),
+                    disabled: note.editable === false || !this.state.editable,
+                    command: action(() => this.pinResearchNote(noteID)),
+                }] : []),
                 { separator: true },
                 {
                     label: this.t('notes.moveToTrash'),
@@ -516,9 +598,42 @@ class ZoteroNotesPanel {
         elements.newButton.disabled = !state.canCreateItemNote
             && !state.canCreateStandaloneNote;
         elements.windowButton.hidden = !this.handle?.noteID;
+        const openNote = state.notes.find(note => note.id === this.handle?.noteID);
+        elements.pinButton.hidden = !this.adapter?.pinResearchNote
+            || !this.handle?.noteID
+            || openNote?.kind !== 'standalone';
+        elements.pinButton.disabled = !this.canInsert;
+        elements.editorTarget.textContent = this.t('notes.insertTarget', {
+            title: this.insertTargetTitle || this.t('notes.untitled'),
+        });
+        elements.editorTarget.title = elements.editorTarget.textContent;
+        this.renderResearchNote();
         this.renderStatus();
         this.renderList();
         this.onStateChange();
+    }
+
+    renderResearchNote() {
+        const target = this.state.researchNote;
+        const { researchStrip, researchTitle, researchLabel, researchContinue,
+            researchClear, researchStatus } = this.elements;
+        researchStrip.hidden = !target || target.status === 'none';
+        researchLabel.textContent = this.t('notes.researchNote');
+        researchTitle.textContent = target?.note?.title || this.t('notes.untitled');
+        setLabel(researchContinue, this.t('notes.continueResearchNote', {
+            title: target?.note?.title || this.t('notes.untitled'),
+        }));
+        researchContinue.disabled = !['ready', 'readonly'].includes(target?.status)
+            || this.openingNote;
+        setLabel(researchClear, this.t('notes.clearResearchNote'));
+        const statusKey = {
+            readonly: 'notes.researchReadonly',
+            missing: 'notes.researchMissing',
+            unavailable: 'notes.researchUnavailable',
+        }[target?.status];
+        researchStatus.hidden = !statusKey;
+        researchStatus.textContent = statusKey ? this.t(statusKey) : '';
+        setLabel(this.elements.pinButton, this.t('notes.pinResearchNote'));
     }
 
     renderStatus() {
@@ -597,10 +712,52 @@ class ZoteroNotesPanel {
             }
         });
         item.appendChild(button);
+        if (note.kind === 'standalone' && this.adapter?.pinResearchNote) {
+            item.classList.add('mktero-zotero-note-item--pinnable');
+            title.id = `mktero-zotero-note-title-${note.id}`;
+            const pinned = this.state.researchNote?.note?.id === note.id;
+            const pin = this.iconButton('mktero-zotero-note-pin-card',
+                LUCIDE_ICONS.pin, pinned ? 'notes.clearResearchNote' : 'notes.pinResearchNote');
+            pin.setAttribute('data-note-id', String(note.id));
+            pin.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+            pin.setAttribute('aria-describedby', title.id);
+            // List editability describes creating child notes, which a standalone
+            // PDF cannot do. Pinning uses the standalone note's own permission.
+            pin.disabled = pinned
+                ? typeof this.adapter.clearResearchNote !== 'function'
+                : note.editable !== true;
+            pin.addEventListener('click', event => {
+                event.stopPropagation();
+                if (pin.disabled) return;
+                void this.runAction(() => (pinned
+                    ? this.clearResearchNote()
+                    : this.pinResearchNote(note.id)));
+            });
+            item.appendChild(pin);
+        }
         return item;
     }
 
     createContent() {
+        const researchStrip = this.element('div', 'mktero-research-note');
+        const researchRow = this.element('div', 'mktero-research-note-row');
+        const researchContinue = this.element('button', 'mktero-research-note-continue');
+        researchContinue.type = 'button';
+        const researchLabel = this.element('span', 'mktero-research-note-label');
+        const researchTitle = this.element('span', 'mktero-research-note-title');
+        researchContinue.append(researchLabel, researchTitle);
+        const researchClear = this.iconButton('mktero-research-note-clear',
+            LUCIDE_ICONS.x, 'notes.clearResearchNote');
+        const researchStatus = this.element('p', 'mktero-research-note-status');
+        researchStatus.setAttribute('role', 'status');
+        researchRow.append(researchContinue, researchClear);
+        researchStrip.append(researchRow, researchStatus);
+        researchContinue.addEventListener('click', () => {
+            void this.runAction(() => this.continueResearchNote());
+        });
+        researchClear.addEventListener('click', () => {
+            void this.runAction(() => this.clearResearchNote());
+        });
         const header = this.element('div', 'mktero-zotero-notes-header');
         const titleRow = this.element('div', 'mktero-zotero-notes-title-row');
         const title = this.element('h2', 'mktero-zotero-notes-title');
@@ -671,22 +828,30 @@ class ZoteroNotesPanel {
             LUCIDE_ICONS.externalLink,
             'notes.openInWindow'
         );
-        editorBar.append(backButton, windowButton);
+        const pinButton = this.iconButton('mktero-zotero-note-pin',
+            LUCIDE_ICONS.pin, 'notes.pinResearchNote');
+        const editorTarget = this.element('span', 'mktero-note-destination');
+        editorBar.append(backButton, editorTarget, pinButton, windowButton);
         const slot = this.element('slot', 'mktero-zotero-note-slot');
         slot.setAttribute('name', NOTE_EDITOR_SLOT);
         editorView.append(editorBar, slot);
         editorView.hidden = true;
 
-        this.aside.replaceChildren(listView, editorView);
+        this.aside.replaceChildren(researchStrip, listView, editorView);
         newButton.addEventListener('click', () => {
             if (this.openCreateMenu({ anchor: newButton })) return;
             void this.createNote('item');
         });
         backButton.addEventListener('click', () => this.back());
+        pinButton.addEventListener('click', () => {
+            void this.runAction(() => this.pinResearchNote());
+        });
         windowButton.addEventListener('click', () => {
             void this.openCurrentInWindow();
         });
         const elements = {
+            researchStrip, researchLabel, researchTitle, researchContinue,
+            researchClear, researchStatus, pinButton, editorTarget,
             listView,
             editorView,
             titleLabel,
@@ -718,6 +883,12 @@ class ZoteroNotesPanel {
         if (className) element.className = className;
         return element;
     }
+}
+
+function unavailableNote() {
+    const error = new Error('The note destination is unavailable or changed');
+    error.code = NOTE_EDITOR_UNAVAILABLE;
+    return error;
 }
 
 function setLabel(element, label) {

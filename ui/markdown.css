@@ -847,11 +847,9 @@ main {
     scrollbar-width: thin;
 }
 
-/* The quote takes the row; the actions keep their size beside it. */
+/* Only the metadata shares its row with actions; the text spans the card. */
 .markdown-note-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 1px;
+    position: relative;
     margin: 4px 0;
 }
 
@@ -860,7 +858,6 @@ main {
     display: block;
     width: 100%;
     min-width: 0;
-    flex: 1 1 auto;
     padding: 10px 11px;
     overflow: hidden;
     border: 1px solid transparent;
@@ -904,6 +901,7 @@ main {
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
+    padding-right: 80px;
     margin-bottom: 6px;
     color: var(--muted);
     font-size: 10.5px;
@@ -943,17 +941,22 @@ main {
 .markdown-note-open-pdf,
 .markdown-note-delete {
     display: inline-grid;
+    position: absolute;
+    top: 5px;
+    right: 5px;
     width: 26px;
     height: 26px;
-    flex: 0 0 26px;
     place-items: center;
-    margin: 5px 0 0 0;
+    margin: 0;
     padding: 0;
     border: 1px solid transparent;
     border-radius: 5px;
     background: transparent;
     cursor: pointer;
 }
+
+.markdown-note-item > :nth-last-child(2):not(.markdown-note-link) { right: 32px; }
+.markdown-note-item > :nth-last-child(3):not(.markdown-note-link) { right: 59px; }
 
 .markdown-note-sync-retry { color: var(--warning); }
 
@@ -1044,6 +1047,76 @@ main {
 }
 
 /* The right column: the paper's Zotero notes. */
+.mktero-research-note {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface);
+}
+
+.mktero-research-note-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mktero-note-destination {
+    min-width: 0;
+    flex: 1;
+    padding: 0 6px;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mktero-research-note-continue {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: var(--radius-md);
+    color: var(--text);
+    background: transparent;
+    font: 12px/1.4 var(--ui-font);
+    text-align: start;
+    cursor: pointer;
+}
+
+.mktero-research-note-continue:hover:not(:disabled) {
+    background: var(--surface-raised);
+}
+
+.mktero-research-note-continue:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.mktero-research-note-continue:disabled { cursor: default; }
+
+.mktero-research-note-label {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.mktero-research-note-title {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 650;
+}
+
+.mktero-research-note-status {
+    margin: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
 .mktero-zotero-notes-list-view,
 .mktero-zotero-notes-editor-view {
     display: flex;
@@ -1185,7 +1258,7 @@ main {
 
 .mktero-zotero-notes-search {
     flex: 0 0 auto;
-    padding: 0 10px 8px;
+    padding: 8px 10px;
 }
 
 .mktero-zotero-notes-search-input {
@@ -1225,6 +1298,23 @@ main {
 }
 
 .mktero-zotero-note-item { margin: 4px 0; }
+
+.mktero-zotero-note-item--pinnable { position: relative; }
+
+.mktero-zotero-note-item--pinnable .mktero-zotero-note-title {
+    padding-right: 33px;
+}
+
+.mktero-zotero-note-pin-card {
+    position: absolute;
+    top: 4px;
+    right: 5px;
+}
+
+.mktero-zotero-note-pin-card[aria-pressed='true'] {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 
 .mktero-zotero-note-link {
     display: flex;

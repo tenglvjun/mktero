@@ -35,13 +35,26 @@ Other papers' child notes and notes from other libraries are not shown. Search n
 
 Both kinds are normal Zotero note items. Zotero handles their sync, search, and recovery; Mktero stores no notes. [Library permissions and editor fallback](#zotero-notes-beside-the-reader-1) are covered below.
 
+### Read several papers with one research note
+
+A research note is an ordinary standalone Zotero note that you choose as the target for passages from several papers. Each library has its own choice.
+
+1. In `Standalone notes`, click the pin button on an editable note's card to set it as the research note. Create a standalone note first if needed; its title can be the question you are exploring. Pinning keeps the list open and does not open the editor. You can also right-click the note and choose `Set as Research Note`, or use the pin button above an already open standalone note.
+2. Click the pinned title in the research-note strip to continue editing. The same target appears in other Mktero reading tabs for that library. You can also choose `Add to Note` on an original-text selection or an annotation to open that target and insert the passage. Check the target title shown by the action before adding it.
+3. Write your question, critique, or connection beside the inserted passage in Zotero's note editor. The citation and page link let you return to the PDF source.
+4. After restarting Zotero, open a paper in that library to continue with the saved research-note target. The editor opens when you choose to continue or add a passage; restoring the target does not restore reading tabs.
+
+Opening a different note changes the target in that reading tab only. It does not replace the pinned research note; click the pinned title in the research-note strip when you want to return to it. To change the pinned target, return to `Standalone notes` and click another note's card pin. Click the selected card's pin again, or use `Unpin Research Note` in the strip, to clear the choice and keep the note and its contents. If the destination changes while an Add to Note popup is open, that old action is refused; close the popup and select the content again.
+
+A deleted note, a note moved under a paper, or a note that is no longer editable cannot receive passages as the research-note target. Mktero shows the reason so you can restore access, choose another note, or clear the choice; it does not silently write to another note.
+
 ### Add passages and annotations to a note
 
-Open a note in the `Notes` column, including a standalone note if that is your target. Then choose `Add to Note` from a text-selection popup, an annotation popup, or an item in the `Annotations` segment.
+Open a note in the `Notes` column, including a standalone note if that is your target, or use the pinned research note. Then choose `Add to Note` from a text-selection popup, an annotation popup, or an item in the `Annotations` segment. The action identifies the actual target note; if another note is already open, it receives the passage.
 
 The passage is inserted the same way as in Zotero's PDF reader: highlighted text, a citation, and the page. Clicking that citation opens Zotero's PDF reader. Adding an ordinary selection does not save a highlight.
 
-Insertion needs both an open note and a PDF position. A local highlight not yet in the PDF, or a selection the local PDF index cannot locate (not found or ambiguous), is refused with the reason; Mktero does not insert it without a source.
+Insertion needs an editable target note and a PDF position. With a valid pinned research note, Mktero opens its editor on demand before inserting. A local highlight not yet in the PDF, or a selection the local PDF index cannot locate (not found or ambiguous), is refused with the reason; Mktero does not insert it without a source.
 
 To collect the PDF's annotations, choose `Add Note from Annotations` in the `Annotations` segment. Like Zotero's command, it creates a child note containing all of that PDF's annotations except ink annotations, and opens it in the `Notes` column.
 
@@ -112,6 +125,8 @@ If Zotero's note editor changes in an unrecognized way, insertion falls back to 
 While a Mktero tab is selected, Mktero hides Zotero's right-hand item pane, the context pane. It returns when another tab is selected. Zotero does not update it for Mktero tabs, so it would otherwise show the previous tab's paper.
 
 Zotero preferences save which columns are open, their widths, and the selected left segment: `extensions.mktero.readerOutlineVisible`, `readerOutlineWidth`, `readerOutlineSegment`, `readerNotesVisible`, and `readerNotesWidth`. The next Mktero tab uses them. Automatic collapsing in a narrow window is not saved.
+
+The separate `extensions.mktero.researchNoteTargets` preference stores a note key for each library ID. It keeps no note title or content, is unencrypted in the local profile, and is neither sent nor synced by Mktero. Research-note contents remain in Zotero note items and sync according to Zotero settings. Clearing the research-note choice removes that library's reference without deleting the note.
 
 ### Correct recognition errors
 

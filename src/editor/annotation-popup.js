@@ -28,6 +28,7 @@ const ANNOTATION_ERROR_KEYS = new Map([
     ['MKTERO_PDF_TEXT_SEARCH_TIMEOUT', 'annotation.pdfTextSearchTimeout'],
     ['MKTERO_ANNOTATION_TOO_MANY_SEGMENTS', 'annotation.tooManySegments'],
     ['MKTERO_NOTE_EDITOR_UNAVAILABLE', 'notes.addToNoteNeedsNote'],
+    ['MKTERO_NOTE_TARGET_CHANGED', 'notes.addToNoteTargetChanged'],
     ['MKTERO_NOTE_ANNOTATION_NOT_IN_PDF', 'notes.addToNoteNotInPDF'],
     ['MKTERO_NOTE_SELECTION_NOT_LOCATED', 'notes.addToNoteNotLocated'],
 ]);
@@ -303,9 +304,10 @@ export function createAnnotationPopup(parent, {
                         addToNote: typeof addSelectionToNote === 'function'
                             ? {
                                 state: noteState(addToNoteState, null),
-                                run: () => addSelectionToNote(
+                                run: targetIdentity => addSelectionToNote(
                                     annotation,
-                                    selectionContext
+                                    selectionContext,
+                                    targetIdentity
                                 ),
                             }
                             : undefined,
@@ -441,7 +443,7 @@ export function createAnnotationPopup(parent, {
                     addToNote: typeof addAnnotationToNote === 'function'
                         ? {
                             state: noteState(addToNoteState, annotation),
-                            run: () => addAnnotationToNote(annotation.id),
+                            run: targetIdentity => addAnnotationToNote(annotation.id, targetIdentity),
                         }
                         : undefined,
                     viewInPDF: annotation.source !== 'markdown'
@@ -1413,9 +1415,11 @@ function createAddToNoteButton(document, translate, addToNote, { run, explain })
     button.type = 'button';
     button.dataset.action = 'add-to-note';
     const enabled = addToNote.state?.status === 'enabled';
-    const label = translate(enabled
-        ? 'notes.addToNote'
-        : addToNote.state?.reasonKey || 'notes.addToNote');
+    const label = enabled && addToNote.state?.targetTitle
+        ? translate('notes.addToNoteTarget', { title: addToNote.state.targetTitle })
+        : translate(enabled
+            ? 'notes.addToNote'
+            : addToNote.state?.reasonKey || 'notes.addToNote');
     button.setAttribute('aria-label', label);
     button.setAttribute('title', label);
     button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
@@ -1429,7 +1433,7 @@ function createAddToNoteButton(document, translate, addToNote, { run, explain })
             explain(addToNote.state?.reasonKey || 'notes.addToNoteNeedsNote');
             return;
         }
-        run(addToNote.run);
+        run(() => addToNote.run(addToNote.state?.targetIdentity));
     });
     return button;
 }

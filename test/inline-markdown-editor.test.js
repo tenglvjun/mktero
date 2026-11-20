@@ -1959,6 +1959,45 @@ function waitForAnnotationPopupToClose(dom, document) {
     });
 }
 
+test('forwards the popup destination through source-selection preparation', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', { pretendToBeVisual: true });
+    const { document } = dom.window;
+    const markdown = 'Evidence from the original paper.';
+    const calls = [];
+    let currentIdentity = 'note:8';
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        addToNoteState: () => ({ status: 'enabled', targetTitle: 'Question A',
+            targetIdentity: currentIdentity }),
+        async addSelectionToNote(annotation, context, targetIdentity) {
+            calls.push({ annotation, context, targetIdentity });
+        },
+    });
+    try {
+        const line = document.querySelector('.cm-line');
+        const range = document.createRange();
+        range.selectNodeContents(line);
+        document.getSelection().addRange(range);
+        line.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0 }));
+        const button = document.querySelector('[data-action="add-to-note"]');
+        assert.ok(button);
+        assert.equal(button.title, 'Add to note: Question A');
+        currentIdentity = 'note:9';
+        button.click();
+        await waitForAnnotationPopupToClose(dom, document);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].targetIdentity, 'note:8');
+        assert.equal(calls[0].annotation.text, markdown);
+        assert.deepEqual(calls[0].annotation.ranges, [{ from: 0, to: markdown.length }]);
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
 test('keeps a note draft open when only the annotations refresh', async () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

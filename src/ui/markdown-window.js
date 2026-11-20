@@ -69,6 +69,7 @@ import {
     NOTE_ANNOTATION_NOT_IN_PDF,
     NOTE_EDITOR_UNAVAILABLE,
     NOTE_SELECTION_NOT_LOCATED,
+    NOTE_TARGET_CHANGED,
     noteBridgeError,
 } from '../core/zotero-note-bridge.js';
 import { createZoteroNotesPanel } from './zotero-notes-panel.js';
@@ -200,6 +201,7 @@ const OUTLINE_SEGMENT_LABEL_KEYS = Object.freeze({
 // Why a note cannot take an annotation, by the bridge's error code.
 const ADD_TO_NOTE_ERROR_KEYS = new Map([
     [NOTE_EDITOR_UNAVAILABLE, 'notes.addToNoteNeedsNote'],
+    [NOTE_TARGET_CHANGED, 'notes.addToNoteTargetChanged'],
     [NOTE_ANNOTATION_NOT_IN_PDF, 'notes.addToNoteNotInPDF'],
     [NOTE_SELECTION_NOT_LOCATED, 'notes.addToNoteNotLocated'],
 ]);
@@ -655,11 +657,11 @@ class MarkdownTabView {
                 this.openAnnotationInPDF(annotationID)
             ),
             addToNoteState: annotation => this.addToNoteState(annotation),
-            addAnnotationToNote: annotationID => (
-                this.addAnnotationToNote(annotationID)
+            addAnnotationToNote: (annotationID, targetIdentity) => (
+                this.addAnnotationToNote(annotationID, targetIdentity)
             ),
-            addSelectionToNote: (annotation, selectionContext) => (
-                this.addSelectionToNote(annotation, selectionContext)
+            addSelectionToNote: (annotation, selectionContext, targetIdentity) => (
+                this.addSelectionToNote(annotation, selectionContext, targetIdentity)
             ),
             onSourceNavigationError: error => this.zotero?.logError?.(error),
             onAnnotationActionError: (messageKey, error) => (
@@ -1501,9 +1503,11 @@ class MarkdownTabView {
         const state = this.addToNoteState(annotation);
         button.hidden = state.status === 'hidden';
         button.setAttribute('aria-disabled', state.status === 'enabled' ? 'false' : 'true');
-        const label = this.t(state.status === 'enabled'
-            ? 'notes.addToNote'
-            : state.reasonKey || 'notes.addToNote');
+        const label = state.status === 'enabled' && state.targetTitle
+            ? this.t('notes.addToNoteTarget', { title: state.targetTitle })
+            : this.t(state.status === 'enabled'
+                ? 'notes.addToNote'
+                : state.reasonKey || 'notes.addToNote');
         button.setAttribute('aria-label', label);
         button.setAttribute('title', label);
     }
@@ -1518,13 +1522,14 @@ class MarkdownTabView {
         if (annotation && isMarkdownAnnotation(annotation)) {
             return { status: 'disabled', reasonKey: 'notes.addToNoteNotInPDF' };
         }
-        if (!panel.canInsert) {
+        if (!panel.canPrepareInsert) {
             return { status: 'disabled', reasonKey: 'notes.addToNoteNeedsNote' };
         }
-        return { status: 'enabled' };
+        return { status: 'enabled', targetTitle: panel.insertTargetTitle,
+            targetIdentity: panel.insertTargetIdentity };
     }
 
-    async addAnnotationToNote(annotationID) {
+    async addAnnotationToNote(annotationID, targetIdentity = undefined) {
         const annotation = findOverlayAnnotation(
             this.model.annotationOverlay,
             annotationID
@@ -1535,20 +1540,22 @@ class MarkdownTabView {
                 'The annotation has not reached the PDF yet'
             );
         }
-        const panel = this.requireInsertableNote();
         const adapter = this.zoteroNotesAdapter;
+        const panel = await this.requireInsertableNote(targetIdentity);
         const annotations = await adapter.annotationsForNote([annotationID]);
         await panel.insertAnnotations(annotations, {
             segmentsFor: json => this.noteSegmentsForAnnotationKey(json?.id),
         });
     }
 
-    async addSelectionToNote(annotation, selectionContext) {
-        const panel = this.requireInsertableNote();
-        const draft = await this.prepareMarkdownAnnotationDraft(
-            annotation,
-            selectionContext
-        );
+    async addSelectionToNote(annotation, selectionContext, targetIdentity = undefined) {
+        // Read the supplied selection snapshot before mounting an editor can
+        // move focus. Bind the destination before starting PDF location too.
+        const draftPromise = this.prepareMarkdownAnnotationDraft(annotation, selectionContext);
+        const [panel, draft] = await Promise.all([
+            this.requireInsertableNote(targetIdentity),
+            draftPromise,
+        ]);
         const annotations = await this.zoteroNotesAdapter.selectionForNote(draft);
         // A passage split across pages is placed part by part from the PDF
         // text, which says nothing of where its formulas are.
@@ -1607,15 +1614,21 @@ class MarkdownTabView {
         return segments;
     }
 
-    requireInsertableNote() {
+    async requireInsertableNote(targetIdentity = undefined) {
         const panel = this.zoteroNotesPanel;
         if (!panel?.available) {
             throw new Error('Zotero notes are unavailable');
         }
-        if (!panel.canInsert) {
-            throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'No note is open');
+        if (targetIdentity !== undefined && targetIdentity !== panel.insertTargetIdentity) {
+            throw noteBridgeError(NOTE_TARGET_CHANGED, 'The displayed note destination changed');
         }
-        return panel;
+        if (!panel.canPrepareInsert) {
+            throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'No note destination is available');
+        }
+        if (!this.sidePanels.notes.visible) {
+            this.setSidePanelVisibility('notes', true, { source: 'user' });
+        }
+        return panel.prepareInsert();
     }
 
     async createNoteFromAnnotations() {

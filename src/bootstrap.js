@@ -2799,6 +2799,12 @@ function createTabNotesBridge(getAttachmentID) {
             }
             return notes.list(id);
         },
+        getResearchNote: () => {
+            const id = getAttachmentID();
+            return id ? notes.getResearchNote(id) : { status: 'unavailable' };
+        },
+        pinResearchNote: logged(noteID => notes.pinResearchNote(attachmentID(), noteID)),
+        clearResearchNote: logged(() => notes.clearResearchNote(attachmentID())),
         canHostEditor: context => notes.canHostEditor(context),
         mountEditor: logged((container, options = {}) => notes.mountEditor(container, {
             ...options,

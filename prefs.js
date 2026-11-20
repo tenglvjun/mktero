@@ -26,6 +26,7 @@ pref("extensions.mktero.readerOutlineWidth", 256);
 pref("extensions.mktero.readerOutlineSegment", "headings");
 pref("extensions.mktero.readerNotesVisible", true);
 pref("extensions.mktero.readerNotesWidth", 300);
+pref("extensions.mktero.researchNoteTargets", "{}");
 pref("extensions.mktero.aiProvider", "openai");
 pref("extensions.mktero.aiProtocol", "openai-responses");
 pref("extensions.mktero.aiApiBase", "https://api.openai.com/v1");
