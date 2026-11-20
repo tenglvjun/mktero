@@ -1,4 +1,10 @@
 import {
+    clearResearchNoteTarget,
+    getResearchNoteTarget,
+    observeResearchNoteTargets,
+    setResearchNoteTarget,
+} from '../config/research-note-preferences.js';
+import {
     annotationJSONForNote,
     NOTE_ANNOTATION_NOT_IN_PDF,
     NOTE_EDITOR_UNAVAILABLE,
@@ -31,7 +37,8 @@ const NOTE_CARET_WAIT_MS = 2_000;
 // Zotero notes shown beside the paper a Mktero tab displays. The list has
 // two scopes: notes attached to the current paper, and standalone notes in
 // the same Zotero library. Notes remain ordinary Zotero note items edited
-// with Zotero's own `note-editor`; Mktero stores nothing about them.
+// with Zotero's own `note-editor`; only the selected research note's key is
+// remembered in preferences, never its contents.
 //
 // Everything used here exists in Zotero 7.0 through 10.0: `note-editor`,
 // `getCurrentInstance()`, `EditorInstance.insertAnnotations()`,
@@ -65,6 +72,7 @@ export function createZoteroNotes(zotero, {
     const observers = new Set();
     let notifierID = null;
     let notifyTimer = null;
+    let disposePreferenceObserver = null;
 
     const attachmentFor = itemID => {
         const attachment = zotero?.Items?.get?.(itemID);
@@ -95,6 +103,9 @@ export function createZoteroNotes(zotero, {
         }, NOTIFY_DELAY_MS);
     };
     const ensureNotifier = () => {
+        if (!disposePreferenceObserver) {
+            disposePreferenceObserver = observeResearchNoteTargets(zotero, scheduleNotify);
+        }
         if (notifierID !== null
             || typeof zotero?.Notifier?.registerObserver !== 'function') {
             return;
@@ -110,6 +121,8 @@ export function createZoteroNotes(zotero, {
             clearTimeout(notifyTimer);
             notifyTimer = null;
         }
+        disposePreferenceObserver?.();
+        disposePreferenceObserver = null;
         if (notifierID === null) return;
         try {
             zotero.Notifier.unregisterObserver?.(notifierID);
@@ -132,7 +145,76 @@ export function createZoteroNotes(zotero, {
         return document;
     };
 
+    const getResearchNote = async attachmentID => {
+        let reference = {};
+        try {
+            const attachment = attachmentFor(attachmentID);
+            if (!attachment || attachment.deleted
+                || !Number.isSafeInteger(attachment.libraryID)
+                || attachment.libraryID <= 0) return { status: 'unavailable' };
+            const libraryID = attachment.libraryID;
+            reference = { libraryID };
+            const key = getResearchNoteTarget(zotero, libraryID);
+            if (!key) return { status: 'none', libraryID };
+            reference = { libraryID, key };
+            if (!zotero?.Libraries?.get?.(libraryID)
+                || typeof zotero?.Items?.getByLibraryAndKey !== 'function') {
+                return { status: 'unavailable', ...reference };
+            }
+            const item = await zotero.Items.getByLibraryAndKey(libraryID, key);
+            if (!item) return { status: 'missing', ...reference };
+            await zotero.Items.loadDataTypes?.([item], ['note']);
+            if (!Number.isSafeInteger(item.id) || item.id <= 0
+                || !item.isNote?.() || item.deleted || item.parentID
+                || item.libraryID !== libraryID || item.key !== key
+                || isSnapshotNote(item)) return { status: 'missing', ...reference };
+            // The source can disappear or move while its note loads.
+            const source = attachmentFor(attachmentID);
+            if (!source || source.deleted || source.libraryID !== libraryID
+                || getResearchNoteTarget(zotero, libraryID) !== key) {
+                return { status: 'unavailable', ...reference };
+            }
+            const note = noteEntry(zotero, item, 'standalone');
+            return { status: note.editable ? 'ready' : 'readonly', ...reference, note };
+        }
+        catch {
+            return { status: 'unavailable', ...reference };
+        }
+    };
+
+    const existingNoteFor = async (attachmentID, noteID) => {
+        let item = zotero.Items.get(noteID);
+        if (item?.isNote?.()) await zotero.Items.loadDataTypes?.([item], ['note']);
+        item = zotero.Items.get(noteID);
+        const attachment = attachmentFor(attachmentID);
+        if (!noteInContext(item, attachment, parentFor(attachment), isSnapshotNote)) {
+            throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The note is unavailable in this paper');
+        }
+        return item;
+    };
+
     return {
+        getResearchNote,
+
+        async pinResearchNote(attachmentID, noteID) {
+            const item = await existingNoteFor(attachmentID, noteID);
+            if (item.parentID || !noteEditable(zotero, item)) {
+                throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The research note must be editable and standalone');
+            }
+            setResearchNoteTarget(zotero, item.libraryID, item.key);
+            scheduleNotify();
+            return getResearchNote(attachmentID);
+        },
+
+        clearResearchNote(attachmentID) {
+            const attachment = attachmentFor(attachmentID);
+            if (!attachment || attachment.deleted) {
+                throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The source PDF is unavailable');
+            }
+            clearResearchNoteTarget(zotero, attachment.libraryID);
+            scheduleNotify();
+        },
+
         // Resolves the column's state for one PDF attachment:
         // { status, notes, editable, canCreateItemNote,
         //   canCreateStandaloneNote, annotationCount }.
@@ -148,6 +230,7 @@ export function createZoteroNotes(zotero, {
                     canCreateItemNote: false,
                     canCreateStandaloneNote: false,
                     annotationCount: 0,
+                    researchNote: { status: 'unavailable' },
                 };
             }
             const annotationCount = await countNoteAnnotations(zotero, attachment);
@@ -183,6 +266,7 @@ export function createZoteroNotes(zotero, {
                 canCreateItemNote,
                 canCreateStandaloneNote,
                 annotationCount,
+                researchNote: await getResearchNote(attachmentID),
             };
         },
 
@@ -215,16 +299,16 @@ export function createZoteroNotes(zotero, {
             const attachment = attachmentFor(attachmentID);
             const parent = parentFor(attachment);
             const item = noteID
-                ? zotero.Items.get(noteID)
+                ? await existingNoteFor(attachmentID, noteID)
                 : newNote(zotero, {
                     attachment,
                     parent,
                     kind: noteKind,
                 });
             if (!item?.isNote?.()) throw new Error('The note is unavailable');
-            if (noteID) await zotero.Items.loadDataTypes?.([item], ['note']);
             const editable = noteEditable(zotero, item);
-            const parentID = item.parentID ?? null;
+            const parentID = item.parentID || null;
+            const libraryID = item.libraryID;
             const editor = document.createXULElement('note-editor');
             editor.setAttribute('flex', '1');
             editor.classList.add('mktero-note-editor');
@@ -241,6 +325,26 @@ export function createZoteroNotes(zotero, {
             editor.mode = editable ? 'edit' : 'view';
             let stopMathPaste = () => {};
             let destroyed = false;
+            const currentItem = () => item.id ? zotero.Items.get(item.id) : item;
+            const isGone = () => {
+                const current = currentItem();
+                const source = attachmentFor(attachmentID);
+                return !current
+                    || current.libraryID !== libraryID
+                    || (current.parentID || null) !== parentID
+                    || !noteInContext(current, source, parentFor(source), isSnapshotNote);
+            };
+            const currentEditable = () => {
+                const allowed = !destroyed && !isGone() && noteEditable(zotero, currentItem());
+                const mode = allowed ? 'edit' : 'view';
+                if (!destroyed && editor.mode !== mode) editor.mode = mode;
+                return allowed;
+            };
+            const requireEditable = () => {
+                if (!currentEditable()) {
+                    throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The note is read-only or unavailable');
+                }
+            };
             if (editable) {
                 try {
                     stopMathPaste = installNoteMathPaste(editor, {
@@ -248,6 +352,7 @@ export function createZoteroNotes(zotero, {
                         schedule: callback => scheduleEditorTurn(editor, setTimeout, callback),
                         delay,
                         isDestroyed: () => destroyed,
+                        canEdit: currentEditable,
                         logError: error => zotero?.logError?.(error),
                     });
                 }
@@ -268,35 +373,31 @@ export function createZoteroNotes(zotero, {
                 get noteID() {
                     return item.id || null;
                 },
-                // True once a saved note was deleted, trashed, or moved to
-                // another item. An unsaved new note is never gone.
-                isGone() {
-                    if (!item.id) return false;
-                    const current = zotero.Items.get(item.id);
-                    return !current?.isNote?.()
-                        || current.deleted === true
-                        || (parentID !== null && current.parentID !== parentID);
+                get title() {
+                    return noteEntry(zotero, currentItem() || item, parentID ? 'item' : 'standalone').title;
                 },
-                editable,
+                isGone,
+                get editable() {
+                    return currentEditable();
+                },
                 // `segmentsFor(annotation, index)` may give the text and
                 // formulas of an annotation, so the note shows its formulas.
                 async insertAnnotations(annotations, { segmentsFor = null } = {}) {
-                    if (!editable) {
-                        throw noteBridgeError(
-                            NOTE_EDITOR_UNAVAILABLE,
-                            'The note is read-only'
-                        );
-                    }
+                    requireEditable();
                     const editorInstance = await instance();
+                    requireEditable();
                     editorInstance.focus?.();
                     const before = noteEditorSnapshot(editor, editorInstance);
                     const inserted = await insertAnnotationsWithMath(
                         zotero,
                         editorInstance,
                         annotations,
-                        { segmentsFor, parseHTML }
+                        { segmentsFor, parseHTML, requireEditable }
                     );
-                    if (!inserted) await editorInstance.insertAnnotations(annotations);
+                    if (!inserted) {
+                        requireEditable();
+                        await editorInstance.insertAnnotations(annotations);
+                    }
                     await moveCaretAfterInsert(editor, before, {
                         delay,
                         isDestroyed: () => destroyed,
@@ -307,6 +408,7 @@ export function createZoteroNotes(zotero, {
                     return editor.focus?.();
                 },
                 save() {
+                    if (!currentEditable()) return;
                     try {
                         editor.saveSync?.();
                     }
@@ -553,6 +655,15 @@ function visibleNote(item, isSnapshotNote) {
     }
 }
 
+function noteInContext(item, attachment, parent, isSnapshotNote) {
+    if (!attachment || attachment.deleted
+        || item?.libraryID !== attachment.libraryID
+        || (item?.parentID && (item.parentID !== parent?.id || parent.deleted))) {
+        return false;
+    }
+    return visibleNote(item, isSnapshotNote);
+}
+
 function noteEditable(zotero, item) {
     if (zotero?.Libraries?.get?.(item.libraryID)?.editable === false) return false;
     if (item.deleted) return false;
@@ -581,6 +692,7 @@ function noteEntry(zotero, item, kind) {
     return {
         id: item.id,
         key: String(item.key || ''),
+        libraryID: item.libraryID,
         kind,
         title: summary.title,
         preview: summary.preview,
@@ -636,13 +748,14 @@ function installNoteMathPaste(editor, {
     schedule,
     delay,
     isDestroyed = () => false,
+    canEdit = () => true,
     logError,
 }) {
     let pasteTarget = null;
     let removePaste = null;
     let stopped = false;
     const onPaste = event => {
-        if (event.shiftKey || event.defaultPrevented) return;
+        if (event.shiftKey || event.defaultPrevented || !canEdit()) return;
         let html = '';
         try {
             html = noteMathClipboardHTML(readClipboardHTML?.());
@@ -867,7 +980,7 @@ async function insertAnnotationsWithMath(
     zotero,
     editorInstance,
     annotations,
-    { segmentsFor, parseHTML }
+    { segmentsFor, parseHTML, requireEditable = () => {} }
 ) {
     if (typeof segmentsFor !== 'function' || !Array.isArray(annotations)) {
         return false;
@@ -917,6 +1030,7 @@ async function insertAnnotationsWithMath(
     }
     if (!html) return false;
     await editorInstance._ensureNoteCreated();
+    requireEditable();
     editorInstance._postMessage({ action: 'insertHTML', pos: null, html });
     return true;
 }

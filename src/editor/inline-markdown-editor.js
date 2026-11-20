@@ -474,12 +474,13 @@ export function createInlineMarkdownEditor({
         addToNoteState,
         addAnnotationToNote,
         addSelectionToNote: typeof addSelectionToNote === 'function'
-            ? (annotation, selectionContext) => addSelectionToNote(
+            ? (annotation, selectionContext, targetIdentity) => addSelectionToNote(
                 withSelectionTextQuote(
                     annotation,
                     selectionSources.get(selectionContext)
                 ),
-                withoutSelectionTranslationContext(selectionContext)
+                withoutSelectionTranslationContext(selectionContext),
+                targetIdentity
             )
             : undefined,
         onNoteEditorClose: clearRetainedSelectionHighlight,

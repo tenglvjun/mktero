@@ -693,6 +693,10 @@ function openAddToNotePopup(kind, options) {
 
 const ADD_TO_NOTE_ERROR_MESSAGES = [
     [
+        'MKTERO_NOTE_TARGET_CHANGED',
+        'The note destination changed. Close this popup and select the content again.',
+    ],
+    [
         'MKTERO_NOTE_EDITOR_UNAVAILABLE',
         'Open or create a note in the Notes column first.',
     ],
@@ -755,6 +759,24 @@ for (const kind of ['selection', 'actions']) {
         assert.ok(fixture.parent.querySelector('.mktero-annotation-popup'));
         assert.deepEqual(called, []);
 
+        finishPopup(fixture);
+    });
+
+    test(`keeps the displayed target identity when the ${label} is used after a pin change`, async () => {
+        let identity = 'note:8';
+        const called = [];
+        const fixture = openAddToNotePopup(kind, {
+            addToNoteState: () => ({ status: 'enabled', targetIdentity: identity,
+                targetTitle: identity === 'note:8' ? 'Question A' : 'Question B' }),
+            addSelectionToNote: async (_annotation, _context, target) => called.push(target),
+            addAnnotationToNote: async (_id, target) => called.push(target),
+        });
+        const button = addToNoteButton(fixture.parent);
+        assert.equal(button.title, 'Add to note: Question A');
+        identity = 'note:9';
+        button.click();
+        await flush();
+        assert.deepEqual(called, ['note:8']);
         finishPopup(fixture);
     });
 

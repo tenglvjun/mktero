@@ -24,6 +24,7 @@ import {
     Network,
     NotebookPen,
     Pencil,
+    Pin,
     Plus,
     RefreshCw,
     RotateCcw,
@@ -151,6 +152,10 @@ export const LUCIDE_ICONS = Object.freeze({
     notebookPen: Object.freeze({
         name: 'notebook-pen',
         nodes: NotebookPen,
+    }),
+    pin: Object.freeze({
+        name: 'pin',
+        nodes: Pin,
     }),
     plus: Object.freeze({
         name: 'plus',

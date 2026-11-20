@@ -211,6 +211,48 @@ A change to `ui/markdown.css` or to the renderer is therefore a change that ever
 downstream client has to pick up in its own build. Say so in the pull request
 description; there is no shared artifact to regenerate here.
 
+## Native research-note validation
+
+On macOS with Zotero installed at `/Applications/Zotero.app`, validate the built
+XPI using synthetic PDFs and an ordinary standalone note:
+
+```bash
+node scripts/validate-research-note-zotero.mjs --fixtures
+node scripts/validate-research-note-zotero.mjs --preflight
+node scripts/validate-research-note-zotero.mjs build/mktero-<version>.xpi
+```
+
+The Seatbelt preflight must deny network access and reads/writes outside the
+isolated run before Zotero launches. The full check uses the installed product's
+rendered controls in two processes sharing one synthetic profile:
+
+1. In PDF A's `Standalone notes` list, click the card pin
+   (`.mktero-zotero-note-pin-card[data-note-id]`). It must be a separate button
+   beside the card's main button. Check `aria-pressed="true"`, the saved target
+   key, and no editor mount or separate window; save a screenshot of the pinned
+   card. Click again to unpin, check `aria-pressed="false"` and that the same
+   standalone note and its content remain, then pin it again. Only an explicit
+   click on Continue opens A's editor.
+2. Insert A's saved PDF annotation through Add to Note. Open PDF B, check the
+   shared target without an automatic editor, then let Add to Note open the
+   target and insert B's evidence. Keep two native `note-editor` instances
+   mounted and insert another annotation in each tab; switching to the other
+   tab must show each update.
+3. Close the reading tabs, request a normal application quit, and wait for
+   process exit before restarting the same profile. Check the restored target,
+   exact note HTML and all four passages with PDF source metadata. The restored
+   target must leave the editor closed until Continue is clicked.
+
+Across both phases, `.mktero-research-note-change` must be absent and the strip
+must fit the 300px notes column without horizontal overflow. Both processes must
+exit with code 0, no signal and no forced termination; a forced termination
+cannot pass the restart check. The script prints and retains its temporary run
+directory with reports, screenshots and synthetic data for diagnosis; it never
+opens the user's Zotero library. Screenshots capture only the isolated Zotero
+window when `canvas.drawWindow` is available; an unavailable API is recorded.
+Record the actual Zotero version tested rather than treating a run as coverage
+of every supported version.
+
 ## Browser preview
 
 `preview/` mounts the real Markdown reader (`createMarkdownTabView`) in a plain

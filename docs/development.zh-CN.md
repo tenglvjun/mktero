@@ -153,6 +153,24 @@ node scripts/reading-corpus-check.mjs --ids a,b --json         # 输出部分论
 因此改动 `ui/markdown.css` 或渲染器，等于要求每个下游客户端在自己的构建里跟上。请
 在 PR 描述里写明这一点；本仓库没有需要重新生成的共享产物。
 
+## 原生研究笔记验收
+
+macOS 安装了 `/Applications/Zotero.app` 后，可以用合成 PDF 和普通独立笔记验证构建出的 XPI：
+
+```bash
+node scripts/validate-research-note-zotero.mjs --fixtures
+node scripts/validate-research-note-zotero.mjs --preflight
+node scripts/validate-research-note-zotero.mjs build/mktero-<version>.xpi
+```
+
+启动前，Seatbelt 预检必须确认网络和隔离运行目录外的读写均被拒绝。完整验收通过已安装产品的真实控件执行，两个进程使用同一合成配置文件：
+
+1. 在 PDF A 的`独立笔记`列表中，点击卡片图钉（`.mktero-zotero-note-pin-card[data-note-id]`）。它必须是卡片主按钮的同级独立按钮。检查 `aria-pressed="true"`、目标 key 已保存、未挂载编辑器或打开独立窗口，并保存已固定卡片的截图。再点击一次取消固定，检查 `aria-pressed="false"`，且同一独立笔记及其内容保留，随后再次固定。只有显式点击继续后，才打开 A 的编辑器。
+2. 用`添加至笔记`插入 A 已保存的 PDF 注释。打开 PDF B，检查共享目标可见且编辑器未自动打开，再让`添加至笔记`按需打开目标并插入 B 的证据。保持两个原生 `note-editor` 同时挂载，在 A、B 各插入另一条注释；切到另一标签后必须能看到每次更新。
+3. 关闭阅读标签页，请求正常退出应用并等待进程退出，之后才用同一配置文件重启。检查目标恢复、笔记 HTML 完全一致，且四段证据及其 PDF 来源元数据均保留。恢复目标后，点击继续前编辑器仍须关闭。
+
+两个阶段均检查 `.mktero-research-note-change` 不存在，且研究笔记条在 300px 笔记栏中没有横向溢出。两个进程均须以退出码 0、无信号、未强制终止的状态退出；强制终止不能作为重启验收通过。脚本会输出并保留临时运行目录，内含报告、截图与合成数据，供诊断使用；它不会打开用户的 Zotero 文库。截图仅在 `canvas.drawWindow` 可用时捕获隔离 Zotero 窗口；API 不可用时会记录。请记录实际测试的 Zotero 版本，不要将一次运行视为所有兼容版本均已验收。
+
 ## 浏览器预览
 
 `preview/` 在普通网页中挂载真实的 Markdown 阅读器（`createMarkdownTabView`），外层是 Zotero 风格的窗口和一篇示例论文，用于网站展示和浏览器兼容检查。论文、译文、注释和模拟的 PDF 页面都是夹具数据；页面不发出任何网络请求，CSP 也禁止对外连接。XPI 不包含这部分内容。

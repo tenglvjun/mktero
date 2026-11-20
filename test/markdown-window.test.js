@@ -10924,7 +10924,7 @@ test('adds a PDF annotation to the open note and refuses one that cannot', async
         shadow.querySelector('.mktero-zotero-note-link').click();
         await flushView();
         assert.equal(pdfButton.getAttribute('aria-disabled'), 'false');
-        assert.equal(pdfButton.getAttribute('title'), 'Add to Note');
+        assert.equal(pdfButton.getAttribute('title'), 'Add to note: Note');
         assert.equal(localButton.getAttribute('aria-disabled'), 'true');
 
         localButton.click();
@@ -11111,6 +11111,84 @@ test('hands a selection\'s formulas to the note, unless it spans pages', async (
         parts = 2;
         await view.addSelectionToNote(selection, { side: 'source' });
         assert.equal(insertedOptions[1].segmentsFor(), null);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('restored research targets accept a source selection on demand and keep its destination', async () => {
+    const research = { id: 8, title: 'Research question', kind: 'standalone', editable: true };
+    const temporary = { id: 9, title: 'Temporary paper note', kind: 'item', editable: true };
+    const target = { status: 'ready', note: research };
+    const inserted = [];
+    const mounted = [];
+    const drafts = [];
+    let releaseLocation;
+    let holdLocation = false;
+    const model = readyNotesModel([], {
+        markdown: 'Evidence in the original paper.',
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return { status: 'ready', editable: true, annotationCount: 0,
+                    notes: [research, temporary], researchNote: target };
+            },
+            getResearchNote: async () => target,
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                mounted.push(noteID);
+                return { noteID, title: noteID === 8 ? research.title : temporary.title,
+                    editable: true,
+                    async insertAnnotations(annotations) { inserted.push({ noteID, annotations }); },
+                    destroy() {} };
+            },
+            async selectionForNote(draft) {
+                drafts.push(draft);
+                if (holdLocation) await new Promise(resolve => { releaseLocation = resolve; });
+                return [{ type: 'highlight', text: draft.text }];
+            },
+        }),
+    });
+    const { view, shadow } = createView(model, {}, { configureWindow: wideReaderWindow });
+    try {
+        await flushView();
+        const shownTarget = view.addToNoteState();
+        assert.equal(shownTarget.targetTitle, research.title);
+        assert.equal(shownTarget.targetIdentity, 'note:8');
+        assert.deepEqual(mounted, []);
+        const selection = { text: model.markdown,
+            ranges: [{ from: 0, to: model.markdown.length }] };
+        await view.addSelectionToNote(selection, { side: 'source' });
+        assert.equal(drafts[0].text, model.markdown);
+        assert.deepEqual(drafts[0].ranges, selection.ranges);
+        assert.equal(inserted[0].noteID, research.id);
+        assert.equal(shadow.querySelector('.mktero-note-destination').textContent,
+            'Writing to: Research question');
+
+        // An external window changes the pin while the original popup still
+        // names research. Refuse that old action before opening another note.
+        view.zoteroNotesPanel.back();
+        target.note = { ...temporary, kind: 'standalone' };
+        await view.zoteroNotesPanel.refresh();
+        await assert.rejects(view.addSelectionToNote(selection, { side: 'source' },
+            shownTarget.targetIdentity), error => error.code === 'MKTERO_NOTE_TARGET_CHANGED');
+        await assert.rejects(view.addAnnotationToNote('HIGH0001', shownTarget.targetIdentity),
+            error => error.code === 'MKTERO_NOTE_TARGET_CHANGED');
+        assert.equal(inserted.length, 1);
+        assert.deepEqual(mounted, [research.id]);
+        target.note = research;
+        await view.zoteroNotesPanel.refresh();
+        await view.zoteroNotesPanel.continueResearchNote();
+
+        holdLocation = true;
+        const pending = view.addSelectionToNote(selection, { side: 'source' });
+        await flushView();
+        assert.equal(typeof releaseLocation, 'function');
+        await view.zoteroNotesPanel.openNote(temporary.id);
+        releaseLocation();
+        await assert.rejects(pending, error => error.code === 'MKTERO_NOTE_EDITOR_UNAVAILABLE');
+        assert.equal(inserted.length, 1);
+        assert.equal(view.addToNoteState().targetTitle, temporary.title);
     }
     finally {
         view.destroy();
