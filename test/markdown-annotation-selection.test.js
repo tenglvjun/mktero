@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { EditorView } from '@codemirror/view';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 import {
     collectMarkdownTranslationBlocks,
@@ -80,6 +81,79 @@ test('creates a local highlight from a whole heading line without Markdown marks
     editor.destroy();
     dom.window.close();
 });
+
+for (const caption of [false, true]) {
+    test(`keeps selected ${caption ? 'caption' : 'body'} actions through a blur without a focus destination`, async () => {
+        const selected = 'Repeated measurements';
+        const markdown = caption
+            ? `Before the figure.\n\n![Figure 3. ${selected} in independent cohorts.](figure.png)`
+            : `${selected} in independent cohorts.\n\nAnother paragraph.`;
+        const dom = new JSDOM('<!doctype html><div id="host"></div>', { pretendToBeVisual: true });
+        const { document } = dom.window;
+        const root = document.querySelector('#host').attachShadow({ mode: 'open' });
+        const parent = document.createElement('div');
+        root.append(parent);
+        const translations = [];
+        const created = [];
+        const editor = createInlineMarkdownEditor({
+            parent,
+            initialMarkdown: markdown,
+            resolveImageURL: () => null,
+            translateSelection: async text => {
+                translations.push(text);
+                return { text: 'Independent translation' };
+            },
+            createMarkdownAnnotation: async annotation => {
+                created.push(annotation);
+                return annotation;
+            },
+        });
+        try {
+            const text = textNodeContaining(parent, selected);
+            const start = text.textContent.indexOf(selected);
+            const selection = document.getSelection();
+            const range = document.createRange();
+            range.setStart(text, start);
+            range.setEnd(text, start + selected.length);
+            // jsdom does not expose native shadow selection; Gecko's shape is
+            // sufficient here because the failure is the later WebKit blur.
+            document.getSelection = () => ({
+                rangeCount: 1, isCollapsed: false,
+                anchorNode: text, anchorOffset: start,
+                focusNode: text, focusOffset: start + selected.length,
+                getRangeAt: () => range, toString: () => selected,
+                removeAllRanges: () => selection.removeAllRanges(),
+            });
+            text.parentElement.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0 }));
+            const toolbar = parent.querySelector('.mktero-markdown-selection-actions');
+            assert.ok(toolbar);
+            const button = toolbar.querySelector('[data-action="translate-selection"]');
+            const icon = button.querySelector('svg');
+            icon.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, composed: true, button: 0 }));
+            parent.querySelector('.cm-content').dispatchEvent(new dom.window.FocusEvent('blur', { relatedTarget: null }));
+            assert.equal(toolbar.isConnected, true, 'WebKit blur must not dismiss the action before its click');
+            button.click();
+            await Promise.resolve();
+            await Promise.resolve();
+            assert.deepEqual(translations, [selected]);
+            assert.equal(toolbar.querySelector('.mktero-selection-translation-result').textContent, 'Independent translation');
+            toolbar.querySelector('[data-color="#ffd400"]').click();
+            await Promise.resolve();
+            await Promise.resolve();
+            assert.equal(created.length, 1);
+            assert.equal(created[0].text, selected);
+            assert.equal(markdownAnnotationRangeMatchesSource(markdown, created[0].ranges, selected), true);
+            // Outside presses still dismiss a subsequent selection popup.
+            text.parentElement.dispatchEvent(new dom.window.MouseEvent('mouseup', { bubbles: true, button: 0 }));
+            document.body.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+            assert.equal(parent.querySelector('.mktero-markdown-selection-actions'), null);
+        }
+        finally {
+            editor.destroy();
+            dom.window.close();
+        }
+    });
+}
 
 test('creates a bilingual highlight from a display math formula', async () => {
     const formula = '(R_t, \\Delta\\Sigma_t, a_t)';
@@ -777,6 +851,148 @@ test('a re-entered caption selectionchange does not loop', async () => {
     editor.destroy();
     dom.window.close();
 });
+
+test('keeps a released caption selection through queued CodeMirror measurements and overlay updates', async () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div><input id="outside">', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Before the figure.\n\n![Figure 1. Repeated measurements in independent trials.](figure.png)\n\nAfter the figure.';
+    const created = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: () => null,
+        createMarkdownAnnotation: async annotation => {
+            created.push(annotation);
+            return annotation;
+        },
+    });
+    try {
+        const content = document.querySelector('.cm-content');
+        const view = EditorView.findFromDOM(content);
+        const caption = document.querySelector('figcaption');
+        const text = textNodeContaining(caption, 'Repeated measurements');
+        const from = text.textContent.indexOf('Repeated measurements');
+        const to = from + 'Repeated measurements'.length;
+        view.focus();
+        caption.dispatchEvent(captionPointerEvent(dom.window, 'mousedown', text, to));
+        // A native press focuses the nearest focusable ancestor. jsdom's
+        // synthetic mouse events need that browser default action explicitly.
+        caption.focus();
+        const selection = document.getSelection();
+        selection.setBaseAndExtent(text, to, text, from);
+        document.dispatchEvent(new dom.window.Event('selectionchange'));
+        caption.dispatchEvent(captionPointerEvent(dom.window, 'mouseup', text, from));
+        for (let frame = 0; frame < 6; frame++) {
+            // measure() force-flushes the DOM observer even when the caption's
+            // capture listener has consumed every selectionchange event.
+            view.measure();
+            if (frame === 2) editor.setDocument({ markdown });
+            await new Promise(resolve => dom.window.requestAnimationFrame(resolve));
+            assert.equal(caption.isConnected, true);
+            assert.equal(document.querySelector('figcaption'), caption);
+            assert.equal(selection.toString(), 'Repeated measurements');
+            assert.equal(selection.anchorNode, text);
+            assert.equal(selection.anchorOffset, to);
+            assert.equal(selection.focusNode, text);
+            assert.equal(selection.focusOffset, from);
+        }
+        document.querySelector('.mktero-markdown-selection-actions [data-color="#ffd400"]').click();
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(created.length, 1);
+        assert.equal(created[0].text, 'Repeated measurements');
+        assert.equal(markdownAnnotationRangeMatchesSource(markdown, created[0].ranges, created[0].text), true);
+        const outside = document.querySelector('#outside');
+        outside.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        outside.focus();
+        assert.equal(document.activeElement, outside);
+        view.focus();
+        assert.equal(document.activeElement, content, 'ordinary editor focus resumes');
+        caption.dispatchEvent(captionPointerEvent(dom.window, 'mousedown', text, to));
+        caption.focus();
+        selection.setBaseAndExtent(text, to, text, from);
+        caption.dispatchEvent(captionPointerEvent(dom.window, 'mouseup', text, from));
+        assert.equal(caption.getAttribute('tabindex'), '-1');
+        editor.setMarkdown('A different document.');
+        assert.equal(caption.hasAttribute('tabindex'), false, 'a new document releases the old focus target');
+        assert.equal(caption.isConnected, false);
+        view.focus();
+        assert.equal(document.activeElement, content);
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
+for (const caption of [
+    'Figure 8. Measurements of β-carotene at 5 μm, followed by repeated measurements.',
+    'Figure 2. Measurements of $\\\\Delta$ at different intervals, followed by repeated measurements.',
+]) {
+    test(`keeps a caption selection stable against an editor selection observer: ${caption}`, async () => {
+        const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+            pretendToBeVisual: true,
+        });
+        const { document } = dom.window;
+        const created = [];
+        let figcaption;
+        let before;
+        let editorObserverCalls = 0;
+        const competingObserver = () => {
+            const selection = document.getSelection();
+            if (!before || selection.isCollapsed) return;
+            editorObserverCalls++;
+            selection.setBaseAndExtent(before, 0, before, before.textContent.length);
+        };
+        document.addEventListener('selectionchange', competingObserver);
+        const editor = createInlineMarkdownEditor({
+            parent: document.querySelector('#editor'),
+            initialMarkdown: `Before the figure stays outside.\n\n![${caption}](figure.png)\n\nAfter the figure stays outside.`,
+            resolveImageURL: () => null,
+            createMarkdownAnnotation: async annotation => {
+                created.push(annotation);
+                return annotation;
+            },
+        });
+        try {
+            figcaption = document.querySelector('figcaption');
+            const text = textNodeContaining(figcaption, 'Measurements');
+            before = textNodeContaining(document.querySelector('#editor'), 'Before the figure');
+            const start = text.textContent.indexOf('Measurements');
+            const focus = start + 'Measurements'.length;
+            figcaption.dispatchEvent(captionPointerEvent(dom.window, 'mousedown', text, start));
+            const selection = document.getSelection();
+            selection.setBaseAndExtent(before, 0, text, focus);
+            document.dispatchEvent(new dom.window.Event('selectionchange'));
+            assert.equal(selection.toString(), 'Measurements');
+            assert.equal(editorObserverCalls, 0);
+            figcaption.dispatchEvent(captionPointerEvent(dom.window, 'mouseup', text, focus));
+            document.dispatchEvent(new dom.window.Event('selectionchange'));
+            assert.equal(selection.toString(), 'Measurements');
+            const actions = document.querySelector('.mktero-markdown-selection-actions');
+            assert.ok(actions);
+            actions.querySelector('[data-color="#ffd400"]').click();
+            await Promise.resolve();
+            await Promise.resolve();
+            assert.equal(created.length, 1);
+            assert.equal(created[0].text, 'Measurements');
+            assert.equal(markdownAnnotationRangeMatchesSource(
+                editor.getMarkdown(), created[0].ranges, created[0].text
+            ), true);
+            before.parentElement.dispatchEvent(captionPointerEvent(dom.window, 'mousedown', before, 0));
+            selection.setBaseAndExtent(before, 0, before, 6);
+            document.dispatchEvent(new dom.window.Event('selectionchange'));
+            assert.ok(editorObserverCalls > 0, 'ordinary text selections reach the editor observer');
+        }
+        finally {
+            editor.destroy();
+            document.removeEventListener('selectionchange', competingObserver);
+            dom.window.close();
+        }
+    });
+}
 
 async function highlightedAnnotation(markdown, select) {
     const created = [];

@@ -82,6 +82,78 @@ test('reads the Firefox hit point from rangeParent', () => {
     assert.equal(point.offset, 4);
 });
 
+test('retries caret hit testing when Firefox reports a point outside the pressed caption', () => {
+    const { document, before, caption, captionText } = fixture();
+    document.caretPositionFromPoint = () => ({ offsetNode: captionText, offset: 9 });
+    const point = captionPointerPoint({
+        target: caption,
+        rangeParent: before,
+        rangeOffset: 0,
+        clientX: 20,
+        clientY: 40,
+    });
+    assert.equal(point.node, captionText);
+    assert.equal(point.offset, 9);
+});
+
+test('does not accept a fallback caret outside the pressed caption', () => {
+    const { document, before, caption } = fixture();
+    document.caretPositionFromPoint = () => ({ offsetNode: before, offset: 2 });
+    assert.equal(captionPointerPoint({
+        target: caption,
+        rangeParent: before,
+        rangeOffset: 0,
+        clientX: 20,
+        clientY: 40,
+    }), null);
+});
+
+test('resolves a caption caret through the reader shadow root', () => {
+    const { document, caption, captionText } = fixture();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = host.attachShadow({ mode: 'open' });
+    root.appendChild(caption.closest('figure'));
+    document.caretPositionFromPoint = (x, y, options) => {
+        assert.equal(x, 20);
+        assert.equal(y, 40);
+        return options?.shadowRoots?.includes(root)
+            ? { offsetNode: captionText, offset: 9 }
+            : { offsetNode: host, offset: 0 };
+    };
+    const point = captionPointerPoint({ target: caption, clientX: 20, clientY: 40 });
+    assert.equal(point?.node, captionText);
+    assert.equal(point?.offset, 9);
+});
+
+test('retries the legacy caret signature when shadow-root options are rejected', () => {
+    const { document, caption, captionText } = fixture();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = host.attachShadow({ mode: 'open' });
+    root.appendChild(caption.closest('figure'));
+    const signatures = [];
+    document.caretPositionFromPoint = (...args) => {
+        signatures.push(args.length);
+        if (args.length > 2) throw new TypeError('Unsupported caret options');
+        return { offsetNode: captionText, offset: 7 };
+    };
+    const point = captionPointerPoint({ target: caption, clientX: 20, clientY: 40 });
+    assert.equal(point?.node, captionText);
+    assert.equal(point?.offset, 7);
+    assert.deepEqual(signatures, [3, 2]);
+});
+
+test('rejects a shadow-root caret that is outside the pressed caption', () => {
+    const { document, before, caption } = fixture();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = host.attachShadow({ mode: 'open' });
+    root.appendChild(caption.closest('figure'));
+    document.caretPositionFromPoint = () => ({ offsetNode: before, offset: 2 });
+    assert.equal(captionPointerPoint({ target: caption, clientX: 20, clientY: 40 }), null);
+});
+
 test('ignores a figcaption that is not in a figure', () => {
     const dom = new JSDOM('<figcaption id="loose">Loose caption</figcaption>');
     assert.equal(figureCaptionOf(dom.window.document.querySelector('#loose')), null);

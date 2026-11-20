@@ -20,7 +20,7 @@ import {
     createAlignmentPlan,
 } from '../src/markdown/translation-alignment.js';
 import { createVisibleTranslationPairs } from '../src/ui/markdown-window.js';
-import { selectedMarkdownAnnotation } from '../src/editor/inline-rendering.js';
+import { selectedMarkdownAnnotation, setTranslationSelection } from '../src/editor/inline-rendering.js';
 import { createAnnotationPopup } from '../src/editor/annotation-popup.js';
 import { createLocalization } from '../src/i18n/localization.js';
 import { hoverReference } from './helpers/reference-hover.js';
@@ -8624,6 +8624,44 @@ test('closes selection actions when clicking outside the editor', () => {
     dom.window.close();
 });
 
+test('leaves original caption selections untouched by translated-side decoration updates', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: '![](figure.png)\n\nFigure 1. A native caption selection.',
+        resolveImageURL: () => 'blob:figure',
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    const callbacks = [];
+    dom.window.requestAnimationFrame = callback => {
+        callbacks.push(callback);
+        return callbacks.length;
+    };
+    const dispatch = view.dispatch.bind(view);
+    let translationRedraws = 0;
+    view.dispatch = transaction => {
+        const effects = Array.isArray(transaction.effects) ? transaction.effects : [transaction.effects];
+        if (effects.some(effect => effect?.is(setTranslationSelection))) translationRedraws++;
+        dispatch(transaction);
+    };
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('figcaption'));
+    document.getSelection().addRange(range);
+    document.dispatchEvent(new dom.window.Event('selectionchange'));
+    try {
+        for (const callback of callbacks.slice()) callback();
+        assert.equal(translationRedraws, 0, 'An unrelated transaction can collapse a native widget selection');
+        assert.match(document.getSelection().toString(), /native caption selection/);
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
 test('keeps shadow selection actions open on a retargeted popup press', () => {
     const dom = new JSDOM(
         '<!doctype html><button id="outside">Outside</button><div id="host"></div>',
@@ -10710,6 +10748,56 @@ test('corrects outline navigation after the offscreen heading is rendered', () =
     assert.deepEqual(measuredScrollPositions, [1200, 1320]);
     assert.equal(resultingScrollTop, 1320);
     assert.equal(resultingMarkdown, markdown);
+});
+
+test('synchronizes centered navigation before entering the measurement write phase', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = 'Earlier annotation.\n\nThe later annotation is the navigation target.';
+    const target = markdown.indexOf('later annotation');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    const dispatch = view.dispatch.bind(view);
+    let writing = false;
+    let blockedUpdates = 0;
+    let successfulScrolls = 0;
+    view.dispatch = transaction => {
+        if (writing) {
+            blockedUpdates++;
+            throw new Error('Calls to EditorView.update are not allowed while an update is in progress');
+        }
+        if (transaction.effects?.value?.range?.head === target) successfulScrolls++;
+        dispatch(transaction);
+    };
+    Object.defineProperty(view.scrollDOM, 'clientHeight', { value: 600 });
+    view.lineBlockAt = () => ({ top: 1200, bottom: 1230, from: 0, to: markdown.length });
+    view.requestMeasure = request => {
+        if (!request?.read) return;
+        const measurement = request.read(view);
+        writing = true;
+        try {
+            request.write?.(measurement, view);
+        }
+        finally {
+            writing = false;
+        }
+    };
+    try {
+        editor.scrollToOffset(target, { align: 'center' });
+        assert.equal(blockedUpdates, 0, 'CodeMirror rejects updates during a measure write');
+        assert.equal(successfulScrolls, 1, 'the viewport receives the exact annotation target');
+        assert.equal(view.scrollDOM.scrollTop, 915);
+        assert.equal(editor.getMarkdown(), markdown);
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
 });
 
 test('cancels a pending outline navigation when the document changes', () => {
