@@ -308,12 +308,41 @@ async function runInteractions(page) {
                 .querySelector('.mktero-selection-translation-result');
             return node?.textContent.includes('快且可预测');
         }, null, { timeout: 4000 });
-        const notesBefore = await page.locator('.markdown-note-item').count();
+        const noteIDsBefore = await page.locator('.markdown-note-link')
+            .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-annotation-id')));
+        const notesBefore = noteIDsBefore.length;
+        const readingTop = await scrollerTop();
         await toolbar.locator('.mktero-annotation-color-button').first().click();
         await page.waitForFunction(count => (
             window.__mkteroPreview.view.host.shadowRoot.querySelectorAll('.markdown-note-item').length > count
         ), notesBefore, { timeout: 3000 });
-        return { notesBefore, notesAfter: await page.locator('.markdown-note-item').count() };
+        const selection = await page.evaluate(async previousIDs => {
+            await new Promise(resolve => {
+                let frames = 0;
+                const settle = () => {
+                    if (++frames === 6) resolve();
+                    else requestAnimationFrame(settle);
+                };
+                requestAnimationFrame(settle);
+            });
+            const shadow = window.__mkteroPreview.view.host.shadowRoot;
+            const links = [...shadow.querySelectorAll('.markdown-note-link')];
+            const created = links.filter(node => !previousIDs.includes(node.getAttribute('data-annotation-id')));
+            return {
+                created: created.map(node => node.getAttribute('data-annotation-id')),
+                active: [...shadow.querySelectorAll('.markdown-note-link.is-active')]
+                    .map(node => node.getAttribute('data-annotation-id')),
+                readingTop: shadow.querySelector('.cm-scroller').scrollTop,
+            };
+        }, noteIDsBefore);
+        if (selection.created.length !== 1 || selection.active.length !== 1
+            || selection.active[0] !== selection.created[0]) {
+            throw new Error(`Saved annotation must stay selected: ${JSON.stringify(selection)}`);
+        }
+        if (Math.abs(selection.readingTop - readingTop) > 2) {
+            throw new Error(`Saving moved the article from ${readingTop} to ${selection.readingTop}`);
+        }
+        return { notesBefore, notesAfter: await page.locator('.markdown-note-item').count(), selection };
     });
 
     await step('typed-search', async () => {
@@ -346,6 +375,47 @@ async function runInteractions(page) {
         });
         if (!visible) throw new Error('Heading not in view after outline click');
         return { visible };
+    });
+
+    await step('annotation-single-click', async () => {
+        await page.locator('.markdown-outline-segment[data-outline-segment="annotations"]').click();
+        const visited = [];
+        for (const id of ['PREVIEW4', 'PREVIEW1', 'PREVIEW3']) {
+            await page.locator(`.markdown-note-link[data-annotation-id="${id}"] .markdown-note-quote`).click();
+            await page.waitForFunction(annotationID => {
+                const shadow = window.__mkteroPreview.view.host.shadowRoot;
+                const port = shadow.querySelector('.cm-scroller').getBoundingClientRect();
+                return [...shadow.querySelectorAll('.cm-mktero-pdf-annotation')]
+                    .filter(node => node.getAttribute('data-annotation-id') === annotationID)
+                    .some(node => {
+                        const rect = node.getBoundingClientRect();
+                        return rect.bottom > port.top && rect.top < port.bottom;
+                    });
+            }, id, { timeout: 3000 });
+            // Wait for native scroll and CodeMirror layout notifications before
+            // checking: the immediate click state used to pass and then revert.
+            await page.evaluate(() => new Promise(resolve => {
+                let frames = 0;
+                const settle = () => {
+                    if (++frames === 6) resolve();
+                    else requestAnimationFrame(settle);
+                };
+                requestAnimationFrame(settle);
+            }));
+            const active = await page.evaluate(() => {
+                const shadow = window.__mkteroPreview.view.host.shadowRoot;
+                return [...shadow.querySelectorAll('.markdown-note-link.is-active')]
+                    .map(node => ({
+                        id: node.getAttribute('data-annotation-id'),
+                        current: node.getAttribute('aria-current'),
+                    }));
+            });
+            if (active.length !== 1 || active[0].id !== id || active[0].current !== 'location') {
+                throw new Error(`Clicked ${id} once; active annotations: ${JSON.stringify(active)}`);
+            }
+            visited.push(id);
+        }
+        return { visited };
     });
 
     await step('note-opens-pdf', async () => {

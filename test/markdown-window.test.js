@@ -10060,6 +10060,183 @@ function createAnnotationWindow(changes = {}, options = {}) {
     return { view, shadow, model, created, editorOptions };
 }
 
+test('selects a newly saved highlight without moving the reading viewport', async () => {
+    const markdown = 'Previous annotation.\n\nContext before the newly highlighted passage.';
+    const from = markdown.indexOf('newly highlighted');
+    const { view, shadow, editorOptions } = createAnnotationWindow({
+        markdown,
+        annotationOverlay: { matched: [{
+            id: 'PREVIOUS', type: 'highlight', text: 'Previous annotation.',
+            color: '#ffd400', pageLabel: '12', ranges: [{ from: 0, to: 20 }],
+        }], unmatched: [] },
+    });
+    const scrolls = [];
+    const retained = [];
+    view.editor.scrollToOffset = offset => scrolls.push(offset);
+    view.editor.retainNavigationOffset = offset => retained.push(offset);
+    const list = shadow.querySelector('.markdown-notes-list');
+    list.scrollTop = 0;
+    list.getBoundingClientRect = () => ({ top: 100, bottom: 300, height: 200 });
+    const createNoteItem = view.createNoteItem.bind(view);
+    view.createNoteItem = (...args) => {
+        const item = createNoteItem(...args);
+        item.getBoundingClientRect = () => ({ top: 350, bottom: 430, height: 80 });
+        return item;
+    };
+    const activeID = () => shadow.querySelector('.markdown-note-link.is-active')
+        ?.getAttribute('data-annotation-id');
+
+    try {
+        view.syncActiveNavigation(0);
+        assert.equal(activeID(), 'PREVIOUS');
+        const saved = await editorOptions.createMarkdownAnnotation({
+            text: 'newly highlighted passage', color: '#ffd400',
+            ranges: [{ from, to: from + 'newly highlighted passage'.length }],
+        }, { side: 'source' });
+
+        assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 2);
+        assert.equal(activeID(), saved.id, 'Saving must select the new annotation rather than the viewport predecessor');
+        assert.equal(shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('aria-current'), 'location');
+        assert.deepEqual(scrolls, [], 'Saving must not recenter the article');
+        assert.deepEqual(retained, [from]);
+        assert.equal(list.scrollTop, 130, 'Only the annotation list should scroll to reveal the new card');
+        view.render({ ...view.model, annotationOverlay: { ...view.model.annotationOverlay } });
+        editorOptions.onViewportChange(from);
+        assert.equal(activeID(), saved.id, 'A passive refresh must keep the saved annotation selected');
+        editorOptions.onViewportChange(0);
+        assert.equal(activeID(), 'PREVIOUS', 'Moving back must resume automatic selection');
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('keeps the created annotation identity when highlights share their starting offset', async () => {
+    const markdown = 'A highlighted passage.';
+    const draft = { text: markdown, color: '#ffd400', ranges: [{ from: 0, to: markdown.length }] };
+    const { view, shadow, editorOptions } = createAnnotationWindow({
+        markdown,
+        annotationOverlay: { matched: [{ ...draft, id: 'OLD', type: 'highlight' }], unmatched: [] },
+    });
+    try {
+        const saved = await editorOptions.createMarkdownAnnotation(draft, { side: 'source' });
+        view.syncActiveNavigation(0);
+        assert.equal(shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('data-annotation-id'), saved.id);
+        shadow.querySelector('.markdown-note-link[data-annotation-id="OLD"]').click();
+        assert.equal(shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('data-annotation-id'), 'OLD');
+    }
+    finally { view.destroy(); }
+});
+
+test('follows the exact PDF identity when a selected local highlight synchronizes', async () => {
+    const markdown = 'Previous.\n\nA newly highlighted passage.';
+    const draft = { text: 'newly highlighted passage', color: '#ffd400',
+        ranges: [{ from: markdown.indexOf('newly'), to: markdown.length - 1 }] };
+    let synchronized = false;
+    const { view, shadow, editorOptions } = createAnnotationWindow({
+        markdown,
+        onGetSynchronizedAnnotationIDs: id => synchronized && id === 'mktero-local-1'
+            ? ['PDFPRIMARY', 'PDFSECOND'] : null,
+    });
+    try {
+        await editorOptions.createMarkdownAnnotation(draft, { side: 'source' });
+        synchronized = true;
+        view.render({ ...view.model, annotationOverlay: { matched: [], unmatched: [] } });
+        assert.equal(shadow.querySelector('.markdown-note-link.is-active'), null);
+        view.render({ ...view.model, annotationOverlay: { matched: [
+            // The PDF may map to a slightly different range or span pages.
+            { ...draft, id: 'PDFPRIMARY', type: 'highlight', ranges: [{ from: draft.ranges[0].from + 1, to: markdown.length - 1 }] },
+            { ...draft, id: 'PDFSECOND', type: 'highlight', ranges: [{ from: markdown.length - 2, to: markdown.length - 1 }] },
+        ], unmatched: [] } });
+        editorOptions.onViewportChange(draft.ranges[0].from);
+        assert.equal(shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('data-annotation-id'), 'PDFPRIMARY');
+    }
+    finally { view.destroy(); }
+});
+
+test('does not append an obsolete local highlight when PDF synchronization already refreshed the overlay', async () => {
+    const markdown = 'A newly highlighted passage.';
+    const draft = { text: markdown, color: '#ffd400', ranges: [{ from: 0, to: markdown.length }] };
+    let view;
+    const window = createAnnotationWindow({
+        markdown,
+        onGetSynchronizedAnnotationIDs: id => id === 'mktero-fast' ? ['PDFFAST'] : null,
+        onCreateMarkdownAnnotation: annotation => {
+            view.render({ ...view.model, annotationOverlay: { matched: [
+                { ...annotation, id: 'PDFFAST', type: 'highlight' },
+            ], unmatched: [] } });
+            return { ...annotation, id: 'mktero-fast', source: 'markdown', type: 'highlight' };
+        },
+    });
+    view = window.view;
+    try {
+        await window.editorOptions.createMarkdownAnnotation(draft, { side: 'source' });
+        assert.equal(window.shadow.querySelectorAll('.markdown-note-link').length, 1);
+        assert.equal(window.shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('data-annotation-id'), 'PDFFAST');
+    }
+    finally { view.destroy(); }
+});
+
+test('a delayed save does not replace the annotation the reader clicked meanwhile', async () => {
+    const markdown = 'Previous annotation.\n\nA newly highlighted passage.';
+    const pending = Promise.withResolvers();
+    const { view, shadow, editorOptions } = createAnnotationWindow({
+        markdown,
+        annotationOverlay: { matched: [{ id: 'OLD', text: 'Previous annotation.',
+            type: 'highlight', color: '#ffd400', ranges: [{ from: 0, to: 20 }] }], unmatched: [] },
+        onCreateMarkdownAnnotation: async annotation => {
+            await pending.promise;
+            return { ...annotation, id: 'mktero-delayed', source: 'markdown', type: 'highlight' };
+        },
+    });
+    try {
+        const saving = editorOptions.createMarkdownAnnotation({ text: 'newly highlighted passage',
+            color: '#ffd400', ranges: [{ from: markdown.indexOf('newly'), to: markdown.length - 1 }] },
+        { side: 'source' });
+        shadow.querySelector('.markdown-note-link[data-annotation-id="OLD"]').click();
+        pending.resolve();
+        await saving;
+        assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 2);
+        assert.equal(shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('data-annotation-id'), 'OLD');
+    }
+    finally { view.destroy(); }
+});
+
+test('the latest annotation creation stays selected when saves finish out of order', async () => {
+    const markdown = 'First passage. Second passage.';
+    const first = Promise.withResolvers();
+    const second = Promise.withResolvers();
+    const { view, shadow, editorOptions } = createAnnotationWindow({
+        markdown,
+        onCreateMarkdownAnnotation: async annotation => {
+            const isFirst = annotation.text.startsWith('First');
+            await (isFirst ? first.promise : second.promise);
+            return { ...annotation, id: isFirst ? 'mktero-first' : 'mktero-second',
+                source: 'markdown', type: 'highlight' };
+        },
+    });
+    try {
+        const earlier = editorOptions.createMarkdownAnnotation({ text: 'First passage',
+            color: '#ffd400', ranges: [{ from: 0, to: 13 }] }, { side: 'source' });
+        const later = editorOptions.createMarkdownAnnotation({ text: 'Second passage',
+            color: '#ffd400', ranges: [{ from: 15, to: 29 }] }, { side: 'source' });
+        second.resolve();
+        await later;
+        first.resolve();
+        await earlier;
+        assert.equal(shadow.querySelectorAll('.markdown-note-link').length, 2);
+        assert.equal(shadow.querySelector('.markdown-note-link.is-active')
+            .getAttribute('data-annotation-id'), 'mktero-second');
+    }
+    finally { view.destroy(); }
+});
+
 test('relocates a draft highlight from its text quote after the Markdown was replaced', async () => {
     const before = 'Short intro.\n\nThe target sentence stays.';
     const after = 'A much longer restored intro.\n\nThe target sentence stays.';

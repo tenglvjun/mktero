@@ -268,6 +268,7 @@ function requestEditorScroll(
             if (editorView.state.doc !== requestedDocument) return null;
             const block = editorView.lineBlockAt(position);
             return {
+                position,
                 top: block.top,
                 bottom: block.bottom,
                 align,
@@ -327,6 +328,8 @@ function navigationScrollTop(editorView, measurement) {
 
 function holdNavigationReveal(editorView, scrollTop, measurement = null) {
     navigationReveals.set(editorView, {
+        document: editorView.state.doc,
+        position: measurement?.position,
         until: editorClock() + NAVIGATION_REVEAL_MS,
         scrollTop,
         measurement,
@@ -358,7 +361,9 @@ function holdNavigationReveal(editorView, scrollTop, measurement = null) {
 
 function activeNavigationReveal(editorView) {
     const reveal = navigationReveals.get(editorView);
-    if (!reveal || editorClock() >= reveal.until) return null;
+    if (!reveal
+        || reveal.document !== editorView.state.doc
+        || editorClock() >= reveal.until) return null;
     return reveal;
 }
 
@@ -781,6 +786,7 @@ export function createInlineMarkdownEditor({
             if (interactionPopups.some(popup => popup.contains(event.target))) {
                 return;
             }
+            if (event.type === 'wheel') navigationReveals.delete(view);
             if (event.type === 'scroll' || event.type === 'wheel') {
                 // An open note editor holds typed text and stays fixed in the
                 // window, so scrolling the reader underneath it, or
@@ -2336,6 +2342,17 @@ export function createInlineMarkdownEditor({
             activateDOMGlobals(ownerWindow);
             view.focus();
         },
+        retainNavigationOffset(offset) {
+            const position = Number(offset);
+            if (!Number.isSafeInteger(position)
+                || position < 0 || position > view.state.doc.length) return;
+            navigationReveals.set(view, {
+                document: view.state.doc,
+                position,
+                scrollTop: Number(view.scrollDOM.scrollTop),
+                until: 0,
+            });
+        },
         scrollToOffset(offset, { align = 'start' } = {}) {
             activateDOMGlobals(ownerWindow);
             const requested = Number(offset);
@@ -2404,6 +2421,7 @@ export function createInlineMarkdownEditor({
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            navigationReveals.delete(view);
             if (selectionFlashTimer !== null) {
                 ownerWindow.clearTimeout?.(selectionFlashTimer);
                 selectionFlashTimer = null;
@@ -2810,6 +2828,23 @@ function createHTMLNode(document, tagName) {
 
 function editorViewportOffset(editorView) {
     const scrollTop = Number(editorView.scrollDOM?.scrollTop);
+    const reveal = navigationReveals.get(editorView);
+    if (reveal?.document === editorView.state.doc
+        && Number.isSafeInteger(reveal.position)) {
+        const maxTop = Math.max(
+            0,
+            editorView.scrollDOM.scrollHeight - editorView.scrollDOM.clientHeight
+        );
+        const targetTop = Math.min(reveal.scrollTop, maxTop);
+        // A centered jump leaves earlier text above the exact target, which
+        // may itself be mid-paragraph. Keep that target through layout updates
+        // until the reader moves away, even after the scroll repair expires.
+        if (activeNavigationReveal(editorView)
+            || Math.abs(scrollTop - targetTop) <= 1) {
+            return reveal.position;
+        }
+        navigationReveals.delete(editorView);
+    }
     if (!Number.isFinite(scrollTop)
         || typeof editorView.lineBlockAtHeight !== 'function') {
         return editorView.viewport.from;

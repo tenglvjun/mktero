@@ -154,6 +154,7 @@ export class MarkdownTabPresenter {
         onReadClipboard,
         onWriteClipboard,
         onCreateMarkdownAnnotation,
+        onGetSynchronizedAnnotationIDs,
         onUpdateMarkdownAnnotation,
         onDeleteMarkdownAnnotation,
         onRetryMarkdownAnnotationSynchronization,
@@ -293,6 +294,10 @@ export class MarkdownTabPresenter {
                 existing.model.onCreateMarkdownAnnotation
                     = onCreateMarkdownAnnotation;
             }
+            if (onGetSynchronizedAnnotationIDs !== undefined) {
+                existing.model.onGetSynchronizedAnnotationIDs
+                    = onGetSynchronizedAnnotationIDs;
+            }
             if (onUpdateMarkdownAnnotation) {
                 existing.model.onUpdateMarkdownAnnotation
                     = onUpdateMarkdownAnnotation;
@@ -376,6 +381,7 @@ export class MarkdownTabPresenter {
                 onReadClipboard,
                 onWriteClipboard,
                 onCreateMarkdownAnnotation,
+                onGetSynchronizedAnnotationIDs,
                 onUpdateMarkdownAnnotation,
                 onDeleteMarkdownAnnotation,
                 onRetryMarkdownAnnotationSynchronization,
