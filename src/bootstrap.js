@@ -1681,6 +1681,10 @@ async function openItemAsMarkdown(itemID, {
             recordAnnotationCreated();
             return created;
         },
+        onGetSynchronizedAnnotationIDs: annotationID => (
+            runtime.localAnnotations?.synchronizedAnnotationIDs(itemID, annotationID)
+                ?? null
+        ),
         onUpdateMarkdownAnnotation: (annotationID, changes) => (
             runMarkdownAnnotationAction(
                 'update',
@@ -2735,6 +2739,12 @@ function createSavedMarkdownActions(noteID, sourceItem) {
         onCreateMarkdownAnnotation: withSource((itemID, draft) => (
             runMarkdownAnnotationAction('create', itemID, draft)
         )),
+        onGetSynchronizedAnnotationIDs: annotationID => {
+            const sourceItemID = currentSourceItemID();
+            if (!sourceItemID) return null;
+            return runtime.localAnnotations
+                ?.synchronizedAnnotationIDs(sourceItemID, annotationID) ?? null;
+        },
         onUpdateMarkdownAnnotation: withSource((itemID, annotationID, changes) => (
             runMarkdownAnnotationAction(
                 'update',

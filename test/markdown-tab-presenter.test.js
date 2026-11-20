@@ -858,6 +858,87 @@ test('exposes and refreshes local Markdown annotation actions', async () => {
     ]);
 });
 
+test('exposes a synchronous annotation ID lookup returning parts or null on creation', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const parts = ['ANN00001', 'ANN00002'];
+    const calls = [];
+    const onGetSynchronizedAnnotationIDs = annotationID => {
+        calls.push(annotationID);
+        return annotationID === 'mktero-local-1' ? parts : null;
+    };
+    try {
+        const presentation = presenter.open(42, {
+            onGetSynchronizedAnnotationIDs,
+        });
+
+        assert.equal(presentation.created, true);
+        assert.equal(
+            harness.calls[0].model.onGetSynchronizedAnnotationIDs,
+            onGetSynchronizedAnnotationIDs
+        );
+        assert.equal(
+            presentation.model.onGetSynchronizedAnnotationIDs('mktero-local-1'),
+            parts
+        );
+        assert.equal(
+            presentation.model.onGetSynchronizedAnnotationIDs('mktero-local-2'),
+            null
+        );
+        assert.deepEqual(calls, ['mktero-local-1', 'mktero-local-2']);
+        assert.equal(presenter.open(43).model.onGetSynchronizedAnnotationIDs, undefined);
+    }
+    finally {
+        presenter.dispose();
+    }
+});
+
+test('refreshes the synchronous annotation ID lookup when reusing a reader', () => {
+    const mainWindow = createMainWindow();
+    const harness = createViewHarness();
+    const presenter = createPresenter(mainWindow, harness);
+    const firstParts = ['ANN00001'];
+    const secondParts = ['ANN00002', 'ANN00003'];
+    try {
+        const first = presenter.open(42, {
+            onGetSynchronizedAnnotationIDs: () => firstParts,
+        });
+        assert.equal(
+            first.model.onGetSynchronizedAnnotationIDs('mktero-local-1'),
+            firstParts
+        );
+
+        const updatedLookup = annotationID => (
+            annotationID === 'mktero-local-2' ? secondParts : null
+        );
+        const second = presenter.open(42, {
+            onGetSynchronizedAnnotationIDs: updatedLookup,
+        });
+
+        assert.equal(second.created, false);
+        assert.equal(first.model, second.model);
+        assert.equal(harness.views.length, 1);
+        assert.equal(first.model.onGetSynchronizedAnnotationIDs, updatedLookup);
+        assert.equal(
+            harness.calls[0].model.onGetSynchronizedAnnotationIDs('mktero-local-2'),
+            secondParts
+        );
+        assert.equal(
+            second.model.onGetSynchronizedAnnotationIDs('mktero-local-1'),
+            null
+        );
+
+        presenter.open(42);
+        assert.equal(first.model.onGetSynchronizedAnnotationIDs, updatedLookup);
+        presenter.open(42, { onGetSynchronizedAnnotationIDs: null });
+        assert.equal(first.model.onGetSynchronizedAnnotationIDs, null);
+    }
+    finally {
+        presenter.dispose();
+    }
+});
+
 test('removes stale Mktero tabs before Zotero restores the previous session', () => {
     const mainWindow = createMainWindow();
     const harness = createViewHarness();

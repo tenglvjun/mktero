@@ -483,6 +483,9 @@ class MarkdownTabView {
         this.translationLanguageSignature = '';
         this.translationReaderFonts = new Map();
         this.activeNavigationOffset = 0;
+        this.activeAnnotationID = null;
+        this.annotationSelectionGeneration = 0;
+        this.annotationCreationGeneration = 0;
         this.renderedCacheKey = '';
         this.didRestorePersistedPosition = false;
         this.readingPositionTimer = null;
@@ -1358,17 +1361,61 @@ class MarkdownTabView {
         if (typeof this.model.onCreateMarkdownAnnotation !== 'function') {
             throw new Error('Markdown annotation creation is unavailable');
         }
+        const itemID = this.model.itemID;
+        const creation = ++this.annotationCreationGeneration;
+        const selection = this.annotationSelectionGeneration;
+        const createAnnotation = this.model.onCreateMarkdownAnnotation;
         const draft = await this.prepareMarkdownAnnotationDraft(
             annotation,
             selectionContext
         );
-        const saved = await this.model.onCreateMarkdownAnnotation(draft);
-        this.model.annotationOverlay = appendMatchedAnnotation(
-            this.model.annotationOverlay,
-            saved
-        );
+        const saved = await createAnnotation(draft);
+        if (this.destroyed || this.model.itemID !== itemID) return saved;
+        const selectSaved = creation === this.annotationCreationGeneration
+            && selection === this.annotationSelectionGeneration;
+        const synchronizedIDs = this.model.onGetSynchronizedAnnotationIDs?.(saved.id) || [];
+        if (!synchronizedIDs.some(id => findOverlayAnnotation(this.model.annotationOverlay, id))) {
+            this.model.annotationOverlay = appendMatchedAnnotation(
+                this.model.annotationOverlay,
+                saved
+            );
+        }
         this.render(this.model);
+        if (selectSaved) this.selectCreatedAnnotation(saved.id);
         return saved;
+    }
+
+    resolveVisibleAnnotationID(annotationID, retainSynchronizing = false) {
+        const synchronizedIDs = this.model.onGetSynchronizedAnnotationIDs?.(annotationID) || [];
+        return [...synchronizedIDs, annotationID].map(id => String(id || ''))
+            .find(id => findOverlayAnnotation(this.displayedAnnotationOverlay, id))
+            // The PDF and local layers can briefly publish neither identity
+            // while the synchronized annotation moves between them.
+            || (retainSynchronizing && synchronizedIDs.length ? String(annotationID) : null);
+    }
+
+    selectCreatedAnnotation(annotationID) {
+        const visibleID = this.resolveVisibleAnnotationID(annotationID);
+        const annotation = findOverlayAnnotation(
+            this.displayedAnnotationOverlay,
+            visibleID
+        );
+        if (!annotation) return;
+        const offset = firstAnnotationOffset(annotation, this.displayedMarkdownLength)
+            ?? this.activeNavigationOffset;
+        // Saving acknowledges the selected passage without moving the article.
+        this.editor?.retainNavigationOffset?.(offset);
+        this.syncActiveNavigation(offset, visibleID);
+        const link = [...this.elements.notesList.querySelectorAll('.markdown-note-link')]
+            .find(node => node.getAttribute('data-annotation-id') === visibleID);
+        const card = link?.closest('.markdown-note-item')?.getBoundingClientRect?.();
+        const list = this.elements.notesList;
+        const port = list.getBoundingClientRect?.();
+        if (!card || !port || port.height <= 0) return;
+        if (card.top < port.top) list.scrollTop += card.top - port.top;
+        else if (card.bottom > port.bottom) {
+            list.scrollTop += Math.min(card.top - port.top, card.bottom - port.bottom);
+        }
     }
 
     // A Markdown selection as a PDF locator draft: the original-text ranges,
@@ -5675,7 +5722,7 @@ class MarkdownTabView {
         const range = (entry.annotation.ranges || []).find(item => (
             item?.from === offset
         )) || null;
-        this.locateMarkdownOffset(offset, range);
+        this.locateMarkdownOffset(offset, range, annotationID);
     }
 
     jumpToAnnotationLandmark(direction) {
@@ -5694,11 +5741,11 @@ class MarkdownTabView {
     // Center the annotation and flash its range. Line-top scrolling is enough
     // for a heading, but an annotation in the middle of a paragraph has to
     // land in the reading area or the reader cannot tell that it moved.
-    locateMarkdownOffset(offset, range = null) {
+    locateMarkdownOffset(offset, range = null, annotationID = undefined) {
         const position = Number(offset);
         if (!Number.isFinite(position)) return;
         this.recordNavigationPoint();
-        this.syncActiveNavigation(position);
+        this.syncActiveNavigation(position, annotationID);
         this.editor?.scrollToOffset?.(position, { align: 'center' });
         const end = Number(range?.to);
         if (Number.isFinite(end) && end > position) {
@@ -7623,6 +7670,7 @@ class MarkdownTabView {
         const itemID = this.model?.itemID;
         if (itemID !== this.noteListItemID) {
             this.noteListItemID = itemID;
+            this.activeAnnotationID = null;
             this.noteListFilter = createEmptyNoteListFilter();
             this.noteSearchComposing = false;
         }
@@ -7738,11 +7786,21 @@ class MarkdownTabView {
         return group;
     }
 
-    syncActiveNavigation(offset = 0) {
+    syncActiveNavigation(offset = 0, annotationID = undefined) {
         const requestedOffset = Number(offset);
-        this.activeNavigationOffset = Number.isFinite(requestedOffset)
+        const nextOffset = Number.isFinite(requestedOffset)
             ? Math.max(0, Math.trunc(requestedOffset))
             : 0;
+        if (nextOffset !== this.activeNavigationOffset || annotationID !== undefined) {
+            this.annotationSelectionGeneration++;
+            this.activeAnnotationID = annotationID === undefined
+                ? null
+                : String(annotationID || '') || null;
+        }
+        this.activeNavigationOffset = nextOffset;
+        if (this.activeAnnotationID) {
+            this.activeAnnotationID = this.resolveVisibleAnnotationID(this.activeAnnotationID, true);
+        }
         if (this.elements?.translationFailurePosition) {
             this.activeTranslationFailureID = null;
             this.syncTranslationFailurePosition();
@@ -7772,7 +7830,9 @@ class MarkdownTabView {
         )];
         for (const link of noteLinks) {
             const itemOffset = Number(link.getAttribute('data-offset'));
-            if (activeOffset !== null && itemOffset === activeOffset) {
+            if (this.activeAnnotationID
+                ? link.getAttribute('data-annotation-id') === this.activeAnnotationID
+                : activeOffset !== null && itemOffset === activeOffset) {
                 activeNote = link;
             }
         }
@@ -8943,8 +9003,11 @@ function appendMatchedAnnotation(annotationOverlay, annotation) {
     const overlay = annotationOverlay || createEmptyAnnotationOverlay();
     return {
         ...overlay,
-        matched: [...(overlay.matched || []), annotation],
-        unmatched: [...(overlay.unmatched || [])],
+        matched: [
+            ...(overlay.matched || []).filter(item => item.id !== annotation.id),
+            annotation,
+        ],
+        unmatched: (overlay.unmatched || []).filter(item => item.id !== annotation.id),
     };
 }
 

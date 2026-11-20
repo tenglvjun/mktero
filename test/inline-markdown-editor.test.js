@@ -10797,6 +10797,79 @@ test('reports the first visible Markdown offset to the owning reader', () => {
     assert.ok(offsets.at(-1) < updatedMarkdown.length);
 });
 
+test('keeps the exact navigation target through scroll and later layout notifications', t => {
+    let now = 0;
+    t.mock.method(globalThis.performance, 'now', () => now);
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const offsets = [];
+    const markdown = 'Previous annotation.\n\nContext before First, talk to yourself. More context.';
+    const target = markdown.indexOf('First, talk to yourself.');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        onViewportChange: offset => offsets.push(offset),
+    });
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor'));
+    Object.defineProperty(view.scrollDOM, 'clientHeight', { value: 600 });
+    Object.defineProperty(view.scrollDOM, 'scrollHeight', { value: 2400 });
+    view.lineBlockAt = () => ({ top: 1200, bottom: 1230, from: 22, to: markdown.length });
+    view.lineBlockAtHeight = () => ({ from: 0, to: 20 });
+    view.requestMeasure = request => {
+        if (request?.read) request.write?.(request.read(view), view);
+    };
+    view.measure = () => {};
+    const notifyScroll = () => view.scrollDOM.dispatchEvent(new dom.window.Event('scroll'));
+
+    try {
+        editor.scrollToOffset(target, { align: 'center' });
+        notifyScroll();
+        assert.equal(view.scrollDOM.scrollTop, 915);
+        assert.equal(offsets.at(-1), target, 'The viewport top must not replace the clicked annotation');
+
+        now = 1000;
+        notifyScroll();
+        assert.equal(offsets.at(-1), target, 'The selection must outlast the temporary scroll repair');
+
+        view.scrollDOM.scrollTop = 1000;
+        notifyScroll();
+        assert.equal(offsets.at(-1), 0, 'Moving the viewport must resume reading-position tracking');
+
+        editor.scrollToOffset(target, { align: 'center' });
+        view.scrollDOM.dispatchEvent(new dom.window.WheelEvent('wheel'));
+        view.scrollDOM.scrollTop = 950;
+        notifyScroll();
+        assert.equal(view.scrollDOM.scrollTop, 950, 'A wheel must interrupt the programmatic reveal immediately');
+        assert.equal(offsets.at(-1), 0);
+
+        view.lineBlockAt = () => ({ top: 2400, bottom: 2430, from: 22, to: markdown.length });
+        editor.scrollToOffset(target, { align: 'center' });
+        now = 2000;
+        view.scrollDOM.scrollTop = 1800; // The browser clamps at scrollHeight - clientHeight.
+        notifyScroll();
+        assert.equal(offsets.at(-1), target, 'A target near the document end must survive scroll clamping');
+
+        editor.setMarkdown('Replacement document.');
+        notifyScroll();
+        assert.equal(offsets.at(-1), 0, 'A replacement document must not inherit the previous navigation target');
+        assert.equal(view.scrollDOM.scrollTop, 1800, 'The old reveal must not repair a replacement document');
+
+        editor.retainNavigationOffset(5);
+        notifyScroll();
+        assert.equal(view.scrollDOM.scrollTop, 1800, 'Retaining a saved highlight must not scroll the article');
+        assert.equal(offsets.at(-1), 5, 'A passive refresh must report the retained highlight');
+        view.scrollDOM.dispatchEvent(new dom.window.WheelEvent('wheel'));
+        notifyScroll();
+        assert.equal(offsets.at(-1), 0, 'A wheel must release a retained highlight immediately');
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
 test('observes editor visibility through the owning Zotero window', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
