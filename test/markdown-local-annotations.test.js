@@ -1717,11 +1717,16 @@ test('keeps a reused annotation the extension did not create', async () => {
     assert.deepEqual(deleted, []);
 });
 
+// Evidence creation hashes the document with the real WebCrypto digest, so
+// the first call on a cold or contended CI worker can finish well after a
+// fixed number of event-loop turns. Wait for wall time, not for a turn count;
+// every assertion after the wait is unchanged.
 async function waitFor(predicate) {
-    for (let attempt = 0; attempt < 20; attempt++) {
+    const deadline = Date.now() + 10_000;
+    do {
         if (await predicate()) return;
-        await new Promise(resolve => setImmediate(resolve));
-    }
+        await new Promise(resolve => setTimeout(resolve, 5));
+    } while (Date.now() < deadline);
     assert.fail('Condition was not reached');
 }
 
