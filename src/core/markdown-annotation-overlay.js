@@ -1,6 +1,5 @@
 import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
-    createDehyphenatedPdfAnnotationTextIndex,
     createHyphenFoldedPdfAnnotationTextIndex,
     createPdfAnnotationTextIndex,
     expandPdfAnnotationSourceRange,
@@ -82,7 +81,8 @@ export class MarkdownAnnotationOverlay {
                 imageMath: true,
             }),
             normalizedIndex: null,
-            dehyphenatedIndex: null,
+            mathBoundaryIndex: null,
+            lineWrappedIndex: null,
             mathCompactIndex: null,
             previousSourceTo: 0,
         };
@@ -228,52 +228,45 @@ export class MarkdownAnnotationOverlay {
                 normalizedRange
             ));
         }
-        const dehyphenatedText = createDehyphenatedPdfAnnotationTextIndex(
-            text
-        ).text;
-        if (!state.dehyphenatedIndex
-            && !candidates.length
-            && !normalizedCandidates.length) {
-            state.dehyphenatedIndex = createDehyphenatedPdfAnnotationTextIndex(
-                state.index.text,
-                offset => state.index.sourceOffsetAt(offset)
+        let lineWrappedResult = { ranges: [], truncated: false };
+        if (!candidates.length && !normalizedCandidates.length) {
+            state.lineWrappedIndex ||= createHyphenFoldedPdfAnnotationTextIndex(
+                state.index.text
+            );
+            lineWrappedResult = lineWrappedAnnotationRanges(
+                state.index, state.lineWrappedIndex, text, range => {
+                    // This index has the same options as the standalone
+                    // boundary helper, and is parsed once per document.
+                    state.mathBoundaryIndex ||= createVisibleMarkdownTextIndex(markdown);
+                    return state.mathBoundaryIndex.expandSourceRangeToMathBoundaries(range);
+                }
             );
         }
-        const dehyphenatedCandidateResult = candidates.length
-            || normalizedCandidates.length
-            ? { offsets: [], truncated: false }
-            : findTextOccurrences(
-                state.dehyphenatedIndex.text,
-                dehyphenatedText,
-                MAX_MATCH_CANDIDATES
-            );
-        const dehyphenatedCandidates = dehyphenatedCandidateResult.offsets;
-        const dehyphenatedRanges = dehyphenatedCandidateResult.truncated
-            ? []
-            : dehyphenatedCandidates.map(candidate => (
-                expandMarkdownRangeToMathBoundaries(
-                    markdown,
-                    state.dehyphenatedIndex.sourceRange(
-                        candidate,
-                        dehyphenatedText.length
-                    )
-                )
-            ));
-        const dehyphenatedPageRanges = selectPageCandidates(
-            dehyphenatedRanges,
+        const lineWrappedPageRanges = selectPageCandidates(
+            lineWrappedResult.ranges,
             annotation.pageIndex,
             sourceMap,
             markdown.length
         );
-        const dehyphenatedRange = selectCandidateRange(
-            dehyphenatedPageRanges,
+        let lineWrappedRange = selectCandidateRange(
+            lineWrappedPageRanges,
             state.previousSourceTo
         );
-        if (dehyphenatedRange) {
+        if (!lineWrappedRange && lineWrappedPageRanges.length > 1) {
+            const textQuote = await this.#locateTextQuote(itemID, annotation);
+            if (textQuote) {
+                lineWrappedRange = selectTextQuoteCandidateRange(
+                    lineWrappedPageRanges,
+                    state.normalizedIndex,
+                    textQuote
+                );
+            }
+        }
+        if (lineWrappedRange) {
             return matchedAnnotation(state, resolvedAnnotation(
                 annotation,
                 'normalized',
-                dehyphenatedRange
+                lineWrappedRange
             ));
         }
         // A formula's TeX and its PDF glyphs only agree once both are
@@ -282,7 +275,8 @@ export class MarkdownAnnotationOverlay {
         let mathCompactCandidates = [];
         if (!candidates.length
             && !normalizedCandidates.length
-            && !dehyphenatedCandidates.length
+            && !lineWrappedResult.ranges.length
+            && !lineWrappedResult.truncated
             && hasMathMarkup(text)) {
             state.mathCompactIndex ||= createMathCompactTextIndex(
                 state.index.text
@@ -315,8 +309,8 @@ export class MarkdownAnnotationOverlay {
             || candidates.length
             || normalizedCandidateResult.truncated
             || normalizedCandidates.length
-            || dehyphenatedCandidateResult.truncated
-            || dehyphenatedCandidates.length;
+            || lineWrappedResult.truncated
+            || lineWrappedResult.ranges.length;
         return { reason: ambiguous ? 'ambiguous' : 'not-found' };
     }
 
@@ -495,6 +489,58 @@ function selectPageCandidates(ranges, pageIndex, sourceMap, documentLength) {
 
 export function createEmptyAnnotationOverlay() {
     return { matched: [], unmatched: [] };
+}
+
+// Folding hyphens only finds candidates. Each full candidate still has to
+// agree character for character, except a letter-to-letter line-end hyphen
+// may join with or without its hyphen. Ordinary word spaces and unwrapped
+// lexical hyphens cannot disappear. All valid interpretations compete.
+function lineWrappedAnnotationRanges(visibleIndex, foldedIndex, text, expandMathRange) {
+    const target = createPdfAnnotationTextIndex(text).text.trim();
+    const key = createHyphenFoldedPdfAnnotationTextIndex(text).text.trim();
+    if (!key) return { ranges: [], truncated: false };
+    const candidates = findTextOccurrences(foldedIndex.text, key, MAX_MATCH_CANDIDATES);
+    if (candidates.truncated) return { ranges: [], truncated: true };
+    const ranges = [];
+    let verifiedCharacters = 0;
+    for (const offset of candidates.offsets) {
+        const visibleRange = foldedIndex.sourceRange(offset, key.length);
+        verifiedCharacters += visibleRange.to - visibleRange.from;
+        if (verifiedCharacters > MAX_MATCHABLE_MARKDOWN_LENGTH) {
+            return { ranges: [], truncated: true };
+        }
+        const source = createPdfAnnotationTextIndex(
+            visibleIndex.text.slice(visibleRange.from, visibleRange.to)
+        ).text.trim();
+        if (!lineWrappedTextMatches(target, source)) continue;
+        ranges.push(expandMathRange(
+            visibleIndex.sourceRange(visibleRange.from, visibleRange.to - visibleRange.from)
+        ));
+    }
+    return { ranges, truncated: false };
+}
+
+function lineWrappedTextMatches(left, right) {
+    let leftOffset = 0;
+    let rightOffset = 0;
+    while (leftOffset < left.length && rightOffset < right.length) {
+        const leftWrapped = isWrappedHyphen(left, leftOffset);
+        const rightWrapped = isWrappedHyphen(right, rightOffset);
+        if (left[leftOffset] === right[rightOffset]) {
+            leftOffset += leftWrapped ? 2 : 1;
+            rightOffset += rightWrapped ? 2 : 1;
+        }
+        else if (leftWrapped) leftOffset += 2;
+        else if (rightWrapped) rightOffset += 2;
+        else return false;
+    }
+    return leftOffset === left.length && rightOffset === right.length;
+}
+
+function isWrappedHyphen(text, offset) {
+    return text[offset] === '-' && text[offset + 1] === ' '
+        && /\p{L}$/u.test(text.slice(Math.max(0, offset - 2), offset))
+        && /^\p{L}/u.test(text.slice(offset + 2, offset + 4));
 }
 
 // Maps each math-compact occurrence of `text` through the visible index back

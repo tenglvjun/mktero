@@ -74,6 +74,11 @@ test('creates a Zotero PDF highlight from located Markdown text', async () => {
         prefix: 'SUMMARY ANSWER: ',
         suffix: ' for this study.',
     };
+    const pdfCaptionEvidence = {
+        sourceHash: 'a'.repeat(64),
+        markdownHash: 'b'.repeat(64),
+        captions: [],
+    };
     const zotero = {
         Items: {
             get: id => id === 42 ? attachment : null,
@@ -115,6 +120,7 @@ test('creates a Zotero PDF highlight from located Markdown text', async () => {
             assert.equal(text, selectedText);
             assert.equal(options.pdfPageIndexHint, 0);
             assert.deepEqual(options.textQuote, textQuote);
+            assert.equal(options.pdfCaptionEvidence, pdfCaptionEvidence);
             return {
                 text,
                 pageLabel: '1',
@@ -134,7 +140,7 @@ test('creates a Zotero PDF highlight from located Markdown text', async () => {
         ranges: [{ from: 0, to: selectedText.length }],
         pdfPageIndexHint: 0,
         textQuote,
-    });
+    }, { pdfCaptionEvidence });
 
     assert.deepEqual(savedJSON, {
         key: 'SYNC0001',

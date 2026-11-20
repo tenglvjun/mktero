@@ -6,7 +6,13 @@ import {
     createPdfAnnotationTextIndex,
     normalizePdfAnnotationText,
 } from '../markdown/pdf-annotation-text.js';
+import { createPDFCaptionExclusions } from './pdf-caption-evidence.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
+import {
+    createPDFPageBodyViews,
+    createPDFPageReadingViews,
+    originalPDFBodyRanges,
+} from './pdf-page-chrome.js';
 import {
     createMathCompactTextIndex,
     findMathCompactOccurrences,
@@ -49,7 +55,6 @@ const MAX_DIFF_EDITS = 16;
 const MAX_DIFF_CANDIDATES = 200;
 const MAX_DIFF_LONG_CANDIDATES = 8;
 const DIFF_LONG_TEXT_LENGTH = 400;
-const MIN_REPEATED_PAGE_HEADER_LENGTH = 20;
 const MISENCODED_PLUS_MINUS = /§(?=\d)/gu;
 const PLUS_MINUS_NUMBER = /±(?=\d)/u;
 const MISENCODED_MAPSTO = /\s*7\s*→/gu;
@@ -174,6 +179,9 @@ export class PDFAnnotationLocator {
                     pdfPageIndexHint: options.pdfPageIndexHint,
                     pdfRegion: options.pdfRegion,
                     textQuote: options.textQuote,
+                    pdfCaptionEvidence: options.pdfCaptionEvidence?.sourceHash === entry.sourceHash
+                        ? options.pdfCaptionEvidence : null,
+                    sourceHash: entry.sourceHash,
                     measureText: this.measureText,
                 });
             }
@@ -349,6 +357,8 @@ function locateInIndex(index, text, {
     pdfPageIndexHint,
     pdfRegion,
     textQuote,
+    pdfCaptionEvidence,
+    sourceHash,
     measureText,
 }) {
     const selectedText = String(text || '');
@@ -465,9 +475,22 @@ function locateInIndex(index, text, {
             || findMathCompactCrossPageMatch(index.pages, selectedText);
     }
     if (!located) {
+        located = findReadingOrderMatch(index.pages, target, quote);
+    }
+    if (!located) {
         const regionLocated = locatePDFRegion(index, pdfRegion, selectedText);
         if (regionLocated) return regionLocated;
-        throw notFoundError();
+        const excludedItems = pdfCaptionEvidence && target.length >= MIN_PAGE_BREAK_MATCH_LENGTH && target.length <= MAX_DIFF_MATCH_LENGTH
+            ? createPDFCaptionExclusions(index.pages, selectedText, pdfCaptionEvidence, sourceHash) : null;
+        if (excludedItems) {
+            const candidate = findReadingOrderMatch(index.pages, target, quote, { excludedItems });
+            // The existing edit matcher may never consume selected caption
+            // characters by deleting them. Require full normalized coverage.
+            if (candidate?.segments
+                && createMathCompactTextIndex(candidate.segments.map(segment => segment.text).join(''), { pdfTextLayer: true }).text
+                    === mathCompactText(selectedText)) located = candidate;
+        }
+        if (!located) throw notFoundError();
     }
     if (located.segments) {
         const segments = locateCrossPageSegments(
@@ -566,10 +589,13 @@ const MIN_MATH_COMPACT_CROSS_PAGE_PART_LENGTH = 3;
 function findMathCompactCrossPageMatch(pages, selectedText) {
     const key = mathCompactText(selectedText);
     if ([...key].length < MIN_PAGE_BREAK_MATCH_LENGTH) return null;
-    const bodies = pages.map((page, pageIndex) => {
-        const range = crossPageContentRange(pages, pageIndex, page.rawText);
+    const views = createPDFPageBodyViews(pages);
+    const bodyPages = views.map(view => view.page);
+    const bodies = bodyPages.map((page, pageIndex) => {
+        const range = crossPageContentRange(bodyPages, pageIndex, page.rawText);
         return {
             page,
+            view: views[pageIndex],
             from: range.from,
             compact: createMathCompactTextIndex(
                 page.rawText.slice(range.from, range.to),
@@ -596,18 +622,18 @@ function findMathCompactCrossPageMatch(pages, selectedText) {
             if (!headRange || !tailRange) continue;
             matches.push([
                 {
-                    page: head.page,
-                    sourceRange: {
+                    page: head.view.original,
+                    sourceRanges: originalPDFBodyRanges(head.view, {
                         from: head.from + headRange.from,
                         to: head.from + headRange.to,
-                    },
+                    }),
                 },
                 {
-                    page: tail.page,
-                    sourceRange: {
+                    page: tail.view.original,
+                    sourceRanges: originalPDFBodyRanges(tail.view, {
                         from: tail.from + tailRange.from,
                         to: tail.from + tailRange.to,
-                    },
+                    }),
                 },
             ]);
             if (matches.length > 1) return null;
@@ -675,6 +701,57 @@ function normalizedBBoxToPageRect(page, bbox) {
     return rect[2] > rect[0] && rect[3] > rect[1] ? rect : null;
 }
 
+// Retry the same bounded text strategies against a geometric reading view.
+// The source mapping keeps columns and float exclusions out of persisted data.
+function findReadingOrderMatch(pages, target, textQuote, viewOptions) {
+    if (target.length < MIN_PAGE_BREAK_MATCH_LENGTH || target.length > MAX_DIFF_MATCH_LENGTH) return null;
+    const views = createPDFPageReadingViews(pages, viewOptions);
+    const output = [];
+    const parts = [];
+    let offset = 0;
+    for (const view of views) {
+        if (output.length) {
+            output.push('\n');
+            offset++;
+        }
+        const from = offset;
+        output.push(view.page.rawText);
+        offset += view.page.rawText.length;
+        parts.push({ from, to: offset, view });
+    }
+    const rawText = output.join('');
+    const virtual = { rawText, normalizedText: createDehyphenatedPdfAnnotationTextIndex(rawText).text };
+    const foldCapitalization = value => value.replace(/\b[A-Za-z]{5,}\b/gu, word => word.toLowerCase());
+    const found = findMatchWithTextStrategies([virtual], target, textQuote)
+        || (/\b[A-Za-z]*[A-Z]{5,}[A-Za-z]*\b/u.test(target)
+            ? findMatchWithTextStrategies([virtual], foldCapitalization(target), textQuote, foldCapitalization)
+            : null);
+    if (!found?.sourceRange) return null;
+    const segments = [];
+    for (const part of parts) {
+        const from = Math.max(part.from, found.sourceRange.from);
+        const to = Math.min(part.to, found.sourceRange.to);
+        if (to <= from) continue;
+        const ranges = originalPDFBodyRanges(part.view, { from: from - part.from, to: to - part.from })
+            .sort((left, right) => left.from - right.from);
+        const merged = [];
+        for (const range of ranges) {
+            const previous = merged.at(-1);
+            if (previous && range.from <= previous.to) previous.to = Math.max(previous.to, range.to);
+            else merged.push({ ...range });
+        }
+        if (merged.length) segments.push({
+            page: part.view.original,
+            sourceRanges: merged,
+            text: part.view.page.rawText.slice(from - part.from, to - part.from).trim(),
+        });
+    }
+    if (segments.length < 2 || segments.length > MAX_PAGE_BREAK_PAGE_DISTANCE + 1
+        || !segmentsAreAdjacent(segments)
+        || segments.some(segment => normalizePdfAnnotationText(segment.text).length < MIN_PAGE_BREAK_PART_LENGTH)) return null;
+    return { segments };
+}
+
 function findMatchWithTextStrategies(
     pages,
     target,
@@ -731,20 +808,26 @@ function findMatchWithTextStrategies(
 // passage locatable as a per-page highlight.
 function findPageBreakMatch(pages, target) {
     if (target.length < MIN_PAGE_BREAK_MATCH_LENGTH) return null;
+    const views = createPDFPageBodyViews(pages);
+    const bodyPages = views.map(view => view.page);
     for (const strategy of basicTextMatchStrategies()) {
-        const texts = pages.map(page => strategy.normalizedTextForPage(page));
-        const parts = pageBreakSegments(pages, texts, target);
+        const texts = bodyPages.map(page => strategy.normalizedTextForPage(page));
+        const parts = pageBreakSegments(bodyPages, texts, target);
         if (!parts) continue;
-        const firstPage = pages[parts[0].pageIndex];
-        const sourceIndex = strategy.createSourceIndex(firstPage.rawText);
+        const first = views[parts[0].pageIndex];
+        const last = views.find(view => view.page === parts[1].page);
+        const sourceIndex = strategy.createSourceIndex(first.page.rawText);
         return {
             segments: [{
-                page: firstPage,
-                sourceRange: sourceIndex.sourceRange(
+                page: first.original,
+                sourceRanges: originalPDFBodyRanges(first, sourceIndex.sourceRange(
                     parts[0].at,
                     parts[0].length
-                ),
-            }, parts[1]],
+                )),
+            }, {
+                page: last.original,
+                sourceRanges: originalPDFBodyRanges(last, parts[1].sourceRange),
+            }],
         };
     }
     return null;
@@ -1258,13 +1341,16 @@ function createCrossPageSequence(
     const parts = [];
     const output = [];
     let offset = 0;
-    for (const [pageIndex, page] of pages.entries()) {
+    const views = createPDFPageBodyViews(pages);
+    const bodyPages = views.map(view => view.page);
+    for (const [pageIndex, bodyView] of views.entries()) {
+        const page = bodyView.page;
         const sourceIndex = strategy.createSourceIndex(page.rawText);
         const normalizedText = transformText(
             strategy.normalizedTextForPage(page)
         );
         const contentRange = crossPageContentRange(
-            pages,
+            bodyPages,
             pageIndex,
             normalizedText
         );
@@ -1282,7 +1368,8 @@ function createCrossPageSequence(
         offset += text.length;
         parts.push({
             from,
-            page,
+            page: bodyView.original,
+            bodyView,
             normalizedFrom: contentRange.from,
             to: offset,
             sourceIndex,
@@ -1298,16 +1385,6 @@ function crossPageContentRange(
 ) {
     let from = 0;
     let to = normalizedText.length;
-    if (pageIndex > 0
-        && hasRepeatedPageHeader(
-            pages[pageIndex - 1],
-            pages[pageIndex],
-            normalizedText
-        )) {
-        const header = firstVisualLineText(pages[pageIndex]);
-        const headerAt = normalizedText.indexOf(header);
-        from = headerAt < 0 ? 0 : headerAt + header.length;
-    }
     const doi = leadingDoiLineEnd(normalizedText, from);
     if (doi !== null) from = doi;
     const pageNumber = trailingPageNumberStart(
@@ -1320,29 +1397,6 @@ function crossPageContentRange(
     while (from < to && /^\s$/u.test(normalizedText[from])) from++;
     while (to > from && /^\s$/u.test(normalizedText[to - 1])) to--;
     return { from, to };
-}
-
-function hasRepeatedPageHeader(
-    previousPage,
-    page,
-    normalizedText
-) {
-    const previousHeader = firstVisualLineText(previousPage);
-    const header = firstVisualLineText(page);
-    if (!previousHeader
-        || previousHeader !== header
-        || header.length < MIN_REPEATED_PAGE_HEADER_LENGTH) {
-        return false;
-    }
-    return normalizedText.startsWith(header);
-}
-
-function firstVisualLineText(page) {
-    const line = pageTextLines(page).find(items => (
-        items.some(item => item.text.trim())
-    ));
-    if (!line) return '';
-    return line.map(item => item.text).join('').trim();
 }
 
 function leadingDoiLineEnd(text, from) {
@@ -1466,23 +1520,26 @@ function crossPageSourceSegments(
             part.normalizedFrom + from - part.from,
             to - from
         );
-        segments.push({ page: part.page, sourceRange });
+        segments.push({
+            page: part.page,
+            sourceRanges: originalPDFBodyRanges(part.bodyView, sourceRange),
+        });
     }
     return segments;
 }
 
 function locateCrossPageSegments(segments, measureText) {
-    const located = segments.map(({ page, sourceRange }) => {
-        const rects = locateSourceRange(page, sourceRange, measureText);
+    const located = segments.map(({ page, sourceRange, sourceRanges = [sourceRange], text: readingText }) => {
+        const rects = locateSourceRanges(page, sourceRanges, measureText);
         if (!rects.length) return null;
-        const text = page.rawText.slice(sourceRange.from, sourceRange.to);
-        if (!text.trim()) return null;
+        const text = readingText ?? sourceRanges.map(range => page.rawText.slice(range.from, range.to)).join('').trim();
+        if (!text) return null;
         return {
             text,
             pageLabel: page.pageLabel,
             sortIndex: createSortIndex(
                 page,
-                sourceRange.from,
+                sourceRanges[0].from,
                 rects[0]
             ),
             position: {
@@ -1816,18 +1873,29 @@ function parseSortIndexSourceOffset(value, pageIndex) {
 }
 
 function locateSourceRange(page, sourceRange, measureText) {
+    return locateSourceRanges(page, [sourceRange], measureText);
+}
+
+function locateSourceRanges(page, sourceRanges, measureText) {
     const rects = [];
+    let firstRange = 0;
     for (const item of page.items) {
-        const from = Math.max(sourceRange.from, item.sourceFrom);
-        const to = Math.min(sourceRange.to, item.sourceTo);
-        if (to <= from || !item.text) continue;
-        const itemFrom = from - item.sourceFrom;
-        const itemTo = to - item.sourceFrom;
-        const rect = textItemRangeToPDFRect(page, item, {
-            from: itemFrom,
-            to: itemTo,
-        }, measureText);
-        if (rect) rects.push(rect);
+        while (firstRange < sourceRanges.length
+            && sourceRanges[firstRange].to <= item.sourceFrom) {
+            firstRange++;
+        }
+        for (let index = firstRange; index < sourceRanges.length; index++) {
+            const range = sourceRanges[index];
+            if (range.from >= item.sourceTo) break;
+            const from = Math.max(range.from, item.sourceFrom);
+            const to = Math.min(range.to, item.sourceTo);
+            if (to <= from || !item.text) continue;
+            const rect = textItemRangeToPDFRect(page, item, {
+                from: from - item.sourceFrom,
+                to: to - item.sourceFrom,
+            }, measureText);
+            if (rect) rects.push(rect);
+        }
     }
     return mergeLineRects(rects);
 }

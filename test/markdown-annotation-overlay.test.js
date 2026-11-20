@@ -786,6 +786,208 @@ test('matches PDF citation digits against inline MinerU superscripts', async () 
     assert.deepEqual(result.unmatched, []);
 });
 
+test('preserves lexical line-end hyphens when reopening page-split PDF highlights', async () => {
+    const secondText = 'The next page records the result.';
+    const firstSource = 'The **multi-site** workflow uses a PLAN-CHECK cycle.';
+    const markdown = `Intro\n\n${firstSource} ${secondText}`;
+    const annotations = [{
+        id: 'WRAPPED1', type: 'highlight',
+        text: 'The multi-\nsite workflow uses a PLAN-\nCHECK cycle.',
+        comment: 'Keep this comment', color: '#ffd400',
+        pageIndex: 0, pageLabel: '1', sortIndex: '00000',
+    }, {
+        id: 'WRAPPED2', type: 'highlight', text: secondText,
+        comment: '', color: '#ffd400',
+        pageIndex: 1, pageLabel: '2', sortIndex: '00001',
+    }];
+    const saved = structuredClone(annotations);
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => annotations },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.matched.map(annotation => ({
+        id: annotation.id, kind: annotation.matchKind,
+        source: markdown.slice(annotation.ranges[0].from, annotation.ranges[0].to),
+    })), [
+        { id: 'WRAPPED1', kind: 'normalized', source: firstSource },
+        { id: 'WRAPPED2', kind: 'exact', source: secondText },
+    ]);
+    assert.deepEqual(annotations, saved);
+});
+
+test('maps retained line-end hyphens through Markdown source offsets in either direction', async () => {
+    for (const [source, text] of [
+        ['A **multi-site** protocol.', 'A multi- site protocol.'],
+        ['A **multi-\nsite** protocol.', 'A multi-site protocol.'],
+        ['A 🧪 **𐐀-𐐁** protocol.', 'A 🧪 𐐀-\n𐐁 protocol.'],
+    ]) {
+        const markdown = `A different introduction.\n\n${source}\n\nUnselected ending.`;
+        const annotation = { id: 'HYPHEN03', text, pageIndex: 0 };
+        const overlay = new MarkdownAnnotationOverlay({
+            extractor: { extract: async () => [annotation] },
+        });
+
+        const result = await overlay.resolve(42, markdown);
+
+        assert.deepEqual(result.unmatched, []);
+        assert.equal(result.matched.length, 1);
+        assert.deepEqual(result.matched[0].ranges, [{
+            from: markdown.indexOf(source), to: markdown.indexOf(source) + source.length,
+        }]);
+        assert.equal(result.matched[0].text, text);
+    }
+});
+
+test('keeps repeated retained-hyphen matches ambiguous without independent context', async () => {
+    const annotation = { id: 'HYPHEN04', text: 'A multi- site protocol.', pageIndex: 0 };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, 'A multi-site protocol.\n\nA multi-site protocol.');
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{ ...annotation, reason: 'ambiguous' }]);
+});
+
+test('uses page evidence for repeated retained-hyphen matches', async () => {
+    const text = 'A multi-site protocol.';
+    const markdown = `${text}\n\n${text}`;
+    const annotation = { id: 'HYPHEN05', text: 'A multi- site protocol.', pageIndex: 1 };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+    const sourceMap = [{
+        type: 'text', markdownFrom: 0, markdownTo: text.length,
+        locations: [{ pageIndex: 0, bbox: [100, 100, 900, 220] }],
+    }, {
+        type: 'text', markdownFrom: text.length + 2, markdownTo: markdown.length,
+        locations: [{ pageIndex: 1, bbox: [100, 100, 900, 220] }],
+    }];
+
+    const result = await overlay.resolve(42, markdown, { sourceMap });
+
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.matched[0].ranges, [{ from: text.length + 2, to: markdown.length }]);
+});
+
+test('retained-hyphen matching does not remove ordinary word boundaries or lexical hyphens', async () => {
+    for (const [text, markdown] of [
+        ['A two- site method.', 'A two-sitemethod.'],
+        ['A multisite method.', 'A multi-site method.'],
+        ['The range is 10-\n20.', 'The range is 1020.'],
+    ]) {
+        const annotation = { id: 'HYPHEN06', text, pageIndex: 0 };
+        const overlay = new MarkdownAnnotationOverlay({
+            extractor: { extract: async () => [annotation] },
+        });
+
+        const result = await overlay.resolve(42, markdown);
+
+        assert.deepEqual(result.matched, []);
+        assert.deepEqual(result.unmatched, [{ ...annotation, reason: 'not-found' }]);
+    }
+});
+
+test('keeps an existing exact match ahead of retained-hyphen fallbacks', async () => {
+    const text = 'A multi- site protocol.';
+    const markdown = `${text}\n\nA multi-site protocol.`;
+    const annotation = { id: 'HYPHEN07', text, pageIndex: 0 };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.equal(result.matched[0].matchKind, 'exact');
+    assert.deepEqual(result.matched[0].ranges, [{ from: 0, to: text.length }]);
+});
+
+test('matches mixed discretionary and retained line-end hyphens without folding lexical hyphens', async () => {
+    const source = 'The multi-site method records actions and preserves the re-sign step.';
+    const markdown = `Before.\n\n${source}\n\nAfter.`;
+    const annotation = {
+        id: 'HYPHEN08', pageIndex: 0,
+        text: 'The multi-\nsite method records ac-\ntions and preserves the re-sign step.',
+    };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, markdown);
+
+    assert.deepEqual(result.unmatched, []);
+    assert.deepEqual(result.matched[0].ranges, [{
+        from: markdown.indexOf(source), to: markdown.indexOf(source) + source.length,
+    }]);
+});
+
+test('rejects conflicting retained and removed interpretations of a line-end hyphen', async () => {
+    const annotation = { id: 'HYPHEN09', text: 'A re-\nsign step.', pageIndex: 0 };
+    const overlay = new MarkdownAnnotationOverlay({
+        extractor: { extract: async () => [annotation] },
+    });
+
+    const result = await overlay.resolve(42, 'A re-sign step.\n\nA resign step.');
+
+    assert.deepEqual(result.matched, []);
+    assert.deepEqual(result.unmatched, [{ ...annotation, reason: 'ambiguous' }]);
+});
+
+test('uses full PDF text context to resolve retained-hyphen candidates and refuses conflicting sides', async () => {
+    const target = 'A multi-site protocol';
+    const firstPrefix = 'Before the first finding: ';
+    const firstSuffix = ' completes the first finding.';
+    const secondSuffix = ' completes the later summary.';
+    const markdown = `${firstPrefix}${target}${firstSuffix}\n\nBefore the later summary: ${target}${secondSuffix}`;
+    const annotation = { id: 'HYPHEN10', text: 'A multi-\nsite protocol', pageIndex: 0 };
+    for (const suffix of [firstSuffix, secondSuffix]) {
+        let calls = 0;
+        const overlay = new MarkdownAnnotationOverlay({
+            extractor: { extract: async () => [annotation] },
+            locateTextQuote: async () => {
+                calls++;
+                return { prefix: firstPrefix, suffix };
+            },
+        });
+
+        const result = await overlay.resolve(42, markdown);
+
+        assert.equal(calls, 1);
+        if (suffix === firstSuffix) {
+            assert.deepEqual(result.unmatched, []);
+            assert.deepEqual(result.matched[0].ranges, [{
+                from: firstPrefix.length, to: firstPrefix.length + target.length,
+            }]);
+        }
+        else {
+            assert.deepEqual(result.matched, []);
+            assert.deepEqual(result.unmatched, [{ ...annotation, reason: 'ambiguous' }]);
+        }
+    }
+});
+
+test('refuses line-wrap matching when candidate or verification work exceeds its budget', async () => {
+    for (const [text, markdown] of [
+        ['A multi- site protocol.', 'A multi-site protocol.\n\n'.repeat(10_001)],
+        [`${'a'.repeat(1_024)}- a`, 'a'.repeat(10_000)],
+    ]) {
+        const annotation = { id: 'HYPHEN11', text, pageIndex: 0 };
+        const overlay = new MarkdownAnnotationOverlay({
+            extractor: { extract: async () => [annotation] },
+        });
+
+        const result = await overlay.resolve(42, markdown);
+
+        assert.deepEqual(result.matched, []);
+        assert.deepEqual(result.unmatched, [{ ...annotation, reason: 'ambiguous' }]);
+    }
+});
+
 test('matches PDF highlights split by a line-end hyphen', async () => {
     const markdown = [
         'Current LLM agent runtimes execute procedural skills by repeatedly',
