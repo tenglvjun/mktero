@@ -316,7 +316,7 @@ async function runInteractions(page) {
         await page.waitForFunction(count => (
             window.__mkteroPreview.view.host.shadowRoot.querySelectorAll('.markdown-note-item').length > count
         ), notesBefore, { timeout: 3000 });
-        const selection = await page.evaluate(async previousIDs => {
+        const selection = await page.evaluate(async ({ previousIDs, text }) => {
             await new Promise(resolve => {
                 let frames = 0;
                 const settle = () => {
@@ -333,8 +333,19 @@ async function runInteractions(page) {
                 active: [...shadow.querySelectorAll('.markdown-note-link.is-active')]
                     .map(node => node.getAttribute('data-annotation-id')),
                 readingTop: shadow.querySelector('.cm-scroller').scrollTop,
+                saved: window.__mkteroPreview.model.annotationOverlay.matched
+                    .filter(annotation => created.some(node => node.getAttribute('data-annotation-id') === annotation.id))
+                    .map(annotation => ({ text: annotation.text, ranges: annotation.ranges })),
+                expectedRange: {
+                    from: window.__mkteroPreview.model.markdown.indexOf(text),
+                    to: window.__mkteroPreview.model.markdown.indexOf(text) + text.length,
+                },
             };
-        }, noteIDsBefore);
+        }, { previousIDs: noteIDsBefore, text: 'Rule-based methods' });
+        if (selection.saved.length !== 1 || selection.saved[0].text !== 'Rule-based methods'
+            || JSON.stringify(selection.saved[0].ranges) !== JSON.stringify([selection.expectedRange])) {
+            throw new Error(`Saved the wrong source selection: ${JSON.stringify(selection)}`);
+        }
         if (selection.created.length !== 1 || selection.active.length !== 1
             || selection.active[0] !== selection.created[0]) {
             throw new Error(`Saved annotation must stay selected: ${JSON.stringify(selection)}`);
@@ -344,6 +355,53 @@ async function runInteractions(page) {
         }
         return { notesBefore, notesAfter: await page.locator('.markdown-note-item').count(), selection };
     });
+
+    for (const { name, text, backward } of [
+        { name: 'reverse-body-highlight', text: 'Learned layout models', backward: true },
+        { name: 'forward-caption-highlight', text: 'Paragraph-order error by page layout.', backward: false },
+        { name: 'reverse-caption-highlight', text: 'methods widens as layouts become less regular.', backward: true },
+    ]) {
+        await step(name, async () => {
+            await page.keyboard.press('Escape');
+            const before = await page.evaluate(() => window.__mkteroPreview.model.annotationOverlay.matched
+                .map(annotation => annotation.id));
+            const rect = await textRect(page, text, { center: true });
+            if (!rect) throw new Error(`Selection text is not in the DOM: ${text}`);
+            if (!rect.inset) throw new Error(`Selection text is too close to the reading viewport edge: ${text}`);
+            await page.mouse.move(backward ? rect.x1 : rect.x0, backward ? rect.y1 : rect.y0);
+            await page.mouse.down();
+            await page.mouse.move(backward ? rect.x0 : rect.x1, backward ? rect.y0 : rect.y1, { steps: 8 });
+            await page.mouse.up();
+            const toolbar = page.locator('.mktero-markdown-selection-actions');
+            await toolbar.waitFor({ state: 'visible', timeout: 3000 });
+            await page.evaluate(() => new Promise(resolve => {
+                let frames = 0;
+                const settle = () => {
+                    if (++frames === 6) resolve();
+                    else requestAnimationFrame(settle);
+                };
+                requestAnimationFrame(settle);
+            }));
+            const selected = await page.evaluate(() => document.getSelection()?.toString());
+            if (selected !== text) throw new Error(`Wrong native selection: ${JSON.stringify(selected)}`);
+            await toolbar.locator('.mktero-annotation-color-button').first().click();
+            await page.waitForFunction(previous => window.__mkteroPreview.model.annotationOverlay.matched
+                .some(annotation => !previous.includes(annotation.id)), before, { timeout: 3000 });
+            const saved = await page.evaluate(({ previous, text }) => {
+                const model = window.__mkteroPreview.model;
+                return {
+                    annotations: model.annotationOverlay.matched.filter(annotation => !previous.includes(annotation.id))
+                        .map(annotation => ({ text: annotation.text, ranges: annotation.ranges })),
+                    expectedRange: { from: model.markdown.indexOf(text), to: model.markdown.indexOf(text) + text.length },
+                };
+            }, { previous: before, text });
+            if (saved.annotations.length !== 1 || saved.annotations[0].text !== text
+                || JSON.stringify(saved.annotations[0].ranges) !== JSON.stringify([saved.expectedRange])) {
+                throw new Error(`Highlight differs from its source selection: ${JSON.stringify(saved)}`);
+            }
+            return { text, backward, ranges: saved.annotations[0].ranges };
+        });
+    }
 
     await step('typed-search', async () => {
         await page.keyboard.press('Escape');
@@ -380,6 +438,7 @@ async function runInteractions(page) {
     await step('annotation-single-click', async () => {
         await page.locator('.markdown-outline-segment[data-outline-segment="annotations"]').click();
         const visited = [];
+        const sourceRanges = [];
         for (const id of ['PREVIEW4', 'PREVIEW1', 'PREVIEW3']) {
             await page.locator(`.markdown-note-link[data-annotation-id="${id}"] .markdown-note-quote`).click();
             await page.waitForFunction(annotationID => {
@@ -413,9 +472,18 @@ async function runInteractions(page) {
             if (active.length !== 1 || active[0].id !== id || active[0].current !== 'location') {
                 throw new Error(`Clicked ${id} once; active annotations: ${JSON.stringify(active)}`);
             }
+            const source = await page.evaluate(annotationID => {
+                const preview = window.__mkteroPreview;
+                const annotation = preview.model.annotationOverlay.matched.find(entry => entry.id === annotationID);
+                return { offset: preview.view.activeNavigationOffset, ranges: annotation.ranges, text: annotation.text };
+            }, id);
+            if (source.offset !== source.ranges[0].from) {
+                throw new Error(`Clicked ${id} at the wrong source offset: ${JSON.stringify(source)}`);
+            }
+            sourceRanges.push({ id, ...source });
             visited.push(id);
         }
-        return { visited };
+        return { visited, sourceRanges };
     });
 
     await step('note-opens-pdf', async () => {
@@ -430,11 +498,16 @@ async function runInteractions(page) {
     return results;
 }
 
-async function textRect(page, text) {
-    return page.evaluate(async needle => {
+async function textRect(page, text, { center = false, navigate = true } = {}) {
+    const rect = await page.evaluate(async ({ needle, center, navigate }) => {
         const preview = window.__mkteroPreview;
-        preview.view.editor.scrollToOffset(Math.max(0, preview.model.markdown.indexOf(needle) - 260));
-        await new Promise(resolve => setTimeout(resolve, 300));
+        const offset = preview.model.markdown.indexOf(needle);
+        if (navigate) {
+            preview.view.editor.scrollToOffset(Math.max(0, offset - (center ? 0 : 260)), {
+                align: center ? 'center' : 'start',
+            });
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
         const shadow = preview.view.host.shadowRoot;
         const walker = document.createTreeWalker(shadow.querySelector('.cm-content'), NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -446,15 +519,32 @@ async function textRect(page, text) {
             const rects = [...range.getClientRects()];
             const first = rects[0];
             const last = rects.at(-1);
+            const port = shadow.querySelector('.cm-scroller').getBoundingClientRect();
             return {
-                x0: first.left + 1,
+                x0: first.left + 0.25,
                 y0: first.top + first.height / 2,
-                x1: last.right - 1,
+                x1: last.right - 0.25,
                 y1: last.top + last.height / 2,
+                inset: first.top > port.top + 48 && last.bottom < port.bottom - 48,
+                scrollDelta: (first.top + last.bottom - port.top - port.bottom) / 2,
+                portX: port.left + port.width / 2,
+                portY: port.top + port.height / 2,
             };
         }
         return null;
-    }, text);
+    }, { needle: text, center, navigate });
+    if (center && rect && !rect.inset) {
+        // A caption shares a measured block with its image. Centering that
+        // block can leave the caption at the bottom edge, where a drag starts
+        // native autoscroll. Wheel the actual caption into a safe visible area.
+        await page.mouse.move(rect.portX, rect.portY);
+        await page.mouse.wheel(0, rect.scrollDelta);
+        await page.waitForFunction(() => new Promise(resolve => requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve(true));
+        })));
+        return textRect(page, text, { navigate: false });
+    }
+    return rect;
 }
 
 async function runSafari(name) {

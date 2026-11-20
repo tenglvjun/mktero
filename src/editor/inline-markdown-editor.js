@@ -61,12 +61,7 @@ import {
 import { createImagePreview } from './image-preview.js';
 import { createCitationPopup } from './citation-popup.js';
 import { clearReaderTextSelection, rootSelectionFor } from './root-selection.js';
-import {
-    applyCaptionSelectionClamp,
-    captionGestureShouldRelease,
-    captionPointerPoint,
-    figureCaptionOf,
-} from './caption-selection-clamp.js';
+import { createCaptionSelectionController } from './caption-selection-controller.js';
 import { createAnnotationPopup } from './annotation-popup.js';
 import { createTranslationSourcePopup } from './translation-source-popup.js';
 import { selectedTableCellRanges } from './rendered-source-alignment.js';
@@ -262,6 +257,12 @@ function requestEditorScroll(
     // Outline, search, notes, landmarks, and citation jumps all land here.
     // Expand before measuring so a collapsed section has a real height.
     expandMarkdownSectionAt(view, position);
+    if (align === 'center' && correctAfterRender) {
+        // CodeMirror rejects transactions from a measure's write callback.
+        // Set its viewport target before measuring, or native scroll anchoring
+        // can keep a previously selected paragraph on screen after a jump.
+        view.dispatch({ effects: EditorView.scrollIntoView(position, { y: 'center' }) });
+    }
     view.requestMeasure({
         key: editorNavigationMeasureKey,
         read(editorView) {
@@ -281,23 +282,6 @@ function requestEditorScroll(
             const nextTop = navigationScrollTop(editorView, measurement);
             holdNavigationReveal(editorView, nextTop, measurement);
             editorView.scrollDOM.scrollTop = nextTop;
-            if (measurement.align === 'center') {
-                // scrollTop puts the line in view. scrollIntoView tells
-                // CodeMirror's own viewport the same target, so a later
-                // measure does not anchor back to the place we left.
-                try {
-                    editorView.dispatch({
-                        effects: EditorView.scrollIntoView(position, {
-                            y: 'center',
-                        }),
-                    });
-                }
-                catch {
-                    // The scrollTop above is the position the reader keeps.
-                }
-                const reveal = activeNavigationReveal(editorView);
-                if (reveal) editorView.scrollDOM.scrollTop = reveal.scrollTop;
-            }
             if (correctAfterRender && !measurement.targetIsRendered) {
                 // Offscreen block-widget heights are estimates until this scroll renders them.
                 requestEditorScroll(
@@ -567,8 +551,7 @@ export function createInlineMarkdownEditor({
     let translationSelectionScheduled = false;
     let currentTranslationView = 'original';
     let selectionFlashTimer = null;
-    let captionGesture = null;
-    let clampingCaptionSelection = false;
+    let captionSelection = null;
     let annotationSelectionClearEpoch = 0;
     // When an annotation refresh republished the same text. CodeMirror then
     // restores its scroll anchor, and that scroll must not dismiss a selection
@@ -855,6 +838,15 @@ export function createInlineMarkdownEditor({
             doc: initialMarkdown || '',
             extensions: [
                 markdown({ extensions: [GFM] }),
+                Prec.highest(EditorView.domEventHandlers({
+                    blur(event) {
+                        // WebKit blurs the read-only surface to the body when
+                        // pressing a popup button, with no relatedTarget. The
+                        // outside-press handler already dismisses real exits;
+                        // keep this selection snapshot until its action runs.
+                        return !event.relatedTarget && annotationPopup.isSelectionOpen();
+                    },
+                })),
                 createInlineRenderingExtension({
                     resolveImageURL,
                     resolveRestoredFigureURL,
@@ -1307,61 +1299,6 @@ export function createInlineMarkdownEditor({
         startCorrectionFromDoubleClick,
         true
     );
-    const beginCaptionSelectionGesture = event => {
-        if (event.button !== 0) return;
-        annotationSelectionClearEpoch += 1;
-        const point = captionPointerPoint(event);
-        const caption = figureCaptionOf(point?.node)
-            || figureCaptionOf(event.target);
-        if (!caption
-            || !view.dom.contains(caption)
-            || point?.node?.nodeType !== 3
-            || !caption.contains(point.node)) {
-            captionGesture = null;
-            return;
-        }
-        captionGesture = {
-            caption,
-            startNode: point.node,
-            startOffset: point.offset,
-            detail: event.detail || 1,
-            released: false,
-            pointerNode: point.node,
-            pointerOffset: point.offset,
-        };
-    };
-    const trackCaptionSelectionGesture = event => {
-        if (!captionGesture || captionGesture.released) return;
-        if (event.type === 'mousemove' && event.buttons !== 1) return;
-        if (captionGestureShouldRelease(captionGesture, event)) {
-            captionGesture.released = true;
-            return;
-        }
-        const point = captionPointerPoint(event);
-        if (point && captionGesture.caption.contains(point.node)) {
-            captionGesture.pointerNode = point.node;
-            captionGesture.pointerOffset = point.offset;
-        }
-    };
-    const clampActiveCaptionSelection = () => {
-        if (clampingCaptionSelection || destroyed || !captionGesture
-            || captionGesture.released) {
-            return;
-        }
-        const selection = rootSelectionFor(parent);
-        if (!selection) return;
-        clampingCaptionSelection = true;
-        try {
-            applyCaptionSelectionClamp(selection, captionGesture);
-        }
-        finally {
-            clampingCaptionSelection = false;
-        }
-    };
-    const onCaptionSelectionChange = () => {
-        clampActiveCaptionSelection();
-        scheduleTranslationSelectionUpdate();
-    };
     // A drag ends in a pointer-up, and a keyboard selection in a key-up. The
     // document-level selectionchange above covers both in Gecko, but reading
     // the selection needs the editor to have finished with the event first, so
@@ -1575,7 +1512,9 @@ export function createInlineMarkdownEditor({
 
     const applyTranslationSelection = () => {
         translationSelectionScheduled = false;
-        if (destroyed || !view) return;
+        // Original selections have no translated-side marks to clear. Even an
+        // empty transaction can restore the editor cursor over a widget range.
+        if (destroyed || !view || currentTranslationView === 'original') return;
         const resolved = translationSelectionForDOM();
         if (!resolved) {
             invalidateTranslationSelection();
@@ -1719,20 +1658,11 @@ export function createInlineMarkdownEditor({
         }
         ownerWindow.setTimeout?.(applyTranslationSelection, 0);
     };
-    const finishCaptionSelectionGesture = event => {
-        if (event.button !== 0) return;
-        if (captionGesture && !captionGesture.released) {
-            trackCaptionSelectionGesture(event);
-            clampActiveCaptionSelection();
-        }
-        captionGesture = null;
-    };
     const openSelectedMarkdownActions = event => {
         if (event.button !== 0) return;
         // Clamp before the annotation reads the selection. A drag that never
         // left the caption must not keep the paragraphs Firefox pulled in.
-        trackCaptionSelectionGesture(event);
-        clampActiveCaptionSelection();
+        captionSelection.prepare(event);
         if (activeCorrection || tableCorrectionEditing) return;
         if (interactionPopups.some(popup => popup.contains(event.target))) {
             return;
@@ -1826,6 +1756,7 @@ export function createInlineMarkdownEditor({
         if (destroyed) return;
         const clear = () => {
             if (destroyed || epoch !== annotationSelectionClearEpoch || !canClear()) return;
+            captionSelection.clear();
             clearReaderTextSelection(parent, view?.root);
             // The note input keeps a retained highlight of its own. Collapsing
             // the editor selection while that input is open can steal its focus.
@@ -1895,13 +1826,12 @@ export function createInlineMarkdownEditor({
         closeSelectionActionsOnEscape,
         true
     );
-    parent.addEventListener('mousedown', beginCaptionSelectionGesture, true);
-    parent.addEventListener('mousemove', trackCaptionSelectionGesture, true);
-    ownerWindow.document.addEventListener(
-        'selectionchange',
-        onCaptionSelectionChange
-    );
-    ownerWindow.addEventListener('mouseup', finishCaptionSelectionGesture);
+    captionSelection = createCaptionSelectionController({
+        parent,
+        editorDOM: view.dom,
+        onGestureStart: () => { annotationSelectionClearEpoch += 1; },
+        onSelectionChange: scheduleTranslationSelectionUpdate,
+    });
     parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
     parent.addEventListener('mouseup', onSelectionGestureEnd, true);
     parent.addEventListener('keyup', onSelectionGestureEnd, true);
@@ -2071,6 +2001,7 @@ export function createInlineMarkdownEditor({
         pendingCorrectionViewportCenterOffset = viewportCenterOffset;
         if (activeCorrection) correctionViewportFallbackEnabled = true;
         if (documentChanged) {
+            captionSelection.clear();
             clearNavigationHistory();
             if (selectionFlashTimer !== null) {
                 ownerWindow.clearTimeout?.(selectionFlashTimer);
@@ -2467,25 +2398,7 @@ export function createInlineMarkdownEditor({
                 clearCopyShortcutWatch();
                 parent.removeEventListener('copy', enrichReaderCopy);
                 parent.removeEventListener('copy', verifyReaderCopy);
-                parent.removeEventListener(
-                    'mousedown',
-                    beginCaptionSelectionGesture,
-                    true
-                );
-                parent.removeEventListener(
-                    'mousemove',
-                    trackCaptionSelectionGesture,
-                    true
-                );
-                ownerWindow.document.removeEventListener(
-                    'selectionchange',
-                    onCaptionSelectionChange
-                );
-                ownerWindow.removeEventListener(
-                    'mouseup',
-                    finishCaptionSelectionGesture
-                );
-                captionGesture = null;
+                captionSelection.destroy();
                 parent.removeEventListener(
                     'mouseup',
                     openSelectedMarkdownActions,

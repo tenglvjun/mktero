@@ -80,6 +80,8 @@ test('resolves refreshed annotations with the current source map', async () => {
         markdownTo: presentation.model.markdown.length,
         locations: [{ pageIndex: 1, bbox: [100, 100, 900, 220] }],
     }];
+    presentation.model.figureMap = { version: 1, figures: [] };
+    presentation.model.sourceHash = 'a'.repeat(64);
     const calls = [];
     const refresher = createAnnotationOverlayRefresher({
         presenter: {
@@ -100,8 +102,38 @@ test('resolves refreshed annotations with the current source map', async () => {
     assert.deepEqual(calls, [[
         42,
         presentation.model.markdown,
-        { sourceMap: presentation.model.sourceMap },
+        {
+            sourceMap: presentation.model.sourceMap,
+            figureMap: presentation.model.figureMap,
+            sourceHash: presentation.model.sourceHash,
+        },
     ]]);
+});
+
+test('does not publish overlays after the PDF identity changes while Markdown stays identical', async () => {
+    for (const field of ['sourceHash', 'figureMap']) {
+        const presentation = readyPresentation(42);
+        presentation.model.sourceHash = 'a'.repeat(64);
+        presentation.model.figureMap = { version: 1 };
+        let complete;
+        const updates = [];
+        const refresher = createAnnotationOverlayRefresher({
+            presenter: {
+                get: () => presentation,
+                list: () => [presentation],
+                update(_presentation, changes) { updates.push(changes); },
+            },
+            service: {
+                resolveAnnotations() { return new Promise(resolve => { complete = resolve; }); },
+            },
+        });
+        const pending = refresher.refresh([42]);
+        presentation.model[field] = field === 'sourceHash' ? 'b'.repeat(64) : { version: 1 };
+        complete(annotationResult('old document'));
+        await pending;
+        assert.deepEqual(updates, []);
+        refresher.dispose();
+    }
 });
 
 function readyPresentation(itemID) {

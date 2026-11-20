@@ -266,9 +266,41 @@ test('combines Zotero PDF annotations with local Markdown annotations', async ()
         { sourceMap },
     ]);
     assert.deepEqual(localResolveOptions, [
-        { retryFailed: true, sourceMap },
-        { retryFailed: false, sourceMap },
+        { retryFailed: true, sourceMap, figureMap: null, sourceHash: null },
+        { retryFailed: false, sourceMap, figureMap: null, sourceHash: null },
     ]);
+});
+
+test('propagates current PDF caption identity through conversion, saved open, and annotation refresh', async () => {
+    const figureMap = { version: 1, markdownHash: 'c'.repeat(64), figures: [] };
+    const sourceHash = 'b'.repeat(64);
+    const calls = [];
+    const document = {
+        kind: 'markdown', markdown: 'Caption document.', sourceHash, figureMap,
+        sourceMap: [], renderMode: 'markdown', sourceItemID: 42,
+    };
+    const service = new MarkdownDocumentService({
+        extractor: { extract: async () => document },
+        savedResolver: { resolve: async () => document },
+        localAnnotations: {
+            async resolve(itemID, markdown, options) {
+                calls.push({ itemID, markdown, options });
+                return { matched: [], unmatched: [] };
+            },
+        },
+    });
+
+    await service.convert(42);
+    await service.openSaved(100);
+    await service.resolveAnnotations(42, document.markdown, { sourceHash, figureMap });
+
+    assert.equal(calls.length, 3);
+    for (const call of calls) {
+        assert.equal(call.itemID, 42);
+        assert.equal(call.options.figureMap, figureMap);
+        assert.equal(call.options.sourceHash, sourceHash);
+    }
+    assert.deepEqual(calls.map(call => call.options.retryFailed), [true, true, false]);
 });
 
 test('keeps a successful conversion when Zotero annotations cannot be read', async () => {

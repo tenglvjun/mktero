@@ -106,6 +106,9 @@ export function createZoteroAnnotationActions(zotero, {
                 pdfPageIndexHint,
                 ...(pdfRegion ? { pdfRegion } : {}),
                 textQuote,
+                ...(context?.pdfCaptionEvidence
+                    ? { pdfCaptionEvidence: context.pdfCaptionEvidence }
+                    : {}),
                 signal,
             });
             throwIfAborted(signal);
@@ -205,6 +208,9 @@ export function createZoteroAnnotationActions(zotero, {
                 pdfPageIndexHint,
                 ...(pdfRegion ? { pdfRegion } : {}),
                 textQuote,
+                ...(context?.pdfCaptionEvidence
+                    ? { pdfCaptionEvidence: context.pdfCaptionEvidence }
+                    : {}),
                 signal,
             });
             throwIfAborted(signal);

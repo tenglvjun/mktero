@@ -17,14 +17,19 @@ export function figureCaptionOf(node) {
 // reader's shadow root. `caretPositionFromPoint` is only the fallback.
 export function captionPointerPoint(event) {
     if (!event) return null;
-    if (event.rangeParent && Number.isInteger(event.rangeOffset)) {
-        return textPoint(event.rangeParent, event.rangeOffset);
-    }
+    const caption = figureCaptionOf(event.target);
+    const accepts = point => point && (!caption || caption.contains(point.node));
+    const reported = event.rangeParent && Number.isInteger(event.rangeOffset)
+        ? textPoint(event.rangeParent, event.rangeOffset) : null;
+    if (accepts(reported)) return reported;
     const root = event.target?.getRootNode?.();
     const ownerDocument = event.target?.ownerDocument;
-    const caret = caretPoint(root, event) || caretPoint(ownerDocument, event);
-    if (!caret?.offsetNode) return null;
-    return textPoint(caret.offsetNode, caret.offset);
+    for (const candidate of new Set([root, ownerDocument])) {
+        const caret = caretPoint(candidate, event);
+        const point = caret?.offsetNode ? textPoint(caret.offsetNode, caret.offset) : null;
+        if (accepts(point)) return point;
+    }
+    return null;
 }
 
 export function captionGestureShouldRelease(gesture, event) {
@@ -150,6 +155,17 @@ function caretPoint(root, event) {
     if (typeof root?.caretPositionFromPoint !== 'function') return null;
     if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) {
         return null;
+    }
+    const shadowRoot = event.target?.getRootNode?.();
+    if (shadowRoot?.host) {
+        try {
+            return root.caretPositionFromPoint(event.clientX, event.clientY, {
+                shadowRoots: [shadowRoot],
+            });
+        }
+        catch {
+            // Older Zotero engines may only accept the two-argument form.
+        }
     }
     try {
         return root.caretPositionFromPoint(event.clientX, event.clientY);

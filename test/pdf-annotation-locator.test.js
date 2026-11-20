@@ -399,6 +399,255 @@ test('locates cross-page text when the watermark line is split across items', as
     locator.dispose();
 });
 
+for (const layout of [
+    { name: 'a long top declaration emitted after the body', side: 'top', order: 'after' },
+    { name: 'a reversed-fragment footer emitted before the body', side: 'bottom', order: 'before' },
+    { name: 'a top running notice interleaved with the body', side: 'top', order: 'middle' },
+]) {
+    test(`locates a three-page passage across ${layout.name}`, async () => {
+        const body = [
+            'The optical sensor measured a reproducible response and the comparison ',
+            'continued across the calibration series before the final estimate ',
+            'confirmed agreement with the independent validation measurements.',
+        ];
+        const notice = [
+            'Archive edition: Measurements and Methods. Manuscript status: accepted for public circulation.',
+            'The contributors retain distribution rights under the repository access agreement and its current terms.',
+            'Record identifier: 10.9999/methods.2031.042. Release date: 17 September 2031. Supplementary material accompanies this record.',
+        ];
+        const pageItems = body.map((text, pageIndex) => {
+            const stamp = repeatedMarginNotice(notice, layout.side, pageIndex);
+            const split = text.indexOf(' ', 28);
+            const first = createTextItem(text.slice(0, split), { y: 500, hasEOL: true });
+            const rest = createTextItem(text.slice(split + 1).trimEnd(), { y: 480, hasEOL: true });
+            return layout.order === 'before' ? [...stamp, first, rest]
+                : layout.order === 'middle' ? [first, ...stamp, rest]
+                    : [first, rest, ...stamp];
+        });
+        const locator = await createSyntheticLocator(pageItems);
+        try {
+            const located = await locator.locate(42, body.join(''), { pdfPageIndexHint: 0 });
+            assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [0, 1, 2]);
+            located.segments.forEach((segment, pageIndex) => {
+                assert.equal(segment.text.replace(/\s+/gu, ' ').trim(), body[pageIndex].trim());
+                assert.equal(segment.position.rects.length, 2);
+                assert.ok(segment.position.rects.every(rect => rect[1] > 470 && rect[3] < 520));
+            });
+        }
+        finally {
+            locator.dispose();
+        }
+    });
+}
+
+test('locates a cross-page passage across alternating running titles and changing page numbers', async () => {
+    const bodies = [
+        'An experiment in computational chemistry starts with a verified structure',
+        'and evaluates the candidate configurations before comparing their energies',
+        'against an independently measured reference for the same molecular system.',
+    ];
+    const pages = bodies.map((body, pageIndex) => [
+        createTextItem(pageIndex % 2 ? 'Computational Methods / Analysis' : 'Molecular Systems / Research', {
+            y: 775, width: 320, hasEOL: true,
+        }),
+        createTextItem(body, { y: 400, width: 550, hasEOL: true }),
+        createTextItem('Research archive / volume twelve', { x: 72, y: 28, width: 300 }),
+        createTextItem(String(pageIndex + 1), { x: 510, y: 28, width: 12, hasEOL: true }),
+    ]);
+    // The fourth page repeats the odd-page running title without contributing
+    // any part of the selected passage.
+    pages.push([
+        createTextItem('Computational Methods / Analysis', { y: 775, width: 320, hasEOL: true }),
+        createTextItem('A separate appendix follows here.', { y: 400, hasEOL: true }),
+        createTextItem('Research archive / volume twelve', { x: 72, y: 28, width: 300 }),
+        createTextItem('4', { x: 510, y: 28, width: 12, hasEOL: true }),
+    ]);
+    const locator = await createSyntheticLocator(pages);
+    try {
+        const located = await locator.locate(42, bodies.join(' '));
+        assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [0, 1, 2]);
+        located.segments.forEach((segment, index) => assert.equal(segment.text, bodies[index]));
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('keeps repeated body paragraphs and body DOI or license text between cross-page fragments', async () => {
+    const omitted = 'This ordinary body paragraph discusses licensing and the DOI '
+        + 'https://doi.org/10.9999/research.2032.17 as scientific evidence, rather than as a page notice. '
+        + 'The full analysis remains part of the experimental argument and must not be skipped. '
+        + 'Its repeated wording does not turn the paragraph into page chrome.';
+    const locator = await createSyntheticLocator([
+        [
+            createTextItem('Measurements at the first site revealed a persistent signal', { y: 650, hasEOL: true }),
+            createTextItem(omitted, { y: 500, width: 500, hasEOL: true }),
+        ],
+        [
+            createTextItem('that was also detected at the independent second site.', { y: 650, hasEOL: true }),
+            createTextItem(omitted, { y: 500, width: 500, hasEOL: true }),
+        ],
+    ]);
+    try {
+        await assert.rejects(locator.locate(42,
+            'Measurements at the first site revealed a persistent signal '
+                + 'that was also detected at the independent second site.'),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND');
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('does not classify a unique edge paragraph as a repeated page notice', async () => {
+    const extra = 'Additional experimental evidence at the page edge establishes an essential constraint. '
+        + 'It is unique to this section, contains the DOI 10.9999/observations and discusses a license. '
+        + 'The next page does not repeat these observations and their actual scientific role must be preserved. '
+        + 'Removing this paragraph would join two unrelated conclusions.';
+    const locator = await createSyntheticLocator([
+        [
+            createTextItem('A result from the first measurement requires careful interpretation', { y: 500, hasEOL: true }),
+            createTextItem(extra, { y: 25, width: 500, hasEOL: true }),
+        ],
+        [createTextItem('because the independent sample differs in its preparation.', { y: 500, hasEOL: true })],
+    ]);
+    try {
+        await assert.rejects(locator.locate(42,
+            'A result from the first measurement requires careful interpretation '
+                + 'because the independent sample differs in its preparation.'),
+        error => error?.code === 'MKTERO_PDF_TEXT_NOT_FOUND');
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('keeps repeated cross-page passages ambiguous after excluding repeated margin notices', async () => {
+    const first = 'The shared experimental observation begins at the selected passage';
+    const second = 'and ends with the same validation outcome in both sections.';
+    const notice = ['Journal of Independent Replication / public archive edition'];
+    const locator = await createSyntheticLocator([first, second, first, second].map((body, index) => [
+        createTextItem(body, { y: 400, hasEOL: true }),
+        ...repeatedMarginNotice(notice, 'top', index),
+    ]));
+    try {
+        await assert.rejects(locator.locate(42, `${first} ${second}`),
+            error => error?.code === 'MKTERO_PDF_TEXT_AMBIGUOUS');
+        const located = await locator.locate(42, `${first} ${second}`, { pdfPageIndexHint: 2 });
+        assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [2, 3]);
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('keeps a recurring first body line when it continues directly into the next line', async () => {
+    const repeated = 'A recurring experimental description remains part of the scientific argument';
+    const head = 'The selected conclusion on this page continues with the following evidence';
+    const tail = 'and its continuation provides the necessary independent confirmation.';
+    const locator = await createSyntheticLocator([
+        [
+            createTextItem(repeated, { y: 755, hasEOL: true }),
+            createTextItem('followed directly by ordinary reading text.', { y: 741, hasEOL: true }),
+            createTextItem(head, { y: 400, hasEOL: true }),
+        ],
+        [
+            createTextItem(repeated, { y: 755, hasEOL: true }),
+            createTextItem(tail, { y: 741, hasEOL: true }),
+        ],
+    ]);
+    try {
+        const located = await locator.locate(42, `${head} ${repeated} ${tail}`);
+        assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [0, 1]);
+        assert.equal(located.segments[1].text, `${repeated}\n${tail}`);
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('keeps original sort offsets after an interleaved notice is excluded', async () => {
+    const notice = ['Circulating research edition / independently archived measurements'];
+    const first = 'The first paragraph is unrelated to the selected measurements.';
+    const head = 'The calibrated optical response remained stable across the repeated runs';
+    const tail = 'and matched the reference signal acquired by a separate instrument.';
+    const locator = await createSyntheticLocator([
+        [
+            createTextItem(first, { y: 550, hasEOL: true }),
+            ...repeatedMarginNotice(notice, 'top', 0),
+            createTextItem(head, { y: 450, hasEOL: true }),
+        ],
+        [
+            ...repeatedMarginNotice(notice, 'top', 1),
+            createTextItem(tail, { y: 500, hasEOL: true }),
+        ],
+    ]);
+    try {
+        const single = await locator.locate(42, head, { pdfPageIndexHint: 0 });
+        const across = await locator.locate(42, `${head} ${tail}`, { pdfPageIndexHint: 0 });
+        assert.equal(across.segments[0].sortIndex, single.sortIndex);
+        assert.deepEqual(across.segments[0].position.rects, single.position.rects);
+        assert.equal(across.segments[0].text, head);
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('locates a continued paragraph past a full-page figure and repeated edge declarations', async () => {
+    const notice = ['Research circulation status: deposited in an independent archive for long-term access'];
+    const head = 'The first measurement provides evidence of a stable response in the experimental system';
+    const tail = 'and the second measurement confirms the same response in a separate sample.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(head, { y: 400, hasEOL: true }), ...repeatedMarginNotice(notice, 'top', 0)],
+        [createTextItem('Figure plate with unrelated experimental diagrams.', { y: 400, hasEOL: true })],
+        [...repeatedMarginNotice(notice, 'top', 2), createTextItem(tail, { y: 400, hasEOL: true })],
+    ]);
+    try {
+        const located = await locator.locate(42, `${head} ${tail}`);
+        assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [0, 2]);
+        assert.equal(located.segments[0].text, head);
+        assert.equal(located.segments[1].text, tail);
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('keeps math-compact cross-page matching across generic edge notices', async () => {
+    const notice = ['Open research working paper / archival access and distribution record'];
+    const head = 'The measured relationship holds for a broad range of inputs and becomes';
+    const tail = 'at ∼ πθ (a | τ, ht, H, K).';
+    const locator = await createSyntheticLocator([
+        [createTextItem(head, { y: 400, hasEOL: true }), ...repeatedMarginNotice(notice, 'top', 0)],
+        [...repeatedMarginNotice(notice, 'top', 1), createTextItem(tail, { y: 400, hasEOL: true })],
+    ]);
+    try {
+        const located = await locator.locate(42,
+            `${head} a_{t} \\sim \\pi_{\\theta}(a \\mid \\tau, h_{t}, H, \\mathcal{K})`);
+        assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [0, 1]);
+        assert.equal(located.segments[0].text, head);
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+function repeatedMarginNotice(lines, side, pageIndex) {
+    return lines.flatMap((line, lineIndex) => {
+        const split = Math.floor(line.length / 2);
+        const y = side === 'top' ? 782 - lineIndex * 9 : 12 + lineIndex * 9;
+        const fragments = [
+            createTextItem(line.slice(0, split), { x: 45, y, width: 230, height: 8, transform: [8, 0, 0, 8, 45, y] }),
+            createTextItem(line.slice(split), { x: 285, y, width: 250, height: 8, transform: [8, 0, 0, 8, 285, y] }),
+        ];
+        // Alternate content-stream order without changing the visual line.
+        if ((pageIndex + lineIndex) % 2) fragments.reverse();
+        fragments.at(-1).hasEOL = true;
+        return fragments;
+    });
+}
+
 test('does not bridge a page break across body text longer than the chrome window', async () => {
     // A long tail that is ordinary prose must not be stripped as chrome: the
     // page-break walk stays bounded and the passage stays unlocatable rather
@@ -2485,6 +2734,289 @@ test('locates a formula paragraph whose PDF glyphs are not the LaTeX source', as
     assert.ok(located.position.rects.length >= 1);
     locator.dispose();
 });
+
+test('locates mixed lexical line-end hyphens across a page boundary', async () => {
+    const locator = await createSyntheticLocator([
+        [createTextItem('The independent work-', { y: 120, hasEOL: true }),
+            createTextItem('flow supports single-', { y: 100, hasEOL: true }),
+            createTextItem('click revision of the scientific argument', { y: 80, hasEOL: true })],
+        [createTextItem('and preserves the complete experimental record.', { y: 700, hasEOL: true })],
+    ]);
+    const found = await locator.locate(42, 'The independent workflow supports single-click revision of the scientific argument and preserves the complete experimental record.');
+    assert.deepEqual(found.segments.map(segment => segment.position.pageIndex), [0, 1]);
+    assert.deepEqual(found.segments.map(segment => segment.position.rects.length), [3, 1]);
+    locator.dispose();
+});
+
+test('matches formula prose across pages within the existing glyph edit budget', async () => {
+    const locator = await createSyntheticLocator([
+        [createTextItem('The mixture is stored at 4°C until the analytical assay,', { y: 100, hasEOL: true }),
+            createTextItem('and α-cell responsiveness is measured', { y: 80, hasEOL: true })],
+        [createTextItem('using an independent instrument under controlled conditions.', { y: 700, hasEOL: true })],
+    ]);
+    const found = await locator.locate(42, 'The mixture is stored at 4^{\\circ} C until the analytical assay, and \\alpha -cell responsiveness is measured using an independent instrument under controlled conditions.');
+    assert.deepEqual(found.segments.map(segment => segment.position.pageIndex), [0, 1]);
+    locator.dispose();
+});
+
+test('locates a continued paragraph in geometric column order without dropping other columns', async () => {
+    const opening = 'A carefully controlled experimental observation identifies a reproducible effect';
+    const continuation = 'which remains present under independent validation.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(opening, { x: 320, y: 80, width: 220, hasEOL: true }),
+            ...[500, 480, 460, 440].map(y => createTextItem('Earlier left-column observations remain available.', { x: 60, y, width: 230, hasEOL: true })),
+            ...[500, 480, 460, 440].map(y => createTextItem('Earlier right-column observations remain available.', { x: 320, y, width: 220, hasEOL: true }))],
+        [createTextItem(continuation, { x: 60, y: 700, width: 230, hasEOL: true })],
+    ]);
+    const found = await locator.locate(42, `${opening} ${continuation}`);
+    assert.deepEqual(found.segments.map(segment => segment.position.pageIndex), [0, 1]);
+    assert.equal(found.segments[0].sortIndex.split('|')[1], '000000');
+    locator.dispose();
+});
+
+test('keeps annotation text in reading order when a middle page emits its right column first', async () => {
+    const opening = 'The complete experimental record starts with an independently validated observation';
+    const left = [
+        'and then describes the first controlled experiment,',
+        'including the independently calibrated instrument,',
+        'the separately collected measurements and controls,',
+        'and the final results of that first experiment,',
+    ];
+    const right = [
+        'followed by the second independently controlled experiment,',
+        'which uses a separate instrument and calibration,',
+        'and verifies the complete set of experimental measurements,',
+        'before the scientific discussion continues',
+    ];
+    const ending = 'with a final validation of the complete experimental argument.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(opening, { y: 80, width: 450, hasEOL: true })],
+        [...right.map((text, index) => createTextItem(text, { x: 320, y: 700 - index * 20, width: 220, hasEOL: true })),
+            ...left.map((text, index) => createTextItem(text, { x: 60, y: 700 - index * 20, width: 230, hasEOL: true }))],
+        [createTextItem(ending, { y: 700, width: 450, hasEOL: true })],
+    ]);
+    const found = await locator.locate(42, [opening, ...left, ...right, ending].join(' '));
+    assert.deepEqual(found.segments.map(segment => segment.position.pageIndex), [0, 1, 2]);
+    assert.equal(found.segments[1].text.replace(/\s+/gu, ' ').trim(), [...left, ...right].join(' '));
+    assert.equal(found.segments[1].position.rects.length, 8);
+    assert.equal(found.segments[1].sortIndex.split('|')[1], '000000');
+    locator.dispose();
+});
+
+test('locates a paragraph across isolated captions and a repeated running heading', async () => {
+    const heading = 'An independently reviewed scientific report';
+    const opening = 'The central experimental observation is supported by several independent replications';
+    const ending = 'and by a final validation using previously unseen measurements.';
+    const pages = [0, 1, 2].map(index => [
+        createTextItem(heading, { y: 735, height: 8, transform: [8, 0, 0, 8, 72, 735], width: 300, hasEOL: true }),
+        createTextItem('Figure 2. Results of the independent experiment.', { y: 500, width: 450, height: 8, transform: [8, 0, 0, 8, 72, 500], hasEOL: true }),
+        createTextItem('The error bars describe repeated measurements.', { y: 489, width: 450, height: 8, transform: [8, 0, 0, 8, 72, 489], hasEOL: true }),
+        createTextItem(index === 0 ? opening : index === 1 ? ending : 'An unrelated experimental conclusion remains in the body.', { y: index === 0 ? 100 : 450, width: 450, hasEOL: true }),
+        createTextItem(String(index + 1), { y: 42, width: 8, hasEOL: true }),
+    ]);
+    const locator = await createSyntheticLocator(pages);
+    const found = await locator.locate(42, `${opening} ${ending}`);
+    assert.deepEqual(found.segments.map(segment => segment.position.pageIndex), [0, 1]);
+    assert.deepEqual(found.segments.map(segment => segment.position.rects.length), [1, 1]);
+    locator.dispose();
+});
+
+test('folds OCR capitalization of long words across a verified page boundary', async () => {
+    const locator = await createSyntheticLocator([
+        [createTextItem('The Longname framework preserves the complete experimental argument', { y: 80, width: 450, hasEOL: true })],
+        [createTextItem('and Longname supports independent validation of every measurement.', { y: 700, width: 450, hasEOL: true })],
+    ]);
+    const found = await locator.locate(42, 'The LONGNAME framework preserves the complete experimental argument and LONGNAME supports independent validation of every measurement.');
+    assert.deepEqual(found.segments.map(segment => segment.position.pageIndex), [0, 1]);
+    locator.dispose();
+});
+
+test('does not bridge omitted body paragraphs through a layout fallback', async () => {
+    const opening = 'The central experimental observation is supported by independent measurements';
+    const ending = 'and the final validation uses a separate experimental instrument.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(opening, { y: 160, width: 450, hasEOL: true }),
+            ...[140, 120, 100].map(y => createTextItem('A substantial intervening body argument must remain part of the selected passage.', { y, width: 450, hasEOL: true }))],
+        [createTextItem(ending, { y: 700, width: 450, hasEOL: true })],
+    ]);
+    await assert.rejects(locator.locate(42, `${opening} ${ending}`), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+    locator.dispose();
+});
+
+test('does not skip a figure-labelled body discussion at a page boundary', async () => {
+    const opening = 'A complete scientific argument requires every independently observed experimental measurement';
+    const ending = 'and a final validation using an independent experimental instrument.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(opening, { y: 180, width: 450, hasEOL: true }),
+            createTextItem('Figure 2: the complete discussion contains substantive evidence that cannot be omitted from this passage.', { y: 140, width: 450, hasEOL: true }),
+            createTextItem('The scientific interpretation requires these independent observations and the detailed experimental controls.', { y: 126, width: 450, hasEOL: true }),
+            createTextItem('Every part of this body discussion must remain in the selected passage before the argument continues.', { y: 112, width: 450, hasEOL: true })],
+        [createTextItem(ending, { y: 700, width: 450, hasEOL: true })],
+    ]);
+    await assert.rejects(locator.locate(42, `${opening} ${ending}`), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+    locator.dispose();
+});
+
+test('keeps short case-sensitive variables significant in the layout fallback', async () => {
+    const variables = 'A B C D E F G H I J K L M N O P Q R S T';
+    const opening = `The LONGNAME framework measures ${variables} with independent controls`;
+    const ending = 'while preserving every original measurement and the complete experimental argument.';
+    const locator = await createSyntheticLocator([
+        [createTextItem(opening, { y: 80, width: 450, hasEOL: true })],
+        [createTextItem(ending, { y: 700, width: 450, hasEOL: true })],
+    ]);
+    await assert.rejects(locator.locate(42, `${opening.replace(variables, variables.toLowerCase())} ${ending}`), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+    locator.dispose();
+});
+
+test('keeps distinct capitalized cross-page occurrences ambiguous', async () => {
+    const opening = 'The Longname framework preserves every independently verified measurement';
+    const ending = 'and the Longname process retains the complete experimental record.';
+    const locator = await createSyntheticLocator([0, 1, 2, 3].map(index => [
+        createTextItem(index % 2 ? ending : opening, { y: index % 2 ? 700 : 80, width: 450, hasEOL: true }),
+    ]));
+    await assert.rejects(locator.locate(42, `${opening} ${ending}`.replaceAll('Longname', 'LONGNAME')), { code: 'MKTERO_PDF_TEXT_AMBIGUOUS' });
+    locator.dispose();
+});
+
+test('uses explicit caption evidence to locate body text across a caption in the body font', async () => {
+    const { locator, text, evidence } = await captionEvidenceFixture();
+    try {
+        await assert.rejects(locator.locate(42, text), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+        const before = JSON.stringify(locator.items.get(42).index);
+        const located = await locator.locate(42, text, { pdfCaptionEvidence: evidence });
+        assert.deepEqual(located.segments.map(segment => segment.position.pageIndex), [0, 1]);
+        assert.deepEqual(located.segments.map(segment => segment.position.rects.length), [1, 1]);
+        assert.equal(located.segments.map(segment => segment.text).join(' ').toLowerCase(), text.toLowerCase());
+        assert.equal(JSON.stringify(locator.items.get(42).index), before);
+        await assert.rejects(locator.locate(42, text), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+    }
+    finally { locator.dispose(); }
+});
+
+test('ignores invalid caption evidence without skipping any body text', async () => {
+    const { locator, text, evidence } = await captionEvidenceFixture();
+    try {
+        for (const corrupt of [
+            value => { value.sourceHash = 'a'.repeat(64); },
+            value => { delete value.markdownHash; },
+            value => { value.captions[0].text = value.captions[0].text.replace('measurements', 'fabrications'); },
+            value => { value.captions[0].text = value.captions[0].text.slice(0, 50); },
+            value => { value.captions[0].captionBBox[0] = 500; },
+            value => { value.captions[0].captionBBox[3] = 600; },
+            value => { value.captions[0].visualBBox = [...value.captions[0].captionBBox]; },
+            value => { value.captions[0].coordinateFrame = 'pdf-user-space'; },
+            value => { value.captions[0].rotation = 90; },
+            value => { value.captions[0].pdfGeometry.width++; },
+            value => { value.captions[0].pdfGeometry.viewportTransform[4]++; },
+            value => { value.captions[0].pdfGeometry.viewBox[0]++; },
+            value => { value.captions[0].pdfGeometry.userUnit = 2; },
+            value => { value.captions[0].pageIndex = 0; },
+            value => { value.captions = Array(65).fill(value.captions[0]); },
+        ]) {
+            const invalid = structuredClone(evidence);
+            corrupt(invalid);
+            await assert.rejects(locator.locate(42, text, { pdfCaptionEvidence: invalid }), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+        }
+    }
+    finally { locator.dispose(); }
+});
+
+test('keeps the original exact result when the selected text is the caption itself', async () => {
+    const { locator, evidence } = await captionEvidenceFixture();
+    try {
+        const text = evidence.captions[0].text;
+        const original = await locator.locate(42, text);
+        assert.deepEqual(await locator.locate(42, text, { pdfCaptionEvidence: evidence }), original);
+        assert.equal(original.position.pageIndex, 1);
+        assert.equal(original.position.rects.length, 4);
+    }
+    finally { locator.dispose(); }
+});
+
+test('does not exclude caption characters selected at either end or inside a cross-page passage', async () => {
+    const { locator, text, evidence } = await captionEvidenceFixture();
+    try {
+        const [opening, ending] = text.split(' and the final');
+        for (const selected of [
+            `${opening} error bars and the final${ending}`,
+            `${opening} controls and the final${ending}`,
+            `The error bars ${text}`,
+            `${text} The error bars`,
+        ]) {
+            await assert.rejects(locator.locate(42, selected, { pdfCaptionEvidence: evidence }), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+        }
+    }
+    finally { locator.dispose(); }
+});
+
+test('rejects caption evidence whose full text occurs at two real PDF locations', async () => {
+    const { locator, text, evidence } = await captionEvidenceFixture({ duplicate: true });
+    try {
+        await assert.rejects(locator.locate(42, text, { pdfCaptionEvidence: evidence }), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+    }
+    finally { locator.dispose(); }
+});
+
+test('keeps multiple body locations ambiguous after validating distinct caption exclusions', async () => {
+    const { locator, text, evidence } = await captionEvidenceFixture();
+    try {
+        const pages = locator.items.get(42).index.pages;
+        const repeated = structuredClone(pages);
+        repeated.forEach((page, index) => { page.pageIndex = index + 2; page.pageLabel = String(index + 3); });
+        repeated[1].rawText = repeated[1].rawText.replace('Figure 2:', 'Figure 3:');
+        repeated[1].items[0].text = repeated[1].items[0].text.replace('Figure 2:', 'Figure 3:');
+        pages.push(...repeated);
+        const secondCaption = structuredClone(evidence.captions[0]);
+        secondCaption.pageIndex = 3;
+        secondCaption.text = secondCaption.text.replace('Figure 2:', 'Figure 3:');
+        evidence.captions.push(secondCaption);
+        await assert.rejects(locator.locate(42, text, { pdfCaptionEvidence: evidence }), { code: 'MKTERO_PDF_TEXT_AMBIGUOUS' });
+    }
+    finally { locator.dispose(); }
+});
+
+async function captionEvidenceFixture({ duplicate = false } = {}) {
+    const opening = 'The Longname framework confirms that the central experimental observation is supported by independent measurements';
+    const ending = 'and the final validation preserves the complete experimental record.';
+    const caption = [
+        'Figure 2: Independent measurements from a separately calibrated instrument across multiple controlled experimental conditions.',
+        'The error bars describe repeated observations and independent experimental controls collected over the complete observation period.',
+        'Each plotted series uses its own calibration, with all trials and individual sample sizes reported in the accompanying legend.',
+        'The shaded regions indicate variation across replications and describe the separate analytical procedure used for the displayed results.',
+    ];
+    const locator = await createSyntheticLocator([
+        [createTextItem(opening, { y: 80, width: 450, hasEOL: true })],
+        [...caption.map((text, index) => createTextItem(text, { y: 500 - index * 14, width: 450, hasEOL: true })),
+            createTextItem(ending, { y: 400, width: 450, hasEOL: true })],
+        ...(duplicate ? [[...caption.map((text, index) => createTextItem(text, { y: 500 - index * 14, width: 450, hasEOL: true }))]] : []),
+    ]);
+    return {
+        locator,
+        text: `${opening.replace('Longname', 'LONGNAME')} ${ending}`,
+        evidence: {
+            sourceHash: 'b'.repeat(64),
+            markdownHash: 'c'.repeat(64),
+            captions: [{
+                text: caption.join(' '),
+                pageIndex: 1,
+                captionBBox: [110, 350, 860, 440],
+                visualBBox: [110, 100, 860, 330],
+                coordinateFrame: 'display-cropbox',
+                rotation: 0,
+                pdfGeometry: {
+                    width: 612,
+                    height: 792,
+                    rotation: 0,
+                    userUnit: 1,
+                    viewBox: [0, 0, 612, 792],
+                    mediaBox: null,
+                    viewportTransform: [1, 0, 0, -1, 0, 792],
+                },
+            }],
+        },
+    };
+}
 
 async function createSyntheticLocator(pageItems, {
     cache = null,

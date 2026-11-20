@@ -34,13 +34,15 @@ export function createAnnotationOverlayRefresher({ presenter, service }) {
         const itemID = presentation.model.sourceItemID
             ?? presentation.model.itemID;
         const documentID = presentation.model.documentID ?? itemID;
-        const { markdown, sourceMap } = presentation.model;
+        const { markdown, sourceMap, figureMap, sourceHash } = presentation.model;
         const generation = Symbol('annotation-refresh');
         generations.set(documentID, generation);
         let result;
         try {
             result = await service.resolveAnnotations(itemID, markdown, {
                 sourceMap,
+                figureMap,
+                sourceHash,
             });
         }
         catch (error) {
@@ -58,6 +60,8 @@ export function createAnnotationOverlayRefresher({ presenter, service }) {
             || current.closed
             || current.model.status !== 'ready'
             || current.model.markdown !== markdown
+            || current.model.figureMap !== figureMap
+            || current.model.sourceHash !== sourceHash
             || !result.annotationOverlay) {
             return;
         }

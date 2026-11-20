@@ -211,6 +211,39 @@ A change to `ui/markdown.css` or to the renderer is therefore a change that ever
 downstream client has to pick up in its own build. Say so in the pull request
 description; there is no shared artifact to regenerate here.
 
+## Native caption-selection validation
+
+On macOS, run the current editor source in an isolated Zotero/Gecko process:
+
+```bash
+node scripts/validate-caption-selection-zotero.mjs --fixtures
+node scripts/validate-caption-selection-zotero.mjs --preflight
+node scripts/validate-caption-selection-zotero.mjs
+node scripts/validate-caption-selection-zotero.mjs --corpus /path/to/corpus.json
+```
+
+The optional corpus is an array of `{ "label": "sample", "markdownPath": "paper.md", "figureIndex": 0 }` records; Markdown paths resolve relative to the manifest. Only the selected figure enters the isolated reader. Keep private papers and manifests outside the repository.
+
+The check uses real mouse gestures with the unmodified editor bundle and reader stylesheet in a shadow root. It covers forward, backward and multi-line caption selection, Unicode units, formulas, shared panels, several reader widths, cancellation, ordinary text, two live editors and cleanup. After selection events settle, the native selection, popup snapshot and exactly one saved annotation callback must agree on text and source ranges.
+
+The Seatbelt preflight denies network access and access to the real Zotero profile. Reports and diagnostics stay in the printed temporary directory; a successful run requires a normal process exit. This is an editor integration check, not a packaged-XPI test of PDF persistence. Record the Zotero version actually exercised.
+
+## Installed-XPI annotation persistence validation
+
+On macOS with Zotero installed at `/Applications/Zotero.app`, run:
+
+```bash
+node scripts/validate-annotation-persistence-zotero.mjs --fixtures
+node scripts/validate-annotation-persistence-zotero.mjs --preflight
+node scripts/validate-annotation-persistence-zotero.mjs build/mktero-<version>.xpi
+```
+
+The full check installs a staged copy of the product XPI in a temporary profile and uses its actual menu, selection, comment, retry, color and delete controls. It reads Zotero annotation items and both local annotation stores after each operation. Synthetic PDFs cover a retained two-page group, deletion through the second member, a failed local draft that retries after its damaged fixture PDF is restored, and a single-page figure caption selected backward in the real widget. The retained group also crosses a repeated page-margin notice emitted after the body in PDF content-stream order. Edit its existing primary comment through the product before checking color changes and restarts.
+
+Three normal application launches verify creation and failed-draft retention, automatic retry after recovery, and persistence after another restart. Check exact annotation keys, text, rectangles, sort order, colors, primary-page comments, group membership and local-draft removal. Closing and reopening tabs must not add duplicate PDF items. Restored grouping must still apply color changes to both pages; deleted groups must remain absent. The caption must persist as exactly one PDF item without a cross-page group or local draft. Failure state itself is session-only, and a synchronized draft's former local ID is not a persistent PDF ID.
+
+The fixture PDF is restored only between processes; the saved local annotation is left unchanged. The harness records this controlled recovery explicitly. Seatbelt denies network and real-profile access. Every process must exit normally; a forced termination fails the run. Reports, staged XPI identity and temporary synthetic data stay in the printed run directory. Record the Zotero version actually exercised.
+
 ## Native research-note validation
 
 On macOS with Zotero installed at `/Applications/Zotero.app`, validate the built
