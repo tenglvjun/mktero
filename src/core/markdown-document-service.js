@@ -99,6 +99,8 @@ export class MarkdownDocumentService {
             markdown,
             {
                 retryLocalAnnotations: true,
+                figureMap: extracted.figureMap,
+                sourceHash: extracted.sourceHash,
                 sourceMap: Array.isArray(extracted.sourceMap)
                     ? extracted.sourceMap
                     : [],
@@ -117,6 +119,8 @@ export class MarkdownDocumentService {
     async resolveAnnotations(itemID, markdown, {
         retryLocalAnnotations = false,
         sourceMap = null,
+        figureMap = null,
+        sourceHash = null,
     } = {}) {
         const overlays = [];
         const warnings = [];
@@ -137,6 +141,8 @@ export class MarkdownDocumentService {
                 {
                     retryFailed: retryLocalAnnotations,
                     sourceMap,
+                    figureMap,
+                    sourceHash,
                 },
             );
             const { warning, ...localOverlay } = localResult;
@@ -169,6 +175,8 @@ export class MarkdownDocumentService {
             {
                 retryLocalAnnotations: true,
                 sourceMap: resolved.sourceMap,
+                figureMap: resolved.figureMap,
+                sourceHash: resolved.sourceHash,
             },
         );
         return {

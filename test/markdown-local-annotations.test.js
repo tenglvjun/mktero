@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
     createMarkdownAnnotationTextQuote,
     invalidMarkdownAnnotationStoreError,
@@ -12,6 +13,217 @@ import {
 import {
     MAX_PDF_ANNOTATION_TEXT_LENGTH,
 } from '../src/core/pdf-annotation.js';
+
+function captionEvidenceDocument() {
+    const caption = 'Figure 1 | Complete caption.';
+    const image = `![${caption}](generated/figure.png)`;
+    const markdown = `Selected text.\n\n${image}`;
+    const from = markdown.indexOf(image);
+    const panel = [100, 100, 900, 300];
+    const bbox = [100, 350, 900, 450];
+    return {
+        markdown,
+        sourceHash: 'a'.repeat(64),
+        figureMap: {
+            version: 1,
+            markdownHash: createHash('sha256').update(markdown).digest('hex'),
+            figures: [{
+                pageIndex: 0, visualBBox: panel, captionBBox: bbox,
+                memberBlockIds: ['panel', 'caption'],
+                panels: [{ blockId: 'panel', bbox: panel, originalAssetPath: 'images/panel.png' }],
+                provenance: {
+                    coordinateFrame: 'display-cropbox', rotation: 0,
+                    pdfGeometry: {
+                        width: 600, height: 800, rotation: 0, userUnit: 1,
+                        viewBox: [0, 0, 600, 800], viewportTransform: [1, 0, 0, -1, 0, 800],
+                    },
+                    fragments: [
+                        { blockId: 'panel', role: 'panel', bbox: panel, markdown: '![Panel](images/panel.png)' },
+                        { blockId: 'caption', role: 'caption', bbox, markdown: caption },
+                    ],
+                },
+                render: {
+                    mode: 'pdf-region', assetPath: 'generated/figure.png',
+                    range: { from, to: from + image.length },
+                    captionRanges: [{ from: from + 2, to: from + 2 + caption.length }],
+                },
+            }],
+        },
+    };
+}
+
+const captionEvidenceDraft = {
+    text: 'Selected text', comment: '', color: '#ffd400', ranges: [{ from: 0, to: 13 }],
+};
+
+test('keeps verified caption evidence for successive new highlights without persisting it in drafts or stores', async () => {
+    const document = captionEvidenceDocument();
+    const store = createMemoryStore();
+    const calls = [];
+    let nextID = 0;
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        createID: () => `caption-${++nextID}`,
+        async createPDFAnnotation(itemID, draft, context) {
+            calls.push({ itemID, draft, context });
+            return { id: `PDF${calls.length}` };
+        },
+    });
+    await annotations.resolve(42, document.markdown, document);
+    await annotations.create(42, captionEvidenceDraft);
+    await waitFor(async () => (await store.get(42)).length === 0);
+    await annotations.create(42, captionEvidenceDraft);
+    await waitFor(() => calls.length === 2);
+    for (const call of calls) {
+        assert.equal(call.context?.pdfCaptionEvidence?.sourceHash, document.sourceHash);
+        assert.equal(call.context.pdfCaptionEvidence.captions[0].text, 'Figure 1 | Complete caption.');
+        assert.equal(Object.hasOwn(call.draft, 'pdfCaptionEvidence'), false);
+        assert.equal(Object.hasOwn(call.draft, 'figureMap'), false);
+    }
+    assert.equal(calls[0].context.pdfCaptionEvidence, calls[1].context.pdfCaptionEvidence);
+    assert.equal(JSON.stringify(await store.get(42)).includes('pdfCaptionEvidence'), false);
+    annotations.dispose();
+});
+
+test('passes verified caption evidence on automatic and explicit failed retries while retaining reader and signal', async () => {
+    const document = captionEvidenceDocument();
+    const stored = { ...captionEvidenceDraft, id: 'mktero-old', source: 'markdown', type: 'highlight' };
+    const store = createMemoryStore([stored]);
+    const calls = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store,
+        async createPDFAnnotation(itemID, draft, context) {
+            calls.push({ itemID, draft, context });
+            throw Object.assign(new Error('no match'), { code: 'MKTERO_PDF_TEXT_NOT_FOUND' });
+        },
+    });
+    await annotations.resolve(42, document.markdown, document);
+    await waitFor(() => annotations.synchronizationFailures.get(42)?.has('mktero-old'));
+    const reader = { itemID: 42 };
+    const signal = new AbortController().signal;
+    await annotations.retrySynchronization(42, 'mktero-old', { reader, signal, pdfCaptionEvidence: { forged: true } });
+    await waitFor(() => calls.length === 2 && annotations.synchronizationFailures.get(42)?.has('mktero-old'));
+    await annotations.resolve(42, document.markdown, { ...document, retryFailed: true });
+    await waitFor(() => calls.length === 3);
+    assert.equal(calls[1].context.reader, reader);
+    assert.equal(calls[1].context.signal, signal);
+    for (const call of calls) assert.equal(call.context.pdfCaptionEvidence.sourceHash, document.sourceHash);
+    const records = await store.get(42);
+    assert.equal(records.length, 1);
+    assert.deepEqual(Object.keys(records[0]).sort(), [
+        'color', 'comment', 'id', 'ranges', 'source', 'text', 'textQuote', 'type',
+    ]);
+    annotations.dispose();
+});
+
+test('clears caption evidence on changed or missing document identity and rejects caller-supplied unverified evidence', async () => {
+    for (const invalid of [
+        document => ({ ...document, markdown: document.markdown + ' changed' }),
+        document => ({ ...document, sourceHash: null }),
+        document => ({ ...document, figureMap: null }),
+        document => ({ markdown: document.markdown }),
+    ]) {
+        const document = captionEvidenceDocument();
+        const store = createMemoryStore();
+        const calls = [];
+        const annotations = new MarkdownLocalAnnotations({
+            store,
+            createID: () => 'caption',
+            async createPDFAnnotation(_itemID, _draft, context) {
+                calls.push(context);
+                return { deferred: true };
+            },
+        });
+        await annotations.resolve(42, document.markdown, document);
+        const changed = invalid(document);
+        await annotations.resolve(42, changed.markdown, changed);
+        const created = await annotations.create(42, captionEvidenceDraft);
+        await waitFor(() => calls.length === 1);
+        const reader = { itemID: 42 };
+        await annotations.retrySynchronization(42, created.id, { reader, pdfCaptionEvidence: { forged: true } });
+        await waitFor(() => calls.length === 2);
+        assert.equal(calls[0]?.pdfCaptionEvidence, undefined);
+        assert.equal(calls[1]?.pdfCaptionEvidence, undefined);
+        assert.equal(calls[1].reader, reader);
+        annotations.dispose();
+    }
+});
+
+test('isolates caption evidence by item and clears it on disposal', async () => {
+    const values = new Map();
+    const calls = [];
+    const annotations = new MarkdownLocalAnnotations({
+        store: {
+            async get(id) { return values.get(id) || []; },
+            async put(id, value) { values.set(id, structuredClone(value)); },
+        },
+        createID: () => 'caption',
+        async createPDFAnnotation(itemID, _draft, context) {
+            calls.push({ itemID, context });
+            return { deferred: true };
+        },
+    });
+    const document = captionEvidenceDocument();
+    await annotations.resolve(42, document.markdown, document);
+    await annotations.resolve(43, document.markdown, { ...document, sourceHash: 'b'.repeat(64) });
+    await annotations.create(42, captionEvidenceDraft);
+    await annotations.create(43, captionEvidenceDraft);
+    await annotations.create(44, captionEvidenceDraft);
+    await waitFor(() => calls.length === 3);
+    assert.equal(calls.find(call => call.itemID === 42).context?.pdfCaptionEvidence?.sourceHash, 'a'.repeat(64));
+    assert.equal(calls.find(call => call.itemID === 43).context?.pdfCaptionEvidence?.sourceHash, 'b'.repeat(64));
+    assert.equal(calls.find(call => call.itemID === 44).context?.pdfCaptionEvidence, undefined);
+    annotations.dispose();
+    assert.equal(annotations.captionEvidenceContexts.size, 0);
+});
+
+test('does not restore evidence from an older pending resolve or after disposal', async () => {
+    for (const dispose of [false, true]) {
+        const document = captionEvidenceDocument();
+        let releaseRead;
+        let readStarted = false;
+        const blockedRead = new Promise(resolve => { releaseRead = resolve; });
+        let value = [];
+        const calls = [];
+        const annotations = new MarkdownLocalAnnotations({
+            store: {
+                async get() {
+                    if (!readStarted) {
+                        readStarted = true;
+                        await blockedRead;
+                    }
+                    return structuredClone(value);
+                },
+                async put(_itemID, updated) { value = structuredClone(updated); },
+            },
+            createID: () => 'caption',
+            async createPDFAnnotation(_itemID, _draft, context) {
+                calls.push(context);
+                return { deferred: true };
+            },
+        });
+        const old = annotations.resolve(42, document.markdown, document);
+        const current = dispose ? null : annotations.resolve(42, document.markdown, {
+            ...document, sourceHash: 'b'.repeat(64),
+        });
+        await waitFor(() => readStarted);
+        if (dispose) {
+            annotations.dispose();
+            releaseRead();
+            await old;
+            assert.equal(annotations.captionEvidenceContexts.size, 0);
+        }
+        else {
+            assert.equal(annotations.captionEvidenceContexts.get(42).evidence, null);
+            releaseRead();
+            await Promise.all([old, current]);
+            await annotations.create(42, captionEvidenceDraft);
+            await waitFor(() => calls.length === 1);
+            assert.equal(calls[0].pdfCaptionEvidence.sourceHash, 'b'.repeat(64));
+            annotations.dispose();
+        }
+    }
+});
 
 test('creates, updates, and deletes a persistent Markdown annotation', async () => {
     const store = createMemoryStore();

@@ -16,6 +16,7 @@ import {
     unescapeImageMathText,
     visibleMarkdownTextForRanges,
 } from '../markdown/markdown-visible-text.js';
+import { createPDFCaptionEvidence } from './pdf-caption-evidence.js';
 import { findTextOccurrences } from '../markdown/text-normalization.js';
 import {
     createPdfAnnotationTextIndex,
@@ -127,6 +128,8 @@ export class MarkdownLocalAnnotations {
         this.operationTails = new Map();
         this.synchronizationRequests = new Map();
         this.synchronizationContexts = new Map();
+        // Document evidence survives consumption of one reader/retry context.
+        this.captionEvidenceContexts = new Map();
         this.synchronizationTasks = new Map();
         this.synchronizationFailures = new Map();
         this.blockedSynchronizations = new Map();
@@ -137,13 +140,21 @@ export class MarkdownLocalAnnotations {
     async resolve(itemID, markdown, {
         retryFailed = false,
         sourceMap = null,
+        figureMap = null,
+        sourceHash = null,
     } = {}) {
+        const documentContext = { evidence: null };
+        if (this.active) this.captionEvidenceContexts.set(itemID, documentContext);
         if (typeof markdown !== 'string') {
             throw new TypeError('Markdown must be a string');
         }
-        const resolution = await this.#withOperation(itemID, () => (
-            this.#resolve(itemID, markdown, sourceMap)
-        ));
+        const resolution = await this.#withOperation(itemID, async () => {
+            const evidence = await createPDFCaptionEvidence({ markdown, sourceHash, figureMap });
+            if (this.active && this.captionEvidenceContexts.get(itemID) === documentContext) {
+                documentContext.evidence = evidence;
+            }
+            return this.#resolve(itemID, markdown, sourceMap);
+        });
         let { result } = resolution;
         const failures = this.synchronizationFailures.get(itemID);
         result = applySynchronizationStates(result, failures);
@@ -443,6 +454,7 @@ export class MarkdownLocalAnnotations {
         this.active = false;
         this.synchronizationRequests.clear();
         this.synchronizationContexts.clear();
+        this.captionEvidenceContexts.clear();
         this.blockedSynchronizations.clear();
         this.setAsideItems.clear();
         this.ownedPDFAnnotations.clear();
@@ -587,7 +599,7 @@ export class MarkdownLocalAnnotations {
                 ...(annotation.textQuote
                     ? { textQuote: annotation.textQuote }
                     : {}),
-            }, context);
+            }, this.#synchronizationContext(itemID, context));
             if (saved?.deferred) return;
             this.#rememberOwnedAnnotations(
                 itemID,
@@ -678,6 +690,15 @@ export class MarkdownLocalAnnotations {
             this.#reportError(error);
             if (changed) this.#notifySynchronizationChange(itemID);
         }
+    }
+
+    #synchronizationContext(itemID, context) {
+        const evidence = this.captionEvidenceContexts.get(itemID)?.evidence;
+        if (!evidence && !context?.pdfCaptionEvidence) return context;
+        // Only the current resolved document supplies evidence; a queued retry
+        // must never reintroduce stale evidence from its earlier context.
+        const { pdfCaptionEvidence: ignored, ...readerContext } = context || {};
+        return evidence ? { ...readerContext, pdfCaptionEvidence: evidence } : readerContext;
     }
 
     #rememberOwnedAnnotations(itemID, annotationID, pdfAnnotationIDs) {

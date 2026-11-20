@@ -2161,6 +2161,11 @@ async function publishConversionResult(presentation, itemID, result, signal) {
             ...consumeSelectionRevealChanges(itemID, readyChanges),
         }
     );
+    // A local synchronization can finish while this tab is still loading.
+    // Its notification cannot refresh that view, and the ready result may
+    // still contain the earlier pending overlay. Reconcile after publication.
+    void runtime.annotationOverlayRefresher?.refresh([itemID])
+        .catch(error => logMkteroError(error));
 }
 
 function publishConversionFailure(presentation, itemID, error, previousResult, { importing = false } = {}) {
@@ -2663,6 +2668,8 @@ async function openSavedMarkdownNote(noteID) {
             resumingTask: false,
             error: '',
         });
+        void runtime.annotationOverlayRefresher?.refresh([noteID])
+            .catch(error => logMkteroError(error));
     }
     catch (error) {
         if (presentation.created || presentation.model.status !== 'ready') {
@@ -3598,7 +3605,11 @@ async function updateRevisionSession(itemID, mutate, {
         annotationResult = await runtime.service.resolveAnnotations(
             itemID,
             snapshot.markdown,
-            { sourceMap: snapshot.sourceMap }
+            {
+                sourceMap: snapshot.sourceMap,
+                figureMap: snapshot.figureMap,
+                sourceHash: snapshot.sourceHash || presentation.model.sourceHash,
+            }
         );
     }
     catch (error) {
