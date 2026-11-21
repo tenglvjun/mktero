@@ -36,6 +36,7 @@ and parser profile.
 
 ### Reading
 
+- Choose the body font, size, line height, column width, and alignment from `Typography` in the reader toolbar; font selections apply immediately. [Reading layout](./docs/reading.md#adjust-the-reading-view)
 - Read multi-column papers as continuous text with formulas, tables, lists, and code, with page chrome hidden. Adjacent inline formulas in an algorithm step keep separate `$…$` boundaries, with a separator preventing adjacent delimiters from joining as `$$`; ordinary text, indentation, code blocks, and genuine display formulas are left as they are. [Reading](./docs/reading.md)
 - Keep formulas and their numbers together in MinerU documents, including numbers printed at the lower right. A formula tail misplaced in a number tag is restored only when a separate number and the PDF's text and positions confirm it. Valid complex tags remain complete, and formulas that cannot be typeset remain visible as source. Reading, copying, and export use the same recovered TeX. [Formula handling](./docs/reading.md#copy-a-formula-a-code-block-or-a-table)
 - Navigate headings, figures, citations, and search results; jump between Markdown and its PDF source. [Navigation](./docs/reading.md#move-around-the-document)

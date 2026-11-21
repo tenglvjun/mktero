@@ -78,7 +78,7 @@ These actions read only the rendered document. They send nothing and do not chan
 
 Open `Typography` (`Aa`) in the toolbar to choose:
 
-- The text font and a body size from 14 to 28 px.
+- The text font and a body size from 14 to 28 px. Open the font list and select a font to apply it immediately to the current reading view.
 - Tight, standard, or loose line height.
 - A narrow, standard, or wide column.
 - Left alignment, the default, or justified body text.

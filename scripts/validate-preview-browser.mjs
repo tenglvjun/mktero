@@ -278,6 +278,76 @@ async function runInteractions(page) {
         throw new Error(`The reader did not stay at the top (scrollTop ${await scrollerTop()})`);
     };
 
+    await step('font-picker-pointer-selection', async () => {
+        const initial = await page.evaluate(() => {
+            const { view, model } = window.__mkteroPreview;
+            const state = {
+                font: view.readerFont,
+                translationView: model.translationView,
+                translationFonts: [...view.translationReaderFonts],
+                lineHeight: view.readerLineHeight,
+                width: view.readerWidth,
+                alignment: view.readerAlignment,
+            };
+            model.onSetTranslationView('original');
+            return state;
+        });
+        const selected = [];
+        try {
+            for (const mode of ['original', 'translated']) {
+                await page.evaluate(value => (
+                    window.__mkteroPreview.model.onSetTranslationView(value)
+                ), mode);
+                const typography = page.locator('.markdown-typography-toggle');
+                if (await typography.getAttribute('aria-expanded') !== 'true') {
+                    await typography.click();
+                }
+                const fonts = mode === 'original'
+                    ? ['georgia', 'cambria', 'times-new-roman', 'system-serif']
+                    : ['songti-sc', 'noto-serif-sc'];
+                for (const font of fonts) {
+                    await page.locator('#mktero-reader-font-family').click();
+                    // A native press must keep the list open until click. Calling
+                    // option.click() in page.evaluate bypasses that sequence.
+                    await page.locator(`[data-reader-font="${font}"]`).click({ timeout: 3000 });
+                    const result = await page.evaluate(() => {
+                        const { view } = window.__mkteroPreview;
+                        const root = view.host.shadowRoot;
+                        return {
+                            selected: root.querySelector('[data-reader-font][aria-selected="true"]')
+                                ?.getAttribute('data-reader-font'),
+                            fontFamily: getComputedStyle(root.querySelector('.cm-content')).fontFamily,
+                            open: view.readerFontOptionsOpen,
+                            typographyOpen: view.typographyOpen,
+                            lineHeight: view.readerLineHeight,
+                            width: view.readerWidth,
+                            alignment: view.readerAlignment,
+                        };
+                    });
+                    if (result.selected !== font || result.open || !result.typographyOpen
+                        || result.lineHeight !== initial.lineHeight || result.width !== initial.width
+                        || result.alignment !== initial.alignment) {
+                        throw new Error(`Font selection changed the wrong control: ${JSON.stringify(result)}`);
+                    }
+                    selected.push({ mode, font, fontFamily: result.fontFamily });
+                }
+            }
+            if (new Set(selected.slice(0, 4).map(entry => entry.fontFamily)).size !== 4) {
+                throw new Error(`Body font did not follow the picker: ${JSON.stringify(selected)}`);
+            }
+            return selected;
+        }
+        finally {
+            await page.evaluate(state => {
+                const { view, model } = window.__mkteroPreview;
+                view.translationReaderFonts = new Map(state.translationFonts);
+                view.setReaderFont(state.font);
+                model.onSetTranslationView(state.translationView);
+                view.setTypographyOpen(false);
+            }, initial);
+        }
+    });
+
     await step('wheel-scroll', async () => {
         await scrollToTop();
         const box = await page.locator('.cm-content').boundingBox();
