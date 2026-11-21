@@ -104,6 +104,18 @@ reading document is written. It accepts captions written on one line or wrapped
 across lines, with or without a trailing period, and captions aligned with the
 outer frame rather than centred over the picture.
 
+A complete caption can also be misclassified as a separate body paragraph
+above, below, or on either side of a figure on the same page. Mktero checks
+native PDF text inside that paragraph's region before assigning it to a single
+figure. Regional reading avoids mixing the caption with nearby plot labels
+and is independent of the whole-page discovery pass's eight-line window; item,
+line, character, and comparison limits still apply. Only complete text agreement
+and a unique, unobstructed owner allow the original OCR content, including its
+formula and link spans, to move into the caption. The source paragraph is then
+consumed once, so the full caption is not repeated in the body. Body references,
+incomplete readings, conflicting owners, and exhausted budgets leave the
+original paragraph intact.
+
 - The printed number and legend are kept as they appear in the PDF. Mktero does
   not exchange two captions because a picture looks like a different chart.
 - Full-width, multi-line legends are not treated as prose merely because they
@@ -131,11 +143,13 @@ outer frame rather than centred over the picture.
   geometric owner for each relocated panel letter. Missing evidence skips
   this joint repair.
 - Text that merely mentions a figure inside a sentence is not a caption, and a
-  real table heading is never taken from a table. A numbered sentence printed in
-the body's own type is never read as a native legend, even when it begins with
-the figure number the page also prints.
-- A legend longer than the eight-line read budget keeps the complete OCR copy;
-the bounded native read never truncates it to its first line.
+  real table heading is never taken from a table. Whole-page discovery does not
+  read a numbered sentence in the body's own type as a native legend without
+  separate caption evidence, even when it begins with the printed figure number.
+- A legend longer than the whole-page pass's eight-line read budget keeps the
+  complete OCR copy; the bounded native read never truncates it to its first
+  line. An independently verified paragraph region uses the regional limits
+  described above.
 - Without a PDF text layer the earlier OCR-only rules still apply, including the
   same-page float repair described below.
 

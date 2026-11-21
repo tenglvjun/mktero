@@ -26,6 +26,7 @@ const MAX_MATH_OUTPUT_LENGTH = 250_000;
 const MAX_MATH_SOURCE_LENGTH = 10_000;
 const MAX_TOTAL_MATH_OUTPUT_LENGTH = 1_000_000;
 const MAX_TOTAL_MATH_SOURCE_LENGTH = 100_000;
+const MAX_CAPTION_LINK_SOURCE_LENGTH = 8192;
 const UNSAFE_MATH_COMMAND = /\\(?:csname|def|edef|futurelet|gdef|global|let|newcommand|providecommand|renewcommand|xdef)\b/;
 const INLINE_CHILD_TOKEN_TYPES = new Set(['strong', 'em', 'del', 'link', 'image']);
 const MATH_RANGE_TOKEN_TYPES = new Set(['text', 'escape', 'strong', 'em', 'del', 'link']);
@@ -654,13 +655,12 @@ function renderFigureCaption(caption, mathBudget, tokens = null, target = 'mkter
 }
 
 function renderFigureCaptionDescription(caption, mathBudget, tokens, target) {
-    // The description is rendered as text plus math; token rendering loses
-    // escape pairs and significance markers to emphasis parsing. Image
-    // descriptions carry the alt escaping, so collapse that extra level.
-    const source = tokens
-        ? unescapeImageMathSource(caption.description)
-        : caption.description;
-    return renderCaptionMathSource(source, mathBudget, target);
+    // Keep caption punctuation literal while recognizing explicit links and
+    // math. Collapse image-alt backslashes only while reading math, so a
+    // link label's escaped closing bracket or backslash stays intact.
+    return renderCaptionMathSource(caption.description, mathBudget, target, {
+        imageEscapes: Boolean(tokens),
+    });
 }
 
 const MARKDOWN_ESCAPE_PATTERN = /\\([!-/:-@[-`{-~])/gu;
@@ -679,16 +679,85 @@ export function unescapeCaptionText(value) {
     return text;
 }
 
-function renderCaptionMathSource(source, mathBudget, target = 'mktero') {
-    const matches = findInlineMathMatches(source);
+function renderCaptionMathSource(
+    source,
+    mathBudget,
+    target = 'mktero',
+    { imageEscapes = false, links = true } = {}
+) {
+    const matches = selectNonOverlappingRanges(
+        findCaptionMathMatches(source, imageEscapes),
+        links ? findCaptionLinkMatches(source) : []
+    );
     let html = '';
     let offset = 0;
     for (const match of matches) {
         html += escapeHTML(unescapeCaptionText(source.slice(offset, match.start)));
-        html += renderCaptionMath(match.text, mathBudget, target);
+        if (match.link) {
+            const label = renderCaptionMathSource(match.link.text, mathBudget, target, {
+                imageEscapes,
+                links: false,
+            });
+            const href = target === 'epub'
+                ? safeEpubLinkURL(match.link.href)
+                : safeMarkdownLinkURL(match.link.href);
+            html += href
+                ? `<a href="${escapeAttribute(href)}" rel="noreferrer">${label}</a>`
+                : label;
+        }
+        else {
+            html += renderCaptionMath(match.text, mathBudget, target);
+        }
         offset = match.end;
     }
     return html + escapeHTML(unescapeCaptionText(source.slice(offset)));
+}
+
+function findCaptionLinkMatches(source) {
+    // Longer captions keep the existing escaped-text plus math rendering.
+    // Bound Marked's bracket scans even for providers without caption limits.
+    if (source.length > MAX_CAPTION_LINK_SOURCE_LENGTH
+        || !source.includes('[') || !source.includes('](')) return [];
+    // Only explicit links are syntax here. In particular, significance stars,
+    // underscores and HTML stay literal, and labels cannot recurse into links
+    // or images. Marked uses false to delegate and undefined to skip a rule.
+    const parser = new Marked({
+        tokenizer: {
+            link() {
+                return this.lexer.state.inLink ? undefined : false;
+            },
+            reflink() {},
+            emStrong() {},
+            del() {},
+            tag() {},
+            codespan() {},
+            autolink() {},
+            url() {},
+        },
+    });
+    const tokens = parser.Lexer.lexInline(source, parser.defaults);
+    return createTokenSpans(tokens)
+        .filter(span => span.token.type === 'link')
+        .map(span => ({ start: span.start, end: span.end, link: span.token }));
+}
+
+function findCaptionMathMatches(source, imageEscapes) {
+    if (!imageEscapes || !source.includes('\\\\')) return findInlineMathMatches(source);
+    const matches = findInlineMathMatches(unescapeImageMathSource(source));
+    let rawOffset = 0;
+    let offset = 0;
+    const sourceOffset = index => {
+        while (offset < index) {
+            rawOffset += source.startsWith('\\\\', rawOffset) ? 2 : 1;
+            offset++;
+        }
+        return rawOffset;
+    };
+    return matches.map(match => ({
+        ...match,
+        start: sourceOffset(match.start),
+        end: sourceOffset(match.end),
+    }));
 }
 
 function renderCaptionMath(source, mathBudget, target = 'mktero') {

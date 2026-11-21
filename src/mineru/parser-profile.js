@@ -109,6 +109,7 @@ export const MINERU_COMPATIBLE_CACHE_PROFILE_IDS = Object.freeze([]);
 
 // Shipped document-IR cache identities. Keep these literals so a profile bump
 // cannot make stored corrections or translations unreachable.
+export const MINERU_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v22","figureStructure":"figure-region-v27"}';
 export const MINERU_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v21","figureStructure":"figure-region-v26"}';
 export const MINERU_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v20","figureStructure":"figure-region-v25"}';
 export const MINERU_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v19","figureStructure":"figure-region-v24"}';
@@ -132,6 +133,7 @@ export const MINERU_DOCUMENT_IR_V8_PARSER_PROFILE_ID = '{"batch":{"model_version
 export const MINERU_FIGURE_REGION_V18_PARSER_PROFILE_ID = '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v12","figureStructure":"figure-region-v18"}';
 
 export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MINERU_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID,
@@ -171,7 +173,7 @@ export const MINERU_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
 
 // How Mktero reads a MinerU result into its reading document. Bump it with
 // any change to the document IR or its Markdown.
-export const MINERU_DOCUMENT_PIPELINE = 'mineru-document-ir-v22';
+export const MINERU_DOCUMENT_PIPELINE = 'mineru-document-ir-v23';
 
 export const MINERU_PARSER_PROFILE_ID = JSON.stringify({
     batch: MINERU_BATCH_OPTIONS,
@@ -196,6 +198,7 @@ export const MINERU_REQUEST_PROFILE_ID = JSON.stringify({
 export const MINERU_CLOUD_MODEL_VERSIONS = Object.freeze(['vlm', 'pipeline']);
 
 // Keep Pipeline's shipped identity separate from the VLM correction history.
+export const MINERU_PIPELINE_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID = '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v22","figureStructure":"figure-region-v27"}';
 export const MINERU_PIPELINE_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID = '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v21","figureStructure":"figure-region-v26"}';
 export const MINERU_PIPELINE_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID = '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v20","figureStructure":"figure-region-v25"}';
 export const MINERU_PIPELINE_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID = '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v19","figureStructure":"figure-region-v24"}';
@@ -209,6 +212,7 @@ export const MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID = '{"b
 export const MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID = '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}';
 
 export const MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MINERU_PIPELINE_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID,
@@ -317,6 +321,7 @@ export const MINERU_LOCAL_PARSER_PROFILE_ID = JSON.stringify({
 });
 
 // Shipped local profiles, kept as literals so their corrections still open.
+export const MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID = '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v22","figureStructure":"figure-region-v27"}';
 export const MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID = '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v21","figureStructure":"figure-region-v26"}';
 export const MINERU_LOCAL_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID = '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v20","figureStructure":"figure-region-v25"}';
 export const MINERU_LOCAL_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID = '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v19","figureStructure":"figure-region-v24"}';
@@ -338,6 +343,7 @@ export const MINERU_LOCAL_DOCUMENT_IR_V8_PARSER_PROFILE_ID = '{"transport":"loca
 export const MINERU_LOCAL_FIGURE_REGION_V18_PARSER_PROFILE_ID = '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v12","figureStructure":"figure-region-v18"}';
 
 export const MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS = Object.freeze([
+    MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID,
     MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID,
     MINERU_LOCAL_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID,
     MINERU_LOCAL_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID,

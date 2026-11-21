@@ -7,6 +7,7 @@ import {
 import { normalizePdfAnnotationText } from '../../markdown/pdf-annotation-text.js';
 import { BLOCK_KIND, BLOCK_ROLE, blockPlainText, fragmentText } from './ir.js';
 import { pdfLines, pdfTextItemsByPage } from './pdf-geometry.js';
+import { readPDFCaptionRegions } from './caption-regions.js';
 
 // MinerU's layout sometimes loses a figure's number, or files the legend of
 // one float under a different float. The PDF's own text layer still has it, so
@@ -83,22 +84,33 @@ export function restorePDFFigureCaptions(ir, pdfText) {
             report.skipped++;
             continue;
         }
-        const captions = findNativeCaptions(page, lines, pageBlocks)
-            .filter(caption => !shortensOCRCaption(caption, floats));
-        if (!withinBudget(lines.length, floats.length, blockCount, captions.length)) {
+        const regions = readPDFCaptionRegions(page, items, pageBlocks, {
+            parseCaption: inlineCaption,
+            maxWork: FIGURE_LIMITS.maxComparisons - captionWork(lines.length, floats.length, blockCount),
+        });
+        if (regions.exhausted) {
+            report.skipped++;
+            continue;
+        }
+        const outsideRegions = caption => !regions.regions.some(region => samePlace(region.sourceBlock.bbox, caption));
+        const captions = [
+            ...findNativeCaptions(page, lines, pageBlocks).filter(outsideRegions),
+            ...regions.regions.map(region => region.caption).filter(Boolean),
+        ].filter(caption => !shortensOCRCaption(caption, floats));
+        if (!withinBudget(lines.length, floats.length, blockCount, captions.length, regions.work)) {
             report.skipped++;
             continue;
         }
         const mixedCaptions = floats.some(float => float.kind === BLOCK_KIND.TABLE)
             && floats.some(float => float.kind === BLOCK_KIND.IMAGE || float.kind === BLOCK_KIND.CHART)
-            && withinBudget(lines.length * 2, floats.length * 2, blockCount * 2)
+            && withinBudget(lines.length * 2, floats.length * 2, blockCount * 2, floats.length, regions.work)
             ? findNativeCaptions(page, lines, pageBlocks, { corroborateOCR: true })
-                .filter(caption => !shortensOCRCaption(caption, floats)) : [];
+                .filter(outsideRegions).filter(caption => !shortensOCRCaption(caption, floats)) : [];
         if (!captions.length && !mixedCaptions.length) continue;
-        const ordinary = planVisualCaptionGroups(captions, floats, pageBlocks, lines);
+        const ordinary = planVisualCaptionGroups(captions.filter(caption => !caption.sourceBlock), floats, pageBlocks, lines);
         // A neighbouring uncaptioned table must not turn a resolved chart group
         // into a tentative mixed group that might fail PDF verification.
-        if (withinBudget(lines.length, floats.length, blockCount, captions.length + mixedCaptions.length)) {
+        if (withinBudget(lines.length, floats.length, blockCount, captions.length + mixedCaptions.length, regions.work)) {
             proposeMixedFigureGroups(mixedCaptions, floats, pageBlocks, ordinary.floats);
         }
         const proposed = floats.map(float => float.pdfFigureProposal).filter(Boolean);
@@ -115,14 +127,17 @@ export function restorePDFFigureCaptions(ir, pdfText) {
 // lines against lines. Counting the worst case of each keeps a page with many
 // repeated candidates from costing more than one ordinary page times the
 // budget, without measuring anything while the work runs.
-function withinBudget(lineCount, floatCount, blockCount, captionCount = floatCount) {
+function withinBudget(lineCount, floatCount, blockCount, captionCount = floatCount, extraWork = 0) {
+    return captionWork(lineCount, floatCount, blockCount, captionCount) + extraWork <= FIGURE_LIMITS.maxComparisons;
+}
+
+function captionWork(lineCount, floatCount, blockCount, captionCount = floatCount) {
     const pairs = captionCount * floatCount;
-    const work = pairs * pairs // pairing, rival search and the copy scan
+    return pairs * pairs // pairing, rival search and the copy scan
         + pairs * blockCount * (captionCount + floatCount) // group, child-caption and prose scans
         + floatCount * floatCount * (captionCount + blockCount) // complete visual components and boundaries
         + blockCount * lineCount // native text checks for interior annotations
         + lineCount * lineCount; // column measure and following lines
-    return work <= FIGURE_LIMITS.maxComparisons;
 }
 
 // What one native caption repairs, decided before the IR changes. A plan names
@@ -130,11 +145,39 @@ function withinBudget(lineCount, floatCount, blockCount, captionCount = floatCou
 // completes, and the misfiled copies it consumes. A caption with no single
 // owner produces no plan, so the page keeps every child MinerU wrote.
 function planPage(captions, floats, pageBlocks, ordinary) {
-    const remainingCaptions = captions.filter(caption => !ordinary.captions.has(caption));
-    const remainingFloats = floats.filter(float => !ordinary.floats.has(float));
+    const regions = planRegionCaptions(captions, floats, pageBlocks, ordinary.floats);
+    const remainingCaptions = captions.filter(caption => !caption.sourceBlock && !ordinary.captions.has(caption));
+    const remainingFloats = floats.filter(float => !ordinary.floats.has(float) && !regions.reserved.has(float));
     const fallback = planDisplacedPanelCaptions(remainingCaptions, remainingFloats, pageBlocks)
         || planIndependentCaptions(remainingCaptions, remainingFloats, pageBlocks);
-    return [...ordinary.plans, ...fallback];
+    return [...ordinary.plans, ...regions.plans, ...fallback];
+}
+
+// Regional evidence is for a single picture. Reserve ambiguous owners as well
+// so a weaker page-level caption cannot commit only half of a rejected repair.
+function planRegionCaptions(captions, floats, pageBlocks, withheld) {
+    const choices = new Map(captions.map(caption => [caption, floats.flatMap(float => {
+        const score = captionScore(caption, float, pageBlocks, captions);
+        return score === null ? [] : [{ float, distance: captionDistance(caption, float) }];
+    }).sort((left, right) => left.distance - right.distance)]));
+    const closest = caption => {
+        const pairs = choices.get(caption);
+        return pairs.filter(pair => pair.distance - pairs[0].distance <= AMBIGUOUS_SCORE);
+    };
+    const reserved = new Set();
+    const plans = [];
+    for (const caption of captions.filter(caption => caption.sourceBlock)) {
+        const owners = closest(caption);
+        for (const { float } of owners) reserved.add(float);
+        if (owners.length !== 1) continue;
+        const destination = owners[0].float;
+        if (withheld.has(destination) || destination.kind === BLOCK_KIND.TABLE
+            || captionChildren(destination).length
+            || captions.some(other => other !== caption && closest(other).some(pair => pair.float === destination))) continue;
+        plans.push({ caption, destination, group: [destination], copies: [], match: null,
+            texts: [{ block: caption.sourceBlock, caption }], regional: true, ordinary: true });
+    }
+    return { plans, reserved };
 }
 
 // Build complete components before assigning legends. Caption children are soft
@@ -474,6 +517,15 @@ function applyPlan(ir, plan, report) {
     }
     for (const child of plan.internal || []) child.kind = 'figure-text';
     if (plan.match) adoptNativeText(plan.match, plan.caption);
+    else if (plan.regional) {
+        const source = plan.caption.sourceBlock;
+        plan.destination.children.push({
+            id: `${plan.destination.id}:pdf-caption`, kind: 'caption', pageIndex: source.pageIndex,
+            bbox: [...plan.caption.bbox], fragments: source.fragments,
+            nativeText: plan.caption.nativeText, pdfNativeCaption: true, pdfRegionCaption: true,
+            sourceBlockId: source.id,
+        });
+    }
     else plan.destination.children.push(attachCaption(plan.destination, plan.caption));
     if (plan.copies.length) {
         releaseChildCopies(ir, plan.copies, plan.destination, plan.caption.id);
@@ -1206,6 +1258,8 @@ function nativeFragment(caption) {
 function shortensOCRCaption(caption, floats) {
     return floats.some(float => captionChildren(float).some(child => {
         const text = captionText(child);
+        if (child.pdfRegionCaption && sameLabelNumber(text, caption.label)
+            && boxMatches(child.bbox, caption.bbox)) return true;
         return sameLabelNumber(text, caption.label) && boxMatches(child.bbox, caption.bbox)
             && (continuesHyphenatedCaption(text, caption.text)
                 || coversCaption(text, caption.text)
