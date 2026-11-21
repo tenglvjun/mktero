@@ -76,6 +76,9 @@ function dropEmptySections(units) {
 // was consumed keeps its image; a paragraph of several fragments keeps all of
 // its text, so a figure can never delete prose that continues elsewhere.
 function placeComposites(units, composites) {
+    const regionalCaptions = new Map(units.flatMap(unit => (unit.pieces || [])
+        .filter(piece => piece.part === 'caption' && piece.sourceBlockId)
+        .map(piece => [piece.key, piece])));
     const owners = new Map();
     for (const composite of composites) {
         for (const id of composite.memberBlockIds || []) {
@@ -89,7 +92,8 @@ function placeComposites(units, composites) {
             const composite = owners.get(piece.key);
             if (composite && !placed.has(composite)) {
                 placed.add(composite);
-                output.push(compositeUnit(composite));
+                const captions = composite.memberBlockIds.map(id => regionalCaptions.get(id)).filter(Boolean);
+                output.push(compositeUnit(composite, captions));
             }
         }
         if (unit.skipKey && owners.has(unit.skipKey)) continue;
@@ -483,6 +487,7 @@ function imageUnit(block, body, assetPath, caption, type, part) {
         pieces.push({
             key: piece.key, part: 'caption', blockId: block.id, from: offset, to: offset + piece.alt.length,
             pageIndex: block.pageIndex, bbox: piece.bbox, text: piece.text, parentId: block.id,
+            ...(piece.sourceBlockId ? { sourceBlockId: piece.sourceBlockId, markdown: piece.markdown } : {}),
         });
         offset += piece.alt.length + 1;
     }
@@ -508,13 +513,16 @@ function imageUnit(block, body, assetPath, caption, type, part) {
 
 function captionPieces(block) {
     return captionChildren(block)
-        .map(child => ({ key: child.id, bbox: child.bbox, text: childText(child) }))
+        .map(child => ({ key: child.id, bbox: child.bbox, text: childText(child),
+            ...(child.pdfRegionCaption ? { sourceBlockId: child.sourceBlockId, markdown: childInline(child) } : {}) }))
         .filter(piece => piece.text)
-        .map(piece => ({ ...piece, alt: escapeImageDescription(piece.text) }));
+        .map(piece => ({ ...piece, alt: escapeImageDescription(piece.markdown ?? piece.text) }));
 }
 
-function compositeUnit(composite) {
-    const alt = composite.captionText ? escapeImageDescription(composite.captionText) : '';
+function compositeUnit(composite, captions = []) {
+    const caption = captions.length === 1 && captions[0].text === composite.captionText ? captions[0] : null;
+    const description = caption?.markdown ?? composite.captionText;
+    const alt = description ? escapeImageDescription(description) : '';
     const text = `![${alt}](${composite.assetPath})`;
     return {
         block: null,
@@ -526,7 +534,8 @@ function compositeUnit(composite) {
         ...(alt ? { caption: { from: 2, to: 2 + alt.length, text: composite.captionText } } : {}),
         fragments: [{ from: 0, to: text.length, fragment: { pageIndex: composite.pageIndex, bbox: composite.bbox } }],
         pieces: [{ key: composite.id, part: 'composite', blockId: null, from: 0, to: text.length,
-            pageIndex: composite.pageIndex, bbox: composite.bbox, text: '' }],
+            pageIndex: composite.pageIndex, bbox: composite.bbox, text: '' },
+        ...(caption && alt ? [{ ...caption, from: 2, to: 2 + alt.length }] : [])],
     };
 }
 
@@ -614,8 +623,11 @@ function sourceMapEntry(unit, from, to, unitFrom = from) {
     const fragments = unit.fragments.filter(fragment => fragment.fragment?.bbox && fragment.to > fragment.from);
     if (!fragments.length) return null;
     if (unit.kind === 'image') {
+        const location = { pageIndex: fragments[0].fragment.pageIndex, bbox: [...fragments[0].fragment.bbox] };
+        const captions = (unit.pieces || []).filter(piece => piece.part === 'caption' && piece.sourceBlockId && piece.bbox);
         return { type: unit.type, markdownFrom: from, markdownTo: to,
-            locations: [{ pageIndex: fragments[0].fragment.pageIndex, bbox: [...fragments[0].fragment.bbox] }] };
+            locations: [location, ...captions.map(piece => ({ pageIndex: piece.pageIndex, bbox: [...piece.bbox] }))],
+            ...(captions.length ? { locationRanges: imageCaptionSourceRanges(captions, unitFrom, from, to, location) } : {}) };
     }
     const locations = [];
     for (const fragment of fragments) {
@@ -631,6 +643,24 @@ function sourceMapEntry(unit, from, to, unitFrom = from) {
         }));
     }
     return entry;
+}
+
+// Caption text lives inside an image's Markdown alt. Split the image range
+// around it so caption selections have one exact source and the image syntax
+// and asset path retain the picture's source without overlapping that text.
+function imageCaptionSourceRanges(captions, unitFrom, from, to, location) {
+    const ranges = [];
+    let cursor = from;
+    for (const piece of captions) {
+        const captionFrom = unitFrom + piece.from;
+        const captionTo = unitFrom + piece.to;
+        if (cursor < captionFrom) ranges.push({ markdownFrom: cursor, markdownTo: captionFrom, location });
+        ranges.push({ markdownFrom: captionFrom, markdownTo: captionTo,
+            location: { pageIndex: piece.pageIndex, bbox: [...piece.bbox] } });
+        cursor = captionTo;
+    }
+    if (cursor < to) ranges.push({ markdownFrom: cursor, markdownTo: to, location });
+    return ranges;
 }
 
 function recordBlockRange(blockRanges, unit, from, to) {
