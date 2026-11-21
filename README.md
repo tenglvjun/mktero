@@ -37,6 +37,7 @@ and parser profile.
 ### Reading
 
 - Read multi-column papers as continuous text with formulas, tables, lists, and code, with page chrome hidden. Adjacent inline formulas in an algorithm step keep separate `$…$` boundaries, with a separator preventing adjacent delimiters from joining as `$$`; ordinary text, indentation, code blocks, and genuine display formulas are left as they are. [Reading](./docs/reading.md)
+- Keep formulas and their numbers together in MinerU documents, including numbers printed at the lower right. A formula tail misplaced in a number tag is restored only when a separate number and the PDF's text and positions confirm it. Valid complex tags remain complete, and formulas that cannot be typeset remain visible as source. Reading, copying, and export use the same recovered TeX. [Formula handling](./docs/reading.md#copy-a-formula-a-code-block-or-a-table)
 - Navigate headings, figures, citations, and search results; jump between Markdown and its PDF source. [Navigation](./docs/reading.md#move-around-the-document)
 - Pause over figure, table, or paper references for previews that stay out of the way while you scroll or select text. [Previews](./docs/reading.md#move-around-the-document)
 - Copy formula LaTeX, code, or tables as Markdown or CSV from the reader. [Copy actions](./docs/reading.md#copy-a-formula-a-code-block-or-a-table)
@@ -56,7 +57,7 @@ and parser profile.
 - Check references across accessible Zotero libraries, copy existing items, or import missing metadata and an optional public PDF. [References](./docs/references-and-export.md#import-references-from-markdown)
 - Explore direct reference relationships in your current library through Semantic Scholar, OpenCitations, and OpenAlex. [Citation graph](./docs/references-and-export.md#explore-the-citation-graph)
 - Save a portable Zotero snapshot or export corrected Markdown and figures to a folder. [Save and export](./docs/references-and-export.md#save-a-portable-snapshot)
-- Export the current reading view as EPUB with formulas rendered as images for reader compatibility, or batch-export snapshots, Markdown, EPUB, and Obsidian notes for a whole selection or collection tree. [EPUB](./docs/references-and-export.md#export-epub) · [Obsidian](./docs/references-and-export.md#export-to-obsidian) · [Batch](./docs/references-and-export.md#batch-export)
+- Export the current reading view as EPUB with formulas rendered as images for reader compatibility, preserving supported bold notation and colored frames in both formulas and tables, or batch-export snapshots, Markdown, EPUB, and Obsidian notes for a whole selection or collection tree. [EPUB](./docs/references-and-export.md#export-epub) · [Obsidian](./docs/references-and-export.md#export-to-obsidian) · [Batch](./docs/references-and-export.md#batch-export)
 - See cached Markdown availability and preparation progress in the item list's local Markdown column. [Availability](./docs/conversion.md#see-which-items-already-have-markdown)
 
 ## Quick start

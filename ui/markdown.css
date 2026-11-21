@@ -5558,11 +5558,13 @@ blockquote.mktero-note,
     width: 100%;
 }
 
-.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math {
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math,
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-native-tagged math {
     width: 100%;
 }
 
-.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable {
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable,
+.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-native-tagged math > semantics > mtable {
     width: 100%;
 }
 

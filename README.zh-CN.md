@@ -31,6 +31,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 ### 阅读
 
 - 将双栏论文重排为连续正文，保留公式、表格、列表和代码，并隐藏刊头、页眉页脚等页面装饰。算法步骤中相邻的行内公式保持各自独立的 `$…$` 边界，分隔符不会粘连为 `$$`；普通文本、缩进、代码块和合法的块级公式保持原样。[阅读](./docs/reading.zh-CN.md)
+- 在 MinerU 文档中关联公式与编号，包括排在公式右下方的编号。公式尾部被误放进编号标签时，只有独立编号以及 PDF 文字和位置共同验证后，才将它恢复到公式正文。合法的复杂标签完整保留，无法排版的公式仍显示为可查看的源码；阅读、复制和导出使用同一份恢复后的 TeX。[公式处理](./docs/reading.zh-CN.md#复制公式代码块与表格)
 - 通过目录、图表、引用和查找定位，在 Markdown 与 PDF 来源之间跳转。[文档导航](./docs/reading.zh-CN.md#在文档中定位)
 - 将鼠标停留在正文的图、表或论文引用上即可预览，滚动和选中文字时不会自动弹出。[引用预览](./docs/reading.zh-CN.md#在文档中定位)
 - 在阅读器内复制公式 LaTeX、代码，或将表格复制为 Markdown、CSV。[复制操作](./docs/reading.zh-CN.md#复制公式代码块与表格)
@@ -50,7 +51,7 @@ Mktero 是适用于 Zotero 7、8、9 和 10 的无需重启扩展，将 PDF 中�
 - 在可访问的 Zotero 文库中检查引用，复制已有条目，或导入缺失的元数据与可选的公开 PDF。[参考文献](./docs/references-and-export.zh-CN.md#从-markdown-导入参考文献)
 - 借助 Semantic Scholar、OpenCitations 和 OpenAlex，浏览当前文库内的直接引用关系。[引用图谱](./docs/references-and-export.zh-CN.md#浏览引用图谱)
 - 保存便携 Zotero 快照，或将校对后的 Markdown 和图片导出到本地文件夹。[保存与导出](./docs/references-and-export.zh-CN.md#保存便携快照)
-- 将当前阅读视图导出为 EPUB，公式以图片保留排版以兼容阅读器；也可对整批所选文献或整个分类树批量导出快照、Markdown、EPUB 和 Obsidian 笔记。[EPUB](./docs/references-and-export.zh-CN.md#导出-epub) · [Obsidian](./docs/references-and-export.zh-CN.md#导出到-obsidian) · [批量导出](./docs/references-and-export.zh-CN.md#批量导出)
+- 将当前阅读视图导出为 EPUB，公式以图片保留排版以兼容阅读器，正文与表格中的受支持粗体记号、彩色边框保持一致；也可对整批所选文献或整个分类树批量导出快照、Markdown、EPUB 和 Obsidian 笔记。[EPUB](./docs/references-and-export.zh-CN.md#导出-epub) · [Obsidian](./docs/references-and-export.zh-CN.md#导出到-obsidian) · [批量导出](./docs/references-and-export.zh-CN.md#批量导出)
 - 在文献列表的本地 Markdown 列中查看缓存可用状态与准备进度。[Markdown 状态](./docs/conversion.zh-CN.md#查看哪些条目已有-markdown)
 
 ## 快速开始

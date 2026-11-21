@@ -57,6 +57,8 @@ This leaves the title, authors, and abstract on the first screen. Sections start
 
 ## Copy a formula, a code block, or a table
 
+In MinerU documents, Mktero keeps formulas and their numbers together, including numbers printed at the lower right. A formula tail misplaced in a number tag is restored only when a separate number and the PDF's text and positions confirm it. Valid complex tags remain complete, and formulas that cannot be typeset remain visible as source. Reading, copying, and export use the same recovered TeX.
+
 Point at a display formula or table to show its copy actions in the top corner. Code blocks have a copy action in their toolbar.
 
 | Content | Action | Clipboard text |

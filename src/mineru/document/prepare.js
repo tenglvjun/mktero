@@ -59,7 +59,7 @@ export function buildMinerUDocumentIR(bundle, { pdfText = null } = {}) {
     restoreDiscardedReferences(ir);
     groupAdjacentTables(ir);
     mergeContinuedTables(ir);
-    attachEquationNumbers(ir);
+    attachEquationNumbers(ir, pdfText);
     assignHeadingLevels(ir);
     stitchParagraphs(ir);
     placePageNotes(ir);
